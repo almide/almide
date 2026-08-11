@@ -1,6 +1,6 @@
 // Quantized linear in Almide's ABI (packed f64). almide-kernel AVX f64 vs the
 // naive scalar = Almide's own x86 path. 1x2048x2048 (inference hot path).
-use almide_kernel::q1_0_packed::{fp16_to_f64, linear_q1_0_packed, q1_0_block_dot_packed_naive};
+use almide_kernel::q1_0_packed::{fp16_to_f64, linear_q1_0_packed, q1_0_block_dot_packed_naive, PackedWeights};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -33,7 +33,7 @@ fn main() {
     for r in 0..reps { x[0] = black_box(r as f64 * 1e-9); linear_naive(black_box(&x), m, k, &w, 0, n, &mut out); black_box(&out); }
     let naive = t.elapsed();
     let t = Instant::now();
-    for r in 0..reps { x[0] = black_box(r as f64 * 1e-9); linear_q1_0_packed(black_box(&x), m, k, &w, 0, n, &mut out); black_box(&out); }
+    for r in 0..reps { x[0] = black_box(r as f64 * 1e-9); linear_q1_0_packed(black_box(&x), m, k, PackedWeights { bytes: &w, offset: 0, rows: n }, &mut out); black_box(&out); }
     let kernel = t.elapsed();
 
     println!("[{arch}] linear_q1_0 packed f64, {m}x{k}x{n}");

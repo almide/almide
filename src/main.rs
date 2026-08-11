@@ -131,7 +131,7 @@ enum Commands {
         /// produces it. This is an explicit opt-in that LEAVES the verified
         /// envelope: wasm-opt is an external, unverified transform, so the
         /// shipped bytes are no longer the exact bytes the trust-spine
-        /// rendered (see docs/WASM-OUTPUT.md). Default off — without this
+        /// rendered (see docs/wasm/WASM-OUTPUT.md). Default off — without this
         /// flag the module ships verbatim. No-op on the native target.
         #[arg(long = "wasm-opt")]
         wasm_opt: bool,
@@ -181,12 +181,17 @@ enum Commands {
     Fmt {
         /// Files to format (default: src/**/*.almd)
         files: Vec<String>,
-        /// Check formatting without writing
+        /// Check formatting without writing (exit non-zero on drift)
         #[arg(long)]
         check: bool,
-        /// Check formatting without writing
+        /// Print the formatted text to stdout without writing
         #[arg(long)]
         dry_run: bool,
+        /// Keep the import list byte-for-byte (no auto-insert of missing
+        /// imports, no removal of unused ones) — for splice-context sources
+        /// like the stdlib, where an added import corrupts the splice
+        #[arg(long)]
+        no_import_edit: bool,
     },
     /// Compile source to .almdi (module interface + IR artifact)
     Compile {
@@ -201,6 +206,11 @@ enum Commands {
         /// Output directory for .almdi files (default: target/compile)
         #[arg(long, short)]
         output: Option<String>,
+    },
+    /// Advance a locked git dependency to its ref's current remote head
+    Update {
+        /// Dependency name (default: every non-tag-pinned dependency)
+        dep: Option<String>,
     },
     /// Clear dependency cache
     Clean,
@@ -590,7 +600,7 @@ fn dispatch_ide(cmd: IdeCommand) {
 /// `parse_file` as-is and report "Is a directory", which the always-zero exit then
 /// swallowed, so a CI job pointed at a tree silently checked nothing (#919). With no
 /// argument at all the `src/` sweep is unchanged.
-fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
+fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool, no_import_edit: bool) {
     let mode = match (check, dry_run) {
         (true, _) => cli::FmtMode::Check,
         (false, true) => cli::FmtMode::DryRun,
@@ -618,7 +628,7 @@ fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
         }
         expanded
     };
-    cli::cmd_fmt(&fmt_files, mode);
+    cli::cmd_fmt(&fmt_files, mode, no_import_edit);
 }
 
 /// `dispatch`'s `Commands::Add` arm. Extracted verbatim.
@@ -640,6 +650,32 @@ fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>) {
     };
     project_fetch::fetch_dep(&dep)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+}
+
+/// `dispatch`'s `Commands::Update` arm (#1131): the sanctioned path FORWARD
+/// for a locked git dependency — `add` re-pins the old commit and `clean`
+/// only clears the cache, so before this the sole escape was hand-editing
+/// the lock the file itself says not to edit.
+fn dispatch_update(dep: Option<String>) {
+    if !std::path::Path::new("almide.toml").exists() {
+        err(&format!("No almide.toml found"));
+        std::process::exit(1);
+    }
+    let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let changed = project_fetch::update_locked_deps(&proj, dep.as_deref())
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    if changed.is_empty() {
+        out(&format!("No dependencies updated"));
+        return;
+    }
+    for (name, before, after) in &changed {
+        let short = |h: &String| h.chars().take(12).collect::<String>();
+        match before.is_empty() {
+            true => out(&format!("{} -> {}", name, short(after))),
+            false => out(&format!("{} {} -> {}", name, short(before), short(after))),
+        }
+    }
 }
 
 /// `dispatch`'s `Commands::Deps` arm. Extracted verbatim.
@@ -696,12 +732,13 @@ fn dispatch_rest(command: Commands) {
             print_error_explanation(&code);
         }
         Commands::Ide { cmd } => dispatch_ide(cmd),
-        Commands::Fmt { files, check, dry_run } => dispatch_fmt(files, check, dry_run),
+        Commands::Fmt { files, check, dry_run, no_import_edit } => dispatch_fmt(files, check, dry_run, no_import_edit),
         Commands::Compile { module, json, dry_run, output } => {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Clean => cli::cmd_clean(),
         Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
+        Commands::Update { dep } => dispatch_update(dep),
         Commands::Deps => dispatch_deps(),
         Commands::DepPath { name } => dispatch_dep_path(name),
         Commands::Install { spec, tag, branch, name, bin_dir, target } => {

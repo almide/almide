@@ -264,6 +264,18 @@ pub enum PrimKind {
     /// so it REUSES [`Capability::FsRead`] (counted in cap_witness). Reached only by the
     /// self-hosted `fs.stat`.
     PathFilestat,
+    /// The NO-FOLLOW twin of [`PathFilestat`] — the same `path_filestat_get` query with
+    /// lookupflags = 0 (the final symlink is NOT followed), so a symlink's own filetype (7)
+    /// is observable. Same `args = [bufaddr, path]` / scalar-errno contract, same
+    /// [`Capability::FsRead`]. Reached only by the self-hosted `fs.is_symlink`.
+    PathFilestatNoFollow,
+    /// The WASI `path_rename` call — `args = [src, dst]` (two BORROWED `String` handles, each
+    /// normalized like every fs path), dst = a fresh OWNED `Result[Unit, String]` in the
+    /// cap-as-tag layout (Ok(()) len@4=0 + tag@16=0 — the `materialize_result_ok` convention —
+    /// or Err(<native std::io Display>)). A rename IS a filesystem WRITE, so it reuses
+    /// [`Capability::FsWrite`] (the write_text_file accounting). Reached only by the
+    /// self-hosted `fs.rename`.
+    Rename,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -369,6 +381,12 @@ pub enum FUnOp {
     Floor,
     Ceil,
     Neg,
+    /// Round to nearest, TIES TO EVEN — wasm's `f64.nearest`, Rust's
+    /// `f64::round_ties_even`. Distinct from `float.round`, which is
+    /// half-AWAY-from-zero (self-hosted in float_round.almd to match native).
+    /// Needed by the canonical fast-exp's range reduction (#1197), whose SIMD
+    /// lanes all round ties-to-even.
+    Nearest,
 }
 
 /// A binary f64 op.

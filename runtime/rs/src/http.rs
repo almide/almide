@@ -467,9 +467,11 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
 // `Result<Response, String>` contract (future error-in-handler support).
 pub fn almide_rt_http_serve(
     port: i64,
-    handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> AlmideHttpResponse>,
+    handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>>,
 ) -> Result<(), String> {
-    almide_http_serve(port, std::rc::Rc::new(move |req| Ok(handler(req))))
+    // #1055: the handler slot is effect-typed, so the checker already hands
+    // us the carrier shape — a handler `Err` becomes the listener loop's 500.
+    almide_http_serve(port, handler)
 }
 
 // ── Helpers ──

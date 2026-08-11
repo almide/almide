@@ -1,0 +1,18 @@
+// #924: the float `**` operator is a VENDORED-musl-libm transcendental — the
+// same class `math.pow` already abstains on in the reference interpreter.
+// Both backends route it through the vendored pow; Rust's `f64::powf` calls
+// the PLATFORM libm, which differs in the last ULP. The module path returned
+// Unsupported (an honest skip) while the OPERATOR arm silently voted with the
+// platform result, so the 3-way oracle cast a wrong third vote and the nightly
+// fuzzer reported the disagreement as a finding (seed 1785995202102876112
+// index 388: interp "5.340981952686458" vs both targets "5.340981952686457").
+//
+// This file pins the VALUES both backends agree on; the interp's abstention is
+// what keeps it out of the oracle's vote (spec/wasm_cross/math_pow.almd is the
+// cross-target contract fixture, C-026).
+test "pow agrees across the two backends on exact cases" {
+  assert_eq(2.0 ^ 10.0, 1024.0)
+  assert_eq(0.0 - 2.0 ^ 3.0, 0.0 - 8.0)
+  assert_eq(4.0 ^ 0.5, 2.0)
+  assert_eq(2.0 ^ 0.0, 1.0)
+}

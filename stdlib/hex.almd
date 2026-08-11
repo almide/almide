@@ -8,7 +8,6 @@
 // encode and decode are SELF-HOSTED in `stdlib/hex_encode.almd`,
 // registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
 // dispatched through `emit_wasm/calls_hex.rs`, retired in c71eff7b.)
-
 @intrinsic("almide_rt_hex_encode")
 fn encode(b: Bytes) -> String = _
 

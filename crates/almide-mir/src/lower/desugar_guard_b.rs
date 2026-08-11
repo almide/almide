@@ -439,6 +439,67 @@ mod hoist_impl {
             || crate::lower::calls_p4_is_small_int(ty)
     }
 
+    /// Replace `slot` with a fresh `name`d Var and hand back the bind that gives
+    /// that Var whatever `slot` held. The two record hoists below differ only in
+    /// WHICH slots they pick, so the swap itself lives here once.
+    fn hoist_to_bind(slot: &mut IrExpr, vt: &mut VarTable, name: &str) -> IrStmt {
+        let ty = slot.ty.clone();
+        let var = vt.alloc(almide_lang::intern::sym(name), ty.clone(), Mutability::Let, None);
+        let value = std::mem::replace(
+            slot,
+            IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: None, def_id: None },
+        );
+        IrStmt {
+            kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value },
+            span: None,
+        }
+    }
+
+    /// Hoist every RECORD-literal ARGUMENT of a SCALAR-result named/module call to
+    /// its own `__rec_arg` bind. Anything else (a non-scalar result, a non-call, a
+    /// computed/method target) is left alone and falls through to the record-FIELD
+    /// hoist below.
+    fn hoist_record_literal_call_args(
+        value: &mut IrExpr,
+        vt: &mut VarTable,
+        hoists: &mut Vec<IrStmt>,
+    ) {
+        if !is_scalar_ty(&value.ty) {
+            return;
+        }
+        let IrExprKind::Call {
+            target: CallTarget::Named { .. } | CallTarget::Module { .. },
+            args,
+            ..
+        } = &mut value.kind
+        else {
+            return;
+        };
+        for a in args.iter_mut() {
+            if matches!(a.kind, IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }) {
+                hoists.push(hoist_to_bind(a, vt, "__rec_arg"));
+            }
+        }
+    }
+
+    /// A record-literal BIND whose FIELD is a scalar CALL (`left: letlib.GAP` — a
+    /// call-initialized module top-let read reaches the IR as its init call): the
+    /// field-position call emitted a dst-less bare call (result on the stack —
+    /// invalid wasm). Hoist each such field to its own `__rec_fld` bind, declaration
+    /// order preserved (= v0's field evaluation order).
+    fn hoist_scalar_call_record_fields(
+        value: &mut IrExpr,
+        vt: &mut VarTable,
+        hoists: &mut Vec<IrStmt>,
+    ) {
+        let IrExprKind::Record { fields, .. } = &mut value.kind else { return };
+        for (_, fe) in fields.iter_mut() {
+            if is_scalar_ty(&fe.ty) && matches!(fe.kind, IrExprKind::Call { .. }) {
+                hoists.push(hoist_to_bind(fe, vt, "__rec_fld"));
+            }
+        }
+    }
+
     fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {
         let mut i = 0;
         while i < stmts.len() {
@@ -451,91 +512,8 @@ mod hoist_impl {
                     // below, falling through to the record-FIELD hoist pass after this block
                     // — unchanged, since `break` exits the labeled block and resumes there).
                     // No behavior change — see docs/roadmap/active/code-health-codopsy.md.
-                    'call_arg_hoist: {
-                        if !is_scalar_ty(&value.ty) {
-                            break 'call_arg_hoist;
-                        }
-                        let IrExprKind::Call {
-                            target: CallTarget::Named { .. } | CallTarget::Module { .. },
-                            args,
-                            ..
-                        } = &mut value.kind
-                        else {
-                            break 'call_arg_hoist;
-                        };
-                        for a in args.iter_mut() {
-                            if !matches!(
-                                a.kind,
-                                IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
-                            ) {
-                                continue;
-                            }
-                            let aty = a.ty.clone();
-                            let av = vt.alloc(
-                                almide_lang::intern::sym("__rec_arg"),
-                                aty.clone(),
-                                Mutability::Let,
-                                None,
-                            );
-                            let lit = std::mem::replace(
-                                a,
-                                IrExpr {
-                                    kind: IrExprKind::Var { id: av },
-                                    ty: aty.clone(),
-                                    span: None,
-                                    def_id: None,
-                                },
-                            );
-                            hoists.push(IrStmt {
-                                kind: IrStmtKind::Bind {
-                                    var: av,
-                                    mutability: Mutability::Let,
-                                    ty: aty,
-                                    value: lit,
-                                },
-                                span: None,
-                            });
-                        }
-                    }
-                    // A record-literal BIND whose FIELD is a scalar CALL (`left:
-                    // letlib.GAP` — a call-initialized module top-let read reaches
-                    // the IR as its init call): the field-position call emitted a
-                    // dst-less bare call (result on the stack — invalid wasm).
-                    // Hoist each scalar call field to its own bind, declaration
-                    // order preserved (= v0's field evaluation order).
-                    if let IrExprKind::Record { fields, .. } = &mut value.kind {
-                        for (_, fe) in fields.iter_mut() {
-                            if is_scalar_ty(&fe.ty)
-                                && matches!(fe.kind, IrExprKind::Call { .. })
-                            {
-                                let fty = fe.ty.clone();
-                                let fv = vt.alloc(
-                                    almide_lang::intern::sym("__rec_fld"),
-                                    fty.clone(),
-                                    Mutability::Let,
-                                    None,
-                                );
-                                let call = std::mem::replace(
-                                    fe,
-                                    IrExpr {
-                                        kind: IrExprKind::Var { id: fv },
-                                        ty: fty.clone(),
-                                        span: None,
-                                        def_id: None,
-                                    },
-                                );
-                                hoists.push(IrStmt {
-                                    kind: IrStmtKind::Bind {
-                                        var: fv,
-                                        mutability: Mutability::Let,
-                                        ty: fty,
-                                        value: call,
-                                    },
-                                    span: None,
-                                });
-                            }
-                        }
-                    }
+                    hoist_record_literal_call_args(value, vt, &mut hoists);
+                    hoist_scalar_call_record_fields(value, vt, &mut hoists);
                 }
                 IrStmtKind::Expr { expr } => rewrite_expr(expr, vt),
                 _ => {}

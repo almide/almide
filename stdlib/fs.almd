@@ -9,13 +9,7 @@
 // looked like a borrow but was really an `ArgTransform::Direct`
 // signal (runtime string → owned); the bundled path writes the
 // owned form directly so no special-case stripping is needed.
-
-type FileStat = {
-  size: Int,
-  is_dir: Bool,
-  is_file: Bool,
-  modified: Int,
-}
+type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
@@ -44,6 +38,35 @@ effect fn exists(path: String) -> Bool = _
 @intrinsic("almide_rt_fs_read_lines")
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
+// Streaming line readers: walk the file line-by-line without materializing a
+// List[String] — peak memory is O(longest line), not O(file). Line semantics
+// byte-match read_lines. The family is exactly {fold_lines, for_each_line,
+// fold_lines_range} (tests/fs_streaming_family_gate): map/filter over lines
+// are intentional omissions (a transforming pipeline belongs on fold_lines;
+// an eager List belongs to read_lines), for_each has no range cell (chunk
+// workers accumulate — fold is their shape), and the ADR-0006 fallible
+// callback forms are the tracked follow-up cell, not yet grown.
+@intrinsic("almide_rt_fs_fold_lines")
+effect fn fold_lines[A](path: String, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
+
+@intrinsic("almide_rt_fs_for_each_line")
+effect fn for_each_line(path: String, f: fn(String) -> Unit) -> Result[Unit, String] = _
+
+// The chunk worker's walker: fold exactly the lines owned by the byte range
+// [start, end) — a line belongs to the chunk containing the byte before its
+// first byte — so folding a partition of [0, file_size) visits every line
+// exactly once, and per-chunk partials merge afterwards.
+@intrinsic("almide_rt_fs_fold_lines_range")
+effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
+
+// Chunk-PARALLEL fold: N workers each fold their byte-range partition on
+// real threads inside the runtime, returning the partials in CHUNK ORDER —
+// the merge stays with the caller, so the result is deterministic whatever
+// the thread schedule. The callback must not capture mutable state (the
+// emitted program's Send + Sync bounds make a violation a compile error).
+@intrinsic("almide_rt_fs_fold_lines_chunked")
+effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: fn(A, String) -> A) -> Result[List[A], String] = _
+
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): none ⇔ the path
 // does not exist (parents included); err = permission / directory / IO. The
 // family covers exactly the content readers — metadata (stat/file_size/
@@ -51,16 +74,16 @@ effect fn read_lines(path: String) -> Result[List[String], String] = _
 // is_dir predicates, writes create, and remove has rm -f semantics of its
 // own; those omissions are intentional (tests/fs_if_exists_family_gate).
 @intrinsic("almide_rt_fs_read_text_if_exists")
-effect fn read_text_if_exists(path: String) -> Result[Option[String], String] = _
+effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
 
 @intrinsic("almide_rt_fs_read_bytes_if_exists")
-effect fn read_bytes_if_exists(path: String) -> Result[Option[List[Int]], String] = _
+effect fn read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = _
 
 @intrinsic("almide_rt_fs_read_lines_if_exists")
-effect fn read_lines_if_exists(path: String) -> Result[Option[List[String]], String] = _
+effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
 
 @intrinsic("almide_rt_fs_read_bytes_raw_if_exists")
-effect fn read_bytes_raw_if_exists(path: String) -> Result[Option[Bytes], String] = _
+effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 @intrinsic("almide_rt_fs_remove")
 effect fn remove(path: String) -> Result[Unit, String] = _

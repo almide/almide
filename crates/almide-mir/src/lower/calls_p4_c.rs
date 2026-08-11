@@ -142,6 +142,52 @@ impl LowerCtx {
         // caller owns the buffer) and a BORROWED `String` path. dst = the SCALAR errno (0 = the
         // 64-byte WASI filestat is at bufaddr). Like path_exists this allocates NO heap result —
         // the dst joins no classification set. Carries Capability::FsRead (counted in cap_witness).
+        // `prim.rename(src, dst)` — the WASI path_rename floor (fs.rename). TWO BORROWED
+        // `String` args. Its dst is a FRESH OWNED `Result[Unit, String]` built by the render
+        // ($rename) in the same cap-as-tag layout as write_text_file (Ok len@4=0 + tag@16=0,
+        // Err len@4=1 + @12=msg + tag@16=1), tracked identically: `materialized_results_str`
+        // so a downstream `match`/`!` reads tag @16, AND `heap_elem_lists` so the scope-end
+        // drop is the flat DropListStr. Carries Capability::FsWrite (counted in cap_witness).
+        if func == "rename" {
+            let src = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::at(args[0].span, "prim.rename src is not a lowerable scalar/handle")
+            })?;
+            let dstp = self.lower_scalar_value(&args[1]).ok_or_else(|| {
+                LowerError::at(args[1].span, "prim.rename dst is not a lowerable scalar/handle")
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Rename,
+                dst: Some(dst),
+                args: vec![src, dstp],
+            });
+            self.materialized_results_str.insert(dst);
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
+        // `prim.path_filestat_nofollow(bufaddr, path)` — the NO-FOLLOW stat twin
+        // (fs.is_symlink): identical contract to path_filestat, lookupflags 0.
+        if func == "path_filestat_nofollow" {
+            let bufaddr = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::at(
+                    args[0].span,
+                    "prim.path_filestat_nofollow buffer address is not a lowerable scalar",
+                )
+            })?;
+            let path = self.lower_scalar_value(&args[1]).ok_or_else(|| {
+                LowerError::at(
+                    args[1].span,
+                    "prim.path_filestat_nofollow path is not a lowerable scalar/handle",
+                )
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::PathFilestatNoFollow,
+                dst: Some(dst),
+                args: vec![bufaddr, path],
+            });
+            return Ok(Some(dst));
+        }
         if func == "path_filestat" {
             let bufaddr = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported(
@@ -328,7 +374,7 @@ impl LowerCtx {
     fn prim_kind_float(func: &str) -> crate::PrimKind {
         if matches!(
             func,
-            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
+            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fnearest" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
                 | "fmin" | "fmax" | "fcopysign"
         ) {
             return Self::prim_kind_float_arith(func);
@@ -346,6 +392,7 @@ impl LowerCtx {
             "fabs" => PrimKind::FloatUn(crate::FUnOp::Abs),
             "fsqrt" => PrimKind::FloatUn(crate::FUnOp::Sqrt),
             "ffloor" => PrimKind::FloatUn(crate::FUnOp::Floor),
+            "fnearest" => PrimKind::FloatUn(crate::FUnOp::Nearest),
             "fceil" => PrimKind::FloatUn(crate::FUnOp::Ceil),
             "fneg" => PrimKind::FloatUn(crate::FUnOp::Neg),
             "fadd" => PrimKind::FloatBin(crate::FBinOp::Add),
@@ -458,7 +505,7 @@ impl LowerCtx {
         }
         if matches!(
             func,
-            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
+            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fnearest" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
                 | "fmin" | "fmax" | "fcopysign" | "flt" | "fle" | "fgt" | "fge" | "feq" | "fne"
                 | "f2i" | "i2f" | "fbits" | "ffrombits" | "f2f32" | "f32_2f" | "bits_to_f32"
                 | "i2f32" | "f32bits"
@@ -582,6 +629,14 @@ impl LowerCtx {
             self.variant_drop_handles.insert(dst, "map_mclo".to_string());
             return;
         }
+        self.seed_call_arg_map_drop_route(dst, ty);
+    }
+
+    /// The Map- and record-shaped arg-temp drop routes of
+    /// [`Self::seed_call_arg_heap_drop_route`]. Split at the named-value seam so
+    /// neither half outgrows a readable guard ladder; the ORDER across the two
+    /// halves is unchanged (this one runs only after every guard above declined).
+    fn seed_call_arg_map_drop_route(&mut self, dst: ValueId, ty: &Ty) {
         if let Some(hname) = self.map_named_value_drop(ty) {
             self.variant_drop_handles.insert(dst, hname);
             return;

@@ -12,17 +12,13 @@
 
 alias_combinator_rc  out-of-interp-scope capability: prim.handle
 alias_cow  out-of-interp-scope capability: prim.alloc_map
-args_surface  out-of-interp-scope capability: prim.args_get_list
 base64_encode  out-of-interp-scope capability: prim.handle
-bundled_pure_modules  out-of-interp-scope capability: args.flag
 bytes_f16  out-of-interp-scope capability: prim.handle
 bytes_f16_offset_overflow  out-of-interp-scope capability: prim.handle
 bytes_push_inplace  out-of-interp-scope capability: prim.handle
 bytes_rawptr  out-of-interp-scope capability: prim.handle
 bytes_set_value_semantics  out-of-interp-scope capability: prim.handle
-checked_conversion_value_match  out-of-interp-scope capability: prim.args_get_list
 chunk_str  out-of-interp-scope capability: prim.handle
-closure_tail_recursion  interp fuel/recursion budget exhausted
 codec_decode_errors  out-of-interp-scope capability: prim.handle
 codec_float_int  out-of-interp-scope capability: prim.handle
 codec_none_omission  out-of-interp-scope capability: prim.alloc_value
@@ -30,31 +26,20 @@ compound_eq  out-of-interp-scope capability: prim.handle
 compound_repr_interp  out-of-interp-scope capability: prim.handle
 compound_repr_records_interp  out-of-interp-scope capability: prim.handle
 datetime_format  out-of-interp-scope capability: prim.alloc_str
-effect_tco  interp fuel/recursion budget exhausted
 effect_tuple_result_tco  out-of-interp-scope capability: prim.alloc_value
 empty_collection_annotated  out-of-interp-scope capability: prim.alloc_set
 empty_collection_fold  out-of-interp-scope capability: prim.alloc_map
 empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
-env_args  out-of-interp-scope capability: prim.args_get_list
-env_get  interp fuel/recursion budget exhausted
-env_platform_reporting  interp fuel/recursion budget exhausted
-fan_any_allfail  out-of-interp-scope capability: fan.any
-fan_any_early_winner  out-of-interp-scope capability: fan.any
-fan_deterministic  out-of-interp-scope capability: fan.any
-fan_pure_thunks  out-of-interp-scope capability: fan.any
-fan_settle_tuple  out-of-interp-scope capability: prim.read_text_file
-fan_var_thunk_list  out-of-interp-scope capability: fan.any
-float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file
-fs_relative_path  out-of-interp-scope capability: prim.make_dir
+fs_composition_family  out-of-interp-scope capability: prim.alloc_bytes
+fs_metadata_family  out-of-interp-scope capability: prim.alloc_bytes
+fs_read_lines  out-of-interp-scope capability: prim.alloc_bytes
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
 hex_two_module_link  out-of-interp-scope capability: prim.handle
-host_floor_string_alloc  out-of-interp-scope capability: prim.make_dir
+host_floor_string_alloc  out-of-interp-scope capability: prim.handle
 int_from_hex  out-of-interp-scope capability: prim.handle
-int_pow_negative_exponent  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-int_pow_overflow_wraps  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+int_pow_negative_exponent  out-of-interp-scope capability: prim.handle
 int_rotate_nonpositive_width  out-of-interp-scope capability: prim.handle
 io_write_ordering  out-of-interp-scope capability: prim.handle
 json_gltf_walk  out-of-interp-scope capability: prim.handle
@@ -67,55 +52,52 @@ let_unwrap_propagation  out-of-interp-scope capability: prim.alloc_value
 list_chunk_windows  out-of-interp-scope capability: prim.handle
 list_chunk_zero  out-of-interp-scope capability: prim.handle
 list_comprehensive  out-of-interp-scope capability: prim.alloc_list
-list_count_index_truncation  out-of-interp-scope capability: HOF list.update
+list_count_index_truncation  out-of-interp-scope capability: prim.handle
 list_flatten_borrow  out-of-interp-scope capability: prim.handle
-list_heapelem_rc  out-of-interp-scope capability: HOF list.update
 list_modify_heap  out-of-interp-scope capability: prim.alloc_value
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list
 list_set_value  out-of-interp-scope capability: prim.alloc_value
 list_slice_oob  out-of-interp-scope capability: prim.handle
-list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
 list_update_heap  out-of-interp-scope capability: prim.alloc_value
 list_window_zero  out-of-interp-scope capability: prim.handle
 list_windows_zero  out-of-interp-scope capability: prim.handle
 list_with_capacity  out-of-interp-scope capability: prim.alloc_list
 map_filter  out-of-interp-scope capability: prim.alloc_map
 map_fold  out-of-interp-scope capability: prim.alloc_map
-map_fold_heap_acc  out-of-interp-scope capability: HOF map.fold
-map_fold_heap_acc_skv  out-of-interp-scope capability: HOF map.fold
+map_fold_heap_acc  out-of-interp-scope capability: prim.handle
+map_fold_heap_acc_skv  out-of-interp-scope capability: prim.handle
 map_insertion_order  out-of-interp-scope capability: prim.handle
 map_set_eq  out-of-interp-scope capability: prim.alloc_map
 map_set_ops  out-of-interp-scope capability: prim.alloc_map
 map_set_typechange  out-of-interp-scope capability: prim.alloc_map
 map_wide_int_key  out-of-interp-scope capability: prim.alloc_map
-math_atan_tanh  out-of-interp-scope capability: transcendental `math.atan` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-math_explog  out-of-interp-scope capability: transcendental `math.exp` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-math_log_gamma  out-of-interp-scope capability: transcendental `math.fpow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
+matrix_dims_guard_rows  out-of-interp-scope capability: prim.alloc_list_str
 matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
+matrix_pow_libm  out-of-interp-scope capability: prim.handle
+matrix_select_rows  out-of-interp-scope capability: prim.handle
+matrix_softmax_fastexp  out-of-interp-scope capability: prim.handle
 memory_stress  out-of-interp-scope capability: prim.alloc_list
 module_global_const  out-of-interp-scope capability: prim.handle
 module_var_alias_cow  out-of-interp-scope capability: prim.alloc_list
 mut_map_param  out-of-interp-scope capability: prim.handle
+mut_param_call_chain  out-of-interp-scope capability: prim.handle
 mutable_global_bytes_arena  out-of-interp-scope capability: prim.handle
 mutable_global_bytes_copy_from  out-of-interp-scope capability: prim.handle
 mutable_global_repeat_writes  out-of-interp-scope capability: prim.handle
 mutual_append  out-of-interp-scope capability: prim.handle
-mutual_tail_recursion  interp fuel/recursion budget exhausted
 nan_canonical_bytes_write  out-of-interp-scope capability: prim.handle
 negative_offset_and_width_totality  out-of-interp-scope capability: prim.handle
 nested_hof_lambda_inference  out-of-interp-scope capability: prim.handle
 nested_match_heap_arm  out-of-interp-scope capability: prim.handle
 place_mutation  out-of-interp-scope capability: prim.alloc_map
-process_args  out-of-interp-scope capability: prim.args_get_list_full
 pure_bang_propagation  out-of-interp-scope capability: prim.handle
 r5_lowmisc_param_try_err  out-of-interp-scope capability: prim.alloc_map
 random_int_entropy  out-of-interp-scope capability: prim.alloc_bytes
 rc_alloc_stress  out-of-interp-scope capability: prim.alloc_map
 regex_engine  out-of-interp-scope capability: prim.handle
 regex_fuzz_batch  out-of-interp-scope capability: prim.handle
-repeat_size_ceiling  out-of-interp-scope capability: prim.args_get_list
 result_list_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
 result_match_rewrap_modcall  out-of-interp-scope capability: prim.handle
 result_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
@@ -136,7 +118,6 @@ string_rle  out-of-interp-scope capability: prim.handle
 string_split_rle_codepoint  out-of-interp-scope capability: prim.handle
 string_whitespace  out-of-interp-scope capability: prim.alloc_str
 tco_map_acc_seed  out-of-interp-scope capability: prim.alloc_map
-trig_libm  out-of-interp-scope capability: transcendental `math.sin` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 unwrap_or_operand  out-of-interp-scope capability: prim.handle
 value_array_leak_loop  out-of-interp-scope capability: prim.alloc_value
 value_array_tuple_tco  out-of-interp-scope capability: prim.alloc_value

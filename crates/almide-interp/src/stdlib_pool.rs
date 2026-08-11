@@ -52,6 +52,9 @@ pub(crate) struct StdlibPool {
     /// tier then misses on the fn lookup and falls through to `Unsupported`,
     /// exactly as before the pool existed).
     pub(crate) call_map: HashMap<(Sym, Sym), Sym>,
+    /// impl name → `(module, func)` — `call_map` reversed (first writer wins;
+    /// the registry is injective in practice).
+    pub(crate) impl_to_call: HashMap<Sym, (Sym, Sym)>,
 }
 
 /// The pool, built on first use and shared for the process lifetime. A single
@@ -67,13 +70,23 @@ pub(crate) fn impl_fn(module: Sym, func: Sym) -> Option<Sym> {
     pool().call_map.get(&(module, func)).copied()
 }
 
+/// The reverse: the `(module, func)` a registry IMPL name stands for. Lets a
+/// NAMED call of an impl (`string_slice` — how a lowered MODULE body spells
+/// `string.slice`) take the same bridge-first resolution a module-spelled call
+/// takes, instead of running the pool body straight into its heap prims.
+pub(crate) fn module_of_impl(impl_name: Sym) -> Option<(Sym, Sym)> {
+    pool().impl_to_call.get(&impl_name).copied()
+}
+
 fn build() -> StdlibPool {
     let mut fns: HashMap<Sym, IrFunction> = HashMap::new();
     let mut call_map: HashMap<(Sym, Sym), Sym> = HashMap::new();
+    let mut impl_to_call: HashMap<Sym, (Sym, Sym)> = HashMap::new();
     for (source, entries) in almide_lang::self_host_registry::self_host_runtime() {
         for (impl_name, call_name) in entries.iter() {
             if let Some((m, f)) = call_name.split_once('.') {
                 call_map.insert((sym(m), sym(f)), sym(impl_name));
+                impl_to_call.entry(sym(impl_name)).or_insert((sym(m), sym(f)));
             }
         }
         if let Some(lowered) = lower_registry_source(source) {
@@ -85,7 +98,7 @@ fn build() -> StdlibPool {
             }
         }
     }
-    StdlibPool { fns, call_map }
+    StdlibPool { fns, call_map, impl_to_call }
 }
 
 /// Parse + check + lower ONE registry source, `None` when any stage declines.

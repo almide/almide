@@ -463,7 +463,7 @@ Flow と List の性能特性をユーザーが把握できるようにする。
 
 ## fan × Flow Integration
 
-Flow と fan は **直交しつつ統合される**。詳細は [`fan-concurrency-next.md`](./fan-concurrency-next.md) に委譲。以下は interaction の 5 原則。
+Flow と fan は **直交しつつ統合される**。詳細は `fan-concurrency-next.md` (removed from the tree — `git log --diff-filter=D -- docs/roadmap/done/fan-concurrency-next.md`) に委譲。以下は interaction の 5 原則。
 
 ### 原則 1: `fan.map` は入力型で戻り型がディスパッチされる
 
@@ -577,7 +577,7 @@ demand ベースで追加:
 
 ### Phase 4: Async / WASM backend
 
-[`fan-concurrency-next.md`](./fan-concurrency-next.md) の Phase 5-6 と並行:
+`fan-concurrency-next.md` (removed from the tree — `git log --diff-filter=D -- docs/roadmap/done/fan-concurrency-next.md`) の Phase 5-6 と並行:
 
 - [ ] Rust async 移行時の `Flow[T]` → `Stream[T]` mapping
 - [ ] WASI 0.3 の `stream<T>` への mapping

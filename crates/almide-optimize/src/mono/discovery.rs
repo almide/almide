@@ -195,7 +195,7 @@ pub(super) fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str
         (Ty::Named(n, _), _) if n == var_name => arg_ty.clone(),
         (Ty::OpenRecord { .. }, _) if var_name.starts_with("__open_") => arg_ty.clone(),
         (Ty::Named(_, _), _) if var_name.starts_with("__open_") => arg_ty.clone(),
-        (Ty::Fn { params: p_params, ret: p_ret }, Ty::Fn { params: a_params, ret: a_ret }) if p_params.len() == a_params.len() =>
+        (Ty::Fn { params: p_params, ret: p_ret, .. }, Ty::Fn { params: a_params, ret: a_ret, .. }) if p_params.len() == a_params.len() =>
             extract_typevar_binding_fn(p_params, p_ret, a_params, a_ret, var_name),
         // A QUALIFIED/bare Named pair (`cell.Cell[T]` param vs a bare `Cell[Int]`
         // arg, or vice versa) is the SAME nominal type under the checker's

@@ -50,7 +50,7 @@ fn display_tuple() {
 
 #[test]
 fn display_fn() {
-    let ty = Ty::Fn {
+    let ty = Ty::Fn { is_effect: false, 
         params: vec![Ty::Int, Ty::Int],
         ret: Box::new(Ty::Bool),
     };
@@ -156,10 +156,10 @@ fn compatible_map() {
 
 #[test]
 fn compatible_fn_types() {
-    let f1 = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) };
-    let f2 = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) };
-    let f3 = Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Bool) };
-    let f4 = Ty::Fn { params: vec![Ty::Int, Ty::Int], ret: Box::new(Ty::Bool) };
+    let f1 = Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Bool) };
+    let f2 = Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Bool) };
+    let f3 = Ty::Fn { is_effect: false, params: vec![Ty::String], ret: Box::new(Ty::Bool) };
+    let f4 = Ty::Fn { is_effect: false, params: vec![Ty::Int, Ty::Int], ret: Box::new(Ty::Bool) };
     assert!(f1.compatible(&f2));
     assert!(!f1.compatible(&f3));
     assert!(!f1.compatible(&f4)); // different arity
@@ -237,11 +237,11 @@ fn unify_result_with_typevars() {
 #[test]
 fn unify_fn_types() {
     let mut bindings = HashMap::new();
-    let sig = Ty::Fn {
+    let sig = Ty::Fn { is_effect: false, 
         params: vec![Ty::TypeVar("T".into())],
         ret: Box::new(Ty::TypeVar("T".into())),
     };
-    let actual = Ty::Fn {
+    let actual = Ty::Fn { is_effect: false, 
         params: vec![Ty::Int],
         ret: Box::new(Ty::Int),
     };
@@ -252,8 +252,8 @@ fn unify_fn_types() {
 #[test]
 fn unify_fn_arity_mismatch() {
     let mut bindings = HashMap::new();
-    let sig = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
-    let actual = Ty::Fn { params: vec![Ty::Int, Ty::Int], ret: Box::new(Ty::Int) };
+    let sig = Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Int) };
+    let actual = Ty::Fn { is_effect: false, params: vec![Ty::Int, Ty::Int], ret: Box::new(Ty::Int) };
     assert!(!unify(&sig, &actual, &mut bindings));
 }
 
@@ -327,7 +327,7 @@ fn substitute_fn_type() {
     let mut bindings = HashMap::new();
     bindings.insert("T".into(), Ty::String);
     let result = substitute(
-        &Ty::Fn {
+        &Ty::Fn { is_effect: false, 
             params: vec![Ty::TypeVar("T".into())],
             ret: Box::new(Ty::TypeVar("T".into())),
         },
@@ -335,7 +335,7 @@ fn substitute_fn_type() {
     );
     assert_eq!(
         result,
-        Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::String) }
+        Ty::Fn { is_effect: false, params: vec![Ty::String], ret: Box::new(Ty::String) }
     );
 }
 
@@ -600,7 +600,7 @@ fn children_record() {
 
 #[test]
 fn children_fn_type() {
-    let f = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) };
+    let f = Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Bool) };
     assert_eq!(f.children(), vec![&Ty::Int, &Ty::Bool]);
 }
 

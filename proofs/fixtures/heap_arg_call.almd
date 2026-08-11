@@ -7,7 +7,7 @@
 // fact that makes the two per-function ownership certs COMPOSE
 // (CallModes.check_fill_sound).
 fn use_it(xs: List[Int]) -> Int = list.len(xs)
-fn main() -> Int = {
+fn main() -> Unit = {
   var a = [1, 2, 3]
-  use_it(a)
+  let _ = use_it(a)
 }

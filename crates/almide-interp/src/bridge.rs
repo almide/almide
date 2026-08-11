@@ -119,20 +119,27 @@ fn path_fn(func: &str, args: &[Value]) -> Option<Flow> {
 /// decodes. The mutating and raw-pointer surface stays out of scope.
 fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-        "from_list" => Flow::val(args.first()?.clone()),
-        "to_list" => Flow::val(args.first()?.clone()),
+        // `Bytes` IS the `List[Int]`, so both directions are the identity.
+        "from_list" | "to_list" => Flow::val(args.first()?.clone()),
         "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
-        "new" => Flow::val(Value::list(vec![Value::Int(0); as_int(args.first())?.max(0) as usize])),
+        // C-197: an unsatisfiable size is the defined abort on every leg —
+        // the infallible `vec![_; n]` panicked with a capacity overflow on
+        // `bytes.new(i64::MAX)` instead (fuzz seed 500705518626 index 711).
+        "new" => {
+            let n = as_int(args.first())?.max(0) as usize;
+            let mut v: Vec<Value> = Vec::new();
+            if v.try_reserve_exact(n).is_err() {
+                Flow::Abort("out of memory".to_string())
+            } else {
+                v.resize(n, Value::Int(0));
+                Flow::val(Value::list(v))
+            }
+        }
         "from_string" => Flow::val(Value::list(
             as_str(args.first())?.bytes().map(|b| Value::Int(b as i64)).collect(),
         )),
         "to_string_lossy" => {
-            let raw: Vec<u8> = args
-                .first()?
-                .as_iter_items()?
-                .iter()
-                .map(|v| match v { Value::Int(i) => *i as u8, _ => 0 })
-                .collect();
+            let raw = as_byte_buf(args.first())?;
             Flow::val(Value::str(String::from_utf8_lossy(&raw).into_owned()))
         }
         // The WASM-only arena pair. Native is literally `almide_rt_bytes_heap_save()
@@ -143,67 +150,81 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
         // neither backend has on this leg (#1021).
         "heap_save" => Flow::val(Value::Int(0)),
         "heap_restore" => Flow::val(Value::Unit),
-        // The Endian-parameterized sized reads (#1098): dispatch on the ctor of
-        // the `Endian` argument, mirror the native guards exactly — an
-        // out-of-range window reads the documented 0 / 0.0 default, never
-        // aborts (`almide_rt_bytes_read_u16_le`'s `checked_add` shape).
         "read_uint16" | "read_uint32" | "read_int32" | "read_float32" => {
-            let raw: Vec<u8> = args
-                .first()?
-                .as_iter_items()?
-                .iter()
-                .map(|v| match v { Value::Int(i) => *i as u8, _ => 0 })
-                .collect();
-            let pos = as_int(args.get(1))?;
-            let big = match args.get(2)? {
-                Value::Variant { ctor, .. } => match ctor.as_str() {
-                    "LittleEndian" => false,
-                    "BigEndian" => true,
-                    _ => return None,
-                },
-                _ => return None,
-            };
-            let width = if func == "read_uint16" { 2 } else { 4 };
-            let p = pos as usize;
-            let window = (pos >= 0)
-                .then(|| p.checked_add(width))
-                .flatten()
-                .filter(|end| *end <= raw.len())
-                .map(|_| &raw[p..p + width]);
-            let val = match (func, window) {
-                (_, None) if func == "read_float32" => Value::Float(0.0),
-                (_, None) => Value::Int(0),
-                ("read_uint16", Some(w)) => {
-                    let b = [w[0], w[1]];
-                    Value::Int(
-                        (if big { u16::from_be_bytes(b) } else { u16::from_le_bytes(b) }) as i64,
-                    )
-                }
-                ("read_uint32", Some(w)) => {
-                    let b = [w[0], w[1], w[2], w[3]];
-                    Value::Int(
-                        (if big { u32::from_be_bytes(b) } else { u32::from_le_bytes(b) }) as i64,
-                    )
-                }
-                ("read_int32", Some(w)) => {
-                    let b = [w[0], w[1], w[2], w[3]];
-                    Value::Int(
-                        (if big { i32::from_be_bytes(b) } else { i32::from_le_bytes(b) }) as i64,
-                    )
-                }
-                ("read_float32", Some(w)) => {
-                    let b = [w[0], w[1], w[2], w[3]];
-                    Value::Float(
-                        (if big { f32::from_be_bytes(b) } else { f32::from_le_bytes(b) }) as f64,
-                    )
-                }
-                _ => return None,
-            };
-            Flow::val(val)
+            return bytes_read_fn(func, args)
         }
         _ => return None,
     };
     Some(f)
+}
+
+/// A `Bytes` receiver as raw octets. The interp models `Bytes` as `List[Int]`,
+/// so every element is truncated with `as u8` exactly as the native runtime does.
+fn as_byte_buf(v: Option<&Value>) -> Option<Vec<u8>> {
+    Some(
+        v?.as_iter_items()?
+            .iter()
+            .map(|v| match v { Value::Int(i) => *i as u8, _ => 0 })
+            .collect(),
+    )
+}
+
+/// The Endian-parameterized sized reads (#1098): dispatch on the ctor of the
+/// `Endian` argument and mirror the native guards exactly — an out-of-range
+/// window reads the documented 0 / 0.0 default, never aborts
+/// (`almide_rt_bytes_read_u16_le`'s `checked_add` shape).
+fn bytes_read_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let raw = as_byte_buf(args.first())?;
+    let pos = as_int(args.get(1))?;
+    let big = endian_is_big(args.get(2)?)?;
+    let width = if func == "read_uint16" { 2 } else { 4 };
+    let p = pos as usize;
+    let window = (pos >= 0)
+        .then(|| p.checked_add(width))
+        .flatten()
+        .filter(|end| *end <= raw.len())
+        .map(|_| &raw[p..p + width]);
+    let Some(w) = window else {
+        // Out of range: the documented default for the read's result type.
+        let zero = if func == "read_float32" { Value::Float(0.0) } else { Value::Int(0) };
+        return Some(Flow::val(zero));
+    };
+    Some(Flow::val(decode_sized(func, w, big)?))
+}
+
+/// The `Endian` variant argument as "is big-endian".
+fn endian_is_big(v: &Value) -> Option<bool> {
+    let Value::Variant { ctor, .. } = v else { return None };
+    match ctor.as_str() {
+        "LittleEndian" => Some(false),
+        "BigEndian" => Some(true),
+        _ => None,
+    }
+}
+
+/// Decode an in-range window for one of the sized reads. `w` is exactly the
+/// read's width, so the array conversions cannot fail.
+fn decode_sized(func: &str, w: &[u8], big: bool) -> Option<Value> {
+    let v = match func {
+        "read_uint16" => {
+            let b = [w[0], w[1]];
+            Value::Int((if big { u16::from_be_bytes(b) } else { u16::from_le_bytes(b) }) as i64)
+        }
+        "read_uint32" => {
+            let b = [w[0], w[1], w[2], w[3]];
+            Value::Int((if big { u32::from_be_bytes(b) } else { u32::from_le_bytes(b) }) as i64)
+        }
+        "read_int32" => {
+            let b = [w[0], w[1], w[2], w[3]];
+            Value::Int((if big { i32::from_be_bytes(b) } else { i32::from_le_bytes(b) }) as i64)
+        }
+        "read_float32" => {
+            let b = [w[0], w[1], w[2], w[3]];
+            Value::Float((if big { f32::from_be_bytes(b) } else { f32::from_le_bytes(b) }) as f64)
+        }
+        _ => return None,
+    };
+    Some(v)
 }
 
 // ── helpers to pull typed args ──────────────────────────────────
@@ -266,64 +287,100 @@ fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
 /// out with them: its argument is always `prim.handle(<message>)`, so the eval
 /// abstains on the handle before die is reached.
 fn prim_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    // Bitwise / shifts: i64-uniform; wasm's `i64.shl` family masks the count
-    // to 6 bits, so the floor does too (a Rust bare `<<` would panic instead).
-    let int2 = |f: fn(i64, i64) -> i64| -> Option<Flow> {
-        Some(Flow::val(Value::Int(f(as_int(args.first())?, as_int(args.get(1))?))))
+    // Four disjoint name families. A miss in one falls through to the next and
+    // ends as the same `None` an unmatched name would produce, so the chain is
+    // equivalent to one flat table with the arms in this order.
+    prim_bitwise_fn(func, args)
+        .or_else(|| prim_repr_fn(func, args))
+        .or_else(|| prim_float_arith_fn(func, args))
+        .or_else(|| prim_float_cmp_fn(func, args))
+}
+
+/// Bitwise / shifts: i64-uniform; wasm's `i64.shl` family masks the count
+/// to 6 bits, so the floor does too (a Rust bare `<<` would panic instead).
+fn prim_bitwise_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let f: fn(i64, i64) -> i64 = match func {
+        "band" => |a, b| a & b,
+        "bor" => |a, b| a | b,
+        "bxor" => |a, b| a ^ b,
+        "bshl" => |a, b| a.wrapping_shl(b as u32 & 63),
+        "bshr" => |a, b| a.wrapping_shr(b as u32 & 63),
+        "bshr_u" => |a, b| ((a as u64).wrapping_shr(b as u32 & 63)) as i64,
+        _ => return None,
     };
-    // f64 arithmetic / comparison: real f64s in the interp carrier.
-    let float2 = |f: fn(f64, f64) -> f64| -> Option<Flow> {
-        Some(Flow::val(Value::Float(f(as_float(args.first())?, as_float(args.get(1))?))))
+    Some(Flow::val(Value::Int(f(as_int(args.first())?, as_int(args.get(1))?))))
+}
+
+/// Numeric REPRESENTATION changes — width and bit-pattern conversions that
+/// carry no arithmetic of their own.
+///
+/// Int ⇄ Float is `f64.convert_i64_s` / saturating `i64.trunc_sat_f64_s`
+/// (Rust's float→int `as` is exactly the saturating truncate); `fbits` /
+/// `ffrombits` are the raw f64 ⇄ i64 reinterpret (`float.to_bits` /
+/// `int.bits_to_float`). For f32 the language-level Float32 is CARRIED widened
+/// (one f64 in this oracle, the widened bits in the backends), the narrowing
+/// rounds to nearest, and the pattern lives in the low 32 bits.
+fn prim_repr_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "i2f" => Value::Float(as_int(args.first())? as f64),
+        "f2i" => Value::Int(as_float(args.first())? as i64),
+        "fbits" => Value::Int(as_float(args.first())?.to_bits() as i64),
+        "ffrombits" => Value::Float(f64::from_bits(as_int(args.first())? as u64)),
+        "f2f32" => Value::Float((as_float(args.first())? as f32) as f64),
+        "f32_2f" => Value::Float(as_float(args.first())?),
+        "i2f32" => Value::Float((as_int(args.first())? as f32) as f64),
+        "f32bits" => Value::Int(((as_float(args.first())? as f32).to_bits()) as i64),
+        "bits_to_f32" => Value::Float(f32::from_bits(as_int(args.first())? as u32) as f64),
+        _ => return None,
     };
-    let fcmp = |f: fn(&f64, &f64) -> bool| -> Option<Flow> {
-        Some(Flow::val(Value::Bool(f(&as_float(args.first())?, &as_float(args.get(1))?))))
+    Some(Flow::val(f))
+}
+
+/// f64 arithmetic: real f64s in the interp carrier.
+fn prim_float_arith_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let binary: fn(f64, f64) -> f64 = match func {
+        "fadd" => |a, b| a + b,
+        "fsub" => |a, b| a - b,
+        "fmul" => |a, b| a * b,
+        "fdiv" => |a, b| a / b,
+        "fcopysign" => f64::copysign,
+        _ => return prim_float_unary_fn(func, args),
     };
-    match func {
-        "band" => int2(|a, b| a & b),
-        "bor" => int2(|a, b| a | b),
-        "bxor" => int2(|a, b| a ^ b),
-        "bshl" => int2(|a, b| a.wrapping_shl(b as u32 & 63)),
-        "bshr" => int2(|a, b| a.wrapping_shr(b as u32 & 63)),
-        "bshr_u" => int2(|a, b| ((a as u64).wrapping_shr(b as u32 & 63)) as i64),
-        // Int ⇄ Float: `f64.convert_i64_s` / saturating `i64.trunc_sat_f64_s`
-        // (Rust's float→int `as` is exactly the saturating truncate).
-        "i2f" => Some(Flow::val(Value::Float(as_int(args.first())? as f64))),
-        "f2i" => Some(Flow::val(Value::Int(as_float(args.first())? as i64))),
-        // The raw f64 ⇄ i64 BIT reinterpret (`float.to_bits` / `int.bits_to_float`).
-        "fbits" => Some(Flow::val(Value::Int(as_float(args.first())?.to_bits() as i64))),
-        "ffrombits" => {
-            Some(Flow::val(Value::Float(f64::from_bits(as_int(args.first())? as u64))))
-        }
-        // The f32 conventions: the language-level Float32 is CARRIED widened (one
-        // f64 in this oracle, the widened bits in the backends), the narrowing
-        // rounds to nearest, and the pattern lives in the low 32 bits.
-        "f2f32" => Some(Flow::val(Value::Float((as_float(args.first())? as f32) as f64))),
-        "f32_2f" => Some(Flow::val(Value::Float(as_float(args.first())?))),
-        "i2f32" => Some(Flow::val(Value::Float((as_int(args.first())? as f32) as f64))),
-        "f32bits" => Some(Flow::val(Value::Int(
-            ((as_float(args.first())? as f32).to_bits()) as i64,
-        ))),
-        "bits_to_f32" => Some(Flow::val(Value::Float(
-            f32::from_bits(as_int(args.first())? as u32) as f64,
-        ))),
-        "fadd" => float2(|a, b| a + b),
-        "fsub" => float2(|a, b| a - b),
-        "fmul" => float2(|a, b| a * b),
-        "fdiv" => float2(|a, b| a / b),
-        "fcopysign" => float2(f64::copysign),
-        "fneg" => Some(Flow::val(Value::Float(-as_float(args.first())?))),
-        "fabs" => Some(Flow::val(Value::Float(as_float(args.first())?.abs()))),
-        "fsqrt" => Some(Flow::val(Value::Float(as_float(args.first())?.sqrt()))),
-        "fceil" => Some(Flow::val(Value::Float(as_float(args.first())?.ceil()))),
-        "ffloor" => Some(Flow::val(Value::Float(as_float(args.first())?.floor()))),
-        "feq" => fcmp(|a, b| a == b),
-        "fne" => fcmp(|a, b| a != b),
-        "flt" => fcmp(|a, b| a < b),
-        "fgt" => fcmp(|a, b| a > b),
-        "fge" => fcmp(|a, b| a >= b),
-        "fle" => fcmp(|a, b| a <= b),
-        _ => None,
-    }
+    Some(Flow::val(Value::Float(binary(
+        as_float(args.first())?,
+        as_float(args.get(1))?,
+    ))))
+}
+
+/// The one-operand half of [`prim_float_arith_fn`].
+fn prim_float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let unary: fn(f64) -> f64 = match func {
+        "fneg" => |a| -a,
+        "fabs" => f64::abs,
+        "fsqrt" => f64::sqrt,
+        "fceil" => f64::ceil,
+        "ffloor" => f64::floor,
+        "fnearest" => f64::round_ties_even,
+        _ => return None,
+    };
+    Some(Flow::val(Value::Float(unary(as_float(args.first())?))))
+}
+
+/// f64 comparison — the IEEE predicates, NaN-unordered like both backends.
+fn prim_float_cmp_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let cmp: fn(&f64, &f64) -> bool = match func {
+        "feq" => |a, b| a == b,
+        "fne" => |a, b| a != b,
+        "flt" => |a, b| a < b,
+        "fgt" => |a, b| a > b,
+        "fge" => |a, b| a >= b,
+        "fle" => |a, b| a <= b,
+        _ => return None,
+    };
+    Some(Flow::val(Value::Bool(cmp(
+        &as_float(args.first())?,
+        &as_float(args.get(1))?,
+    ))))
 }
 
 /// The first half of the `int.*` arm table.
@@ -406,66 +463,44 @@ fn float_sized_conv(func: &str, args: &[Value]) -> Option<Flow> {
 }
 
 fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    if let Some(f) = float_sized_conv(func, args) {
-        return Some(f);
-    }
-    float_fn_core(func, args).or_else(|| float_fn_convert(func, args))
+    float_sized_conv(func, args)
+        .or_else(|| float_unary_fn(func, args))
+        .or_else(|| float_order_fn(func, args))
+        .or_else(|| float_text_fn(func, args))
 }
 
-/// Rounding, sign, and the total-order predicates.
-///
-/// Extracted from `float_fn` (name-router split, arms verbatim and in source order).
-fn float_fn_core(func: &str, args: &[Value]) -> Option<Flow> {
+/// The one-operand surface: rounding, sign, width conversion and the
+/// classification predicates.
+fn float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-
+        "to_int" => Value::Int(as_float(args.first())? as i64),
+        "from_int" => Value::Float(as_int(args.first())? as f64),
+        "abs" => Value::Float(as_float(args.first())?.abs()),
+        "ceil" => Value::Float(as_float(args.first())?.ceil()),
+        "floor" => Value::Float(as_float(args.first())?.floor()),
+        "round" => Value::Float(as_float(args.first())?.round()),
+        "sqrt" => Value::Float(as_float(args.first())?.sqrt()),
+        "sign" => Value::Float(as_float(args.first())?.signum()),
+        "is_nan" => Value::Bool(as_float(args.first())?.is_nan()),
+        "is_infinite" => Value::Bool(as_float(args.first())?.is_infinite()),
         _ => return None,
     };
-    Some(f)
+    Some(Flow::val(f))
 }
 
-/// Conversions to/from other numeric types and to string.
-///
-/// Extracted from `float_fn` (name-router split, arms verbatim and in source order).
-fn float_fn_convert(func: &str, args: &[Value]) -> Option<Flow> {
-    float_fn_convert_a(func, args)
-        .or_else(|| float_fn_convert_b(func, args))
-}
-
-/// The first half of `float_fn_convert`'s arm table.
-///
-/// Extracted from `float_fn_convert` (arm-table halving): arms verbatim and in
-/// source order, so the router's order is the only ordering that matters.
-fn float_fn_convert_a(func: &str, args: &[Value]) -> Option<Flow> {
-    let f = match func {
-        "to_string" => Flow::val(Value::str(float_to_string(as_float(args.first())?))),
-        "to_int" => Flow::val(Value::Int(as_float(args.first())? as i64)),
-        "from_int" => Flow::val(Value::Float(as_int(args.first())? as f64)),
-        "abs" => Flow::val(Value::Float(as_float(args.first())?.abs())),
-        "ceil" => Flow::val(Value::Float(as_float(args.first())?.ceil())),
-        "floor" => Flow::val(Value::Float(as_float(args.first())?.floor())),
-        "round" => Flow::val(Value::Float(as_float(args.first())?.round())),
-        "sqrt" => Flow::val(Value::Float(as_float(args.first())?.sqrt())),
-        // Explicit NaN/tie tree mirroring runtime/rs/src/float.rs
-        // almide_rt_float_min/max — NOT f64::min/max (llvm.minnum/maxnum has
-        // unspecified ±0-tie order). Ties return the FIRST operand (C-049).
-        _ => return None,
-    };
-    Some(f)
-}
-
-/// The second half of `float_fn_convert`'s arm table.
-///
-/// Extracted from `float_fn_convert` (arm-table halving): arms verbatim and in
-/// source order, so the router's order is the only ordering that matters.
-fn float_fn_convert_b(func: &str, args: &[Value]) -> Option<Flow> {
-    let f = match func {
+/// `min` / `max` / `clamp` — the explicit NaN/tie tree mirroring
+/// runtime/rs/src/float.rs `almide_rt_float_min`/`_max`, NOT `f64::min`/`max`
+/// (llvm.minnum/maxnum has unspecified ±0-tie order). Ties return the FIRST
+/// operand (C-049).
+fn float_order_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    match func {
         "min" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
-            Flow::val(Value::Float(if a.is_nan() { b } else if b.is_nan() { a } else if a > b { b } else { a }))
+            Some(Flow::val(Value::Float(pick_ordered(a, b, a > b))))
         }
         "max" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
-            Flow::val(Value::Float(if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }))
+            Some(Flow::val(Value::Float(pick_ordered(a, b, a < b))))
         }
         "clamp" => {
             let n = as_float(args.first())?;
@@ -476,11 +511,29 @@ fn float_fn_convert_b(func: &str, args: &[Value]) -> Option<Flow> {
             if !(lo <= hi) {
                 return Some(Flow::Abort("clamp requires min <= max".to_string()));
             }
-            Flow::val(Value::Float(n.clamp(lo, hi)))
+            Some(Flow::val(Value::Float(n.clamp(lo, hi))))
         }
-        "sign" => Flow::val(Value::Float(as_float(args.first())?.signum())),
-        "is_nan" => Flow::val(Value::Bool(as_float(args.first())?.is_nan())),
-        "is_infinite" => Flow::val(Value::Bool(as_float(args.first())?.is_infinite())),
+        _ => None,
+    }
+}
+
+/// The min/max body shared by [`float_order_fn`]: a NaN operand loses, and
+/// `take_b` decides the non-NaN comparison so a tie keeps `a` (the first
+/// operand) either way.
+fn pick_ordered(a: f64, b: f64, take_b: bool) -> f64 {
+    if a.is_nan() {
+        b
+    } else if b.is_nan() || !take_b {
+        a
+    } else {
+        b
+    }
+}
+
+/// The text surface: rendering to a string and parsing back.
+fn float_text_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "to_string" => Flow::val(Value::str(float_to_string(as_float(args.first())?))),
         "to_fixed" => {
             let n = as_float(args.first())?;
             let d = as_int(args.get(1))?;
@@ -506,35 +559,65 @@ fn float_fn_convert_b(func: &str, args: &[Value]) -> Option<Flow> {
 
 // ── math ────────────────────────────────────────────────────────
 
+/// The vendored-musl-libm transcendentals, by stdlib name. `None` = not a
+/// vendored transcendental (the caller then decides: honest abstain, or one of
+/// the platform-exact ops like sqrt/abs).
+fn math_vendored_libm(func: &str, args: &[Value]) -> Option<f64> {
+    use crate::vendored_libm as vl;
+    let x = as_float(args.first())?;
+    Some(match func {
+        "sin" => vl::almide_rt_libm_sin(x),
+        "cos" => vl::almide_rt_libm_cos(x),
+        "tan" => vl::almide_rt_libm_tan(x),
+        "atan" => vl::almide_rt_libm_atan(x),
+        "tanh" => vl::almide_rt_libm_tanh(x),
+        "exp" => vl::almide_rt_libm_exp(x),
+        "expm1" => vl::almide_rt_libm_expm1(x),
+        "ln" | "log" => vl::almide_rt_libm_log(x),
+        "log2" => vl::almide_rt_libm_log2(x),
+        "log10" => vl::almide_rt_libm_log10(x),
+        "fpow" | "powf" | "pow" => {
+            let y = as_float(args.get(1))?;
+            vl::almide_rt_libm_pow(x, y)
+        }
+        _ => return None,
+    })
+}
+
 fn math_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    // TRANSCENDENTALS DIVERGE FROM THE ORACLE. Both backends deliberately route
-    // `math.sin/cos/tan/exp/log*/pow` (and float `**`) through a VENDORED
-    // musl-libm (`runtime/rs/src/libm.rs`, mirrored by `emit_wasm/rt_libm.rs`)
-    // rather than the platform `f64::sin/…`, because the system libm's last-ULP
-    // result is platform-specific and provides no stable oracle (the StrictMath
-    // / fdlibm decision). Rust `std`'s `f64::sin` calls that same platform libm,
-    // so if the interp used it here it would diverge from the native==wasm
-    // consensus in the last ULP (e.g. `0.799441007199113` vs
-    // `0.7994410071991129`) and cast a WRONG third vote into the cross-target
-    // oracle. The interp does not vendor the libm (it would couple this lean
-    // crate to `almide_rt`'s heavyweight TLS deps and risk silent drift from the
-    // oracle), so it honestly reports `Unsupported` for the platform-libm
-    // transcendentals; the 3-way gate logs a reasoned skip.
+    // The transcendental floor is the VENDORED musl-libm both backends run
+    // (`crate::vendored_libm`, included from runtime/rs/src/libm.rs — see that
+    // module's header for why include! beats a copy or a crate dep). Before
+    // this the interp abstained here, because Rust `std`'s `f64::sin` calls the
+    // PLATFORM libm and would diverge from the native==wasm consensus in the
+    // last ULP (`0.799441007199113` vs `0.7994410071991129`), casting a WRONG
+    // third vote. Computing the consensus algorithm restores the third judge.
     //
-    // SAFE here: `sqrt` is IEEE-754 correctly-rounded (identical on every libm /
-    // platform), `abs` is exact, and `pi` / `e` are constants — all match the
-    // backends bit-for-bit.
+    // `sqrt` stays on `f64::sqrt` (IEEE-754 correctly rounded — identical on
+    // every platform and equal to the wasm `f64.sqrt` opcode), `abs` is exact,
+    // `pi`/`e` are constants.
+    //
+    // NOT bridged, and still honestly Unsupported: names the vendored file does
+    // not provide (`asin`/`acos`/`atan2`/`sinh`/`cosh`/`exp2`/`log1p`/`cbrt`/
+    // `hypot`). The runtime's own asin/acos/atan2 delegate to the PLATFORM
+    // libm, so they have no stable oracle either — they are unreachable from
+    // Almide today (no `@intrinsic` in stdlib/math.almd) and must not be
+    // bridged here on a guess.
+    //
+    // The float `**` OPERATOR is the same floor and routes to the same
+    // `pow` in the binop path (`eval_match.rs`, `BinOp::PowFloat`) — #924's
+    // rule stands: a transcendental reachable through an OPERATOR must agree
+    // in both places.
+    if let Some(v) = math_vendored_libm(func, args) {
+        return Some(Flow::val(Value::Float(v)));
+    }
     if matches!(
         func,
-        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2"
-            | "sinh" | "cosh" | "tanh"
-            | "exp" | "exp2" | "expm1"
-            | "ln" | "log" | "log2" | "log10" | "log1p"
-            | "pow" | "fpow" | "powf" | "cbrt" | "hypot"
+        "asin" | "acos" | "atan2" | "sinh" | "cosh"
+            | "exp2" | "log1p" | "cbrt" | "hypot"
     ) {
         return Some(Flow::Unsupported(format!(
-            "transcendental `math.{func}` (backends use vendored musl-libm; \
-             interp's platform libm diverges in the last ULP — no oracle match)"
+            "transcendental `math.{func}` (no vendored musl-libm implementation;              the runtime's own delegates to the platform libm — no oracle match)"
         )));
     }
     let f = match func {
@@ -691,6 +774,15 @@ fn string_fn_structural(func: &str, args: &[Value]) -> Option<Flow> {
             Flow::val(Value::Option(
                 s.find(as_str(args.get(1))?)
                     .map(|b| Box::new(Value::Int(s[..b].chars().count() as i64))),
+            ))
+        }
+        // Option-returning prefix strip (`args.option`'s `--name=` parse walked
+        // into the pool body's prim.handle without this — #1217's recon).
+        "strip_prefix" => {
+            let s = as_str(args.first())?;
+            let p = as_str(args.get(1))?;
+            Flow::val(Value::Option(
+                s.strip_prefix(p).map(|r| Box::new(Value::str(r.to_string()))),
             ))
         }
         "last_index_of" => {

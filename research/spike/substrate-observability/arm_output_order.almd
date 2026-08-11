@@ -1,0 +1,42 @@
+// The C-004 EXCEPTION, reproduced.
+//
+// Four `fan {}` arms each do unfoldable work, then print their tag. Under the
+// #1000 stance the observation must equal the list-order sequential one
+// (always "A B C D"). It does on wasm and in the reference interpreter; on
+// native — where the arms are real scoped threads — the order is whatever the
+// OS scheduler picked, and it differs BETWEEN TWO NATIVE RUNS.
+//
+// The `extra` parameter comes from `env.args()` so that `spin` cannot be
+// constant-folded: with a literal argument LLVM evaluates the whole loop at
+// compile time, every arm finishes instantly, and the divergence hides.
+//
+// See: docs/adr/0011-execution-substrate-is-a-free-variable.md
+//      docs/roadmap/active/execution-inception.md
+import env
+
+fn spin(n: Int, seed: Int) -> Int = {
+  var i = 0
+  var acc = seed
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+
+effect fn arm(tag: String, extra: Int) -> Int = {
+  let v = spin(6000000 + extra, 1)
+  println("${tag}")
+  v
+}
+
+effect fn main() -> Unit = {
+  let n = list.len(env.args()!)
+  let (a, b, c, d) = fan {
+    arm("A", n)
+    arm("B", n)
+    arm("C", n)
+    arm("D", n)
+  }
+  println("sum=${a + b + c + d}")
+}

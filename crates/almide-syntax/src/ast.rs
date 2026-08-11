@@ -52,7 +52,7 @@ pub enum TypeExpr {
     Generic { name: Sym, args: Vec<TypeExpr> },
     Record { fields: Vec<FieldType> },
     OpenRecord { fields: Vec<FieldType> },
-    Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr> },
+    Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr>, is_effect: bool },
     Tuple { elements: Vec<TypeExpr> },
     Variant { cases: Vec<VariantCase> },
     Union { members: Vec<TypeExpr> },
@@ -538,85 +538,124 @@ fn visit_string_parts_mut(parts: &mut [StringPart], f: &mut impl FnMut(&mut Expr
     }
 }
 
+/// Apply `f` to `expr` and then to every child expression, grouped by CHILD
+/// SHAPE (one / two / three / sequence / name-tagged / bespoke). Exhaustive with
+/// no wildcard, so a new `ExprKind` fails to compile here until its shape is
+/// declared.
 pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
     f(expr);
     match &mut expr.kind {
-        ExprKind::List { elements } | ExprKind::Tuple { elements } => visit_exprs_slice_mut(elements, f),
-        ExprKind::Fan { exprs } => visit_exprs_slice_mut(exprs, f),
-        ExprKind::FanBounded { budget, body } => {
-            f(budget);
-            f(body);
+        // ── One child ──
+        ExprKind::Member { object: e, .. } | ExprKind::TupleIndex { object: e, .. }
+        | ExprKind::Unary { operand: e, .. } | ExprKind::Lambda { body: e, .. }
+        | ExprKind::Try { expr: e } | ExprKind::Unwrap { expr: e }
+        | ExprKind::ToOption { expr: e } | ExprKind::Paren { expr: e }
+        | ExprKind::Some { expr: e } | ExprKind::Ok { expr: e } | ExprKind::Err { expr: e }
+        | ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::TypeAscription { expr: e, .. } => visit_expr_mut(e, f),
+
+        // ── Two children, left to right ──
+        ExprKind::Binary { left: a, right: b, .. } | ExprKind::Pipe { left: a, right: b }
+        | ExprKind::Compose { left: a, right: b }
+        | ExprKind::UnwrapOr { expr: a, fallback: b }
+        | ExprKind::IndexAccess { object: a, index: b }
+        | ExprKind::Range { start: a, end: b, .. } => {
+            visit_expr_mut(a, f);
+            visit_expr_mut(b, f);
         }
-        ExprKind::FanRace { budget, arms } => {
-            if let Some(b) = budget {
-                f(b);
-            }
-            visit_exprs_slice_mut(arms, f);
+
+        // ── Three children ──
+        ExprKind::If { cond: a, then: b, else_: c }
+        | ExprKind::IfLet { scrutinee: a, then: b, else_: c, .. } => {
+            visit_expr_mut(a, f);
+            visit_expr_mut(b, f);
+            visit_expr_mut(c, f);
         }
-        ExprKind::FanRaceMap { budget, list, mapper } => {
-            if let Some(b) = budget {
-                f(b);
-            }
-            f(list);
-            f(mapper);
+
+        // ── A flat sequence of children ──
+        ExprKind::List { elements: xs } | ExprKind::Tuple { elements: xs }
+        | ExprKind::Fan { exprs: xs } | ExprKind::FanSettle { arms: xs } => {
+            visit_exprs_slice_mut(xs, f)
         }
-        ExprKind::FanSettle { arms } => visit_exprs_slice_mut(arms, f),
-        ExprKind::FanTimeout { deadline, body } => {
-            f(deadline);
-            f(body);
-        }
+
+        // ── Name-tagged children ──
         ExprKind::MapLiteral { entries } => visit_map_entries_mut(entries, f),
         ExprKind::Record { fields, .. } => visit_field_inits_mut(fields, f),
         ExprKind::SpreadRecord { base, fields } => {
             visit_expr_mut(base, f);
             visit_field_inits_mut(fields, f);
         }
+
+        // ── The fan family: `f` is applied SHALLOWLY to the budget and the
+        //    body/arms (no recursion into their subtrees) — the pre-existing
+        //    contract, kept verbatim.
+        ExprKind::FanBounded { budget, body } => {
+            f(budget);
+            f(body);
+        }
+        ExprKind::FanRace { budget, arms } => {
+            visit_opt_shallow_mut(budget, f);
+            visit_exprs_slice_mut(arms, f);
+        }
+        ExprKind::FanRaceMap { budget, list, mapper } => {
+            visit_opt_shallow_mut(budget, f);
+            f(list);
+            f(mapper);
+        }
+        ExprKind::FanTimeout { deadline, body } => {
+            f(deadline);
+            f(body);
+        }
+
+        // ── Shapes with their own traversal order ──
         ExprKind::Call { callee, args, named_args, .. } => {
             visit_expr_mut(callee, f);
             visit_exprs_slice_mut(args, f);
-            for (_, a) in named_args.iter_mut() { visit_expr_mut(a, f); }
-        }
-        ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. } => visit_expr_mut(object, f),
-        ExprKind::IndexAccess { object, index } => { visit_expr_mut(object, f); visit_expr_mut(index, f); }
-        ExprKind::Binary { left, right, .. } | ExprKind::Pipe { left, right } |
-        ExprKind::Compose { left, right } | ExprKind::UnwrapOr { expr: left, fallback: right } => {
-            visit_expr_mut(left, f); visit_expr_mut(right, f);
-        }
-        ExprKind::Unary { operand, .. } => visit_expr_mut(operand, f),
-        ExprKind::If { cond, then, else_ } => {
-            visit_expr_mut(cond, f); visit_expr_mut(then, f); visit_expr_mut(else_, f);
-        }
-        ExprKind::IfLet { scrutinee, then, else_, .. } => {
-            visit_expr_mut(scrutinee, f); visit_expr_mut(then, f); visit_expr_mut(else_, f);
+            visit_named_args_mut(named_args, f);
         }
         ExprKind::Match { subject, arms } => {
             visit_expr_mut(subject, f);
             visit_match_arms_mut(arms, f);
         }
-        ExprKind::Block { stmts, expr: tail } => {
-            visit_stmts_mut(stmts, f);
-            if let Some(e) = tail { visit_expr_mut(e, f); }
-        }
-        ExprKind::ForIn { iterable, body, .. } => {
-            visit_expr_mut(iterable, f);
+        ExprKind::Block { stmts, expr: tail } => visit_block_mut(stmts, tail, f),
+        ExprKind::ForIn { iterable: lead, body, .. }
+        | ExprKind::While { cond: lead, body } => {
+            visit_expr_mut(lead, f);
             visit_stmts_mut(body, f);
         }
-        ExprKind::While { cond, body } => {
-            visit_expr_mut(cond, f);
-            visit_stmts_mut(body, f);
-        }
-        ExprKind::Lambda { body, .. } => visit_expr_mut(body, f),
-        ExprKind::Try { expr } | ExprKind::Unwrap { expr } | ExprKind::ToOption { expr } |
-        ExprKind::Paren { expr } |
-        ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } |
-        ExprKind::OptionalChain { expr, .. } => visit_expr_mut(expr, f),
-        ExprKind::Range { start, end, .. } => { visit_expr_mut(start, f); visit_expr_mut(end, f); }
         ExprKind::InterpolatedString { parts } => visit_string_parts_mut(parts, f),
-        ExprKind::TypeAscription { expr, .. } => visit_expr_mut(expr, f),
+
+        // ── No children ──
         ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
         ExprKind::Bool { .. } | ExprKind::Ident { .. } | ExprKind::TypeName { .. } |
         ExprKind::EmptyMap | ExprKind::Hole | ExprKind::Todo { .. } |
         ExprKind::Break | ExprKind::Continue | ExprKind::Placeholder |
         ExprKind::Unit | ExprKind::None | ExprKind::Error => {}
+    }
+}
+
+/// An optional child the fan family applies `f` to WITHOUT recursing.
+fn visit_opt_shallow_mut(e: &mut Option<Box<Expr>>, f: &mut impl FnMut(&mut Expr)) {
+    if let Some(b) = e {
+        f(b);
+    }
+}
+
+/// A call's named arguments — the name plays no part in the walk.
+fn visit_named_args_mut(args: &mut [(Sym, Expr)], f: &mut impl FnMut(&mut Expr)) {
+    for (_, a) in args.iter_mut() {
+        visit_expr_mut(a, f);
+    }
+}
+
+/// A block: every statement, then the tail expression if there is one.
+fn visit_block_mut(
+    stmts: &mut [Stmt],
+    tail: &mut Option<Box<Expr>>,
+    f: &mut impl FnMut(&mut Expr),
+) {
+    visit_stmts_mut(stmts, f);
+    if let Some(e) = tail {
+        visit_expr_mut(e, f);
     }
 }

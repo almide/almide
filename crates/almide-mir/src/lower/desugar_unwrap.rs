@@ -47,6 +47,16 @@ fn desugar_effect_unwrap_inner(
 ) -> Option<IrExpr> {
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::Ty;
+    // A `!` in a FOR-IN ITERABLE HEAD (`for row in list.get(XS, 0)! { … }` — #1168):
+    // hoist it FIRST into `let $t = <head>!; for row in $t { … }` (exactly the manual
+    // workaround, automated), so the stmt scan below sees an ordinary bind-`!` and the
+    // continuation machinery takes over. Without this the head fell through to the
+    // call-argument lowering, whose wall named a position ("call-argument") that a
+    // plain argument does not even trip — the diagnosis cost the issue documents.
+    if let Some(rewritten) = hoist_for_in_head_unwrap(body, next_var) {
+        return desugar_effect_unwrap_inner(&rewritten, next_var, unit_main, ret_is_result)
+            .or(Some(rewritten));
+    }
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         // An EXPRESSION-FORM body (`effect fn f(..) -> Result[..] = list.get(xs, i)!`) is kept
         // BARE by the frontend — no Block wrapper — so the tail-position machinery below never
@@ -138,6 +148,113 @@ fn desugar_effect_unwrap_inner(
 /// discards the payload). `Try` is the frontend's auto-`?` on an un-annotated
 /// bind of a declared-Result effect call — the same monadic coercion as a
 /// spelled-out `!`, so both desugar identically.
+/// The #1168 head hoist: the FIRST `for … in <expr>! { … }` statement in the
+/// block becomes `let $t = <expr>!; for … in $t { … }`. Only a TOP-LEVEL
+/// `Unwrap`/`Try` head (an operand-nested `!` keeps its own path); one hoist per
+/// call — the caller recurses, so every head in the block is reached. `None` =
+/// no such head (the common case, zero-cost).
+fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    // An EXPRESSION-FORM body that IS the for (`effect fn main() -> Unit = { for … }`
+    // reaches the lowering as the bare `ForIn` node, no Block wrapper): wrap it into
+    // a single-statement Block and hoist there.
+    if matches!(&body.kind, IrExprKind::ForIn { iterable, .. }
+        if matches!(iterable.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
+    {
+        let as_block = IrExpr {
+            kind: IrExprKind::Block {
+                stmts: vec![IrStmt {
+                    kind: IrStmtKind::Expr { expr: body.clone() },
+                    span: body.span.clone(),
+                }],
+                expr: None,
+            },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        };
+        return hoist_for_in_head_unwrap(&as_block, next_var);
+    }
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    let is_unwrap_head_for = |e: &IrExpr| {
+        matches!(&e.kind, IrExprKind::ForIn { iterable, .. }
+            if matches!(iterable.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
+    };
+    // The for may also be the block TAIL (`{ for row in f()! { … } }` — a
+    // single-statement body): hoist it the same way, the loop becoming the
+    // last STATEMENT with a Unit tail.
+    let tail_hit = matches!(tail.as_deref(), Some(t) if is_unwrap_head_for(t));
+    let idx = match stmts
+        .iter()
+        .position(|s| matches!(&s.kind, IrStmtKind::Expr { expr } if is_unwrap_head_for(expr)))
+    {
+        Some(i) => i,
+        None if tail_hit => {
+            let t_expr = tail.as_deref().unwrap();
+            let mut new_stmts = stmts.clone();
+            new_stmts.push(IrStmt {
+                kind: IrStmtKind::Expr { expr: t_expr.clone() },
+                span: t_expr.span.clone(),
+            });
+            let as_stmts = IrExpr {
+                kind: IrExprKind::Block { stmts: new_stmts, expr: None },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            };
+            return hoist_for_in_head_unwrap(&as_stmts, next_var);
+        }
+        None => return None,
+    };
+    let IrStmtKind::Expr { expr: for_expr } = &stmts[idx].kind else { unreachable!() };
+    let IrExprKind::ForIn { var, var_tuple, iterable, body: loop_body } = &for_expr.kind else {
+        unreachable!()
+    };
+    let t = VarId(*next_var);
+    *next_var += 1;
+    let bind = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: t,
+            mutability: almide_ir::Mutability::Let,
+            ty: iterable.ty.clone(),
+            value: (**iterable).clone(),
+        },
+        span: stmts[idx].span.clone(),
+    };
+    let new_for = IrStmt {
+        kind: IrStmtKind::Expr {
+            expr: IrExpr {
+                kind: IrExprKind::ForIn {
+                    var: *var,
+                    var_tuple: var_tuple.clone(),
+                    iterable: Box::new(IrExpr {
+                        kind: IrExprKind::Var { id: t },
+                        ty: iterable.ty.clone(),
+                        span: iterable.span.clone(),
+                        def_id: None,
+                    }),
+                    body: loop_body.clone(),
+                },
+                ty: for_expr.ty.clone(),
+                span: for_expr.span.clone(),
+                def_id: for_expr.def_id,
+            },
+        },
+        span: stmts[idx].span.clone(),
+    };
+    let mut new_stmts = stmts[..idx].to_vec();
+    new_stmts.push(bind);
+    new_stmts.push(new_for);
+    new_stmts.extend_from_slice(&stmts[idx + 1..]);
+    Some(IrExpr {
+        kind: IrExprKind::Block { stmts: new_stmts, expr: tail.clone() },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    })
+}
+
 fn stmt_effect_unwrap_target(s: &IrStmt) -> Option<(IrExpr, almide_ir::IrPattern)> {
     use almide_ir::IrPattern;
     match &s.kind {

@@ -19,29 +19,7 @@ impl Checker {
         // ADR-0006 D3 (#1108): user-spelled try_* is deprecated (the
         // fallibility-polymorphic core covers it) — same site as E039.
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-            if mod_name.as_str() == "list"
-                && matches!(field.as_str(), "try_map" | "try_filter" | "try_flat_map"
-                    | "try_filter_map" | "try_fold" | "try_find" | "try_each")
-                && !self.hof_rewritten_calls.contains(&object.id)
-            {
-                let core = field.as_str().trim_start_matches("try_");
-                let rewrite = if core == "fold" {
-                    "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string()
-                } else {
-                    format!("list.{}(xs, (x) => f(x)!)!", core)
-                };
-                let mut d = crate::diagnostic::Diagnostic::error(
-                    format!("list.{} was removed — the core HOF is fallibility-polymorphic (ADR-0006)", field),
-                    format!("{rewrite}\n        The callback's `!` instantiates the fallible form (first-err short-circuit); the try_ family's one name per combinator is the core name."),
-                    format!("call to list.{}", field),
-                ).with_code("E043");
-                d.file = self.source_file.clone();
-                if let Some(sp) = object.span {
-                    d.line = Some(sp.line);
-                    d.col = Some(sp.col);
-                }
-                self.diagnostics.push(d);
-            }
+            self.reject_dead_try_spelling(mod_name, field, object.id, object.span);
         }
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();
@@ -85,13 +63,13 @@ impl Checker {
             return ty;
         }
         let ret = self.fresh_var();
-        self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
+        self.constrain(obj_ty, Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
         ret
     }
     /// Record field call: `h.run("hello")` where `run` is a Fn-typed field. Must be checked before UFCS so field-access + call takes priority. Verbatim text move out of [`Self::check_call_target_member`].
     fn check_call_target_record_field(&mut self, obj_concrete: &Ty, field: &Sym, arg_tys: &[Ty]) -> Option<Ty> {
         let field_ty = self.resolve_field_type(obj_concrete, field);
-        if let Ty::Fn { params, ret } = &field_ty {
+        if let Ty::Fn { is_effect: _, params, ret } = &field_ty {
             // Validate argument count
             if arg_tys.len() != params.len() {
                 self.emit(super::err(

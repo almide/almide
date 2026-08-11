@@ -74,95 +74,127 @@ impl ErrorSurfaceLint {
         }
     }
 
+    /// Recurse into every sub-expression of a node the lint has no rule for.
+    ///
+    /// Arms are grouped by CHILD SHAPE, not by node family: every variant whose
+    /// traversal is "walk one child" shares one arm, "walk two children" the
+    /// next, and so on. Or-pattern binding renames (`Member { object: e, .. }`)
+    /// line the field names up, and the shapes with their own order (blocks,
+    /// loops, calls) delegate to a named helper.
     fn walk_children(&mut self, expr: &ast::Expr, err_binds: &[Sym]) {
         use ast::ExprKind as EK;
         match &expr.kind {
-            EK::InterpolatedString { parts } => {
-                for p in parts {
-                    if let ast::StringPart::Expr { expr } = p { self.walk_expr(expr, err_binds); }
-                }
+            // ── One child ──
+            EK::Member { object: e, .. } | EK::TupleIndex { object: e, .. }
+            | EK::Lambda { body: e, .. } | EK::Unary { operand: e, .. }
+            | EK::Try { expr: e } | EK::Unwrap { expr: e } | EK::ToOption { expr: e }
+            | EK::Paren { expr: e } | EK::Some { expr: e } | EK::Ok { expr: e }
+            | EK::Err { expr: e } | EK::TypeAscription { expr: e, .. }
+            | EK::OptionalChain { expr: e, .. } => self.walk_expr(e, err_binds),
+
+            // ── Two children, left to right ──
+            EK::IndexAccess { object: a, index: b }
+            | EK::Pipe { left: a, right: b } | EK::Compose { left: a, right: b }
+            | EK::UnwrapOr { expr: a, fallback: b }
+            | EK::Binary { left: a, right: b, .. }
+            | EK::Range { start: a, end: b, .. }
+            | EK::FanBounded { budget: a, body: b }
+            | EK::FanTimeout { deadline: a, body: b } => {
+                self.walk_expr(a, err_binds);
+                self.walk_expr(b, err_binds);
             }
-            EK::List { elements } | EK::Tuple { elements } => {
-                for e in elements { self.walk_expr(e, err_binds); }
+
+            // ── Three children ──
+            EK::IfLet { scrutinee: a, then: b, else_: c, .. }
+            | EK::FanRaceMap { budget: Some(a), list: b, mapper: c } => {
+                self.walk_expr(a, err_binds);
+                self.walk_expr(b, err_binds);
+                self.walk_expr(c, err_binds);
             }
-            EK::MapLiteral { entries } => {
-                for (k, v) in entries { self.walk_expr(k, err_binds); self.walk_expr(v, err_binds); }
-            }
-            EK::Record { fields, .. } => {
-                for f in fields { self.walk_expr(&f.value, err_binds); }
-            }
-            EK::SpreadRecord { base, fields } => {
-                self.walk_expr(base, err_binds);
-                for f in fields { self.walk_expr(&f.value, err_binds); }
-            }
-            EK::Call { callee, args, named_args, .. } => {
-                self.walk_expr(callee, err_binds);
-                for a in args { self.walk_expr(a, err_binds); }
-                for (_, a) in named_args { self.walk_expr(a, err_binds); }
-            }
-            EK::Member { object, .. } | EK::TupleIndex { object, .. } => self.walk_expr(object, err_binds),
-            EK::IndexAccess { object, index } => {
-                self.walk_expr(object, err_binds);
-                self.walk_expr(index, err_binds);
-            }
-            EK::Pipe { left, right } | EK::Compose { left, right } => {
-                self.walk_expr(left, err_binds);
-                self.walk_expr(right, err_binds);
-            }
-            EK::IfLet { scrutinee, then, else_, .. } => {
-                self.walk_expr(scrutinee, err_binds);
-                self.walk_expr(then, err_binds);
-                self.walk_expr(else_, err_binds);
-            }
-            EK::Block { stmts, expr } => {
-                for s in stmts { self.walk_stmt(s, err_binds); }
-                if let Some(e) = expr { self.walk_expr(e, err_binds); }
-            }
-            EK::Fan { exprs } | EK::FanRace { arms: exprs, .. } | EK::FanSettle { arms: exprs } => {
-                for e in exprs { self.walk_expr(e, err_binds); }
-            }
-            EK::FanBounded { budget, body } => {
-                self.walk_expr(budget, err_binds);
-                self.walk_expr(body, err_binds);
-            }
-            EK::FanRaceMap { budget, list, mapper } => {
-                if let Some(b) = budget { self.walk_expr(b, err_binds); }
+            EK::FanRaceMap { budget: None, list, mapper } => {
                 self.walk_expr(list, err_binds);
                 self.walk_expr(mapper, err_binds);
             }
-            EK::FanTimeout { deadline, body } => {
-                self.walk_expr(deadline, err_binds);
-                self.walk_expr(body, err_binds);
+
+            // ── A flat sequence of children ──
+            EK::List { elements: xs } | EK::Tuple { elements: xs } | EK::Fan { exprs: xs }
+            | EK::FanRace { arms: xs, .. } | EK::FanSettle { arms: xs } => {
+                for e in xs {
+                    self.walk_expr(e, err_binds);
+                }
             }
+
+            _ => self.walk_children_nested(expr, err_binds),
+        }
+    }
+
+    /// The [`Self::walk_children`] arms whose children are not a plain list of
+    /// sub-expressions — literals with parts, keyed containers, calls, and the
+    /// nodes that carry statement bodies.
+    fn walk_children_nested(&mut self, expr: &ast::Expr, err_binds: &[Sym]) {
+        use ast::ExprKind as EK;
+        match &expr.kind {
+            EK::InterpolatedString { parts } => self.walk_interpolation(parts, err_binds),
+            EK::MapLiteral { entries } => {
+                for (k, v) in entries {
+                    self.walk_expr(k, err_binds);
+                    self.walk_expr(v, err_binds);
+                }
+            }
+            EK::Record { fields, .. } => self.walk_record_fields(fields, err_binds),
+            EK::SpreadRecord { base, fields } => {
+                self.walk_expr(base, err_binds);
+                self.walk_record_fields(fields, err_binds);
+            }
+            EK::Call { callee, args, named_args, .. } => {
+                self.walk_expr(callee, err_binds);
+                for a in args.iter().chain(named_args.iter().map(|(_, a)| a)) {
+                    self.walk_expr(a, err_binds);
+                }
+            }
+            EK::Block { stmts, expr } => self.walk_block(stmts, expr.as_deref(), err_binds),
             EK::ForIn { iterable, body, .. } => {
                 self.walk_expr(iterable, err_binds);
-                for s in body { self.walk_stmt(s, err_binds); }
+                self.walk_body(body, err_binds);
             }
+            // A `while` condition is a branch condition, so it gets the E035 check.
             EK::While { cond, body } => {
                 self.check_condition(cond, err_binds);
                 self.walk_expr(cond, err_binds);
-                for s in body { self.walk_stmt(s, err_binds); }
-            }
-            EK::Lambda { body, .. } => self.walk_expr(body, err_binds),
-            EK::Try { expr } | EK::Unwrap { expr } | EK::ToOption { expr }
-            | EK::Paren { expr } | EK::Some { expr } | EK::Ok { expr } | EK::Err { expr }
-            | EK::TypeAscription { expr, .. } | EK::OptionalChain { expr, .. } => {
-                self.walk_expr(expr, err_binds)
-            }
-            EK::UnwrapOr { expr, fallback } => {
-                self.walk_expr(expr, err_binds);
-                self.walk_expr(fallback, err_binds);
-            }
-            EK::Binary { left, right, .. } => {
-                self.walk_expr(left, err_binds);
-                self.walk_expr(right, err_binds);
-            }
-            EK::Unary { operand, .. } => self.walk_expr(operand, err_binds),
-            EK::Range { start, end, .. } => {
-                self.walk_expr(start, err_binds);
-                self.walk_expr(end, err_binds);
+                self.walk_body(body, err_binds);
             }
             _ => {}
+        }
+    }
+
+    /// The interpolated sub-expressions of a `"${..}"` literal.
+    fn walk_interpolation(&mut self, parts: &[ast::StringPart], err_binds: &[Sym]) {
+        for p in parts {
+            if let ast::StringPart::Expr { expr } = p {
+                self.walk_expr(expr, err_binds);
+            }
+        }
+    }
+
+    /// The value of every field in a record or spread-record literal.
+    fn walk_record_fields(&mut self, fields: &[ast::FieldInit], err_binds: &[Sym]) {
+        for f in fields {
+            self.walk_expr(&f.value, err_binds);
+        }
+    }
+
+    /// A block: every statement, then the tail expression.
+    fn walk_block(&mut self, stmts: &[ast::Stmt], tail: Option<&ast::Expr>, err_binds: &[Sym]) {
+        self.walk_body(stmts, err_binds);
+        if let Some(e) = tail {
+            self.walk_expr(e, err_binds);
+        }
+    }
+
+    /// A statement list (block body, loop body).
+    fn walk_body(&mut self, stmts: &[ast::Stmt], err_binds: &[Sym]) {
+        for s in stmts {
+            self.walk_stmt(s, err_binds);
         }
     }
 
@@ -197,43 +229,47 @@ impl ErrorSurfaceLint {
     /// parens and and/or chains) is inspected — conservative by design.
     fn check_condition(&mut self, cond: &ast::Expr, err_binds: &[Sym]) {
         use ast::ExprKind as EK;
-        if err_binds.is_empty() { return; }
+        if err_binds.is_empty() {
+            return;
+        }
         match &cond.kind {
-            EK::Paren { expr } => self.check_condition(expr, err_binds),
-            EK::Unary { operand, .. } => self.check_condition(operand, err_binds),
+            // Transparent wrappers: keep looking at what they wrap.
+            EK::Paren { expr: inner } | EK::Unary { operand: inner, .. } => {
+                self.check_condition(inner, err_binds)
+            }
             EK::Binary { op, left, right } => {
-                let op = op.as_str();
-                if op == "and" || op == "or" {
-                    self.check_condition(left, err_binds);
-                    self.check_condition(right, err_binds);
-                } else if op == "==" || op == "!=" {
-                    let is_err_ident = |e: &ast::Expr| matches!(&e.kind,
-                        EK::Ident { name } if err_binds.contains(name));
-                    let is_str_lit = |e: &ast::Expr| matches!(&e.kind, EK::String { .. });
-                    if (is_err_ident(left) && is_str_lit(right))
-                        || (is_str_lit(left) && is_err_ident(right)) {
-                        self.emit_e035(cond);
-                    }
-                }
+                self.check_binary_condition(cond, op.as_str(), left, right, err_binds)
             }
             EK::Call { callee, args, .. } => {
-                let arg_is_err = |e: &ast::Expr| matches!(&e.kind,
-                    EK::Ident { name } if err_binds.contains(name));
-                match &callee.kind {
-                    // string.contains(e, …) — module spelling
-                    EK::Member { object, field } if field.as_str() == "contains" => {
-                        let module_form = matches!(&object.kind,
-                            EK::Ident { name } if name.as_str() == "string");
-                        if (module_form && args.first().is_some_and(arg_is_err))
-                            // e.contains(…) — UFCS spelling
-                            || arg_is_err(object) {
-                            self.emit_e035(cond);
-                        }
-                    }
-                    _ => {}
+                if contains_call_on_err(callee, args, err_binds) {
+                    self.emit_e035(cond);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The `Binary` arm of [`Self::check_condition`]: `and`/`or` keep the walk
+    /// going down both sides, `==`/`!=` between an err binding and a string
+    /// literal IS the report.
+    fn check_binary_condition(
+        &mut self,
+        cond: &ast::Expr,
+        op: &str,
+        left: &ast::Expr,
+        right: &ast::Expr,
+        err_binds: &[Sym],
+    ) {
+        if op == "and" || op == "or" {
+            self.check_condition(left, err_binds);
+            self.check_condition(right, err_binds);
+            return;
+        }
+        let compares_err_to_literal = (op == "==" || op == "!=")
+            && ((is_err_ident(left, err_binds) && is_str_lit(right))
+                || (is_str_lit(left) && is_err_ident(right, err_binds)));
+        if compares_err_to_literal {
+            self.emit_e035(cond);
         }
     }
 
@@ -275,6 +311,29 @@ impl ErrorSurfaceLint {
     }
 }
 
+/// `e`, where `e` is one of the err-pattern bindings in scope.
+fn is_err_ident(e: &ast::Expr, err_binds: &[Sym]) -> bool {
+    matches!(&e.kind, ast::ExprKind::Ident { name } if err_binds.contains(name))
+}
+
+/// A string literal — the right-hand side of the comparison E035 reports.
+fn is_str_lit(e: &ast::Expr) -> bool {
+    matches!(&e.kind, ast::ExprKind::String { .. })
+}
+
+/// `string.contains(e, …)` (module spelling) or `e.contains(…)` (UFCS), where
+/// `e` is an err-pattern binding.
+fn contains_call_on_err(callee: &ast::Expr, args: &[ast::Expr], err_binds: &[Sym]) -> bool {
+    use ast::ExprKind as EK;
+    let EK::Member { object, field } = &callee.kind else { return false };
+    if field.as_str() != "contains" {
+        return false;
+    }
+    let module_form = matches!(&object.kind, EK::Ident { name } if name.as_str() == "string");
+    (module_form && args.first().is_some_and(|a| is_err_ident(a, err_binds)))
+        || is_err_ident(object, err_binds)
+}
+
 fn collect_err_pattern_binds(pat: &ast::Pattern, out: &mut Vec<Sym>) {
     use ast::Pattern as P;
     match pat {
@@ -297,65 +356,74 @@ fn collect_err_pattern_binds(pat: &ast::Pattern, out: &mut Vec<Sym>) {
 /// counts as a use, keeping the lint free of false positives.
 fn expr_uses_ident(expr: &ast::Expr, name: Sym) -> bool {
     use ast::ExprKind as EK;
+    let uses = |e: &ast::Expr| expr_uses_ident(e, name);
     match &expr.kind {
         EK::Ident { name: n } => *n == name,
+
+        // ── One child ──
+        EK::Member { object: e, .. } | EK::TupleIndex { object: e, .. }
+        | EK::Lambda { body: e, .. } | EK::Unary { operand: e, .. }
+        | EK::Try { expr: e } | EK::Unwrap { expr: e } | EK::ToOption { expr: e }
+        | EK::Paren { expr: e } | EK::Some { expr: e } | EK::Ok { expr: e }
+        | EK::Err { expr: e } | EK::TypeAscription { expr: e, .. }
+        | EK::OptionalChain { expr: e, .. } => uses(e),
+
+        // ── Two children ──
+        EK::IndexAccess { object: a, index: b }
+        | EK::Pipe { left: a, right: b } | EK::Compose { left: a, right: b }
+        | EK::UnwrapOr { expr: a, fallback: b }
+        | EK::Binary { left: a, right: b, .. }
+        | EK::Range { start: a, end: b, .. }
+        | EK::FanBounded { budget: a, body: b }
+        | EK::FanTimeout { deadline: a, body: b } => uses(a) || uses(b),
+
+        // ── Three children ──
+        EK::If { cond: a, then: b, else_: c }
+        | EK::IfLet { scrutinee: a, then: b, else_: c, .. } => uses(a) || uses(b) || uses(c),
+        EK::FanRaceMap { budget, list, mapper } => {
+            budget.as_ref().is_some_and(|b| uses(b)) || uses(list) || uses(mapper)
+        }
+
+        // ── A flat sequence of children ──
+        EK::List { elements: xs } | EK::Tuple { elements: xs } | EK::Fan { exprs: xs }
+        | EK::FanRace { arms: xs, .. } | EK::FanSettle { arms: xs } => xs.iter().any(uses),
+
+        _ => expr_uses_ident_nested(expr, name),
+    }
+}
+
+/// The [`expr_uses_ident`] arms whose children are not a plain list of
+/// sub-expressions — literals with parts, keyed containers, calls, and the
+/// nodes that carry statement bodies.
+fn expr_uses_ident_nested(expr: &ast::Expr, name: Sym) -> bool {
+    use ast::ExprKind as EK;
+    let uses = |e: &ast::Expr| expr_uses_ident(e, name);
+    match &expr.kind {
         EK::InterpolatedString { parts } => parts.iter().any(|p| match p {
-            ast::StringPart::Expr { expr } => expr_uses_ident(expr, name),
+            ast::StringPart::Expr { expr } => uses(expr),
             _ => false,
         }),
-        EK::List { elements } | EK::Tuple { elements } =>
-            elements.iter().any(|e| expr_uses_ident(e, name)),
-        EK::MapLiteral { entries } =>
-            entries.iter().any(|(k, v)| expr_uses_ident(k, name) || expr_uses_ident(v, name)),
-        EK::Record { fields, .. } => fields.iter().any(|f| expr_uses_ident(&f.value, name)),
-        EK::SpreadRecord { base, fields } =>
-            expr_uses_ident(base, name) || fields.iter().any(|f| expr_uses_ident(&f.value, name)),
-        EK::Call { callee, args, named_args, .. } =>
-            expr_uses_ident(callee, name)
-                || args.iter().any(|a| expr_uses_ident(a, name))
-                || named_args.iter().any(|(_, a)| expr_uses_ident(a, name)),
-        EK::Member { object, .. } | EK::TupleIndex { object, .. } => expr_uses_ident(object, name),
-        EK::IndexAccess { object, index } =>
-            expr_uses_ident(object, name) || expr_uses_ident(index, name),
-        EK::Pipe { left, right } | EK::Compose { left, right } =>
-            expr_uses_ident(left, name) || expr_uses_ident(right, name),
-        EK::If { cond, then, else_ } =>
-            expr_uses_ident(cond, name) || expr_uses_ident(then, name) || expr_uses_ident(else_, name),
-        EK::IfLet { scrutinee, then, else_, .. } =>
-            expr_uses_ident(scrutinee, name) || expr_uses_ident(then, name) || expr_uses_ident(else_, name),
-        EK::Match { subject, arms } =>
-            expr_uses_ident(subject, name) || arms.iter().any(|a|
-                a.guard.as_ref().is_some_and(|g| expr_uses_ident(g, name))
-                    || expr_uses_ident(&a.body, name)),
+        EK::MapLiteral { entries } => entries.iter().any(|(k, v)| uses(k) || uses(v)),
+        EK::Record { fields, .. } => fields.iter().any(|f| uses(&f.value)),
+        EK::SpreadRecord { base, fields } => uses(base) || fields.iter().any(|f| uses(&f.value)),
+        EK::Call { callee, args, named_args, .. } => {
+            uses(callee)
+                || args.iter().any(uses)
+                || named_args.iter().any(|(_, a)| uses(a))
+        }
+        EK::Match { subject, arms } => {
+            uses(subject)
+                || arms.iter().any(|a| {
+                    a.guard.as_ref().is_some_and(|g| uses(g)) || uses(&a.body)
+                })
+        }
         EK::Block { stmts, expr } => {
             stmts.iter().any(|s| stmt_uses_ident(s, name))
-                || expr.as_ref().is_some_and(|e| expr_uses_ident(e, name))
+                || expr.as_ref().is_some_and(|e| uses(e))
         }
-        EK::Fan { exprs } | EK::FanRace { arms: exprs, .. } | EK::FanSettle { arms: exprs } =>
-            exprs.iter().any(|e| expr_uses_ident(e, name)),
-        EK::FanBounded { budget, body } =>
-            expr_uses_ident(budget, name) || expr_uses_ident(body, name),
-        EK::FanRaceMap { budget, list, mapper } =>
-            budget.as_ref().is_some_and(|b| expr_uses_ident(b, name))
-                || expr_uses_ident(list, name) || expr_uses_ident(mapper, name),
-        EK::FanTimeout { deadline, body } =>
-            expr_uses_ident(deadline, name) || expr_uses_ident(body, name),
-        EK::ForIn { iterable, body, .. } =>
-            expr_uses_ident(iterable, name) || body.iter().any(|s| stmt_uses_ident(s, name)),
-        EK::While { cond, body } =>
-            expr_uses_ident(cond, name) || body.iter().any(|s| stmt_uses_ident(s, name)),
-        EK::Lambda { body, .. } => expr_uses_ident(body, name),
-        EK::Try { expr } | EK::Unwrap { expr } | EK::ToOption { expr }
-        | EK::Paren { expr } | EK::Some { expr } | EK::Ok { expr } | EK::Err { expr }
-        | EK::TypeAscription { expr, .. } | EK::OptionalChain { expr, .. } =>
-            expr_uses_ident(expr, name),
-        EK::UnwrapOr { expr, fallback } =>
-            expr_uses_ident(expr, name) || expr_uses_ident(fallback, name),
-        EK::Binary { left, right, .. } =>
-            expr_uses_ident(left, name) || expr_uses_ident(right, name),
-        EK::Unary { operand, .. } => expr_uses_ident(operand, name),
-        EK::Range { start, end, .. } =>
-            expr_uses_ident(start, name) || expr_uses_ident(end, name),
+        EK::ForIn { iterable: lead, body, .. } | EK::While { cond: lead, body } => {
+            uses(lead) || body.iter().any(|s| stmt_uses_ident(s, name))
+        }
         _ => false,
     }
 }

@@ -152,7 +152,11 @@ fn dump_mir_ops(
             continue;
         }
         match almide_mir::lower::lower_function_all_with_globals(
-            f, globals, global_inits, &record_layouts, &variant_layouts,
+            f,
+            globals,
+            global_inits,
+            &record_layouts,
+            &variant_layouts,
         ) {
             Ok(mirs) => {
                 for mir in &mirs {
@@ -200,7 +204,11 @@ fn lower_program_with_lifted_lambdas(
     let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
     for f in &ir.functions {
         if let Ok(mirs) = almide_mir::lower::lower_function_all_with_globals(
-            f, globals, global_inits, &record_layouts, &variant_layouts,
+            f,
+            globals,
+            global_inits,
+            &record_layouts,
+            &variant_layouts,
         ) {
             for m in mirs {
                 program.insert(m.name.clone(), m);
@@ -219,8 +227,8 @@ fn main() {
     let property = args.next().unwrap_or_else(|| "ownership".to_string());
     let manifest_allow: Option<Vec<String>> = args.next().map(|p| read_manifest_allow(&p));
 
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
     let ir = source_to_ir(&source);
 
     let (globals, global_inits) = collect_top_level_globals(&ir);
@@ -242,7 +250,10 @@ fn main() {
 
     if property == "drops" {
         // Debug aid: print the GENERATED recursive-drop fn source (ADT brick 5b).
-        print!("{}", almide_mir::lower::generate_variant_drop_sources(&ir.type_decls));
+        print!(
+            "{}",
+            almide_mir::lower::generate_variant_drop_sources(&ir.type_decls)
+        );
         return;
     }
 
@@ -294,14 +305,11 @@ fn main() {
             // genuinely out-of-program names.
             print!(
                 "{}",
-                call_modes_witness(&program, &|n: &str| n.contains('.')
-                    || n.starts_with("__"))
+                call_modes_witness(&program, &|n: &str| n.contains('.') || n.starts_with("__"))
             );
         }
-        other => {
-            die(format!(
-                "unknown property: {other} (try: ownership | names | caps | tcaps | modes)"
-            ))
-        }
+        other => die(format!(
+            "unknown property: {other} (try: ownership | names | caps | tcaps | modes)"
+        )),
     }
 }

@@ -339,6 +339,21 @@ impl LowerCtx {
                 // (frees each element String + the list block), NOT the flat DropListStr
                 // (heap_elem_lists) which would leak them.
                 self.list_str_result_results.insert(v);
+            } else if crate::lower::is_res_map_si_ty(&subject.ty)
+                || crate::lower::is_res_list_map_si_ty(&subject.ty)
+            {
+                // `Result[Map[String, <scalar>], String]` / the chunked List-of-maps
+                // sibling (fs.fold_lines msi): the TAG-AWARE `$__drop_res_msi` /
+                // `$__drop_res_lmsi` (Ok → the skv key sweep). `heap_elem_lists`
+                // ALSO inserted so the heap-payload bind gates open (the map.find
+                // dual-insert precedent); `variant_drop_handles` wins the drop.
+                let route = if crate::lower::is_res_map_si_ty(&subject.ty) {
+                    "res_msi"
+                } else {
+                    "res_lmsi"
+                };
+                self.variant_drop_handles.insert(v, route.to_string());
+                self.heap_elem_lists.insert(v);
             } else if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                 self.heap_elem_lists.insert(v);
             }
@@ -476,45 +491,14 @@ impl LowerCtx {
         }
     }
 
-    /// Lower ONE branch arm into the flat op stream with a PER-ARM SCOPE FRAME:
-    /// snapshot the live-handle count, lower the arm, then DROP every handle the arm
-    /// added (so the arm is internally balanced, and vacuous when the other arm runs).
-    /// The arm's result is DISCARDED (Unit/statement) or a SCALAR the caller merges
-    /// into one `Const`; a heap result is walled. See [`Self::lower_branch`].
-    ///
-    /// For a `match` arm, `pattern` is `Some((pat, subject))` — the pattern's bound
-    /// variables are introduced at the START of the frame (so they drop with the arm):
-    /// a HEAP payload aliases the whole SUBJECT (`Op::Dup` — container-grain, like a
-    /// field extraction; element/payload-PRECISE identity needs the layout brick),
-    /// a SCALAR payload is a `Const`. See [`Self::bind_pattern`].
-    pub(crate) fn lower_branch_arm(
-        &mut self,
-        pattern: Option<(&IrPattern, Option<ValueId>)>,
-        body: &IrExpr,
-    ) -> Result<(), LowerError> {
-        let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
-            IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
-            _ => (&[], Some(body)),
-        };
-        let mark = self.live_heap_handles.len();
-        if let Some((pat, subject)) = pattern {
-            self.bind_pattern(pat, subject)?;
-        }
-        // Inside the arm, a HEAP reassignment is DEFERRED, not rebound: a post-branch
-        // read must not dereference a handle this arm dropped (the `in_frame` discipline
-        // in `lower_stmt`). The accumulator keeps its still-live handle — memory-safe.
-        self.in_frame += 1;
-        for stmt in stmts {
-            self.lower_stmt(stmt)?;
-        }
-        if let Some(tail) = tail {
-            // The arm's tail VALUE never escapes the arm — the branch RESULT is one
-            // fresh `Alloc{Opaque}` the CALLER emits (a heap result) or a `Const` (a
-            // scalar). So a Unit-call tail is lowered as an EFFECT (`println`, so its
-            // Stdout reaches the witness); a nested branch recurses (its own arms get
-            // per-arm frames); ANY OTHER tail — scalar or HEAP — is a deferred value
-            // whose calls we capture as effect markers (its content, like every
-            // `Opaque`, is carried by the merged result, not modelled per-arm).
+    /// The arm's TAIL. Its value never escapes the arm — the branch RESULT is one
+    /// fresh `Alloc{Opaque}` the CALLER emits (a heap result) or a `Const` (a
+    /// scalar). So a Unit-call tail is lowered as an EFFECT (`println`, so its
+    /// Stdout reaches the witness); a nested branch recurses (its own arms get
+    /// per-arm frames); ANY OTHER tail — scalar or HEAP — is a deferred value
+    /// whose calls we capture as effect markers (its content, like every
+    /// `Opaque`, is carried by the merged result, not modelled per-arm).
+    fn lower_branch_arm_tail(&mut self, tail: &IrExpr) -> Result<(), LowerError> {
             match &tail.kind {
                 // Route through the STATEMENT dispatcher, not lower_effect_call
                 // directly: an in-place mutator tail (`if c then { list.push(out,
@@ -525,7 +509,18 @@ impl LowerCtx {
                 // to absorb that). Double-run safety: a call-bearing arm never
                 // reaches the linearization (lower_branch walls it), so this arm
                 // only executes under a REAL branch (try_lower_unit_if).
-                IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit) => {
+                // `Ty::Never` rides with `Ty::Unit` here (#1124). A diverging
+                // call — `process.exit(code)`, the only `-> Never` in the
+                // stdlib — produces no value BY CONSTRUCTION, exactly like a
+                // Unit effect call, but it is not Unit-typed. Matching only on
+                // Unit sent it to the deferred-value path below, which records
+                // the call as a caps marker and EMITS NOTHING: the arm lowered
+                // to zero ops and returned Ok, so `guard n > 99 else
+                // process.exit(3)` built clean and exited 0 on wasm while
+                // native exited 3. A silently wrong exit code, not a wall —
+                // the class the strict-value mode exists to prevent, reached
+                // through a type the match forgot to name.
+                IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit | Ty::Never) => {
                     self.lower_stmt_expr(tail)?
                 }
                 // A Unit arm-tail effect call wrapped in `Try`/`Unwrap` (the auto-`?` of an
@@ -558,8 +553,73 @@ impl LowerCtx {
                 // `match … { x => { r = 999 } }` assignment-loss). Recurse so its statements
                 // run as effects and its own tail is dispatched the same way.
                 IrExprKind::Block { .. } => self.lower_branch_arm(None, tail)?,
-                _ => self.record_elided_calls(tail),
-            }
+                other => {
+                    // Σ-probe over this seam (#912; instance record: #1124's
+                    // Never call, the Try/Unwrap-Unit drop, the ForIn/While
+                    // drop, the nested-Block statement loss — every dispatch
+                    // arm above exists because THIS fallthrough once ate one).
+                    // A Unit/Never tail has NO value for the merged branch
+                    // result to carry, so "defer it as a value" is a
+                    // contradiction: any call captured below would be an
+                    // EFFECT this arm silently drops. In strict mode a
+                    // call-bearing Unit/Never tail walls here instead of
+                    // building wrong code; a genuinely value-shaped tail
+                    // (scalar/heap) still defers as before.
+                    if crate::lower::strict_values()
+                        && matches!(tail.ty, Ty::Unit | Ty::Never)
+                        && contains_any_call(tail)
+                    {
+                        return Err(LowerError::at(
+                            tail.span,
+                            format!(
+                                "a unit-typed arm tail ({}) with calls reached \
+                                 the deferred-value path — the arm would lower \
+                                 to zero ops and drop the effect (the #1124 \
+                                 class); this tail shape needs its own \
+                                 dispatch arm",
+                                crate::lower::kind_name(other)
+                            ),
+                        ));
+                    }
+                    self.record_elided_calls(tail)
+                }
+        }
+        Ok(())
+    }
+
+    /// Lower ONE branch arm into the flat op stream with a PER-ARM SCOPE FRAME:
+    /// snapshot the live-handle count, lower the arm, then DROP every handle the arm
+    /// added (so the arm is internally balanced, and vacuous when the other arm runs).
+    /// The arm's result is DISCARDED (Unit/statement) or a SCALAR the caller merges
+    /// into one `Const`; a heap result is walled. See [`Self::lower_branch`].
+    ///
+    /// For a `match` arm, `pattern` is `Some((pat, subject))` — the pattern's bound
+    /// variables are introduced at the START of the frame (so they drop with the arm):
+    /// a HEAP payload aliases the whole SUBJECT (`Op::Dup` — container-grain, like a
+    /// field extraction; element/payload-PRECISE identity needs the layout brick),
+    /// a SCALAR payload is a `Const`. See [`Self::bind_pattern`].
+    pub(crate) fn lower_branch_arm(
+        &mut self,
+        pattern: Option<(&IrPattern, Option<ValueId>)>,
+        body: &IrExpr,
+    ) -> Result<(), LowerError> {
+        let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+            IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+            _ => (&[], Some(body)),
+        };
+        let mark = self.live_heap_handles.len();
+        if let Some((pat, subject)) = pattern {
+            self.bind_pattern(pat, subject)?;
+        }
+        // Inside the arm, a HEAP reassignment is DEFERRED, not rebound: a post-branch
+        // read must not dereference a handle this arm dropped (the `in_frame` discipline
+        // in `lower_stmt`). The accumulator keeps its still-live handle — memory-safe.
+        self.in_frame += 1;
+        for stmt in stmts {
+            self.lower_stmt(stmt)?;
+        }
+        if let Some(tail) = tail {
+            self.lower_branch_arm_tail(tail)?;
         }
         self.in_frame -= 1;
         self.drop_arm_locals(mark);
@@ -684,4 +744,31 @@ impl LowerCtx {
         })
     }
 }
+/// Does `expr` contain ANY call anywhere inside? The strict-mode Σ-probe over
+/// the deferred-value seam ([`LowerCtx::lower_branch_arm`]'s fallthrough) needs
+/// presence only, not identity: a Unit/Never arm tail carrying one is an effect
+/// about to be silently dropped, never a deferrable value.
+pub(crate) fn contains_any_call(expr: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Finder {
+        found: bool,
+    }
+    impl IrVisitor for Finder {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found {
+                return;
+            }
+            match &e.kind {
+                IrExprKind::Call { .. }
+                | IrExprKind::RuntimeCall { .. }
+                | IrExprKind::RenderedCall { .. } => self.found = true,
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut f = Finder { found: false };
+    f.visit_expr(expr);
+    f.found
+}
+
 include!("control_b.rs");

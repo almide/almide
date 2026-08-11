@@ -51,6 +51,8 @@ pub fn q1_0_dot_simd128(x: &[f32; 128], sign: &[u8; 16], scale: f32) -> f32 {
     let lane_bit = i32x4(1, 2, 4, 8);
     let signbit = i32x4_splat(0x8000_0000u32 as i32);
     let mut acc = f32x4_splat(0.0);
+    // 128 f32 = exactly 32 four-lane windows; the cast is proved by the type.
+    let (lanes, _) = x.as_chunks::<4>();
     for blk in 0..32 {
         let bit_base = blk * 4;
         let byte = sign[bit_base / 8];
@@ -59,8 +61,7 @@ pub fn q1_0_dot_simd128(x: &[f32; 128], sign: &[u8; 16], scale: f32) -> f32 {
         let sel = v128_and(b, lane_bit);
         let is_set = i32x4_eq(sel, lane_bit); // all-ones where bit set
         let flip = v128_and(is_set, signbit); // 0x80000000 where set
-        // SAFETY: blk in 0..32, blk*4 in 0..128, x has 128 elems.
-        let xv = unsafe { v128_load(x.as_ptr().add(blk * 4) as *const v128) };
+        let xv = crate::simd_wasm::load_f32x4(&lanes[blk]);
         let signed = v128_xor(xv, flip);
         acc = f32x4_add(acc, signed);
     }
@@ -112,51 +113,50 @@ pub unsafe fn q1_0_dot_avx2(x: &[f32; 128], sign: &[u8; 16], scale: f32) -> f32 
     _mm_cvtss_f32(s) * scale
 }
 
+/// A Q1_0-quantized weight matrix: `n` output rows, each `k / 128` blocks wide.
+/// One block packs 128 weights as 16 sign bytes plus one f32 scale, so
+/// `sign` is `[n * blocks * 16]` and `scale` is `[n * blocks]`.
+pub struct Q1_0Weights<'a> {
+    pub sign: &'a [u8],
+    pub scale: &'a [f32],
+    pub n: usize,
+}
+
 /// Full quantized linear — the inference hot path. `out[m,n] = Σ_k x[m,k]·W[n,k]`
-/// with W in Q1_0. x: `[m*k]` row-major f32; w_sign: `[n*blocks*16]` u8;
-/// w_scale: `[n*blocks]` f32; k a multiple of 128. Uses the per-target
-/// `q1_0_dot` schedule (AVX2 / simd128 / naive) for every block dot.
-pub fn linear_q1_0(
-    x: &[f32], m: usize, k: usize,
-    w_sign: &[u8], w_scale: &[f32], n: usize,
-    out: &mut [f32],
-) {
-    let blocks = k / 128;
-    for mi in 0..m {
-        for ni in 0..n {
-            let mut acc = 0.0f32;
-            for b in 0..blocks {
-                let xb: &[f32; 128] =
-                    (&x[mi * k + b * 128..mi * k + b * 128 + 128]).try_into().unwrap();
-                let sb: &[u8; 16] = (&w_sign[(ni * blocks + b) * 16..(ni * blocks + b) * 16 + 16])
-                    .try_into()
-                    .unwrap();
-                acc += q1_0_dot(xb, sb, w_scale[ni * blocks + b]);
-            }
-            out[mi * n + ni] = acc;
-        }
-    }
+/// with W in Q1_0. x: `[m*k]` row-major f32; k a multiple of 128. Uses the
+/// per-target `q1_0_dot` schedule (AVX2 / simd128 / naive) for every block dot.
+pub fn linear_q1_0(x: &[f32], m: usize, k: usize, w: &Q1_0Weights, out: &mut [f32]) {
+    linear_q1_0_with(x, m, k, w, out, q1_0_dot);
 }
 
 /// Naive reference for `linear_q1_0` (scalar block dot — the Rust baseline).
-pub fn linear_q1_0_naive(
-    x: &[f32], m: usize, k: usize,
-    w_sign: &[u8], w_scale: &[f32], n: usize,
+pub fn linear_q1_0_naive(x: &[f32], m: usize, k: usize, w: &Q1_0Weights, out: &mut [f32]) {
+    linear_q1_0_with(x, m, k, w, out, q1_0_dot_naive);
+}
+
+/// The shared driver: the loop nest is identical for both schedules, only the
+/// per-block dot differs. Blocks are carved with `as_chunks`, so the 128-lane
+/// and 16-byte windows are typed as fixed-size arrays by construction — a
+/// short row simply contributes no blocks instead of panicking on a cast.
+fn linear_q1_0_with(
+    x: &[f32],
+    m: usize,
+    k: usize,
+    w: &Q1_0Weights,
     out: &mut [f32],
+    dot: fn(&[f32; 128], &[u8; 16], f32) -> f32,
 ) {
     let blocks = k / 128;
     for mi in 0..m {
-        for ni in 0..n {
+        let (xb, _) = x[mi * k..mi * k + k].as_chunks::<128>();
+        for ni in 0..w.n {
+            let (sb, _) = w.sign[ni * blocks * 16..(ni + 1) * blocks * 16].as_chunks::<16>();
+            let scales = &w.scale[ni * blocks..(ni + 1) * blocks];
             let mut acc = 0.0f32;
             for b in 0..blocks {
-                let xb: &[f32; 128] =
-                    (&x[mi * k + b * 128..mi * k + b * 128 + 128]).try_into().unwrap();
-                let sb: &[u8; 16] = (&w_sign[(ni * blocks + b) * 16..(ni * blocks + b) * 16 + 16])
-                    .try_into()
-                    .unwrap();
-                acc += q1_0_dot_naive(xb, sb, w_scale[ni * blocks + b]);
+                acc += dot(&xb[b], &sb[b], scales[b]);
             }
-            out[mi * n + ni] = acc;
+            out[mi * w.n + ni] = acc;
         }
     }
 }

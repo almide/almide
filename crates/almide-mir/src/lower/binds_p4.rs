@@ -252,75 +252,95 @@ impl LowerCtx {
     ) -> Result<(), LowerError> {
         match pattern {
             IrPattern::Wildcard | IrPattern::None | IrPattern::Literal { .. } => Ok(()),
-            IrPattern::Bind { var, ty } => {
-                let dst = self.fresh_value();
-                if is_heap_ty(ty) {
-                    let src = subject.ok_or_else(|| {
-                        LowerError::Unsupported(
-                            "heap pattern binding over a non-heap subject (no container to alias) not in this brick".into(),
-                        )
-                    })?;
-                    self.ops.push(Op::Dup { dst, src });
-                    self.live_heap_handles.push(dst);
-                } else {
-                    if crate::lower::strict_values() {
-                        return Err(crate::lower::strict_const_wall("destructure component"));
-                    }
-                    self.ops.push(Op::Const { dst });
-                }
-                self.value_of.insert(*var, dst);
-                Ok(())
-            }
+            IrPattern::Bind { var, ty } => self.bind_leaf(*var, ty, subject),
+            // Carrier patterns bind at the container grain — the payload is the
+            // same subject.
             IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
                 self.bind_pattern(inner, subject)
             }
-            IrPattern::Constructor { args, .. } => {
-                for p in args {
-                    self.bind_pattern(p, subject)?;
+            // A tuple-pattern match arm (`match t { (a, b) => … }`) must read each component from
+            // its tuple SLOT (base+12+i*8), NOT alias the whole tuple container-grain (which left
+            // `a`/`b` reading the tuple pointer / an uninitialized 0). Route through the same
+            // layout-aware per-slot loader `let (a, b) = t` uses, when the subject is a tracked
+            // materialized aggregate (its slots are real). Falls back to the container-grain
+            // recursion below only when there is no per-slot subject (an untracked/None subject).
+            IrPattern::Tuple { elements } if self.per_slot_subject(subject).is_some() => {
+                let subj = self.per_slot_subject(subject).expect("guarded above");
+                if self.try_lower_tuple_destructure(elements, subj, None) {
+                    return Ok(());
                 }
-                Ok(())
+                self.bind_each(elements, subject)
             }
-            IrPattern::Tuple { elements } => {
-                // A tuple-pattern match arm (`match t { (a, b) => … }`) must read each component from
-                // its tuple SLOT (base+12+i*8), NOT alias the whole tuple container-grain (which left
-                // `a`/`b` reading the tuple pointer / an uninitialized 0). Route through the same
-                // layout-aware per-slot loader `let (a, b) = t` uses, when the subject is a tracked
-                // materialized aggregate (its slots are real). Falls back to the container-grain
-                // recursion below only when there is no per-slot subject (an untracked/None subject).
-                if let Some(subj) = subject
-                    .filter(|s| self.materialized_aggregates.contains(s) || self.param_values.contains(s))
-                {
-                    {
-                        if self.try_lower_tuple_destructure(elements, subj, None) {
-                            return Ok(());
-                        }
-                    }
-                }
-                for p in elements {
-                    self.bind_pattern(p, subject)?;
-                }
-                Ok(())
-            }
-            IrPattern::List { elements } => {
-                for p in elements {
-                    self.bind_pattern(p, subject)?;
-                }
-                Ok(())
-            }
-            IrPattern::RecordPattern { fields, .. } => {
-                for f in fields {
-                    match &f.pattern {
-                        Some(p) => self.bind_pattern(p, subject)?,
-                        None => {
-                            return Err(LowerError::Unsupported(
-                                "record pattern shorthand field (no bound VarId) not in this brick".into(),
-                            ))
-                        }
-                    }
-                }
-                Ok(())
-            }
+            IrPattern::Constructor { args: elements, .. }
+            | IrPattern::Tuple { elements }
+            | IrPattern::List { elements } => self.bind_each(elements, subject),
+            IrPattern::RecordPattern { fields, .. } => self.bind_record_fields(fields, subject),
         }
+    }
+
+    /// The subject when it has REAL per-slot storage (a tracked materialized
+    /// aggregate or a param), which is what the slot-wise tuple loader needs.
+    fn per_slot_subject(&self, subject: Option<ValueId>) -> Option<ValueId> {
+        subject.filter(|s| {
+            self.materialized_aggregates.contains(s) || self.param_values.contains(s)
+        })
+    }
+
+    /// A `Bind` leaf: a heap binding ALIASES the container (`Dup`, tracked live),
+    /// a scalar one gets a deferred `Const`.
+    fn bind_leaf(
+        &mut self,
+        var: almide_ir::VarId,
+        ty: &Ty,
+        subject: Option<ValueId>,
+    ) -> Result<(), LowerError> {
+        let dst = self.fresh_value();
+        if is_heap_ty(ty) {
+            let src = subject.ok_or_else(|| {
+                LowerError::Unsupported(
+                    "heap pattern binding over a non-heap subject (no container to alias) not in this brick".into(),
+                )
+            })?;
+            self.ops.push(Op::Dup { dst, src });
+            self.live_heap_handles.push(dst);
+        } else {
+            if crate::lower::strict_values() {
+                return Err(crate::lower::strict_const_wall("destructure component"));
+            }
+            self.ops.push(Op::Const { dst });
+        }
+        self.value_of.insert(var, dst);
+        Ok(())
+    }
+
+    /// Bind every sub-pattern at the container grain.
+    fn bind_each(
+        &mut self,
+        patterns: &[IrPattern],
+        subject: Option<ValueId>,
+    ) -> Result<(), LowerError> {
+        for p in patterns {
+            self.bind_pattern(p, subject)?;
+        }
+        Ok(())
+    }
+
+    /// A record pattern's fields. A shorthand field (`{ name }`) has no bound
+    /// `VarId` to thread, so it walls.
+    fn bind_record_fields(
+        &mut self,
+        fields: &[almide_ir::IrFieldPattern],
+        subject: Option<ValueId>,
+    ) -> Result<(), LowerError> {
+        for f in fields {
+            let Some(p) = &f.pattern else {
+                return Err(LowerError::Unsupported(
+                    "record pattern shorthand field (no bound VarId) not in this brick".into(),
+                ));
+            };
+            self.bind_pattern(p, subject)?;
+        }
+        Ok(())
     }
 
     /// If `value` is an Option CONSTRUCTOR in the executable subset — `Some(scalar)`
@@ -347,6 +367,7 @@ impl LowerCtx {
             .or_else(|| self.try_lower_opt_heap_general(value, ty))
             .or_else(|| self.try_lower_opt_fallback_and_none(value, ty))
             .or_else(|| self.try_lower_result_ok_heap(value, ty))
+            .or_else(|| self.try_lower_result_ok_variant_ctor(value, ty))
             .or_else(|| self.try_lower_result_small_arms(value, ty))
             .or_else(|| self.try_lower_result_err_heap_ok_result(value, ty))
             .or_else(|| self.try_lower_result_err_heap_fallback(value, ty))

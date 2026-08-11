@@ -11,8 +11,7 @@
 // (the value is moved, never interpreted, so Float bits round-trip). A HEAP element
 // (String/…) routes to the UNREGISTERED `list.pop_x` in `list_call_name` and walls at
 // render — popping an owned handle needs an ownership transfer this impl cannot express.
-
-fn __lp_none() -> Option[Int] = None
+fn __lp_none() -> Int? = none
 
 fn __lp_take(h: Int, len: Int) -> Int = {
   let v = prim.load64(h + 12 + (len - 1) * 8)
@@ -20,11 +19,10 @@ fn __lp_take(h: Int, len: Int) -> Int = {
   v
 }
 
-fn __lp_some(h: Int, len: Int) -> Option[Int] = Some(__lp_take(h, len))
+fn __lp_some(h: Int, len: Int) -> Int? = some(__lp_take(h, len))
 
-fn list_pop(xs: List[Int]) -> Option[Int] = {
+fn list_pop(xs: List[Int]) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  if len <= 0 then __lp_none()
-  else __lp_some(h, len)
+  if len <= 0 then __lp_none() else __lp_some(h, len)
 }

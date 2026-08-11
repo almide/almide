@@ -86,19 +86,25 @@ effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
 ### Pure-fallible marker `-> T!` (ADR-0002 Phase 1)
 
 `-> T!` declares a pure fn that can fail: the return IS `Result[T, String]`.
-The body writes the Result directly — pass a fallible call through, or build
-it with ok/err; `!` propagates inside (no effect fn needed):
+`!` propagates inside (no effect fn needed), and a VALUE tail lifts into
+`ok(...)` automatically — write the payload, or write the Result explicitly;
+both work:
 
 ```almide
-fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through
+fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through (already a Result)
+fn double_port(s: String) -> Int! = int.parse(s)! * 2  // value tail — lifts into ok(...)
 fn checked(s: String) -> Int! = {
   let n = int.parse(s)!                              // ! propagates in a T! body
   guard n > 0 else err("must be positive")
-  ok(n)
+  n                                                  // value tail lifts (ok(n) also fine)
 }
 ```
 
-`!` is legal ONLY in return position of a fn declaration. E is always String —
+A LAMBDA whose body uses `!` becomes a fallible closure `(A) -> Result[T, String]`
+(first-class; a fallible callback to a core list HOF takes the first-err form;
+fn-type slots spell it `(A) -> B!`). In test blocks a lambda's `!` stays plain
+unwrap. `!` the RETURN MARKER is legal ONLY in return position of a fn
+declaration and in fn-type slots. E is always String —
 a custom error type keeps the explicit `Result[T, MyError]` spelling
 (ADR-0003/0004: branch on structure, not message text).
 
@@ -221,13 +227,41 @@ let f = (x) => {
 ```
 
 **Lambdas and effects**: a lambda inherits the enclosing fn's effect
-capability — one rule for every higher-order callee (`list.map`,
-`http.serve`'s handler, …). Inside an `effect fn`, a lambda may call effect
-fns, but their results stay **explicit `Result` values** (auto-`?` never
-crosses a closure boundary): unwrap with `?? fallback` or `match` — `!`
-cannot propagate out of a lambda. In a pure fn the same lambda is an error.
-Exception: metered regions (`fan.bounded` / `fan.race` bodies) are pure by
-design, so effect calls are rejected there even inside an effect fn.
+capability — one rule for every higher-order callee (`list.map`, …). Inside
+an `effect fn`, a lambda may call effect fns, but their results stay
+**explicit `Result` values** (auto-`?` never crosses a closure boundary):
+unwrap with `?? fallback` or `match` — `!` cannot propagate out of a lambda.
+In a pure fn the same lambda is an error. Exception: metered regions
+(`fan.bounded` / `fan.race` bodies) are pure by design, so effect calls are
+rejected there even inside an effect fn.
+
+**Effect fn-typed slots** (`effect (A) -> B`): a HOF can declare that its
+callback runs effects — `effect fn serve(port: Int, f: effect
+(HttpRequest) -> HttpResponse) -> Unit`. A lambda checked against an
+`effect (…) -> …` slot gets full effect-fn body ergonomics: effect calls are
+permitted and `!` propagates (into the handler's own failure channel — a
+failing `http.serve` handler becomes the 500 response). Both spellings are
+accepted uniformly:
+
+```
+http.serve(8080, (req) => {
+  let body = fs.read_text("index.html")!   // ← `!` works: the slot is effect-typed
+  http.response(200, body)
+})!
+```
+
+Calling an effect fn-typed VALUE is itself an effect call (`h(x)!` inside the
+HOF); doing it from a pure fn is E006. A plain `(A) -> B` slot still rejects
+fallible lambdas (E005) — declare the slot `(A) -> B!` or `effect (A) -> B`.
+The bare arrow form is the canonical spelling; `almide fmt` normalizes the
+legacy `fn(A) -> B` to it.
+
+NAMED fns work as slot values the same way lambdas do (#1148): an effect fn
+referenced as a value is a `(A) -> Result[B, String]` closure — bind it
+(`let h: effect (String) -> Int = parse_pos`, annotation optional), pipe into
+it (`(s |> h)!`), or pass it to an effect slot directly. A PURE named fn also
+fills an effect slot (its result is ok-wrapped). UFCS method syntax does not
+apply to fn values (`x.h()` is E002 — write `h(x)` or `x |> h`).
 
 ### Block (last expression is the value)
 ```
@@ -376,7 +410,29 @@ let cfg = fs.read_text_if_exists(path)! ?? "default"
 // family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
 ```
 
-### All-errors collection: partition (ADR-0007)
+### Processing a file line-by-line (large files)
+
+`fs.read_lines` materializes the whole file — fine for small files, a memory
+wall for big ones. Aggregation over a large file is `fs.fold_lines`
+(O(longest line) memory, same line semantics as read_lines):
+
+```almide
+// ✓ aggregate: fold_lines carries the accumulator through; split_once +
+//   map.upsert is the hot-loop form (one lookup, no List, no re-split)
+let stats = fs.fold_lines(path, map.new(), (acc, line) =>
+  match string.split_once(line, ";") {
+    some((key, _)) => map.upsert(acc, key, 1, (n) => n + 1),
+    none => acc,
+  })!
+
+// ✓ side-effecting walk: for_each_line (callback may mutate captured vars —
+//   but keep MAP accumulation on fold_lines: reading a Map captured in a
+//   closure clones it per read)
+var count = 0
+fs.for_each_line(path, (line) => { count = count + 1 })!
+
+// ✗ avoid for large files: fs.read_lines(path)! |> list.fold(...)
+```
 
 `result.collect` / `collect_map` are REMOVED (ADR-0007 — the name promised Rust's first-err short-circuit and did the opposite). Collect every error with partition:
 

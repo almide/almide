@@ -5,7 +5,7 @@
       "author": "almide maintainers"
     },
     {
-      "content": "Archived material — do not create pages from it or present it as an existing feature. docs/wasm/archive/ (agent-container.md, bubblewrap.md, hatch-design.md, memory-model.md, wasm3-features.md, ecosystem.md) holds historical design explorations that were superseded or never shipped; in particular there is no 'WASM agent container platform' in the product. research/benchmark/msr/ and research/benchmark/framework/ are archived — daily MSR (Modification Survival Rate) measurement and the task bank live in the separate repo almide/almide-dojo. research/spike/ is throwaway experiments.",
+      "content": "Archived material — do not create pages from it or present it as an existing feature. The pre-v1 wasm design explorations (agent container, bubblewrap, hatch, memory model, WASM 3.0 features, ecosystem survey) were removed from the tree and live only in git history; in particular there is no 'WASM agent container platform' in the product. research/benchmark/msr/ and research/benchmark/framework/ were removed from this repo (2026-08-08) — daily MSR (Modification Survival Rate) measurement and the task bank live in the separate repo almide/almide-dojo. research/spike/ is throwaway experiments.",
       "author": "almide maintainers"
     },
     {
@@ -155,12 +155,12 @@
     },
     {
       "title": "Performance & Benchmarks",
-      "purpose": "Native and WASM performance: docs/BENCHMARKS.md, research/benchmark/perf and research/benchmark/lang-bench harnesses, WASM binary size and speed compared against hand-written Rust compiled to wasm32, and the cargo-excluded almide-kernel SIMD crate.",
+      "purpose": "Native and WASM performance: docs/project/BENCHMARKS.md, research/benchmark/perf and research/benchmark/lang-bench harnesses, WASM binary size and speed compared against hand-written Rust compiled to wasm32, and the cargo-excluded almide-kernel SIMD crate.",
       "parent": null
     },
     {
       "title": "LLM Writability Research",
-      "purpose": "The research program behind the mission: research/grammar-lab experiments, lang-bench cross-language comparisons, and the design ledgers docs/REJECTED_PATTERNS.md and docs/HIDDEN_OPERATIONS.md. State clearly that daily MSR measurement and the task bank live in the almide/almide-dojo repo, and that research/benchmark/msr and research/benchmark/framework here are archived.",
+      "purpose": "The research program behind the mission: research/grammar-lab experiments, lang-bench cross-language comparisons, and the design ledgers docs/design/REJECTED_PATTERNS.md and docs/design/HIDDEN_OPERATIONS.md. State clearly that daily MSR measurement and the task bank live in the almide/almide-dojo repo, and that research/benchmark/msr and research/benchmark/framework here are archived.",
       "parent": null
     }
   ]

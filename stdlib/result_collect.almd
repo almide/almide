@@ -7,23 +7,21 @@
 // and SHRUNK via the len field (cap stays n — len <= cap, the list.pop precedent).
 // Ok payloads are scalar raw copies; Err strings DEEP-COPY (string.repeat ·1) so
 // both result lists are single-owned. Counts ride the packed `oi*2^20 + ei` Int.
-
-fn __rpar_go(oh: Int, eh: Int, sh: Int, n: Int, i: Int, packed: Int) -> Int =
-  if i >= n then packed
-  else {
-    let r = prim.load64(sh + 12 + i * 8)
-    let oi = packed / 1048576
-    let ei = prim.band(packed, 1048575)
-    if prim.load32(r + 4) == 1 then {
-      let s = prim.load_str(r + 12)
-      let copy = string.repeat(s, 1)
-      prim.store_str(eh + 12 + ei * 8, copy)
-      __rpar_go(oh, eh, sh, n, i + 1, oi * 1048576 + ei + 1)
-    } else {
-      prim.store64(oh + 12 + oi * 8, prim.load64(r + 12))
-      __rpar_go(oh, eh, sh, n, i + 1, (oi + 1) * 1048576 + ei)
-    }
+fn __rpar_go(oh: Int, eh: Int, sh: Int, n: Int, i: Int, packed: Int) -> Int = if i >= n then packed
+else {
+  let r = prim.load64(sh + 12 + i * 8)
+  let oi = packed / 1048576
+  let ei = prim.band(packed, 1048575)
+  if prim.load32(r + 4) == 1 then {
+    let s = prim.load_str(r + 12)
+    let copy = string.repeat(s, 1)
+    prim.store_str(eh + 12 + ei * 8, copy)
+    __rpar_go(oh, eh, sh, n, i + 1, oi * 1048576 + ei + 1)
+  } else {
+    prim.store64(oh + 12 + oi * 8, prim.load64(r + 12))
+    __rpar_go(oh, eh, sh, n, i + 1, (oi + 1) * 1048576 + ei)
   }
+}
 
 fn result_partition(rs: List[Result[Int, String]]) -> (List[Int], List[String]) = {
   let sh = prim.handle(rs)

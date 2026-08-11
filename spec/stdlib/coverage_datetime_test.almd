@@ -49,3 +49,13 @@ test "datetime.now returns positive timestamp" {
   let ts = datetime.now()
   assert(ts > 0)
 }
+
+// The ORIGIN is unspecified and target-dependent (native counts from the first
+// call, WASI from its own epoch), so only these two properties are asserted —
+// they are the whole documented contract.
+test "datetime.monotonic_ns never goes backwards" {
+  let a = datetime.monotonic_ns()
+  let b = datetime.monotonic_ns()
+  assert(a >= 0)
+  assert(b >= a)
+}

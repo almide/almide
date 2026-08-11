@@ -8,7 +8,6 @@
 // pipeline SPLICES this file after the user program (`{source}\n{value_core_src}\n{drops}`,
 // pipeline.rs), where a mid-file import is a parse error — the #1078 fmt sweep
 // broke every Codec-deriving wasm build exactly this way.
-
 fn value_null() -> Value = {
   let v = prim.alloc_value(1)
   let h = prim.handle(v)
@@ -320,8 +319,8 @@ fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
 
 fn __leq_opt_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
 else {
-  let xa: Option[Int] = prim.load_handle(ah + 12 + i * 8)
-  let xb: Option[Int] = prim.load_handle(bh + 12 + i * 8)
+  let xa: Int? = prim.load_handle(ah + 12 + i * 8)
+  let xb: Int? = prim.load_handle(bh + 12 + i * 8)
   let pa = prim.handle(xa)
   let pb = prim.handle(xb)
   let ta = prim.load32(pa + 4)
@@ -335,11 +334,75 @@ else {
 // list.eq over NESTED lists — List[List[Int/Float/String]]: same length + element-wise
 // recursion into the flat list eq. Elements are handle slots (the inner list blocks),
 // BORROWED for the read-only compare — no ownership event, same discipline as eq_str.
-fn list_eq_opt_int(a: List[Option[Int]], b: List[Option[Int]]) -> Bool = {
+fn list_eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
   if prim.load32(ha + 4) != prim.load32(hb + 4) then false
   else __leq_opt_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
+// list.eq over List[Option[String]] — elements are len-as-tag Option blocks
+// (None = len 0; Some = len 1, String handle @12), BORROWED for the read-only
+// compare. Tags must match; both-Some compares the payload bytes via the
+// value_core-local string eq (string.eq is a cross-module call this module
+// avoids). The String twin of `list_eq_opt_int` (#1134, the codec `dp:
+// List[String?]?` eq cell).
+fn __leq_opt_str(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
+else {
+  let xa: String? = prim.load_handle(ah + 12 + i * 8)
+  let xb: String? = prim.load_handle(bh + 12 + i * 8)
+  let pa = prim.handle(xa)
+  let pb = prim.handle(xb)
+  let ta = prim.load32(pa + 4)
+  let tb = prim.load32(pb + 4)
+  let elem_eq = if ta != tb then false
+  else if ta == 0 then true
+  else {
+    let sa: String = prim.load_handle(pa + 12)
+    let sb: String = prim.load_handle(pb + 12)
+    __veq_strval(sa, sb)
+  }
+  if elem_eq then __leq_opt_str(ah, bh, i + 1, n)
+  else false
+}
+
+fn list_eq_opt_str(a: List[String?], b: List[String?]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_opt_str(ha, hb, 0, prim.load32(ha + 4))
+}
+
+// list.eq over List[Result[Int/Bool, String]] — elements are len-as-tag Result
+// blocks (Ok = len 0, scalar payload @12; Err = len 1, String handle @12),
+// BORROWED for the read-only compare. Tags must match; both-Ok compares the i64
+// payloads (scalar-only — a Float payload's bit compare would diverge from `==`
+// on -0.0/NaN), both-Err compares the message bytes via the value_core-local
+// string eq (string.eq is a cross-module call this module avoids).
+fn __leq_res_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
+else {
+  let ra: Result[Int, String] = prim.load_handle(ah + 12 + i * 8)
+  let rb: Result[Int, String] = prim.load_handle(bh + 12 + i * 8)
+  let pa = prim.handle(ra)
+  let pb = prim.handle(rb)
+  let ta = prim.load32(pa + 4)
+  let tb = prim.load32(pb + 4)
+  let elem_eq = if ta != tb then false
+  else if ta == 0 then prim.load64(pa + 12) == prim.load64(pb + 12)
+  else {
+    let sa: String = prim.load_handle(pa + 12)
+    let sb: String = prim.load_handle(pb + 12)
+    __veq_strval(sa, sb)
+  }
+  if elem_eq then __leq_res_int(ah, bh, i + 1, n)
+  else false
+}
+
+fn list_eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_res_int(ha, hb, 0, prim.load32(ha + 4))
 }
 
 fn __leq_list_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
@@ -675,7 +738,7 @@ fn result_str_unwrap_or(r: Result[String, String], d: String) -> String = match 
 // SAME len-as-tag prim shape as option_liststr_unwrap_or, with a FLAT scalar-element list payload —
 // the Some arm loads the @12 inner-list handle and the bare-Var tail auto-acquires (Dup, freed by
 // the flat rc_dec — scalar elements own nothing), the None arm returns the fallback.
-fn option_value_unwrap_or(o: Option[Value], d: Value) -> Value = {
+fn option_value_unwrap_or(o: Value?, d: Value) -> Value = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
   if tag == 0 then d
@@ -690,7 +753,7 @@ fn option_value_unwrap_or(o: Option[Value], d: Value) -> Value = {
 // Result is the CAP-AS-TAG 1-slot block (tag @16: 0 = Ok, 1 = Err; payload handle @12) —
 // the Ok arm loads the @12 inner block and the bare-Var tail auto-acquires (Dup, freed by
 // the flat rc_dec — scalar slots own nothing), the Err arm returns the fallback.
-fn option_listint_unwrap_or(o: Option[List[Int]], d: List[Int]) -> List[Int] = {
+fn option_listint_unwrap_or(o: List[Int]?, d: List[Int]) -> List[Int] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
   if tag == 0 then d
@@ -717,7 +780,7 @@ fn result_flat_unwrap_or(r: Result[List[Int], String], d: List[Int]) -> List[Int
 // option_liststr_unwrap_or, with a List[Value] payload — the Some arm loads the @12 inner-list handle
 // and the bare-Var tail auto-acquires (Dup, freed recursively by DropListValue), the None arm returns
 // the fallback. Mirrors result_list_value_unwrap_or's List[Value] Ok-acquire; the root of get_arr.
-fn option_liststr_unwrap_or(o: Option[List[String]], d: List[String]) -> List[String] = {
+fn option_liststr_unwrap_or(o: List[String]?, d: List[String]) -> List[String] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
   if tag == 0 then d
@@ -731,7 +794,7 @@ fn option_liststr_unwrap_or(o: Option[List[String]], d: List[String]) -> List[St
 // the element as a String (`string.repeat`), which corrupts a dynamic Value (an Object copied as a
 // string is empty). The Value accessor instead SHARES the element: `Some(@i)` Dup's the Value handle
 // (rc_inc, shallow — the list keeps owning the original; the Option co-owns), exactly value.get's Ok.
-fn option_listvalue_unwrap_or(o: Option[List[Value]], d: List[Value]) -> List[Value] = {
+fn option_listvalue_unwrap_or(o: List[Value]?, d: List[Value]) -> List[Value] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
   if tag == 0 then d
@@ -741,19 +804,19 @@ fn option_listvalue_unwrap_or(o: Option[List[Value]], d: List[Value]) -> List[Va
   }
 }
 
-fn __get_value_some(h: Int, i: Int) -> Option[Value] = {
+fn __get_value_some(h: Int, i: Int) -> Value? = {
   let v: Value = prim.load_handle(h + 12 + i * 8)
   some(v)
 }
 
-fn list_get_value(xs: List[Value], i: Int) -> Option[Value] = {
+fn list_get_value(xs: List[Value], i: Int) -> Value? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if i < 0 then none
   else if i >= len then none else __get_value_some(h, i)
 }
 
-fn list_first_value(xs: List[Value]) -> Option[Value] = {
+fn list_first_value(xs: List[Value]) -> Value? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then none else __get_value_some(h, 0)
@@ -765,25 +828,25 @@ fn list_first_value(xs: List[Value]) -> Option[Value] = {
 // word as a byte count — garbage. Here `prim.load_handle` reads the element handle and the
 // `List[String]` binding Dup's it (rc_inc the block; the list keeps owning, the Option co-owns), and
 // the result's DropListStr drop frees the block's strings only when its rc reaches 0.
-fn list_last_value(xs: List[Value]) -> Option[Value] = {
+fn list_last_value(xs: List[Value]) -> Value? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then none else __get_value_some(h, len - 1)
 }
 
-fn __get_liststr_some(h: Int, i: Int) -> Option[List[String]] = {
+fn __get_liststr_some(h: Int, i: Int) -> List[String]? = {
   let v: List[String] = prim.load_handle(h + 12 + i * 8)
   some(v)
 }
 
-fn list_get_liststr(xs: List[List[String]], i: Int) -> Option[List[String]] = {
+fn list_get_liststr(xs: List[List[String]], i: Int) -> List[String]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if i < 0 then none
   else if i >= len then none else __get_liststr_some(h, i)
 }
 
-fn list_first_liststr(xs: List[List[String]]) -> Option[List[String]] = {
+fn list_first_liststr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then none else __get_liststr_some(h, 0)
@@ -793,7 +856,7 @@ fn list_first_liststr(xs: List[List[String]]) -> Option[List[String]] = {
 // handle (rc_inc + raw store64, like __varr_copy), NOT the `_str` variant's `string.repeat` deep-copy
 // which would read an inner List[String] block as a byte string (garbage / trap). Source borrowed; the
 // result co-owns each kept inner list (freed at its last ref via the source's / result's own drop).
-fn list_last_liststr(xs: List[List[String]]) -> Option[List[String]] = {
+fn list_last_liststr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then none else __get_liststr_some(h, len - 1)
@@ -1190,7 +1253,7 @@ fn json_stringify_pretty_at(v: Value, d: Int) -> String = {
 // exactly this.
 fn json_stringify_pretty(v: Value) -> String = json_stringify_pretty_at(v, 0)
 
-fn option_unwrap_or_hx(o: Option[Value], d: Value) -> Value = {
+fn option_unwrap_or_hx(o: Value?, d: Value) -> Value = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
   if tag == 0 then d

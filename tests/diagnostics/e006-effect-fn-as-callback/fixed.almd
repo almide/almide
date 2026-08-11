@@ -1,0 +1,10 @@
+// E006: an EFFECT fn passed as a callback VALUE carries its effect bit to the
+// call site (ADR-0009 D2). A bare reference used to launder the capability —
+// `list.map(xs, eff)` passed check from a PURE fn and ran its effects, while
+// the equivalent `list.map(xs, (x) => eff(x))` was correctly rejected. Same
+// program, same effects, opposite verdicts, decided by the spelling.
+effect fn eff(n: Int) -> Result[Int, String] = ok(n * 2)
+
+effect fn effect_caller(xs: List[Int]) -> List[Result[Int, String]] = list.map(xs, eff)
+
+effect fn main() -> Unit = println(int.to_string(list.len(effect_caller([1, 2])!)))

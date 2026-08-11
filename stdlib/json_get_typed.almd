@@ -12,63 +12,52 @@
 // `Result[T] -> Option[T]` adapter (`__r2o*`) — the minimal-body form the materialized-Option
 // lowering admits (brick #46: a heap Option-returning named-call tail), exactly like
 // json_string's `__jas_some` helper split.
+fn __r2o_str(r: Result[String, String]) -> String? = match r {
+  ok(s) => some(s),
+  err(_) => none,
+}
 
-fn __r2o_str(r: Result[String, String]) -> Option[String] =
-  match r {
-    ok(s) => Some(s)
-    err(_) => None
-  }
+fn __r2o_int(r: Result[Int, String]) -> Int? = match r {
+  ok(n) => some(n),
+  err(_) => none,
+}
 
-fn __r2o_int(r: Result[Int, String]) -> Option[Int] =
-  match r {
-    ok(n) => Some(n)
-    err(_) => None
-  }
+fn __r2o_float(r: Result[Float, String]) -> Float? = match r {
+  ok(f) => some(f),
+  err(_) => none,
+}
 
-fn __r2o_float(r: Result[Float, String]) -> Option[Float] =
-  match r {
-    ok(f) => Some(f)
-    err(_) => None
-  }
+fn __r2o_bool(r: Result[Bool, String]) -> Bool? = match r {
+  ok(b) => some(b),
+  err(_) => none,
+}
 
-fn __r2o_bool(r: Result[Bool, String]) -> Option[Bool] =
-  match r {
-    ok(b) => Some(b)
-    err(_) => None
-  }
+fn __r2o_arr(r: Result[List[Value], String]) -> List[Value]? = match r {
+  ok(a) => some(a),
+  err(_) => none,
+}
 
-fn __r2o_arr(r: Result[List[Value], String]) -> Option[List[Value]] =
-  match r {
-    ok(a) => Some(a)
-    err(_) => None
-  }
+fn json_get_string(j: Value, key: String) -> String? = match value.field(j, key) {
+  ok(v) => __r2o_str(value.as_string(v)),
+  err(_) => none,
+}
 
-fn json_get_string(j: Value, key: String) -> Option[String] =
-  match value.field(j, key) {
-    ok(v) => __r2o_str(value.as_string(v))
-    err(_) => None
-  }
+fn json_get_int(j: Value, key: String) -> Int? = match value.field(j, key) {
+  ok(v) => __r2o_int(value.as_int(v)),
+  err(_) => none,
+}
 
-fn json_get_int(j: Value, key: String) -> Option[Int] =
-  match value.field(j, key) {
-    ok(v) => __r2o_int(value.as_int(v))
-    err(_) => None
-  }
+fn json_get_float(j: Value, key: String) -> Float? = match value.field(j, key) {
+  ok(v) => __r2o_float(value.as_float(v)),
+  err(_) => none,
+}
 
-fn json_get_float(j: Value, key: String) -> Option[Float] =
-  match value.field(j, key) {
-    ok(v) => __r2o_float(value.as_float(v))
-    err(_) => None
-  }
+fn json_get_bool(j: Value, key: String) -> Bool? = match value.field(j, key) {
+  ok(v) => __r2o_bool(value.as_bool(v)),
+  err(_) => none,
+}
 
-fn json_get_bool(j: Value, key: String) -> Option[Bool] =
-  match value.field(j, key) {
-    ok(v) => __r2o_bool(value.as_bool(v))
-    err(_) => None
-  }
-
-fn json_get_array(j: Value, key: String) -> Option[List[Value]] =
-  match value.field(j, key) {
-    ok(v) => __r2o_arr(value.as_array(v))
-    err(_) => None
-  }
+fn json_get_array(j: Value, key: String) -> List[Value]? = match value.field(j, key) {
+  ok(v) => __r2o_arr(value.as_array(v)),
+  err(_) => none,
+}

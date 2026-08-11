@@ -15,7 +15,6 @@
 // F4 + [80..8F][80..BF]². A maximal invalid subpart consumes every byte that *could* extend
 // a valid prefix and stops at the first byte that cannot, re-examining that byte next step.
 // Source `xs` borrowed; result owned.
-
 // Byte at list slot `i` (low 8 bits of the i64 element).
 fn __fb_byte(h: Int, i: Int) -> Int = {
   let v = prim.load64(h + 12 + i * 8)
@@ -24,32 +23,29 @@ fn __fb_byte(h: Int, i: Int) -> Int = {
 
 // Encoded length (in input bytes) of the well-formed sequence a lead byte starts; 0 = the
 // lead itself is invalid (00..7F handled before this; C0..C1, F5..FF land here as 0).
-fn __fb_lead_len(b0: Int) -> Int =
-  if b0 < 128 then 1
-  else if b0 < 194 then 0           // 80..C1: continuation byte or overlong C0/C1 lead
-  else if b0 < 224 then 2           // C2..DF
-  else if b0 < 240 then 3           // E0..EF
-  else if b0 < 245 then 4           // F0..F4
-  else 0                            // F5..FF
+fn __fb_lead_len(b0: Int) -> Int = if b0 < 128 then 1
+else if b0 < 194 then 0
+else if b0 < 224 then 2
+else if b0 < 240 then 3
+else if b0 < 245 then 4 else 0
 
+// F5..FF
 // Low/high bound of the SECOND byte, given the lead (the lead-specific row of Table 3-7).
-fn __fb_lo2(b0: Int) -> Int =
-  if b0 == 224 then 160             // E0 -> A0
-  else if b0 == 240 then 144        // F0 -> 90
-  else 128                          // else -> 80
+fn __fb_lo2(b0: Int) -> Int = if b0 == 224 then 160
+else if b0 == 240 then 144 else 128
 
-fn __fb_hi2(b0: Int) -> Int =
-  if b0 == 237 then 159             // ED -> 9F
-  else if b0 == 244 then 143        // F4 -> 8F
-  else 191                          // else -> BF
+// else -> 80
+fn __fb_hi2(b0: Int) -> Int = if b0 == 237 then 159
+else if b0 == 244 then 143 else 191
 
+// else -> BF
 // Is `b` a 80..BF continuation byte?
-fn __fb_is_cont(b: Int) -> Bool =
-  if b >= 128 then (if b <= 191 then true else false) else false
+fn __fb_is_cont(b: Int) -> Bool = if b >= 128 then (if b <= 191 then true else false)
+else false
 
 // Is `b` within [lo, hi]?
-fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool =
-  if b >= lo then (if b <= hi then true else false) else false
+fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool = if b >= lo then (if b <= hi then true else false)
+else false
 
 // The step helpers are written as FLAT `else if` chains whose every arm is a literal or a
 // single tail call — never a `{ … }` block ending in a nested `if`. That is the shape the v1
@@ -57,23 +53,23 @@ fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool =
 // conditions are pre-bound `let`s (a scalar call/compare in an `if`-cond must be bound first).
 // `__fb_byte` reads at the slot index even just past the input (a discarded garbage value when
 // the corresponding `trunc` guard is true) — an in-bounds linear-memory read, never a trap.
-
 // 4th-byte position (only reached for a 4-byte lead with a valid 3-byte prefix).
 fn __fb_step4(h: Int, i: Int, n: Int) -> Int = {
   let trunc = i + 3 >= n
   let b3 = __fb_byte(h, i + 3)
   let ok3 = __fb_is_cont(b3)
-  if trunc then 6                                     // truncated after 3rd: consume 3, invalid
-  else if ok3 then 9                                  // 4-byte char: consume 4, valid
-  else 6                                              // bad 4th byte: 1 FFFD, consume 3
+  // bad 4th byte: 1 FFFD, consume 3
+  if trunc then 6
+  else if ok3 then 9 else 6
 }
 
 // 3-byte lead vs descend to the 4th byte (the tail of __fb_step3, kept as a 2-arm `if` so no
 // helper exceeds a 3-arm chain — the v1 scalar-if lowering reconstructs ≤3-arm chains).
 fn __fb_step3b(h: Int, i: Int, n: Int, len: Int) -> Int = {
   let three = len == 3
-  if three then 7                                     // 3-byte char: consume 3, valid
-  else __fb_step4(h, i, n)                            // descend to the 4th byte
+  // descend to the 4th byte
+  if three then 7
+  else __fb_step4(h, i, n)
 }
 
 // 3rd-byte position (reached for a 3- or 4-byte lead with a valid 2-byte prefix). Branch on
@@ -82,16 +78,18 @@ fn __fb_step3(h: Int, i: Int, n: Int, len: Int) -> Int = {
   let trunc = i + 2 >= n
   let b2 = __fb_byte(h, i + 2)
   let ok2 = __fb_is_cont(b2)
-  if trunc then 4                                     // truncated after 2nd: consume 2, invalid
-  else if ok2 then __fb_step3b(h, i, n, len)          // good 3rd byte: 3-byte char or descend to 4th
-  else 4                                              // bad 3rd byte: 1 FFFD, consume 2
+  // bad 3rd byte: 1 FFFD, consume 2
+  if trunc then 4
+  else if ok2 then __fb_step3b(h, i, n, len)
+  else 4
 }
 
 // 2-byte lead vs descend to the 3rd byte (the tail of __fb_step2, kept as a 2-arm `if`).
 fn __fb_step2b(h: Int, i: Int, n: Int, len: Int) -> Int = {
   let two = len == 2
-  if two then 5                                       // 2-byte char: consume 2, valid
-  else __fb_step3(h, i, n, len)                       // descend to the 3rd byte
+  // descend to the 3rd byte
+  if two then 5
+  else __fb_step3(h, i, n, len)
 }
 
 // 2nd-byte position (reached for any multibyte lead). The lead-specific bounds are bound
@@ -102,9 +100,10 @@ fn __fb_step2(h: Int, i: Int, n: Int, b0: Int, len: Int) -> Int = {
   let lo = __fb_lo2(b0)
   let hi = __fb_hi2(b0)
   let ok1 = __fb_in_range(b1, lo, hi)
-  if trunc then 2                                     // truncated after lead: 1 FFFD, consume 1
-  else if ok1 then __fb_step2b(h, i, n, len)          // good 2nd byte: 2-byte char or descend to 3rd
-  else 2                                              // bad 2nd byte: 1 FFFD, consume 1
+  // bad 2nd byte: 1 FFFD, consume 1
+  if trunc then 2
+  else if ok1 then __fb_step2b(h, i, n, len)
+  else 2
 }
 
 // Classify the step at index `i`; returns consume*2 + valid (consume ∈ 1..4, valid ∈ {0,1}).
@@ -113,48 +112,49 @@ fn __fb_step(h: Int, i: Int, n: Int) -> Int = {
   let ascii = b0 < 128
   let len = __fb_lead_len(b0)
   let bad_lead = len == 0
-  if ascii then 3                                     // ASCII: consume 1, valid -> 1*2+1
-  else if bad_lead then 2                             // invalid lead: 1 FFFD, consume 1
-  else __fb_step2(h, i, n, b0, len)                   // descend to the 2nd byte
+  // descend to the 2nd byte
+  if ascii then 3
+  else if bad_lead then 2
+  else __fb_step2(h, i, n, b0, len)
 }
 
 // Length pass: total output byte count. A valid step contributes `consume` bytes; an invalid
 // step contributes 3 (one U+FFFD = EF BF BD).
-fn __fb_outlen(h: Int, i: Int, n: Int, acc: Int) -> Int =
-  if i >= n then acc
-  else {
-    let e = __fb_step(h, i, n)
-    let consume = e / 2
-    let valid = e % 2
-    let add = if valid == 1 then consume else 3
-    __fb_outlen(h, i + consume, n, acc + add)
-  }
+fn __fb_outlen(h: Int, i: Int, n: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let e = __fb_step(h, i, n)
+  let consume = e / 2
+  let valid = e % 2
+  let add = if valid == 1 then consume else 3
+  __fb_outlen(h, i + consume, n, acc + add)
+}
 
 // Copy `consume` input bytes (a valid char) from src index `i` to dst offset `d`.
-fn __fb_copy(sh: Int, i: Int, dh: Int, d: Int, consume: Int) -> Int =
-  if consume <= 0 then d
-  else {
-    prim.store8(dh + d, __fb_byte(sh, i))
-    __fb_copy(sh, i + 1, dh, d + 1, consume - 1)
-  }
+fn __fb_copy(sh: Int, i: Int, dh: Int, d: Int, consume: Int) -> Int = if consume <= 0 then d
+else {
+  prim.store8(dh + d, __fb_byte(sh, i))
+  __fb_copy(sh, i + 1, dh, d + 1, consume - 1)
+}
 
 // Fill pass: replay the same decisions, writing bytes to the output at offset `d`.
-fn __fb_fill(sh: Int, i: Int, n: Int, dh: Int, d: Int) -> Int =
-  if i >= n then d
-  else {
-    let e = __fb_step(sh, i, n)
-    let consume = e / 2
-    let valid = e % 2
-    if valid == 1 then {
-      let d2 = __fb_copy(sh, i, dh, d, consume)
-      __fb_fill(sh, i + consume, n, dh, d2)
-    } else {
-      prim.store8(dh + d, 239)       // EF
-      prim.store8(dh + d + 1, 191)   // BF
-      prim.store8(dh + d + 2, 189)   // BD
-      __fb_fill(sh, i + consume, n, dh, d + 3)
-    }
+fn __fb_fill(sh: Int, i: Int, n: Int, dh: Int, d: Int) -> Int = if i >= n then d
+else {
+  let e = __fb_step(sh, i, n)
+  let consume = e / 2
+  let valid = e % 2
+  if valid == 1 then {
+    let d2 = __fb_copy(sh, i, dh, d, consume)
+    __fb_fill(sh, i + consume, n, dh, d2)
+  } else {
+    prim.store8(dh + d, 239)
+    // EF
+    prim.store8(dh + d + 1, 191)
+    // BF
+    prim.store8(dh + d + 2, 189)
+    // BD
+    __fb_fill(sh, i + consume, n, dh, d + 3)
   }
+}
 
 fn string_from_bytes(xs: List[Int]) -> String = {
   let h = prim.handle(xs)

@@ -108,6 +108,13 @@ const CORPUS: &[(&str, &str)] = &[
     //    desugar's abort tail now renders on the native v1 rung ──
     ("eprintln_line", "fn main() -> Unit = {\n  eprintln(\"warn \" + int.to_string(7))\n  println(int.to_string(1))\n}\n"),
     ("assert_abort_tail", "fn main() -> Unit = {\n  println(int.to_string(1))\n  assert(1 == 2)\n  println(int.to_string(2))\n}\n"),
+    // ── The MIR tail-recursion loop reassigns its params, so the rendered
+    //    signature must spell them `mut` — this textbook scalar accumulator
+    //    was an E0384 on the DEFAULT run path in v0.56.0 (every test harness
+    //    rides the v0 fallback, so only the differential corpus can see the
+    //    v1 render's rustc verdict). Depth 1.5M also pins that the loop, not
+    //    LLVM, carries the recursion. ──
+    ("tail_self_accumulator", "fn count(n: Int, acc: Int) -> Int = if n == 0 then acc else count(n - 1, acc + 1)\n\nfn main() -> Unit = println(int.to_string(count(1500000, 0)))\n"),
 ];
 
 #[test]
@@ -150,6 +157,44 @@ fn divzero_abort_matches_v0() {
         String::from_utf8_lossy(&v1.stderr),
         "divzero stderr diverges"
     );
+}
+
+#[test]
+fn v0_mutual_tail_recursion_survives_opt_level_0() {
+    // #1043: the SHARED-IR mutual-SCC dispatcher (almide-optimize's
+    // mutual_tco, run at the monomorphize exit every pipeline takes),
+    // exercised at the configuration that regressed — TRUE rustc opt-level 0,
+    // where LLVM's sibling-call opt is absent and 1M plain calls overflow the
+    // stack. The emitted source is compiled DIRECTLY here: `almide run`'s
+    // generated manifest pins `[profile.dev] opt-level = 1`, so a
+    // CARGO_PROFILE_* env knob on the run path never reaches opt 0 (measured:
+    // the knob-based spelling of this test stayed green with the pass
+    // disabled).
+    let src = "fn ping(n: Int, acc: Int) -> Int = if n == 0 then acc else pong(n - 1, acc + 1)\n\nfn pong(n: Int, acc: Int) -> Int = if n == 0 then acc else ping(n - 1, acc + 2)\n\nfn main() -> Unit = println(int.to_string(ping(1000000, 0)))\n";
+    let dir = scratch("v0_mutual_opt0");
+    let file = dir.join("prog.almd");
+    std::fs::write(&file, src).unwrap();
+    let emitted = Command::new(almide())
+        .args([file.to_str().unwrap(), "--target", "rust"])
+        .output()
+        .expect("almide emit");
+    assert!(emitted.status.success(), "emit failed: {}", String::from_utf8_lossy(&emitted.stderr));
+    let rust = String::from_utf8_lossy(&emitted.stdout).into_owned();
+    assert!(
+        rust.contains("__mutual_tco"),
+        "the mutual-SCC dispatcher is missing from the v0 emission"
+    );
+    let rs = dir.join("prog.rs");
+    let bin = dir.join("prog_bin");
+    std::fs::write(&rs, &rust).unwrap();
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021", "-C", "opt-level=0", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
+        .output()
+        .expect("rustc");
+    assert!(rc.status.success(), "rustc rejected the emission:\n{}", String::from_utf8_lossy(&rc.stderr));
+    let out = Command::new(&bin).output().expect("run");
+    assert_eq!(out.status.code(), Some(0), "opt-0 run failed (stack overflow?): {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "1500000\n");
 }
 
 #[test]

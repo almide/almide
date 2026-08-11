@@ -2,65 +2,123 @@
 # NIGHTLY FUZZ VERDICT RENDERER (#924)
 # ====================================
 #
-# Renders one night's campaign output into (a) a markdown verdict for
+# Renders one night's SHARDED campaign into (a) a markdown verdict for
 # $GITHUB_STEP_SUMMARY on stdout and (b) the greppable per-night record line
 # on stderr, so it lands in the job log even with stdout redirected:
 #
-#   fuzz-night: budget_completed=true minutes=5 elapsed=300.1s generated=1052
-#               throughput=210.3prog/min findings=0
+#   fuzz-night: shards=4/4 minutes_planned=20 minutes_delivered=20.0
+#               generated=4210 throughput=210.5prog/min findings=0
 #
-# budget_completed is read from the presence of the fuzzer's own
+# WHY SHARDS. The night used to be one campaign in one job, so one reclaimed
+# runner ("The runner has received a shutdown signal", exit 143 — a JOB-level
+# kill no `set +e` or `timeout-minutes` can catch) cost the WHOLE night and
+# reported identically to a real finding. Measured over the 12 nights after the
+# build was split out (#1014): 10 completed, 2 were killed — a ~1-in-6 kill
+# rate, which makes #924's "14 consecutive full-budget nights" a (5/6)^14 ≈ 8%
+# proposition. The condition was unreachable by arithmetic, not by any property
+# of the compiler.
+#
+# Sharding fixes the arithmetic: N independent jobs, N independent runner
+# lifetimes. A kill now costs 1/N of the night's coverage instead of the night,
+# and the night still produces a verdict from the shards that did report. It
+# also multiplies coverage — N shards of M minutes deliver N*M fuzz-minutes in
+# M minutes of wall clock.
+#
+# A shard that was killed simply has no output file: `upload-artifact` never
+# ran. That absence is the signal, and it is reported as `shards=k/N` rather
+# than being confused with a finding.
+#
+# WHAT MAKES A NIGHT RED. Findings, and only findings. Coverage lost to a
+# reclaimed runner is reported, never fatal — otherwise the infra noise the
+# sharding exists to absorb would come straight back in through the verdict.
+#
+# budget_completed per shard is read from the presence of the fuzzer's own
 # `=== campaign summary ===` block: print_summary (tools/xtarget-fuzz) only
-# runs after the campaign loop exits on its own (time or program budget), so
-# a reclaimed runner cannot fake it. A truncated night reports its last
-# progress line instead.
+# runs after the campaign loop exits on its own (time or program budget), so a
+# reclaimed runner cannot fake it.
 #
 # Lives in a file, not workflow YAML, so it can be run and tested locally.
 # Division of labour: scripts/fuzz-track-record.sh scores nights ACROSS runs
-# from step conclusions; this renders the numbers WITHIN one night.
+# from job conclusions; this aggregates the shards WITHIN one night.
 #
-# Usage: fuzz-night-verdict.sh <fuzz-output.txt> <minutes> <findings>
+# Usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings>
+#   <shard-dir> holds one subdirectory per reporting shard, each containing
+#   fuzz-output.txt (the layout `actions/download-artifact` produces when
+#   several artifacts are downloaded without a `name:`).
 
 set -euo pipefail
+# Byte-order collation, pinned (#1031): the shard walk below is `find | sort`,
+# so an unpinned locale would order the verdict's per-shard rows differently on
+# differently-configured machines — the same drift that made
+# docs/roadmap/README.md churn with no content change.
+export LC_ALL=C
 
-OUT="${1:?usage: fuzz-night-verdict.sh <fuzz-output.txt> <minutes> <findings>}"
-MINUTES="${2:?minutes}"
-FINDINGS="${3:?findings}"
+DIR="${1:?usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings>}"
+MINUTES="${2:?minutes-per-shard}"
+PLANNED="${3:?shards-planned}"
+FINDINGS="${4:?findings}"
 
 echo "## Nightly fuzz verdict"
 echo ""
 
-if [ ! -s "$OUT" ]; then
-  echo "The campaign produced no output — it was killed before it started."
+# One shard = one fuzz-output.txt anywhere under DIR. A killed shard uploaded
+# nothing, so it is absent here — that is exactly what `shards=k/N` reports.
+mapfile -t OUTS < <(find "$DIR" -name fuzz-output.txt -type f 2>/dev/null | sort)
+REPORTING=${#OUTS[@]}
+
+if [ "$REPORTING" -eq 0 ]; then
+  LINE="fuzz-night: shards=0/$PLANNED minutes_planned=$((MINUTES * PLANNED)) minutes_delivered=0 generated=0 findings=$FINDINGS"
+  echo "$LINE" >&2
+  echo '```'; echo "$LINE"; echo '```'
+  echo ""
+  echo "No shard reported: every runner was reclaimed before its campaign could upload."
   exit 0
 fi
 
-# The campaign header pads its columns ("seed     = N"), so the separator is
-# `space*=space*`, not a single "= ".
-SEED=$(grep -oE "seed += +[0-9]+" "$OUT" | tr -s ' ' | head -1 || true)
+COMPLETED=0
+GENERATED=0
+ELAPSED=0
+SEEDS=""
+ROWS=""
+for out in "${OUTS[@]}"; do
+  seed=$(grep -oE "seed += +[0-9]+" "$out" | tr -s ' ' | cut -d' ' -f3 | head -1 || true)
+  if grep -q "^=== campaign summary ===" "$out"; then
+    COMPLETED=$((COMPLETED + 1))
+    g=$(awk '/^  generated /{print $3; exit}' "$out")
+    e=$(awk '/^  elapsed /{gsub(/s$/,"",$3); print $3; exit}' "$out")
+    GENERATED=$((GENERATED + ${g:-0}))
+    ELAPSED=$(awk -v a="$ELAPSED" -v b="${e:-0}" 'BEGIN{printf "%.1f", a+b}')
+    ROWS="${ROWS}| ${seed:-?} | complete | ${g:-?} | ${e:-?}s |"$'\n'
+  else
+    # Truncated: credit what its last progress line saw, so a reclaimed shard
+    # still contributes its real coverage instead of being counted as zero.
+    last=$(grep -E "^ *\[ *[0-9]+s\]" "$out" | tail -1 || true)
+    g=$(echo "$last" | grep -oE 'generated=[0-9]+' | cut -d= -f2 || true)
+    e=$(echo "$last" | grep -oE '\[ *[0-9]+s\]' | grep -oE '[0-9]+' || true)
+    GENERATED=$((GENERATED + ${g:-0}))
+    ELAPSED=$(awk -v a="$ELAPSED" -v b="${e:-0}" 'BEGIN{printf "%.1f", a+b}')
+    ROWS="${ROWS}| ${seed:-?} | truncated | ${g:-?} | ${e:-?}s |"$'\n'
+  fi
+  SEEDS="${SEEDS}${seed:-?} "
+done
 
-if grep -q "^=== campaign summary ===" "$OUT"; then
-  ELAPSED=$(awk '/^  elapsed /{print $3; exit}' "$OUT")
-  GENERATED=$(awk '/^  generated /{print $3; exit}' "$OUT")
-  THROUGHPUT=$(awk '/^  throughput /{print $3; exit}' "$OUT")
-  LINE="fuzz-night: budget_completed=true minutes=$MINUTES elapsed=$ELAPSED generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS"
-else
-  LAST=$(grep -E "^ *\[ *[0-9]+s\]" "$OUT" | tail -1 || true)
-  LINE="fuzz-night: budget_completed=false minutes=$MINUTES last_progress=\"${LAST:-<none>}\" findings=$FINDINGS"
-fi
+DELIVERED=$(awk -v e="$ELAPSED" 'BEGIN{printf "%.1f", e/60}')
+THROUGHPUT=$(awk -v g="$GENERATED" -v e="$ELAPSED" 'BEGIN{printf "%.1f", (e>0)? g*60/e : 0}')
+LINE="fuzz-night: shards=$COMPLETED/$PLANNED reporting=$REPORTING minutes_planned=$((MINUTES * PLANNED)) minutes_delivered=$DELIVERED generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS"
 
 echo "$LINE" >&2
-
 echo '```'
 echo "$LINE"
 echo '```'
 echo ""
-echo "Campaign ${SEED:-seed unknown} — replay a finding with"
-echo '`xtarget-fuzz replay --seed S --index I`'
-
-if grep -q "^=== campaign summary ===" "$OUT"; then
+if [ "$COMPLETED" -lt "$PLANNED" ]; then
+  echo "**$((PLANNED - COMPLETED))** of **$PLANNED** shard(s) did not finish their budget"
+  echo "(runner reclaimed). The night still has a verdict — coverage is reduced,"
+  echo "not absent. This is reported, never fatal: only findings fail the night."
   echo ""
-  echo '```'
-  sed -n '/^=== campaign summary ===/,$p' "$OUT" | head -25
-  echo '```'
 fi
+echo "| seed | budget | programs | elapsed |"
+echo "|------|--------|---------:|--------:|"
+printf '%s' "$ROWS"
+echo ""
+echo "Replay any finding with \`xtarget-fuzz replay --seed S --index I\` (seeds above)."

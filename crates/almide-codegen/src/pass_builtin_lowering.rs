@@ -164,9 +164,9 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
         let value_ty = Ty::Named("Value".into(), vec![]);
         use almide_lang::types::constructor::TypeConstructorId;
         let fn_ref_ty = if is_encode {
-            Ty::Fn { params: vec![elem_ty], ret: Box::new(value_ty) }
+            Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(value_ty) }
         } else {
-            Ty::Fn {
+            Ty::Fn { is_effect: false, 
                 params: vec![value_ty],
                 ret: Box::new(Ty::Applied(
                     TypeConstructorId::Result,
@@ -210,9 +210,9 @@ fn rewrite_call_option_codec(name: Sym, type_name: String, args: Vec<IrExpr>, ty
     let value_ty = Ty::Named("Value".into(), vec![]);
     use almide_lang::types::constructor::TypeConstructorId;
     let fn_ref_ty = if is_encode {
-        Ty::Fn { params: vec![elem_ty], ret: Box::new(value_ty) }
+        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(value_ty) }
     } else {
-        Ty::Fn {
+        Ty::Fn { is_effect: false, 
             params: vec![value_ty],
             ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![elem_ty, Ty::String])),
         }
@@ -234,6 +234,19 @@ fn rewrite_call_option_codec(name: Sym, type_name: String, args: Vec<IrExpr>, ty
 }
 
 fn rewrite_call_named(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, span: Option<Span>) -> IrExpr {
+    // Two disjoint families: the builtins that become a Rust macro, and the
+    // generated / dotted names that become a renamed free-fn call.
+    if matches!(
+        name.as_str(),
+        "assert" | "assert_eq" | "assert_ne" | "assert_some" | "panic" | "println" | "eprintln"
+    ) {
+        return rewrite_call_as_macro(name, args, ty, span);
+    }
+    rewrite_call_rename(name, args, type_args, ty, span)
+}
+
+/// The builtins with no Rust fn behind them: they lower to a macro invocation.
+fn rewrite_call_as_macro(name: Sym, args: Vec<IrExpr>, ty: Ty, span: Option<Span>) -> IrExpr {
     // assert / assert_eq / assert_ne → RustMacro
     if name == "assert" || name == "assert_eq" || name == "assert_ne" {
         // assert(cond, msg) → assert!(cond, "{}", msg)
@@ -290,6 +303,12 @@ fn rewrite_call_named(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, 
         macro_args.extend(args);
         return IrExpr { kind: IrExprKind::RustMacro { name, args: macro_args }, ty, span, def_id: None };
     }
+    unreachable!("rewrite_call_as_macro reached with a non-macro builtin: {}", name)
+}
+
+/// The generated codec helpers and the dotted `Type.method` spellings: same
+/// call, renamed target.
+fn rewrite_call_rename(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, span: Option<Span>) -> IrExpr {
     // __encode_list_T / __decode_list_T
     if name.starts_with("__encode_list_") || name.starts_with("__decode_list_") {
         return rewrite_call_list_codec(name, args, type_args, ty, span);
@@ -400,156 +419,35 @@ fn rewrite_call_method(object: Box<IrExpr>, method: Sym, args: Vec<IrExpr>, type
     }, ty, span, def_id: None }
 }
 
+/// Lower every builtin call in the tree. Only `Call` needs a rule of its own:
+/// every other node just needs its children rewritten, which `map_children`
+/// does exhaustively (it lists every `IrExprKind`, so a lowerable call nested
+/// inside an un-listed or future kind is still reached — this used to be a
+/// silent `other => other` drop; see
+/// docs/roadmap/active/codegen-traversal-totality.md). Statement bodies ride
+/// along through `IrStmt::map_exprs`.
 fn rewrite_expr(expr: IrExpr) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
-
-    let kind = match expr.kind {
+    match expr.kind {
         IrExprKind::Call { target, args, type_args } => {
             let args: Vec<IrExpr> = args.into_iter().map(rewrite_expr).collect();
-
             match target {
-                CallTarget::Named { name } => return rewrite_call_named(name, args, type_args, ty, span),
-                CallTarget::Method { object, method } => return rewrite_call_method(object, method, args, type_args, ty, span),
-                _ => IrExprKind::Call { target, args, type_args },
+                CallTarget::Named { name } => rewrite_call_named(name, args, type_args, ty, span),
+                CallTarget::Method { object, method } => {
+                    rewrite_call_method(object, method, args, type_args, ty, span)
+                }
+                target => IrExpr {
+                    kind: IrExprKind::Call { target, args, type_args },
+                    ty,
+                    span,
+                    def_id: None,
+                },
             }
         }
-
-        // Recurse into all sub-expressions
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(rewrite_expr(*cond)),
-            then: Box::new(rewrite_expr(*then)),
-            else_: Box::new(rewrite_expr(*else_)),
-        },
-        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: rewrite_stmts(stmts),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e))),
-        },
-
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(rewrite_expr(*subject)),
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(rewrite_expr),
-                body: rewrite_expr(arm.body),
-            }).collect(),
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op, left: Box::new(rewrite_expr(*left)), right: Box::new(rewrite_expr(*right)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(rewrite_expr(*operand)),
-        },
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body)), lambda_id,
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(rewrite_expr).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v))).collect(),
-        },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_expr(*expr)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_expr(*expr)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_expr(*expr)) },
-        IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(rewrite_expr(*object)), field,
-        },
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(rewrite_expr(*expr)), field,
-        },
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple, iterable: Box::new(rewrite_expr(*iterable)),
-            body: rewrite_stmts(body),
-        },
-        IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(rewrite_expr(*cond)), body: rewrite_stmts(body),
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_expr(expr) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(rewrite_expr).collect(),
-        },
-        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
-            base: Box::new(rewrite_expr(*base)),
-            fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v))).collect(),
-        },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (rewrite_expr(k), rewrite_expr(v))).collect(),
-        },
-        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(rewrite_expr(*object)),
-            index: Box::new(rewrite_expr(*index)),
-        },
-        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
-            object: Box::new(rewrite_expr(*object)),
-            key: Box::new(rewrite_expr(*key)),
-        },
-        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
-            object: Box::new(rewrite_expr(*object)), index,
-        },
-        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(rewrite_expr(*start)),
-            end: Box::new(rewrite_expr(*end)),
-            inclusive,
-        },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_expr(*expr)) },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_expr(*expr)) },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(rewrite_expr(*expr)),
-            fallback: Box::new(rewrite_expr(*fallback)),
-        },
-        IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(rewrite_expr).collect(),
-        },
-        // Recurse into iterator chains so lambdas inside fold / map / filter
-        // get builtin-lowered (e.g. println → RustMacro).
-        IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
-            source: Box::new(rewrite_expr(*source)),
-            consume,
-            steps: steps.into_iter().map(|s| s.map_exprs(&mut rewrite_expr)).collect(),
-            collector: collector.map_exprs(&mut rewrite_expr),
-        },
-        // Recurse into InlineRust args so `__`-prefixed runtime calls
-        // nested inside them (e.g. `__encode_option_string` inside a
-        // `value.object(pairs)` InlineRust produced by stdlib lowering)
-        // are reached by the `__` prefix transformer.
-        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
-            template,
-            args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a))).collect(),
-        },
-        // Traverse RuntimeCall args so `panic(...)` / `assert_eq(...)` etc.
-        // nested inside a `@intrinsic` fn (e.g. `assert_throws(|| panic(...), msg)`)
-        // get lowered to their RustMacro form instead of staying as free fn calls.
-        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
-            symbol,
-            args: args.into_iter().map(rewrite_expr).collect(),
-        },
-        // Recurse through ownership wrappers inserted by BorrowInsertion /
-        // CloneInsertion so derive-generated `__encode_*` calls living
-        // inside a `Borrow { List { Tuple { __encode_* } } }` spine still
-        // get rewritten to `almide_rt_*`.
-        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
-            expr: Box::new(rewrite_expr(*expr)), as_str, mutable,
-        },
-        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr)) },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr)) },
-        // No builtin lowering applies to this node — recurse into its children
-        // via the exhaustive `map_children` so a lowerable call nested inside an
-        // un-listed / future kind is still reached (was a silent `other => other`
-        // drop). See docs/roadmap/active/codegen-traversal-totality.md.
-        other => {
-            return IrExpr { kind: other, ty, span, def_id: None }
-                .map_children(&mut |e| rewrite_expr(e));
-        }
-    };
-
-    IrExpr { kind, ty, span, def_id: None }
+        kind => IrExpr { kind, ty, span, def_id: None }
+            .map_children(&mut |e| rewrite_expr(e)),
+    }
 }
 
 /// Retype a bare Int / Float literal whose IR type is `Ty::Int` /
@@ -580,24 +478,3 @@ fn coerce_macro_arg(arg: &mut IrExpr, peer_ty: &Ty) {
     }
 }
 
-fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| {
-        let kind = match s.kind {
-            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty, value: rewrite_expr(value),
-            },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_expr(value) },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_expr(expr) },
-            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: rewrite_expr(cond), else_: rewrite_expr(else_),
-            },
-            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: rewrite_expr(value),
-            },
-            // Recurse the exprs of any other statement kind via `map_exprs`
-            // (was a silent drop of e.g. IndexAssign/MapInsert/ListSwap exprs).
-            other => return IrStmt { kind: other, span: s.span }.map_exprs(&mut |e| rewrite_expr(e)),
-        };
-        IrStmt { kind, span: s.span }
-    }).collect()
-}

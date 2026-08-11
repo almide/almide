@@ -62,8 +62,46 @@ impl Checker {
         if !types_mismatch(&expected_resolved, &arg_resolved) {
             return false;
         }
+        // #1055: an `effect (A) -> B` slot accepts BOTH a pure `(A) -> B`
+        // value (running no effects satisfies the permission) and a FALLIBLE
+        // `(A) -> Result[B, String]` one — the effect carrier IS
+        // `Result[_, String]`, so a `!`-using handler already has the slot's
+        // runtime shape. The effect-agnostic structural check above only
+        // covers the pure spelling; this arm admits the carrier spelling.
+        if self.effect_slot_accepts(&expected_resolved, &arg_resolved) {
+            return false;
+        }
         self.emit_call_arg_mismatch(site, &expected, arg_ty, &expected_resolved, &arg_resolved);
         true
+    }
+
+    /// The #1055 effect-slot acceptance: expected is `Fn { is_effect: true }`
+    /// and the argument is a fn whose params match and whose return is the
+    /// slot's return WRAPPED in the effect carrier `Result[B, String]`.
+    /// (The unwrapped pure spelling already passed the structural check.)
+    fn effect_slot_accepts(&self, expected: &Ty, actual: &Ty) -> bool {
+        let Ty::Fn { params: ep, ret: er, is_effect: true } = expected else {
+            return false;
+        };
+        let Ty::Fn { params: ap, ret: ar, .. } = actual else { return false };
+        if ep.len() != ap.len() {
+            return false;
+        }
+        let params_ok = ep.iter().zip(ap.iter()).all(|(e, a)| {
+            !types_mismatch(&self.env.resolve_named(e), &self.env.resolve_named(a))
+        });
+        if !params_ok {
+            return false;
+        }
+        match self.env.resolve_named(ar) {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, args)
+                if args.len() == 2 =>
+            {
+                !types_mismatch(&self.env.resolve_named(er), &self.env.resolve_named(&args[0]))
+                    && matches!(self.env.resolve_named(&args[1]), Ty::String)
+            }
+            _ => false,
+        }
     }
 
     // Fix-it hint for `emit_call_arg_mismatch`: the first Some in a chain of
@@ -149,6 +187,24 @@ impl Checker {
         };
         let tys = MismatchTys { expected, arg: arg_ty, expected_resolved, arg_resolved };
         let hint = self.call_arg_mismatch_hint(fn_name, tys, float_sibling);
+        // #1108 Phase 2b: a FALLIBLE callback into a plain fn-typed slot —
+        // the one shape the bit does not yet flow through (2b-iii). Name the
+        // two working spellings instead of the generic "fix the type".
+        let hint = match (expected_resolved, arg_resolved) {
+            (Ty::Fn { ret: er, .. }, Ty::Fn { ret: ar, .. })
+                if !er.is_result() && ar.is_result() =>
+            {
+                format!(
+                    "The callback is FALLIBLE (`(A) -> Result[..]`) but the slot is total. \
+                     Either declare the slot fallible — `{}: (A) -> B!` — and consume the \
+                     Result in the HOF body, or handle the error inside the lambda \
+                     (`?? fallback` / match). The core list HOFs accept fallible callbacks \
+                     natively; plain-slot transparency for user HOFs is #1108 Phase 2b-iii.",
+                    param_name
+                )
+            }
+            _ => hint,
+        };
         let mut diag = super::err(
             format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
             hint,

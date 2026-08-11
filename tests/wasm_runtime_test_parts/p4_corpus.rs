@@ -195,7 +195,34 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
             return Err(format!("parse errors: {:?}", parser.errors));
         }
 
-        let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+        // The BUNDLED pure-Almide modules the fixture imports, loaded the way
+        // the DRIVER's resolve loads them (parse the embedded source, register
+        // as a user module, lower into `ir.modules`) — so `args.*` bodies land
+        // in the interp's tier-(i) module dispatch instead of falling through
+        // to `Unsupported` (#1217). Allowlisted per module and expanded by
+        // MEASUREMENT (the abstain ledger names what each addition closes):
+        // a module whose fns reach unfloored effect prims would lower fine
+        // here and then abstain per call anyway, so listing it buys nothing.
+        const INTERP_BUNDLED_MODULES: &[&str] = &["args"];
+        let mut bundled: Vec<(String, almide_lang::ast::Program)> = Vec::new();
+        for imp in &prog.imports {
+            let almide_lang::ast::Decl::Import { path, .. } = imp else { continue };
+            let Some(root) = path.first() else { continue };
+            let name = root.as_str();
+            if !INTERP_BUNDLED_MODULES.contains(&name) {
+                continue;
+            }
+            if let Some(src) = almide_lang::stdlib_info::bundled_source(name) {
+                if let Some(p) = almide_lang::parse_cached(src) {
+                    bundled.push((name.to_string(), p.clone()));
+                }
+            }
+        }
+
+        let canon = canonicalize::canonicalize_program(
+            &prog,
+            bundled.iter().map(|(n, p)| (n.as_str(), p, false)),
+        );
         let mut checker = Checker::from_env(canon.env);
         let diags = checker.infer_program(&mut prog);
         let errors: Vec<_> = diags
@@ -211,6 +238,32 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         }
 
         let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
+        // Mirror `lower_one_user_module`'s essentials (compile_driver.rs): infer
+        // the module body, swap in ITS import table for lowering, push the
+        // lowered IrModule. A module type error is a reasoned skip, not a crash.
+        for (name, mod_prog) in &mut bundled {
+            // The DRIVER swallows a bundled module's own check diagnostics (its
+            // reporting path is keyed by user source files, which a bundled
+            // module does not have) and lowers anyway — mirror that exactly;
+            // the 3-way voting gate is the arbiter of whether the result is
+            // faithful, not this recipe.
+            checker.infer_module(mod_prog, name);
+            let (mod_table, _) = almide_frontend::import_table::build_import_table(
+                mod_prog,
+                Some(name),
+                &checker.env.user_modules,
+            );
+            let saved = std::mem::replace(&mut checker.env.import_table, mod_table);
+            let m = almide_frontend::lower::lower_module(
+                name,
+                mod_prog,
+                &checker.env,
+                &checker.type_map,
+                None,
+            );
+            checker.env.import_table = saved;
+            ir.modules.push(m);
+        }
         almide_driver::link_ir(&mut ir);
         Ok(ir)
     });
@@ -237,7 +290,12 @@ fn run_interp_capture(source: &str) -> InterpLeg {
         Err(_) => return InterpLeg::Skip("interp evaluation panicked".to_string()),
     };
     match &outcome.status {
-        RunStatus::Ok | RunStatus::Aborted => InterpLeg::Ran(
+        // `Exited(n)` RAN — it is an explicit `process.exit(n)`, a real
+        // observable outcome the backends reproduce exactly, so it casts a
+        // vote like Ok and Aborted. Folding it into a skip would have hidden
+        // #1124's fixture from the third judge, which is the one that catches
+        // a bug both backends share.
+        RunStatus::Ok | RunStatus::Aborted | RunStatus::Exited(_) => InterpLeg::Ran(
             outcome.exit_code(),
             outcome.stdout.trim().to_string(),
             outcome.stderr.trim().to_string(),
@@ -250,4 +308,5 @@ fn run_interp_capture(source: &str) -> InterpLeg {
         }
     }
 }
+
 

@@ -1,0 +1,12 @@
+// E043: the `__fallible_*` carriers are the INTERNAL form the checker instantiates
+// when a callback propagates — they are not a spelling source may name.
+//
+// The fix is the SAME source the public try_* removal points at: write the
+// core HOF and let the callback's `!` select the fallible form. The carrier is
+// still what runs; it is simply no longer something source names.
+fn parse1(s: String) -> Result[Int, String] = int.parse(s)
+
+fn main() -> Unit = {
+  let r = list.map(["1", "2"], (s) => parse1(s)!)
+  println("r=${r ?? []}")
+}

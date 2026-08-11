@@ -35,7 +35,7 @@ pub fn cmd_init() {
 
     // Generate CLAUDE.md for AI-assisted development
     if !std::path::Path::new("CLAUDE.md").exists() {
-        let claude_md = include_str!("../../docs/CLAUDE_TEMPLATE.md");
+        let claude_md = include_str!("../../docs/project/CLAUDE_TEMPLATE.md");
         if let Err(e) = std::fs::write("CLAUDE.md", claude_md) {
             err(&format!("Failed to write CLAUDE.md: {}", e));
             std::process::exit(1);
@@ -662,14 +662,28 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
+    let mut trapped: Vec<(String, String)> = Vec::new();
     for o in wasm_outcomes {
         match o {
             WasmTestOutcome::Pass { .. } => wasm_pass += 1,
+            // A `Fail` is DIFFERENT IN KIND from the benign fallback classes
+            // (#1166): the wasm leg COMPILED the file, claimed it, and produced
+            // a runtime failure. Whether that is a plain failing test or a
+            // MISCOMPILE only the native re-run can say — so hold the detail
+            // and judge after phase 2: native red → an ordinary FAILED (no
+            // wasm-specific noise); native green → the divergence class the
+            // walls exist to prevent, reported loudly below. Silently folding
+            // it into "via native fallback" hid the #1165 `indirect call type
+            // mismatch` for its whole life locally while CI's Test WASM failed
+            // the PR.
+            WasmTestOutcome::Fail { file, detail } => {
+                trapped.push((file.clone(), detail));
+                fallback.push(file);
+            }
             // CompileError routes to the fallback like everything else here:
             // the native leg re-runs it and reports the diagnostics
             // authoritatively (#862), turning it into a counted FAILED.
-            WasmTestOutcome::Fail { file, .. }
-            | WasmTestOutcome::CompileError { file, .. }
+            WasmTestOutcome::CompileError { file, .. }
             | WasmTestOutcome::Skip { file, .. } => fallback.push(file),
         }
     }
@@ -686,9 +700,51 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     for (file, code) in &native_results {
         if *code != 0 { err(&format!("FAILED: {}", file)); failed += 1; }
     }
-    err(&format!("\n{} via WASM, {} via native fallback, {} failed (of {} files)",
-        wasm_pass, fallback.len().saturating_sub(failed), failed, test_files.len()));
+    // The #1166 divergence class: the wasm leg compiled the file and failed at
+    // runtime, but the AUTHORITATIVE native re-run passed — a wasm-only
+    // miscompile signal, exactly what CI's Test WASM job reds a PR for. Report
+    // each one loudly (still counted "via native fallback": the suite verdict
+    // is native's). A trap whose native re-run ALSO failed is a plain FAILED
+    // test — no wasm-specific noise for those.
+    let native_code: std::collections::HashMap<&String, i32> =
+        native_results.iter().map(|(f, c)| (f, *c)).collect();
+    let diverged: Vec<&(String, String)> = trapped
+        .iter()
+        .filter(|(f, _)| native_code.get(f).copied() == Some(0))
+        .collect();
+    for (file, detail) in &diverged {
+        err(&format!("WASM TRAP {} (compiled for wasm, failed at runtime; native re-run PASSED — CI's Test WASM will fail this)", file));
+        err_no_nl(detail);
+    }
+    // The wasm COVERAGE ratchet's data feed (mission-critical arc): every
+    // file the wasm leg did not pass, one per line, so
+    // proofs/check-wasm-fallback.sh can diff the set against its shrink-only
+    // baseline. Names only under the flag — the summary line stays stable.
+    if std::env::var_os("ALMIDE_FALLBACK_NAMES").is_some() {
+        let mut sorted = fallback.clone();
+        sorted.sort();
+        for f in &sorted {
+            err(&format!("FALLBACK {}", f));
+        }
+    }
+    let trap_note = if diverged.is_empty() {
+        String::new()
+    } else {
+        format!(" ({} after a wasm TRAP)", diverged.len())
+    };
+    err(&format!("\n{} via WASM, {} via native fallback{}, {} failed (of {} files)",
+        wasm_pass, fallback.len().saturating_sub(failed), trap_note, failed, test_files.len()));
     if failed > 0 {
+        std::process::exit(1);
+    }
+    // Pre-push strict mode: a diverged trap fails the run even though the
+    // native re-run passed — CI's Test WASM verdict, surfaced locally instead
+    // of on the PR (#1166).
+    if !diverged.is_empty() && std::env::var_os("ALMIDE_TEST_STRICT_WASM").is_some() {
+        err(&format!(
+            "STRICT WASM: {} file(s) trapped on the wasm leg (native re-run passed; CI's Test WASM will fail)",
+            diverged.len()
+        ));
         std::process::exit(1);
     }
     err(&format!("All {} test file(s) passed", test_files.len()));
@@ -806,7 +862,7 @@ pub enum FmtMode {
     DryRun,
 }
 
-pub fn cmd_fmt(files: &[String], mode: FmtMode) {
+pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
     // Load dependency info from almide.toml (if present)
     let (dep_names, dep_submodules) = load_dep_info_for_fmt();
     // `--check` is a gate: a file that differs, and a file that cannot even be parsed,
@@ -827,10 +883,14 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode) {
             unreadable = true;
             continue;
         }
-        // Auto-manage imports: add missing, remove unused
-        let import_changes = fmt::auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
-        for msg in &import_changes {
-            err(&format!("{}: {}", file, msg));
+        // Auto-manage imports: add missing, remove unused. `--no-import-edit`
+        // keeps the import list byte-for-byte — the stdlib's splice-context
+        // sources would be corrupted by an inserted import line.
+        if !no_import_edit {
+            let import_changes = fmt::auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
+            for msg in &import_changes {
+                err(&format!("{}: {}", file, msg));
+            }
         }
         let formatted = fmt::format_program(&program);
         match mode {

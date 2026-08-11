@@ -12,27 +12,27 @@ test "pass named fn to filter" {
   assert_eq(list.filter([1, 10, 3, 20], is_big), [10, 20])
 }
 
-fn transform(xs: List[Int], f: fn(Int) -> Int, pred: fn(Int) -> Bool) -> List[Int] = xs |> list.map(f) |> list.filter(pred)
+fn transform(xs: List[Int], f: (Int) -> Int, pred: (Int) -> Bool) -> List[Int] = xs |> list.map(f) |> list.filter(pred)
 
 test "multi-fn HOF" {
   assert_eq(transform([1, 2, 3, 4, 5], double, is_big), [6, 8, 10])
 }
 
-fn make_multiplier(factor: Int) -> fn(Int) -> Int = (x) => x * factor
+fn make_multiplier(factor: Int) -> (Int) -> Int = (x) => x * factor
 
 test "closure factory to HOF" {
   let triple = make_multiplier(3)
   assert_eq(list.map([1, 2, 3], triple), [3, 6, 9])
 }
 
-fn curry_add(a: Int) -> fn(Int) -> fn(Int) -> Int = (b) => (c) => a + b + c
+fn curry_add(a: Int) -> (Int) -> (Int) -> Int = (b) => (c) => a + b + c
 
 test "currying" {
   assert_eq(curry_add(1)(2)(3), 6)
   assert_eq(curry_add(10)(20)(30), 60)
 }
 
-fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int = (x) => f(g(x))
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => f(g(x))
 
 test "function composition" {
   let inc = (x) => x + 1

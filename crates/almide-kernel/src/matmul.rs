@@ -6,34 +6,58 @@
 //! the ceiling and we don't reach it; this is the SIMD-dot rung, enough to pass
 //! a scalar inner loop. Used for sdpa's QKᵀ and weights·V.
 
+/// Row-major shape of the product `C(m×n) = A(m×k)·B(k×n)`. Bundles the three
+/// extents so the x86 kernel's edge pass stays inside the parameter budget.
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Copy)]
+struct Dims {
+    m: usize,
+    k: usize,
+    n: usize,
+}
+
 /// Naive tiled-scalar reference (≈ Almide's mul).
 pub fn matmul_naive(a: &[f64], m: usize, k: usize, b: &[f64], n: usize, out: &mut [f64]) {
-    for x in out.iter_mut() {
-        *x = 0.0;
-    }
+    out.fill(0.0);
     const T: usize = 32;
-    let mut i0 = 0;
-    while i0 < m {
-        let i1 = (i0 + T).min(m);
-        let mut k0 = 0;
-        while k0 < k {
-            let k1 = (k0 + T).min(k);
-            let mut j0 = 0;
-            while j0 < n {
-                let j1 = (j0 + T).min(n);
-                for i in i0..i1 {
-                    for kk in k0..k1 {
-                        let aik = a[i * k + kk];
-                        for j in j0..j1 {
-                            out[i * n + j] += aik * b[kk * n + j];
-                        }
-                    }
-                }
-                j0 += T;
+    for i0 in (0..m).step_by(T) {
+        for k0 in (0..k).step_by(T) {
+            for j0 in (0..n).step_by(T) {
+                let tile = Tile {
+                    rows: i0..(i0 + T).min(m),
+                    depth: k0..(k0 + T).min(k),
+                    cols: j0..(j0 + T).min(n),
+                };
+                accumulate_tile(a, k, b, n, out, &tile);
             }
-            k0 += T;
         }
-        i0 += T;
+    }
+}
+
+/// One cache tile of the tiled reference: the (rows × depth × cols) index box
+/// the three outer loops carved out.
+struct Tile {
+    rows: std::ops::Range<usize>,
+    depth: std::ops::Range<usize>,
+    cols: std::ops::Range<usize>,
+}
+
+/// `C[tile.rows, tile.cols] += A[tile.rows, tile.depth] · B[tile.depth, tile.cols]`.
+///
+/// The column span is taken as a slice pair so the innermost loop walks two
+/// contiguous rows — same operation order as the index form it replaced, so the
+/// result stays bit-identical to what the Wyve proof pins.
+fn accumulate_tile(a: &[f64], k: usize, b: &[f64], n: usize, out: &mut [f64], tile: &Tile) {
+    let (c0, c1) = (tile.cols.start, tile.cols.end);
+    for i in tile.rows.clone() {
+        for kk in tile.depth.clone() {
+            let aik = a[i * k + kk];
+            let orow = &mut out[i * n + c0..i * n + c1];
+            let brow = &b[kk * n + c0..kk * n + c1];
+            for (o, bv) in orow.iter_mut().zip(brow) {
+                *o += aik * bv;
+            }
+        }
     }
 }
 
@@ -85,10 +109,8 @@ unsafe fn matmul_register_tiled(a: &[f64], m: usize, k: usize, b: &[f64], n: usi
     use std::arch::x86_64::*;
     let mt = m / 4 * 4;
     let nt = n / 4 * 4;
-    let mut i0 = 0;
-    while i0 < mt {
-        let mut j0 = 0;
-        while j0 < nt {
+    for i0 in (0..mt).step_by(4) {
+        for j0 in (0..nt).step_by(4) {
             let mut c0 = _mm256_setzero_pd();
             let mut c1 = _mm256_setzero_pd();
             let mut c2 = _mm256_setzero_pd();
@@ -104,20 +126,24 @@ unsafe fn matmul_register_tiled(a: &[f64], m: usize, k: usize, b: &[f64], n: usi
             _mm256_storeu_pd(out.as_mut_ptr().add((i0 + 1) * n + j0), c1);
             _mm256_storeu_pd(out.as_mut_ptr().add((i0 + 2) * n + j0), c2);
             _mm256_storeu_pd(out.as_mut_ptr().add((i0 + 3) * n + j0), c3);
-            j0 += 4;
         }
-        i0 += 4;
     }
-    // ragged edges: any (i,j) not in the 4×4-tiled region
-    for i in 0..m {
-        for j in 0..n {
-            if i >= mt || j >= nt {
-                let mut s = 0.0;
-                for kk in 0..k {
-                    s += a[i * k + kk] * b[kk * n + j];
-                }
-                out[i * n + j] = s;
+    scalar_edges(a, b, out, Dims { m, k, n }, mt, nt);
+}
+
+/// The (i, j) cells the 4×4 tiling did not cover: the bottom `m % 4` rows in
+/// full, plus the right `n % 4` columns of every tiled row. Plain scalar dots —
+/// no intrinsics, so this half of the kernel is safe code.
+#[cfg(target_arch = "x86_64")]
+fn scalar_edges(a: &[f64], b: &[f64], out: &mut [f64], d: Dims, mt: usize, nt: usize) {
+    for i in 0..d.m {
+        let first_col = if i < mt { nt } else { 0 };
+        for j in first_col..d.n {
+            let mut s = 0.0;
+            for kk in 0..d.k {
+                s += a[i * d.k + kk] * b[kk * d.n + j];
             }
+            out[i * d.n + j] = s;
         }
     }
 }

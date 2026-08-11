@@ -45,6 +45,9 @@ SUITE = [
     ("fft",          "fft/fft.almd",                     ["fft.rs"],                        "22",       "10",   "line1", ["native", "rust"]),
     ("fft-wasm",     "fft/fft.almd",                     ["fft.rs"],                        "18",       "10",   "line1", ["native", "wasm", "rust"]),
     ("fannkuchredux","fannkuchredux/fannkuchredux.almd", [],                                "11",       "7",    "bytes", None),
+    # onebrc writes/reads a measurements file; the wasm leg has no preopened
+    # dir under `wasmtime run` so the row is native/rust only.
+    ("onebrc",       "onebrc/onebrc.almd",               ["onebrc.rs"],                     "10000000", "50000", "bytes", ["native", "rust"]),
     ("binarytrees",  "binarytrees/binarytrees.almd",     [],                                "18",       "10",   "bytes", None),
     ("mandelbrot",   "mandelbrot/mandelbrot.almd",       [],                                "4000",     "200",  "bytes", None),
 ]
@@ -58,6 +61,7 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "fft": "22",
     "fft-wasm": "16",
     "fannkuchredux": "9",
+    "onebrc": "1000000",
     "binarytrees": "14",
     "mandelbrot": "1000",
 }

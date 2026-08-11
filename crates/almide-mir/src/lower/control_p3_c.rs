@@ -122,9 +122,23 @@ impl LowerCtx {
     /// payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN). Verbatim.
     fn list_elem_eq_call_name_nested_option(elem_ty: &Ty) -> Option<&'static str> {
         use almide_lang::types::constructor::TypeConstructorId as TC;
-        let Ty::Applied(TC::Option, inner) = elem_ty else { return None };
-        if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
-            return Some("list.eq_opt_int");
+        if let Ty::Applied(TC::Option, inner) = elem_ty {
+            if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
+                return Some("list.eq_opt_int");
+            }
+            // `List[Option[String]]` — the String twin (byte compare on both-Some).
+            if inner.len() == 1 && matches!(inner[0], Ty::String) {
+                return Some("list.eq_opt_str");
+            }
+        }
+        // `List[Result[Int/Bool, String]]` — element-wise len-as-tag + i64/byte
+        // payload compare (value_core `list_eq_res_int`, #1134 Shape 2: the
+        // fallible-HOF marker cond `long == [ok(1), err("…")]`). Scalar Ok only
+        // (a Float payload's bit-eq ≠ `==` on -0.0/NaN), String Err only.
+        if let Ty::Applied(TC::Result, ra) = elem_ty {
+            if ra.len() == 2 && matches!(ra[0], Ty::Int | Ty::Bool) && matches!(ra[1], Ty::String) {
+                return Some("list.eq_res_int");
+            }
         }
         None
     }
@@ -279,6 +293,46 @@ impl LowerCtx {
         depth: u32,
     ) -> Option<ValueId> {
         use almide_lang::types::constructor::TypeConstructorId as TC;
+        // A `List[<record>]` — the synthesized loop-helper route (#1134 Shape 1, the
+        // codec `many: List[Inner]` cell): per-element record eq via the record
+        // helper, the identical branchless loop as List[variant] (Tier 2 already
+        // passed — a record is never in `variant_layouts`, so this is the first
+        // tier that can serve it). Gated to a NON-GENERIC Named record with a
+        // resolvable field layout; a field outside the engine fails the ensure and
+        // the site walls (None — honest, never wrong bytes).
+        if let Ty::Applied(TC::List, es) = ty {
+            if es.len() == 1 {
+                if let Ty::Named(n, args) = &es[0] {
+                    if args.is_empty() {
+                        if let Some((_names, ftys)) = self.aggregate_field_tys(&es[0]) {
+                            let key = n.as_str().to_string();
+                            if self.ensure_list_record_eq_helper(&key, &ftys) {
+                                let name = self.list_record_eq_helper_name(&key);
+                                return Some(self.emit_eq_helper_call(name, lv, rv));
+                            }
+                            return None;
+                        }
+                    }
+                }
+                // `List[Option[<record>]]` (the codec `lc: List[Inner?]` eq cell,
+                // #1134): the synthesized loop over the option-element helper —
+                // tag eq per element, the record compare guarded to both-Some.
+                if let Ty::Applied(TC::Option, oa) = &es[0] {
+                    if let [Ty::Named(n, args)] = &oa[..] {
+                        if args.is_empty() && self.custom_variant_type_name(&oa[0]).is_none() {
+                            if let Some((_names, ftys)) = self.aggregate_field_tys(&oa[0]) {
+                                let key = n.as_str().to_string();
+                                if self.ensure_list_opt_record_eq_helper(&key, &ftys) {
+                                    let name = self.list_opt_record_eq_helper_name(&key);
+                                    return Some(self.emit_eq_helper_call(name, lv, rv));
+                                }
+                                return None;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if let Ty::Applied(TC::Option, oa) = ty {
             if oa.len() == 1 {
                 if !is_heap_ty(&oa[0]) {
@@ -305,7 +359,7 @@ impl LowerCtx {
     /// Tuple/record `==` over two materialized block HANDLES: load each declaration-order
     /// uniform slot (a heap field as its owned handle, a scalar as its value), recurse the
     /// typed eq per field, AND-fold. An empty aggregate compares equal.
-    fn aggregate_eq_from_handles(
+    pub(crate) fn aggregate_eq_from_handles(
         &mut self,
         hl: ValueId,
         hr: ValueId,

@@ -29,7 +29,10 @@ fn dep_paths_for(path: &str) -> Vec<(almide::project::PkgId, std::path::PathBuf)
         if toml.exists() {
             if let Ok(proj) = almide::project::parse_toml(&toml) {
                 if let Ok(deps) = almide::project_fetch::fetch_all_deps(&proj) {
-                    return deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect();
+                    return deps
+                        .into_iter()
+                        .map(|fd| (fd.pkg_id, fd.source_dir))
+                        .collect();
                 }
             }
             return Vec::new();

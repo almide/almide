@@ -305,259 +305,7 @@ impl LowerCtx {
     /// single match, unchanged relative order.
     fn lower_heap_result_arm_option(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         match &arm.kind {
-            // A direct Option ctor arm (`if c then Some(x*2) else None` — the filter_map / map
-            // closure body): materialize the 0-or-1-element Option block + Consume (move-out)
-            // — the SAME per-arm `"im"` balance as a literal arm (init-agnostic `Alloc` = `i`,
-            // `Consume` = `m`). `Some`'s payload must be a lowerable scalar (a heap payload
-            // aliases its element — a later brick; it falls out of the subset here).
-            // A HEAP payload (`Some(string_var)` — an `Option[String]`) materializes a 0-or-1-
-            // element `DynListStr` (Machinery 2): the owned String is MOVED into slot 0 (cert `m`)
-            // and the whole Option is freed recursively (`DropListStr`) at scope end. Same `Alloc`
-            // = `i` + `Consume` = `m` per-arm balance as the scalar case; reuses the proven
-            // List[String] cert (init-agnostic). Only a Var payload (the owned slice, let-bound).
-            // A `some(<record>)` arm — Option wrapping a heap RECORD (porta find_eq_pos's
-            // `some({key: key, val: val})`). Materialize the owned record payload
-            // (`try_lower_record_construct`, recursive-drop), wrap it in the 0-or-1 Option, and route
-            // the Option's scope-end drop to the recursive `$__drop_<R>` (`Op::DropWrapperRec`) so the
-            // record's nested heap fields are freed — NOT the flat `DropListStr` that leaks them. Same
-            // per-arm `"im"` balance (Alloc `i` + the move-out `Consume` `m`); the record-construct's
-            // transient temps are freed within the arm (`drop_arm_locals`). Gated on the record needing
-            // a recursive drop (`record_or_anon_drop_type_name`) — a scalar-only record has no
-            // `$__drop_<R>` and is not reached here (it would fall through to the deferred path).
-            IrExprKind::OptionSome { expr }
-                if matches!(expr.kind, IrExprKind::Record { .. })
-                    && self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                let repr = repr_of(result_ty).ok()?;
-                let drop_fn = self.record_or_anon_drop_type_name(&expr.ty)?;
-                let piece = self.try_lower_record_construct(expr)?;
-                let obj = self.materialize_opt_aggregate_some(piece, repr, drop_fn);
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            // `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload as a MATCH/if ARM
-            // value (the option-of-variant shape, `try_lower_option_ctor`'s BIND-position twin,
-            // binds_p4.rs — never mirrored here). Build the variant block
-            // (`try_lower_variant_ctor`), move it into the 1-element Option. Drop routing by the
-            // payload's OWN discipline: a recursive-drop variant routes "optrec:<Type>" → the
-            // generated `$__drop_<Type>` frees the payload (fields, then block) then the option
-            // block; a flat variant (no heap fields) uses the Some(string) shape — DropListStr's
-            // flat slot-0 free IS its exact drop. Checked BEFORE the generic Named-call arm
-            // further below (a ctor is NOT a real wasm fn — `try_lower_variant_ctor` inlines its
-            // block construction at every call site, so the plain Named-call route would emit an
-            // unlinked call).
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind,
-                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                        if self.variant_layouts.ctor_to_type.contains_key(name.as_str())) =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                let repr = repr_of(result_ty).ok()?;
-                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind
-                else {
-                    return None;
-                };
-                let type_name = self.variant_layouts.ctor_to_type.get(name.as_str())?.clone();
-                let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
-                    crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
-                });
-                let piece = self.try_lower_variant_ctor(expr)?;
-                let obj = if needs_rec {
-                    self.materialize_opt_aggregate_some(piece, repr, type_name)
-                } else {
-                    self.materialize_opt_str_some(piece, repr)
-                };
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            // `some((s1, s2))` — a `(String, String)` TUPLE payload as an if/match ARM
-            // value (the if-merged Option ctor, `try_lower_option_ctor`'s bind-position
-            // twin — the fuzz index-374 divergence): build the tuple (both slots owned
-            // Strings), move it into the 1-element Option routed to
-            // `$__drop_opt_str_str`. Per-arm `"im"` balance (Alloc `i` + move-out
-            // `Consume` `m`); transient temps freed within the arm.
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind, IrExprKind::Tuple { .. })
-                    && matches!(&expr.ty,
-                        Ty::Tuple(tys) if tys.len() == 2
-                            && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                let repr = repr_of(result_ty).ok()?;
-                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
-                let elements = elements.clone();
-                let piece = self.try_lower_tuple_construct(&elements)?;
-                let obj = self.materialize_opt_str_some(piece, repr);
-                self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            // `some((i, s))` — an `(Int, String)` TUPLE payload (the zip_first merge arm:
-            // `(some(a), some(b)) => some((a, b))` after the tuple-variant desugar). The fresh
-            // owned tuple (`lower_owned_heap_field` — literal construct or borrowed-Var Dup)
-            // moves into the 1-element Option whose scope drop is the RECURSIVE
-            // `$__drop_list_int_str` (`materialize_opt_int_str_some`, which Consumes the piece)
-            // — the same shape as try_lower_option_ctor's `list.find` case. Per-arm `"im"`
-            // balance: the Option `Alloc` (`i`) + the move-out `Consume` (`m`).
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2
-                        && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                let repr = repr_of(result_ty).ok()?;
-                let piece = self.lower_owned_heap_field(expr)?;
-                let obj = self.materialize_opt_int_str_some(piece, repr);
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            // `some((x, y))` — an ALL-SCALAR tuple literal payload as a MATCH/if ARM value
-            // (`match e { Click{x,y,..} => some((x,y)), _ => none }` — extract_click_positions,
-            // the closure body a `list.filter_map` lambda lifts). Build the flat tuple block,
-            // move it into the 1-element Option: the payload owns NO inner heap, so
-            // `materialize_opt_str_some`'s flat slot-0 free is EXACT (the SAME shape
-            // `try_lower_option_ctor`'s BIND-position twin already proves, binds_p4.rs — this
-            // arm-position mirror was simply never added). Checked BEFORE the generic
-            // `is_heap_ty` fallback below, whose inner `match &expr.kind` has no `Tuple` case
-            // (it only covers Var / Named-call / pure-String-Module-call payloads) and would
-            // otherwise decline a Tuple literal outright.
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind, IrExprKind::Tuple { .. })
-                    && matches!(&expr.ty,
-                        Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t))) =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                let repr = repr_of(result_ty).ok()?;
-                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
-                let elements = elements.clone();
-                let piece = self.try_lower_scalar_tuple_construct(&elements)?;
-                let obj = self.materialize_opt_str_some(piece, repr);
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            // `some((k, v))` — a `(String, <scalar>)` tuple literal payload as a MATCH/if ARM
-            // value (`map.find`'s `__skv_find_some(k, v) = Some((kc, v))`, B41's find-with-
-            // fallback shape). Build the tuple (`try_lower_tuple_construct`, one heap slot —
-            // the String), move it into the 1-element Option whose scope drop routes to the
-            // RECURSIVE `$__drop_opt_str_int` (`variant_drop_handles = "opt_str_int"`, B41) —
-            // the flat `DropListStr` a bare `is_heap_ty` fallback would use only frees the
-            // TUPLE's own refcount, leaking its String (the same class of bug B41's DIAGNOSIS
-            // caught for the BIND position; this is its ARM-position mirror in
-            // `try_lower_option_ctor`, binds_p4.rs, never ported here). Checked BEFORE the
-            // generic `is_heap_ty` fallback, which has no `Tuple` case at all.
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind, IrExprKind::Tuple { .. })
-                    && matches!(&expr.ty,
-                        Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1])) =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                let repr = repr_of(result_ty).ok()?;
-                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
-                let elements = elements.clone();
-                let piece = self.try_lower_tuple_construct(&elements)?;
-                let obj = self.materialize_opt_str_some(piece, repr);
-                self.variant_drop_handles.insert(obj, "opt_str_int".to_string());
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
-                let repr = repr_of(result_ty).ok()?;
-                // The owned String payload: a let-bound Var (its handle), or a direct user-call
-                // that RETURNS a fresh owned String (CallFn result, rc 1) — materialized into the
-                // Option below (its `Consume` `m` balances the alloc/call `i`).
-                let piece = match &expr.kind {
-                    // `some(v)` over a Var STILL OWNED elsewhere (a borrowed param, or a local with
-                    // its own scope-end drop): `Op::Dup` a fresh owned reference (cert `a`) to MOVE
-                    // into the Option, leaving the original to drop once at its scope — never a bare
-                    // move-out `m` the checker rejects (param → `am`, owned local → `iamd`).
-                    IrExprKind::Var { id } => {
-                        let src = self.value_for(*id).ok()?;
-                        let p = self.fresh_value();
-                        self.ops.push(Op::Dup { dst: p, src });
-                        p
-                    }
-                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                        let lowered = self.lower_call_args(args).ok()?;
-                        let pr = repr_of(&expr.ty).ok()?;
-                        let p = self.fresh_value();
-                        self.ops.push(Op::CallFn {
-                            dst: Some(p),
-                            name: name.as_str().to_string(),
-                            args: lowered,
-                            result: Some(pr),
-                        });
-                        p
-                    }
-                    // `some(string.slice(s, …))` / `some(list.drop_end(stack, 1))` — a PURE
-                    // Module call yielding a fresh owned HEAP payload (String, or the fold-step's
-                    // List[String]): the self-host call's result moves into the Option
-                    // (retain-removed — the Option is the sole owner); its arg temps free within
-                    // the arm frame below. The moved-in payload's recursive free is the CALLER's
-                    // (per the option's bind-site drop routing), not this arm's.
-                    IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                        if is_heap_ty(&expr.ty) =>
-                    {
-                        // Arg temps this call materializes must free WITHIN the arm — a per-arm
-                        // temp left to the FUNCTION epilogue would rc_dec an UNINITIALIZED local
-                        // when the OTHER arm ran (garbage rc_dec → trap; the fold-step `["("]`
-                        // concat temp reproduced exactly this).
-                        let arm_mark = self.live_heap_handles.len();
-                        let p = self
-                            .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)
-                            .ok()?;
-                        self.live_heap_handles.retain(|h| *h != p);
-                        self.drop_arm_locals(arm_mark);
-                        p
-                    }
-                    // `some(stack + ["("])` — the fold-step push: a fresh owned concat list
-                    // moves into the Option directly (no Dup — sole owner). The concat's
-                    // materialized RHS-element temp frees WITHIN the arm (same trap avoidance
-                    // as the Module-call case above).
-                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
-                        let arm_mark = self.live_heap_handles.len();
-                        let p = self.try_lower_concat_list(expr)?;
-                        self.live_heap_handles.retain(|h| *h != p);
-                        self.drop_arm_locals(arm_mark);
-                        p
-                    }
-                    // `some("café")` — a String LITERAL payload. The bare-payload arm
-                    // right above already lowers a literal this way (`Init::Str` into a
-                    // fresh owned block); wrapping it in `Some` needs the same alloc, then
-                    // the move into the Option. Missing it walled the whole enclosing
-                    // function — `let v = ok(if c then some("ΑΒΓ") else some("café"))`,
-                    // the archived café fuzz finding, is exactly two literal Some arms.
-                    // The block is fresh and rc 1, so it moves in with no Dup.
-                    IrExprKind::LitStr { value } => {
-                        let pr = repr_of(&expr.ty).ok()?;
-                        let p = self.fresh_value();
-                        self.ops.push(Op::Alloc {
-                            dst: p,
-                            repr: pr,
-                            init: Init::Str(value.clone()),
-                        });
-                        p
-                    }
-                    _ => return None,
-                };
-                let obj = self.materialize_opt_str_some(piece, repr);
-                self.ops.push(Op::Consume { v: obj });
-                Some(obj)
-            }
-            IrExprKind::OptionSome { expr } => {
-                let payload = self.lower_scalar_value(expr)?;
-                let repr = repr_of(result_ty).ok()?;
-                let obj = self.fresh_value();
-                self.ops.push(Op::Alloc { dst: obj, repr, init: Init::OptSome { payload } });
-                self.ops.push(Op::Consume { v: obj });
-                Some(obj)
-            }
+            IrExprKind::OptionSome { expr } => self.lower_heap_result_arm_some(expr, result_ty),
             // A `None` for an `Option[heap]` is the 0-element `DynListStr` (so `DropListStr` frees
             // it uniformly); a scalar Option keeps `Init::OptNone`.
             IrExprKind::OptionNone if is_heap_elem_list_ty(result_ty) => {
@@ -575,5 +323,308 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// The `some(<payload>)` half of [`Self::lower_heap_result_arm_option`]'s
+    /// router, by payload shape: the AGGREGATE payloads first (each with its own
+    /// exact drop routing — [`Self::arm_some_aggregate`]), then a general heap
+    /// payload, then a scalar one.
+    ///
+    /// `arm_some_aggregate`'s outer `Option` is the SELECTION and its inner one the
+    /// RESULT, so an aggregate arm whose body declines still ends the whole
+    /// lowering — never falls through to the heap path. That commit-once behavior
+    /// is what the former single `match`'s `?`-in-arm-body spelled, and several arm
+    /// bodies genuinely rely on it.
+    fn lower_heap_result_arm_some(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        if let Some(selected) = self.arm_some_aggregate(expr, result_ty) {
+            return selected;
+        }
+        if is_heap_ty(&expr.ty) {
+            let repr = repr_of(result_ty).ok()?;
+            // The owned String payload: a let-bound Var (its handle), or a direct user-call
+            // that RETURNS a fresh owned String (CallFn result, rc 1) — materialized into the
+            // Option below (its `Consume` `m` balances the alloc/call `i`).
+            let piece = self.arm_some_heap_piece(expr)?;
+            let obj = self.materialize_opt_str_some(piece, repr);
+            self.ops.push(Op::Consume { v: obj });
+            return Some(obj);
+        }
+        let payload = self.lower_scalar_value(expr)?;
+        let repr = repr_of(result_ty).ok()?;
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::OptSome { payload } });
+        self.ops.push(Op::Consume { v: obj });
+        Some(obj)
+    }
+
+    /// The AGGREGATE `some(<payload>)` arms — a heap record, a custom-variant ctor,
+    /// or one of the four tuple shapes — each of which needs its OWN drop routing
+    /// rather than the generic heap path's flat `DropListStr`. `None` means "no arm
+    /// selected"; `Some(None)` means an arm selected and declined (see
+    /// [`Self::lower_heap_result_arm_some`]). Arms are in their original order.
+    fn arm_some_aggregate(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<Option<ValueId>> {
+        Some(match &expr.kind {
+            IrExprKind::Record { .. }
+                if self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
+            {
+                self.arm_some_record(expr, result_ty)
+            }
+            IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+            {
+                self.arm_some_variant_ctor(expr, result_ty)
+            }
+            IrExprKind::Tuple { .. }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2
+                        && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
+            {
+                self.arm_some_str_str_tuple(expr, result_ty)
+            }
+            _ if matches!(&expr.ty,
+                Ty::Tuple(tys) if tys.len() == 2
+                    && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
+            {
+                self.arm_some_int_str_tuple(expr, result_ty)
+            }
+            IrExprKind::Tuple { .. }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t))) =>
+            {
+                self.arm_some_scalar_tuple(expr, result_ty)
+            }
+            IrExprKind::Tuple { .. }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+                        && !is_heap_ty(&tys[1])) =>
+            {
+                self.arm_some_str_scalar_tuple(expr, result_ty)
+            }
+            _ => return None,
+        })
+    }
+
+    /// A `some(<record>)` arm — Option wrapping a heap RECORD (porta find_eq_pos's
+    /// `some({key: key, val: val})`). Materialize the owned record payload
+    /// (`try_lower_record_construct`, recursive-drop), wrap it in the 0-or-1 Option, and route
+    /// the Option's scope-end drop to the recursive `$__drop_<R>` (`Op::DropWrapperRec`) so the
+    /// record's nested heap fields are freed — NOT the flat `DropListStr` that leaks them. Same
+    /// per-arm `"im"` balance (Alloc `i` + the move-out `Consume` `m`); the record-construct's
+    /// transient temps are freed within the arm (`drop_arm_locals`). Gated on the record needing
+    /// a recursive drop (`record_or_anon_drop_type_name`) — a scalar-only record has no
+    /// `$__drop_<R>` and is not reached here (it would fall through to the deferred path).
+    fn arm_some_record(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let repr = repr_of(result_ty).ok()?;
+        let drop_fn = self.record_or_anon_drop_type_name(&expr.ty)?;
+        let piece = self.try_lower_record_construct(expr)?;
+        let obj = self.materialize_opt_aggregate_some(piece, repr, drop_fn);
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+            
+            
+    }
+
+    /// `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload as a MATCH/if ARM
+    /// value (the option-of-variant shape, `try_lower_option_ctor`'s BIND-position twin,
+    /// binds_p4.rs — never mirrored here). Build the variant block
+    /// (`try_lower_variant_ctor`), move it into the 1-element Option. Drop routing by the
+    /// payload's OWN discipline: a recursive-drop variant routes "optrec:<Type>" → the
+    /// generated `$__drop_<Type>` frees the payload (fields, then block) then the option
+    /// block; a flat variant (no heap fields) uses the Some(string) shape — DropListStr's
+    /// flat slot-0 free IS its exact drop. Checked BEFORE the generic Named-call arm
+    /// further below (a ctor is NOT a real wasm fn — `try_lower_variant_ctor` inlines its
+    /// block construction at every call site, so the plain Named-call route would emit an
+    /// unlinked call).
+    fn arm_some_variant_ctor(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let repr = repr_of(result_ty).ok()?;
+        let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind
+        else {
+            return None;
+        };
+        let type_name = self.variant_layouts.ctor_to_type.get(name.as_str())?.clone();
+        let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        });
+        let piece = self.try_lower_variant_ctor(expr)?;
+        let obj = if needs_rec {
+            self.materialize_opt_aggregate_some(piece, repr, type_name)
+        } else {
+            self.materialize_opt_str_some(piece, repr)
+        };
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+            
+            
+    }
+
+    /// `some((s1, s2))` — a `(String, String)` TUPLE payload as an if/match ARM
+    /// value (the if-merged Option ctor, `try_lower_option_ctor`'s bind-position
+    /// twin — the fuzz index-374 divergence): build the tuple (both slots owned
+    /// Strings), move it into the 1-element Option routed to
+    /// `$__drop_opt_str_str`. Per-arm `"im"` balance (Alloc `i` + move-out
+    /// `Consume` `m`); transient temps freed within the arm.
+    fn arm_some_str_str_tuple(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let repr = repr_of(result_ty).ok()?;
+        let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+        let elements = elements.clone();
+        let piece = self.try_lower_tuple_construct(&elements)?;
+        let obj = self.materialize_opt_str_some(piece, repr);
+        self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+            
+            
+    }
+
+    /// `some((i, s))` — an `(Int, String)` TUPLE payload (the zip_first merge arm:
+    /// `(some(a), some(b)) => some((a, b))` after the tuple-variant desugar). The fresh
+    /// owned tuple (`lower_owned_heap_field` — literal construct or borrowed-Var Dup)
+    /// moves into the 1-element Option whose scope drop is the RECURSIVE
+    /// `$__drop_list_int_str` (`materialize_opt_int_str_some`, which Consumes the piece)
+    /// — the same shape as try_lower_option_ctor's `list.find` case. Per-arm `"im"`
+    /// balance: the Option `Alloc` (`i`) + the move-out `Consume` (`m`).
+    fn arm_some_int_str_tuple(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let repr = repr_of(result_ty).ok()?;
+        let piece = self.lower_owned_heap_field(expr)?;
+        let obj = self.materialize_opt_int_str_some(piece, repr);
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+            
+            
+    }
+
+    /// `some((x, y))` — an ALL-SCALAR tuple literal payload as a MATCH/if ARM value
+    /// (`match e { Click{x,y,..} => some((x,y)), _ => none }` — extract_click_positions,
+    /// the closure body a `list.filter_map` lambda lifts). Build the flat tuple block,
+    /// move it into the 1-element Option: the payload owns NO inner heap, so
+    /// `materialize_opt_str_some`'s flat slot-0 free is EXACT (the SAME shape
+    /// `try_lower_option_ctor`'s BIND-position twin already proves, binds_p4.rs — this
+    /// arm-position mirror was simply never added). Checked BEFORE the generic
+    /// `is_heap_ty` fallback below, whose inner `match &expr.kind` has no `Tuple` case
+    /// (it only covers Var / Named-call / pure-String-Module-call payloads) and would
+    /// otherwise decline a Tuple literal outright.
+    fn arm_some_scalar_tuple(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let repr = repr_of(result_ty).ok()?;
+        let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+        let elements = elements.clone();
+        let piece = self.try_lower_scalar_tuple_construct(&elements)?;
+        let obj = self.materialize_opt_str_some(piece, repr);
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+            
+            
+    }
+
+    /// `some((k, v))` — a `(String, <scalar>)` tuple literal payload as a MATCH/if ARM
+    /// value (`map.find`'s `__skv_find_some(k, v) = Some((kc, v))`, B41's find-with-
+    /// fallback shape). Build the tuple (`try_lower_tuple_construct`, one heap slot —
+    /// the String), move it into the 1-element Option whose scope drop routes to the
+    /// RECURSIVE `$__drop_opt_str_int` (`variant_drop_handles = "opt_str_int"`, B41) —
+    /// the flat `DropListStr` a bare `is_heap_ty` fallback would use only frees the
+    /// TUPLE's own refcount, leaking its String (the same class of bug B41's DIAGNOSIS
+    /// caught for the BIND position; this is its ARM-position mirror in
+    /// `try_lower_option_ctor`, binds_p4.rs, never ported here). Checked BEFORE the
+    /// generic `is_heap_ty` fallback, which has no `Tuple` case at all.
+    fn arm_some_str_scalar_tuple(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let repr = repr_of(result_ty).ok()?;
+        let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+        let elements = elements.clone();
+        let piece = self.try_lower_tuple_construct(&elements)?;
+        let obj = self.materialize_opt_str_some(piece, repr);
+        self.variant_drop_handles.insert(obj, "opt_str_int".to_string());
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+            
+            
+    }
+
+    /// The OWNED heap payload a general `some(<heap>)` arm moves into the Option.
+    fn arm_some_heap_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        Some(match &expr.kind {
+            // `some(v)` over a Var STILL OWNED elsewhere (a borrowed param, or a local with
+            // its own scope-end drop): `Op::Dup` a fresh owned reference (cert `a`) to MOVE
+            // into the Option, leaving the original to drop once at its scope — never a bare
+            // move-out `m` the checker rejects (param → `am`, owned local → `iamd`).
+            IrExprKind::Var { id } => {
+                let src = self.value_for(*id).ok()?;
+                let p = self.fresh_value();
+                self.ops.push(Op::Dup { dst: p, src });
+                p
+            }
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let lowered = self.lower_call_args(args).ok()?;
+                let pr = repr_of(&expr.ty).ok()?;
+                let p = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(p),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(pr),
+                });
+                p
+            }
+            // `some(string.slice(s, …))` / `some(list.drop_end(stack, 1))` — a PURE
+            // Module call yielding a fresh owned HEAP payload (String, or the fold-step's
+            // List[String]): the self-host call's result moves into the Option
+            // (retain-removed — the Option is the sole owner); its arg temps free within
+            // the arm frame below. The moved-in payload's recursive free is the CALLER's
+            // (per the option's bind-site drop routing), not this arm's.
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if is_heap_ty(&expr.ty) =>
+            {
+                // Arg temps this call materializes must free WITHIN the arm — a per-arm
+                // temp left to the FUNCTION epilogue would rc_dec an UNINITIALIZED local
+                // when the OTHER arm ran (garbage rc_dec → trap; the fold-step `["("]`
+                // concat temp reproduced exactly this).
+                let arm_mark = self.live_heap_handles.len();
+                let p = self
+                    .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)
+                    .ok()?;
+                self.live_heap_handles.retain(|h| *h != p);
+                self.drop_arm_locals(arm_mark);
+                p
+            }
+            // `some(stack + ["("])` — the fold-step push: a fresh owned concat list
+            // moves into the Option directly (no Dup — sole owner). The concat's
+            // materialized RHS-element temp frees WITHIN the arm (same trap avoidance
+            // as the Module-call case above).
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let p = self.try_lower_concat_list(expr)?;
+                self.live_heap_handles.retain(|h| *h != p);
+                self.drop_arm_locals(arm_mark);
+                p
+            }
+            // `some("café")` — a String LITERAL payload. The bare-payload arm
+            // right above already lowers a literal this way (`Init::Str` into a
+            // fresh owned block); wrapping it in `Some` needs the same alloc, then
+            // the move into the Option. Missing it walled the whole enclosing
+            // function — `let v = ok(if c then some("ΑΒΓ") else some("café"))`,
+            // the archived café fuzz finding, is exactly two literal Some arms.
+            // The block is fresh and rc 1, so it moves in with no Dup.
+            IrExprKind::LitStr { value } => {
+                let pr = repr_of(&expr.ty).ok()?;
+                let p = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: p,
+                    repr: pr,
+                    init: Init::Str(value.clone()),
+                });
+                p
+            }
+            _ => return None,
+        })
     }
 }

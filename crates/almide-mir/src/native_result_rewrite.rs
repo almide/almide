@@ -53,14 +53,20 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
                 t.const_vals.insert(*dst, *value);
                 out.push(op);
             }
-            Op::Alloc { dst, init: Init::Str(_), .. } => {
+            Op::Alloc {
+                dst,
+                init: Init::Str(_),
+                ..
+            } => {
                 t.str_allocs.insert(*dst);
                 out.push(op);
             }
             // Producer window opens: a len-1 DynListStr alloc.
-            Op::Alloc { dst, init: Init::DynListStr { len }, .. }
-                if t.const_vals.get(len) == Some(&1) =>
-            {
+            Op::Alloc {
+                dst,
+                init: Init::DynListStr { len },
+                ..
+            } if t.const_vals.get(len) == Some(&1) => {
                 let dst = *dst;
                 t.pending.insert(
                     dst,
@@ -74,22 +80,37 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
                 // NOT emitted — replaced by the ResMake* at completion, or
                 // flushed back verbatim if the window is abandoned (#1100).
             }
-            Op::Prim { kind: PrimKind::Handle, dst: Some(_), args } if args.len() == 1 => {
+            Op::Prim {
+                kind: PrimKind::Handle,
+                dst: Some(_),
+                args,
+            } if args.len() == 1 => {
                 t.track_handle(op, &mut out);
             }
-            Op::IntBinOp { op: crate::IntOp::Add, .. } => t.track_addr_add(op, &mut out),
-            Op::Prim { kind: PrimKind::Store { .. }, dst: None, args } if args.len() == 2 => {
+            Op::IntBinOp {
+                op: crate::IntOp::Add,
+                ..
+            } => t.track_addr_add(op, &mut out),
+            Op::Prim {
+                kind: PrimKind::Store { .. },
+                dst: None,
+                args,
+            } if args.len() == 2 => {
                 t.track_store(op, &mut out);
             }
-            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, dst: Some(_), args }
-                if args.len() == 1 && t.res_addrs.contains_key(&args[0]) =>
-            {
+            Op::Prim {
+                kind: PrimKind::Load { .. } | PrimKind::LoadHandle,
+                dst: Some(_),
+                args,
+            } if args.len() == 1 && t.res_addrs.contains_key(&args[0]) => {
                 t.track_res_load(op, &mut out);
             }
             // A Consume of a rewritten result value: the carrier is
             // scalar-like to the verifier (no object) — drop the op.
             Op::Consume { v } if t.res_vals.contains(v) => {}
-            Op::CallFn { dst: Some(d), name, .. } if result_fns.contains(name) => {
+            Op::CallFn {
+                dst: Some(d), name, ..
+            } if result_fns.contains(name) => {
                 t.res_vals.insert(*d);
                 out.push(op);
             }
@@ -153,7 +174,12 @@ impl ResultWindowTracker {
     /// emitted — if it feeds a recognized store it dies with the window;
     /// otherwise the sweep keeps it and the render walls honestly as before.
     fn track_handle(&mut self, op: Op, out: &mut Vec<Op>) {
-        let Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } = &op else {
+        let Op::Prim {
+            kind: PrimKind::Handle,
+            dst: Some(d),
+            args,
+        } = &op
+        else {
             unreachable!("caller matched the handle prim")
         };
         let (d, a) = (*d, args[0]);
@@ -175,7 +201,13 @@ impl ResultWindowTracker {
     /// The `Add` arm: an offset add over a window/res handle becomes address
     /// knowledge (not emitted); anything else passes through.
     fn track_addr_add(&mut self, op: Op, out: &mut Vec<Op>) {
-        let Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } = &op else {
+        let Op::IntBinOp {
+            dst,
+            op: crate::IntOp::Add,
+            a,
+            b,
+        } = &op
+        else {
             unreachable!("caller matched the add")
         };
         let (dst, a) = (*dst, *a);
@@ -197,7 +229,12 @@ impl ResultWindowTracker {
     /// payload (offset 12, width 8) or completes the Ok producer (the len:=0
     /// tag store at offset 4). Any other store passes through.
     fn track_store(&mut self, op: Op, out: &mut Vec<Op>) {
-        let Op::Prim { kind: PrimKind::Store { width }, dst: None, args } = &op else {
+        let Op::Prim {
+            kind: PrimKind::Store { width },
+            dst: None,
+            args,
+        } = &op
+        else {
             unreachable!("caller matched the store prim")
         };
         let (width, addr, stored) = (*width, args[0], args[1]);
@@ -229,9 +266,15 @@ impl ResultWindowTracker {
         } else {
             return;
         }
-        let Some(p) = self.remove_window(r) else { return };
+        let Some(p) = self.remove_window(r) else {
+            return;
+        };
         let _ = p; // Err completes: the buffered window ops are REPLACED.
-        out.push(Op::Prim { kind: PrimKind::ResMakeErrStr, dst: Some(r), args: vec![payload] });
+        out.push(Op::Prim {
+            kind: PrimKind::ResMakeErrStr,
+            dst: Some(r),
+            args: vec![payload],
+        });
         self.res_vals.insert(r);
     }
 
@@ -240,10 +283,16 @@ impl ResultWindowTracker {
     /// all) FLUSHES the buffered window back instead — re-emitting is possible
     /// now, so R is never left undefined (#1100).
     fn complete_ok_producer(&mut self, r: ValueId, out: &mut Vec<Op>) {
-        let Some(p) = self.remove_window(r) else { return };
+        let Some(p) = self.remove_window(r) else {
+            return;
+        };
         match p.payload {
             Some((payload, false)) => {
-                out.push(Op::Prim { kind: PrimKind::ResMakeOk, dst: Some(r), args: vec![payload] });
+                out.push(Op::Prim {
+                    kind: PrimKind::ResMakeOk,
+                    dst: Some(r),
+                    args: vec![payload],
+                });
                 self.res_vals.insert(r);
             }
             _ => out.extend(p.buffered),
@@ -254,7 +303,12 @@ impl ResultWindowTracker {
     /// payload (Load8 @+12), or the err payload (LoadHandle @+12). Any other
     /// width/offset combination passes through untouched.
     fn track_res_load(&mut self, op: Op, out: &mut Vec<Op>) {
-        let Op::Prim { kind, dst: Some(d), args } = &op else {
+        let Op::Prim {
+            kind,
+            dst: Some(d),
+            args,
+        } = &op
+        else {
             unreachable!("caller matched the load prims")
         };
         let (r, off) = self.res_addrs[&args[0]];
@@ -266,7 +320,11 @@ impl ResultWindowTracker {
         };
         let d = *d;
         match res_kind {
-            Some(kind) => out.push(Op::Prim { kind, dst: Some(d), args: vec![r] }),
+            Some(kind) => out.push(Op::Prim {
+                kind,
+                dst: Some(d),
+                args: vec![r],
+            }),
             None => out.push(op),
         }
     }
@@ -345,19 +403,26 @@ impl ResultWindowTracker {
     /// Only those may read window material without abandoning the window.
     fn is_window_continuation(&self, op: &Op) -> bool {
         match op {
-            Op::Prim { kind: PrimKind::Handle, dst: Some(_), args } if args.len() == 1 => {
-                self.pending.contains_key(&args[0])
-            }
-            Op::IntBinOp { op: crate::IntOp::Add, a, b, .. } => {
-                self.pending_handles.contains_key(a) && self.const_vals.contains_key(b)
-            }
-            Op::Prim { kind: PrimKind::Store { width }, dst: None, args } if args.len() == 2 => {
-                match self.pending_addrs.get(&args[0]).copied() {
-                    Some((_, 12)) => *width == 8,
-                    Some((_, 4)) => *width == 4 && self.const_vals.get(&args[1]) == Some(&0),
-                    _ => false,
-                }
-            }
+            Op::Prim {
+                kind: PrimKind::Handle,
+                dst: Some(_),
+                args,
+            } if args.len() == 1 => self.pending.contains_key(&args[0]),
+            Op::IntBinOp {
+                op: crate::IntOp::Add,
+                a,
+                b,
+                ..
+            } => self.pending_handles.contains_key(a) && self.const_vals.contains_key(b),
+            Op::Prim {
+                kind: PrimKind::Store { width },
+                dst: None,
+                args,
+            } if args.len() == 2 => match self.pending_addrs.get(&args[0]).copied() {
+                Some((_, 12)) => *width == 8,
+                Some((_, 4)) => *width == 4 && self.const_vals.get(&args[1]) == Some(&0),
+                _ => false,
+            },
             _ => false,
         }
     }
@@ -381,7 +446,11 @@ fn sweep_dead_window_material(out: &mut Vec<Op>, ret: Option<ValueId>) {
         out.retain(|op| match op {
             Op::ConstInt { dst, .. } => used.contains(dst),
             Op::IntBinOp { dst, .. } => used.contains(dst),
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), .. } => used.contains(d),
+            Op::Prim {
+                kind: PrimKind::Handle,
+                dst: Some(d),
+                ..
+            } => used.contains(d),
             _ => true,
         });
         if out.len() == before {
@@ -406,9 +475,7 @@ fn collect_reads(op: &Op, used: &mut BTreeSet<ValueId>) {
     }
     match op {
         Op::Alloc { init, .. } => match init {
-            Init::DynStr { len }
-            | Init::DynList { len }
-            | Init::DynListStr { len } => {
+            Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                 used.insert(*len);
             }
             Init::OptSome { payload } => {
@@ -452,7 +519,9 @@ fn collect_reads(op: &Op, used: &mut BTreeSet<ValueId>) {
         Op::Call { args, .. } | Op::CallFn { args, .. } | Op::CallImport { args, .. } => {
             call_args(args, used)
         }
-        Op::CallIndirect { table_idx, args, .. } => {
+        Op::CallIndirect {
+            table_idx, args, ..
+        } => {
             used.insert(*table_idx);
             call_args(args, used);
         }

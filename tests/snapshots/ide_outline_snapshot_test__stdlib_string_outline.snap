@@ -39,6 +39,7 @@ fn string.reverse(s: String) -> String
 fn string.run_length_encode(s: String) -> List[(String, Int)]
 fn string.slice(s: String, start: Int, end: Int) -> String
 fn string.split(s: String, sep: String) -> List[String]
+fn string.split_once(s: String, sep: String) -> Option[(String, String)]
 fn string.starts_with(s: String, prefix: String) -> Bool
 fn string.strip_prefix(s: String, prefix: String) -> Option[String]
 fn string.strip_suffix(s: String, suffix: String) -> Option[String]

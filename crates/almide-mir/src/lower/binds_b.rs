@@ -262,11 +262,7 @@ impl LowerCtx {
     /// `If` arm can RECURSE into its own arms instead of hard-coding what an arm may be.
     fn str_list_literal_elem_lowerable(&self, e: &IrExpr, class: &StrListLiteralClass) -> bool {
         use almide_ir::BinOp;
-        let &StrListLiteralClass {
-            elem_str, elem_scalar_aggregate, elem_value, elem_str_value, elem_list_scalar,
-            elem_list_flat, elem_int_str, elem_str_int, ref elem_recdrop, elem_flat_variant,
-            ref elem_rich_variant, ..
-        } = class;
+        let &StrListLiteralClass { elem_str, elem_list_scalar, .. } = class;
         match &e.kind {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             // A `${...}` interpolation element (`["", "[[${emit_path(...)}]]"]` — the toml
@@ -281,6 +277,42 @@ impl LowerCtx {
             // event-list shape): a `Record` literal whose NAME is a registered constructor is
             // a TAGGED variant value, materialized via `try_lower_variant_ctor` below (NOT the
             // plain-record path). Gated on the list being a flat/rich variant list.
+            // A String-result `if` ELEMENT with LITERAL arms (`["a", (if r2 then "b" else
+            // "d")]` — Wave 4 L2's fuzz shape, reachable whenever const-fold declines to
+            // collapse the cond): lowered via the proven heap-result-if machinery.
+            // Admitted only in the shape that machinery ALWAYS lowers — both arms LitStr,
+            // the cond a tracked scalar Var or a Bool literal — so the build loop's `?`
+            // never fails mid-build (the partial-ops-leak guard the Member arm documents).
+            // An `if` ELEMENT. Admissibility is decided by the ARMS, recursively — an arm
+            // is admissible exactly when it would be admissible as a bare element, so
+            // `[if p then "a" else r2, "b"]` works for the same reason `[r2, "b"]` does.
+            //
+            // The CONDITION is deliberately NOT constrained here. `try_lower_heap_result_if`
+            // already materializes a general cond (a pure scalar, or a Bool/Int-returning
+            // pure call with heap args, whose arg temps it frees in a per-cond frame) and
+            // rolls the whole attempt back as a unit when it cannot. Re-stating a narrower
+            // rule here made the predicate STRICTER than the builder, which is what walled
+            // Wave 5 R1: `if string.starts_with(r2, …) then "Привет" else r2` has a
+            // call-valued condition and a Var arm, both of which the builder handles.
+            IrExprKind::If { then, else_, .. } => {
+                self.str_list_literal_elem_lowerable(then, class)
+                    && self.str_list_literal_elem_lowerable(else_, class)
+            }
+            _ => self.str_list_literal_elem_ctor_lowerable(e, class),
+        }
+    }
+
+    /// The constructor-, field- and call-shaped elements of
+    /// [`Self::str_list_literal_elem_lowerable`]. Split out so neither half
+    /// outgrows a readable arm table; the guarded `Record`/`Call` arms keep
+    /// their position relative to their unguarded siblings, which is what
+    /// decides a registered-ctor element from a plain aggregate.
+    fn str_list_literal_elem_ctor_lowerable(&self, e: &IrExpr, class: &StrListLiteralClass) -> bool {
+        let &StrListLiteralClass {
+            elem_scalar_aggregate, elem_str_value, elem_int_str, elem_str_int,
+            ref elem_recdrop, elem_flat_variant, ref elem_rich_variant, ..
+        } = class;
+        match &e.kind {
             IrExprKind::Record { name: Some(n), .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
                     && self.variant_layouts.ctor_to_type.contains_key(n.as_str()) =>
@@ -291,6 +323,19 @@ impl LowerCtx {
             IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str || elem_str_int,
             // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
             // registered constructor, materialized via `try_lower_variant_ctor` below.
+            _ => self.str_list_literal_elem_call_lowerable(e, class),
+        }
+    }
+
+    /// The CALL- and field-shaped elements of
+    /// [`Self::str_list_literal_elem_ctor_lowerable`]. Split again so neither
+    /// third outgrows a readable arm table; the guarded `Call` arm keeps its
+    /// position before its unguarded sibling.
+    fn str_list_literal_elem_call_lowerable(&self, e: &IrExpr, class: &StrListLiteralClass) -> bool {
+        let &StrListLiteralClass {
+            elem_str, elem_value, elem_list_flat, elem_flat_variant, ref elem_rich_variant, ..
+        } = class;
+        match &e.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
                     && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
@@ -315,27 +360,6 @@ impl LowerCtx {
                 // same fresh-owned move-in; the list's DropListListStr reclaims it two levels deep.
                 (elem_value && is_value_ty(&e.ty)) || elem_str || elem_list_flat
             }
-            // A String-result `if` ELEMENT with LITERAL arms (`["a", (if r2 then "b" else
-            // "d")]` — Wave 4 L2's fuzz shape, reachable whenever const-fold declines to
-            // collapse the cond): lowered via the proven heap-result-if machinery.
-            // Admitted only in the shape that machinery ALWAYS lowers — both arms LitStr,
-            // the cond a tracked scalar Var or a Bool literal — so the build loop's `?`
-            // never fails mid-build (the partial-ops-leak guard the Member arm documents).
-            // An `if` ELEMENT. Admissibility is decided by the ARMS, recursively — an arm
-            // is admissible exactly when it would be admissible as a bare element, so
-            // `[if p then "a" else r2, "b"]` works for the same reason `[r2, "b"]` does.
-            //
-            // The CONDITION is deliberately NOT constrained here. `try_lower_heap_result_if`
-            // already materializes a general cond (a pure scalar, or a Bool/Int-returning
-            // pure call with heap args, whose arg temps it frees in a per-cond frame) and
-            // rolls the whole attempt back as a unit when it cannot. Re-stating a narrower
-            // rule here made the predicate STRICTER than the builder, which is what walled
-            // Wave 5 R1: `if string.starts_with(r2, …) then "Привет" else r2` has a
-            // call-valued condition and a Var arm, both of which the builder handles.
-            IrExprKind::If { then, else_, .. } => {
-                self.str_list_literal_elem_lowerable(then, class)
-                    && self.str_list_literal_elem_lowerable(else_, class)
-            }
             _ => false,
         }
     }
@@ -349,9 +373,8 @@ impl LowerCtx {
     /// caller's `?` exactly as the former inline `?`s did.
     fn lower_str_list_literal_elem(&mut self, elem: &IrExpr, class: &StrListLiteralClass) -> Option<ValueId> {
         let &StrListLiteralClass {
-            elem_str, elem_value, elem_str_value, elem_list_scalar, elem_list_flat,
-            elem_int_str, elem_str_int, ref elem_recdrop, elem_flat_variant,
-            ref elem_rich_variant, ..
+            elem_str_value, elem_list_scalar, elem_int_str, elem_str_int,
+            ref elem_recdrop, elem_flat_variant, ref elem_rich_variant, ..
         } = class;
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
         let ev = match &elem.kind {
@@ -411,11 +434,45 @@ impl LowerCtx {
                 self.try_lower_tuple_construct(tup_elems)?
             }
             IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,
-            // A heap-returning CALL element — a fresh OWNED value MOVED into the slot. A `Value`
-            // ctor (`value.int(1)`) for a List[Value]; a String-returning call (`string.slice(s,a,b)`
-            // — the dominant yaml `acc + [string.slice(…)]` append) for a List[String]. Module via
-            // the pure-call path (→ a registered CallFn like `string.slice`), Named via CallFn. The
-            // list's recursive drop (DropListValue / DropListStr) frees each at scope end.
+            // The call-, field- and interpolation-shaped elements.
+            _ => self.lower_str_list_literal_call_elem(elem, class)?,
+        };
+        Some(ev)
+    }
+
+    /// The call / field / interpolation elements of
+    /// [`Self::lower_str_list_literal_elem`]. Split at the same seam as
+    /// [`Self::str_list_literal_elem_ctor_lowerable`]'s so the builder and its
+    /// admission predicate keep matching shapes; arm ORDER within the half is
+    /// unchanged (the ctor-guarded `Call` arms must stay before their unguarded
+    /// sibling).
+    /// A heap-returning NAMED call element: emit the `CallFn` and take its
+    /// fresh OWNED result, which the caller moves into the list slot.
+    fn lower_named_call_elem(
+        &mut self,
+        name: &str,
+        args: &[IrExpr],
+        elem_ty: &Ty,
+    ) -> Option<ValueId> {
+        let lowered = self.lower_call_args(args).ok()?;
+        let repr = repr_of(elem_ty).ok()?;
+        let obj = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(obj),
+            name: name.to_string(),
+            args: lowered,
+            result: Some(repr),
+        });
+        Some(obj)
+    }
+
+    fn lower_str_list_literal_call_elem(
+        &mut self,
+        elem: &IrExpr,
+        class: &StrListLiteralClass,
+    ) -> Option<ValueId> {
+        let &StrListLiteralClass { elem_str, elem_value, elem_list_flat, elem_flat_variant, ref elem_rich_variant, .. } = class;
+        let ev = match &elem.kind {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                 if elem_value || elem_str || elem_list_flat =>
             {
@@ -424,16 +481,7 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
                 if elem_value || elem_str || elem_list_flat =>
             {
-                let lowered = self.lower_call_args(args).ok()?;
-                let obj = self.fresh_value();
-                let repr = repr_of(&elem.ty).ok()?;
-                self.ops.push(Op::CallFn {
-                    dst: Some(obj),
-                    name: name.as_str().to_string(),
-                    args: lowered,
-                    result: Some(repr),
-                });
-                obj
+                self.lower_named_call_elem(name.as_str(), args, &elem.ty)?
             }
             // A FLAT-variant CONSTRUCTOR element (`CapIO`) — materialize the fresh OWNED tag-block
             // (`try_lower_variant_ctor`, cert `i`) and move it into the slot. The block owns no
@@ -470,6 +518,7 @@ impl LowerCtx {
             }
             // A `${...}` interpolation element → a fresh owned String via the interp concat chain.
             IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,
+            // Anything else the predicate admitted is a concat-shaped String.
             _ => self.try_lower_concat_str(elem)?,
         };
         Some(ev)
@@ -540,6 +589,7 @@ impl LowerCtx {
 }
 
 include!("binds_p2.rs");
+include!("binds_p2_heap.rs");
 include!("binds_p2_b.rs");
 include!("binds_p2_c.rs");
 include!("binds_p3.rs");

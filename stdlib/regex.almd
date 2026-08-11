@@ -4,7 +4,6 @@
 // are pure. Note the runtime prefix is `almide_regex_*` (not the
 // `almide_rt_*` used by most other modules) — this mirrors the
 // existing TOML templates verbatim.
-
 @intrinsic("almide_regex_is_match")
 fn is_match(pat: String, s: String) -> Bool = _
 
@@ -12,7 +11,7 @@ fn is_match(pat: String, s: String) -> Bool = _
 fn full_match(pat: String, s: String) -> Bool = _
 
 @intrinsic("almide_regex_find")
-fn find(pat: String, s: String) -> Option[String] = _
+fn find(pat: String, s: String) -> String? = _
 
 @intrinsic("almide_regex_find_all")
 fn find_all(pat: String, s: String) -> List[String] = _
@@ -27,4 +26,4 @@ fn replace_first(pat: String, s: String, rep: String) -> String = _
 fn split(pat: String, s: String) -> List[String] = _
 
 @intrinsic("almide_regex_captures")
-fn captures(pat: String, s: String) -> Option[List[String]] = _
+fn captures(pat: String, s: String) -> List[String]? = _

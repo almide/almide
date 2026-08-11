@@ -1,0 +1,13 @@
+// fs_read_bytes_raw_if_exists — SELF-HOSTED `fs.read_bytes_raw_if_exists(path)`
+// for the wasm leg: missing file → `Ok(none)`, present → the raw read floor's
+// Bytes into `Ok(some(bytes))`, any other read error keeps the err channel.
+// Reaching the floors carries Capability::FsRead.
+effect fn fs_read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = {
+  if prim.path_exists(path) then {
+    let r = prim.read_bytes_file(path)
+    match r {
+      ok(b) => ok(some(b)),
+      err(e) => err(e),
+    }
+  } else ok(none)
+}

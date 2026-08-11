@@ -317,16 +317,21 @@ fn worker_loop(
             }
             Outcome::Finding(finding) => {
                 stats.findings.fetch_add(1, Ordering::Relaxed);
-                // Minimize before recording so the artifact is small.
+                // Minimize before recording so the artifact is small. The
+                // recorded evidence is the MINIMIZED program's own run
+                // whenever it shrank — `repro.almd` and `native.out` /
+                // `wasm.out` must describe the same program, or a triager
+                // reasons about output the repro never produced.
                 let minimized =
-                    minimize::minimize(&tc, &gen.source, finding.kind, &work_dir);
+                    minimize::minimize(&tc, &gen.source, finding.kind, &work_dir, Some(&reference));
+                let evidence = minimized.finding.as_ref().unwrap_or(&finding);
                 let was_new = sink.record(
                     cfg.seed,
                     index,
                     &gen.origin,
                     &gen.source,
-                    &minimized,
-                    &finding,
+                    &minimized.source,
+                    evidence,
                 );
                 if was_new {
                     eprintln!(

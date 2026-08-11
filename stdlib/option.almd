@@ -6,49 +6,47 @@
 // Closure args (map / flat_map / filter / unwrap_or_else / or_else)
 // ride the generic lambda-prep in `pass_stdlib_lowering` — same
 // clone-binding logic as the TOML path's `ArgTransform::LambdaClone`.
-
 @intrinsic("almide_rt_option_map")
-fn map[A, B](o: Option[A], f: (A) -> B) -> Option[B] = _
+fn map[A, B](o: A?, f: fn(A) -> B) -> B? = _
 
 @intrinsic("almide_rt_option_and_then")
-fn flat_map[A, B](o: Option[A], f: (A) -> Option[B]) -> Option[B] = _
+fn flat_map[A, B](o: A?, f: fn(A) -> B?) -> B? = _
 
 @intrinsic("almide_rt_option_flatten")
-fn flatten[A](o: Option[Option[A]]) -> Option[A] = _
+fn flatten[A](o: (A?)?) -> A? = _
 
 @intrinsic("almide_rt_option_unwrap_or")
-fn unwrap_or[A](o: Option[A], default: A) -> A = _
+fn unwrap_or[A](o: A?, default: A) -> A = _
 
 @intrinsic("almide_rt_option_unwrap_or_else")
-fn unwrap_or_else[A](o: Option[A], f: () -> A) -> A = _
+fn unwrap_or_else[A](o: A?, f: fn() -> A) -> A = _
 
 @intrinsic("almide_rt_option_is_some")
-fn is_some[A](o: Option[A]) -> Bool = _
+fn is_some[A](o: A?) -> Bool = _
 
 @intrinsic("almide_rt_option_is_none")
-fn is_none[A](o: Option[A]) -> Bool = _
+fn is_none[A](o: A?) -> Bool = _
 
 // #1114: E-generic (Rust ok_or parity) — a pure bundled body monos per
 // call site on both targets; the String form infers E=String unchanged.
 // The lazy sibling (ok_or_else) is an INTENTIONAL omission: an error value
 // is a pure, cheap construction — effectful defaults use match.
-fn to_result[A, E](o: Option[A], e: E) -> Result[A, E] =
-  match o {
-    some(v) => ok(v),
-    none    => err(e),
-  }
+fn to_result[A, E](o: A?, e: E) -> Result[A, E] = match o {
+  some(v) => ok(v),
+  none => err(e),
+}
 
 @intrinsic("almide_rt_option_filter")
-fn filter[A](o: Option[A], f: (A) -> Bool) -> Option[A] = _
+fn filter[A](o: A?, f: fn(A) -> Bool) -> A? = _
 
 @intrinsic("almide_rt_option_zip")
-fn zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)] = _
+fn zip[A, B](a: A?, b: B?) -> (A, B)? = _
 
 @intrinsic("almide_rt_option_or_else")
-fn or_else[A](o: Option[A], f: () -> Option[A]) -> Option[A] = _
+fn or_else[A](o: A?, f: fn() -> A?) -> A? = _
 
 @intrinsic("almide_rt_option_to_list")
-fn to_list[A](o: Option[A]) -> List[A] = _
+fn to_list[A](o: A?) -> List[A] = _
 
 // ── Symmetry fills (option.collect / collect_map — these MATCH Rust's collect, unlike the removed result twins; ADR-0007) ──
 //
@@ -59,17 +57,12 @@ fn to_list[A](o: Option[A]) -> List[A] = _
 // the monomorphised callsites the walker emits; this layer is the
 // behavioural source of truth and works on both Rust and WASM
 // targets without per-target dispatch arms.
+fn collect[T](xs: List[T?]) -> List[T]? = list.fold(xs, some([]), (acc, item) => match acc {
+  some(vals) => match item {
+    some(v) => some(vals + [v]),
+    none => none,
+  },
+  none => none,
+})
 
-fn collect[T](xs: List[Option[T]]) -> Option[List[T]] =
-  list.fold(xs, some([]), (acc, item) =>
-    match acc {
-      some(vals) => match item {
-        some(v) => some(vals + [v]),
-        none => none,
-      },
-      none => none,
-    }
-  )
-
-fn collect_map[T, U](xs: List[T], f: (T) -> Option[U]) -> Option[List[U]] =
-  option.collect(list.map(xs, f))
+fn collect_map[T, U](xs: List[T], f: fn(T) -> U?) -> List[U]? = option.collect(list.map(xs, f))

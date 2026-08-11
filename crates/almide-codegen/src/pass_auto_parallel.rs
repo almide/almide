@@ -210,88 +210,88 @@ fn is_pure_expr(
     effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
 ) -> bool {
+    let pure = |e: &IrExpr| is_pure_expr(e, local_vars, effect_fns, mutable_vars);
     match &expr.kind {
-        // Variable reference: impure if it captures a mutable variable
-        IrExprKind::Var { id } => {
-            if local_vars.contains(id) {
-                return true;
-            }
-            // Captured variable — impure only if it's mutable
-            !mutable_vars.contains(id)
+        // Variable reference: a local is always fine; a CAPTURED variable is
+        // impure only if it is mutable.
+        IrExprKind::Var { id } => local_vars.contains(id) || !mutable_vars.contains(id),
+
+        // ── Always pure, no children ──
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Hole | IrExprKind::OptionNone
+        | IrExprKind::FnRef { .. } | IrExprKind::EmptyMap
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. } => true,
+
+        // ── Never pure ──
+        //
+        // Macro invocations and rendered calls are conservative; loops in a
+        // lambda body could mutate; `fan` is concurrent by definition.
+        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::Todo { .. } => false,
+
+        // ── Calls: purity is decided by the target ──
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+            is_pure_call(target, args, local_vars, effect_fns, mutable_vars)
+        }
+        // Resolved runtime call: purity follows the same effect-module rules as
+        // Module calls. `almide_rt_fs_*` / `almide_rt_http_*` / etc. are effects
+        // and block parallelization.
+        IrExprKind::RuntimeCall { symbol, args } => {
+            is_pure_runtime_call(symbol, args, local_vars, effect_fns, mutable_vars)
         }
 
-        // Calls: check if the target is an effect fn
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } =>
-            is_pure_call(target, args, local_vars, effect_fns, mutable_vars),
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Clone { expr: e }
+        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e } | IrExprKind::RcWrap { expr: e, .. }
+        | IrExprKind::ToVec { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e } => pure(e),
 
-        // Resolved runtime call: purity follows the same effect-module
-        // rules as Module calls. `almide_rt_fs_*` / `almide_rt_http_*` /
-        // etc. are effects and block parallelization.
-        IrExprKind::RuntimeCall { symbol, args } =>
-            is_pure_runtime_call(symbol, args, local_vars, effect_fns, mutable_vars),
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => pure(a) && pure(b),
 
-        // Literals: always pure
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } |
-        IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } |
-        IrExprKind::Unit | IrExprKind::Hole | IrExprKind::OptionNone => true,
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => pure(cond) && pure(then) && pure(else_),
 
-        // Operators
-        IrExprKind::BinOp { left, right, .. } => {
-            is_pure_expr(left, local_vars, effect_fns, mutable_vars) &&
-            is_pure_expr(right, local_vars, effect_fns, mutable_vars)
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs } => {
+            xs.iter().all(pure)
         }
-        IrExprKind::UnOp { operand, .. } => {
-            is_pure_expr(operand, local_vars, effect_fns, mutable_vars)
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, e)| pure(e)),
+        IrExprKind::SpreadRecord { base, fields } => {
+            pure(base) && fields.iter().all(|(_, e)| pure(e))
         }
 
-        // Control flow
-        IrExprKind::If { cond, then, else_ } => {
-            is_pure_expr(cond, local_vars, effect_fns, mutable_vars) &&
-            is_pure_expr(then, local_vars, effect_fns, mutable_vars) &&
-            is_pure_expr(else_, local_vars, effect_fns, mutable_vars)
+        // ── Shapes with their own traversal ──
+        IrExprKind::Match { subject, arms } => {
+            is_pure_match(subject, arms, local_vars, effect_fns, mutable_vars)
         }
-        IrExprKind::Match { subject, arms } => is_pure_match(subject, arms, local_vars, effect_fns, mutable_vars),
-        IrExprKind::Block { stmts, expr } => is_pure_block(stmts, expr, local_vars, effect_fns, mutable_vars),
-
-        // Collections
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } =>
-            elements.iter().all(|e| is_pure_expr(e, local_vars, effect_fns, mutable_vars)),
-        IrExprKind::Record { fields, .. } => {
-            fields.iter().all(|(_, e)| is_pure_expr(e, local_vars, effect_fns, mutable_vars))
+        IrExprKind::Block { stmts, expr } => {
+            is_pure_block(stmts, expr, local_vars, effect_fns, mutable_vars)
         }
         IrExprKind::MapLiteral { entries } => {
-            entries.iter().all(|(k, v)|
-                is_pure_expr(k, local_vars, effect_fns, mutable_vars) &&
-                is_pure_expr(v, local_vars, effect_fns, mutable_vars)
-            )
+            entries.iter().all(|(k, v)| pure(k) && pure(v))
         }
-
-        // Access
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            is_pure_expr(object, local_vars, effect_fns, mutable_vars)
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            is_pure_expr(object, local_vars, effect_fns, mutable_vars) &&
-            is_pure_expr(index, local_vars, effect_fns, mutable_vars)
-        }
-
-        // Wrapping
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } |
-        IrExprKind::OptionSome { expr } | IrExprKind::Clone { expr } |
-        IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. } |
-        IrExprKind::BoxNew { expr } | IrExprKind::RcWrap { expr, .. } |
-        IrExprKind::ToVec { expr } |
-        IrExprKind::Try { expr } |
-        IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => {
-            is_pure_expr(expr, local_vars, effect_fns, mutable_vars)
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            is_pure_expr(expr, local_vars, effect_fns, mutable_vars) &&
-            is_pure_expr(fallback, local_vars, effect_fns, mutable_vars)
-        }
-
-        // Nested lambda: treat as pure boundary (it captures, but we check its own refs)
+        IrExprKind::StringInterp { parts } => parts.iter().all(|p| match p {
+            IrStringPart::Lit { .. } => true,
+            IrStringPart::Expr { expr } => pure(expr),
+        }),
+        // Nested lambda: its params are locals for its own body.
         IrExprKind::Lambda { params, body, .. } => {
             let mut inner_vars = local_vars.clone();
             for (id, _) in params {
@@ -299,44 +299,6 @@ fn is_pure_expr(
             }
             is_pure_expr(body, &inner_vars, effect_fns, mutable_vars)
         }
-
-        // String interpolation
-        IrExprKind::StringInterp { parts } => {
-            parts.iter().all(|p| match p {
-                IrStringPart::Lit { .. } => true,
-                IrStringPart::Expr { expr } => is_pure_expr(expr, local_vars, effect_fns, mutable_vars),
-            })
-        }
-
-        // Range
-        IrExprKind::Range { start, end, .. } => {
-            is_pure_expr(start, local_vars, effect_fns, mutable_vars) &&
-            is_pure_expr(end, local_vars, effect_fns, mutable_vars)
-        }
-
-        // Spread record
-        IrExprKind::SpreadRecord { base, fields } => {
-            is_pure_expr(base, local_vars, effect_fns, mutable_vars) &&
-            fields.iter().all(|(_, e)| is_pure_expr(e, local_vars, effect_fns, mutable_vars))
-        }
-
-        // FnRef: pure (it's just a reference to a function)
-        IrExprKind::FnRef { .. } => true,
-
-        // Macro invocations and rendered calls: assume impure (conservative)
-        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. } => false,
-
-        // Loops in a lambda body: could mutate, be conservative
-        IrExprKind::ForIn { .. } | IrExprKind::While { .. } => false,
-        IrExprKind::Break | IrExprKind::Continue => true,
-
-        // Fan (concurrent): impure by definition
-        IrExprKind::Fan { .. } => false,
-
-        IrExprKind::EmptyMap => true,
-        IrExprKind::Todo { .. } => false,
-        IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } => true,
-        IrExprKind::IterChain { .. } => true,
     }
 }
 
@@ -405,236 +367,61 @@ fn rewrite_expr(
     effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
 ) -> IrExpr {
-    let ty = expr.ty.clone();
-    let span = expr.span;
-
-    let kind = match expr.kind {
-        // Target pattern: Named call to a parallelizable list function with a lambda arg
-        IrExprKind::Call { target: CallTarget::Named { ref name }, .. }
-            if parallel_name(name).is_some() =>
-        {
-            let orig_name = *name; // Sym is Copy
-            let par_name = parallel_name(name).unwrap();
-            // Extract the call (we matched the ref above)
-            let IrExprKind::Call { target: CallTarget::Named { name: _ }, args, type_args } = expr.kind else {
-                unreachable!()
-            };
-
-            // Recurse into args first
-            let args: Vec<IrExpr> = args.into_iter()
-                .map(|a| rewrite_expr(a, effect_fns, mutable_vars))
-                .collect();
-
-            // Find the lambda argument (last arg for map/filter/any/all)
-            let lambda_arg = args.last();
-            let is_pure = match lambda_arg {
-                Some(IrExpr { kind: IrExprKind::Lambda { params, body, .. }, .. }) => {
-                    is_pure_lambda(body, params, effect_fns, mutable_vars)
-                }
-                // If the lambda is wrapped in Clone (from CloneInsertionPass), peek inside
-                Some(IrExpr { kind: IrExprKind::Clone { expr }, .. }) => {
-                    match &expr.kind {
-                        IrExprKind::Lambda { params, body, .. } => {
-                            is_pure_lambda(body, params, effect_fns, mutable_vars)
-                        }
-                        _ => false,
-                    }
-                }
-                _ => false,
-            };
-
-            if is_pure {
-                IrExprKind::Call {
-                    target: CallTarget::Named { name: sym(par_name) },
-                    args,
-                    type_args,
-                }
-            } else {
-                // Not pure — keep original sequential call
-                IrExprKind::Call {
-                    target: CallTarget::Named { name: orig_name },
-                    args,
-                    type_args,
-                }
-            }
-        }
-
-        // Recurse into all other expressions
-        IrExprKind::Call { target, args, type_args } => {
-            let args = args.into_iter().map(|a| rewrite_expr(a, effect_fns, mutable_vars)).collect();
-            let target = match target {
-                CallTarget::Method { object, method } =>
-                    CallTarget::Method { object: Box::new(rewrite_expr(*object, effect_fns, mutable_vars)), method },
-                CallTarget::Computed { callee } =>
-                    CallTarget::Computed { callee: Box::new(rewrite_expr(*callee, effect_fns, mutable_vars)) },
-                other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
-            };
-            IrExprKind::Call { target, args, type_args }
-        }
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(rewrite_expr(*cond, effect_fns, mutable_vars)),
-            then: Box::new(rewrite_expr(*then, effect_fns, mutable_vars)),
-            else_: Box::new(rewrite_expr(*else_, effect_fns, mutable_vars)),
-        },
-        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: rewrite_stmts(stmts, effect_fns, mutable_vars),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e, effect_fns, mutable_vars))),
-        },
-
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(rewrite_expr(*subject, effect_fns, mutable_vars)),
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| rewrite_expr(g, effect_fns, mutable_vars)),
-                body: rewrite_expr(arm.body, effect_fns, mutable_vars),
-            }).collect(),
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op,
-            left: Box::new(rewrite_expr(*left, effect_fns, mutable_vars)),
-            right: Box::new(rewrite_expr(*right, effect_fns, mutable_vars)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op,
-            operand: Box::new(rewrite_expr(*operand, effect_fns, mutable_vars)),
-        },
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params,
-            body: Box::new(rewrite_expr(*body, effect_fns, mutable_vars)),
-            lambda_id,
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| rewrite_expr(e, effect_fns, mutable_vars)).collect(),
-        },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| rewrite_expr(e, effect_fns, mutable_vars)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name,
-            fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v, effect_fns, mutable_vars))).collect(),
-        },
-        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
-            base: Box::new(rewrite_expr(*base, effect_fns, mutable_vars)),
-            fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v, effect_fns, mutable_vars))).collect(),
-        },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(rewrite_expr(*object, effect_fns, mutable_vars)),
-            field,
-        },
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)),
-            field,
-        },
-        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
-            object: Box::new(rewrite_expr(*object, effect_fns, mutable_vars)),
-            index,
-        },
-        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(rewrite_expr(*object, effect_fns, mutable_vars)),
-            index: Box::new(rewrite_expr(*index, effect_fns, mutable_vars)),
-        },
-        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
-            object: Box::new(rewrite_expr(*object, effect_fns, mutable_vars)),
-            key: Box::new(rewrite_expr(*key, effect_fns, mutable_vars)),
-        },
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple,
-            iterable: Box::new(rewrite_expr(*iterable, effect_fns, mutable_vars)),
-            body: rewrite_stmts(body, effect_fns, mutable_vars),
-        },
-        IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(rewrite_expr(*cond, effect_fns, mutable_vars)),
-            body: rewrite_stmts(body, effect_fns, mutable_vars),
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_expr(expr, effect_fns, mutable_vars) },
-                lit @ IrStringPart::Lit { .. } => lit,
-            }).collect(),
-        },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), fallback: Box::new(rewrite_expr(*fallback, effect_fns, mutable_vars)) },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), as_str, mutable },
-        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::RcWrap { expr, cast_ty, wrap } => IrExprKind::RcWrap { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), cast_ty, wrap },
-        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (rewrite_expr(k, effect_fns, mutable_vars), rewrite_expr(v, effect_fns, mutable_vars))).collect(),
-        },
-        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(rewrite_expr(*start, effect_fns, mutable_vars)),
-            end: Box::new(rewrite_expr(*end, effect_fns, mutable_vars)),
-            inclusive,
-        },
-        IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| rewrite_expr(e, effect_fns, mutable_vars)).collect(),
-        },
-        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
-            name,
-            args: args.into_iter().map(|a| rewrite_expr(a, effect_fns, mutable_vars)).collect(),
-        },
-        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
-            template,
-            args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a, effect_fns, mutable_vars))).collect(),
-        },
-        // Any other kind: recurse into every child (total by construction).
-        other => return IrExpr { kind: other, ty, span, def_id: None }
-            .map_children(&mut |e| rewrite_expr(e, effect_fns, mutable_vars)),
-    };
-
+    // Target pattern: a Named call to a parallelizable list function.
+    let is_target = matches!(
+        &expr.kind,
+        IrExprKind::Call { target: CallTarget::Named { name }, .. } if parallel_name(name).is_some()
+    );
+    if is_target {
+        return rewrite_parallel_call(expr, effect_fns, mutable_vars);
+    }
+    // Every other node: rewrite each child and rebuild. `map_children` is the
+    // single wildcard-free traversal primitive (it lists every `IrExprKind`, so
+    // adding a variant is a compile error there), which is why this pass needs
+    // no per-variant arms of its own — including statement bodies, which
+    // `IrStmt::map_exprs` covers. `def_id` is dropped, as it always was here.
+    let IrExpr { kind, ty, span, .. } = expr;
     IrExpr { kind, ty, span, def_id: None }
+        .map_children(&mut |e| rewrite_expr(e, effect_fns, mutable_vars))
 }
 
-fn rewrite_stmts(
-    stmts: Vec<IrStmt>,
+/// The `list.map(xs, f)`-shaped call this pass exists for: rewrite the args,
+/// then swap the callee for its parallel twin when the lambda argument is pure.
+fn rewrite_parallel_call(
+    expr: IrExpr,
     effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
-) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| {
-        let kind = match s.kind {
-            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty,
-                value: rewrite_expr(value, effect_fns, mutable_vars),
-            },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign {
-                var,
-                value: rewrite_expr(value, effect_fns, mutable_vars),
-            },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr {
-                expr: rewrite_expr(expr, effect_fns, mutable_vars),
-            },
-            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: rewrite_expr(cond, effect_fns, mutable_vars),
-                else_: rewrite_expr(else_, effect_fns, mutable_vars),
-            },
-            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern,
-                value: rewrite_expr(value, effect_fns, mutable_vars),
-            },
-            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
-                target,
-                index: rewrite_expr(index, effect_fns, mutable_vars),
-                value: rewrite_expr(value, effect_fns, mutable_vars),
-            },
-            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
-                target,
-                key: rewrite_expr(key, effect_fns, mutable_vars),
-                value: rewrite_expr(value, effect_fns, mutable_vars),
-            },
-            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
-                target, field,
-                value: rewrite_expr(value, effect_fns, mutable_vars),
-            },
-            other => return IrStmt { kind: other, span: s.span }
-                .map_exprs(&mut |e| rewrite_expr(e, effect_fns, mutable_vars)),
-        };
-        IrStmt { kind, span: s.span }
-    }).collect()
+) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+    let IrExprKind::Call { target: CallTarget::Named { name: orig_name }, args, type_args } = expr.kind
+    else {
+        unreachable!("rewrite_parallel_call on a non-parallelizable call")
+    };
+    let par_name = parallel_name(&orig_name).expect("caller checked parallel_name");
+
+    // Recurse into args first
+    let args: Vec<IrExpr> = args
+        .into_iter()
+        .map(|a| rewrite_expr(a, effect_fns, mutable_vars))
+        .collect();
+
+    // The lambda argument (last arg for map/filter/any/all) decides. If the
+    // lambda is wrapped in Clone (from CloneInsertionPass), peek inside.
+    let lambda = match args.last().map(|a| &a.kind) {
+        Some(IrExprKind::Clone { expr }) => Some(&expr.kind),
+        other => other,
+    };
+    let is_pure = matches!(
+        lambda,
+        Some(IrExprKind::Lambda { params, body, .. })
+            if is_pure_lambda(body, params, effect_fns, mutable_vars)
+    );
+    let name = if is_pure { sym(par_name) } else { orig_name };
+    IrExpr {
+        kind: IrExprKind::Call { target: CallTarget::Named { name }, args, type_args },
+        ty,
+        span,
+        def_id: None,
+    }
 }

@@ -309,7 +309,18 @@ impl LowerCtx {
                     let bind = self.result_err_bind(subj, inner).ok()?;
                     fill_once(&mut err, (&arm.body, bind))?;
                 }
-                IrPattern::Wildcard => fill_once(&mut err, (&arm.body, Option::None))?,
+                // A WILDCARD takes whichever side the ctor arm did NOT: after an Ok
+                // arm it is the not-Ok (err) side — the original behavior; after an
+                // ERR arm (`match r { err(e) => …, _ => … }`, the desugared
+                // nested-pattern custom-E shape) it is the not-Err (ok) side,
+                // binding nothing. A wildcard BEFORE any ctor arm is ambiguous —
+                // reject (same rule as `classify_variant_arm`).
+                IrPattern::Wildcard if err.is_some() && ok.is_none() => {
+                    fill_once(&mut ok, (&arm.body, Option::None))?
+                }
+                IrPattern::Wildcard if ok.is_some() => {
+                    fill_once(&mut err, (&arm.body, Option::None))?
+                }
                 _ => return None,
             }
         }

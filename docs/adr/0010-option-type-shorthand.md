@@ -51,9 +51,16 @@ fn parse_opt(s: String) -> Int?!   // = Result[Option[Int], String]  ? が先、
 するため、v0.53.5 の one-name-one-meaning 路線で 1 形に潰す。入れ子・fn 型・
 レコード型の inner は再パース可能になるよう括弧を付けて出力する。
 
-**D4(スコープ外の明示)**: `Result[T, String] → T!` の fmt 正規化は本 ADR に
-**含めない**。`!` 付き署名は本体の解釈(ok 自動包み・`!` 伝搬)と連動するため、
-綴りのみの置換であることを A/B で証明してから別途 1 問で裁定する。
+**D4(2026-08-07 更新: 恒久却下)**: `Result[T, String] → T!` の fmt 正規化は
+**恒久的に行わない** — 保留(証明待ち)から却下へ。実測証明: #1108 の 1-bit
+規則により callback bit は**宣言マーカー**に乗るため、同一本体でも
+`list.map(xs, f)` の意味が f の綴りで分岐する(長綴り = map-of-results
+`[ok(1), err(…)]` / `T!` = first-err 打ち切り)。機械置換は全 map-of-results を
+first-err に化けさせる。この分岐は仕様であり
+spec/lang/fallible_hof_test.almd の「the marker, not the type, carries the
+callback bit」がピンする。つまり 0.55 以降、2綴りは「1 型 2 記法」ではなく
+**書き手が戦略を選ぶ2つの宣言**である(T? には HOF bit が無いので同種の
+問題は起きない — T? 正規化の健全性は不変)。
 
 ## Rationale
 
@@ -83,10 +90,11 @@ fn parse_opt(s: String) -> Int?!   // = Result[Option[Int], String]  ? が先、
 **払うもの**:
 - 文法表面の追加(型アトム後置 `?`)とその教育コスト。
 - 一回きりの正規化 diff(spec/ + examples/ = fmt gate の対象範囲)。
-- **stdlib は長綴りのまま据え置き**: fmt の import 自動挿入が splice-context を
-  壊すため batch-fmt 禁止(実測: 277/284 ファイルに diff、うち 203 に import 挿入)。
-  fmt が no-import-splice モードを得るまで移行しない。据え置きは無害を超えて有用 —
-  stdlib 署名の `Option[T]` が短綴りとの単一化を全コーパスで常時実証する境界証人になる。
+- **stdlib も移行済み(2026-08-07 追記)**: `almide fmt --no-import-edit` が
+  据え置きの前提だった splice-context ハザード(import 自動挿入)を解いたため、
+  stdlib 258 ファイルを batch 正規化(import 行の増減ゼロを機械確認)。
+  旧・据え置き根拠だった「長綴りの境界証人」役は spec の単一化テスト
+  (fallible_marker / option_marker)へ引き継ぎ。
 
 ## Falsifier
 

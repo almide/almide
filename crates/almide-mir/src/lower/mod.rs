@@ -69,12 +69,12 @@ impl WallShape {
                 "this Option/Result match binds a payload shape that is not yet in \
                  the verified wasm subset",
             ),
-            WallShape::CallArgument => Some(
-                "this call argument's shape is not yet in the verified wasm subset",
-            ),
-            WallShape::TailExtraction => Some(
-                "this return expression's shape is not yet in the verified wasm subset",
-            ),
+            WallShape::CallArgument => {
+                Some("this call argument's shape is not yet in the verified wasm subset")
+            }
+            WallShape::TailExtraction => {
+                Some("this return expression's shape is not yet in the verified wasm subset")
+            }
             WallShape::Other => None,
         }
     }
@@ -97,12 +97,12 @@ impl WallShape {
                  match in tail position via a helper fn, or collapse the value first \
                  with `??`",
             ),
-            WallShape::CallArgument => Some(
-                "hoist the argument into its own `let` binding and pass the name",
-            ),
-            WallShape::TailExtraction => Some(
-                "bind the expression to a `let` and return the binding",
-            ),
+            WallShape::CallArgument => {
+                Some("hoist the argument into its own `let` binding and pass the name")
+            }
+            WallShape::TailExtraction => {
+                Some("bind the expression to a `let` and return the binding")
+            }
             WallShape::Other => None,
         }
     }
@@ -126,7 +126,11 @@ pub enum LowerError {
     /// instead of a bare sentence. Sites matching a known [`WallShape`]
     /// construct via [`LowerError::shaped`] instead, which additionally buys
     /// the per-shape headline and rewrite hint.
-    UnsupportedAt { reason: String, span: almide_ir::Span, shape: WallShape },
+    UnsupportedAt {
+        reason: String,
+        span: almide_ir::Span,
+        shape: WallShape,
+    },
 }
 
 impl LowerError {
@@ -147,9 +151,11 @@ impl LowerError {
     /// never have to branch.
     pub fn at(span: Option<almide_ir::Span>, reason: impl Into<String>) -> LowerError {
         match span {
-            Some(span) => {
-                LowerError::UnsupportedAt { reason: reason.into(), span, shape: WallShape::Other }
-            }
+            Some(span) => LowerError::UnsupportedAt {
+                reason: reason.into(),
+                span,
+                shape: WallShape::Other,
+            },
             None => LowerError::Unsupported(reason.into()),
         }
     }
@@ -165,7 +171,11 @@ impl LowerError {
         reason: impl Into<String>,
     ) -> LowerError {
         match span {
-            Some(span) => LowerError::UnsupportedAt { reason: reason.into(), span, shape },
+            Some(span) => LowerError::UnsupportedAt {
+                reason: reason.into(),
+                span,
+                shape,
+            },
             None => LowerError::at(None, reason),
         }
     }
@@ -273,7 +283,9 @@ fn is_bytes_from_list_call(module: &str, func: &str, arg_count: usize) -> bool {
 /// lowering time: zero calls injected, so the count gate stays exact. An invalid
 /// codepoint keeps walling (never a wrong byte).
 fn const_fold_string_from_codepoint(args: &[IrExpr]) -> Option<crate::Init> {
-    let IrExprKind::LitInt { value } = &args[0].kind else { return None };
+    let IrExprKind::LitInt { value } = &args[0].kind else {
+        return None;
+    };
     u32::try_from(*value)
         .ok()
         .and_then(char::from_u32)
@@ -281,7 +293,9 @@ fn const_fold_string_from_codepoint(args: &[IrExpr]) -> Option<crate::Init> {
 }
 
 fn const_fold_bytes_from_list(args: &[IrExpr]) -> Option<crate::Init> {
-    let IrExprKind::List { elements } = &args[0].kind else { return None };
+    let IrExprKind::List { elements } = &args[0].kind else {
+        return None;
+    };
     let bytes: Option<Vec<u8>> = elements
         .iter()
         .map(|e| match &e.kind {
@@ -305,14 +319,18 @@ fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
                 .collect();
             ints.map(crate::Init::IntList)
         }
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            if is_string_from_codepoint_call(module.as_str(), func.as_str(), args.len()) =>
-        {
+        IrExprKind::Call {
+            target: CallTarget::Module { module, func, .. },
+            args,
+            ..
+        } if is_string_from_codepoint_call(module.as_str(), func.as_str(), args.len()) => {
             const_fold_string_from_codepoint(args)
         }
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            if is_bytes_from_list_call(module.as_str(), func.as_str(), args.len()) =>
-        {
+        IrExprKind::Call {
+            target: CallTarget::Module { module, func, .. },
+            args,
+            ..
+        } if is_bytes_from_list_call(module.as_str(), func.as_str(), args.len()) => {
             const_fold_bytes_from_list(args)
         }
         _ => None,
@@ -372,7 +390,9 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
         ));
     }
     if is_heap_ty(ty) {
-        return Ok(Repr::Ptr { layout: PLACEHOLDER_LAYOUT });
+        return Ok(Repr::Ptr {
+            layout: PLACEHOLDER_LAYOUT,
+        });
     }
     use crate::ScalarWidth;
     let w = match ty {
@@ -404,8 +424,15 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
 fn extern_wasm_abi(ty: &Ty) -> Option<crate::WasmAbi> {
     use crate::WasmAbi;
     match ty {
-        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16
-        | Ty::UInt32 | Ty::UInt64 => Some(WasmAbi::I64),
+        Ty::Int
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32
+        | Ty::UInt64 => Some(WasmAbi::I64),
         Ty::Float | Ty::Float32 | Ty::Float64 => Some(WasmAbi::F64),
         Ty::Bool => Some(WasmAbi::I32),
         // A String / list / map / any heap value crosses the boundary as an i32 POINTER.
@@ -422,7 +449,11 @@ fn extern_wasm_abi(ty: &Ty) -> Option<crate::WasmAbi> {
 /// the shape applies — the lowering forwards the operand's value with NO call, and
 /// `count_ir_calls` skips the node by the SAME predicate (mir == ir by construction).
 pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
-    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+    let IrExprKind::Call {
+        target: CallTarget::Module { module, func, .. },
+        args,
+        ..
+    } = &e.kind
     else {
         return None;
     };
@@ -462,7 +493,11 @@ pub fn is_identity_int_widening(module: &str, func: &str, args: &[IrExpr]) -> bo
 /// `count_ir_calls` skips the node by this SAME predicate (`mir == ir` by
 /// construction). Returns the operand expr when the shape applies.
 pub fn float_from_int_prim_call(e: &IrExpr) -> Option<&IrExpr> {
-    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+    let IrExprKind::Call {
+        target: CallTarget::Module { module, func, .. },
+        args,
+        ..
+    } = &e.kind
     else {
         return None;
     };
@@ -481,7 +516,10 @@ pub fn is_float_from_int_prim(module: &str, func: &str, args: &[IrExpr]) -> bool
 fn extern_wasm_target(func: &IrFunction) -> Option<(String, String)> {
     func.extern_attrs.iter().find_map(|a| {
         if a.target.as_str() == "wasm" {
-            Some((a.module.as_str().to_string(), a.function.as_str().to_string()))
+            Some((
+                a.module.as_str().to_string(),
+                a.function.as_str().to_string(),
+            ))
         } else {
             None
         }
@@ -502,10 +540,15 @@ fn extern_wasm_target(func: &IrFunction) -> Option<(String, String)> {
 /// ABI (WALL — never guess a signature). SOUNDNESS: a `rust`/`rs` extern is NOT a wasm
 /// import (no wasm host) → `extern_wasm_target` is `None` → it keeps walling.
 fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, LowerError> {
-    let Some((module, name)) = extern_wasm_target(func) else { return Ok(None) };
+    let Some((module, name)) = extern_wasm_target(func) else {
+        return Ok(None);
+    };
     // Bind params to fresh MIR values (the borrow-by-default convention) — a heap param
     // is a borrowed i32 pointer, a scalar an i64 local; both are read into the call.
-    let mut ctx = LowerCtx { fn_name: func.name.as_str().to_string(), ..Default::default() };
+    let mut ctx = LowerCtx {
+        fn_name: func.name.as_str().to_string(),
+        ..Default::default()
+    };
     let params = ctx.bind_params(&func.params)?;
     // The import-call args + their per-arg valtypes, parallel to the params. A heap param
     // is BORROWED (a `Handle` — the caller owns it, no refcount change here); a scalar is
@@ -542,7 +585,15 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
         let d = ctx.fresh_value();
         (Some(d), Some(repr), Some(rabi), Some(d))
     };
-    ctx.ops.push(Op::CallImport { dst, module, name, args, abi, result, result_abi });
+    ctx.ops.push(Op::CallImport {
+        dst,
+        module,
+        name,
+        args,
+        abi,
+        result,
+        result_abi,
+    });
     Ok(Some(MirFunction {
         name: func.name.as_str().to_string(),
         params,
@@ -762,3 +813,4 @@ pub fn expr_contains_call(e: &almide_ir::IrExpr) -> bool {
 include!("mod_b.rs");
 include!("mod_c.rs");
 include!("crossmod_toplet_bridge.rs");
+include!("continuation_lift.rs");

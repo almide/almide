@@ -10,16 +10,23 @@
 // the preamble layout: NWRITTEN@0, IOVEC@8 (two {ptr,len} pairs), SCRATCH@768
 // (512..768 is the fixed fs-errno message region — do NOT write below 768).
 fn print_str(s: String) -> Unit = {
-  let h = prim.handle(s)        // i64 address of the [rc][len][cap][bytes] block
-  let len = prim.load32(h + 4)  // header len (LIST_LEN_OFFSET)
-  let data = h + 12             // byte start (LIST_HEADER)
+  let h = prim.handle(s)
+  // i64 address of the [rc][len][cap][bytes] block
+  let len = prim.load32(h + 4)
+  // header len (LIST_LEN_OFFSET)
+  let data = h + 12
+  // byte start (LIST_HEADER)
   // Write the string bytes, then the newline — two single-iovec fd_writes (the
   // proven $print_int pattern; a 2-element iovec is not reliably gathered here).
-  prim.store32(8, data)         // iovec = { the string bytes, len }
+  prim.store32(8, data)
+  // iovec = { the string bytes, len }
   prim.store32(12, len)
-  let _w0 = prim.fd_write(1, 8, 1, 0)  // fd_write(stdout, iovec@8, count 1, nwritten@0)
-  prim.store8(768, 10)          // "\n" at scratch 768
-  prim.store32(8, 768)          // iovec = { the newline, 1 }
+  let _w0 = prim.fd_write(1, 8, 1, 0)
+  // fd_write(stdout, iovec@8, count 1, nwritten@0)
+  prim.store8(768, 10)
+  // "\n" at scratch 768
+  prim.store32(8, 768)
+  // iovec = { the newline, 1 }
   prim.store32(12, 1)
   let _w1 = prim.fd_write(1, 8, 1, 0)
 }

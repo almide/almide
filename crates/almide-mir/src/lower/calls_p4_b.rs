@@ -592,7 +592,8 @@ impl LowerCtx {
             func,
             "args_get_list" | "args_get_list_full" | "env_get" | "read_text_file"
                 | "read_bytes_file" | "read_dir" | "write_text_file" | "make_dir"
-                | "remove_all" | "path_filestat" | "path_exists"
+                | "remove_all" | "path_filestat" | "path_filestat_nofollow" | "path_exists"
+                | "rename"
         ) {
             return self.lower_prim_call_fs_env(func, args);
         }

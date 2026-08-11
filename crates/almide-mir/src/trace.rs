@@ -22,18 +22,55 @@
 /// the description.
 #[cfg_attr(not(test), allow(dead_code))] // read only by debug_channels_are_documented
 pub(crate) const CHANNELS: &[(&str, &str)] = &[
-    ("ALMIDE_DBG_ANF", "why a lambda lift or statement inline declined"),
-    ("ALMIDE_DBG_CELLS", "the captured / mutated / celled variable sets"),
-    ("ALMIDE_DBG_NESTED_MATCH", "why a nested-match chain was refused"),
-    ("ALMIDE_DBG_UNLINKED", "wasm references with no resolvable definition"),
-    ("ALMIDE_ABI_PROBE", "the lifted-effect-fn ABI decision per function"),
-    ("ALMIDE_DUMP_IR", "the lowered IR of every fn whose name contains the value"),
+    (
+        "ALMIDE_DBG_ANF",
+        "why a lambda lift or statement inline declined",
+    ),
+    (
+        "ALMIDE_DBG_CELLS",
+        "the captured / mutated / celled variable sets",
+    ),
+    (
+        "ALMIDE_DBG_NESTED_MATCH",
+        "why a nested-match chain was refused",
+    ),
+    (
+        "ALMIDE_DBG_UNLINKED",
+        "wasm references with no resolvable definition",
+    ),
+    (
+        "ALMIDE_ABI_PROBE",
+        "the lifted-effect-fn ABI decision per function",
+    ),
+    (
+        "ALMIDE_DUMP_IR",
+        "the lowered IR of every fn whose name contains the value",
+    ),
     ("ALMIDE_DUMP_DROPS", "the computed drop set"),
-    ("ALMIDE_MG_DEBUG", "mutable-global slot assignment and the cross-module name-bridge decisions"),
-    ("ALMIDE_DBG_ELEM", "why a list-literal Block element declined"),
-    ("DBG_LOWER_FN", "the lowered body of the fn named by the value"),
-    ("DBG_DESUGAR_FN", "the desugared body of the fn named by the value"),
-    ("DBG_DESUGAR_RAW", "with DBG_DESUGAR_FN, the raw pre-desugar body too"),
+    (
+        "ALMIDE_MG_DEBUG",
+        "mutable-global slot assignment and the cross-module name-bridge decisions",
+    ),
+    (
+        "ALMIDE_DBG_CONTLIFT",
+        "why a poison-oracle continuation lift rolled back (which piece walled or still poisoned)",
+    ),
+    (
+        "ALMIDE_DBG_ELEM",
+        "why a list-literal Block element declined",
+    ),
+    (
+        "DBG_LOWER_FN",
+        "the lowered body of the fn named by the value",
+    ),
+    (
+        "DBG_DESUGAR_FN",
+        "the desugared body of the fn named by the value",
+    ),
+    (
+        "DBG_DESUGAR_RAW",
+        "with DBG_DESUGAR_FN, the raw pre-desugar body too",
+    ),
 ];
 
 /// True when `var` is set to anything.
@@ -87,13 +124,18 @@ mod tests {
                 }
             }
         }
-        assert!(missing.is_empty(), "undocumented debug channels: {missing:?}");
+        assert!(
+            missing.is_empty(),
+            "undocumented debug channels: {missing:?}"
+        );
     }
 
     /// Every `.rs` file under `dir`, recursively.
     fn walk_sources(dir: std::path::PathBuf) -> Vec<std::path::PathBuf> {
         let mut out = Vec::new();
-        let Ok(entries) = std::fs::read_dir(&dir) else { return out };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return out;
+        };
         for e in entries.flatten() {
             let p = e.path();
             if p.is_dir() {

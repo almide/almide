@@ -7,20 +7,21 @@
 // length, so this decodes UTF-8: every byte that is NOT a continuation byte
 // (10xxxxxx, i.e. `byte / 64 == 2`) starts a new codepoint. Reads only — `s` is
 // borrowed, no allocation.
-
 // Count codepoint-start bytes in [addr, end).
-fn __strlen_count(addr: Int, end: Int, n: Int) -> Int =
-  if addr >= end then n
-  else {
-    let b = prim.load8(addr)
-    let step = if b / 64 == 2 then 0 else 1   // continuation byte (128..191) → not a start
-    __strlen_count(addr + 1, end, n + step)
-  }
+fn __strlen_count(addr: Int, end: Int, n: Int) -> Int = if addr >= end then n
+else {
+  let b = prim.load8(addr)
+  let step = if b / 64 == 2 then 0 else 1
+  // continuation byte (128..191) → not a start
+  __strlen_count(addr + 1, end, n + step)
+}
 
 fn string_len(s: String) -> Int = {
   let h = prim.handle(s)
-  let blen = prim.load32(h + 4)              // byte length at LIST_LEN_OFFSET(4)
-  __strlen_count(h + 12, h + 12 + blen, 0)   // data at LIST_HEADER(12)
+  let blen = prim.load32(h + 4)
+  // byte length at LIST_LEN_OFFSET(4)
+  // data at LIST_HEADER(12)
+  __strlen_count(h + 12, h + 12 + blen, 0)
 }
 
 // string.length — an explicit-name alias of string.len (both map to almide_rt_string_len, the

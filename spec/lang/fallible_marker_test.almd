@@ -39,3 +39,26 @@ test "bang propagates and guard raises through the ! channel" {
     ok(_) => testing.assert_contains("unexpected", "never"),
   }
 }
+
+// Phase 1b (#1103): a VALUE tail lifts into ok(...) — the same ergonomics an
+// effect fn's lifted body has. Result-typed exits (the Phase 1a forms above)
+// stay untouched; the wrap is type-driven per exit.
+fn double_port(s: String) -> Int! = int.parse(s)! * 2
+
+fn label(s: String) -> String! = {
+  let n = int.parse(s)!
+  guard n > 0 else err("must be positive")
+  "n=" + int.to_string(n)
+}
+
+fn pick_mixed(c: Bool) -> Int! = if c then 1
+else int.parse("x")!
+
+test "value tails lift into ok" {
+  assert_eq(double_port("21") ?? -1, 42)
+  assert_eq(double_port("x") ?? -1, -1)
+  assert_eq(label("7") ?? "-", "n=7")
+  assert_eq(label("-2") ?? "-", "-")
+  assert_eq(pick_mixed(true) ?? -9, 1)
+  assert_eq(pick_mixed(false) ?? -9, -9)
+}

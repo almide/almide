@@ -279,36 +279,67 @@ fn sync_resolved_expr_ty(expr: &mut IrExpr, vt: &VarTable) {
     }
 }
 
-fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
-    match &mut expr.kind {
+/// The nodes whose resolution needs more than "visit the children": a call's
+/// signature, a lambda's params, or a scope's bindings.
+fn resolve_expr_scoped(expr: &mut IrExpr, vt: &mut VarTable) {
+    match &expr.kind {
         IrExprKind::Call { .. } => resolve_expr_call(expr, vt),
         IrExprKind::RuntimeCall { .. } => resolve_expr_runtime_call(expr, vt),
         IrExprKind::Lambda { .. } => resolve_expr_lambda(expr, vt),
         IrExprKind::Block { .. } => resolve_expr_block(expr, vt),
+        IrExprKind::Match { .. } => resolve_expr_match(expr, vt),
+        IrExprKind::ForIn { .. } => resolve_expr_for_in(expr, vt),
+        IrExprKind::While { .. } => resolve_expr_while(expr, vt),
+        _ => unreachable!("resolve_expr_scoped called on a non-scoped kind"),
+    }
+}
+
+fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
+    // The nodes that carry a lambda, a scope, or a call signature each have
+    // their own resolver; the rest only need their children visited, grouped
+    // here by child shape.
+    if matches!(
+        expr.kind,
+        IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. } | IrExprKind::Lambda { .. }
+            | IrExprKind::Block { .. } | IrExprKind::Match { .. }
+            | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
+    ) {
+        resolve_expr_scoped(expr, vt);
+        return;
+    }
+    match &mut expr.kind {
         IrExprKind::If { cond, then, else_ } => {
             resolve_expr(cond, vt);
             resolve_expr(then, vt);
             resolve_expr(else_, vt);
         }
-        IrExprKind::Match { .. } => resolve_expr_match(expr, vt),
-        IrExprKind::ForIn { .. } => resolve_expr_for_in(expr, vt),
-        IrExprKind::While { .. } => resolve_expr_while(expr, vt),
-        IrExprKind::BinOp { left, right, .. } => {
-            resolve_expr(left, vt); resolve_expr(right, vt);
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => resolve_expr(e, vt),
+
+        // ── Two children, left to right ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => {
+            resolve_expr(a, vt);
+            resolve_expr(b, vt);
         }
-        IrExprKind::UnOp { operand, .. } => resolve_expr(operand, vt),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements.iter_mut() { resolve_expr(e, vt); }
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs } => {
+            for e in xs.iter_mut() { resolve_expr(e, vt); }
         }
+
+        // ── Name-tagged children ──
         IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
             for (_, e) in fields.iter_mut() { resolve_expr(e, vt); }
         }
-        IrExprKind::OptionSome { expr: inner } | IrExprKind::ResultOk { expr: inner }
-        | IrExprKind::ResultErr { expr: inner } | IrExprKind::Try { expr: inner }
-        | IrExprKind::Clone { expr: inner }
-        | IrExprKind::Deref { expr: inner } => resolve_expr(inner, vt),
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::IndexAccess { object, .. } => resolve_expr(object, vt),
+
+        // ── Shapes with their own traversal ──
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries.iter_mut() { resolve_expr(k, vt); resolve_expr(v, vt); }
         }
@@ -317,12 +348,13 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
                 if let IrStringPart::Expr { expr: e } = p { resolve_expr(e, vt); }
             }
         }
-        IrExprKind::Range { start, end, .. } => {
-            resolve_expr(start, vt); resolve_expr(end, vt);
+        // Handled by `resolve_expr_scoped`; never routed here.
+        IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::Block { .. } | IrExprKind::Match { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {
+            unreachable!("resolve_expr reached a scoped kind after the guard above")
         }
-        IrExprKind::MapAccess { object, key } => {
-            resolve_expr(object, vt); resolve_expr(key, vt);
-        }
+
         // Leaf / non-type-bearing kinds: nothing to descend into for the
         // top-down type propagation. Listed explicitly so a new IrExprKind
         // is a compile error here, never a silently-dropped subtree.
@@ -596,7 +628,7 @@ fn apply_lambda_fn_ty_wrapper(
     acc_ty: &Option<Ty>,
     body_ret: Option<Ty>,
 ) {
-    let Ty::Fn { params: fparams, ret } = arg_ty else { return };
+    let Ty::Fn { is_effect: _, params: fparams, ret } = arg_ty else { return };
     for &pidx in elem_param_indices {
         if let Some(fp) = fparams.get_mut(pidx) {
             if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
@@ -689,11 +721,11 @@ fn extract_applied_arg(ty: &Ty, idx: usize) -> Option<Ty> {
 /// Update a Lambda expression's Ty::Fn wrapper to reflect resolved params.
 fn refresh_lambda_fn_ty(expr: &mut IrExpr, _vt: &VarTable) {
     let IrExprKind::Lambda { params, body, .. } = &expr.kind else { return };
-    let Ty::Fn { params: fparams, ret } = &expr.ty else { return };
+    let Ty::Fn { is_effect: _, params: fparams, ret } = &expr.ty else { return };
     let (new_fparams, params_changed) = refresh_lambda_fn_ty_params(params, fparams);
     let (new_ret, ret_changed) = refresh_lambda_fn_ty_ret(ret, body, params);
     if params_changed || ret_changed {
-        expr.ty = Ty::Fn { params: new_fparams, ret: new_ret };
+        expr.ty = Ty::Fn { is_effect: false, params: new_fparams, ret: new_ret };
     }
 }
 

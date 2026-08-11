@@ -3,34 +3,30 @@
 // addresses for the sublist's len/elements) — the same type-agnostic handle reads as list.join.
 // The result is a fresh owned List[Int] (DynList, scalar elements); the input is borrowed. A
 // monomorphic List[Int] impl serves any List[List[T]] at the wasm level (handles are i32).
-
 // Total element count across all sublists.
-fn __flat_total(oh: Int, n: Int, i: Int, acc: Int) -> Int =
-  if i >= n then acc
-  else {
-    let subh = prim.load64(oh + 12 + i * 8)
-    let sl = prim.load32(subh + 4)
-    __flat_total(oh, n, i + 1, acc + sl)
-  }
+fn __flat_total(oh: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let subh = prim.load64(oh + 12 + i * 8)
+  let sl = prim.load32(subh + 4)
+  __flat_total(oh, n, i + 1, acc + sl)
+}
 
 // Copy a sublist's `sl` elements into dst starting at write offset `off`; return the advanced offset.
-fn __flat_copy_sub(dh: Int, subh: Int, sl: Int, j: Int, off: Int) -> Int =
-  if j >= sl then off
-  else {
-    let v = prim.load64(subh + 12 + j * 8)
-    prim.store64(dh + 12 + off * 8, v)
-    __flat_copy_sub(dh, subh, sl, j + 1, off + 1)
-  }
+fn __flat_copy_sub(dh: Int, subh: Int, sl: Int, j: Int, off: Int) -> Int = if j >= sl then off
+else {
+  let v = prim.load64(subh + 12 + j * 8)
+  prim.store64(dh + 12 + off * 8, v)
+  __flat_copy_sub(dh, subh, sl, j + 1, off + 1)
+}
 
 // Walk the outer list, copying each sublist in order; return the total written.
-fn __flat_fill(dh: Int, oh: Int, n: Int, i: Int, off: Int) -> Int =
-  if i >= n then off
-  else {
-    let subh = prim.load64(oh + 12 + i * 8)
-    let sl = prim.load32(subh + 4)
-    let off1 = __flat_copy_sub(dh, subh, sl, 0, off)
-    __flat_fill(dh, oh, n, i + 1, off1)
-  }
+fn __flat_fill(dh: Int, oh: Int, n: Int, i: Int, off: Int) -> Int = if i >= n then off
+else {
+  let subh = prim.load64(oh + 12 + i * 8)
+  let sl = prim.load32(subh + 4)
+  let off1 = __flat_copy_sub(dh, subh, sl, 0, off)
+  __flat_fill(dh, oh, n, i + 1, off1)
+}
 
 fn list_flatten(xss: List[Int]) -> List[Int] = {
   let oh = prim.handle(xss)
@@ -45,23 +41,21 @@ fn list_flatten(xss: List[Int]) -> List[Int] = {
 // identical walk, but each copied slot is a HANDLE the result must CO-OWN — rc_inc
 // on copy, so the result's recursive/flat drop and the sources' drops each release
 // exactly their own reference.
-fn __flat_copy_sub_rc(dh: Int, subh: Int, sl: Int, j: Int, off: Int) -> Int =
-  if j >= sl then off
-  else {
-    let v = prim.load64(subh + 12 + j * 8)
-    prim.rc_inc(v)
-    prim.store64(dh + 12 + off * 8, v)
-    __flat_copy_sub_rc(dh, subh, sl, j + 1, off + 1)
-  }
+fn __flat_copy_sub_rc(dh: Int, subh: Int, sl: Int, j: Int, off: Int) -> Int = if j >= sl then off
+else {
+  let v = prim.load64(subh + 12 + j * 8)
+  prim.rc_inc(v)
+  prim.store64(dh + 12 + off * 8, v)
+  __flat_copy_sub_rc(dh, subh, sl, j + 1, off + 1)
+}
 
-fn __flat_fill_rc(dh: Int, oh: Int, n: Int, i: Int, off: Int) -> Int =
-  if i >= n then off
-  else {
-    let subh = prim.load64(oh + 12 + i * 8)
-    let sl = prim.load32(subh + 4)
-    let off1 = __flat_copy_sub_rc(dh, subh, sl, 0, off)
-    __flat_fill_rc(dh, oh, n, i + 1, off1)
-  }
+fn __flat_fill_rc(dh: Int, oh: Int, n: Int, i: Int, off: Int) -> Int = if i >= n then off
+else {
+  let subh = prim.load64(oh + 12 + i * 8)
+  let sl = prim.load32(subh + 4)
+  let off1 = __flat_copy_sub_rc(dh, subh, sl, 0, off)
+  __flat_fill_rc(dh, oh, n, i + 1, off1)
+}
 
 fn list_flatten_rc(xss: List[Int]) -> List[Int] = {
   let oh = prim.handle(xss)

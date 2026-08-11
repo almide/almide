@@ -30,12 +30,25 @@
 # forward brick named in #1064's close). The cells RUN and pass on the native
 # leg; these entries are the honest wasm frontier, to be pruned by the next
 # heap-result-arm/aggregate-drop brick.
-spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_Inner_go
-spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_int_go
-spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_string_go
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested Codec: direct field, list elements, Option none omission
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Option field omits none, folds missing/null to none
+# (2026-08-10, #1134 Shape 1) The Nested and Shape roundtrip test fns are PRUNED:
+# the eq engine gained the synthesized List[record] loop helper (the record twin
+# of the List[variant] route) and the Result-Ok materializer gained the variant-
+# ctor payload arm (`ok(Label{…})`), so both conds lower and A/B byte-identically.
+# The Deep test fn stays: its cond rides the Deep decode helpers' heap-result-if
+# class below plus the bind-position record brick (#1064) — same file, other brick.
+# (2026-08-10, #1134 Shape 2) The int/string opt-list decode workers are PRUNED:
+# the ConcatList element families gained the literal builder's two lenlist ctor
+# classes (Flat scalar payload / LenLoop String payload with the shared
+# $__drop_list_lenlist route), so `acc + [_x]` lowers and both workers run the
+# wasm leg byte-identical.
+# (2026-08-11, #1134 Shape 4) The Inner worker AND the Deep test fn are PRUNED:
+# the Option[record] element class landed end to end — the tag-aware generated
+# `$__drop_opt_<R>`/`$__drop_list_opt_<R>` pair (emitted for scalar-only records
+# too), the OptRecord literal/concat element families, and the eq engine's
+# `list.eq_opt_str` + synthesized List[Option[record]] loop helpers — so the
+# codec file's walled-real count is 0. The FILE still rides the native leg: its
+# test-mode render hits the BIND-POSITION record brick (#1064, `Record heap
+# bind`), the separate frontier the #1064 close named.
 #
 #
 # (2026-08-05, #1041) The list.try_* family (effectful pipelines keep the
@@ -46,30 +59,51 @@ spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Opt
 # and run via the native fallback. These entries are the honest wasm frontier
 # for bundled generic HOFs, to be pruned when the defunctionalization brick
 # admits bundled closure params (the same brick list.iterate waits on).
-spec/stdlib/list_try_test.almd :: __test_almd_try_each runs to completion or stops at the first err
-spec/stdlib/list_try_test.almd :: __test_almd_try_filter keeps by an erring predicate
-spec/stdlib/list_try_test.almd :: __test_almd_try_filter_map keeps ok(some), drops ok(none), stops at err
-spec/stdlib/list_try_test.almd :: __test_almd_try_find returns ok(some/none) and propagates err
-spec/stdlib/list_try_test.almd :: __test_almd_try_flat_map concatenates and short-circuits
-spec/stdlib/list_try_test.almd :: __test_almd_try_fold threads the accumulator and stops at err
-spec/stdlib/list_try_test.almd :: __test_almd_try_map collects ok values
 # (2026-08-06, #1108) The fallibility-polymorphic core HOFs route their
 # fallible instantiation through the SAME bundled-generic twin bodies, so the
 # new spec file's test fns sit on the identical closure-lifting frontier as
 # the list_try_test entries above — pruned by the same defunctionalization
 # brick. Not a regression: same lowering gap, new witnesses.
-spec/lang/fallible_hof_test.almd :: __test_almd_filter: fallible predicate
-spec/lang/fallible_hof_test.almd :: __test_almd_find: fallible predicate
-spec/lang/fallible_hof_test.almd :: __test_almd_flat_map and filter_map: fallible callbacks
-spec/lang/fallible_hof_test.almd :: __test_almd_map: a named -> T! fn is a fallible callback
-spec/lang/fallible_hof_test.almd :: __test_almd_map: fallible lambda — ok path and first-err short-circuit
+# (2026-08-07, #1108 Phase 2b + L9) The polymorphic-HOF and fallible-lambda
+# behavior moved from test blocks into top-level helper fns (L9: test blocks
+# keep the pre-#1108 world), and the L-battery landed — the helpers sit on the
+# same bundled-generic closure-lifting frontier as the twins; pruned by the
+# same defunctionalization brick.
+# (2026-08-10, #1134 Shape 2 second batch) m_pipe_qq / fm_cells / marker_cells /
+# find_cells are PRUNED: the bind-position Result-polarity heap `??` now takes
+# the SAME `match ok/err` rewrite the tail position proved (routed through the
+# bind heap-match machinery, whose variant router gate widened to variant
+# SUBJECTS with non-variant heap results), and a NESTED `??` operand ANFs its
+# inner `??` to a synthetic bind.
+# (2026-08-10, #1134 Shape 2 third batch) The marker test fn's cond entry is
+# PRUNED: the eq engine gained the `List[Result[Int/Bool, String]]` element
+# class (value_core `list.eq_res_int` — len-as-tag element compare, scalar-Ok
+# bit-eq / String-Err byte-eq), so `long == [ok(1), err("…")]` lowers.
+# (2026-08-10, #1134 Shape 3) The branch-lift clone entry is PRUNED: a
+# Result-polarity heap `??` in a CALL-ARGUMENT position (`list.len(out ?? [])`)
+# now ANFs through the bind machinery's tail-proven `match ok/err` rewrite —
+# the whole file lowers and runs the wasm leg.
+# (2026-08-10, #1134 Shape 2) The three fallible_lambda use_* fns are PRUNED:
+# the `??` operand machinery gained the fallible-CLOSURE call route (the
+# ADR-0009 carrier — dispatch through the tracked closure block, inverse tag
+# read for a Result carrier), which was the real blocker behind their
+# "heap-result Tuple" label. The fallible_hof entries above stay: their `??`
+# operands are fallible-HOF Module calls with HEAP fallbacks — the next cell.
 #
-# (2026-08-06, #1114) option.to_result became an E-GENERIC pure bundled body
-# (ADR-0003 D1's typed-error route needs Option -> Result[T, CustomE]). The
-# custom-E instantiation binds a match over Result[Int, <variant>] whose
-# variant payload sits outside the heap-result ctor zoo — the same
-# feature-frontier family as the Codec-matrix class above. The String
-# instantiation (the overwhelmingly common form) stays IN the wasm corpus and
-# passes; this one cell runs on the native leg. Prune with the same
-# heap-result-arm brick.
-spec/stdlib/option_to_result_generic_test.almd :: __test_almd_custom E flows through
+# (2026-08-10, #1134 Shape 3) The #1114 custom-E test fn is PRUNED: the `_ve`
+# twin routes the scalar-A custom-E instantiation (killing the silent
+# `__copy_str` corruption of the two-step spelling), the module-call bind seed
+# registers the `res_<V>`/flat drop route for a variant-Err Result (which is
+# also the `err(e)` bind admission), and the statement-position Result match's
+# WILDCARD arm now takes whichever side the ctor arm did not — so the
+# desugared `match r { err(e) => …, _ => … }` executes on the wasm leg.
+#
+# (2026-08-11, #1134 Shape 5 ENDGAME — the set is EMPTY)
+# All walls burned. The last entry (collect_partition, the in-loop `!` consumer
+# of fs.fold_lines_range) fell when the classify count-side gained the SAME
+# AUTO_WRAP synthetic-Result root retype the lowering applies before its desugar
+# ladder (auto_wrap_abi_body, one helper both sides — #1176): desugar_loop_unwrap's
+# Result[T, String] root gate then fires count-side too, and the loop-`!` flag
+# rewrite's injected owned-copy concat is counted 1:1 (mir == ir).
+# The ratchet target is now permanently 0: ANY new walled-real entry is a
+# regression and fails the gate.

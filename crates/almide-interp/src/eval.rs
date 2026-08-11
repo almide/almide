@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use almide_base::intern::Sym;
 use almide_ir::{
-    BinOp, IrExpr, IrExprKind, IrFieldPattern, IrMatchArm, IrPattern, IrStmt, IrStmtKind,
-    IrStringPart, UnOp, VarId,
+    BinOp, CallTarget, IrExpr, IrExprKind, IrFieldPattern, IrMatchArm, IrPattern, IrStmt,
+    IrStmtKind, IrStringPart, UnOp, VarId,
 };
 use almide_lang::types::Ty;
 
@@ -132,17 +132,7 @@ impl<'a> Interpreter<'a> {
     fn eval_expr_control(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
         Some(match &expr.kind {
             // ── Control flow ──
-            IrExprKind::If { cond, then, else_ } => {
-                let c = val!(self.eval_expr(cond, scope));
-                match c {
-                    Value::Bool(true) => self.eval_expr(then, scope),
-                    Value::Bool(false) => self.eval_expr(else_, scope),
-                    other => Flow::Abort(format!(
-                        "internal: if-condition is {} not Bool",
-                        other.type_name()
-                    )),
-                }
-            }
+            IrExprKind::If { cond, then, else_ } => self.eval_if(cond, then, else_, scope),
             IrExprKind::Match { subject, arms } => self.eval_match(subject, arms, scope),
             IrExprKind::Block { stmts, expr } => self.eval_block(stmts, expr.as_deref(), scope),
             // Fan block: evaluate each expr SEQUENTIALLY in source order — the
@@ -161,51 +151,7 @@ impl<'a> Interpreter<'a> {
             // removes it runs post-cut), so evaluating the expr already performs
             // the unwrap and propagates an `Err` as `Flow::Return` — exactly the
             // backends' join-point `?`. We therefore just evaluate and collect.
-            IrExprKind::Fan { exprs } => {
-                // The deterministic-data-parallelism model (docs/roadmap/active/
-                // concurrency-stance.md) defines a `fan` block's observable behaviour as
-                // sequential evaluation in LIST ORDER, so the interpreter models it exactly:
-                // evaluate every arm in order (JOINING all of them — there is no
-                // cancellation, C-199), then fail with the FIRST `Err` in list order.
-                //
-                // The arms are Result-typed and the block's type is the unwrapped payload —
-                // `infer_expr_g3_fan` does that unwrap in the checker. Without mirroring it
-                // here the tuple carried Results into arithmetic and the interpreter aborted
-                // with `internal: int op on Result and Int`, which is a WRONG VOTE into the
-                // 3-way oracle rather than an honest skip. C-199's fixture caught it.
-                let mut out = Vec::with_capacity(exprs.len());
-                let mut first_err: Option<String> = None;
-                for e in exprs {
-                    let v = val!(self.eval_expr(e, scope));
-                    match v {
-                        Value::Result(Ok(payload)) => out.push(*payload),
-                        Value::Result(Err(payload)) => {
-                            if first_err.is_none() {
-                                first_err = Some(payload.display_bare());
-                            }
-                            // Keep the arity right for the tuple below; the value is
-                            // unreachable because `first_err` aborts before it is read.
-                            out.push(Value::Unit);
-                        }
-                        other => out.push(other),
-                    }
-                }
-                if let Some(msg) = first_err {
-                    return Some(Flow::Abort(msg));
-                }
-                // Single-expr fan is the bare value (no 1-tuple), matching both
-                // backends; multi-expr is a tuple.
-                // A single-expr fan is the bare value (no 1-tuple); `into_iter`
-                // is destructured rather than unwrapped so the 1-element case is
-                // proved by the pattern instead of by a length check.
-                let mut it = out.into_iter();
-                match (it.next(), it.next()) {
-                    (Some(only), None) => Flow::val(only),
-                    (first, second) => Flow::val(Value::tuple(
-                        first.into_iter().chain(second).chain(it).collect(),
-                    )),
-                }
-            }
+            IrExprKind::Fan { exprs } => self.eval_fan(exprs, scope),
             // ── Loops ──
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 self.eval_for_in(*var, var_tuple.as_deref(), iterable, body, scope)
@@ -215,6 +161,64 @@ impl<'a> Interpreter<'a> {
             IrExprKind::Continue => Flow::Continue,
             _ => return None,
         })
+    }
+
+    /// `If` — the condition must be a Bool; anything else is an internal
+    /// error, not a truthiness rule.
+    fn eval_if(&mut self, cond: &IrExpr, then: &IrExpr, else_: &IrExpr, scope: &Scope) -> Flow {
+        let c = val!(self.eval_expr(cond, scope));
+        match c {
+            Value::Bool(true) => self.eval_expr(then, scope),
+            Value::Bool(false) => self.eval_expr(else_, scope),
+            other => Flow::Abort(format!(
+                "internal: if-condition is {} not Bool",
+                other.type_name()
+            )),
+        }
+    }
+
+    /// `Fan` — the deterministic-data-parallelism model (docs/roadmap/active/
+    /// concurrency-stance.md) defines a `fan` block's observable behaviour as
+    /// sequential evaluation in LIST ORDER, so the interpreter models it exactly:
+    /// evaluate every arm in order (JOINING all of them — there is no
+    /// cancellation, C-199), then fail with the FIRST `Err` in list order.
+    ///
+    /// The arms are Result-typed and the block's type is the unwrapped payload —
+    /// `infer_expr_g3_fan` does that unwrap in the checker. Without mirroring it
+    /// here the tuple carried Results into arithmetic and the interpreter aborted
+    /// with `internal: int op on Result and Int`, which is a WRONG VOTE into the
+    /// 3-way oracle rather than an honest skip. C-199's fixture caught it.
+    fn eval_fan(&mut self, exprs: &[IrExpr], scope: &Scope) -> Flow {
+        let mut out = Vec::with_capacity(exprs.len());
+        let mut first_err: Option<String> = None;
+        for e in exprs {
+            let v = val!(self.eval_expr(e, scope));
+            match v {
+                Value::Result(Ok(payload)) => out.push(*payload),
+                Value::Result(Err(payload)) => {
+                    if first_err.is_none() {
+                        first_err = Some(payload.display_bare());
+                    }
+                    // Keep the arity right for the tuple below; the value is
+                    // unreachable because `first_err` aborts before it is read.
+                    out.push(Value::Unit);
+                }
+                other => out.push(other),
+            }
+        }
+        if let Some(msg) = first_err {
+            return Flow::Abort(msg);
+        }
+        // A single-expr fan is the bare value (no 1-tuple), matching both
+        // backends; `into_iter` is destructured rather than unwrapped so the
+        // 1-element case is proved by the pattern instead of by a length check.
+        let mut it = out.into_iter();
+        match (it.next(), it.next()) {
+            (Some(only), None) => Flow::val(only),
+            (first, second) => Flow::val(Value::tuple(
+                first.into_iter().chain(second).chain(it).collect(),
+            )),
+        }
     }
 
     /// Direct and tail calls.
@@ -247,29 +251,9 @@ impl<'a> Interpreter<'a> {
     fn eval_expr_collection(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
         Some(match &expr.kind {
             // ── Collections ──
-            IrExprKind::List { elements } => {
-                let mut out = Vec::with_capacity(elements.len());
-                for e in elements {
-                    out.push(val!(self.eval_expr(e, scope)));
-                }
-                Flow::val(Value::list(out))
-            }
-            IrExprKind::Tuple { elements } => {
-                let mut out = Vec::with_capacity(elements.len());
-                for e in elements {
-                    out.push(val!(self.eval_expr(e, scope)));
-                }
-                Flow::val(Value::tuple(out))
-            }
-            IrExprKind::MapLiteral { entries } => {
-                let mut out: Vec<(Value, Value)> = Vec::with_capacity(entries.len());
-                for (k, v) in entries {
-                    let kv = val!(self.eval_expr(k, scope));
-                    let vv = val!(self.eval_expr(v, scope));
-                    map_insert(&mut out, kv, vv);
-                }
-                Flow::val(Value::Map(Rc::new(out)))
-            }
+            IrExprKind::List { elements } => self.eval_seq_literal(elements, Value::list, scope),
+            IrExprKind::Tuple { elements } => self.eval_seq_literal(elements, Value::tuple, scope),
+            IrExprKind::MapLiteral { entries } => self.eval_map_literal(entries, scope),
             IrExprKind::EmptyMap => Flow::val(Value::Map(Rc::new(Vec::new()))),
             IrExprKind::Record { name, fields } => {
                 self.eval_record_literal(name, fields, &expr.ty, scope)
@@ -288,16 +272,7 @@ impl<'a> Interpreter<'a> {
             }
             IrExprKind::TupleIndex { object, index } => {
                 let o = val!(self.eval_expr(object, scope));
-                match o {
-                    Value::Tuple(items) | Value::List(items) => match items.get(*index) {
-                        Some(v) => Flow::val(v.clone()),
-                        None => Flow::Abort("index out of bounds".into()),
-                    },
-                    other => Flow::Abort(format!(
-                        "internal: tuple-index on {} ",
-                        other.type_name()
-                    )),
-                }
+                tuple_index(o, *index)
             }
             IrExprKind::IndexAccess { object, index } => {
                 let o = val!(self.eval_expr(object, scope));
@@ -307,20 +282,38 @@ impl<'a> Interpreter<'a> {
             IrExprKind::MapAccess { object, key } => {
                 let o = val!(self.eval_expr(object, scope));
                 let k = val!(self.eval_expr(key, scope));
-                match o {
-                    Value::Map(entries) => {
-                        let found = entries.iter().find(|(ek, _)| ek == &k);
-                        Flow::val(Value::Option(found.map(|(_, v)| Box::new(v.clone()))))
-                    }
-                    other => Flow::Abort(format!(
-                        "internal: map-access on {}",
-                        other.type_name()
-                    )),
-                }
+                map_lookup(o, k)
             }
 
             _ => return None,
         })
+    }
+
+    /// `List` / `Tuple`: evaluate every element left to right, then hand the
+    /// vector to the value constructor for this literal's shape.
+    fn eval_seq_literal(
+        &mut self,
+        elements: &[IrExpr],
+        build: fn(Vec<Value>) -> Value,
+        scope: &Scope,
+    ) -> Flow {
+        let mut out = Vec::with_capacity(elements.len());
+        for e in elements {
+            out.push(val!(self.eval_expr(e, scope)));
+        }
+        Flow::val(build(out))
+    }
+
+    /// `MapLiteral`: key then value per entry, inserted in source order so a
+    /// duplicate key keeps the LAST binding, as both backends do.
+    fn eval_map_literal(&mut self, entries: &[(IrExpr, IrExpr)], scope: &Scope) -> Flow {
+        let mut out: Vec<(Value, Value)> = Vec::with_capacity(entries.len());
+        for (k, v) in entries {
+            let kv = val!(self.eval_expr(k, scope));
+            let vv = val!(self.eval_expr(v, scope));
+            map_insert(&mut out, kv, vv);
+        }
+        Flow::val(Value::Map(Rc::new(out)))
     }
 
     /// Lambdas and string interpolation.
@@ -462,45 +455,13 @@ impl<'a> Interpreter<'a> {
                 self.budget_prim_rt(symbol.as_str(), &vals)
             }
             // ── Codegen-inserted: UNREACHABLE at the pre-codegen cut point ──
-            IrExprKind::RuntimeCall { .. } => unreachable!(
-                "RuntimeCall is codegen-inserted (IntrinsicLowering); interp runs pre-codegen"
-            ),
-            IrExprKind::Clone { .. } => {
-                unreachable!("Clone is codegen-inserted (CloneInsertion); interp runs pre-codegen")
-            }
-            IrExprKind::Deref { .. } => {
-                unreachable!("Deref is codegen-inserted (BoxDeref); interp runs pre-codegen")
-            }
-            IrExprKind::Borrow { .. } => unreachable!(
-                "Borrow is codegen-inserted (BorrowInsertion); interp runs pre-codegen"
-            ),
-            IrExprKind::BoxNew { .. } => {
-                unreachable!("BoxNew is codegen-inserted (BoxDeref); interp runs pre-codegen")
-            }
-            IrExprKind::RcWrap { .. } => unreachable!(
-                "RcWrap is codegen-inserted (ClosureConversion); interp runs pre-codegen"
-            ),
-            IrExprKind::RustMacro { .. } => unreachable!(
-                "RustMacro is codegen-inserted (BuiltinLowering); interp runs pre-codegen"
-            ),
-            IrExprKind::ToVec { .. } => {
-                unreachable!("ToVec is codegen-inserted; interp runs pre-codegen")
-            }
-            IrExprKind::RenderedCall { .. } => unreachable!(
-                "RenderedCall is codegen-inserted (StdlibLowering); interp runs pre-codegen"
-            ),
-            IrExprKind::InlineRust { .. } => unreachable!(
-                "InlineRust is codegen-inserted (StdlibLowering); interp runs pre-codegen"
-            ),
-            IrExprKind::ClosureCreate { .. } => unreachable!(
-                "ClosureCreate is codegen-inserted (ClosureConversion); interp runs pre-codegen"
-            ),
-            IrExprKind::EnvLoad { .. } => unreachable!(
-                "EnvLoad is codegen-inserted (ClosureConversion); interp runs pre-codegen"
-            ),
-            IrExprKind::IterChain { .. } => unreachable!(
-                "IterChain is codegen-inserted (StdlibLowering); interp runs pre-codegen"
-            ),
+            IrExprKind::RuntimeCall { .. } | IrExprKind::Clone { .. }
+            | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+            | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+            | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+            | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+            | IrExprKind::IterChain { .. } => unreachable_post_cut(&expr.kind),
             _ => return None,
         })
     }
@@ -515,6 +476,15 @@ impl<'a> Interpreter<'a> {
     /// the identity there — pass the Option through, do NOT unwrap some/none.
     fn eval_try_unwrap(&mut self, expr: &IrExpr, node_ty: &Ty, scope: &Scope) -> Flow {
         let v = val!(self.eval_expr(expr, scope));
+        self.try_unwrap_value(v, node_ty)
+    }
+
+    /// The value half of [`Self::eval_try_unwrap`] — the `!`/`?` marker's
+    /// normalization on an ALREADY-evaluated operand. Split out so the
+    /// tail-call trampoline can fold the same normalization over a chain's
+    /// final value (`run_callable`'s pending list) instead of re-implementing
+    /// it: one instrument, two call sites.
+    pub(crate) fn try_unwrap_value(&mut self, v: Value, node_ty: &Ty) -> Flow {
         if matches!(node_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1)
         {
@@ -747,7 +717,198 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    // ── The tail-call trampoline's spine walker ─────────────────
+
+    /// Walk a function/closure body's TAIL SPINE iteratively — Block tails,
+    /// If branches, the effect `Try{Call}` wrapper — and report whether it
+    /// ends in a transferable call ([`crate::SpineOutcome::Transfer`]) or in
+    /// anything else (evaluated normally, [`crate::SpineOutcome::Done`]).
+    /// The engine looping on this is [`crate::Interpreter::run_callable`];
+    /// everything NOT on the spine evaluates through the ordinary recursive
+    /// `eval_expr`, so semantics change nowhere except stack growth.
+    pub(crate) fn eval_body_spine(
+        &mut self,
+        body: &IrExpr,
+        frame: &Scope,
+    ) -> crate::SpineOutcome<'a> {
+        use crate::SpineOutcome;
+        let mut scope = frame.clone();
+        let mut cur = body;
+        loop {
+            match &cur.kind {
+                IrExprKind::Block { stmts, expr: Some(tail) } => {
+                    let child = scope.child();
+                    for s in stmts {
+                        if let Err(f) = self.exec_stmt(s, &child) {
+                            return SpineOutcome::Done(f);
+                        }
+                    }
+                    scope = child;
+                    cur = tail;
+                }
+                IrExprKind::If { cond, then, else_ } => match self.eval_expr(cond, &scope) {
+                    Flow::Value(Value::Bool(true)) => cur = then,
+                    Flow::Value(Value::Bool(false)) => cur = else_,
+                    Flow::Value(other) => {
+                        return SpineOutcome::Done(Flow::Abort(format!(
+                            "internal: if-condition is {} not Bool",
+                            other.type_name()
+                        )))
+                    }
+                    other => return SpineOutcome::Done(other),
+                },
+                // The effect wrapper `f(..)!` in tail position: transfer the
+                // call and let the engine fold the marker's normalization
+                // over the chain's final value (the pending list).
+                IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
+                    return match self.spine_tail_call(inner, &scope) {
+                        Some(SpineOutcome::Transfer { next, next_args, try_marker: None }) => {
+                            SpineOutcome::Transfer {
+                                next,
+                                next_args,
+                                try_marker: Some(cur.ty.clone()),
+                            }
+                        }
+                        Some(out) => out,
+                        None => SpineOutcome::Done(self.eval_expr(cur, &scope)),
+                    };
+                }
+                IrExprKind::Call { .. } => {
+                    return match self.spine_tail_call(cur, &scope) {
+                        Some(out) => out,
+                        None => SpineOutcome::Done(self.eval_expr(cur, &scope)),
+                    };
+                }
+                _ => return SpineOutcome::Done(self.eval_expr(cur, &scope)),
+            }
+        }
+    }
+
+    /// The call half of the spine walk. `None` = "not transferable, and
+    /// NOTHING has been evaluated yet" — the caller re-evaluates the node
+    /// through the ordinary path. `Some(Done)` = a terminal tier (builtin,
+    /// non-Value arg flow) resolved it here. `Some(Transfer)` = tail call to
+    /// a lowered fn / closure with its arguments already evaluated.
+    ///
+    /// Resolution order mirrors `eval_named_call` exactly: builtins first
+    /// (they may evaluate args, so once consulted this fn must complete),
+    /// then variant ctors / Endian (pure lookups — declined to the normal
+    /// path), then the fn table. A `mut`-param callee declines the transfer:
+    /// copy-out needs the caller's lvalue, which a transferred frame no
+    /// longer has (#1022).
+    fn spine_tail_call(
+        &mut self,
+        expr: &IrExpr,
+        scope: &Scope,
+    ) -> Option<crate::SpineOutcome<'a>> {
+        use crate::{SpineOutcome, TailCallee};
+        let IrExprKind::Call { target, args, .. } = &expr.kind else {
+            return None;
+        };
+        match target {
+            CallTarget::Named { name } => {
+                if let Some(flow) = self.eval_builtin_call(name.as_str(), args, scope) {
+                    return Some(SpineOutcome::Done(flow));
+                }
+                if self.variant_ctor(*name).is_some()
+                    || (args.is_empty()
+                        && matches!(name.as_str(), "LittleEndian" | "BigEndian"))
+                {
+                    return None;
+                }
+                let func = self.fns.get(name).copied()?;
+                if func.params.iter().any(|p| p.is_mut) {
+                    return None;
+                }
+                let mut evaled = Vec::with_capacity(args.len());
+                for a in args {
+                    match self.eval_expr(a, scope) {
+                        Flow::Value(v) => evaled.push(v),
+                        other => return Some(SpineOutcome::Done(other)),
+                    }
+                }
+                Some(SpineOutcome::Transfer {
+                    next: TailCallee::Fn(func),
+                    next_args: evaled,
+                    try_marker: None,
+                })
+            }
+            CallTarget::Computed { callee } => {
+                let f = match self.eval_expr(callee, scope) {
+                    Flow::Value(v) => v,
+                    other => return Some(SpineOutcome::Done(other)),
+                };
+                let Value::Closure(clo) = f else {
+                    return Some(SpineOutcome::Done(Flow::Abort(format!(
+                        "internal: call of non-closure {}",
+                        f.type_name()
+                    ))));
+                };
+                let mut evaled = Vec::with_capacity(args.len());
+                for a in args {
+                    match self.eval_expr(a, scope) {
+                        Flow::Value(v) => evaled.push(v),
+                        other => return Some(SpineOutcome::Done(other)),
+                    }
+                }
+                Some(SpineOutcome::Transfer {
+                    next: TailCallee::Clo(clo),
+                    next_args: evaled,
+                    try_marker: None,
+                })
+            }
+            // Module / Method tails keep the ordinary path: their dispatch
+            // has value-keyed pre-body tiers (container ops, prims, bridge)
+            // whose claim order cannot be probed without evaluating.
+            _ => None,
+        }
+    }
 }
 
 include!("eval_loops_stmts.rs");
 include!("eval_match.rs");
+
+/// `TupleIndex` on an already-evaluated receiver. Lists share the arm: a
+/// destructured list binding is a `Value::List` at this cut point.
+fn tuple_index(o: Value, index: usize) -> Flow {
+    let (Value::Tuple(items) | Value::List(items)) = o else {
+        return Flow::Abort(format!("internal: tuple-index on {} ", o.type_name()));
+    };
+    match items.get(index) {
+        Some(v) => Flow::val(v.clone()),
+        None => Flow::Abort("index out of bounds".into()),
+    }
+}
+
+/// `MapAccess` on an already-evaluated receiver — a miss is `None`, not an
+/// abort (the node's type is `Option[V]`).
+fn map_lookup(o: Value, k: Value) -> Flow {
+    let Value::Map(entries) = o else {
+        return Flow::Abort(format!("internal: map-access on {}", o.type_name()));
+    };
+    let found = entries.iter().find(|(ek, _)| ek == &k);
+    Flow::val(Value::Option(found.map(|(_, v)| Box::new(v.clone()))))
+}
+
+/// Every node kind an `almide-codegen` target pass inserts, paired with the
+/// pass that inserts it. Reaching one means the pre-codegen cut point moved —
+/// fix the boundary rather than handling the node here (see the crate docs).
+fn unreachable_post_cut(kind: &IrExprKind) -> ! {
+    let (node, pass) = match kind {
+        IrExprKind::RuntimeCall { .. } => ("RuntimeCall", "IntrinsicLowering"),
+        IrExprKind::Clone { .. } => ("Clone", "CloneInsertion"),
+        IrExprKind::Deref { .. } => ("Deref", "BoxDeref"),
+        IrExprKind::Borrow { .. } => ("Borrow", "BorrowInsertion"),
+        IrExprKind::BoxNew { .. } => ("BoxNew", "BoxDeref"),
+        IrExprKind::RcWrap { .. } => ("RcWrap", "ClosureConversion"),
+        IrExprKind::RustMacro { .. } => ("RustMacro", "BuiltinLowering"),
+        IrExprKind::ToVec { .. } => ("ToVec", "StdlibLowering"),
+        IrExprKind::RenderedCall { .. } => ("RenderedCall", "StdlibLowering"),
+        IrExprKind::InlineRust { .. } => ("InlineRust", "StdlibLowering"),
+        IrExprKind::ClosureCreate { .. } => ("ClosureCreate", "ClosureConversion"),
+        IrExprKind::EnvLoad { .. } => ("EnvLoad", "ClosureConversion"),
+        IrExprKind::IterChain { .. } => ("IterChain", "StdlibLowering"),
+        other => unreachable!("{:?} is not a codegen-inserted node", std::mem::discriminant(other)),
+    };
+    unreachable!("{} is codegen-inserted ({}); interp runs pre-codegen", node, pass)
+}

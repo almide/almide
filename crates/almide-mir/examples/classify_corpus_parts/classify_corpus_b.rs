@@ -356,6 +356,9 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_mir::lower::desugar_loop_early_returns(&mut ir);
         almide_mir::lower::hoist_spread_call_bases(&mut ir);
         almide_mir::lower::hoist_record_literal_args(&mut ir);
+        // #1147 — the SAME oracle-driven continuation lift the pipeline runs,
+        // LAST in the chain (desugar-before-both).
+        almide_mir::lower::lift_poisoning_continuations(&mut ir);
         Ok(ir)
     }));
     match result {
@@ -448,6 +451,10 @@ struct Tally {
     /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
     /// soundness gate). Must stay empty — a non-empty list is a wall breach.
     cert_backing_breaches: Vec<String>,
+    /// Poisoned certificates EXCLUDED from the ownership witness (#1146):
+    /// kernel-unrepresentable nested-region arms, counted so the exclusion is
+    /// never a silent shrink of the proof surface.
+    cert_poisoned_excluded: usize,
     /// Functions whose MIR call-op count EXCEEDS their source call-node count — the
     /// caps-soundness gate for the elided-call effect markers (`record_elided_calls`).
     /// A marker may only ADD a call-op for a genuinely ELIDED call, so `mir_calls`

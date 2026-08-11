@@ -84,10 +84,67 @@ jobs:
   # Target tests — all run on every develop/main PR
   # ═══════════════════════════════════════════════
 
-  test-rust:
-    name: Test Rust
+  shard-coverage:
+    # THE GATE that makes sharding safe. A partition that drops a target does
+    # not fail — it goes GREEN, faster, with less tested. That failure mode is
+    # invisible by construction, so it gets its own job: assert the four shards'
+    # union is exactly the full target set, with nothing missing and nothing run
+    # twice. Cheap (no tests run, just enumeration) and it gates the same commit
+    # the shards run on.
+    name: Test shards cover every target
     needs: build
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Union of shards == full target set
+        run: |
+          set -euo pipefail
+          bash scripts/ci-test-shard.sh --list-all | sort > /tmp/all.txt
+          : > /tmp/union.txt
+          for i in 0 1 2 3; do
+            bash scripts/ci-test-shard.sh --list "$i" 4 >> /tmp/union.txt
+          done
+          sort /tmp/union.txt > /tmp/union_sorted.txt
+          dupes=$(sort /tmp/union.txt | uniq -d | wc -l | tr -d ' ')
+          if [ "$dupes" -ne 0 ]; then
+            echo "SHARD GATE FAIL: $dupes target(s) assigned to more than one shard:" >&2
+            sort /tmp/union.txt | uniq -d >&2
+            exit 1
+          fi
+          if ! diff -u /tmp/all.txt /tmp/union_sorted.txt; then
+            echo "SHARD GATE FAIL: the shards' union is not the full target set — a" >&2
+            echo "target above with '-' is enumerated but NEVER RUN (a green build" >&2
+            echo "that tests less), one with '+' is run twice." >&2
+            exit 1
+          fi
+          echo "shard coverage OK: $(wc -l < /tmp/all.txt | tr -d ' ') target(s), each in exactly one shard"
+      - name: Balance report (informational — imbalance costs time, not coverage)
+        run: |
+          for i in 0 1 2 3; do
+            printf '  shard %s: %s target(s)\n' "$i" "$(bash scripts/ci-test-shard.sh --list "$i" 4 | wc -l | tr -d ' ')"
+          done
+
+  test-rust:
+    # SHARDED (4 ways). The suite's 30 minutes are TEST EXECUTION, not
+    # compilation — 29 of them are `finished in` time — so caching cannot touch
+    # it, and neither can a bigger runner: nearly every test shells out to
+    # `almide`, and each `almide` compile takes a GLOBAL exclusive flock on the
+    # shared build dir (src/cli/run.rs::BuildDirLock), which serializes the whole
+    # suite inside one machine. Separate JOBS each get their own build dir and
+    # therefore their own lock — that is where the parallelism comes from.
+    #
+    # 4, not more: the load is extremely skewed (the top 4 targets are half the
+    # total) and `wasm_runtime_test` alone is ~270s, so past 4 shards the
+    # longest target IS the floor and extra jobs buy nothing.
+    name: Test Rust (shard ${{ matrix.shard }}/4)
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
 
@@ -163,11 +220,72 @@ jobs:
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
           ALMIDE_EXPECT_TOOLS: "1"
-        # --workspace: a bare `cargo test` at the root tests only the ROOT
-        # package — the member crates' suites (almide-interp's abstain-ledger
-        # gate, frontend/codegen/tools unit tests) silently never ran in CI.
-        # Trust Spine covers almide-mir; this covers everything.
-        run: cargo test --workspace
+        # The script enumerates every workspace test target from cargo's own
+        # JSON (root package AND member crates — a bare `cargo test` at the root
+        # tests only the root, and the members' suites silently never ran in CI
+        # before `--workspace`), packs them heaviest-first into balanced shards,
+        # and runs this shard's share. `shard-coverage` below proves the four
+        # shards' union is the whole set, so a partition bug reads as a RED
+        # build rather than a fast green one.
+        run: bash scripts/ci-test-shard.sh --run ${{ matrix.shard }} 4
+
+  almide-gates:
+    # BRANCH PROTECTION: this job's name is a REQUIRED CHECK on develop. Renaming
+    # a job silently un-requires it — the old name never reports again and the
+    # PR blocks forever waiting for a check that cannot arrive (which is exactly
+    # what the shard rename did to `Test Rust`). Rename here ⟹ update
+    # repos/almide/almide/branches/develop/protection/required_status_checks in
+    # the same change.
+    #
+    # The steps that do NOT depend on the shard split, lifted OUT of it.
+    #
+    # `test-rust` is a 4-way matrix, so every step in it runs FOUR TIMES. These
+    # six run the built compiler over fixed inputs — the same work, the same
+    # result, four times over — which cost the critical shard ~150s of pure
+    # duplication and would not shrink by adding shards. Sharding parallelises
+    # `cargo test`; anything else sharing that job just gets copied.
+    #
+    # The registry regen is the one step here that needs cargo (it rebuilds
+    # almide-codegen to diff the generated sources); the rest need only the
+    # downloaded binary, which is why this job installs wasmtime/wasm-opt but
+    # skips the heavy cargo cache the shards restore.
+    name: Almide gates (compiler-driven, shard-independent)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache wasmtime tarball
+        id: wasmtime-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/wasmtime.tar.xz
+          key: wasmtime-v27.0.0-x86_64-linux
+
+      - name: Install wasmtime
+        run: |
+          if [ ! -f /tmp/wasmtime.tar.xz ]; then
+            curl -sSL -o /tmp/wasmtime.tar.xz \
+              https://github.com/bytecodealliance/wasmtime/releases/download/v27.0.0/wasmtime-v27.0.0-x86_64-linux.tar.xz
+          fi
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v27.0.0-x86_64-linux/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Install wasm-opt (binaryen)
+        run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
 
       - name: Generated runtime registry matches committed sources (regenerate and diff)
         # crates/almide-codegen/src/generated/{rust_runtime,runtime_fn_modes}.rs
@@ -196,6 +314,27 @@ jobs:
         run: |
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test examples/
+
+      - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-fallback.sh
+
+      # Per-FUNCTION parity. The ratchet above measures which spec FILES fall back,
+      # so a stdlib fn no test touches is invisible to it — datetime.monotonic_ns
+      # had no wasm body at all while that gate read a clean 18/18. ~70s.
+      - name: WASM reachability ratchet (every stdlib fn builds on both legs, or is listed)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-reachability.sh
+
+      # Stage 1c. The two ratchets above measure code rendered FROM the shared MIR —
+      # the half the 3-way oracle can differ native against wasm. The prelude is the
+      # other half: hand-written wasm with no native counterpart, so its assurance has
+      # to be named per function. CI runs the reachability re-measurement (the `via`
+      # column is measured here, not trusted), which is why the example is built —
+      # debug on purpose: it shares the registry-regen step's dep cache, and
+      # rendering 47 fixtures is cheap even unoptimized.
+      - name: WAT prelude audit (every hand-written wasm fn's evidence named and re-measured)
+        run: |
+          cargo build -p almide-mir --example render_program
+          ALMIDE_RENDER=target/debug/examples/render_program bash scripts/check-wat-prelude-audit.sh
 
       # The dogfood program (Unit 0.46, #1001). Its own tests cover the decision rules
       # extracted from the shell gates — the parity verdict, the nightly streak fold, the
@@ -396,6 +535,17 @@ jobs:
   # and to wasm32-wasip1 and asserts byte-identical output.
   # ═══════════════════════════════════════════════
 
+  # SPLIT FROM ONE JOB (#1138). The two determinism scripts share nothing but a
+  # harness build and never read each other's output, yet they ran back-to-back
+  # in one job: 316s + 476s = 792s, which made this the critical path of CI once
+  # the test job was sharded (#1136, #1137). As two jobs they overlap and the
+  # pair costs the slower one.
+  #
+  # The harness build is NOT the duplication worth chasing here — measured at
+  # 52s native against ~476s of fixture loop, so ~7% of the job. The loop over
+  # spec/wasm_cross is the weight, and partitioning it is the next step in #1138
+  # (which needs a coverage gate reconciling both the fixture set and the
+  # `walled` tally before it can land).
   wasm-host-determinism:
     name: WASM host-arch determinism
     if: github.server_url == 'https://github.com'
@@ -450,10 +600,73 @@ jobs:
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
-
       - name: Host-arch codegen determinism (wasm32-wasip1 vs native, byte-identical)
         run: scripts/check-host-determinism.sh
 
+  wasm-browser-determinism:
+    # BRANCH PROTECTION: this job's name is a NEW required check on develop.
+    # Adding or renaming a job silently changes the required set — the shard
+    # rename in #1136 left a PR blocked forever on a `Test Rust` check that
+    # could no longer report. Update
+    # repos/almide/almide/branches/develop/protection/required_status_checks
+    # in the same change.
+    name: WASM browser-ABI determinism
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1, wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/wasmgen-harness/target
+            tools/wasmgen-harness-uu/target
+          # Keyed on the LIVE wasm emitter (almide-mir's v1 renderer) — the old
+          # key hashed crates/almide-codegen/src/emit_wasm/**, deleted with the
+          # v0 retirement, so that component silently hashed nothing (#992).
+          # DISTINCT from the host job's key: both jobs cache the same paths, and
+          # two jobs saving one key makes the second save fail as a duplicate. The
+          # browser leg is also the only one that populates wasmgen-harness-uu, so a
+          # shared entry would be written by whichever job finished first.
+          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
+          restore-keys: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          # Pinned + cached + retried. On a cache hit the tarball is already here,
+          # so the per-IP-rate-limited release download runs at most once per key.
+          # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
+          # "not a tar archive". Bump VERSION and the cache key together.
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
       - name: Browser-ABI determinism (wasm32-unknown-unknown via node, no panic + byte-identical)
         run: scripts/check-browser-determinism.sh
 
@@ -574,6 +787,15 @@ jobs:
 
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
+
+      - name: Scalar-read audit (every raw-load arm classified, zero unguarded — the #1183 class stays extinct)
+        run: scripts/check-scalar-read-audit.sh
+
+      - name: Abstain classification (every interp abstain classed; the executable-spec boundary never grows unclassified)
+        run: scripts/check-abstain-classes.sh
+
+      - name: libm determinism (every platform-libm call classified; a reachable undeclared one is the #1197 class)
+        run: scripts/check-libm-determinism.sh
 
       - name: Embedded payload size ratchet (#878 — the stdlib every embedder downloads)
         run: scripts/check-embedded-size.sh

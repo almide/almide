@@ -84,6 +84,9 @@ def module_block(module: str) -> str:
         )
     iface = json.loads(out.stdout)
     fns = iface.get("functions", [])
+    # __-prefixed fns are INTERNAL carriers (e.g. the fallibility-polymorphic
+    # __fallible_* bodies, ADR-0006 D3) — never document them.
+    fns = [f for f in fns if not f.get("name", "").startswith("__")]
     lines = [BEGIN, "", f"## Signature index ({len(fns)} functions)", "", "```"]
     for f in fns:
         lines.append(signature(module, f))

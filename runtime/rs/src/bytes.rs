@@ -23,8 +23,32 @@ pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
 pub fn almide_rt_bytes_from_list(xs: &[i64]) -> Vec<u8> { xs.iter().map(|&x| x as u8).collect() }
 pub fn almide_rt_bytes_to_list(b: &Vec<u8>) -> Vec<i64> { b.iter().map(|&x| x as i64).collect() }
 pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r = a.clone(); r.extend_from_slice(b); r }
-pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> { b.repeat(n.max(0) as usize) }
-pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> { vec![0u8; len.max(0) as usize] }
+// C-197: an allocation the process cannot satisfy is the DEFINED abort
+// (`Error: out of memory` + exit 1) on BOTH targets — the wasm render's $oom
+// prints the same line. The infallible `vec![0; n]` here instead died on the
+// Rust allocator abort (SIGABRT, no exit code — fuzz seed 500705518626
+// index 711, `bytes.new(i64::MAX)`).
+fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
+    let mut v: Vec<u8> = Vec::new();
+    if v.try_reserve_exact(n).is_err() {
+        eprintln!("Error: out of memory");
+        std::process::exit(1);
+    }
+    v
+}
+pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
+    let n = n.max(0) as usize;
+    let total = b.len().checked_mul(n).unwrap_or(usize::MAX);
+    let mut v = alloc_bytes_or_oom(total);
+    for _ in 0..n { v.extend_from_slice(b); }
+    v
+}
+pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> {
+    let n = len.max(0) as usize;
+    let mut v = alloc_bytes_or_oom(n);
+    v.resize(n, 0);
+    v
+}
 pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
 pub fn almide_rt_bytes_set_at(b: &mut Vec<u8>, i: i64, val: i64) { if (i as usize) < b.len() { b[i as usize] = val as u8; } }
 pub fn almide_rt_bytes_copy_within(b: &mut Vec<u8>, src_start: i64, src_end: i64, dst: i64) {
@@ -354,8 +378,18 @@ pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> String {
     if p + 4 + slen > b.len() { return String::new(); }
     String::from_utf8_lossy(&b[p+4..p+4+slen]).into_owned()
 }
-pub fn almide_rt_bytes_as_ptr(b: &Vec<u8>) -> *mut u8 { b.as_ptr() as *mut u8 }
-pub fn almide_rt_bytes_as_mut_ptr(b: &mut Vec<u8>) -> *mut u8 { b.as_mut_ptr() }
+// An EMPTY buffer has no data region, so both return NULL (which every bridge
+// consumer already treats as "move nothing"): `Vec::as_ptr` on an empty Vec is a
+// DANGLING sentinel, and `copy_to_ptr` through it was UB — a safe Almide program
+// corrupted the native heap and died silently while the wasm leg wrote past the
+// empty block and continued (differential fuzz, 2026-08-10 night). Mirrored by
+// the wasm self-host (stdlib/bytes_rawptr.almd), C-062.
+pub fn almide_rt_bytes_as_ptr(b: &Vec<u8>) -> *mut u8 {
+    if b.is_empty() { std::ptr::null_mut() } else { b.as_ptr() as *mut u8 }
+}
+pub fn almide_rt_bytes_as_mut_ptr(b: &mut Vec<u8>) -> *mut u8 {
+    if b.is_empty() { std::ptr::null_mut() } else { b.as_mut_ptr() }
+}
 
 /// Create Bytes from a raw pointer + length (unsafe: caller must ensure validity).
 pub fn almide_rt_bytes_from_raw_ptr(ptr: *mut u8, len: i64) -> Vec<u8> {

@@ -12,9 +12,7 @@
 // (Almide self-host fns return a single value): slot0 = n, slot1 = bits(y0), slot2 = bits(y1).
 // rem_pio2_large uses a few small scratch List[Int]/List[Float] arrays (q/iq/f/fq + the IPIO2
 // 2/pi table prefix), each bounded and freed — pure scalar Float, the cert is untouched.
-
 // ───────────────────────── kernel sin / cos / tan ─────────────────────────
-
 // k_sin on ~[-pi/4, pi/4]. iy != 0 means y (the tail) is used.
 fn __k_sin(x: Float, y: Float, iy: Int) -> Float = {
   let s1 = prim.ffrombits(0 - 4628199217061079735)
@@ -27,8 +25,7 @@ fn __k_sin(x: Float, y: Float, iy: Int) -> Float = {
   let w = z * z
   let r = s2 + z * (s3 + z * s4) + z * w * (s5 + z * s6)
   let v = z * x
-  if iy == 0 then x + v * (s1 + z * r)
-  else x - ((z * (0.5 * y - v * r) - y) - v * s1)
+  if iy == 0 then x + v * (s1 + z * r) else x - ((z * (0.5 * y - v * r) - y) - v * s1)
 }
 
 // k_cos on [-pi/4, pi/4]. y is the tail of x.
@@ -69,16 +66,17 @@ fn __k_tan(x0: Float, y0: Float, odd: Int) -> Float = {
   let t12 = prim.ffrombits(4538267711989316308)
   let pio4 = prim.ffrombits(4605249457297304856)
   let pio4_lo = prim.ffrombits(4359948597267291143)
-
   let hx = prim.band(prim.bshr_u(prim.fbits(x0), 32), 4294967295)
-  let big = prim.band(hx, 2147483647) >= 1072010280    // 0x3FE59428
+  let big = prim.band(hx, 2147483647) >= 1072010280
+  // 0x3FE59428
   let sign = prim.bshr_u(hx, 31)
   // big branch: fold x into pi/4 - x. negate first when sign set.
-  let xn = if big then (if sign == 0 then x0 else 0.0 - x0) else x0
-  let yn = if big then (if sign == 0 then y0 else 0.0 - y0) else y0
+  let xn = if big then (if sign == 0 then x0 else 0.0 - x0)
+  else x0
+  let yn = if big then (if sign == 0 then y0 else 0.0 - y0)
+  else y0
   let x = if big then (pio4 - xn) + (pio4_lo - yn) else xn
   let y = if big then 0.0 else yn
-
   let z = x * x
   let w = z * z
   let r0 = t1 + w * (t3 + w * (t5 + w * (t7 + w * (t9 + w * t11))))
@@ -96,8 +94,7 @@ fn __k_tan(x0: Float, y0: Float, odd: Int) -> Float = {
     let sg = prim.i2f(1 - 2 * odd)
     let v = sg - 2.0 * (x + (r - w3 * w3 / (w3 + sg)))
     if sign == 0 then v else 0.0 - v
-  }
-  else if odd == 0 then w3
+  } else if odd == 0 then w3
   else {
     let w0 = __zero_low_word(w3)
     let v = r - (w0 - x)
@@ -116,7 +113,6 @@ fn __k_tan(x0: Float, y0: Float, odd: Int) -> Float = {
 // Faithful port of k_rem_pio2.c. x is a scratch List[Float] of `nx` 24-bit terms; ty is a
 // 3-slot scratch List[Float] receiving y0,y1; prec is fixed at 1 here (the trig caller).
 // Returns n & 7. Uses small scratch arrays f/q/fq (Float) and iq (Int), each `alloc`-bounded.
-
 // Read IPIO2[i] from the table built once per large-path call (handle `tabh`).
 fn __ipio2(tabh: Int, i: Int) -> Int = prim.load64(tabh + 12 + i * 8)
 
@@ -244,15 +240,17 @@ fn __pio2(i: Int) -> Float = {
   else if i == 3 then p3
   else if i == 4 then p4
   else if i == 5 then p5
-  else if i == 6 then p6
-  else p7
+  else if i == 6 then p6 else p7
 }
 
 // scalbn (faithful port, generic path) — x * 2^n.
 fn __scalbn(x0: Float, n0: Int) -> Float = {
-  let f_exp_max = prim.ffrombits(9214364837600034816)    // 2^1023
-  let f_exp_min = prim.ffrombits(4503599627370496)        // 2^-1022
-  let f_pow_subnorm = prim.ffrombits(4845873199050653696) // 2^53
+  let f_exp_max = prim.ffrombits(9214364837600034816)
+  // 2^1023
+  let f_exp_min = prim.ffrombits(4503599627370496)
+  // 2^-1022
+  let f_pow_subnorm = prim.ffrombits(4845873199050653696)
+  // 2^53
   // n > 1023
   if n0 > 1023 then {
     let x1 = x0 * f_exp_max
@@ -263,13 +261,11 @@ fn __scalbn(x0: Float, n0: Int) -> Float = {
       let n3 = if n2 > 1023 then 1023 else n2
       let scale = prim.ffrombits(prim.bshl(1023 + n3, 52))
       x2 * scale
-    }
-    else {
+    } else {
       let scale = prim.ffrombits(prim.bshl(1023 + n1, 52))
       x1 * scale
     }
-  }
-  else if n0 < 0 - 1022 then {
+  } else if n0 < 0 - 1022 then {
     let mul = f_exp_min * f_pow_subnorm
     let add = 1022 - 53
     let x1 = x0 * mul
@@ -280,13 +276,11 @@ fn __scalbn(x0: Float, n0: Int) -> Float = {
       let n3 = if n2 < 0 - 1022 then 0 - 1022 else n2
       let scale = prim.ffrombits(prim.bshl(1023 + n3, 52))
       x2 * scale
-    }
-    else {
+    } else {
       let scale = prim.ffrombits(prim.bshl(1023 + n1, 52))
       x1 * scale
     }
-  }
-  else {
+  } else {
     let scale = prim.ffrombits(prim.bshl(1023 + n0, 52))
     x0 * scale
   }
@@ -298,17 +292,18 @@ fn __floor(x: Float) -> Float = {
   let e = prim.band(prim.bshr_u(ui, 52), 2047) - 1023
   if e >= 52 then x
   else if e >= 0 then {
-    let m = prim.bshr_u(4503599627370495, e)            // 0x000fffffffffffff >> e
+    let m = prim.bshr_u(4503599627370495, e)
+    // 0x000fffffffffffff >> e
     let bit = prim.band(ui, m)
     if bit == 0 then x
     else {
       let neg = prim.bshr_u(ui, 63)
       let ui2 = if neg == 1 then ui + m else ui
-      let ui3 = prim.band(ui2, prim.bxor(m, 0 - 1))      // ui & !m
+      let ui3 = prim.band(ui2, prim.bxor(m, 0 - 1))
+      // ui & !m
       prim.ffrombits(ui3)
     }
-  }
-  else {
+  } else {
     let neg = prim.bshr_u(ui, 63)
     if neg == 0 then 0.0
     else {
@@ -320,78 +315,70 @@ fn __floor(x: Float) -> Float = {
 
 // distill q[jz] into iq[] reversingly; returns the running z. Loops j = jz down to 1.
 // scratch handles: qh (Float list), iqh (Int list). i starts at 0.
-fn __ph_distill(qh: Int, iqh: Int, jz: Int, j: Int, i: Int, z: Float) -> Float =
-  if j < 1 then z
-  else {
-    let x1p24 = prim.ffrombits(4715268809856909312)
-    let x1p_24 = prim.ffrombits(4499096027743125504)
-    let fw0 = x1p_24 * z
-    let fw = prim.i2f(prim.f2i(fw0))                     // (x1p_24*z) as i32 as f64
-    let iqv = prim.f2i(z - x1p24 * fw)                   // (z - x1p24*fw) as i32
-    prim.store64(iqh + 12 + i * 8, iqv)
-    let qprev = prim.ffrombits(prim.load64(qh + 12 + (j - 1) * 8))
-    let z2 = qprev + fw
-    __ph_distill(qh, iqh, jz, j - 1, i + 1, z2)
-  }
+fn __ph_distill(qh: Int, iqh: Int, jz: Int, j: Int, i: Int, z: Float) -> Float = if j < 1 then z
+else {
+  let x1p24 = prim.ffrombits(4715268809856909312)
+  let x1p_24 = prim.ffrombits(4499096027743125504)
+  let fw0 = x1p_24 * z
+  let fw = prim.i2f(prim.f2i(fw0))
+  // (x1p_24*z) as i32 as f64
+  let iqv = prim.f2i(z - x1p24 * fw)
+  // (z - x1p24*fw) as i32
+  prim.store64(iqh + 12 + i * 8, iqv)
+  let qprev = prim.ffrombits(prim.load64(qh + 12 + (j - 1) * 8))
+  let z2 = qprev + fw
+  __ph_distill(qh, iqh, jz, j - 1, i + 1, z2)
+}
 
 // new iq value at this complement step (carry-in `c`, current term `j`):
 //   already carrying → 0xffffff-j ; first nonzero term starts the borrow → 0x1000000-j ; else unchanged.
-fn __ph_comp_val(c: Int, j: Int) -> Int =
-  if c != 0 then 16777215 - j
-  else if j != 0 then 16777216 - j
-  else j
+fn __ph_comp_val(c: Int, j: Int) -> Int = if c != 0 then 16777215 - j
+else if j != 0 then 16777216 - j else j
 
 // carry-out after this step (1 once any nonzero term has been seen).
-fn __ph_comp_carry(c: Int, j: Int) -> Int =
-  if c != 0 then 1
-  else if j != 0 then 1
-  else 0
+fn __ph_comp_carry(c: Int, j: Int) -> Int = if c != 0 then 1
+else if j != 0 then 1 else 0
 
 // compute 1-q over iq[0..jz): carry-propagated complement. Returns final carry.
-fn __ph_complement(iqh: Int, jz: Int, i: Int, carry: Int) -> Int =
-  if i >= jz then carry
-  else {
-    let j = prim.load64(iqh + 12 + i * 8)
-    prim.store64(iqh + 12 + i * 8, __ph_comp_val(carry, j))
-    __ph_complement(iqh, jz, i + 1, __ph_comp_carry(carry, j))
-  }
+fn __ph_complement(iqh: Int, jz: Int, i: Int, carry: Int) -> Int = if i >= jz then carry
+else {
+  let j = prim.load64(iqh + 12 + i * 8)
+  prim.store64(iqh + 12 + i * 8, __ph_comp_val(carry, j))
+  __ph_complement(iqh, jz, i + 1, __ph_comp_carry(carry, j))
+}
 
 // set up f[0..=m] where f[i] = if j<0 then 0 else IPIO2[j], j starts at jv-jx.
-fn __ph_setf(tabh: Int, fh: Int, m: Int, i: Int, j: Int) -> Int =
-  if i > m then 0
-  else {
-    let v = if j < 0 then 0.0 else prim.i2f(__ipio2(tabh, j))
-    prim.store64(fh + 12 + i * 8, prim.fbits(v))
-    __ph_setf(tabh, fh, m, i + 1, j + 1)
-  }
+fn __ph_setf(tabh: Int, fh: Int, m: Int, i: Int, j: Int) -> Int = if i > m then 0
+else {
+  let v = if j < 0 then 0.0 else prim.i2f(__ipio2(tabh, j))
+  prim.store64(fh + 12 + i * 8, prim.fbits(v))
+  __ph_setf(tabh, fh, m, i + 1, j + 1)
+}
 
 // inner dot product fw += x[j]*f[jx+i-j], j = 0..=jx. Returns fw.
-fn __ph_dot(xh: Int, fh: Int, jx: Int, i: Int, j: Int, fw: Float) -> Float =
-  if j > jx then fw
-  else {
-    let xv = prim.ffrombits(prim.load64(xh + 12 + j * 8))
-    let fv = prim.ffrombits(prim.load64(fh + 12 + (jx + i - j) * 8))
-    __ph_dot(xh, fh, jx, i, j + 1, fw + xv * fv)
-  }
+fn __ph_dot(xh: Int, fh: Int, jx: Int, i: Int, j: Int, fw: Float) -> Float = if j > jx then fw
+else {
+  let xv = prim.ffrombits(prim.load64(xh + 12 + j * 8))
+  let fv = prim.ffrombits(prim.load64(fh + 12 + (jx + i - j) * 8))
+  __ph_dot(xh, fh, jx, i, j + 1, fw + xv * fv)
+}
 
 // compute q[0..=jk] (or q[lo..=hi]) = dot products. fills q[i].
-fn __ph_fillq(xh: Int, fh: Int, qh: Int, jx: Int, lo: Int, hi: Int) -> Int =
-  if lo > hi then 0
-  else {
-    let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
-    prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
-    __ph_fillq(xh, fh, qh, jx, lo + 1, hi)
-  }
+fn __ph_fillq(xh: Int, fh: Int, qh: Int, jx: Int, lo: Int, hi: Int) -> Int = if lo > hi then 0
+else {
+  let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
+  prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
+  __ph_fillq(xh, fh, qh, jx, lo + 1, hi)
+}
 
 // convert "bit" chunk to float: q[i] = fw * iq[i]; fw *= 2^-24, i = jz down to 0.
-fn __ph_tofloat(qh: Int, iqh: Int, i: Int, fw: Float) -> Int =
-  if i < 0 then 0
-  else {
-    let x1p_24 = prim.ffrombits(4499096027743125504)
-    let iqv = prim.load64(iqh + 12 + i * 8)
-    prim.store64(qh + 12 + i * 8, prim.fbits(fw * prim.i2f(iqv)))
-    __ph_tofloat(qh, iqh, i - 1, fw * x1p_24)
-  }
+fn __ph_tofloat(qh: Int, iqh: Int, i: Int, fw: Float) -> Int = if i < 0 then 0
+else {
+  let x1p_24 = prim.ffrombits(4499096027743125504)
+  let iqv = prim.load64(iqh + 12 + i * 8)
+  prim.store64(qh + 12 + i * 8, prim.fbits(fw * prim.i2f(iqv)))
+  __ph_tofloat(qh, iqh, i - 1, fw * x1p_24)
+}
 
 // inner: fw += PIO2[k]*q[i+k], k = 0 while k<=jp && k<=jz-i.
 fn __ph_recmul(qh: Int, i: Int, jp: Int, jz: Int, k: Int, fw: Float) -> Float = {
@@ -401,101 +388,83 @@ fn __ph_recmul(qh: Int, i: Int, jp: Int, jz: Int, k: Int, fw: Float) -> Float = 
 }
 
 // compute fq[jz-i] = PIO2[..] . q[..], i = jz down to 0.
-fn __ph_fq(qh: Int, fqh: Int, jz: Int, jp: Int, i: Int) -> Int =
-  if i < 0 then 0
-  else {
-    let fw = __ph_recmul(qh, i, jp, jz, 0, 0.0)
-    prim.store64(fqh + 12 + (jz - i) * 8, prim.fbits(fw))
-    __ph_fq(qh, fqh, jz, jp, i - 1)
-  }
+fn __ph_fq(qh: Int, fqh: Int, jz: Int, jp: Int, i: Int) -> Int = if i < 0 then 0
+else {
+  let fw = __ph_recmul(qh, i, jp, jz, 0, 0.0)
+  prim.store64(fqh + 12 + (jz - i) * 8, prim.fbits(fw))
+  __ph_fq(qh, fqh, jz, jp, i - 1)
+}
 
 // sum fq[i], i = lo down to 0 (prec 1/2 path: y0 = sum of all fq).
-fn __ph_sum(fqh: Int, i: Int, acc: Float) -> Float =
-  if i < 0 then acc
-  else __ph_sum(fqh, i - 1, acc + prim.ffrombits(prim.load64(fqh + 12 + i * 8)))
+fn __ph_sum(fqh: Int, i: Int, acc: Float) -> Float = if i < 0 then acc
+else __ph_sum(fqh, i - 1, acc + prim.ffrombits(prim.load64(fqh + 12 + i * 8)))
 
 // sum fq[i] ASCENDING, i = 1 up to jz (for the y1 tail; the order matches v0's `for i in 1..=jz`).
-fn __ph_sum_tail(fqh: Int, jz: Int, i: Int, acc: Float) -> Float =
-  if i > jz then acc
-  else __ph_sum_tail(fqh, jz, i + 1, acc + prim.ffrombits(prim.load64(fqh + 12 + i * 8)))
+fn __ph_sum_tail(fqh: Int, jz: Int, i: Int, acc: Float) -> Float = if i > jz then acc
+else __ph_sum_tail(fqh, jz, i + 1, acc + prim.ffrombits(prim.load64(fqh + 12 + i * 8)))
 
 // OR iq[jk..=jz-1] to test for all-zero (recompute trigger). Returns the OR.
-fn __ph_orcheck(iqh: Int, jk: Int, i: Int, acc: Int) -> Int =
-  if i < jk then acc
-  else __ph_orcheck(iqh, jk, i - 1, prim.bor(acc, prim.load64(iqh + 12 + i * 8)))
+fn __ph_orcheck(iqh: Int, jk: Int, i: Int, acc: Int) -> Int = if i < jk then acc
+else __ph_orcheck(iqh, jk, i - 1, prim.bor(acc, prim.load64(iqh + 12 + i * 8)))
 
 // count leading zero iq terms below jk: k = 1 while iq[jk-k]==0 { k++ }. Returns k.
 fn __ph_countk(iqh: Int, jk: Int, k: Int) -> Int = {
   let v = prim.load64(iqh + 12 + (jk - k) * 8)
-  if v == 0 then __ph_countk(iqh, jk, k + 1) else k
+  if v == 0 then __ph_countk(iqh, jk, k + 1)
+  else k
 }
 
 // ── the 'recompute loop. State buffer `st`: [0]=jz [1]=n [2]=ih [3]=q0 [4]=z_bits.
 // Loops until no recomputation is needed (rare), mutating st + iq/q/f in place. Returns 0.
-
 fn __ph_loop(tabh: Int, xh: Int, fh: Int, qh: Int, iqh: Int, sth: Int, jx: Int, jv: Int, jk: Int, m: Int) -> Int = {
   let jz = prim.load64(sth + 12 + 0 * 8)
   let q0 = prim.load64(sth + 12 + 3 * 8)
   let x1p24 = prim.ffrombits(4715268809856909312)
-
   // distill q[jz..1] into iq, starting z = q[jz].
   let z0 = prim.ffrombits(prim.load64(qh + 12 + jz * 8))
   let zd = __ph_distill(qh, iqh, jz, jz, 0, z0)
-
   // compute n: z = scalbn(z,q0); z -= 8*floor(z/8); n = z; z -= n.
   let zs = __scalbn(zd, q0)
   let zt = zs - 8.0 * __floor(zs * 0.125)
   let n0 = prim.f2i(zt)
   let z1 = zt - prim.i2f(n0)
-
   // ih + n adjustments depending on q0 sign. q0>0: i=iq[jz-1]>>(24-q0); n+=i;
   // iq[jz-1]-=i<<(24-q0); ih=iq[jz-1]>>(23-q0). Mutates iq[jz-1] in place.
   let half = prim.fge(z1, 0.5)
-  let ii =
-    if q0 > 0 then prim.bshr(prim.load64(iqh + 12 + (jz - 1) * 8), 24 - q0)
-    else 0
+  let ii = if q0 > 0 then prim.bshr(prim.load64(iqh + 12 + (jz - 1) * 8), 24 - q0) else 0
   let n1 = n0 + ii
   // UNCONDITIONAL store (a no-op value when q0<=0) so the side effect is never DCE'd.
-  let adjval = if q0 > 0 then prim.load64(iqh + 12 + (jz - 1) * 8) - prim.bshl(ii, 24 - q0)
-               else prim.load64(iqh + 12 + (jz - 1) * 8)
+  let adjval = if q0 > 0 then prim.load64(iqh + 12 + (jz - 1) * 8) - prim.bshl(ii, 24 - q0) else prim.load64(iqh + 12 + (jz - 1) * 8)
   prim.store64(iqh + 12 + (jz - 1) * 8, adjval)
   // read ih from the COMPUTED adjusted value, not a re-load (the store's effect must not be relied
   // on for instruction ordering — an unused `let _ = {store}` may be reordered relative to a reload).
-  let ih =
-    if q0 > 0 then prim.bshr(adjval, 23 - q0)
-    else if q0 == 0 then prim.bshr(adjval, 23)
-    else (if half then 2 else 0)
-
+  let ih = if q0 > 0 then prim.bshr(adjval, 23 - q0)
+  else if q0 == 0 then prim.bshr(adjval, 23)
+  else (if half then 2 else 0)
   // ih>0 branch: n+=1, complement, q0 masking, ih==2 z handling.
-  let carry =
-    if ih > 0 then __ph_complement(iqh, jz, 0, 0)
-    else 0
+  let carry = if ih > 0 then __ph_complement(iqh, jz, 0, 0)
+  else 0
   // q0 masking (rare; ih>0 && q0 in {1,2}) — UNCONDITIONAL store via a no-op-when-inapplicable AND-mask.
-  let maskbits = if ih > 0 then (if q0 == 1 then 8388607 else if q0 == 2 then 4194303 else 0 - 1)
-                 else 0 - 1
+  let maskbits = if ih > 0 then (if q0 == 1 then 8388607
+  else if q0 == 2 then 4194303 else 0 - 1)
+  else 0 - 1
   prim.store64(iqh + 12 + (jz - 1) * 8, prim.band(prim.load64(iqh + 12 + (jz - 1) * 8), maskbits))
   let n2 = if ih > 0 then n1 + 1 else n1
-  let z2 =
-    if ih == 2 then {
-      let zc = 1.0 - z1
-      if carry != 0 then zc - __scalbn(1.0, q0) else zc
-    }
-    else z1
-
+  let z2 = if ih == 2 then {
+    let zc = 1.0 - z1
+    if carry != 0 then zc - __scalbn(1.0, q0) else zc
+  } else z1
   // store state.
   prim.store64(sth + 12 + 0 * 8, jz)
   prim.store64(sth + 12 + 1 * 8, n2)
   prim.store64(sth + 12 + 2 * 8, ih)
   prim.store64(sth + 12 + 3 * 8, q0)
   prim.store64(sth + 12 + 4 * 8, prim.fbits(z2))
-
   // check recompute.
-  let need =
-    if prim.feq(z2, 0.0) then {
-      let orv = __ph_orcheck(iqh, jk, jz - 1, 0)
-      if orv == 0 then true else false
-    }
-    else false
+  let need = if prim.feq(z2, 0.0) then {
+    let orv = __ph_orcheck(iqh, jk, jz - 1, 0)
+    if orv == 0 then true else false
+  } else false
   if need then {
     let kk = __ph_countk(iqh, jk, 1)
     // extend f[jx+i] = IPIO2[jv+i] then q[i] for i = jz+1..=jz+kk.
@@ -503,19 +472,17 @@ fn __ph_loop(tabh: Int, xh: Int, fh: Int, qh: Int, iqh: Int, sth: Int, jx: Int, 
     let jz2 = jz + kk
     prim.store64(sth + 12 + 0 * 8, jz2)
     __ph_loop(tabh, xh, fh, qh, iqh, sth, jx, jv, jk, m)
-  }
-  else 0
+  } else 0
 }
 
 // extend: f[jx+i] = IPIO2[jv+i]; q[i] = dot, for i = lo..=hi.
-fn __ph_extend(tabh: Int, xh: Int, fh: Int, qh: Int, jx: Int, jv: Int, lo: Int, hi: Int) -> Int =
-  if lo > hi then 0
-  else {
-    prim.store64(fh + 12 + (jx + lo) * 8, prim.fbits(prim.i2f(__ipio2(tabh, jv + lo))))
-    let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
-    prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
-    __ph_extend(tabh, xh, fh, qh, jx, jv, lo + 1, hi)
-  }
+fn __ph_extend(tabh: Int, xh: Int, fh: Int, qh: Int, jx: Int, jv: Int, lo: Int, hi: Int) -> Int = if lo > hi then 0
+else {
+  prim.store64(fh + 12 + (jx + lo) * 8, prim.fbits(prim.i2f(__ipio2(tabh, jv + lo))))
+  let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
+  prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
+  __ph_extend(tabh, xh, fh, qh, jx, jv, lo + 1, hi)
+}
 
 // chop off zero terms after the loop: while iq[jz]==0 { jz--; q0-=24 }. Mutates st (jz,q0).
 fn __ph_chop(iqh: Int, sth: Int) -> Int = {
@@ -525,8 +492,7 @@ fn __ph_chop(iqh: Int, sth: Int) -> Int = {
     prim.store64(sth + 12 + 0 * 8, jz - 1)
     prim.store64(sth + 12 + 3 * 8, prim.load64(sth + 12 + 3 * 8) - 24)
     __ph_chop(iqh, sth)
-  }
-  else 0
+  } else 0
 }
 
 // The rem_pio2_large orchestrator. xh = handle of x (List[Float], nx terms), tyh = handle of a
@@ -534,14 +500,14 @@ fn __ph_chop(iqh: Int, sth: Int) -> Int = {
 fn __rem_pio2_large(xh: Int, tyh: Int, e0: Int, nx: Int) -> Int = {
   let x1p24 = prim.ffrombits(4715268809856909312)
   let x1p_24 = prim.ffrombits(4499096027743125504)
-  let jk = 4                                   // INIT_JK[1]
+  let jk = 4
+  // INIT_JK[1]
   let jp = jk
   let jx = nx - 1
   let jv0 = (e0 - 3) / 24
   let jv = if jv0 < 0 then 0 else jv0
   let q0init = e0 - 24 * (jv + 1)
   let m = jx + jk
-
   // scratch arrays (generous sizes; f/q/fq/iq <= ~jx+jk+slack).
   let fbuf = prim.alloc_list_f64(jx + jk + 30)
   let qbuf = prim.alloc_list_f64(jx + jk + 30)
@@ -555,63 +521,51 @@ fn __rem_pio2_large(xh: Int, tyh: Int, e0: Int, nx: Int) -> Int = {
   let iqh = prim.handle(iqbuf)
   let sth = prim.handle(stbuf)
   let tabh = prim.handle(tabbuf)
-
   // set up f[0..=m].
   let _sf = __ph_setf(tabh, fh, m, 0, jv - jx)
   // compute q[0..=jk].
   let _fq = __ph_fillq(xh, fh, qh, jx, 0, jk)
-
   // init state: jz=jk, q0=q0init.
   prim.store64(sth + 12 + 0 * 8, jk)
   prim.store64(sth + 12 + 3 * 8, q0init)
   let _lp = __ph_loop(tabh, xh, fh, qh, iqh, sth, jx, jv, jk, m)
-
   let n = prim.load64(sth + 12 + 1 * 8)
   let ih = prim.load64(sth + 12 + 2 * 8)
   let z = prim.ffrombits(prim.load64(sth + 12 + 4 * 8))
-
   // chop off zero terms / break z into 24-bit.
-  let _c =
-    if prim.feq(z, 0.0) then {
-      prim.store64(sth + 12 + 0 * 8, prim.load64(sth + 12 + 0 * 8) - 1)
-      prim.store64(sth + 12 + 3 * 8, prim.load64(sth + 12 + 3 * 8) - 24)
-      __ph_chop(iqh, sth)
+  let _c = if prim.feq(z, 0.0) then {
+    prim.store64(sth + 12 + 0 * 8, prim.load64(sth + 12 + 0 * 8) - 1)
+    prim.store64(sth + 12 + 3 * 8, prim.load64(sth + 12 + 3 * 8) - 24)
+    __ph_chop(iqh, sth)
+  } else {
+    let jz = prim.load64(sth + 12 + 0 * 8)
+    let q0 = prim.load64(sth + 12 + 3 * 8)
+    let zb = __scalbn(z, 0 - q0)
+    if prim.fge(zb, x1p24) then {
+      let fw = prim.i2f(prim.f2i(x1p_24 * zb))
+      prim.store64(iqh + 12 + jz * 8, prim.f2i(zb - x1p24 * fw))
+      prim.store64(sth + 12 + 0 * 8, jz + 1)
+      prim.store64(sth + 12 + 3 * 8, q0 + 24)
+      prim.store64(iqh + 12 + (jz + 1) * 8, prim.f2i(fw))
+      0
+    } else {
+      prim.store64(iqh + 12 + jz * 8, prim.f2i(zb))
+      0
     }
-    else {
-      let jz = prim.load64(sth + 12 + 0 * 8)
-      let q0 = prim.load64(sth + 12 + 3 * 8)
-      let zb = __scalbn(z, 0 - q0)
-      if prim.fge(zb, x1p24) then {
-        let fw = prim.i2f(prim.f2i(x1p_24 * zb))
-        prim.store64(iqh + 12 + jz * 8, prim.f2i(zb - x1p24 * fw))
-        prim.store64(sth + 12 + 0 * 8, jz + 1)
-        prim.store64(sth + 12 + 3 * 8, q0 + 24)
-        prim.store64(iqh + 12 + (jz + 1) * 8, prim.f2i(fw))
-        0
-      }
-      else {
-        prim.store64(iqh + 12 + jz * 8, prim.f2i(zb))
-        0
-      }
-    }
-
+  }
   let jzf = prim.load64(sth + 12 + 0 * 8)
   let q0f = prim.load64(sth + 12 + 3 * 8)
-
   // convert integer bit chunk to float: fw = scalbn(1,q0); q[i] = fw*iq[i]; fw*=2^-24.
   let fw0 = __scalbn(1.0, q0f)
   let _tf = __ph_tofloat(qh, iqh, jzf, fw0)
-
   // compute PIO2[..] . q[..] into fq[].
   let _cf = __ph_fq(qh, fqh, jzf, jp, jzf)
-
   // compress (prec == 1): y0 = sum fq[jz..0]; y1 = fq[0]-y0 + sum fq[1..jz].
   let fwsum = __ph_sum(fqh, jzf, 0.0)
   let y0 = if ih == 0 then fwsum else 0.0 - fwsum
   let fq0 = prim.ffrombits(prim.load64(fqh + 12 + 0 * 8))
   let fwt = __ph_sum_tail(fqh, jzf, 1, fq0 - fwsum)
   let y1 = if ih == 0 then fwt else 0.0 - fwt
-
   prim.store64(tyh + 12 + 0 * 8, prim.fbits(y0))
   prim.store64(tyh + 12 + 1 * 8, prim.fbits(y1))
   prim.band(n, 7)
@@ -620,7 +574,6 @@ fn __rem_pio2_large(xh: Int, tyh: Int, e0: Int, nx: Int) -> Int = {
 // ───────────────────────── rem_pio2 ─────────────────────────
 // Writes (n, y0, y1) into the caller's 3-slot scratch List[Int] at `outh`: slot0 = n,
 // slot1 = bits(y0), slot2 = bits(y1).
-
 fn __rpio2_medium(x: Float, ix: Int, outh: Int) -> Int = {
   let inv_pio2 = prim.ffrombits(4603909380684499075)
   let to_int = prim.ffrombits(4843621399236968448)
@@ -630,7 +583,6 @@ fn __rpio2_medium(x: Float, ix: Int, outh: Int) -> Int = {
   let pio2_2t = prim.ffrombits(4297306550709743731)
   let pio2_3 = prim.ffrombits(4297306550709518336)
   let pio2_3t = prim.ffrombits(4142048980368378305)
-
   let tmp = x * inv_pio2 + to_int
   let f_n = tmp - to_int
   let n = prim.f2i(f_n)
@@ -641,13 +593,29 @@ fn __rpio2_medium(x: Float, ix: Int, outh: Int) -> Int = {
   let ex = prim.bshr_u(ix, 20)
   // 2nd / 3rd rounds when ex-ey > 16 / 49.
   let do2 = ex - ey0 > 16
-  let r1 = if do2 then { let t = r0; let w = f_n * pio2_2; t - w } else r0
-  let w1 = if do2 then { let t = r0; let w = f_n * pio2_2; f_n * pio2_2t - ((t - r1) - w) } else w0
+  let r1 = if do2 then {
+    let t = r0
+    let w = f_n * pio2_2
+    t - w
+  } else r0
+  let w1 = if do2 then {
+    let t = r0
+    let w = f_n * pio2_2
+    f_n * pio2_2t - ((t - r1) - w)
+  } else w0
   let y01 = if do2 then r1 - w1 else y00
   let ey1 = prim.band(prim.bshr_u(prim.fbits(y01), 52), 2047)
   let do3 = if do2 then (ex - ey1 > 49) else false
-  let r2 = if do3 then { let t = r1; let w = f_n * pio2_3; t - w } else r1
-  let w2 = if do3 then { let t = r1; let w = f_n * pio2_3; f_n * pio2_3t - ((t - r2) - w) } else w1
+  let r2 = if do3 then {
+    let t = r1
+    let w = f_n * pio2_3
+    t - w
+  } else r1
+  let w2 = if do3 then {
+    let t = r1
+    let w = f_n * pio2_3
+    f_n * pio2_3t - ((t - r2) - w)
+  } else w1
   let y0 = if do3 then r2 - w2 else y01
   let y1 = (r2 - y0) - w2
   prim.store64(outh + 12 + 0 * 8, n)
@@ -662,10 +630,11 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
   let bits = prim.fbits(x)
   let sign = prim.bshr_u(bits, 63)
   let ix = prim.band(prim.bshr_u(bits, 32), 2147483647)
-
-  if ix <= 1074752122 then {                        // 0x400f6a7a, |x| ~<= 5pi/4
-    if prim.band(ix, 1048575) == 598523 then __rpio2_medium(x, ix, outh)   // 0x921fb
-    else if ix <= 1073928572 then {                 // 0x4002d97c, |x| ~<= 3pi/4
+  if ix <= 1074752122 then {
+    // 0x400f6a7a, |x| ~<= 5pi/4
+    if prim.band(ix, 1048575) == 598523 then __rpio2_medium(x, ix, outh)
+    else if ix <= 1073928572 then {
+      // 0x4002d97c, |x| ~<= 3pi/4
       if sign == 0 then {
         let z = x - pio2_1
         let y0 = z - pio2_1t
@@ -674,8 +643,7 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
         prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
         prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
         0
-      }
-      else {
+      } else {
         let z = x + pio2_1
         let y0 = z + pio2_1t
         let y1 = (z - y0) + pio2_1t
@@ -684,8 +652,7 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
         prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
         0
       }
-    }
-    else if sign == 0 then {
+    } else if sign == 0 then {
       let z = x - 2.0 * pio2_1
       let y0 = z - 2.0 * pio2_1t
       let y1 = (z - y0) - 2.0 * pio2_1t
@@ -693,8 +660,7 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
       prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
       prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
       0
-    }
-    else {
+    } else {
       let z = x + 2.0 * pio2_1
       let y0 = z + 2.0 * pio2_1t
       let y1 = (z - y0) + 2.0 * pio2_1t
@@ -703,10 +669,11 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
       prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
       0
     }
-  }
-  else if ix <= 1075594811 then {                   // 0x401c463b, |x| ~<= 9pi/4
-    if ix <= 1075183036 then {                      // 0x4015fdbc, |x| ~<= 7pi/4
-      if ix == 1074977148 then __rpio2_medium(x, ix, outh)   // 0x4012d97c, 3pi/2
+  } else if ix <= 1075594811 then {
+    // 0x401c463b, |x| ~<= 9pi/4
+    if ix <= 1075183036 then {
+      // 0x4015fdbc, |x| ~<= 7pi/4
+      if ix == 1074977148 then __rpio2_medium(x, ix, outh)
       else if sign == 0 then {
         let z = x - 3.0 * pio2_1
         let y0 = z - 3.0 * pio2_1t
@@ -715,8 +682,7 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
         prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
         prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
         0
-      }
-      else {
+      } else {
         let z = x + 3.0 * pio2_1
         let y0 = z + 3.0 * pio2_1t
         let y1 = (z - y0) + 3.0 * pio2_1t
@@ -725,9 +691,8 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
         prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
         0
       }
-    }
-    else {
-      if ix == 1075388923 then __rpio2_medium(x, ix, outh)   // 0x401921fb, 4pi/2
+    } else {
+      if ix == 1075388923 then __rpio2_medium(x, ix, outh)
       else if sign == 0 then {
         let z = x - 4.0 * pio2_1
         let y0 = z - 4.0 * pio2_1t
@@ -736,8 +701,7 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
         prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
         prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
         0
-      }
-      else {
+      } else {
         let z = x + 4.0 * pio2_1
         let y0 = z + 4.0 * pio2_1t
         let y1 = (z - y0) + 4.0 * pio2_1t
@@ -747,25 +711,23 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
         0
       }
     }
-  }
-  else if ix < 1094263291 then {                    // 0x413921fb, medium
+  } else if ix < 1094263291 then {
+    // 0x413921fb, medium
     __rpio2_medium(x, ix, outh)
-  }
-  else if ix >= 2146435072 then {                   // 0x7ff00000, inf/NaN
+  } else if ix >= 2146435072 then {
+    // 0x7ff00000, inf/NaN
     let y0 = x - x
     prim.store64(outh + 12 + 0 * 8, 0)
     prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
     prim.store64(outh + 12 + 2 * 8, prim.fbits(y0))
     0
-  }
-  else {
+  } else {
     // large: set z = scalbn(|x|, -ilogb(x)+23); split into 3 24-bit terms.
     // ui &= (!1u64)>>12 (= 0x000fffffffffffff); ui |= (0x3ff+23)<<52.
     let x1p24 = prim.ffrombits(4715268809856909312)
     let mask = 4503599627370495
     let ui = prim.bor(prim.band(prim.fbits(x), mask), prim.bshl(1046, 52))
     let z0 = prim.ffrombits(ui)
-
     let txbuf = prim.alloc_list_f64(3)
     let tybuf = prim.alloc_list_f64(3)
     let txh = prim.handle(txbuf)
@@ -780,8 +742,10 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
     prim.store64(txh + 12 + 1 * 8, prim.fbits(t1))
     prim.store64(txh + 12 + 2 * 8, prim.fbits(t2))
     // skip trailing zero terms: i = 2; while i!=0 && tx[i]==0 { i-- }.
-    let i2 = if prim.feq(t2, 0.0) then (if prim.feq(t1, 0.0) then 0 else 1) else 2
-    let e0 = prim.bshr(ix, 20) - 1046                // ((ix as i32)>>20) - (0x3ff+23)
+    let i2 = if prim.feq(t2, 0.0) then (if prim.feq(t1, 0.0) then 0 else 1)
+    else 2
+    let e0 = prim.bshr(ix, 20) - 1046
+    // ((ix as i32)>>20) - (0x3ff+23)
     let nx = i2 + 1
     let n = __rem_pio2_large(txh, tyh, e0, nx)
     let ty0 = prim.ffrombits(prim.load64(tyh + 12 + 0 * 8))
@@ -791,8 +755,7 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
       prim.store64(outh + 12 + 1 * 8, prim.fbits(0.0 - ty0))
       prim.store64(outh + 12 + 2 * 8, prim.fbits(0.0 - ty1))
       0
-    }
-    else {
+    } else {
       prim.store64(outh + 12 + 0 * 8, n)
       prim.store64(outh + 12 + 1 * 8, prim.fbits(ty0))
       prim.store64(outh + 12 + 2 * 8, prim.fbits(ty1))
@@ -802,15 +765,14 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
 }
 
 // ───────────────────────── sin / cos / tan ─────────────────────────
-
 fn math_sin(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let ix = prim.band(prim.bshr_u(bits, 32), 2147483647)
-  if ix <= 1072243195 then {                        // 0x3fe921fb, |x| ~< pi/4
-    if ix < 1045430272 then x                        // 0x3e500000, |x| < 2^-26: return x
+  if ix <= 1072243195 then {
+    // 0x3fe921fb, |x| ~< pi/4
+    if ix < 1045430272 then x
     else __k_sin(x, 0.0, 0)
-  }
-  else if ix >= 2146435072 then x - x                // inf/NaN
+  } else if ix >= 2146435072 then x - x
   else {
     let out = prim.alloc_list(3)
     let outh = prim.handle(out)
@@ -828,14 +790,14 @@ fn math_sin(x: Float) -> Float = {
 fn math_cos(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let ix = prim.band(prim.bshr_u(bits, 32), 2147483647)
-  if ix <= 1072243195 then {                        // 0x3fe921fb, |x| ~< pi/4
-    if ix < 1044816030 then {                        // 0x3e46a09e, |x| < 2^-27*sqrt2
+  if ix <= 1072243195 then {
+    // 0x3fe921fb, |x| ~< pi/4
+    if ix < 1044816030 then {
+      // 0x3e46a09e, |x| < 2^-27*sqrt2
       let xi = prim.f2i(x)
       if xi == 0 then 1.0 else __k_cos(x, 0.0)
-    }
-    else __k_cos(x, 0.0)
-  }
-  else if ix >= 2146435072 then x - x                // inf/NaN
+    } else __k_cos(x, 0.0)
+  } else if ix >= 2146435072 then x - x
   else {
     let out = prim.alloc_list(3)
     let outh = prim.handle(out)
@@ -853,11 +815,11 @@ fn math_cos(x: Float) -> Float = {
 fn math_tan(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let ix = prim.band(prim.bshr_u(bits, 32), 2147483647)
-  if ix <= 1072243195 then {                        // 0x3fe921fb, |x| ~< pi/4
-    if ix < 1044381696 then x                        // 0x3e400000, |x| < 2^-27: return x
+  if ix <= 1072243195 then {
+    // 0x3fe921fb, |x| ~< pi/4
+    if ix < 1044381696 then x
     else __k_tan(x, 0.0, 0)
-  }
-  else if ix >= 2146435072 then x - x                // inf/NaN
+  } else if ix >= 2146435072 then x - x
   else {
     let out = prim.alloc_list(3)
     let outh = prim.handle(out)

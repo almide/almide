@@ -10,18 +10,13 @@
 // reads land on the right slots. Because this body reaches prim.path_filestat, its
 // cap_witness carries Capability::FsRead (a stat IS a filesystem read — the SAME
 // capability as fs.exists/fs.read_text).
-effect fn fs_stat(path: String) -> Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, String] = {
+effect fn fs_stat(path: String) -> Result[{ size: Int, is_dir: Bool, is_file: Bool, modified: Int }, String] = {
   let buf = prim.alloc_bytes(64)
   let p = prim.handle(buf) + 12
   let errno = prim.path_filestat(p, path)
   if errno != 0 then err("stat failed: " + path)
   else {
     let ftype = prim.load8(p + 16)
-    ok({
-      size: prim.load64(p + 32),
-      is_dir: ftype == 3,
-      is_file: ftype == 4,
-      modified: prim.load64(p + 48) / 1000000000,
-    })
+    ok({ size: prim.load64(p + 32), is_dir: ftype == 3, is_file: ftype == 4, modified: prim.load64(p + 48) / 1000000000 })
   }
 }

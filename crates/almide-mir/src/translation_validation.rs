@@ -71,62 +71,21 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
             format!("call ${}", crate::render_wasm::import_symbol(module, name))
         }
         Op::ConstInt { .. } => "i64.const".into(),
-        Op::IntBinOp { op: IntOp::Add, .. } => "i64.add".into(),
-        Op::IntBinOp { op: IntOp::Sub, .. } => "i64.sub".into(),
-        Op::IntBinOp { op: IntOp::Mul, .. } => "i64.mul".into(),
-        Op::IntBinOp { op: IntOp::Div, .. } => "i64.div_s".into(),
-        Op::IntBinOp { op: IntOp::Mod, .. } => "i64.rem_s".into(),
-        Op::IntBinOp { op: IntOp::DivU, .. } => "i64.div_u".into(),
-        Op::IntBinOp { op: IntOp::ModU, .. } => "i64.rem_u".into(),
-        Op::IntBinOp { op: IntOp::LtU, .. } => "i64.lt_u".into(),
-        Op::IntBinOp { op: IntOp::LeU, .. } => "i64.le_u".into(),
-        Op::IntBinOp { op: IntOp::GtU, .. } => "i64.gt_u".into(),
-        Op::IntBinOp { op: IntOp::GeU, .. } => "i64.ge_u".into(),
-        Op::IntBinOp { op: IntOp::Lt, .. } => "i64.lt_s".into(),
-        Op::IntBinOp { op: IntOp::Le, .. } => "i64.le_s".into(),
-        Op::IntBinOp { op: IntOp::Gt, .. } => "i64.gt_s".into(),
-        Op::IntBinOp { op: IntOp::Ge, .. } => "i64.ge_s".into(),
-        Op::IntBinOp { op: IntOp::Eq, .. } => "i64.eq".into(),
-        Op::IntBinOp { op: IntOp::Ne, .. } => "i64.ne".into(),
-        Op::IntBinOp { op: IntOp::And, .. } => "i64.and".into(),
-        Op::IntBinOp { op: IntOp::Or, .. } => "i64.or".into(),
-        Op::IntBinOp { op: IntOp::Xor, .. } => "i64.xor".into(),
-        Op::IntBinOp { op: IntOp::Shl, .. } => "i64.shl".into(),
-        Op::IntBinOp { op: IntOp::Shr, .. } => "i64.shr_s".into(),
-        Op::IntBinOp { op: IntOp::ShrU, .. } => "i64.shr_u".into(),
-        // A release decrements the refcount cell — realized by `call $rc_dec`.
-        Op::Drop { .. } => "call $rc_dec".into(),
-        Op::DropListStr { .. } => "call $rc_dec".into(),
-        Op::DropValue { .. } => "call $__drop_value".into(),
-        Op::DropListValue { .. } => "call $__drop_list_value".into(),
-        Op::DropListStrValue { .. } => "call $__drop_list_str_value".into(),
-        Op::DropListStrStr { .. } => "call $__drop_list_str_str".into(),
-        // Inline-rendered (per-tuple String-slot rc_dec loop, no helper) — cert-claimed token is the
-        // final list-block `call $rc_dec`.
-        Op::DropListIntStr { .. } => "call $rc_dec".into(),
-        Op::DropListStrInt { .. } => "call $rc_dec".into(),
-        Op::DropResultListValue { .. } => "call $__drop_result_lv".into(),
-        Op::DropResultValue { .. } => "call $__drop_result_value".into(),
-        // Inline-rendered (no helper) like DropListStr; the cert-claimed token is the
-        // final wrapper `call $rc_dec`.
-        Op::DropResultStrInt { .. } => "call $rc_dec".into(),
-        // Rendered via a value_core helper call (NOT inline) — the cert-claimed token is that call.
-        Op::DropResultValueInt { .. } => "call $__drop_value_tuple".into(),
-        Op::DropResultListValueInt { .. } => "call $__drop_list_value_tuple".into(),
-        // Inline-rendered (nested loop, no helper) — cert-claimed token is the final wrapper rc_dec.
-        Op::DropResultListStrInt { .. } => "call $rc_dec".into(),
-        // Inline-rendered (Ok-payload list loop, no helper) — cert-claimed token is the final wrapper rc_dec.
-        Op::DropResultListStr { .. } => "call $rc_dec".into(),
-        Op::DropListListStr { .. } => "drop_list_list_str".into(),
-        Op::DropVariant { ty, .. } => format!("call $__drop_{ty}"),
-        // Inline-rendered (rc==1-gated recurse into the @12 record via `$__drop_<drop_fn>`, then the
-        // wrapper block) — the cert-claimed token is the final wrapper `call $rc_dec`, like DropListStr.
-        Op::DropWrapperRec { .. } => "call $rc_dec".into(),
-        // A copy-on-write: MakeUnique clones a SHARED block before in-place
-        // mutation — realized by `call $list_copy` (in the cow's then-branch).
+        Op::IntBinOp { op, .. } => wasm_pattern_int_binop(*op),
         Op::MakeUnique { .. } => "call $list_copy".into(),
         // No emitted instruction: Consume MOVES the reference out (no free here),
         // opaque alloc / not-yet-rendered ops emit nothing.
+        drop_op @ (Op::Drop { .. }
+        | Op::DropListStr { .. } | Op::DropValue { .. } | Op::DropListValue { .. }
+        | Op::DropListStrValue { .. } | Op::DropListStrStr { .. }
+        | Op::DropListIntStr { .. } | Op::DropListStrInt { .. }
+        | Op::DropResultListValue { .. } | Op::DropResultValue { .. }
+        | Op::DropResultStrInt { .. } | Op::DropResultValueInt { .. }
+        | Op::DropResultListValueInt { .. } | Op::DropResultListStrInt { .. }
+        | Op::DropResultListStr { .. } | Op::DropListListStr { .. }
+        | Op::DropVariant { .. } | Op::DropWrapperRec { .. }) => {
+            wasm_pattern_drop(drop_op)
+        }
         Op::Alloc { .. }
         | Op::Const { .. }
         | Op::Consume { .. }
@@ -154,19 +113,103 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
     })
 }
 
+/// The i64 integer operations — a flat instruction table.
+fn wasm_pattern_int_binop(op: crate::IntOp) -> String {
+    use crate::IntOp;
+    let instr = match op {
+        IntOp::Add => "i64.add",
+        IntOp::Sub => "i64.sub",
+        IntOp::Mul => "i64.mul",
+        IntOp::Div => "i64.div_s",
+        IntOp::Mod => "i64.rem_s",
+        IntOp::DivU => "i64.div_u",
+        IntOp::ModU => "i64.rem_u",
+        _ => return wasm_pattern_int_compare(op),
+    };
+    instr.to_string()
+}
+
+/// The comparison and bitwise i64 instructions — the second half of the flat
+/// table, split only to keep each arm list readable.
+fn wasm_pattern_int_compare(op: crate::IntOp) -> String {
+    use crate::IntOp;
+    let instr = match op {
+        IntOp::LtU => "i64.lt_u",
+        IntOp::LeU => "i64.le_u",
+        IntOp::GtU => "i64.gt_u",
+        IntOp::GeU => "i64.ge_u",
+        IntOp::Lt => "i64.lt_s",
+        IntOp::Le => "i64.le_s",
+        IntOp::Gt => "i64.gt_s",
+        IntOp::Ge => "i64.ge_s",
+        IntOp::Eq => "i64.eq",
+        IntOp::Ne => "i64.ne",
+        IntOp::And => "i64.and",
+        IntOp::Or => "i64.or",
+        IntOp::Xor => "i64.xor",
+        IntOp::Shl => "i64.shl",
+        IntOp::Shr => "i64.shr_s",
+        IntOp::ShrU => "i64.shr_u",
+        IntOp::Add | IntOp::Sub | IntOp::Mul | IntOp::Div | IntOp::Mod | IntOp::DivU
+        | IntOp::ModU => unreachable!("arithmetic is handled by wasm_pattern_int_binop"),
+    };
+    instr.to_string()
+}
+
+/// The drop ops — each names the runtime routine that frees its shape. A flat
+/// `rc_dec` covers the shapes whose element sweep the renderer inlines.
+fn wasm_pattern_drop(op: &crate::Op) -> String {
+    use crate::Op;
+    match op {
+        Op::Drop { .. } => "call $rc_dec".into(),
+        Op::DropListStr { .. } => "call $rc_dec".into(),
+        Op::DropListIntStr { .. } => "call $rc_dec".into(),
+        Op::DropListStrInt { .. } => "call $rc_dec".into(),
+        Op::DropResultStrInt { .. } => "call $rc_dec".into(),
+        Op::DropResultListStrInt { .. } => "call $rc_dec".into(),
+        Op::DropResultListStr { .. } => "call $rc_dec".into(),
+        Op::DropWrapperRec { .. } => "call $rc_dec".into(),
+        _ => wasm_pattern_drop_routine(op),
+    }
+}
+
+/// The drop shapes whose free is a dedicated generated routine rather than the
+/// flat `rc_dec` — the second half of the flat table.
+fn wasm_pattern_drop_routine(op: &crate::Op) -> String {
+    use crate::Op;
+    match op {
+        Op::DropValue { .. } => "call $__drop_value".into(),
+        Op::DropListValue { .. } => "call $__drop_list_value".into(),
+        Op::DropListStrValue { .. } => "call $__drop_list_str_value".into(),
+        Op::DropListStrStr { .. } => "call $__drop_list_str_str".into(),
+        Op::DropResultListValue { .. } => "call $__drop_result_lv".into(),
+        Op::DropResultValue { .. } => "call $__drop_result_value".into(),
+        Op::DropResultValueInt { .. } => "call $__drop_value_tuple".into(),
+        Op::DropResultListValueInt { .. } => "call $__drop_list_value_tuple".into(),
+        Op::DropListListStr { .. } => "drop_list_list_str".into(),
+        Op::DropVariant { ty, .. } => format!("call $__drop_{ty}"),
+        _ => unreachable!("wasm_pattern_drop_routine on a non-drop op"),
+    }
+}
+
 /// V, table-driven: the emitted wasm REALIZES each MIR op iff every op's required
 /// instruction pattern is present (a `Drop`'s pattern is `call $rc_dec`). This is
 /// the PRESENCE half of `R(M,w)`; `validate_translation_perceus` adds the leak-
 /// freedom COUNT (one release per drop, not one for many).
 pub fn validate_translation(wat: &str, mir: &crate::MirFunction) -> bool {
-    mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)))
+    mir.ops
+        .iter()
+        .all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)))
 }
 
 /// The DROP ops — each FREES one reference; its realization in the emitted bytes
 /// is a `call $rc_dec`. (A `Consume`/move-out TRANSFERS its reference — no free
 /// at this site, the receiver frees later — so it is not counted here.)
 fn drop_count(mir: &crate::MirFunction) -> usize {
-    mir.ops.iter().filter(|op| matches!(op, crate::Op::Drop { .. })).count()
+    mir.ops
+        .iter()
+        .filter(|op| matches!(op, crate::Op::Drop { .. }))
+        .count()
 }
 
 /// PERCEUS-mode V — the renderer's leak-freedom + safety gate (the PRODUCTION
@@ -177,13 +220,18 @@ fn drop_count(mir: &crate::MirFunction) -> usize {
 /// drop); a renderer that emitted one `rc_dec` for several drops (a leak), or
 /// dropped an op, FAILS here. The `$rc_dec` sentinel traps a double-free at run.
 pub fn validate_translation_perceus(wat: &str, mir: &crate::MirFunction) -> bool {
-    let positives = mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)));
+    let positives = mir
+        .ops
+        .iter()
+        .all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)));
     // Count releases in the USER FUNCTION ONLY — the FIXED runtime preamble's WASI-floor funcs
     // now contain their OWN `call $rc_dec` (e.g. `$read_dir` frees its readdir buffer), which are
     // NOT part of THIS function's certified release trace. Subtract the preamble's intrinsic
     // count (a fixed constant) so the leak-freedom comparison stays precise: an under-freeing
     // user body must still fail even though the preamble frees internally.
-    let preamble_rc_decs = crate::render_wasm::preamble().matches("call $rc_dec").count();
+    let preamble_rc_decs = crate::render_wasm::preamble()
+        .matches("call $rc_dec")
+        .count();
     let total_rc_decs = wat.matches("call $rc_dec").count();
     let body_rc_decs = total_rc_decs.saturating_sub(preamble_rc_decs);
     positives && body_rc_decs >= drop_count(mir)
@@ -196,7 +244,9 @@ mod tests {
     use crate::{Init, MirFunction, Op, Repr, ValueId, PLACEHOLDER_LAYOUT};
 
     fn heap() -> Repr {
-        Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
+        Repr::Ptr {
+            layout: PLACEHOLDER_LAYOUT,
+        }
     }
 
     #[test]
@@ -208,7 +258,11 @@ mod tests {
         let mir = MirFunction {
             name: "main".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1, 2, 3]) },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::IntList(vec![1, 2, 3]),
+                },
                 Op::Dup { dst: b, src: a },
                 Op::MakeUnique { v: a },
                 Op::Drop { v: b },
@@ -217,7 +271,10 @@ mod tests {
             ..Default::default()
         };
         let wat = render_wasm(&mir);
-        assert!(validate_safety(&wat, &mir), "artifact must realize the certified releases");
+        assert!(
+            validate_safety(&wat, &mir),
+            "artifact must realize the certified releases"
+        );
         // The two drops are realized as releases; MakeUnique's cow adds one more
         // (it relinquishes the shared original before cloning), so >= 2 — never a
         // leak (the extra release is balanced by the cow's fresh copy block).
@@ -232,9 +289,18 @@ mod tests {
         let mir = MirFunction {
             name: "main".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1, 2, 3]) },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::IntList(vec![1, 2, 3]),
+                },
                 Op::Const { dst: n },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(n)] , result: None },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintInt,
+                    args: vec![CallArg::Scalar(n)],
+                    result: None,
+                },
                 Op::Drop { v: a },
             ],
             ..Default::default()
@@ -243,11 +309,17 @@ mod tests {
         // Each op's table pattern is present (incl. `call $rc_dec` for the drop).
         assert!(validate_translation(&wat, &mir));
         assert!(wat.contains("call $list_new") && wat.contains("call $print_int"));
-        assert!(wat.contains("call $rc_dec"), "the drop is realized as a release");
+        assert!(
+            wat.contains("call $rc_dec"),
+            "the drop is realized as a release"
+        );
         // Non-vacuous: a renderer that DROPPED the print fails V (the table catches
         // an unrealized op).
         let stripped = wat.replace("call $print_int", "nop");
-        assert!(!validate_translation(&stripped, &mir), "an unrealized op must fail V");
+        assert!(
+            !validate_translation(&stripped, &mir),
+            "an unrealized op must fail V"
+        );
     }
 
     #[test]
@@ -259,7 +331,11 @@ mod tests {
         let mir = MirFunction {
             name: "main".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1, 2, 3]) },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::IntList(vec![1, 2, 3]),
+                },
                 Op::Dup { dst: b, src: a },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
@@ -286,7 +362,11 @@ mod tests {
         let mir = MirFunction {
             name: "main".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1]) },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::IntList(vec![1]),
+                },
                 Op::Dup { dst: b, src: a },
                 Op::Drop { v: b },
                 Op::Drop { v: a },

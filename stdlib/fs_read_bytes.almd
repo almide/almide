@@ -7,7 +7,7 @@
 effect fn fs_read_bytes(path: String) -> Result[List[Int], String] = {
   let r = prim.read_bytes_file(path)
   match r {
-    ok(b) => ok(bytes.to_list(b))
-    err(e) => err(e)
+    ok(b) => ok(bytes.to_list(b)),
+    err(e) => err(e),
   }
 }

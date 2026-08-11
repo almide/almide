@@ -16,6 +16,9 @@ pub mod matmul;
 pub mod q1_0;
 pub mod q1_0_packed;
 pub mod scale;
+/// The audited raw-pointer boundary for wasm SIMD loads/stores.
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+mod simd_wasm;
 pub mod silu;
 pub mod softmax;
 pub mod transpose;

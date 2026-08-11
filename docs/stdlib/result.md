@@ -1,4 +1,4 @@
-> **Deprecated (E039, ADR-0007)**: `result.collect` / `collect_map` are in their removal window — all-errors collection is spelled with `partition`.
+> **Removed (ADR-0007)**: `result.collect` / `collect_map` are gone — a call is now an ordinary [E002](../diagnostics/E002.md). All-errors collection is spelled with `result.partition`.
 
 # result
 
@@ -76,28 +76,17 @@ Convert err to some, ok to none. Discards the ok value.
 result.to_err_option(err("fail"))
 ```
 
-### `result.collect(rs: List[Result[T, E]]) -> Result[List[T], List[E]]`
-
-Collect a list of Results. All ok → ok(values), any err → err(all_errors).
-
-```almd
-result.collect([ok(1), ok(2), ok(3)]) // => ok([1, 2, 3])
-```
-
 ### `result.partition(rs: List[Result[T, E]]) -> (List[T], List[E])`
 
-Partition a list of Results into ok values and err values.
+Partition a list of Results into ok values and err values. This is the
+all-errors collection primitive — the removed `result.collect` /
+`result.collect_map` are spelled with it:
 
 ```almd
 result.partition([ok(1), err("x"), ok(2)]) // => ([1, 2], ["x"])
-```
 
-### `result.collect_map(xs: List[T], f: Fn[T] -> Result[U, E]) -> Result[List[U], List[E]]`
-
-Map a function over a list and collect Results. All ok → ok(values), any err → err(all_errors).
-
-```almd
-result.collect_map([1, 2, 3], fn(x) => if x > 0 then ok(x) else err("neg"))
+// result.collect(rs)          → let (oks, errs) = result.partition(rs)
+// result.collect_map(xs, f)   → let (oks, errs) = result.partition(list.map(xs, f))
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->

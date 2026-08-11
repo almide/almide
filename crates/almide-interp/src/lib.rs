@@ -18,6 +18,7 @@
 //! runtime/std dispatch bridge, the in-interp HOFs, fuel, and the total-op /
 //! abort semantics. The 3-way harness is wired in a later phase.
 
+mod vendored_libm;
 mod bridge;
 mod dispatch;
 mod env;
@@ -25,6 +26,7 @@ mod eval;
 mod hofs;
 mod inplace;
 mod stdlib_pool;
+mod vfs;
 mod value;
 
 pub use value::{Closure, Value, VariantPayload};
@@ -34,7 +36,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use almide_base::intern::Sym;
-use almide_ir::{IrFunction, IrProgram};
+use almide_ir::{IrExpr, IrFunction, IrProgram};
+use almide_lang::types::Ty;
 
 /// The observable result of an interpreter run — the SAME 3-tuple shape as the
 /// existing `run_native_capture` / `run_wasm_capture` harness helpers, plus a
@@ -53,6 +56,7 @@ impl RunOutcome {
         match self.status {
             RunStatus::Ok => 0,
             RunStatus::Aborted => 1,
+            RunStatus::Exited(code) => code,
             // Distinguished markers: the gate excludes these from the 3-way
             // assert rather than emitting a bogus third vote.
             RunStatus::Unsupported(_) => -2,
@@ -75,11 +79,24 @@ pub enum RunStatus {
     /// The fuel / recursion-depth budget was exhausted. NOT a hang or panic —
     /// a clean distinguished outcome for the future fuzz oracle.
     FuelExhausted,
+    /// An explicit `process.exit(n)` with a NON-ZERO, NON-ONE code. Both
+    /// backends exit with exactly `n`, so the third vote has to carry it: this
+    /// used to collapse into `Aborted`, whose `exit_code()` is a flat 1, and
+    /// the 3-way gate then read a `process.exit(3)` fixture as
+    /// `interp=1 native=3 wasm=3` — a BOTH-BACKENDS-WRONG banner raised by the
+    /// ORACLE's own lossy encoding, not by any disagreement in the program
+    /// (#1124's fixture). `Ok` and `Aborted` still cover 0 and 1 so every
+    /// existing match arm keeps its meaning.
+    Exited(i32),
 }
 
 /// The interpreter over a fully-linked `IrProgram`.
 pub struct Interpreter<'a> {
     pub(crate) program: &'a IrProgram,
+    /// The run's argv tail (argv[1..] — what `prim.args_get_list` answers).
+    /// Defaults to empty: the oracle harness runs every fixture without
+    /// arguments on all three legs, so the empty vec IS the parity value.
+    pub(crate) args: Vec<String>,
     /// Top-level functions indexed by name for O(1) call dispatch. Holds
     /// user fns, monomorphized specializations, and any almide-bodied stdlib
     /// fns that were lowered into the program.
@@ -88,6 +105,9 @@ pub struct Interpreter<'a> {
     /// Populated from `program.modules` (pre-`ir_link`) and from any function
     /// whose name encodes a module path. Used by tier-(i) dispatch.
     pub(crate) module_fns: HashMap<(Sym, Sym), &'a IrFunction>,
+    /// The sandboxed fs overlay (#1218) — writes land here, never on disk;
+    /// reads fall back to the real filesystem read-only. See `vfs.rs`.
+    pub(crate) vfs: vfs::Vfs,
     /// Named record types keyed by their SORTED field-name set, mapping to
     /// `(type name, declaration-order field names)`. Lets the repr recover the
     /// nominal name + declaration order for a record LITERAL whose inferred type
@@ -208,6 +228,43 @@ impl Flow {
     }
 }
 
+/// Index named record types by their sorted field-name set, so a record VALUE
+/// can recover the nominal name its repr prints.
+///
+/// A field-name set shared by two distinct record types is ambiguous → drop it
+/// (sentinel-marked in `ambiguous`, which also stops a later decl from
+/// re-adding it), so the repr falls back to anonymous-record rendering rather
+/// than guessing a name.
+fn index_named_records(program: &IrProgram) -> HashMap<Vec<Sym>, (Sym, Vec<Sym>)> {
+    let mut named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)> = HashMap::new();
+    let mut ambiguous: HashSet<Vec<Sym>> = HashSet::new();
+    let record_decls = program
+        .type_decls
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    for decl in record_decls {
+        let almide_ir::IrTypeDeclKind::Record { fields } = &decl.kind else { continue };
+        let decl_order: Vec<Sym> = fields.iter().map(|f| f.name).collect();
+        let mut key = decl_order.clone();
+        key.sort();
+        if ambiguous.contains(&key) {
+            continue;
+        }
+        match named_records.get(&key) {
+            // Two record types with identical field-name sets: ambiguous.
+            Some(prev) if prev.0 != decl.name => {
+                named_records.remove(&key);
+                ambiguous.insert(key);
+            }
+            Some(_) => {}
+            None => {
+                named_records.insert(key, (decl.name, decl_order));
+            }
+        }
+    }
+    named_records
+}
+
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a IrProgram) -> Self {
         let mut fns = HashMap::new();
@@ -238,38 +295,36 @@ impl<'a> Interpreter<'a> {
                 module_fns.insert((m.name, f.name), f);
             }
         }
-
-        // Index named record types by their sorted field-name set. A set shared
-        // by two distinct record types is ambiguous → drop it (sentinel-marked),
-        // so the repr falls back to anonymous-record rendering rather than
-        // guessing a name.
-        let mut named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)> = HashMap::new();
-        let mut ambiguous: std::collections::HashSet<Vec<Sym>> = std::collections::HashSet::new();
-        let record_decls = program.type_decls.iter().chain(
-            program.modules.iter().flat_map(|m| m.type_decls.iter()),
-        );
-        for decl in record_decls {
-            if let almide_ir::IrTypeDeclKind::Record { fields } = &decl.kind {
-                let decl_order: Vec<Sym> = fields.iter().map(|f| f.name).collect();
-                let mut key = decl_order.clone();
-                key.sort();
-                if ambiguous.contains(&key) {
-                    continue;
-                }
-                if let Some(prev) = named_records.get(&key) {
-                    // Two record types with identical field-name sets: ambiguous.
-                    if prev.0 != decl.name {
-                        named_records.remove(&key);
-                        ambiguous.insert(key);
+        // A module's `__`-prefixed PRIVATE helpers also join the flat table:
+        // the module's own bodies call them as bare Named targets (`flag` →
+        // `__flag_at`), and #868 rejects the prefix in user code, so a program
+        // fn can never collide. Only a name defined in EXACTLY ONE module is
+        // indexed — a shared helper name across two modules stays module-keyed
+        // and abstains honestly rather than resolving from the wrong source
+        // (the #1087 class).
+        {
+            let mut count: HashMap<Sym, u32> = HashMap::new();
+            for m in &program.modules {
+                for f in &m.functions {
+                    if f.name.as_str().starts_with("__") {
+                        *count.entry(f.name).or_insert(0) += 1;
                     }
-                } else {
-                    named_records.insert(key, (decl.name, decl_order));
+                }
+            }
+            for m in &program.modules {
+                for f in &m.functions {
+                    if f.name.as_str().starts_with("__") && count.get(&f.name) == Some(&1) {
+                        fns.entry(f.name).or_insert(f);
+                    }
                 }
             }
         }
+        let named_records = index_named_records(program);
 
         Interpreter {
             program,
+            args: Vec::new(),
+            vfs: vfs::Vfs::new(),
             fns,
             module_fns,
             named_records,
@@ -349,6 +404,14 @@ impl<'a> Interpreter<'a> {
     /// Override the fuel budget (for tests / the fuzz oracle).
     pub fn with_fuel(mut self, fuel: u64) -> Self {
         self.fuel = Cell::new(fuel);
+        self
+    }
+
+    /// Supply the run's argv tail (argv[1..]). The oracle harness never sets
+    /// this — fixtures run argument-less on all three legs — but a caller
+    /// embedding the interp can inject real args.
+    pub fn with_args(mut self, args: Vec<String>) -> Self {
+        self.args = args;
         self
     }
 
@@ -524,7 +587,11 @@ impl<'a> Interpreter<'a> {
                 }
             }
             Flow::Exit(code) => RunOutcome {
-                status: if code == 0 { RunStatus::Ok } else { RunStatus::Aborted },
+                status: match code {
+                    0 => RunStatus::Ok,
+                    1 => RunStatus::Aborted,
+                    n => RunStatus::Exited(n as i32),
+                },
                 stdout: self.stdout.clone(),
                 stderr: self.stderr.clone(),
             },
@@ -574,68 +641,167 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         base: &env::Scope,
     ) -> (Flow, env::Scope) {
+        self.run_callable(TailCallee::Fn(func), args, base)
+    }
+
+    /// The tail-call trampoline: the shared engine under every function and
+    /// closure application.
+    ///
+    /// The backends convert tail calls to loops (tco_rewrite; C-178's
+    /// `return_call`/`return_call_indirect` on wasm), so `sum_to(1_000_000, 0)`
+    /// runs in O(1) stack there — while a frame-per-call evaluator dies at
+    /// [`MAX_DEPTH`] and abstains on programs the contracts DEFINE as
+    /// constant-stack. This loop is the interp's mirror of that guarantee:
+    /// each hop binds a fresh frame, walks the body's TAIL SPINE
+    /// (`eval_body_spine`: Block tails, If branches, the effect `Try{Call}`
+    /// wrapper), and when the spine ends in a call to a lowered fn or a
+    /// closure, RE-ENTERS with the callee instead of recursing.
+    ///
+    /// What is preserved exactly:
+    ///   - resolution order — the spine walker re-checks builtins / variant
+    ///     ctors / Endian before the fn table, same as `eval_named_call`;
+    ///   - the deterministic meter — the per-hop entry charge fires each
+    ///     transfer, matching the backends' charge-inside-the-loop placement;
+    ///   - `Try`/`Unwrap` — a transfer through the effect wrapper records the
+    ///     marker's node type (run-length compressed), and the final base
+    ///     value is folded through the SAME normalization `eval_try_unwrap`
+    ///     applies, innermost-first, so N∘…∘N is computed, not approximated;
+    ///   - mut-param copy-out — a callee with a `mut` param DECLINES the
+    ///     transfer (evaluated via the plain nested path), because copy-out
+    ///     needs the caller's lvalue, which a transferred frame no longer has.
+    fn run_callable(
+        &mut self,
+        mut callee: TailCallee<'a>,
+        mut args: Vec<Value>,
+        base: &env::Scope,
+    ) -> (Flow, env::Scope) {
         let d = self.depth.get();
         if d >= MAX_DEPTH {
             return (Flow::Fuel, base.child());
         }
         self.depth.set(d + 1);
-
-        // Deterministic meter: a USER fn's entry charge (fires regardless of
-        // caller, like the charge op at the top of the rendered fn); the
-        // in-user flag scopes loop-head charges to user bodies only.
         let det_was_user = self.det_in_user.get();
-        let det_is_user = self.user_fn_names.contains(&func.name);
-        self.det_in_user.set(det_is_user);
-        if det_is_user {
-            self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
-            if self.det_cut() {
-                self.det_in_user.set(det_was_user);
-                self.depth.set(d);
-                return (Flow::Value(Value::Int(0)), base.child());
-            }
-        }
 
-        let frame = base.child();
-        for (param, arg) in func.params.iter().zip(args.into_iter()) {
-            frame.bind(param.var, arg);
-        }
-        let result = match self.eval_expr(&func.body, &frame) {
-            // A function-body `Return` resolves to the returned value here.
-            Flow::Return(v) => Flow::Value(v),
+        // First hop's frame — what mut-param copy-out reads. Meaningful only
+        // when no transfer happened, and a transfer implies no mut params.
+        let mut first_frame: Option<env::Scope> = None;
+        // (marker node type, run length) — pending `Try` normalizations.
+        let mut pending: Vec<(Ty, u32)> = Vec::new();
+
+        let result = 'tramp: loop {
+            // Per-hop entry charge (the backends charge inside the loop).
+            match &callee {
+                TailCallee::Fn(f) => {
+                    let det_is_user = self.user_fn_names.contains(&f.name);
+                    self.det_in_user.set(det_is_user);
+                    if det_is_user {
+                        self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+                        if self.det_cut() {
+                            break 'tramp Flow::Value(Value::Int(0));
+                        }
+                    }
+                }
+                TailCallee::Clo(_) => {
+                    self.det_charge();
+                    if self.det_cut() {
+                        break 'tramp Flow::Value(Value::Int(0));
+                    }
+                }
+            }
+
+            // Bind the hop's frame. A closure hop keeps its body Rc alive for
+            // the duration of the spine walk.
+            let (frame, fn_body, clo_body): (env::Scope, Option<&'a IrExpr>, Option<Rc<Closure>>) =
+                match &callee {
+                    TailCallee::Fn(f) => {
+                        let fr = base.child();
+                        for (param, arg) in f.params.iter().zip(args.drain(..)) {
+                            fr.bind(param.var, arg);
+                        }
+                        (fr, Some(&f.body), None)
+                    }
+                    TailCallee::Clo(c) => {
+                        let fr = c.captured.child();
+                        for (param, arg) in c.params.iter().zip(args.drain(..)) {
+                            fr.bind(*param, arg);
+                        }
+                        (fr, None, Some(Rc::clone(c)))
+                    }
+                };
+            if first_frame.is_none() {
+                first_frame = Some(frame.clone());
+            }
+            let outcome = match (&fn_body, &clo_body) {
+                (Some(b), _) => self.eval_body_spine(b, &frame),
+                (_, Some(c)) => self.eval_body_spine(&c.body, &frame),
+                _ => unreachable!("one body source is always set"),
+            };
+            match outcome {
+                SpineOutcome::Done(flow) => break 'tramp flow,
+                SpineOutcome::Transfer { next, next_args, try_marker } => {
+                    if let Some(ty) = try_marker {
+                        match pending.last_mut() {
+                            Some((last, n)) if *last == ty => *n += 1,
+                            _ => pending.push((ty, 1)),
+                        }
+                    }
+                    callee = next;
+                    args = next_args;
+                }
+            }
+        };
+
+        // A function-body `Return` resolves to the returned value at the fn
+        // boundary; then the pending Try normalizations fold over the value,
+        // innermost-first — exactly what the nested evaluation would compute.
+        let mut result = match result {
+            Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
             other => other,
         };
+        'fold: for (ty, n) in pending.iter().rev() {
+            for _ in 0..*n {
+                let Flow::Value(v) = result else { break 'fold };
+                result = match self.try_unwrap_value(v, ty) {
+                    // `Return(x)` here means "that level's fn returns x" —
+                    // which is the next level's call VALUE.
+                    Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
+                    other => other,
+                };
+            }
+        }
         self.det_in_user.set(det_was_user);
-        self.depth.set(d);
-        (result, frame)
+        self.depth.set(self.depth.get() - 1);
+        (result, first_frame.unwrap_or_else(|| base.child()))
     }
 
     /// Apply a closure value to arguments. Used by the in-interp HOFs and by
-    /// `Computed` call targets.
+    /// `Computed` call targets. Rides the same trampoline as named fns, so a
+    /// lambda whose tail is a call (C-178's indirect-recursion cycle) costs
+    /// O(1) evaluator depth per chain, matching the backends' `return_call`.
     pub(crate) fn apply_closure(&mut self, clo: &Rc<Closure>, args: Vec<Value>) -> Flow {
-        let d = self.depth.get();
-        if d >= MAX_DEPTH {
-            return Flow::Fuel;
-        }
-        self.depth.set(d + 1);
-        // Deterministic meter: a closure invocation is a lifted lambda's
-        // entry charge on the backends.
-        self.det_charge();
-        if self.det_cut() {
-            self.depth.set(d);
-            return Flow::Value(Value::Int(0));
-        }
-
-        let frame = clo.captured.child();
-        for (param, arg) in clo.params.iter().zip(args.into_iter()) {
-            frame.bind(*param, arg);
-        }
-        let result = match self.eval_expr(&clo.body, &frame) {
-            Flow::Return(v) => Flow::Value(v),
-            other => other,
-        };
-        self.depth.set(d);
-        result
+        let root = self.root_scope();
+        self.run_callable(TailCallee::Clo(Rc::clone(clo)), args, &root).0
     }
+}
+
+/// A tail-transferable callee: a lowered named function (program-lifetime
+/// borrow) or a closure value (owned Rc). What [`Interpreter::run_callable`]
+/// loops over.
+pub(crate) enum TailCallee<'a> {
+    Fn(&'a IrFunction),
+    Clo(Rc<Closure>),
+}
+
+/// One hop's verdict from the tail-spine walker.
+pub(crate) enum SpineOutcome<'a> {
+    /// The body does not end in a transferable call — this flow is the hop's
+    /// result (a `Return` is resolved at the engine's fn boundary).
+    Done(Flow),
+    /// The body's tail is a call to `next` — re-enter the trampoline.
+    /// `try_marker` carries the `Try`/`Unwrap` marker node's type when the
+    /// tail was the effect wrapper `Try{Call}`, so the engine can fold the
+    /// normalization over the final value.
+    Transfer { next: TailCallee<'a>, next_args: Vec<Value>, try_marker: Option<Ty> },
 }
 
 /// If `main`'s result value is an unhandled error, return the message that the

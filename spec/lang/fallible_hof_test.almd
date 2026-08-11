@@ -23,71 +23,156 @@ else err("odd cannot halve")
 fn maybe_double(n: Int) -> Int?! = if n < 0 then err("negative")
 else if n % 2 == 0 then ok(some(n * 2)) else ok(none)
 
+// The 1-bit rule rides the DECLARATION MARKER (ADR-0010 D4's proof): the
+// same body declared longhand stays a map-of-results callback.
+fn parse_long(s: String) -> Result[Int, String] = int.parse(s)
+
 fn add_checked(a: Int, x: Int) -> Int! = if x > 100 then err("too big") else ok(a + x)
 
-test "map: fallible lambda — ok path and first-err short-circuit" {
-  assert_eq(list.map(["1", "2", "3"], (s) => parse_pos(s)!) ?? [], [1, 2, 3])
-  match list.map(["1", "-7", "x"], (s) => parse_pos(s)!) {
-    ok(_) => testing.assert_contains("unexpected", "never"),
-    err(e) => testing.assert_contains(e, "positive"),
+// L9 (2026-08-07): test blocks keep the pre-#1108 world (lambda `!` =
+// unwrap, no first-err dispatch), so every polymorphic-HOF behavior is
+// exercised through top-level helper fns and the tests assert their values.
+fn m_ok() -> List[Int] = list.map(["1", "2", "3"], (s) => parse_pos(s)!) ?? []
+
+fn m_err() -> String = match list.map(["1", "-7", "x"], (s) => parse_pos(s)!) {
+  ok(_) => "unexpected",
+  err(e) => e,
+}
+
+fn m_named() -> List[Int] = list.map(["4", "5"], parse_pos) ?? []
+
+fn m_pipe() -> List[Int] = (["1", "2"] |> list.map((s) => parse_pos(s)!)) ?? []
+
+fn m_pipe_qq() -> (List[Int], List[Int]) = {
+  let a = ["1", "2"] |> list.map((s) => parse_pos(s)!) ?? [0]
+  let b = ["1", "x"] |> list.map((s) => parse_pos(s)!) ?? [0]
+  (a, b)
+}
+
+fn f_ok() -> List[Int] = list.filter([1, 20, 3], (n) => is_small(n)!) ?? []
+
+fn f_err() -> String = match list.filter([1, -2, 3], (n) => is_small(n)!) {
+  ok(_) => "unexpected",
+  err(e) => e,
+}
+
+fn fm_cells() -> (List[Int], String, List[Int], String) = {
+  let a = list.flat_map([2, 4], (n) => halves(n)!) ?? []
+  let b = match list.flat_map([2, 3], (n) => halves(n)!) {
+    ok(_) => "unexpected",
+    err(e) => e,
   }
+  let c = list.filter_map([2, 3, 4], (n) => maybe_double(n)!) ?? []
+  let d = match list.filter_map([2, -1], (n) => maybe_double(n)!) {
+    ok(_) => "unexpected",
+    err(e) => e,
+  }
+  (a, b, c, d)
+}
+
+fn fold_cells() -> (Int, String) = {
+  let a = list.fold([1, 2, 3], 0, (acc, x) => add_checked(acc, x)!) ?? -1
+  let b = match list.fold([1, 200], 0, (acc, x) => add_checked(acc, x)!) {
+    ok(_) => "unexpected",
+    err(e) => e,
+  }
+  (a, b)
+}
+
+fn find_cells() -> (Int, String) = {
+  let a = (list.find([1, 20, 3], (n) => is_small(n)!) ?? none) ?? -1
+  let b = match list.find([-5, 1], (n) => is_small(n)!) {
+    ok(_) => "unexpected",
+    err(e) => e,
+  }
+  (a, b)
+}
+
+fn each_cells() -> (String, String) = {
+  let a = match list.each([1, 2], (n) => record_seen(n)!) {
+    ok(_) => "fine",
+    err(_) => "unexpected",
+  }
+  let b = match list.each([1, -2], (n) => record_seen(n)!) {
+    ok(_) => "unexpected",
+    err(e) => e,
+  }
+  (a, b)
+}
+
+fn marker_cells() -> (List[Result[Int, String]], List[Int], List[Int]) = {
+  let long = list.map(["1", "x"], parse_long)
+  let bang_err: List[Int] = list.map(["1", "x"], parse_pos) ?? []
+  let bang_ok = list.map(["1", "2"], parse_pos) ?? []
+  (long, bang_err, bang_ok)
+}
+
+test "map: fallible lambda — ok path and first-err short-circuit" {
+  assert_eq(m_ok(), [1, 2, 3])
+  testing.assert_contains(m_err(), "positive")
 }
 
 test "map: a named -> T! fn is a fallible callback" {
-  assert_eq(list.map(["4", "5"], parse_pos) ?? [], [4, 5])
+  assert_eq(m_named(), [4, 5])
 }
 
 test "map: pipe spelling" {
-  match ["1", "2"] |> list.map((s) => parse_pos(s)!) {
-    ok(v) => assert_eq(v, [1, 2]),
-    err(_) => testing.assert_contains("unexpected", "never"),
-  }
+  assert_eq(m_pipe(), [1, 2])
+}
+
+test "map: pipe spelling with ?? fallback (#1127)" {
+  assert_eq(m_pipe_qq(), ([1, 2], [0]))
+}
+
+// #1134: the polymorphic idiom's CONSUMER — a heap-Ok `??` in RETURN position
+// — used to wall on the wasm leg (the tail path could only Alloc{Opaque} for
+// it). It now lowers through the proven heap-result-match; these helpers are
+// the shape, and their absence from proofs/walled-real-baseline.txt is the
+// assertion that both legs run them.
+fn qq_tail_ok() -> List[Int] = list.map(["1", "2"], (s) => parse_pos(s)!) ?? [0]
+
+fn qq_tail_err() -> List[Int] = list.map(["1", "x"], (s) => parse_pos(s)!) ?? [0]
+
+test "heap-?? in return position lowers on both legs" {
+  assert_eq(qq_tail_ok(), [1, 2])
+  assert_eq(qq_tail_err(), [0])
 }
 
 test "filter: fallible predicate" {
-  assert_eq(list.filter([1, 20, 3], (n) => is_small(n)!) ?? [], [1, 3])
-  match list.filter([1, -2, 3], (n) => is_small(n)!) {
-    ok(_) => testing.assert_contains("unexpected", "never"),
-    err(e) => testing.assert_contains(e, "size class"),
-  }
+  assert_eq(f_ok(), [1, 3])
+  testing.assert_contains(f_err(), "size class")
 }
 
 test "flat_map and filter_map: fallible callbacks" {
-  assert_eq(list.flat_map([2, 4], (n) => halves(n)!) ?? [], [1, 1, 2, 2])
-  match list.flat_map([2, 3], (n) => halves(n)!) {
-    ok(_) => testing.assert_contains("unexpected", "never"),
-    err(e) => testing.assert_contains(e, "odd"),
-  }
-  assert_eq(list.filter_map([2, 3, 4], (n) => maybe_double(n)!) ?? [], [4, 8])
-  match list.filter_map([2, -1], (n) => maybe_double(n)!) {
-    ok(_) => testing.assert_contains("unexpected", "never"),
-    err(e) => testing.assert_contains(e, "negative"),
-  }
+  let (a, b, c, d) = fm_cells()
+  assert_eq(a, [1, 1, 2, 2])
+  testing.assert_contains(b, "odd")
+  assert_eq(c, [4, 8])
+  testing.assert_contains(d, "negative")
 }
 
 test "fold: fallible two-arg callback" {
-  assert_eq(list.fold([1, 2, 3], 0, (a, x) => add_checked(a, x)!) ?? -1, 6)
-  match list.fold([1, 200], 0, (a, x) => add_checked(a, x)!) {
-    ok(_) => testing.assert_contains("unexpected", "never"),
-    err(e) => testing.assert_contains(e, "too big"),
-  }
+  let (a, b) = fold_cells()
+  assert_eq(a, 6)
+  testing.assert_contains(b, "too big")
 }
 
 test "find: fallible predicate" {
-  assert_eq((list.find([1, 20, 3], (n) => is_small(n)!) ?? none) ?? -1, 1)
-  match list.find([-5, 1], (n) => is_small(n)!) {
-    ok(_) => testing.assert_contains("unexpected", "never"),
-    err(e) => testing.assert_contains(e, "size class"),
-  }
+  let (a, b) = find_cells()
+  assert_eq(a, 1)
+  testing.assert_contains(b, "size class")
 }
 
 test "each: fallible callback short-circuits" {
-  match list.each([1, 2], (n) => record_seen(n)!) {
-    ok(_) => testing.assert_contains("fine", "fine"),
-    err(_) => testing.assert_contains("unexpected", "never"),
-  }
-  match list.each([1, -2], (n) => record_seen(n)!) {
-    ok(_) => testing.assert_contains("unexpected", "never"),
-    err(e) => testing.assert_contains(e, "record"),
-  }
+  let (a, b) = each_cells()
+  assert_eq(a, "fine")
+  testing.assert_contains(b, "record")
+}
+
+test "the marker, not the type, carries the callback bit" {
+  let (long, bang_err, bang_ok) = marker_cells()
+  assert_eq(long, [ok(1), err("invalid digit found in string")])
+  let empty: List[Int] = []
+  assert_eq(bang_err, empty)
+  assert_eq(bang_ok, [1, 2])
 }

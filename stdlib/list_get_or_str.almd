@@ -22,6 +22,5 @@ fn list_get_or_str(xs: List[String], i: Int, default: String) -> String = {
   let ge0 = if i >= 0 then 1 else 0
   let lt_len = if i < len then 1 else 0
   let in_bounds = ge0 * lt_len
-  if in_bounds == 1 then __gos_elem(h, i)
-  else __gos_copy(default)
+  if in_bounds == 1 then __gos_elem(h, i) else __gos_copy(default)
 }

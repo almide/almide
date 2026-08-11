@@ -20,6 +20,7 @@
 ///   diagnostics.rs  — Error hint helpers
 
 mod types;
+mod fallible_user_hof;
 mod infer;
 pub(crate) mod calls;
 mod builtin_calls;
@@ -111,6 +112,10 @@ pub struct Checker {
     /// sig generic like `A` would disconnect the lambda param from the
     /// union-find and it would silently default to Int later).
     pub(crate) lambda_arg_hint: Option<Vec<Option<crate::types::Ty>>>,
+    /// #1055: the enclosing call slot for the lambda being inferred is an
+    /// `effect (A) -> B` fn type — the body gets effect-fn ergonomics and the
+    /// lambda types as the effect carrier `(A) -> Result[B, String]`.
+    pub(crate) lambda_slot_effect: bool,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Named-type pairs currently being unified structurally. Unifying two
@@ -493,6 +498,7 @@ impl Checker {
             arg_spans: Vec::new(),
             named_arg_meta: None,
             lambda_arg_hint: None,
+            lambda_slot_effect: false,
             constraints: Vec::new(), uf: UnionFind::new(),
             unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,
@@ -861,6 +867,42 @@ impl Checker {
                 }
             }
         }
+        // #1108 Phase 2b-iii (D2, Cell 1): a fallible callback in a USER HOF's
+        // bare `(A) -> B` slot routes the call to a GENERATED `__fallible__`
+        // twin — same pre-inference name-swap discipline as the list HOFs'
+        // hand-written twins, so everything downstream is the proven D3
+        // explicit-slot path. Runs before any inference so the twins register
+        // like ordinary decls.
+        let n_twins =
+            fallible_user_hof::normalize_fallible_user_hofs(program, &self.fallible_marker_fns);
+        // The twins were appended AFTER `register_decls` ran (registration is
+        // part of canonicalize, upstream of this checker entry) — register
+        // their signatures through the same path so call resolution sees them
+        // like any parsed decl.
+        if n_twins > 0 {
+            let start = program.decls.len() - n_twins;
+            for decl in &program.decls[start..] {
+                let ast::Decl::Fn {
+                    name, effect, visibility, generics, params, return_type, span, ..
+                } = decl
+                else {
+                    continue;
+                };
+                crate::canonicalize::registration::register_fn_sig(
+                    &mut self.env,
+                    &crate::canonicalize::registration::FnSigToRegister {
+                        name: name.as_str(),
+                        params,
+                        return_type,
+                        effect,
+                        generics,
+                        prefix: None,
+                        span: span.as_ref(),
+                        visibility: *visibility,
+                    },
+                );
+            }
+        }
         // `main` takes NO parameters (#789): the parameter form typechecked but no
         // codegen leg wires the argument — native emitted an uncallable driver
         // ("codegen produced invalid Rust — this is an Almide bug") and the v1 wasm
@@ -879,6 +921,38 @@ impl Checker {
                 "fn main",
             )
             .with_code("E028");
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
+        // A PURE `main` returns Unit (#912 diagnostic-divergence lens, round 1):
+        // the C/Go-style `fn main() -> Int` typechecked but the entry is emitted
+        // verbatim — native produced `pub fn main() -> i64` (rustc E0277,
+        // surfaced as "codegen produced invalid Rust"). An EFFECT main may
+        // declare any Ok type: its wrapper unwraps the carrier and discards the
+        // payload, which every leg supports (e008-fan-captures-mut pins it).
+        // Same #789 discipline as the parameter rule above: reject at the seam
+        // with the documented convention instead of blaming the compiler
+        // downstream.
+        for decl in &program.decls {
+            let ast::Decl::Fn { name, effect, return_type, span, .. } = decl else { continue };
+            if name.as_str() != "main" || effect.unwrap_or(false) {
+                continue;
+            }
+            if matches!(return_type, ast::TypeExpr::Simple { name: t } if t.as_str() == "Unit") {
+                continue;
+            }
+            let mut diag = err(
+                "main() returns Unit",
+                "a program's result is its output, not a return value — print it, \
+                 or set the exit code with `process.exit(n)` (import process). \
+                 Declare the entry `fn main() -> Unit` (or `effect fn main() -> Unit`)",
+                "fn main",
+            )
+            .with_code("E044");
             if let Some(s) = span {
                 diag.file = self.source_file.clone();
                 diag.line = Some(s.line);
@@ -1001,6 +1075,10 @@ impl Checker {
         user_ret: &Ty,
     ) -> Option<(&'static str, &'static str)> {
         let user_lc = user_name.to_ascii_lowercase();
+        // Codepoint count, not `len()`: a byte-length gap overstates the
+        // edit distance for non-ASCII identifiers and would drop a real
+        // candidate.
+        let user_chars = user_name.chars().count();
         // Best match, not first match. `atan` passes the gates against
         // both `math.atan` (distance 0) and `math.tan` (distance 1), so
         // taking the first candidate named whichever of the two the
@@ -1011,25 +1089,33 @@ impl Checker {
         let mut best: Option<(usize, &'static str, &'static str)> = Option::None;
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
             for fn_name in crate::stdlib::module_functions_all(module) {
-                // Name-similarity filter: coarse `≤ 2` Levenshtein
-                // gate (cheap), then a substring gate so that
-                // common-shape collisions like
+                // Name-similarity filter, cheapest gate first. Edit
+                // distance is never below the length difference, so a
+                // gap over the `≤ 2` cap rules a candidate out without
+                // running the O(len²) matrix. Then a substring gate (one
+                // scan) so that common-shape collisions like
                 // `fn add(Int, Int) -> Int` don't false-positive
                 // against `int.band`. Require one name to contain
                 // the other (case-insensitive) — catches typos
                 // (`maps` ⊃ `map`), qualified renames
                 // (`my_binary_search` ⊃ `binary_search`), and exact
                 // matches, while excluding short stdlib names with
-                // unrelated user fns.
+                // unrelated user fns. Only survivors reach `levenshtein`,
+                // which used to run on every stdlib fn for every user fn
+                // and dominated `almide check` (12.8% of self time on a
+                // 3200-fn program that emits no diagnostics at all).
+                if user_chars.abs_diff(fn_name.chars().count()) > 2 {
+                    continue;
+                }
+                let fn_lc = fn_name.to_ascii_lowercase();
+                if !(user_lc.contains(&fn_lc) || fn_lc.contains(&user_lc)) {
+                    continue;
+                }
                 let dist = almide_base::diagnostic::levenshtein(user_name, fn_name);
                 if dist > 2 {
                     continue;
                 }
                 if best.as_ref().is_some_and(|(d, _, _)| *d <= dist) {
-                    continue;
-                }
-                let fn_lc = fn_name.to_ascii_lowercase();
-                if !(user_lc.contains(&fn_lc) || fn_lc.contains(&user_lc)) {
                     continue;
                 }
                 let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };

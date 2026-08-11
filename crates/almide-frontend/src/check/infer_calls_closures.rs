@@ -41,8 +41,8 @@ impl Checker {
                 let resolved_left = resolve_ty(&left_ty, &self.uf);
                 let resolved_right = resolve_ty(&right_ty, &self.uf);
                 match (&resolved_left, &resolved_right) {
-                    (Ty::Fn { params: a_params, .. }, Ty::Fn { ret: c_ret, .. }) => {
-                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone() }
+                    (Ty::Fn { params: a_params, is_effect: a_eff, .. }, Ty::Fn { ret: c_ret, is_effect: c_eff, .. }) => {
+                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone(), is_effect: *a_eff || *c_eff }
                     }
                     _ => Ty::Unknown,
                 }
@@ -406,6 +406,7 @@ impl Checker {
             Ty::Fn {
                 params: vec![elem],
                 ret: Box::new(Ty::result(winner.clone(), Ty::String)),
+                is_effect: false,
             },
             "fan.race mapper",
         );
@@ -527,6 +528,24 @@ impl Checker {
         let saved_auto_unwrap = self.env.auto_unwrap;
         self.env.auto_unwrap = false;
         self.env.lambda_depth += 1;
+        // ADR-0006 D1 (#1108 Phase 2b): every lambda carries a PROVISIONAL
+        // failure channel; a `!` in the body propagates into it (see
+        // check_unwrap_propagation_context) and marks the lambda fallible.
+        let saved_lambda_ret = self.env.lambda_ret.take();
+        let saved_prop_used = self.env.lambda_prop_used;
+        let channel_ok = self.fresh_var();
+        self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), Ty::String));
+        self.env.lambda_prop_used = false;
+        // #1055: a lambda in an `effect (…) -> …` slot is an effect-fn body —
+        // effect calls are permitted (the slot's owner runs the handler under
+        // its own effect context) and the lambda ALWAYS types as the carrier
+        // `(A) -> Result[B, String]`, so a pure value tail gets the same
+        // ok(...) wrap the fallible machinery already emits (Phase 1b).
+        let slot_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let saved_can_call_effect = self.env.can_call_effect;
+        if slot_effect {
+            self.env.can_call_effect = true;
+        }
         // Expected-type hint from the enclosing call (#653): when this
         // lambda is an argument whose parameter slot is a `Fn`, the
         // caller pins each UNANNOTATED param to the expected element
@@ -565,11 +584,30 @@ impl Checker {
             ty
         }).collect();
         let ret_ty = self.infer_expr(body);
+        self.env.can_call_effect = saved_can_call_effect;
+        let became_fallible = self.env.lambda_prop_used || slot_effect;
+        let channel = self.env.lambda_ret.take();
+        self.env.lambda_ret = saved_lambda_ret;
+        self.env.lambda_prop_used = saved_prop_used;
         self.env.lambda_depth -= 1;
         self.env.auto_unwrap = saved_auto_unwrap;
         self.env.current_ret = saved_ret;
         self.env.pop_scope();
-        Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
+        // Usage-driven fallibility (L2): a lambda whose body used its channel
+        // infers as `(A) -> Result[T, String]` — a Result-typed body unifies
+        // whole, a VALUE body pins the channel's ok side (the lowering wraps
+        // that value tail in ok(...), the Phase 1b machinery).
+        if became_fallible {
+            let chan_ty = channel.unwrap_or_else(|| Ty::result(channel_ok.clone(), Ty::String));
+            let body_resolved = resolve_ty(&ret_ty, &self.uf);
+            if body_resolved.is_result() {
+                self.constrain(chan_ty.clone(), ret_ty, "fallible lambda body");
+            } else if body_resolved != Ty::Never {
+                self.constrain(channel_ok, ret_ty, "fallible lambda body");
+            }
+            return Ty::Fn { params: param_tys, ret: Box::new(chan_ty), is_effect: false };
+        }
+        Ty::Fn { params: param_tys, ret: Box::new(ret_ty), is_effect: false }
     }
 
     /// `expr!` — unwrap with propagation (Option[T] → T, Result[T,E] → T).
@@ -672,8 +710,8 @@ impl Checker {
     /// fn declared `-> T!` — instantiates the fallible twin:
     ///
     /// ```text
-    /// list.map(xs, (x) => f(x)!)   ≡   list.__try_map(xs, (x) => f(x))
-    /// list.map(xs, parse)          ≡   list.__try_map(xs, parse)   (parse: -> T!)
+    /// list.map(xs, (x) => f(x)!)   ≡   list.__fallible_map(xs, (x) => f(x))
+    /// list.map(xs, parse)          ≡   list.__fallible_map(xs, parse)   (parse: -> T!)
     /// ```
     ///
     /// The lambda's `!` is the propagation marker; the twin carries the
@@ -684,6 +722,12 @@ impl Checker {
     /// — sees a plain try_* call. A COMPOUND fallible body (`(x) => g(f(x)!)!`)
     /// is Phase 2b and keeps today's E022.
     fn normalize_fallible_hof_callback(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) {
+        // L9 (2026-08-07): inside a TEST block a lambda's `!` is plain
+        // unwrap — no fallibility bit, no first-err dispatch. The test world
+        // keeps its pre-#1108 semantics wholesale.
+        if self.env.in_test_block {
+            return;
+        }
         const FALLIBLE_HOF_CORE: &[&str] =
             &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
         let ExprKind::Member { object, field } = &mut callee.kind else { return };
@@ -691,9 +735,18 @@ impl Checker {
         if mod_name.as_str() != "list" || !FALLIBLE_HOF_CORE.contains(&field.as_str()) {
             return;
         }
+        fn contains_unwrap(e: &mut ast::Expr) -> bool {
+            let mut found = false;
+            ast::visit_expr_mut(e, &mut |c| {
+                if matches!(c.kind, ExprKind::Unwrap { .. }) { found = true; }
+            });
+            found
+        }
         let mut fallible = false;
         for a in args.iter_mut() {
             match &mut a.kind {
+                // CANONICAL tail form `(x) => f(x)!`: strip the marker — the
+                // residue IS the twin's Result-returning callback (proven path).
                 ExprKind::Lambda { body, .. }
                     if matches!(body.kind, ExprKind::Unwrap { .. }) =>
                 {
@@ -701,6 +754,15 @@ impl Checker {
                     let mut stripped = (**inner).clone();
                     std::mem::swap(&mut **body, &mut stripped);
                     fallible = true;
+                }
+                // COMPOUND fallible body (`(x) => g(f(x)!)!` etc., 2b-i): no
+                // surgery — the lambda infers as a real fallible closure
+                // `(A) -> Result[B, String]` (its own channel + value-tail
+                // lift), which is exactly the twin's callback type.
+                ExprKind::Lambda { body, .. } => {
+                    if contains_unwrap(body) {
+                        fallible = true;
+                    }
                 }
                 ExprKind::Ident { name, .. } if self.fallible_marker_fns.contains(name) => {
                     fallible = true;
@@ -711,7 +773,7 @@ impl Checker {
         if fallible {
             // v0.56.0: the public try_ family is removed; the fallible
             // instantiation routes to the __-prefixed internal carriers.
-            *field = almide_base::intern::sym(&format!("__try_{}", field.as_str()));
+            *field = almide_base::intern::sym(&format!("__fallible_{}", field.as_str()));
             self.hof_rewritten_calls.insert(object.id);
         }
     }
@@ -726,6 +788,38 @@ impl Checker {
         // ADR-0006 D1 (#1108 Phase 2a): the 1-bit fallibility rule for the
         // core list HOFs, applied as a pre-inference normalization.
         self.normalize_fallible_hof_callback(callee, args);
+        // ADR-0009 D2 (#1055 / #1135 cluster 1): an EFFECT fn passed as a
+        // callback VALUE carries its effect bit to this call site.
+        // `check_effect_isolation` fires on a CALL, so a bare reference
+        // laundered the capability: `fn pure_caller(xs) = list.map(xs, eff)`
+        // — `eff` an effect fn declared `-> Result[T, E]` — passed check from
+        // a PURE fn and ran its effects, while `list.map(xs, (x) => eff(x))`
+        // was correctly E006. Same program, same effects, opposite verdicts,
+        // decided by the callback's SPELLING.
+        for a in args.iter() {
+            let ExprKind::Ident { name, .. } = &a.kind else { continue };
+            // SHADOWING FIRST. `infer_expr_g2_ident` resolves an identifier
+            // local → top-level `let` → const param → FUNCTION, so a name that
+            // any of those bind is NOT a reference to the fn of that name.
+            // Skipping this check read the function table directly and reported
+            // E006 for a plain local: `let run = take_path_run(line, at)` in
+            // tools/almide-gates, with an unrelated `effect fn run` in a
+            // SIBLING module, made `string.len(run)` "cannot call effect
+            // function 'run' from a pure function". The capability rule must
+            // key on what the identifier RESOLVES to, never on its spelling —
+            // which is the same mistake, inverted, that this check exists to
+            // fix (#1055: a bare `eff` laundering its effect bit).
+            if self.env.lookup_var(name).is_some()
+                || self.env.top_lets.contains_key(&sym(name))
+                || matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. }))
+            {
+                continue;
+            }
+            let Some(sig) = self.env.functions.get(&sym(name)).cloned() else { continue };
+            if sig.is_effect {
+                self.check_effect_isolation(name, &sig);
+            }
+        }
         // Save named arg names, then flatten into positional args temporarily.
         let named_names: Vec<almide_base::intern::Sym> = named_args.iter().map(|(n, _)| *n).collect();
         let named_start = args.len();
@@ -757,51 +851,15 @@ impl Checker {
         if self.env.auto_unwrap || self.env.in_test_block {
             return;
         }
-        // #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
-        // `!` exactly like an effect fn body — Result propagation is pure
-        // control flow (the derived Codec decoders have always lowered this
-        // way; every peer with hand-written codecs has the same operator: Rust
-        // `?`, Zig `try`). The closure-boundary rule is unchanged (#489):
-        // inside a lambda `!` cannot propagate out, whatever the fn returns.
-        if self.env.lambda_depth == 0 {
-            if let Some(ret) = self.env.current_ret.clone() {
-                let ret = resolve_ty(&ret, &self.uf);
-                let op = resolve_ty(operand, &self.uf);
-                match (&ret, &op) {
-                    // A Result operand's error type must BE the fn's error type
-                    // (the lowered `?` converts nothing) — unify, so a mismatch
-                    // is a check-time error, never generated-Rust E0308.
-                    (
-                        Ty::Applied(TypeConstructorId::Result, ra),
-                        Ty::Applied(TypeConstructorId::Result, oa),
-                    ) if ra.len() == 2 && oa.len() == 2 => {
-                        self.unify_infer(&ra[1], &oa[1]);
-                        return;
-                    }
-                    // Option operand in a Result fn: none becomes the same
-                    // manufactured error the effect-fn lowering already emits.
-                    (
-                        Ty::Applied(TypeConstructorId::Result, _),
-                        Ty::Applied(TypeConstructorId::Option, _),
-                    ) => return,
-                    // Option operand in an Option fn: none propagates as none.
-                    (
-                        Ty::Applied(TypeConstructorId::Option, _),
-                        Ty::Applied(TypeConstructorId::Option, _),
-                    ) => return,
-                    // Error-recovery parity with the unwrap typing rule.
-                    (
-                        Ty::Applied(TypeConstructorId::Result, _)
-                        | Ty::Applied(TypeConstructorId::Option, _),
-                        Ty::Unknown | Ty::TypeVar(_),
-                    ) => return,
-                    _ => {}
-                }
-            }
+        let accepted = if self.env.lambda_depth == 0 {
+            self.accept_declared_channel_prop(operand)
+        } else {
+            self.accept_lambda_channel_prop(operand)
+        };
+        if accepted {
+            return;
         }
-        // Inside a lambda within an effect fn the call site *looks* effectful,
-        // but `?` cannot propagate out of the closure (#489) — point there
-        // specifically; otherwise the fn needs a propagation-capable signature.
+        // Off-type operands (and a missing channel) still reject.
         let hint = if self.env.lambda_depth > 0 {
             "`!` cannot propagate an error out of a lambda; use `??` for a fallback value or move the call out of the closure"
         } else {
@@ -812,6 +870,78 @@ impl Checker {
             hint,
             "operator !",
         ).with_code("E022"));
+    }
+
+    /// #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
+    /// `!` exactly like an effect fn body — Result propagation is pure control
+    /// flow (the derived Codec decoders have always lowered this way; every
+    /// peer with hand-written codecs has the same operator: Rust `?`, Zig
+    /// `try`). Returns whether the declared return type accepts this operand.
+    fn accept_declared_channel_prop(&mut self, operand: &Ty) -> bool {
+        let Some(ret) = self.env.current_ret.clone() else { return false };
+        let ret = resolve_ty(&ret, &self.uf);
+        let op = resolve_ty(operand, &self.uf);
+        match (&ret, &op) {
+            // A Result operand's error type must BE the fn's error type (the
+            // lowered `?` converts nothing) — unify, so a mismatch is a
+            // check-time error, never generated-Rust E0308.
+            (
+                Ty::Applied(TypeConstructorId::Result, ra),
+                Ty::Applied(TypeConstructorId::Result, oa),
+            ) if ra.len() == 2 && oa.len() == 2 => {
+                self.unify_infer(&ra[1], &oa[1]);
+                true
+            }
+            // Option operand in a Result fn: none becomes the same manufactured
+            // error the effect-fn lowering already emits. Option operand in an
+            // Option fn: none propagates as none.
+            (
+                Ty::Applied(TypeConstructorId::Result, _),
+                Ty::Applied(TypeConstructorId::Option, _),
+            )
+            | (
+                Ty::Applied(TypeConstructorId::Option, _),
+                Ty::Applied(TypeConstructorId::Option, _),
+            ) => true,
+            // Error-recovery parity with the unwrap typing rule.
+            (
+                Ty::Applied(TypeConstructorId::Result, _)
+                | Ty::Applied(TypeConstructorId::Option, _),
+                Ty::Unknown | Ty::TypeVar(_),
+            ) => true,
+            _ => false,
+        }
+    }
+
+    /// ADR-0006 D1 (#1108 Phase 2b): inside a LAMBDA, `!` propagates into the
+    /// lambda's OWN provisional channel (`Result[fresh, String]`) — never
+    /// across the closure boundary (#489 unchanged). Accepting here marks the
+    /// lambda fallible (usage-driven, L2); the lambda then infers as
+    /// `(A) -> Result[T, String]`.
+    fn accept_lambda_channel_prop(&mut self, operand: &Ty) -> bool {
+        let Some(chan) = self.env.lambda_ret.clone() else { return false };
+        let op = resolve_ty(operand, &self.uf);
+        let accepted = match (&chan, &op) {
+            (
+                Ty::Applied(TypeConstructorId::Result, ra),
+                Ty::Applied(TypeConstructorId::Result, oa),
+            ) if ra.len() == 2 && oa.len() == 2 => {
+                // E is String by the channel's construction (ADR-0002 D2, L3):
+                // a custom-E operand fails this unification.
+                self.unify_infer(&ra[1], &oa[1]);
+                true
+            }
+            // Option operand: none maps to err("none") (L4).
+            (
+                Ty::Applied(TypeConstructorId::Result, _),
+                Ty::Applied(TypeConstructorId::Option, _) | Ty::Unknown | Ty::TypeVar(_),
+            ) => true,
+            _ => false,
+        };
+        if accepted {
+            self.env.lambda_prop_used = true;
+        }
+        accepted
     }
 
     fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
@@ -847,14 +977,31 @@ impl Checker {
     /// `ExprKind::UnwrapOr` arm of [`Self::infer_pipe`]. Verbatim text move.
     fn infer_pipe_unwrap_or(&mut self, left: &mut Box<ast::Expr>, inner: &mut Box<ast::Expr>, fallback: &mut Box<ast::Expr>) -> Ty {
         let inner_ty = self.infer_pipe(left, inner);
-        let fb_ty = self.infer_expr(fallback);
-        self.unify_infer(&inner_ty, &fb_ty);
-        // UnwrapOr unwraps Option[T]/Result[T,E] → T
-        match &inner_ty {
-            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
-            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-            _ => inner_ty,
-        }
+        let ft = self.infer_expr(fallback);
+        let resolved = resolve_ty(&inner_ty, &self.uf);
+        // #1127: annotate the piped operand with its RESOLVED type — the
+        // lowering reads it to pick the Option- vs Result-shaped unwrap
+        // (the pipe-`!` arm above has the same insert for the same reason).
+        // Without it a Result operand was matched as Some/None, a rustc
+        // E0308 behind the codegen wall.
+        self.type_map.insert(inner.id, resolved.clone());
+        // Mirror the DIRECT `??` rule (infer_expr_g3_unwrap_or): unwrap the
+        // payload first, then constrain the FALLBACK against the payload —
+        // the old code unified the fallback with the whole Option/Result.
+        let payload = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
+            ty
+        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+            ft.clone()
+        } else {
+            self.emit(super::err(
+                format!("operator '??' requires Option or Result type but got {}", resolved.display()),
+                "Use '??' only on Option[T] or Result[T, E] values",
+                "operator ??",
+            ).with_code("E034"));
+            ft.clone()
+        };
+        self.constrain(payload.clone(), ft, "?? fallback");
+        payload
     }
 
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
@@ -886,13 +1033,13 @@ impl Checker {
                         }
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                         ret
                     }
                     _ => {
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                         ret
                     }
                 }
@@ -910,13 +1057,13 @@ impl Checker {
                 }
                 let ct = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                 ret
             }
             _ => {
                 let rt = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(rt, Ty::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(rt, Ty::Fn { params: vec![left_ty], ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                 ret
             }
         }

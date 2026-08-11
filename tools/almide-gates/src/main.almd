@@ -1,6 +1,6 @@
 // almide-gates — this repository's quality gates and doc generators, in Almide.
 //
-// Unit 0.46's dogfood target (docs/ai-dlc/units/0.46/construction.md). The point is not
+// Unit 0.46's dogfood target. The point is not
 // that these tasks need a new language: it is that 4,063 lines of untyped shell currently
 // guard the project's strongest correctness claims, and that every one of them has an
 // existing output to diff against. A reimplementation is correct exactly when its bytes

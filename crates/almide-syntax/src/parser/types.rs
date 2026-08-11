@@ -16,6 +16,22 @@ impl Parser {
             self.advance();
             return Ok(TypeExpr::ConstLit { value });
         }
+        // `effect (A) -> B` / `effect fn(A) -> B` (#1055): an EFFECT-typed fn
+        // slot. The prefix wraps whichever fn-type spelling follows; a lambda
+        // checked against it gets effect-fn body ergonomics.
+        if self.check(TokenType::Effect) {
+            self.advance();
+            let inner = self.parse_type_expr_inner()?;
+            return match inner {
+                TypeExpr::Fn { params, ret, .. } => {
+                    Ok(TypeExpr::Fn { params, ret, is_effect: true })
+                }
+                other => Err(format!(
+                    "`effect` in type position must prefix a fn type — \
+                     `effect (A) -> B` or `effect fn(A) -> B` — got {other:?}"
+                )),
+            };
+        }
         if self.check(TokenType::Pipe) { return self.parse_variant_type(); }
         if self.check(TokenType::LBrace) { return self.parse_record_type(); }
         if self.check(TokenType::Fn) { return self.parse_fn_type(); }
@@ -46,6 +62,19 @@ impl Parser {
         }
         let name = self.expect_type_name()?;
         self.parse_type_name_suffix(name)
+    }
+
+    /// ADR-0009 D1 (#1108 Phase 2b): a fn TYPE's return may carry the
+    /// fallibility marker — `(A) -> B!` ≡ `(A) -> Result[B, String]`. Same
+    /// pseudo-generic carrier as the declaration-position marker; `?` binds
+    /// first (`-> B?!` = Result[Option[B], String]), matching the decl rule.
+    fn wrap_fallible_ret_suffix(&mut self, ret: TypeExpr) -> TypeExpr {
+        if self.check(TokenType::Bang) && !self.newline_before_current() {
+            self.advance();
+            TypeExpr::Generic { name: sym("!"), args: vec![ret] }
+        } else {
+            ret
+        }
     }
 
     /// ADR-0010: `T?` marks Option — `?` binds to the just-parsed type ATOM
@@ -102,7 +131,8 @@ impl Parser {
             if self.check(TokenType::Arrow) {
                 self.advance();
                 let ret = self.parse_type_expr()?;
-                return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret) });
+                let ret = self.wrap_fallible_ret_suffix(ret);
+                return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret), is_effect: false });
             }
             return Ok(TypeExpr::Simple { name: sym("Unit") });
         }
@@ -113,7 +143,8 @@ impl Parser {
             if self.check(TokenType::Arrow) {
                 self.advance();
                 let ret = self.parse_type_expr()?;
-                return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret) });
+                let ret = self.wrap_fallible_ret_suffix(ret);
+                return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret), is_effect: false });
             }
             // ADR-0010: a parenthesized type is an atom, so `?` may follow —
             // this is how the whole-fn and nested spellings parse:
@@ -130,7 +161,8 @@ impl Parser {
         if self.check(TokenType::Arrow) {
             self.advance();
             let ret = self.parse_type_expr()?;
-            return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret) });
+            let ret = self.wrap_fallible_ret_suffix(ret);
+            return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret), is_effect: false });
         }
         // ADR-0010: a tuple is a parenthesized atom — `(String, Int)?`.
         Ok(self.wrap_option_suffix(TypeExpr::Tuple { elements }))
@@ -161,7 +193,17 @@ impl Parser {
             } else {
                 cases.push(VariantCase::Unit { name: case_name });
             }
-            self.skip_newlines();
+            // Conditional, not a bare `skip_newlines()`: after the LAST case the
+            // next lines belong to the next declaration, and a bare skip eats the
+            // `Comment` tokens (`skip_newlines` discards them) so `parse()`'s
+            // `skip_newlines_collect_comments` finds nothing and the comment is
+            // gone from `comment_map` — the formatter then cannot print what the
+            // parser never recorded. `almide fmt` therefore DELETED any comment
+            // following a leading-`|` variant declaration, and was non-idempotent
+            // for the leading-`|`-less spelling (pass 1 inserts the `|`, pass 2
+            // takes this path and eats the comment). Restoring on a non-`|`
+            // lookahead leaves those tokens for the caller.
+            self.skip_newlines_if_followed_by(TokenType::Pipe);
         }
         Ok(TypeExpr::Variant { cases })
     }
@@ -202,7 +244,10 @@ impl Parser {
                 cases.push(VariantCase::Unit { name: case_name.clone() });
                 simple_names.push(case_name);
             }
-            self.skip_newlines();
+            // Same restore-on-miss rule as `parse_variant_type` — this is the
+            // leading-`|`-less spelling, and its trailing lines belong to the
+            // next declaration once no `|` continues the type.
+            self.skip_newlines_if_followed_by(TokenType::Pipe);
         }
         if all_simple {
             let members = simple_names.into_iter()
@@ -315,7 +360,8 @@ impl Parser {
         self.expect(TokenType::RParen)?;
         self.expect(TokenType::Arrow)?;
         let ret = self.parse_type_expr()?;
-        Ok(TypeExpr::Fn { params, ret: Box::new(ret) })
+        let ret = self.wrap_fallible_ret_suffix(ret);
+        Ok(TypeExpr::Fn { params, ret: Box::new(ret), is_effect: false })
     }
     pub(crate) fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, String> {
         self.expect(TokenType::LBracket)?;

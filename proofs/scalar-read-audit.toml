@@ -1,0 +1,471 @@
+# ── SCALAR-READ AUDIT LEDGER (#1183 class; aviation-quality Stage 1) ──
+#
+# Every function in crates/almide-mir/src/lower/ that emits a raw memory read
+# (PrimKind::Load / load_at_offset) is an AUDIT UNIT with a verdict here.
+# Gate: scripts/check-scalar-read-audit.sh (CI `checks` job + lefthook) —
+# unclassified arm / stale entry / changed load count / bad verdict all FAIL.
+# Enumeration: scripts/lib/scalar-read-enumerate.py (shared with the gate —
+# one instrument, both sides).
+#
+# Vocabulary: TAG_DISPATCHED / MASKED / CALLER_DISPATCHED / NOT_SUM_READ /
+# WALLS. UNGUARDED_SUSPECT is a working verdict the gate rejects.
+#
+# Audit round 1 (2026-08-11, the #1183 close-out): 63 arms, ZERO unguarded.
+# Two soundness facts the hoisted-load entries lean on, verified this round:
+#  (1) PrimKind::LoadHandle renders as a pure `i32.load`
+#      (render_wasm_p2_b.rs:423) — no rc mutation, so an unconsumed wrong-arm
+#      load is inert bits in a dead local;
+#  (2) sum blocks are allocated at their Some/payload size even on the
+#      None/unit arm (Init::OptNone "sized like OptSome", binds_p4_b.rs:546),
+#      so the fixed +12 read is in-bounds on every arm.
+# TRUST-BOUNDARY NOTE: emit_prim_call is the raw prim floor — tag discipline
+# for prim.load* lives in the self-hosted stdlib .almd sources, a SEPARATE
+# audit surface (tracked for a later round).
+
+[[arm]]
+file = "binds.rs"
+fn = "lower_lifted_lambda_body"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Closure env slots 2..2+k are the fixed CaptureLayout capture list (slot 0 fnidx, 1 drop header) — never a len-as-tag sum block."
+
+[[arm]]
+file = "binds_p3_b.rs"
+fn = "try_lower_spread_record_construct"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Field slots resolved via aggregate_field_tys (record/tuple only, never Option/Result/variant); declaration-ordered layout, no tag."
+
+[[arm]]
+file = "binds_p4.rs"
+fn = "dup_borrowed_slot"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Generic slot copy; every call site passes an aggregate_field/index_offset_any offset (record-field / tuple-index layout), never a sum payload offset."
+
+[[arm]]
+file = "binds_p4.rs"
+fn = "try_lower_tuple_destructure"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Per-slot tuple reads at 12+i*8; unresolved/TypeVar components wall before any read. Positional layout, no tag."
+
+[[arm]]
+file = "binds_p4.rs"
+fn = "try_lower_record_destructure"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Record field reads at aggregate_field_tys indices; declaration-ordered layout, no tag."
+
+[[arm]]
+file = "calls.rs"
+fn = "mutable_global_cow"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Reads the mutable global's own storage slot (mg_slot_addr) — a single scalar-or-handle cell, no sum layout."
+
+[[arm]]
+file = "calls_b.rs"
+fn = "two_level_field_cow"
+loads = 3
+verdict = "NOT_SUM_READ"
+why = "Record spread-copy over aggregate_field_tys slots (levels 1 and 2); record-only layout, no tag."
+
+[[arm]]
+file = "calls_p3.rs"
+fn = "closure_block_of_mut"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Fn-typed field/element borrow at record-field or bounds-checked slot offsets, gated on statically Fn-typed callee; no sum tag."
+
+[[arm]]
+file = "calls_p4.rs"
+fn = "option_scalar_eq_from_handles"
+loads = 4
+verdict = "MASKED"
+why = "Unconditional payload@12 reads discarded on the wrong-tag path by the branchless mask: (tagL==tagR) AND (bothNone OR payloadEq) — garbage only feeds a discarded bit."
+
+[[arm]]
+file = "calls_p4.rs"
+fn = "option_heap_eq_from_handles"
+loads = 2
+verdict = "TAG_DISPATCHED"
+why = "both_some = tagL AND tagR gates IfThen; payload deref lives only in the Then arm, Else computes tags_eq without touching @12."
+
+[[arm]]
+file = "calls_p4.rs"
+fn = "result_scalar_eq_from_handles"
+loads = 4
+verdict = "MASKED"
+why = "Ok-payload @12 read unconditional but masked (both_ok AND ok_eq discards a garbage Err-side scalar); Err-payload string.eq is tag-dispatched inside IfThen(both_err). Weakest load = the masked Ok read."
+
+[[arm]]
+file = "calls_p4.rs"
+fn = "lower_scalar_ok_payload_unwrap"
+loads = 3
+verdict = "TAG_DISPATCHED"
+why = "The #1183 fix: len-as-tag loaded first, IfThen(tag) dies with the err message, payload@12 read only on the surviving Ok path."
+
+[[arm]]
+file = "calls_p4_c.rs"
+fn = "prim_kind_load_store"
+loads = 5
+verdict = "NOT_SUM_READ"
+why = "Enumeration false positive: a pure str->PrimKind lookup TABLE (the 'Load' hits are string arms), emits no ops and performs no read."
+
+[[arm]]
+file = "calls_p4_c.rs"
+fn = "emit_prim_call"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "The raw prim-floor emitter (prim.load8/32/64/...) — address is caller-supplied; tag discipline lives in the self-hosted .almd sources (a separate audit surface, noted in the header)."
+
+[[arm]]
+file = "cells.rs"
+fn = "lower_cell_read"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "cell_class_of admits only Int/Bool/String/Bytes/List[scalar]/Map[String,scalar]; Option/Result/variant fall to None -> Unsupported before any load. Cell block is a 1-slot value cell."
+
+[[arm]]
+file = "defunc_find.rs"
+fn = "try_lower_defunc_find"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "List length@4 + element at 12+i*8 bounded by i<len; writes (not reads) the fresh Option result block."
+
+[[arm]]
+file = "defunc_find.rs"
+fn = "append_owned_sub_to_acc"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Enumeration false positive: emits concat/drop/SetLocal only — no Load op."
+
+[[arm]]
+file = "defunc_fold.rs"
+fn = "lower_cond_acc_then_value"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "TupleIndex slot via aggregate_index_offset_any (bounds-checked tuple field), gated on materialized_aggregates."
+
+[[arm]]
+file = "defunc_fold.rs"
+fn = "try_lower_defunc_tuple_acc_fold"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "List length + bounds-checked element reads; the tuple accumulator is two plain locals."
+
+[[arm]]
+file = "defunc_fold_b.rs"
+fn = "emit_record_fold_loop_prologue"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "List length + bounds-checked element reads; seed_variant_param only records metadata, no tag/payload deref here."
+
+[[arm]]
+file = "defunc_hof_inner.rs"
+fn = "lower_defunc_list_hof_inner"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Source-list length/element reads bounded by the loop guard; sum interpretation delegated to the tag-dispatched body lowerers."
+
+[[arm]]
+file = "defunc_hof_inner.rs"
+fn = "defunc_second_source"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Second fused list's length header only."
+
+[[arm]]
+file = "defunc_hof_inner.rs"
+fn = "bind_defunc_second_elem"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Bounds-checked element read on the fused second source (i < min(lenA,lenB))."
+
+[[arm]]
+file = "defunc_str_acc.rs"
+fn = "lower_defunc_str_acc_hof"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "List length/element reads; variant dispatch fully delegated to append_variant_match_to_str_acc."
+
+[[arm]]
+file = "defunc_str_acc.rs"
+fn = "lower_defunc_filter_map_hof"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "List length/element reads; keep/skip tag decision fully delegated to append_variant_match_to_result_list."
+
+[[arm]]
+file = "defunc_str_acc_b.rs"
+fn = "append_variant_match_to_str_acc"
+loads = 1
+verdict = "TAG_DISPATCHED"
+why = "Payload load hoisted above IfThen(tag) but its bound var is consumed ONLY inside the tag-true arm; the none-arm never references it."
+
+[[arm]]
+file = "defunc_str_acc_b.rs"
+fn = "bind_variant_payload_from_slot0"
+loads = 2
+verdict = "CALLER_DISPATCHED"
+caller = "append_variant_match_to_str_acc (IfThen at defunc_str_acc_b.rs:105), append_variant_match_to_result_list (IfThen at :516)"
+why = "Unconditional slot-0 bind with no tag knowledge; sound because both callers immediately guard consumption with IfThen(tag)."
+
+[[arm]]
+file = "defunc_str_acc_b.rs"
+fn = "append_variant_match_to_result_list"
+loads = 1
+verdict = "TAG_DISPATCHED"
+why = "tag at 4 (or cap-as-tag at 16) loaded, then/else payload binds consumed strictly within their own IfThen/Else arms."
+
+[[arm]]
+file = "defunc_tuple_fold.rs"
+fn = "try_lower_defunc_scalar_tuple_fold"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "List length + bounds-checked element reads; argmax accumulator is scalar locals."
+
+[[arm]]
+file = "defunc_tuple_fold.rs"
+fn = "try_lower_scalar_tuple_option_match_bind"
+loads = 3
+verdict = "TAG_DISPATCHED"
+why = "Payload reads sit between IfThen(tag, dst) and Else(fallback) — the canonical value-merging conditional; Else computes only the scalar fallback."
+
+[[arm]]
+file = "defunc_tuple_fold_b.rs"
+fn = "project_found_match"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Enumeration false positive: a pure IR-tree projection gate (no self, emits zero ops); the real loop threads the Option as two scalar locals."
+
+[[arm]]
+file = "scalar_for.rs"
+fn = "try_lower_scalar_for_list"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "List length header + bounds-checked element slot via bind_scalar_for_list_element."
+
+[[arm]]
+file = "scalar_for.rs"
+fn = "try_lower_scalar_for_map"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Map length header + per-entry key/value slots bounded by the entry loop."
+
+[[arm]]
+file = "scalar_for.rs"
+fn = "bind_scalar_for_list_element"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Single element-slot read at a caller-verified index."
+
+[[arm]]
+file = "scalar_for.rs"
+fn = "bind_map_components"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Map key/value slot reads at a caller-verified entry index."
+
+[[arm]]
+file = "synth_eq.rs"
+fn = "ensure_opt_record_eq_helper"
+loads = 2
+verdict = "TAG_DISPATCHED"
+why = "both_some = tagA AND tagB gates IfThen; record-eq payload deref only in the Then arm, Else computes tags_eq."
+
+[[arm]]
+file = "synth_eq.rs"
+fn = "synth_list_eq_loop_fn"
+loads = 4
+verdict = "NOT_SUM_READ"
+why = "List length/element reads with the branchless n = la*(la==lb) length mask; element sum interpretation delegated to the independently tag-dispatched elem_call helper."
+
+[[arm]]
+file = "tail.rs"
+fn = "try_lower_heap_list_elem_borrow"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "ElemAddr-based bounds-checked List[heap] element borrow, gated on tracked/materialized list vars."
+
+[[arm]]
+file = "tail.rs"
+fn = "try_lower_heap_field_borrow"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "aggregate_field/index_offset_any offsets resolve record/tuple layouts only (never variant_layouts); gated on materialized_aggregates/params."
+
+[[arm]]
+file = "control_p2.rs"
+fn = "try_lower_result_match"
+loads = 1
+verdict = "TAG_DISPATCHED"
+why = "tag loaded (off 4 or 16), IfThen(tag); err-payload bind emitted between IfThen and Else, ok-payload bind between Else and EndIf."
+
+[[arm]]
+file = "control_p2.rs"
+fn = "bind_result_err_payload"
+loads = 1
+verdict = "CALLER_DISPATCHED"
+caller = "try_lower_result_match (call between IfThen control_p2.rs:263 and Else :272)"
+why = "Unconditional payload@12 read; sole caller emits it inside the Err (IfThen) region."
+
+[[arm]]
+file = "control_p2.rs"
+fn = "bind_result_ok_payload"
+loads = 2
+verdict = "CALLER_DISPATCHED"
+caller = "try_lower_result_match (call between Else control_p2.rs:272 and EndIf :279)"
+why = "Unconditional payload@12 read; sole caller emits it inside the Ok (Else) region."
+
+[[arm]]
+file = "control_p2.rs"
+fn = "try_lower_variant_value_match"
+loads = 1
+verdict = "TAG_DISPATCHED"
+why = "HOISTED-LOAD pattern: both arm payloads loaded before IfThen(tag), consumption strictly branch-confined (then-bind used only in the then arm, else-bind only in the else arm). Sound because LoadHandle is a pure i32.load (render_wasm_p2_b.rs:423 — no rc mutation) and sum blocks are sized so +12 is in-bounds on every arm (Init::OptNone sized like OptSome, binds_p4_b.rs:546) — the untaken arm's load is inert bits in a dead local."
+
+[[arm]]
+file = "control_p2.rs"
+fn = "bind_variant_payload"
+loads = 2
+verdict = "CALLER_DISPATCHED"
+caller = "try_lower_variant_value_match (consumption confined by lower_variant_match_branches control_p2.rs:574-625)"
+why = "Unconditional payload@12 bind with no tag knowledge; the sole caller confines each bound var's CONSUMPTION to its own tag arm (the hoisted-load pattern — see try_lower_variant_value_match for the two soundness facts)."
+
+[[arm]]
+file = "control_p2_b.rs"
+fn = "try_lower_option_match_value"
+loads = 2
+verdict = "TAG_DISPATCHED"
+why = "IfThen(tag@4); payload@12 load sits between IfThen and Else — Some branch only."
+
+[[arm]]
+file = "control_p2_c.rs"
+fn = "try_lower_list_match_value"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "@4 here is a genuine List length (subject statically List), used to pick empty-vs-nonempty; the rest bind aliases the subject, no payload read."
+
+[[arm]]
+file = "control_p2_c.rs"
+fn = "nested_refinement_cond"
+loads = 3
+verdict = "TAG_DISPATCHED"
+why = "Discriminant@12 read (always meaningful), then every field read at 12+8*(i+1) sits inside IfThen(tag==case); nested recursion inherits the guard."
+
+[[arm]]
+file = "control_p2_d.rs"
+fn = "variant_dispatch_handle_and_tag"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "unwrap_single only fires when strip_single_ctor_outer proved the type has EXACTLY ONE ctor (there is no other arm); the other load reads the discriminant itself."
+
+[[arm]]
+file = "control_p2_d.rs"
+fn = "bind_variant_arm"
+loads = 1
+verdict = "CALLER_DISPATCHED"
+caller = "emit_variant_unit_chain (IfThen control_p2_d.rs:563), emit_variant_arm_chain (IfThen :630)"
+why = "Field reads guarded by each dispatcher's tag-equality IfThen; the terminal arm runs unguarded only after exhaustive tag elimination (or a Wildcard that reads nothing)."
+
+[[arm]]
+file = "control_p3.rs"
+fn = "field_unwrap_or_operand"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Fetches the Option/Result FIELD'S own block handle out of a record/tuple slot (aggregate layout); tag dispatch happens in the consuming lower_*_unwrap_or."
+
+[[arm]]
+file = "control_p3.rs"
+fn = "lower_variant_ctor_unwrap_or"
+loads = 2
+verdict = "TAG_DISPATCHED"
+why = "IfThen(tag@4); payload@12 load in the Some arm only, None arm builds the ctor fallback."
+
+[[arm]]
+file = "control_p3.rs"
+fn = "lower_closure_unwrap_or"
+loads = 2
+verdict = "TAG_DISPATCHED"
+why = "IfThen(tag@4); payload@12 load in the Some arm only."
+
+[[arm]]
+file = "control_p3.rs"
+fn = "lower_scalar_unwrap_or"
+loads = 3
+verdict = "TAG_DISPATCHED"
+why = "IfThen(tag@4) with the documented Result/Option arm swap; payload read placed in the Ok arm (Result) or Some arm (Option) respectively."
+
+[[arm]]
+file = "control_p3_c.rs"
+fn = "aggregate_eq_from_handles"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Tuple/record declaration-order slot reads; nested sum fields recurse through typed_slot_eq which owns its own dispatch."
+
+[[arm]]
+file = "control_p3_c.rs"
+fn = "variant_eq_from_handles"
+loads = 4
+verdict = "TAG_DISPATCHED"
+why = "Doubly gated: IfThen(tagL==tagR) then per-ctor IfThen(tag==case); every field read strictly inside its ctor arm."
+
+[[arm]]
+file = "control_p3_c.rs"
+fn = "result_eq_general_from_handles"
+loads = 6
+verdict = "TAG_DISPATCHED"
+why = "Ok payloads read inside IfThen(both_ok), Err payloads inside IfThen(both_err) — per its own doc: a payload slot is only read inside the branch that knows both sides carry that variant."
+
+[[arm]]
+file = "control_p3_c.rs"
+fn = "handle_of"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Enumeration false positive: emits Prim{Handle} only (address computation), no memory read."
+
+[[arm]]
+file = "control_p3_c.rs"
+fn = "load_payload_addr"
+loads = 1
+verdict = "CALLER_DISPATCHED"
+caller = "variant_eq_from_handles (:438 inside is_c), result_eq_general_from_handles (:514/:530 inside both_ok/both_err), option_heap_eq_from_handles (calls_p4.rs:61 inside both_some), result_scalar_eq_from_handles (calls_p4.rs:112 inside both_err), ensure_opt_record_eq_helper (synth_eq.rs:253 inside both_some), aggregate_eq_from_handles (:373 non-sum)"
+why = "Caller-supplied-offset load with no tag test of its own; all 8 call sites verified — every sum-payload site is inside its caller's tag guard, the rest are aggregate slots."
+
+[[arm]]
+file = "option_match.rs"
+fn = "try_lower_variant_match"
+loads = 3
+verdict = "TAG_DISPATCHED"
+why = "IfThen(tag@4); payload@12 load directly after it, before Else — Some branch only."
+
+[[arm]]
+file = "result_match_value.rs"
+fn = "try_lower_result_match_value"
+loads = 1
+verdict = "TAG_DISPATCHED"
+why = "IfThen(tag, off 4 or 16); err bind emitted in the then region, ok bind in the else region."
+
+[[arm]]
+file = "result_match_value.rs"
+fn = "bind_result_arm_payload"
+loads = 2
+verdict = "CALLER_DISPATCHED"
+caller = "try_lower_result_match_value (:59 err/then region, :71 ok/else region)"
+why = "Unconditional payload@12 bind; sole caller positions both calls correctly relative to IfThen/Else/EndIf."
+
+[[arm]]
+file = "list_literal_elements.rs"
+fn = "lower_list_index_element"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "List element access at handle+12+idx*8 (array indexing, no discriminant); index-bounds is a separate class from tag-blind sum reads."
+
+[[arm]]
+file = "mod_p3_c.rs"
+fn = "read_mutable_global_slot"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Reads the mutable global's own storage slot (mg_slot_addr) — a fixed-type cell, no sum layout."

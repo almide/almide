@@ -1,0 +1,16 @@
+// E001: a FALLIBLE callback handed to a container HOF that has no fallible
+// form. `list.map(xs, (x) => f(x)!)` is rewritten before inference to the
+// `__fallible_*` twin, so the traversal itself becomes fallible; `set.map` /
+// `option.map` / `map.map` have no twin, so the callback's Result rides
+// through the container and the mismatch lands as
+// `Set[Result[..]]` vs `Result[Set[..]]`.
+//
+// Under the generic "fix the expression type" that dead-ends: nothing says
+// which spellings work, or that `list` is special. The shape is recognizable
+// (a Result one level inside the actual where the expected has it outside),
+// so the hint names the two working routes instead.
+fn parse1(s: String) -> Result[Int, String] = int.parse(s)
+
+fn all_parsed(xs: Set[String]) -> Result[Set[Int], String] = set.map(xs, (x) => parse1(x)!)
+
+fn main() -> Unit = println(int.to_string(set.len(all_parsed(set.from_list(["1"])) ?? set.new())))

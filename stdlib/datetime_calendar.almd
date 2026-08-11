@@ -5,7 +5,6 @@
 // like `datetime_month` is rewritten to `datetime.month` at link time, so calling it intra-file
 // would dangle — the helpers keep their names). Each public fn recomputes the shared chain (pure,
 // so redundant but correct).
-
 fn __c_z(ts: Int) -> Int = ts / 86400 + 719468
 
 fn __c_era(ts: Int) -> Int = {
@@ -59,14 +58,12 @@ fn datetime_year(ts: Int) -> Int = {
 }
 
 // weekday: days since epoch mod 7, indexed into the week starting Thursday (1970-01-01 = Thursday).
-fn __wd_name(idx: Int) -> String =
-  if idx == 0 then "Thursday"
-  else if idx == 1 then "Friday"
-  else if idx == 2 then "Saturday"
-  else if idx == 3 then "Sunday"
-  else if idx == 4 then "Monday"
-  else if idx == 5 then "Tuesday"
-  else "Wednesday"
+fn __wd_name(idx: Int) -> String = if idx == 0 then "Thursday"
+else if idx == 1 then "Friday"
+else if idx == 2 then "Saturday"
+else if idx == 3 then "Sunday"
+else if idx == 4 then "Monday"
+else if idx == 5 then "Tuesday" else "Wednesday"
 
 fn datetime_weekday(ts: Int) -> String = {
   let idx = (((ts / 86400) % 7) + 7) % 7

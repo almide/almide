@@ -25,6 +25,28 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // ordinary ok()/err() ctor rails of the fan_any self-host — a
             // `match`/`??`/auto-unwrap over the bound result EXECUTES.
             | ("fan", "any_map")
+            // `fs.file_size` / `fs.modified_at` build their Result[Int, String]
+            // through the ordinary ok()/err() ctors over the path_filestat scratch
+            // (fs_file_size.almd / fs_modified_at.almd) — the int.parse scalar-Ok
+            // shape, so a `match`/`!` over the bound result EXECUTES.
+            | ("fs", "file_size")
+            | ("fs", "modified_at")
+            // `fs.copy` / `fs.append` — Result[Unit, String] built by the ok(())/err(m)
+            // CTORS (fs_copy.almd / fs_append.almd): a NON-heap Ok routes through
+            // `try_lower_result_scalar_ok_ctor` → `materialize_result_ok`, the flat
+            // LEN-AS-TAG block (@4 — NOT the prim pass-through's cap-as-tag @16 that
+            // fs.write's $write_text_file builds). Listing them in the str-result
+            // (@16) family instead made every err read back as ok — the caller read
+            // the len-0 block's untouched @16 field (a silent wrong-branch, caught
+            // by the missing-src copy probe).
+            | ("fs", "copy")
+            | ("fs", "append")
+            // `fs.remove` / `fs.write_bytes` / `fs.write_bytes_raw` — the same
+            // ctor-built len-as-tag Result[Unit, String] (fs_remove.almd /
+            // fs_write_bytes.almd / fs_write_bytes_raw.almd).
+            | ("fs", "remove")
+            | ("fs", "write_bytes")
+            | ("fs", "write_bytes_raw")
     )
 }
 
@@ -52,6 +74,16 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // expected — a 1-byte garbage print (low byte of the payload pointer) / an i64↔i32 width
             // mismatch downstream in csv-to-json.
             | ("fs", "read_text")
+            // `fs.create_temp_dir` — the self-host (fs_create_temp_dir.almd) builds its
+            // `Result[String, String]` with the ordinary ok()/err() ctors = the same
+            // cap-as-tag layout (payload @12, tag @16); a `match`/`!` over it reads tag @16.
+            | ("fs", "create_temp_dir")
+            // `fs.create_temp_file` — the empty-file twin (fs_create_temp_file.almd),
+            // the identical Result[String, String] ok()/err() ctor shape.
+            | ("fs", "create_temp_file")
+            // `env.cwd` — Result[String, String] over the PWD read (env_cwd.almd),
+            // the same ok()-ctor cap-as-tag layout.
+            | ("env", "cwd")
             // `fs.read_bytes_raw` — the raw-bytes twin (same cap-as-tag Result block; the Ok
             // payload is Bytes instead of String).
             | ("fs", "read_bytes_raw")
@@ -63,6 +95,35 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
             // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
             | ("fs", "list_dir")
+            // `fs.walk` / `fs.glob` — Result[List[String], String] built by the
+            // ordinary ok()/err() ctors over the recursive read_dir walk
+            // (fs_walk.almd): a HEAP-Ok list payload = the cap-as-tag layout,
+            // exactly fs.list_dir's shape and drop route (DropResultListStr).
+            | ("fs", "walk")
+            | ("fs", "glob")
+            // `fs.read_lines` returns the SAME cap-as-tag `Result[List[String], String]` shape
+            // as fs.list_dir (the self-host builds it with the ordinary ok()/err() ctors —
+            // payload @12 a List[String], tag @16), so a `match`/`!` over it reads tag @16 +
+            // binds the @12 payload list handle, and the subject-seed routes its scope-end
+            // drop to the recursive DropResultListStr via the same is_list_str_result_ty arm.
+            | ("fs", "read_lines")
+            // `fs.read_text_if_exists` — Result[String?, String] built by the
+            // Result-Option ctor rails (try_lower_result_option_scalar_str_ctor —
+            // the materialize_result_str wrapper over an Option payload), so a
+            // `match`/`!` over it reads tag @16 like every ctor-built heap-Ok Result.
+            | ("fs", "read_text_if_exists")
+            // The heap-leaf `_if_exists` twins ride the same Result-Option ctor
+            // family (a heap Option payload in the cap-as-tag wrapper).
+            | ("fs", "read_lines_if_exists")
+            | ("fs", "read_bytes_if_exists")
+            | ("fs", "read_bytes_raw_if_exists")
+            // `fs.fold_lines` / `fs.fold_lines_chunked` (the msi twins,
+            // fs_fold_lines.almd) build their Results with the ordinary
+            // ok()/err() ctors = the same cap-as-tag layout (payload @12,
+            // tag @16); a `match`/`!` over them reads tag @16.
+            | ("fs", "fold_lines")
+            | ("fs", "fold_lines_chunked")
+            | ("fs", "fold_lines_range")
             // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
             // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
             // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the
@@ -80,6 +141,10 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
             // fs.write — same Ok-has-no-payload discipline, same flat DropListStr for both arms.
             | ("fs", "mkdir_p")
+            // `fs.rename` — the prim PASS-THROUGH twin of fs.write ($rename builds the
+            // identical cap-as-tag Result[Unit, String]: Ok len@4=0 + tag@16=0, Err with
+            // @12=msg + tag@16=1), so a `match`/`!` reads tag @16 like fs.write.
+            | ("fs", "rename")
             // `fs.remove_all` returns the SAME cap-as-tag `Result[Unit, String]` shape as fs.write
             // ($remove_all builds it identically — Ok with len@4=0 + @12=0 + tag@16=0, Err with
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like

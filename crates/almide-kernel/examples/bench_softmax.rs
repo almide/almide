@@ -10,5 +10,5 @@ fn main() {
     let t = Instant::now();
     for r in 0..reps { data[0]=black_box(r as f64*1e-9); softmax_rows(black_box(&data), rows, cols, &mut out); black_box(&out); }
     let sv = t.elapsed();
-    println!("softmax {rows}x{cols}: libm {nv:?} / SIMD {sv:?} → {:.2}x", nv.as_secs_f64()/sv.as_secs_f64());
+    println!("softmax {rows}x{cols}: scalar {nv:?} / SIMD {sv:?} → {:.2}x", nv.as_secs_f64()/sv.as_secs_f64());
 }

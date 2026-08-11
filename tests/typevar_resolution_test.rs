@@ -25,7 +25,7 @@ fn has_inference_typevar(ty: &Ty) -> bool {
         Ty::TypeVar(name) => name.starts_with('?'),
         Ty::Applied(_, args) => args.iter().any(has_inference_typevar),
         Ty::Tuple(elems) => elems.iter().any(has_inference_typevar),
-        Ty::Fn { params, ret } => params.iter().any(has_inference_typevar) || has_inference_typevar(ret),
+        Ty::Fn { is_effect: _, params, ret } => params.iter().any(has_inference_typevar) || has_inference_typevar(ret),
         Ty::Named(_, args) => args.iter().any(has_inference_typevar),
         Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_inference_typevar(t)),
         _ => false,

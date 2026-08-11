@@ -2,67 +2,47 @@
 /// Only resolves when the type is known (not Unknown).
 fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
     let candidates = almide_lang::stdlib_info::resolve_ufcs_candidates(method);
-    if candidates.is_empty() { return None; }
-    let module = match ty {
-        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
-        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
-        Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
-        Ty::String => Some("string"),
-        Ty::Int => Some("int"),
-        Ty::Float => Some("float"),
-        // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-        // Each hosts its own UFCS conversion / `.to_string()` module.
-        Ty::Int8 => Some("int8"),
-        Ty::Int16 => Some("int16"),
-        Ty::Int32 => Some("int32"),
-        Ty::Int64 => Some("int64"),
-        Ty::UInt8 => Some("uint8"),
-        Ty::UInt16 => Some("uint16"),
-        Ty::UInt32 => Some("uint32"),
-        Ty::UInt64 => Some("uint64"),
-        Ty::Float32 => Some("float32"),
-        Ty::Float64 => Some("float64"),
-        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
-        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
-        _ => None,
-    };
-    if let Some(m) = module {
-        if candidates.contains(&m) { return Some(m); }
+    if candidates.is_empty() {
+        return None;
     }
-    None
+    let module = container_ufcs_module(ty).or_else(|| numeric_ufcs_module(ty))?;
+    candidates.contains(&module).then_some(module)
 }
 
-fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| {
-        let kind = match s.kind {
-            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty, value: rewrite_expr(value),
-            },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_expr(value) },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_expr(expr) },
-            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: rewrite_expr(cond), else_: rewrite_expr(else_),
-            },
-            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: rewrite_expr(value),
-            },
-            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
-                target, index: rewrite_expr(index), value: rewrite_expr(value),
-            },
-            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
-                target, field, value: rewrite_expr(value),
-            },
-            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
-                target, key: rewrite_expr(key), value: rewrite_expr(value),
-            },
-            // Default: recurse every expr child via the exhaustive map_exprs chokepoint.
-            other => IrStmt { kind: other, span: s.span }
-                .map_exprs(&mut |e| rewrite_expr(e))
-                .kind,
-        };
-        IrStmt { kind, span: s.span }
-    }).collect()
+/// The stdlib module a CONTAINER (or String) receiver's UFCS call resolves to.
+fn container_ufcs_module(ty: &Ty) -> Option<&'static str> {
+    Some(match ty {
+        Ty::Applied(TypeConstructorId::List, _) => "list",
+        Ty::Applied(TypeConstructorId::Map, _) => "map",
+        Ty::Applied(TypeConstructorId::Set, _) => "set",
+        Ty::Applied(TypeConstructorId::Option, _) => "option",
+        Ty::Applied(TypeConstructorId::Result, _) => "result",
+        Ty::String => "string",
+        _ => return None,
+    })
 }
+
+/// The stdlib module a NUMERIC receiver's UFCS call resolves to. The sized
+/// numerics are Stage 3 of the sized-numeric-types arc: each hosts its own UFCS
+/// conversion / `.to_string()` module.
+fn numeric_ufcs_module(ty: &Ty) -> Option<&'static str> {
+    Some(match ty {
+        Ty::Int => "int",
+        Ty::Float => "float",
+        Ty::Int8 => "int8",
+        Ty::Int16 => "int16",
+        Ty::Int32 => "int32",
+        Ty::Int64 => "int64",
+        Ty::UInt8 => "uint8",
+        Ty::UInt16 => "uint16",
+        Ty::UInt32 => "uint32",
+        Ty::UInt64 => "uint64",
+        Ty::Float32 => "float32",
+        Ty::Float64 => "float64",
+        _ => return None,
+    })
+}
+
 
 /// Resolve bare UFCS calls in module function bodies where the checker
 /// couldn't fully resolve types. Only converts Named/Method calls that
@@ -130,10 +110,6 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
     expr.map_children(&mut |e| resolve_unresolved_ufcs(e, siblings))
 }
 
-// Kept for backward compatibility — resolve_ufcs_stmts callers in the pass
-fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| s.map_exprs(&mut |e| resolve_unresolved_ufcs(e, siblings))).collect()
-}
 
 // ── Iterator chain lowering ────────────────────────────────────────
 

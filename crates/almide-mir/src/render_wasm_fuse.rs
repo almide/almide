@@ -37,6 +37,25 @@ pub(crate) struct Fuser {
     evens: BTreeSet<ValueId>,
 }
 
+/// Per-value definition index, plus the values with MORE than one definition
+/// (a second `defined_value` or any `SetLocal` — neither is SSA, so nothing may
+/// be inferred from a single defining op).
+fn single_def_index(ops: &[Op]) -> (BTreeMap<ValueId, usize>, BTreeSet<ValueId>) {
+    let mut def_idx: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut multi: BTreeSet<ValueId> = BTreeSet::new();
+    for (i, op) in ops.iter().enumerate() {
+        if let Some(d) = defined_value(op) {
+            if def_idx.insert(d, i).is_some() {
+                multi.insert(d);
+            }
+        }
+        if let Op::SetLocal { local, .. } = op {
+            multi.insert(*local);
+        }
+    }
+    (def_idx, multi)
+}
+
 impl Fuser {
     pub(crate) fn new() -> Self {
         Fuser {
@@ -69,39 +88,44 @@ impl Fuser {
     /// Parity is preserved by two's-complement wrapping (2^64 is even), so
     /// `x*(x±1)` stays even even when the add/mul wrap.
     pub(crate) fn scan_evens(&mut self, ops: &[Op]) {
-        let mut def_idx: BTreeMap<ValueId, usize> = BTreeMap::new();
-        let mut multi: BTreeSet<ValueId> = BTreeSet::new();
-        for (i, op) in ops.iter().enumerate() {
-            if let Some(d) = defined_value(op) {
-                if def_idx.insert(d, i).is_some() {
-                    multi.insert(d);
-                }
-            }
-            if let Op::SetLocal { local, .. } = op {
-                multi.insert(*local);
-            }
-        }
+        let (def_idx, multi) = single_def_index(ops);
         let mut evens: BTreeSet<ValueId> = BTreeSet::new();
         for op in ops {
             let Op::IntBinOp { dst, op: iop, a, b } = op else { continue };
             if multi.contains(dst) {
                 continue;
             }
-            let even = match iop {
-                IntOp::Mul => {
-                    consecutive_values(ops, &def_idx, &multi, &self.consts, *a, *b)
-                        || consecutive_values(ops, &def_idx, &multi, &self.consts, *b, *a)
-                        || self.consts.get(a).is_some_and(|c| c % 2 == 0)
-                        || self.consts.get(b).is_some_and(|c| c % 2 == 0)
-                }
-                IntOp::Shl => self.consts.get(b).is_some_and(|c| (1..64).contains(c)),
-                _ => false,
-            };
-            if even {
+            if self.binop_is_even(ops, &def_idx, &multi, *iop, *a, *b) {
                 evens.insert(*dst);
             }
         }
         self.evens = evens;
+    }
+
+    /// Is this integer binop's result provably EVEN?
+    ///
+    /// A product is even when one factor is an even constant, or when the two
+    /// factors are consecutive integers (one of any two consecutive values is
+    /// even). A left shift by 1..64 is even by construction.
+    fn binop_is_even(
+        &self,
+        ops: &[Op],
+        def_idx: &BTreeMap<ValueId, usize>,
+        multi: &BTreeSet<ValueId>,
+        iop: IntOp,
+        a: ValueId,
+        b: ValueId,
+    ) -> bool {
+        match iop {
+            IntOp::Mul => {
+                consecutive_values(ops, def_idx, multi, &self.consts, a, b)
+                    || consecutive_values(ops, def_idx, multi, &self.consts, b, a)
+                    || self.consts.get(&a).is_some_and(|c| c % 2 == 0)
+                    || self.consts.get(&b).is_some_and(|c| c % 2 == 0)
+            }
+            IntOp::Shl => self.consts.get(&b).is_some_and(|c| (1..64).contains(c)),
+            _ => false,
+        }
     }
     pub(crate) fn is_even(&self, v: ValueId) -> bool {
         self.evens.contains(&v)
@@ -182,57 +206,79 @@ fn consecutive_values(
     x: ValueId,
     y: ValueId,
 ) -> bool {
+    consecutive_values_opt(ops, def_idx, multi, consts, x, y).unwrap_or(false)
+}
+
+/// The `Option`-returning body of [`consecutive_values`]: every `None` is a
+/// "cannot prove consecutive", which the wrapper reads as `false`.
+#[allow(clippy::too_many_arguments)]
+fn consecutive_values_opt(
+    ops: &[Op],
+    def_idx: &BTreeMap<ValueId, usize>,
+    multi: &BTreeSet<ValueId>,
+    consts: &BTreeMap<ValueId, i64>,
+    x: ValueId,
+    y: ValueId,
+) -> Option<bool> {
     if multi.contains(&y) {
-        return false;
+        return None;
     }
-    let Some(&dy) = def_idx.get(&y) else { return false };
-    let (w, one) = match &ops[dy] {
-        Op::IntBinOp { op: IntOp::Add, a, b, .. } => {
-            if consts.get(b) == Some(&1) {
-                (*a, true)
-            } else if consts.get(a) == Some(&1) {
-                (*b, true)
-            } else {
-                return false;
-            }
-        }
-        Op::IntBinOp { op: IntOp::Sub, a, b, .. } => (*a, consts.get(b) == Some(&1)),
-        _ => return false,
-    };
-    if !one {
-        return false;
-    }
+    let &dy = def_idx.get(&y)?;
+    let w = neighbour_of(&ops[dy], consts)?;
     if multi.contains(&w) || multi.contains(&x) {
         // A reassignable name can change between y's def and the multiply
         // that consumes the pair — no stable "same number" witness.
-        return false;
+        return None;
     }
     if w == x {
-        return true;
+        return Some(true);
     }
-    let (Some(&dw), Some(&dx)) = (def_idx.get(&w), def_idx.get(&x)) else { return false };
-    let (sa, sb) = match (&ops[dw], &ops[dx]) {
+    let (&dw, &dx) = (def_idx.get(&w)?, def_idx.get(&x)?);
+    let (sa, sb) = same_binop_operands(&ops[dw], &ops[dx])?;
+    let (lo, hi) = if dw < dx { (dw, dx) } else { (dx, dw) };
+    Some(ops[lo + 1..hi].iter().all(|o| !disturbs(o, sa, sb)))
+}
+
+/// `y = w ± 1` — the neighbour `w` whose successor/predecessor `y` is, or `None`
+/// when the defining op is not that shape.
+fn neighbour_of(def: &Op, consts: &BTreeMap<ValueId, i64>) -> Option<ValueId> {
+    let Op::IntBinOp { op, a, b, .. } = def else { return None };
+    match op {
+        IntOp::Add if consts.get(b) == Some(&1) => Some(*a),
+        IntOp::Add if consts.get(a) == Some(&1) => Some(*b),
+        IntOp::Sub if consts.get(b) == Some(&1) => Some(*a),
+        _ => None,
+    }
+}
+
+/// Two ops that compute the SAME integer expression: same operator, same
+/// operands. Returns those operands, which is what must stay untouched between
+/// the two definitions.
+fn same_binop_operands(dw: &Op, dx: &Op) -> Option<(ValueId, ValueId)> {
+    match (dw, dx) {
         (
             Op::IntBinOp { op: o1, a: a1, b: b1, .. },
             Op::IntBinOp { op: o2, a: a2, b: b2, .. },
-        ) if o1 == o2 && a1 == a2 && b1 == b2 => (*a1, *b1),
-        _ => return false,
-    };
-    let (lo, hi) = if dw < dx { (dw, dx) } else { (dx, dw) };
-    ops[lo + 1..hi].iter().all(|o| {
-        let redefines = defined_value(o).is_some_and(|d| d == sa || d == sb);
-        let writes = matches!(o, Op::SetLocal { local, .. } if *local == sa || *local == sb);
-        let control = matches!(
-            o,
+        ) if o1 == o2 && a1 == a2 && b1 == b2 => Some((*a1, *b1)),
+        _ => None,
+    }
+}
+
+/// Does this op break the "both definitions compute the same number" witness —
+/// by redefining or writing an operand, or by being control flow (which could
+/// skip one of them)?
+fn disturbs(op: &Op, sa: ValueId, sb: ValueId) -> bool {
+    defined_value(op).is_some_and(|d| d == sa || d == sb)
+        || matches!(op, Op::SetLocal { local, .. } if *local == sa || *local == sb)
+        || matches!(
+            op,
             Op::LoopStart
                 | Op::LoopEnd
                 | Op::LoopBreakUnless { .. }
                 | Op::IfThen { .. }
                 | Op::Else { .. }
                 | Op::EndIf { .. }
-        );
-        !redefines && !writes && !control
-    })
+        )
 }
 
 /// Read a FLOAT-op operand: splice a pending expr / plain `local.get`, in the

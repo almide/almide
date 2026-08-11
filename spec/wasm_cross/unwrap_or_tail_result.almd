@@ -1,0 +1,31 @@
+// @contract: C-218
+// A heap-payload `??` in the RETURN position — the consumer half of the
+// fallibility-polymorphic HOF idiom (ADR-0006): `list.map(xs, (x) => f(x)!)`
+// is first-err short-circuiting, so its value is a `Result[List[T], E]`, and
+// the natural way to spend it is `?? fallback` as the function's tail.
+//
+// C-172 made `??` type-erased over heap payloads, but only in BIND position
+// (`lower_call_args` → `result.unwrap_or_hx`). The tail has its own lowering,
+// and there `UnwrapOr` reached nothing but `Init::Opaque` — which would move
+// out an EMPTY heap value — so the brick correctly refused and the whole
+// module walled: `heap-result UnwrapOr cannot be faithfully returned in this
+// brick`. The idiom's most idiomatic consumer could not be compiled to wasm
+// at all (#1134).
+//
+// The fix rewrites ONLY this position and ONLY the Result polarity into the
+// `match r { ok(p) => p, err(_) => fb }` the tail lowering already proves. An
+// OPTION tail `??` is deliberately left alone: it already reaches
+// `option.unwrap_or_str`, a proven executable path, and routing it through
+// the match would take a working shape off its own path for nothing.
+fn heads(xs: List[String]) -> List[Int] = list.map(xs, (x) => int.parse(x)!) ?? [0]
+
+fn show(ns: List[Int]) -> String = list.join(list.map(ns, (n) => int.to_string(n)), ",")
+
+fn main() -> Unit = {
+  // every element parses ⇒ the ok payload is returned
+  println(show(heads(["1", "2", "3"])))
+  // the first failure short-circuits ⇒ the fallback is returned
+  println(show(heads(["1", "zz", "3"])))
+  // empty input ⇒ ok([]) , not the fallback
+  println(show(heads([])))
+}

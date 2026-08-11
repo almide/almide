@@ -59,6 +59,23 @@ impl LowerCtx {
     })
     }
 
+    /// Borrow a freshly-built argument block into the call and register its
+    /// scope-end drop, or WALL with `msg` when the producer declined.
+    ///
+    /// The wall is the point: an `Init::Opaque` empty value in argument position
+    /// is read by the callee as zero bytes — a silent miscompile — so a shape
+    /// outside the executable subset must fail loudly instead.
+    fn materialize_arg_or_wall(
+        &mut self,
+        built: Option<ValueId>,
+        repr: Repr,
+        ty: &Ty,
+        msg: &str,
+    ) -> Result<CallArg, LowerError> {
+        let dst = built.ok_or_else(|| LowerError::Unsupported(msg.to_string()))?;
+        Ok(self.materialized_call_arg(dst, repr, ty))
+    }
+
     fn lower_call_arg_leaf(
         &mut self,
         a: &IrExpr,
@@ -117,16 +134,12 @@ impl LowerCtx {
             | IrExprKind::ResultOk { .. }
             | IrExprKind::ResultErr { .. } => {
                 let repr = repr_of(&a.ty)?;
-                match self.try_lower_option_ctor(a, &a.ty) {
-                    Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
-                    None => {
-                        return Err(LowerError::Unsupported(format!(
-                            "{} argument cannot be faithfully materialized in this brick \
-                             (a heap payload outside the executable subset)",
-                            kind_name(&a.kind)
-                        )))
-                    }
-                }
+                let built = self.try_lower_option_ctor(a, &a.ty);
+                self.materialize_arg_or_wall(built, repr, &a.ty, &format!(
+                    "{} argument cannot be faithfully materialized in this brick \
+                     (a heap payload outside the executable subset)",
+                    kind_name(&a.kind)
+                ))?
             }
             // A RECORD literal argument (`f(P { x: 3, y: 4 })`) materializes the real
             // layout block via `try_lower_record_construct` (the SAME block a `let p =
@@ -138,19 +151,12 @@ impl LowerCtx {
                 let repr = repr_of(&a.ty)?;
                 // heap-field records via `try_lower_record_construct`; all-scalar-field
                 // records (`Point { x, y }`) via `try_lower_scalar_record_construct`.
-                match self
+                let built = self
                     .try_lower_record_construct(a)
-                    .or_else(|| self.try_lower_scalar_record_construct(a))
-                {
-                    Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
-                    None => {
-                        return Err(LowerError::Unsupported(
-                            "record argument cannot be faithfully materialized in this \
-                             brick (a field outside the executable subset)"
-                                .into(),
-                        ))
-                    }
-                }
+                    .or_else(|| self.try_lower_scalar_record_construct(a));
+                self.materialize_arg_or_wall(built, repr, &a.ty,
+                    "record argument cannot be faithfully materialized in this \
+                     brick (a field outside the executable subset)")?
             }
             // A SPREAD-record argument (`upd({ ...opts, entry: next }, …)` — the dominant
             // porta recursive-parser shape `parse_options(args, idx+2, {...opts, field: v})`):
@@ -165,16 +171,10 @@ impl LowerCtx {
             // executable subset) it returns None → WALL (never an `Init::Opaque` empty record).
             IrExprKind::SpreadRecord { .. } => {
                 let repr = repr_of(&a.ty)?;
-                match self.try_lower_spread_record_construct(a) {
-                    Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
-                    None => {
-                        return Err(LowerError::Unsupported(
-                            "spread-record argument cannot be faithfully materialized in this \
-                             brick (a non-materialized base or a field outside the subset)"
-                                .into(),
-                        ))
-                    }
-                }
+                let built = self.try_lower_spread_record_construct(a);
+                self.materialize_arg_or_wall(built, repr, &a.ty,
+                    "spread-record argument cannot be faithfully materialized in this \
+                     brick (a non-materialized base or a field outside the subset)")?
             }
             // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
             // materialized into an owned temp via `Alloc`, borrowed into the
@@ -389,19 +389,12 @@ impl LowerCtx {
         Ok(Some(ArgOutcome::Value(match &a.kind {
             IrExprKind::Tuple { elements } => {
                 let repr = repr_of(&a.ty)?;
-                match self
+                let built = self
                     .try_lower_tuple_construct(elements)
-                    .or_else(|| self.try_lower_scalar_tuple_construct(elements))
-                {
-                    Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
-                    None => {
-                        return Err(LowerError::Unsupported(
-                            "Tuple argument cannot be faithfully materialized in this brick \
-                             (an element outside the executable subset)"
-                                .into(),
-                        ))
-                    }
-                }
+                    .or_else(|| self.try_lower_scalar_tuple_construct(elements));
+                self.materialize_arg_or_wall(built, repr, &a.ty,
+                    "Tuple argument cannot be faithfully materialized in this brick \
+                     (an element outside the executable subset)")?
             }
             // A heap-result `if` operand (`"a=" + (if c then "x" else "y")` — the StringInterp
             // `${if …}` desugar; `f(if c then a else b)`): materialize it via try_lower_heap_result_if

@@ -219,6 +219,32 @@ fn list_heap_call_name_special_cases(
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
         return Some(heap_fold_call_name(module, arg_tys, result_ty));
     }
+    // `fs.fold_lines` / `fs.fold_lines_chunked` (#1134, the C-220 streaming trio):
+    // the `Map[String, Int]` accumulator routes to the `_msi` self-host twin
+    // (fs_fold_lines.almd); any other accumulator routes to an unregistered
+    // `_x` name and walls cleanly at render (never a wrong-typed link).
+    // The C-220 streaming trio (#1134): typed routing to the self-host twins in
+    // fs_fold_lines.almd — `Map[String, Int]` accumulators to `_msi`
+    // (fold_lines / fold_lines_chunked), the `List[String]` accumulator to
+    // `_ls` (fold_lines_range, the collect_partition shape). Any other
+    // accumulator type routes to an unregistered `_x` name and walls cleanly
+    // at render — never a wrong-typed link.
+    if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range") {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let init_idx = match func { "fold_lines" => 1, "fold_lines_chunked" => 2, _ => 3 };
+        let msi_acc = matches!(arg_tys.get(init_idx),
+            Some(Ty::Applied(TC::Map, a)) if a.len() == 2
+                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+        let ls_acc = matches!(arg_tys.get(init_idx),
+            Some(Ty::Applied(TC::List, a)) if a.len() == 1 && matches!(a[0], Ty::String));
+        return Some(if msi_acc && func != "fold_lines_range" {
+            format!("fs.{func}_msi")
+        } else if ls_acc && func == "fold_lines_range" {
+            format!("fs.{func}_ls")
+        } else {
+            format!("fs.{func}_x")
+        });
+    }
     None
 }
 
@@ -324,6 +350,29 @@ fn option_call_name_closure_result_repr(func: &str, arg_tys: &[Ty], result_ty: &
                 && matches!(arg_tys.get(1), Some(Ty::String)) =>
         {
             Some("option.to_result_h".to_string())
+        }
+        // A CUSTOM-E instantiation (#1114's typed-error route): the type-blind
+        // default routed EVERY scalar-A instantiation to the registry's
+        // (Int?, String) body, whose `__copy_str` read a VARIANT error block as
+        // string bytes — the match over the result dispatched on a corrupt copy
+        // and printed NOTHING (silent wrong output vs native's payload; the
+        // shim-v1 failure selfhost-link-v2.md names). A scalar A routes to the
+        // `_ve` twin (err arm co-owns the block — payload-type-independent, the
+        // `_h` discipline); a HEAP A with custom E routes to a name the registry
+        // does NOT serve, so the unlinked-callee wall fires (honest refusal,
+        // never the silent corruption).
+        "to_result"
+            if matches!(arg_tys.get(1),
+                Some(Ty::Named(..) | Ty::Variant { .. }
+                    | Ty::Applied(TC::UserDefined(_), _))) =>
+        {
+            let scalar_a = matches!(arg_tys.first(), Some(Ty::Applied(TC::Option, a))
+                if a.len() == 1 && !is_heap_ty(&a[0]));
+            if scalar_a {
+                Some("option.to_result_ve".to_string())
+            } else {
+                Some("option.to_result__custom_e_heap_payload".to_string())
+            }
         }
         "unwrap_or_else" if is_heap_ty(result_ty) => {
             Some("option.unwrap_or_else_h".to_string())

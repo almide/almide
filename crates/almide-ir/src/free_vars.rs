@@ -97,9 +97,16 @@ struct FreeVarCollector {
 }
 
 impl FreeVarCollector {
-    /// Walk a statement-list body (While / ForIn), registering each `let`'s
-    /// binding for the statements that follow — the same discipline as the
-    /// `Block` arm.
+    /// Record `id` as free unless an enclosing binder already covers it.
+    fn note_reference(&mut self, id: VarId) {
+        if !self.bound.contains(&id) {
+            self.free.insert(id);
+        }
+    }
+
+    /// Walk a statement-list body (Block / While / ForIn), registering each
+    /// `let`'s binding for the statements that follow. All three node kinds
+    /// share this discipline: a bind is in scope from the next statement on.
     fn visit_body_stmts(&mut self, body: &[IrStmt]) {
         for stmt in body {
             IrVisitor::visit_stmt(self, stmt);
@@ -114,85 +121,96 @@ impl FreeVarCollector {
             }
         }
     }
+
+    /// `Lambda`: params bind for the body only.
+    fn visit_lambda_scope(&mut self, params: &[(VarId, crate::Ty)], body: &IrExpr) {
+        let saved = self.bound.clone();
+        for (v, _) in params {
+            self.bound.insert(*v);
+        }
+        self.visit_expr(body);
+        self.bound = saved;
+    }
+
+    /// `Block`: statement binds accumulate, then the tail expression sees them all.
+    fn visit_block_scope(&mut self, stmts: &[IrStmt], tail: Option<&IrExpr>) {
+        let saved = self.bound.clone();
+        self.visit_body_stmts(stmts);
+        if let Some(e) = tail {
+            self.visit_expr(e);
+        }
+        self.bound = saved;
+    }
+
+    /// `Match`: the subject is outside every arm's scope; each arm's pattern
+    /// binds for that arm's guard and body only.
+    fn visit_match_scope(&mut self, subject: &IrExpr, arms: &[crate::IrMatchArm]) {
+        self.visit_expr(subject);
+        for arm in arms {
+            let saved = self.bound.clone();
+            collect_pattern_bindings(&arm.pattern, &mut self.bound);
+            if let Some(g) = &arm.guard {
+                self.visit_expr(g);
+            }
+            self.visit_expr(&arm.body);
+            self.bound = saved;
+        }
+    }
+
+    /// `ForIn`: the iterable is evaluated outside the loop scope; the loop
+    /// var (or destructured tuple of vars) binds for the body.
+    fn visit_for_in_scope(
+        &mut self,
+        var: VarId,
+        var_tuple: Option<&Vec<VarId>>,
+        iterable: &IrExpr,
+        body: &[IrStmt],
+    ) {
+        self.visit_expr(iterable);
+        let saved = self.bound.clone();
+        self.bound.insert(var);
+        if let Some(vt) = var_tuple {
+            for v in vt {
+                self.bound.insert(*v);
+            }
+        }
+        self.visit_body_stmts(body);
+        self.bound = saved;
+    }
+
+    /// `While`: the condition is outside the body scope. The body is a
+    /// statement scope like a Block's — its `let`s bind for the remainder of
+    /// the body. Falling to the generic walk left those binds unregistered, so
+    /// a loop-local was counted FREE and an outliner lifted it into a phantom
+    /// param (the race-mapper `__rm_o` unbound-var wall, 2026-08-03).
+    fn visit_while_scope(&mut self, cond: &IrExpr, body: &[IrStmt]) {
+        self.visit_expr(cond);
+        let saved = self.bound.clone();
+        self.visit_body_stmts(body);
+        self.bound = saved;
+    }
 }
 
 impl IrVisitor for FreeVarCollector {
     fn visit_expr(&mut self, expr: &IrExpr) {
         match &expr.kind {
-            IrExprKind::Var { id } => {
-                if !self.bound.contains(id) {
-                    self.free.insert(*id);
-                }
-            }
+            IrExprKind::Var { id } => self.note_reference(*id),
+            // A nested closure's captures are references to THIS scope.
             IrExprKind::ClosureCreate { captures, .. } => {
                 for (vid, _) in captures {
-                    if !self.bound.contains(vid) {
-                        self.free.insert(*vid);
-                    }
+                    self.note_reference(*vid);
                 }
             }
-            IrExprKind::Lambda { params, body, .. } => {
-                let saved = self.bound.clone();
-                for (v, _) in params {
-                    self.bound.insert(*v);
-                }
-                self.visit_expr(body);
-                self.bound = saved;
-            }
+            // ── Scope-introducing nodes: each saves and restores `bound` ──
+            IrExprKind::Lambda { params, body, .. } => self.visit_lambda_scope(params, body),
             IrExprKind::Block { stmts, expr: tail } => {
-                let saved = self.bound.clone();
-                for stmt in stmts {
-                    self.visit_stmt(stmt);
-                    match &stmt.kind {
-                        IrStmtKind::Bind { var, .. } => {
-                            self.bound.insert(*var);
-                        }
-                        IrStmtKind::BindDestructure { pattern, .. } => {
-                            collect_pattern_bindings(pattern, &mut self.bound);
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(e) = tail {
-                    self.visit_expr(e);
-                }
-                self.bound = saved;
+                self.visit_block_scope(stmts, tail.as_deref())
             }
-            IrExprKind::Match { subject, arms } => {
-                self.visit_expr(subject);
-                for arm in arms {
-                    let saved = self.bound.clone();
-                    collect_pattern_bindings(&arm.pattern, &mut self.bound);
-                    if let Some(g) = &arm.guard {
-                        self.visit_expr(g);
-                    }
-                    self.visit_expr(&arm.body);
-                    self.bound = saved;
-                }
-            }
+            IrExprKind::Match { subject, arms } => self.visit_match_scope(subject, arms),
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-                self.visit_expr(iterable);
-                let saved = self.bound.clone();
-                self.bound.insert(*var);
-                if let Some(vt) = var_tuple {
-                    for v in vt {
-                        self.bound.insert(*v);
-                    }
-                }
-                self.visit_body_stmts(body);
-                self.bound = saved;
+                self.visit_for_in_scope(*var, var_tuple.as_ref(), iterable, body)
             }
-            // A While body is a statement scope like a Block's: its `let`s bind
-            // for the remainder of the body. Falling to the generic walk left
-            // those binds unregistered, so a loop-local was counted FREE and
-            // an outliner lifted it into a phantom param (the race-mapper
-            // `__rm_o` unbound-var wall, 2026-08-03).
-            IrExprKind::While { cond, body } => {
-                self.visit_expr(cond);
-                let saved = self.bound.clone();
-                self.visit_body_stmts(body);
-                self.bound = saved;
-            }
+            IrExprKind::While { cond, body } => self.visit_while_scope(cond, body),
             _ => walk_expr(self, expr),
         }
     }
@@ -204,14 +222,10 @@ impl IrVisitor for FreeVarCollector {
         // `s = …` with no read of `s`) is still recognized as captured. Without this
         // such a closure captured nothing and the write went nowhere.
         match &stmt.kind {
-            IrStmtKind::Assign { var, .. } => {
-                if !self.bound.contains(var) { self.free.insert(*var); }
-            }
-            IrStmtKind::IndexAssign { target, .. }
+            IrStmtKind::Assign { var: target, .. }
+            | IrStmtKind::IndexAssign { target, .. }
             | IrStmtKind::MapInsert { target, .. }
-            | IrStmtKind::FieldAssign { target, .. } => {
-                if !self.bound.contains(target) { self.free.insert(*target); }
-            }
+            | IrStmtKind::FieldAssign { target, .. } => self.note_reference(*target),
             _ => {}
         }
         walk_stmt(self, stmt);

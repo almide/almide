@@ -490,6 +490,39 @@ fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
     scan(body)
 }
 
+use almide_lang::intern::sym as __die_sym;
+fn die_expr(msg: &str) -> IrExpr {
+    die_on(IrExpr {
+        kind: IrExprKind::LitStr { value: msg.to_string() },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    })
+}
+/// die on an arbitrary String-typed message EXPRESSION (the computed 2-arg
+/// assert message: `assert(c, "got " + float.to_string(x))`).
+fn die_on(lit: IrExpr) -> IrExpr {
+    let handle = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: __die_sym("prim"), func: __die_sym("handle"), def_id: None },
+            args: vec![lit],
+            type_args: Vec::new(),
+        },
+        ty: Ty::Int,
+        span: None,
+        def_id: None,
+    };
+    IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: __die_sym("prim"), func: __die_sym("die"), def_id: None },
+            args: vec![handle],
+            type_args: Vec::new(),
+        },
+        ty: Ty::Unit,
+        span: None,
+        def_id: None,
+    }
+}
 /// Desugar `assert(cond)` / `assert_eq(a, b)` / `assert_ne(a, b)` (Unit-typed builtin
 /// calls — the test-block floor, also legal in a main body) to the §13 controlled-halt
 /// shape the SELF-HOST stdlib already proves out (math.pow's negative-exponent guard):
@@ -503,41 +536,41 @@ fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
 fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::intern::sym;
-    fn die_expr(msg: &str) -> IrExpr {
-        die_on(IrExpr {
-            kind: IrExprKind::LitStr { value: msg.to_string() },
-            ty: Ty::String,
-            span: None,
-            def_id: None,
-        })
-    }
-    /// die on an arbitrary String-typed message EXPRESSION (the computed 2-arg
-    /// assert message: `assert(c, "got " + float.to_string(x))`).
-    fn die_on(lit: IrExpr) -> IrExpr {
-        let handle = IrExpr {
-            kind: IrExprKind::Call {
-                target: CallTarget::Module { module: sym("prim"), func: sym("handle"), def_id: None },
-                args: vec![lit],
-                type_args: Vec::new(),
-            },
-            ty: Ty::Int,
-            span: None,
-            def_id: None,
-        };
-        IrExpr {
-            kind: IrExprKind::Call {
-                target: CallTarget::Module { module: sym("prim"), func: sym("die"), def_id: None },
-                args: vec![handle],
-                type_args: Vec::new(),
-            },
-            ty: Ty::Unit,
-            span: None,
-            def_id: None,
-        }
-    }
     struct S {
         changed: bool,
     }
+/// `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0 wasm
+/// form: prefix + message, then halt). The message expr is evaluated only on
+/// the abort path, like the computed assert message. `None` when the call is
+/// not that shape.
+fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
+    if name != "panic" || args.len() != 1 || !matches!(args[0].ty, Ty::String) {
+        return None;
+    }
+    let msg = args[0].clone();
+        let text = match &msg.kind {
+        IrExprKind::LitStr { value } => {
+            die_expr(&format!("PANIC: {value}"))
+        }
+        _ => die_on(IrExpr {
+            kind: IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatStr,
+                left: Box::new(IrExpr {
+                    kind: IrExprKind::LitStr { value: "PANIC: ".to_string() },
+                    ty: Ty::String,
+                    span: None,
+                    def_id: None,
+                }),
+                right: Box::new(msg),
+            },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        }),
+        };
+    Some(text)
+}
+
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
@@ -554,104 +587,12 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
             else {
                 return;
             };
-            // `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0
-            // wasm form: prefix + message, then halt). The message expr is evaluated
-            // only here (the abort path), like the computed assert message.
-            if name.as_str() == "panic" && args.len() == 1 && matches!(args[0].ty, Ty::String)
-            {
-                let msg = args[0].clone();
-                let text = match &msg.kind {
-                    IrExprKind::LitStr { value } => {
-                        die_expr(&format!("PANIC: {value}"))
-                    }
-                    _ => die_on(IrExpr {
-                        kind: IrExprKind::BinOp {
-                            op: almide_ir::BinOp::ConcatStr,
-                            left: Box::new(IrExpr {
-                                kind: IrExprKind::LitStr { value: "PANIC: ".to_string() },
-                                ty: Ty::String,
-                                span: None,
-                                def_id: None,
-                            }),
-                            right: Box::new(msg),
-                        },
-                        ty: Ty::String,
-                        span: None,
-                        def_id: None,
-                    }),
-                };
+            if let Some(text) = panic_die_expr(name.as_str(), args) {
                 *e = text;
                 self.changed = true;
                 return;
             }
-            let (cond, msg) = match (name.as_str(), args.as_slice()) {
-                ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
-                    (c.clone(), None)
-                }
-                // The 2-arg form `assert(cond, msg)`: a LITERAL message folds into
-                // the die text; a COMPUTED String message dies on the CONCAT
-                // `"assertion failed: " + msg` (evaluated only on the failing path).
-                ("assert", [c, m]) if matches!(c.ty, Ty::Bool) && matches!(m.ty, Ty::String) => {
-                    (c.clone(), Some(m.clone()))
-                }
-                ("assert_eq", [a, b]) => (
-                    IrExpr {
-                        kind: IrExprKind::BinOp {
-                            op: almide_ir::BinOp::Eq,
-                            left: Box::new(a.clone()),
-                            right: Box::new(b.clone()),
-                        },
-                        ty: Ty::Bool,
-                        span: None,
-                        def_id: None,
-                    },
-                    None,
-                ),
-                ("assert_ne", [a, b]) => (
-                    IrExpr {
-                        kind: IrExprKind::BinOp {
-                            op: almide_ir::BinOp::Neq,
-                            left: Box::new(a.clone()),
-                            right: Box::new(b.clone()),
-                        },
-                        ty: Ty::Bool,
-                        span: None,
-                        def_id: None,
-                    },
-                    None,
-                ),
-                _ => return,
-            };
-            let default_text = match name.as_str() {
-                "assert_eq" => "assertion failed: left == right",
-                "assert_ne" => "assertion failed: left != right",
-                _ => "assertion failed: assert(false)",
-            };
-            let die = match msg {
-                None => die_expr(default_text),
-                Some(m) => match &m.kind {
-                    IrExprKind::LitStr { value } => {
-                        die_expr(&format!("assertion failed: {value}"))
-                    }
-                    _ => die_on(IrExpr {
-                        kind: IrExprKind::BinOp {
-                            op: almide_ir::BinOp::ConcatStr,
-                            left: Box::new(IrExpr {
-                                kind: IrExprKind::LitStr {
-                                    value: "assertion failed: ".to_string(),
-                                },
-                                ty: Ty::String,
-                                span: None,
-                                def_id: None,
-                            }),
-                            right: Box::new(m),
-                        },
-                        ty: Ty::String,
-                        span: None,
-                        def_id: None,
-                    }),
-                },
-            };
+            let Some((cond, die)) = assert_die_expr(name.as_str(), args) else { return };
             let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
             *e = IrExpr {
                 kind: IrExprKind::If {
@@ -670,6 +611,84 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     let mut out = body.clone();
     s.visit_expr_mut(&mut out);
     s.changed.then_some(out)
+}
+
+/// The `assert` family's failure expression: `(cond, die)` folded into the die
+/// side, or `None` when the call is not an assert shape.
+///
+/// A LITERAL message folds into the die text; a COMPUTED String message dies on
+/// the CONCAT `"assertion failed: " + msg`, evaluated only on the failing path.
+fn assert_die_expr(name: &str, args: &[IrExpr]) -> Option<(IrExpr, IrExpr)> {
+    let (cond, msg) = match (name, args) {
+        ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
+            (c.clone(), None)
+        }
+        // The 2-arg form `assert(cond, msg)`: a LITERAL message folds into
+        // the die text; a COMPUTED String message dies on the CONCAT
+        // `"assertion failed: " + msg` (evaluated only on the failing path).
+        ("assert", [c, m]) if matches!(c.ty, Ty::Bool) && matches!(m.ty, Ty::String) => {
+            (c.clone(), Some(m.clone()))
+        }
+        ("assert_eq", [a, b]) => (
+            IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: almide_ir::BinOp::Eq,
+                    left: Box::new(a.clone()),
+                    right: Box::new(b.clone()),
+                },
+                ty: Ty::Bool,
+                span: None,
+                def_id: None,
+            },
+            None,
+        ),
+        ("assert_ne", [a, b]) => (
+            IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: almide_ir::BinOp::Neq,
+                    left: Box::new(a.clone()),
+                    right: Box::new(b.clone()),
+                },
+                ty: Ty::Bool,
+                span: None,
+                def_id: None,
+            },
+            None,
+        ),
+_ => return None,
+    };
+    let default_text = match name {
+        "assert_eq" => "assertion failed: left == right",
+        "assert_ne" => "assertion failed: left != right",
+        _ => "assertion failed: assert(false)",
+    };
+    let die = match msg {
+        None => die_expr(default_text),
+        Some(m) => match &m.kind {
+            IrExprKind::LitStr { value } => {
+                die_expr(&format!("assertion failed: {value}"))
+            }
+            _ => die_on(IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: almide_ir::BinOp::ConcatStr,
+                    left: Box::new(IrExpr {
+                        kind: IrExprKind::LitStr {
+                            value: "assertion failed: ".to_string(),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }),
+                    right: Box::new(m),
+                },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            }),
+        },
+    };
+
+    Some((cond, die))
 }
 
 /// `m[k]` over a `Map` (the frontend emits `MapAccess` ONLY for `obj.ty.is_map()`) →

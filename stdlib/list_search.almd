@@ -5,15 +5,13 @@
 // i64 slot, where handle equality is NOT value equality — those need a per-element-type
 // variant (a later refinement). Reads only — `xs` borrowed. contains is cert-untouching;
 // index_of returns a materialized Option (the proven 0-or-1-element-list layout).
-
 // Index of the first element == x scanning from `i`, or -1 if none.
-fn __idx_find(h: Int, len: Int, x: Int, i: Int) -> Int =
-  if i >= len then -1
-  else {
-    let e = prim.load64(h + 12 + i * 8)
-    if e == x then i
-    else __idx_find(h, len, x, i + 1)
-  }
+fn __idx_find(h: Int, len: Int, x: Int, i: Int) -> Int = if i >= len then -1
+else {
+  let e = prim.load64(h + 12 + i * 8)
+  if e == x then i
+  else __idx_find(h, len, x, i + 1)
+}
 
 fn list_contains(xs: List[Int], x: Int) -> Bool = {
   let h = prim.handle(xs)
@@ -22,15 +20,15 @@ fn list_contains(xs: List[Int], x: Int) -> Bool = {
   idx >= 0
 }
 
-fn __lio_none() -> Option[Int] = None
-fn __lio_some(i: Int) -> Option[Int] = Some(i)
+fn __lio_none() -> Int? = none
 
-fn list_index_of(xs: List[Int], x: Int) -> Option[Int] = {
+fn __lio_some(i: Int) -> Int? = some(i)
+
+fn list_index_of(xs: List[Int], x: Int) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   let idx = __idx_find(h, len, x, 0)
-  if idx < 0 then __lio_none()
-  else __lio_some(idx)
+  if idx < 0 then __lio_none() else __lio_some(idx)
 }
 
 // list.binary_search over a SORTED List[Int] (v0 is already monomorphic &[i64]):
@@ -44,26 +42,23 @@ fn list_index_of(xs: List[Int], x: Int) -> Option[Int] = {
 // std spec, but native==wasm byte-identity demands the same one). __bsearch
 // returns the found index or -1; the Option is materialized via the dedicated
 // none/some helpers (the proven index_of pattern).
-fn __bsearch(h: Int, target: Int, base: Int, size: Int) -> Int =
-  if size > 1 then {
-    let half = size / 2
-    let mid = base + half
-    let e = prim.load64(h + 12 + mid * 8)
-    let nb = if e > target then base else mid
-    __bsearch(h, target, nb, size - half)
-  }
-  else {
-    let e = prim.load64(h + 12 + base * 8)
-    if e == target then base else -1
-  }
+fn __bsearch(h: Int, target: Int, base: Int, size: Int) -> Int = if size > 1 then {
+  let half = size / 2
+  let mid = base + half
+  let e = prim.load64(h + 12 + mid * 8)
+  let nb = if e > target then base else mid
+  __bsearch(h, target, nb, size - half)
+} else {
+  let e = prim.load64(h + 12 + base * 8)
+  if e == target then base else -1
+}
 
-fn list_binary_search(xs: List[Int], target: Int) -> Option[Int] = {
+fn list_binary_search(xs: List[Int], target: Int) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len == 0 then __lio_none()
   else {
     let idx = __bsearch(h, target, 0, len)
-    if idx < 0 then __lio_none()
-    else __lio_some(idx)
+    if idx < 0 then __lio_none() else __lio_some(idx)
   }
 }

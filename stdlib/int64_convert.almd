@@ -1,7 +1,6 @@
 // int64_convert — SELF-HOSTED int64.to_* sized conversions for v1: `int.to_<dst>(int.from_int64(x))`
 // unrolled to two `let`s (no call-as-arg), byte-matching int64.almd. Cross-file callees, pure
 // scalar. `to_string` routes through signed int.to_string. There is no `to_int64` — identity.
-
 fn int64_to_string(x: Int64) -> String = {
   let v = int.from_int64(x)
   int.to_string(v)
@@ -53,7 +52,7 @@ fn int64_to_float64(x: Int64) -> Float64 = {
 }
 
 // Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
-fn int64_to_int8_checked(x: Int64) -> Option[Int8] = {
+fn int64_to_int8_checked(x: Int64) -> Int8? = {
   let i = int.from_int64(x)
   int.to_int8_checked(i)
 }
@@ -63,7 +62,7 @@ fn int64_to_int8_saturating(x: Int64) -> Int8 = {
   int.to_int8_saturating(i)
 }
 
-fn int64_to_int16_checked(x: Int64) -> Option[Int16] = {
+fn int64_to_int16_checked(x: Int64) -> Int16? = {
   let i = int.from_int64(x)
   int.to_int16_checked(i)
 }
@@ -73,7 +72,7 @@ fn int64_to_int16_saturating(x: Int64) -> Int16 = {
   int.to_int16_saturating(i)
 }
 
-fn int64_to_int32_checked(x: Int64) -> Option[Int32] = {
+fn int64_to_int32_checked(x: Int64) -> Int32? = {
   let i = int.from_int64(x)
   int.to_int32_checked(i)
 }
@@ -83,7 +82,7 @@ fn int64_to_int32_saturating(x: Int64) -> Int32 = {
   int.to_int32_saturating(i)
 }
 
-fn int64_to_uint8_checked(x: Int64) -> Option[UInt8] = {
+fn int64_to_uint8_checked(x: Int64) -> UInt8? = {
   let i = int.from_int64(x)
   int.to_uint8_checked(i)
 }
@@ -93,7 +92,7 @@ fn int64_to_uint8_saturating(x: Int64) -> UInt8 = {
   int.to_uint8_saturating(i)
 }
 
-fn int64_to_uint16_checked(x: Int64) -> Option[UInt16] = {
+fn int64_to_uint16_checked(x: Int64) -> UInt16? = {
   let i = int.from_int64(x)
   int.to_uint16_checked(i)
 }
@@ -103,7 +102,7 @@ fn int64_to_uint16_saturating(x: Int64) -> UInt16 = {
   int.to_uint16_saturating(i)
 }
 
-fn int64_to_uint32_checked(x: Int64) -> Option[UInt32] = {
+fn int64_to_uint32_checked(x: Int64) -> UInt32? = {
   let i = int.from_int64(x)
   int.to_uint32_checked(i)
 }
@@ -113,7 +112,7 @@ fn int64_to_uint32_saturating(x: Int64) -> UInt32 = {
   int.to_uint32_saturating(i)
 }
 
-fn int64_to_uint64_checked(x: Int64) -> Option[UInt64] = {
+fn int64_to_uint64_checked(x: Int64) -> UInt64? = {
   let i = int.from_int64(x)
   int.to_uint64_checked(i)
 }
@@ -122,4 +121,3 @@ fn int64_to_uint64_saturating(x: Int64) -> UInt64 = {
   let i = int.from_int64(x)
   int.to_uint64_saturating(i)
 }
-

@@ -365,6 +365,62 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (br $cloop)))
     (local.get $errno))
 
+  ;; fs.is_symlink's floor — the NO-FOLLOW stat twin of $path_filestat_q: the identical
+  ;; buffered path_filestat_get with lookupflags = 0 (the final symlink is NOT followed),
+  ;; so a symlink's own filetype (7) lands at @16. Same aligned-scratch copy discipline.
+  (func $path_filestat_nf (param $buf i32) (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32) (local $scratch i32) (local $errno i32) (local $j i32)
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
+    (local.set $scratch (i32.and (i32.add (call $alloc8 (i32.const 72)) (i32.const 7)) (i32.const -8)))
+    (local.set $errno
+      (call $path_filestat_get (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+                               (local.get $scratch)))
+    (local.set $j (i32.const 0))
+    (block $cdone (loop $cloop
+      (br_if $cdone (i32.ge_u (local.get $j) (i32.const 64)))
+      (i32.store8 (i32.add (local.get $buf) (local.get $j))
+                  (i32.load8_u (i32.add (local.get $scratch) (local.get $j))))
+      (local.set $j (i32.add (local.get $j) (i32.const 1)))
+      (br $cloop)))
+    (local.get $errno))
+
+  ;; fs.rename's floor — the WASI path_rename call. Both paths are BORROWED canonical
+  ;; Strings, each normalized through $path_norm (which allocates a FRESH buffer per call,
+  ;; so the two normalizations never clobber each other). Builds a fresh OWNED
+  ;; `Result[Unit, String]`: Ok(()) with len@4=0 + tag@16=0 (the `materialize_result_ok`
+  ;; convention, identical to $make_dir's Ok arm) on errno 0, else Err(<native std::io
+  ;; Display>) via the same errno→text mapping $read_text_file uses (NOENT/ACCES; anything
+  ;; else keeps "write failed"). A rename IS a filesystem write (Capability::FsWrite).
+  (func $rename (param $src i32) (param $dst i32) (result i32)
+    (local $sdata i32) (local $slen i32) (local $ddata i32) (local $dlen i32)
+    (local $errno i32) (local $maddr i32) (local $mlen i32) (local $msg i32) (local $obj i32)
+    (call $path_norm (local.get $src))
+    (local.set $slen)
+    (local.set $sdata)
+    (call $path_norm (local.get $dst))
+    (local.set $dlen)
+    (local.set $ddata)
+    (local.set $errno
+      (call $path_rename (i32.const 3) (local.get $sdata) (local.get $slen)
+                         (i32.const 3) (local.get $ddata) (local.get $dlen)))
+    (if (result i32) (i32.eqz (local.get $errno))
+      (then
+        (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
+        (i64.store (i32.add (local.get $obj) (i32.const {LIST_HEADER})) (i64.const 0))
+        (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
+        (local.get $obj))
+      (else
+        (local.set $maddr (i32.const {WRITE_ERR_ADDR}))
+        (local.set $mlen (i32.const {WRITE_ERR_LEN}))
+        (if (i32.eq (local.get $errno) (i32.const 44)) (then
+          (local.set $maddr (i32.const {FS_ERR_NOENT_ADDR})) (local.set $mlen (i32.const {FS_ERR_NOENT_LEN}))))
+        (if (i32.eq (local.get $errno) (i32.const 2)) (then
+          (local.set $maddr (i32.const {FS_ERR_ACCES_ADDR})) (local.set $mlen (i32.const {FS_ERR_ACCES_LEN}))))
+        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+        (call $rtf_result (local.get $msg) (i32.const 1)))))
+
   (func $path_exists (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $stat i32) (local $errno i32)
     ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).

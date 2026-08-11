@@ -3,9 +3,9 @@ type Color = | Red | Green | Blue
 
 type Wrapped = | Wrap(Int) | Tag(String) | Empty
 
-fn apply_int(ctor: fn(Int) -> Wrapped, v: Int) -> Wrapped = ctor(v)
+fn apply_int(ctor: (Int) -> Wrapped, v: Int) -> Wrapped = ctor(v)
 
-fn apply_str(ctor: fn(String) -> Wrapped, v: String) -> Wrapped = ctor(v)
+fn apply_str(ctor: (String) -> Wrapped, v: String) -> Wrapped = ctor(v)
 
 test "single-field constructor as function argument" {
   let w = apply_int(Wrap, 42)

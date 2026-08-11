@@ -111,7 +111,7 @@ impl TyChecker<'_> {
             Ty::Applied(_, args) | Ty::Tuple(args) => {
                 for a in args { self.check_ty(a); }
             }
-            Ty::Fn { params, ret } => {
+            Ty::Fn { is_effect: _, params, ret } => {
                 for p in params { self.check_ty(p); }
                 self.check_ty(ret);
             }
@@ -731,7 +731,7 @@ mod tests {
                 body: Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None }),
                 lambda_id: None,
             },
-            ty: Ty::Fn { params: vec![named("Cfg")], ret: Box::new(Ty::Unit) },
+            ty: Ty::Fn { is_effect: false, params: vec![named("Cfg")], ret: Box::new(Ty::Unit) },
             span: None,
             def_id: None,
         };

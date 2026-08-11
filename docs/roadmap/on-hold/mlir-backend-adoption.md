@@ -163,7 +163,7 @@ Known gaps:
 
 ## Stdlib Unification arc との関係
 
-この arc は [stdlib-declarative-unification.md](./stdlib-declarative-unification.md) の **投資回収段階**でもある:
+この arc は [stdlib-declarative-unification.md](../done/stdlib-declarative-unification.md) の **投資回収段階**でもある:
 
 | Stdlib Unification アウトプット | 本 arc での扱い |
 |---|---|

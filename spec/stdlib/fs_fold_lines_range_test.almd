@@ -1,0 +1,75 @@
+// @contract: C-220
+// fs.fold_lines_range — the chunk-parallel worker's walker. Ownership rule:
+// a line belongs to the chunk containing the byte BEFORE its first byte
+// (line 0 to the chunk containing byte 0), so folding any partition of
+// [0, file_size) visits every line exactly once, whatever the boundaries.
+import fs
+
+effect fn tmp() -> String = fs.create_temp_dir("range")!
+
+effect fn collect_partition(path: String, cuts: List[Int]) -> List[String] = {
+  var out: List[String] = []
+  for i in 0..<(list.len(cuts) - 1) {
+    let part = fs.fold_lines_range(path, cuts[i], cuts[i + 1], [], (acc, line) => acc + [line])!
+    out = out + part
+  }
+  out
+}
+
+test "every partition folds every line exactly once" {
+  let d = tmp()!
+  let p = d + "/data.txt"
+  // lines: "aa"(0..2) "bbb"(3..6) "c"(7..8) "dddd"(9..13), size 14
+  fs.write(p, "aa\nbbb\nc\ndddd\n")!
+  let whole = fs.read_lines(p)!
+  let size = fs.file_size(p)!
+  let partitions = [
+    [0, size],
+    [0, 7, size],
+    [0, 1, size],
+    [0, 3, size],
+    [0, 4, 9, size],
+    [0, 0, size],
+    [0, 2, 3, 8, size]
+  ]
+  for cuts in partitions {
+    assert_eq(collect_partition(p, cuts)!, whole)
+  }
+}
+
+test "no trailing newline still partitions exactly" {
+  let d = tmp()!
+  let p = d + "/tail.txt"
+  fs.write(p, "one\ntwo\nthree")!
+  let whole = fs.read_lines(p)!
+  let size = fs.file_size(p)!
+  for cuts in [
+    [0, 5, size],
+    [0, 4, size],
+    [0, 12, size]
+  ] {
+    assert_eq(collect_partition(p, cuts)!, whole)
+  }
+}
+
+test "crlf boundary cuts stay exact" {
+  let d = tmp()!
+  let p = d + "/crlf.txt"
+  fs.write(p, "a\r\nbb\r\nc\r\n")!
+  let whole = fs.read_lines(p)!
+  let size = fs.file_size(p)!
+  for cuts in [
+    [0, 2, size],
+    [0, 3, size],
+    [0, 4, 7, size]
+  ] {
+    assert_eq(collect_partition(p, cuts)!, whole)
+  }
+}
+
+test "empty range folds to init" {
+  let d = tmp()!
+  let p = d + "/e.txt"
+  fs.write(p, "x\ny\n")!
+  assert_eq(fs.fold_lines_range(p, 2, 2, ["seed"], (acc, line) => acc + [line])!, ["seed"])
+}

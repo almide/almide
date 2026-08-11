@@ -255,7 +255,7 @@ impl Checker {
                 let result_elem = self.fresh_var();
                 let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                 self.constrain(arg_tys[1].clone(),
-                    Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret) },
+                    Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret) },
                     "fan.map callback");
                 Some(Ty::result(Ty::list(resolve_ty(&result_elem, &self.uf)), Ty::String))
             }
@@ -331,7 +331,7 @@ impl Checker {
                     let result_elem = self.fresh_var();
                     let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                     self.constrain(arg_tys[1].clone(),
-                        Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret) },
+                        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret) },
                         "fan.any callback");
                     return Some(Ty::result(resolve_ty(&result_elem, &self.uf), Ty::String));
                 }
@@ -364,7 +364,7 @@ impl Checker {
                     let result_elem = self.fresh_var();
                     let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                     self.constrain(arg_tys[1].clone(),
-                        Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
+                        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
                         "fan.settle callback");
                     return Some(Ty::list(Ty::result(
                         resolve_ty(&result_elem, &self.uf),

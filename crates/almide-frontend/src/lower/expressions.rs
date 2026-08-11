@@ -330,7 +330,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         ast::ExprKind::While { cond, body, .. } => {
             let ir_cond = lower_expr(ctx, cond);
             ctx.push_scope();
-            let ir_body: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
+            let ir_body: Vec<IrStmt> = lower_loop_body_stmts(ctx, body);
             ctx.pop_scope();
             ctx.mk(IrExprKind::While { cond: Box::new(ir_cond), body: ir_body }, ty, span)
         }
@@ -432,6 +432,25 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 }, body_ty, span);
             }
             ctx.pop_scope();
+            // ADR-0006 D1 (#1108 Phase 2b): a FALLIBLE lambda — the checker
+            // typed it `(A) -> Result[T, String]` while its body's value
+            // exits are still T — gets the same value-tail ok(...) lift a
+            // `-> T!` fn body gets. Type-driven: Result-typed exits pass
+            // through, so a pass-through / explicit-ok body is untouched.
+            if let Ty::Fn { ret, .. } = &ty {
+                if ret.is_result() {
+                    // An OPTION operand's `!` maps none → err("none") (L4).
+                    // Inside a fn body the codegen's ok_or template does this;
+                    // a CLOSURE body lacks that context on every backend, so
+                    // desugar it here: `e!` (e: Option[T]) becomes
+                    // `option.to_result(e, "none")!` — a plain Result unwrap
+                    // all three consumers already handle.
+                    convert_option_unwraps_to_result(&mut ir_body);
+                    if !ir_body.ty.is_result() {
+                        ir_body = crate::lower::wrap_fallible_value_tail(ir_body);
+                    }
+                }
+            }
             let lambda_id = Some(ctx.next_lambda_id());
             ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body), lambda_id }, ty, span)
         }
@@ -672,6 +691,35 @@ fn lower_expr_misc(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<as
 /// scrutinee, and `alt` the wildcard arm. Statements before the guard stay as block
 /// stmts. Recurses so multiple guard-lets nest. Without a guard-let it lowers normally.
 /// The caller owns the block scope (push/pop around this).
+/// Lower a LOOP BODY's statement list (#1204).
+///
+/// A loop body is a statement list like a block's, but it has no tail — so it
+/// cannot go through `lower_block_body`, which is where `guard let` is
+/// rewritten into its `match { ok/some => rest, _ => else }` form. Mapping
+/// `lower_stmt` straight over the list therefore handed a `GuardLet` to
+/// `lower_stmt`, whose arm is an `unreachable!("guard let is desugared by the
+/// enclosing block")` — a compiler PANIC on `for … { guard let x = … else {
+/// continue } … }`, which is `guard let`'s most natural use (it exists for
+/// early exit, and `continue` is a loop's early exit). Present since the
+/// construct landed; `spec/lang/guard_let_test.almd` never put one in a loop.
+///
+/// The rewrite is the block one, minus the tail: everything after the guard
+/// becomes the Some/Ok arm's body, the `else` becomes the wildcard arm, and the
+/// result is ONE statement in the loop body. Nested guards fall out of the
+/// recursion, exactly as in a block.
+fn lower_loop_body_stmts(ctx: &mut LowerCtx, body: &[ast::Stmt]) -> Vec<IrStmt> {
+    let Some(i) = body.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) else {
+        return body.iter().map(|s| lower_stmt(ctx, s)).collect();
+    };
+    let mut out: Vec<IrStmt> = body[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
+    // `lower_block_body` owns the guard rewrite; a Unit-typed, tail-less block
+    // over the REST is exactly the shape it expects, and its result is a single
+    // expression statement here.
+    let rest = lower_block_body(ctx, &body[i..], None, &Ty::Unit, None);
+    out.push(IrStmt { kind: IrStmtKind::Expr { expr: rest }, span: None });
+    out
+}
+
 fn lower_block_body(
     ctx: &mut LowerCtx,
     stmts: &[ast::Stmt],
@@ -864,7 +912,7 @@ fn eta_expand_module_fn(
     }, ret_ty.clone(), span.clone());
     ctx.pop_scope();
     let lambda_id = Some(ctx.next_lambda_id());
-    let lambda_ty = Ty::Fn {
+    let lambda_ty = Ty::Fn { is_effect: false, 
         params: params.clone(),
         ret: Box::new(ret_ty),
     };
@@ -1600,4 +1648,47 @@ fn lower_fan_race_map_fold(
     stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: for_e }, span });
 
     (stmts, okv, valv, winner_ty)
+}
+
+/// L4 (#1108 Phase 2b): inside a FALLIBLE lambda body, rewrite every
+/// Option-operand `Unwrap` into `option.to_result(e, "none")!` so the
+/// closure's propagation stays a plain Result unwrap on every backend
+/// (the fn-body ok_or template has no closure equivalent).
+fn convert_option_unwraps_to_result(body: &mut IrExpr) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct Rw;
+    impl IrMutVisitor for Rw {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Unwrap { expr: inner } = &mut e.kind else { return };
+            if !inner.ty.is_option() {
+                return;
+            }
+            let inner_ty = inner.ty.clone();
+            let payload_ty = inner_ty.option_inner().unwrap_or(Ty::Unknown);
+            let span = inner.span.clone();
+            let opt = std::mem::replace(
+                &mut **inner,
+                IrExpr { kind: IrExprKind::OptionNone, ty: inner_ty, span: span.clone(), def_id: None },
+            );
+            **inner = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("option"),
+                        func: sym("to_result"),
+                        def_id: None,
+                    },
+                    args: vec![
+                        opt,
+                        IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span: span.clone(), def_id: None },
+                    ],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::result(payload_ty, Ty::String),
+                span,
+                def_id: None,
+            };
+        }
+    }
+    Rw.visit_expr_mut(body);
 }

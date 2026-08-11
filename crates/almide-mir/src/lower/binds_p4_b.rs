@@ -27,6 +27,20 @@ impl LowerCtx {
             IrExprKind::Record { .. } if self.aggregate_field_tys(&expr.ty).is_some() => {
                 self.try_opt_record_aggregate_payload(expr, ty)
             }
+            _ => self.try_lower_opt_tuple_and_record_payloads(expr, ty),
+        }
+    }
+
+    /// The tail of [`Self::try_lower_opt_tuple_and_variant_payloads`]'s router,
+    /// reached exactly when none of its leading arms selected — so the arms below
+    /// stay in their original relative order and keep the same commit-once
+    /// behavior (an arm body's internal `None` is the whole router's `None`).
+    fn try_lower_opt_tuple_and_record_payloads(
+        &mut self,
+        expr: &IrExpr,
+        ty: &Ty,
+    ) -> Option<ValueId> {
+        match &expr.kind {
             _ if Self::is_all_scalar_tuple(&expr.ty) => {
                 self.try_opt_scalar_tuple_payload(expr, ty)
             }
@@ -297,14 +311,27 @@ impl LowerCtx {
             IrExprKind::List { elements } if Self::is_scalar_list_ty(&expr.ty) => {
                 self.try_lower_scalar_list_slots(elements)?
             }
+            _ => return self.opt_heap_general_computed_piece(expr),
+        };
+        Some(piece)
+    }
+
+    /// The COMPUTED tail of [`Self::opt_heap_general_piece`]'s router — every arm
+    /// whose payload is produced by a pure Module call, a list concat or a
+    /// heap-result `if`/`match`. Reached exactly when none of the leading (Var /
+    /// literal / Named-call / nested-ctor / projection / interp / list-literal)
+    /// arms selected, so the relative order — and the commit-once semantics — is
+    /// unchanged.
+    fn opt_heap_general_computed_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             IrExprKind::Call { target: CallTarget::Module { .. }, .. }
             | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. }
                 if Self::is_scalar_list_ty(&expr.ty) =>
             {
-                self.piece_from_computed_scalar_list(expr)?
+                self.piece_from_computed_scalar_list(expr)
             }
             IrExprKind::Call { target: CallTarget::Module { .. }, .. } if matches!(expr.ty, Ty::String) => {
-                self.piece_from_module_string_call(expr)?
+                self.piece_from_module_string_call(expr)
             }
             // `some(option.unwrap_or(some((2, 3)), (2, 4)))` — a PURE Module
             // call yielding a fresh owned SCALAR-slot TUPLE payload (#871, the
@@ -318,17 +345,16 @@ impl LowerCtx {
                 if matches!(&expr.ty, Ty::Tuple(ts)
                     if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t))) =>
             {
-                self.piece_from_computed_scalar_list(expr)?
+                self.piece_from_computed_scalar_list(expr)
             }
             IrExprKind::If { .. } | IrExprKind::Match { .. } if matches!(expr.ty, Ty::String) => {
-                self.piece_from_heap_result_if_match(expr)?
+                self.piece_from_heap_result_if_match(expr)
             }
             IrExprKind::Call { target: CallTarget::Module { .. }, .. } if Self::is_str_int_map_ty(&expr.ty) => {
-                self.piece_from_computed_map(expr)?
+                self.piece_from_computed_map(expr)
             }
-            _ => return None,
-        };
-        Some(piece)
+            _ => None,
+        }
     }
 
     fn is_live_heap_var(&self, id: almide_ir::VarId) -> bool {
@@ -563,6 +589,46 @@ impl LowerCtx {
         }
     }
 
+    /// `ok(Label { text: "a", hint: none })` / `ok(Circle(2.0))` — a VARIANT CTOR Ok
+    /// payload (#1134 Shape 1, the codec Shape roundtrip): the Result twin of
+    /// [`Self::try_opt_variant_ctor_payload`]. The fresh owned tag-block is MOVED into
+    /// the Ok slot; a type whose payload owns heap fields routes the wrapper drop
+    /// through the recursive `resrec:<type>` arm ([`Self::materialize_result_aggregate`]
+    /// — a flat `DropListStr` would leak the ctor's String/heap fields), the rest keep
+    /// the flat wrapper — the same split the Option side takes.
+    pub(crate) fn try_lower_result_ok_variant_ctor(
+        &mut self,
+        value: &IrExpr,
+        ty: &Ty,
+    ) -> Option<ValueId> {
+        let IrExprKind::ResultOk { expr } = &value.kind else {
+            return None;
+        };
+        if !Self::is_heap_ok_result(ty) {
+            return None;
+        }
+        let ctor_name = match &expr.kind {
+            IrExprKind::Record { name: Some(n), .. } => n.as_str().to_string(),
+            IrExprKind::Call { target: CallTarget::Named { name }, .. } => name.as_str().to_string(),
+            _ => return None,
+        };
+        let type_name = self.variant_layouts.ctor_to_type.get(&ctor_name)?.clone();
+        let repr = repr_of(ty).ok()?;
+        let needs_rec = self
+            .variant_layouts
+            .needs_recursive_drop(&type_name, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            });
+        let piece = self.try_lower_variant_ctor(expr)?;
+        let dst = if needs_rec {
+            self.materialize_result_aggregate(piece, repr, false, type_name)
+        } else {
+            self.materialize_result_str(piece, repr, false, false)
+        };
+        self.seed_variant_param(dst, ty);
+        Some(dst)
+    }
+
     /// The per-`expr.kind` heap-Ok-payload construction strategy for
     /// [`Self::try_lower_result_ok_heap`] — verbatim extraction of that
     /// function's former inner `match &expr.kind { .. }`.
@@ -618,6 +684,17 @@ impl LowerCtx {
             | IrExprKind::OptionNone
             | IrExprKind::ResultOk { .. }
             | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
+            _ => return self.result_ok_heap_computed_piece(expr),
+        };
+        Some(piece)
+    }
+
+    /// The COMPUTED tail of [`Self::result_ok_heap_piece`]'s router, the Ok-Result
+    /// sibling of [`Self::opt_heap_general_computed_piece`]. Reached exactly when
+    /// none of the leading arms selected, so the relative order is unchanged.
+    fn result_ok_heap_computed_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        match &expr.kind {
             // A COMPUTED list Ok payload (`ok(list.map(xs, f))`, `ok(a + b)`) — lower the fresh
             // owned list, moved into the Ok slot (retain-remove so materialize_result_str is the
             // sole owner). Gated to a SCALAR- or STRING-element list — the two element kinds whose
@@ -631,20 +708,20 @@ impl LowerCtx {
             | IrExprKind::BinOp {
                 op: almide_ir::BinOp::ConcatList,
                 ..
-            } if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+            } if matches!(&expr.ty, Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && (!is_heap_ty(&a[0]) || matches!(a[0], Ty::String))) =>
             {
-                self.piece_from_computed_scalar_list(expr)?
+                self.piece_from_computed_scalar_list(expr)
             }
             // A `Map[String, Int]` (map_skv) Ok payload (`ok(["a": 1])` → `ok(map.from_list(…))`)
             // — mirror the OptionSome map arm: the flat drop frees the map_skv block.
             IrExprKind::Call {
                 target: CallTarget::Module { .. },
                 ..
-            } if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+            } if matches!(&expr.ty, Ty::Applied(TypeConstructorId::Map, a)
                     if a.len() == 2 && is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
             {
-                self.piece_from_computed_map(expr)?
+                self.piece_from_computed_map(expr)
             }
             // `ok(float.to_fixed(x, 4))` — a PURE Module call yielding a fresh owned STRING
             // Ok payload (fuzz C-class 323/768: the un-admitted stdlib call fell to the
@@ -652,16 +729,15 @@ impl LowerCtx {
             IrExprKind::Call {
                 target: CallTarget::Module { .. },
                 ..
-            } if matches!(expr.ty, Ty::String) => self.piece_from_module_string_call(expr)?,
+            } if matches!(expr.ty, Ty::String) => self.piece_from_module_string_call(expr),
             // `ok((if c then a else b))` — a heap-result IF/MATCH String Ok payload
             // (the fuzz F-858 family's Result sibling): the heap-result-if machinery
             // yields the one owned result, moved into the Ok slot.
             IrExprKind::If { .. } | IrExprKind::Match { .. } if matches!(expr.ty, Ty::String) => {
-                self.piece_from_heap_result_if_match(expr)?
+                self.piece_from_heap_result_if_match(expr)
             }
-            _ => return None,
-        };
-        Some(piece)
+            _ => None,
+        }
     }
 
     /// The str-element list via the str builder; a SCALAR-element list (`ok([4, 5])`,
@@ -672,8 +748,7 @@ impl LowerCtx {
         expr: &IrExpr,
         elements: &[IrExpr],
     ) -> Option<ValueId> {
-        let e = expr.clone();
-        match self.try_lower_str_list_literal(&e) {
+        match self.try_lower_str_list_literal(expr) {
             Some(obj) => Some(obj),
             None => self.try_lower_scalar_list_slots(elements),
         }

@@ -109,7 +109,7 @@ mod tests {
             Ty::Record { fields: vec![(sym("x"), Ty::Int)] },
             Ty::OpenRecord { fields: vec![(sym("x"), Ty::Int)] },
             Ty::Variant { name: sym("V"), cases: vec![] },
-            Ty::Fn { params: vec![], ret: Box::new(Ty::Unit) },
+            Ty::Fn { is_effect: false, params: vec![], ret: Box::new(Ty::Unit) },
             Ty::Tuple(vec![Ty::Int, Ty::Bool]),
             Ty::Named(sym("P"), vec![]),
             Ty::Union(vec![Ty::Int, Ty::String]),

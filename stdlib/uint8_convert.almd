@@ -1,7 +1,6 @@
 // uint8_convert — SELF-HOSTED uint8.to_* via the two-hop int composition (int.from_uint8
 // zero-widens to i64, int.to_<dst> narrows) — byte-identical to v0's uint8.almd bodies.
 // Nested call unrolled to two lets; callees are cross-file. Pure scalar.
-
 fn uint8_to_int8(x: UInt8) -> Int8 = {
   let i = int.from_uint8(x)
   int.to_int8(i)
@@ -53,7 +52,7 @@ fn uint8_to_string(x: UInt8) -> String = {
 }
 
 // Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
-fn uint8_to_int8_checked(x: UInt8) -> Option[Int8] = {
+fn uint8_to_int8_checked(x: UInt8) -> Int8? = {
   let i = int.from_uint8(x)
   int.to_int8_checked(i)
 }
@@ -62,4 +61,3 @@ fn uint8_to_int8_saturating(x: UInt8) -> Int8 = {
   let i = int.from_uint8(x)
   int.to_int8_saturating(i)
 }
-

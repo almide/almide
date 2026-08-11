@@ -24,4 +24,15 @@ fn main() -> Unit = {
   let m = bytes.copy_to_ptr(src, bytes.as_mut_ptr(small), 2)
   println("m:" + int.to_string(m))
   println("small01:" + int.to_string(bytes.read_u8(small, 0)) + "," + int.to_string(bytes.read_u8(small, 1)))
+  // EMPTY buffer: as_ptr/as_mut_ptr return NULL (no data region exists), and
+  // every bridge op through null moves nothing. Before, native handed out
+  // Vec's DANGLING sentinel and copy_to_ptr through it was UB (silent heap
+  // corruption, the process died with no output) while the wasm self-host
+  // handed out a real address past the 0-len block and overwrote the NEXT
+  // allocation (differential fuzz, 2026-08-10 night).
+  var empty = bytes.new(-1)
+  let z = bytes.copy_to_ptr(src, bytes.as_mut_ptr(empty), 2)
+  println("z:" + int.to_string(z))
+  let back = bytes.from_raw_ptr(bytes.as_ptr(empty), 3)
+  println("back:" + int.to_string(bytes.len(back)))
 }

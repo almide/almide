@@ -197,7 +197,7 @@ pub fn almide_rt_matrix_rope_rotate_at(
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
     for i in 0..half {
         let exp = (2 * i) as f64 / head_dim_u as f64;
-        inv_freqs.push(1.0 / theta_base.powf(exp));
+        inv_freqs.push(1.0 / almide_rt_libm_pow(theta_base, exp));
     }
     let mut out = Vec::<Vec<f64>>::with_capacity(rows);
     for p in 0..rows {
@@ -344,9 +344,11 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
         &x.data,
         x_rows,
         n_in,
-        w_bytes,
-        w_offset.max(0) as usize,
-        out_cols,
+        almide_kernel::q1_0_packed::PackedWeights {
+            bytes: w_bytes,
+            offset: w_offset.max(0) as usize,
+            rows: out_cols,
+        },
         &mut out,
     );
     mk(x_rows, out_cols, out)
@@ -376,7 +378,7 @@ pub fn almide_rt_matrix_silu_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMa
         let mut row = vec![0.0f64; cols];
         for j in 0..cols {
             let x = ai[j];
-            let sig = 1.0f64 / (1.0 + (-x).exp());
+            let sig = 1.0f64 / (1.0 + almide_rt_libm_exp(-x));
             row[j] = x * sig * bi[j];
         }
         out.push(row);
@@ -687,7 +689,7 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
     for j in 0..half {
         let exp = (2 * j) as f64 / head_dim_u as f64;
-        inv_freqs.push(1.0 / theta_base.powf(exp));
+        inv_freqs.push(1.0 / almide_rt_libm_pow(theta_base, exp));
     }
     let mut out = Vec::<Vec<f64>>::with_capacity(rows);
     for p in 0..rows {

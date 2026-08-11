@@ -96,27 +96,33 @@ fn render_byte_block_alloc(dst: ValueId, bytes: &[u8]) -> String {
     s
 }
 
-fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
-    match op {
-        // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
-        // as a list; len/cap are BYTE counts). $alloc the block, set the header, store
-        // each byte. Real DATA reproduced from the MIR (the un-defer, ③ exec slice).
-        Op::Alloc { dst, init: Init::Str(string), .. } => {
-            render_byte_block_alloc(*dst, string.as_bytes())
-        }
-        // A BYTES constant — physically the SAME `[rc][len][cap][bytes…]` block as a String
-        // literal (len/cap are byte counts), but the source bytes are arbitrary (not UTF-8).
-        // Materializes a const Bytes module global (the aes S-box) with no runtime call.
-        Op::Alloc { dst, init: Init::Bytes(data), .. } => {
-            render_byte_block_alloc(*dst, data)
-        }
-        // A runtime-sized OWNED String of `len` bytes: round the byte length up to
-        // ELEM_SIZE (list-compatible so the free-list reuses it), $alloc, set rc=1 + the
-        // byte len + the element cap. The data is left UNINITIALIZED for the caller to fill
-        // via `prim.store8` (the self-host `int.to_string` builder). Cert: one `Alloc` = i,
-        // init-agnostic — a fresh owned object, no checker change.
-        Op::Alloc { dst, init: Init::DynStr { len }, .. } => {
-            let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
+/// A runtime-sized OWNED String of `len` bytes: round the byte length up to
+/// ELEM_SIZE (list-compatible so the free-list reuses it), $alloc, set rc=1 plus
+/// the byte len and the element cap. The data is left UNINITIALIZED for the
+/// caller to fill via `prim.store8` (the self-host `int.to_string` builder).
+/// Cert: one `Alloc` = i, init-agnostic — a fresh owned object, no checker change.
+///
+/// The wrap guard runs on the FULL i64 length BEFORE `i32.wrap_i64` (the C-067
+/// discipline, applied to allocation): a byte len past 0xFFFFFFF0 wraps the
+/// `LIST_HEADER + round8(len)` i32 math to a TINY block — `bytes.new(4294967295)`
+/// allocated 12 bytes and the zerofill ran off the memory end as an OOB fault
+/// (fuzz seed 424245 index 104), the exact failure shape C-197 promises can never
+/// happen. Unsatisfiable-on-wasm32 is the DEFINED `$oom` abort; the compare is
+/// unsigned so a negative len (huge as u64) aborts the same way. 0xFFFFFFF0 is
+/// the largest len whose rounded block size still fits u32; everything in
+/// (ceiling, 0xFFFFFFF0] still aborts honestly at the refused `memory.grow`.
+fn render_dyn_str_alloc(dst: ValueId, len: ValueId) -> String {
+            // The wrap guard runs on the FULL i64 length BEFORE `i32.wrap_i64` (the
+            // C-067 discipline, applied to allocation): a byte len past 0xFFFFFFF0
+            // wraps the `LIST_HEADER + round8(len)` i32 math to a TINY block —
+            // `bytes.new(4294967295)` allocated 12 bytes and the zerofill ran off the
+            // memory end as an OOB fault (fuzz seed 424245 index 104), the exact
+            // failure shape C-197 promises can never happen. Unsatisfiable-on-wasm32
+            // is the DEFINED `$oom` abort; unsigned compare so a negative len (huge
+            // as u64) aborts the same way. 0xFFFFFFF0 = the largest len whose rounded
+            // block size still fits u32; everything in (ceiling, 0xFFFFFFF0] still
+            // aborts honestly at the refused `memory.grow`.
+            let wlen = format!("(i32.wrap_i64 (local.get {}))", local(len));
             // round byte len up to ELEM_SIZE: (len + ELEM_SIZE-1) & ~(ELEM_SIZE-1)
             let rounded = format!(
                 "(i32.and (i32.add {wlen} (i32.const {add})) (i32.const {mask}))",
@@ -124,38 +130,23 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
                 mask = -(ELEM_SIZE as i32),
             );
             format!(
-                "    (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {rounded})))\n\
+                "    (if (i64.gt_u (local.get {n}) (i64.const 4294967280))\n\
+                 \x20     (then (call $oom)))\n\
+                 \x20   (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {rounded})))\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) {wlen})\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.shr_u {rounded} (i32.const {shift})))\n",
-                d = local(*dst),
+                d = local(dst),
+                n = local(len),
                 shift = ELEM_SIZE.trailing_zeros(),
             )
-        }
-        // A materialized `Some(payload)`: a 1-element list (len=1) whose `data[0]` holds
-        // the scalar payload. `None` is the 0-element list (`Init::Opaque`, len=0). A
-        // variant `match` reads `len` as the tag and `data[0]` as the payload. Cert: one
-        // `Alloc` = i, init-agnostic (no checker change).
-        Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
-            let cap = 1 + PUSH_HEADROOM;
-            format!(
-                "    (local.set {d} (call $list_new (i32.const 1) (i32.const {cap})))\n\
-                 \x20   (call $list_set (local.get {d}) (i32.const 0) (local.get {p}))\n",
-                d = local(*dst),
-                p = local(*payload),
-            )
-        }
-        // A runtime-sized OWNED `List[Int]` of `len` i64 slots: $alloc `LIST_HEADER +
-        // len*ELEM_SIZE` bytes, set rc=1 + len + cap (= the element count). Elements are
-        // left UNINITIALIZED for the caller to fill via `prim.store64`. The list-building
-        // sibling of `DynStr`. Cert: one `Alloc` = i, init-agnostic — no checker change.
-        // A DynList (List[Int], scalar slots) OR a DynListStr (List[String], heap-handle
-        // slots) — physically IDENTICAL: alloc `LIST_HEADER + len*ELEM_SIZE`, rc=1, len=cap.
-        // (The DropListStr free is what distinguishes the nested-ownership variant.)
-        // The rung-4 SCALAR-list literal — the SAME `[rc][len][cap][slots…]` block the
-        // inline `Alloc{DynList}`+store sequence built (byte-behavior identical): alloc
-        // len==cap==N, store each raw i64 slot value at its offset. One op, so the
-        // native leg can map it to `vec![…]` without prim-idiom guessing.
+}
+
+/// The rung-4 list slot ops: a literal's block build, and the bounds-checked
+/// element get/set. Split out of [`render_op_alloc_lit`] so neither half
+/// outgrows a readable arm table.
+fn render_op_list_slot(op: &Op, floats: &BTreeSet<ValueId>) -> String {
+    match op {
         Op::ListLit { dst, elems } => {
             let n = elems.len() as u32;
             let total = LIST_HEADER + n * ELEM_SIZE;
@@ -233,15 +224,79 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
                 v = local(*val),
             )
         }
+        _ => unreachable!("render_op_list_slot: {op:?} is not a list slot op"),
+    }
+}
+
+fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
+    match op {
+        // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
+        // as a list; len/cap are BYTE counts). $alloc the block, set the header, store
+        // each byte. Real DATA reproduced from the MIR (the un-defer, ③ exec slice).
+        Op::Alloc { dst, init: Init::Str(string), .. } => {
+            render_byte_block_alloc(*dst, string.as_bytes())
+        }
+        // A BYTES constant — physically the SAME `[rc][len][cap][bytes…]` block as a String
+        // literal (len/cap are byte counts), but the source bytes are arbitrary (not UTF-8).
+        // Materializes a const Bytes module global (the aes S-box) with no runtime call.
+        Op::Alloc { dst, init: Init::Bytes(data), .. } => {
+            render_byte_block_alloc(*dst, data)
+        }
+        // A runtime-sized OWNED String of `len` bytes: round the byte length up to
+        // ELEM_SIZE (list-compatible so the free-list reuses it), $alloc, set rc=1 + the
+        // byte len + the element cap. The data is left UNINITIALIZED for the caller to fill
+        // via `prim.store8` (the self-host `int.to_string` builder). Cert: one `Alloc` = i,
+        // init-agnostic — a fresh owned object, no checker change.
+        Op::Alloc { dst, init: Init::DynStr { len }, .. } => render_dyn_str_alloc(*dst, *len),
+        // A materialized `Some(payload)`: a 1-element list (len=1) whose `data[0]` holds
+        // the scalar payload. `None` is the 0-element list (`Init::Opaque`, len=0). A
+        // variant `match` reads `len` as the tag and `data[0]` as the payload. Cert: one
+        // `Alloc` = i, init-agnostic (no checker change).
+        Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
+            let cap = 1 + PUSH_HEADROOM;
+            format!(
+                "    (local.set {d} (call $list_new (i32.const 1) (i32.const {cap})))\n\
+                 \x20   (call $list_set (local.get {d}) (i32.const 0) (local.get {p}))\n",
+                d = local(*dst),
+                p = local(*payload),
+            )
+        }
+        // A runtime-sized OWNED `List[Int]` of `len` i64 slots: $alloc `LIST_HEADER +
+        // len*ELEM_SIZE` bytes, set rc=1 + len + cap (= the element count). Elements are
+        // left UNINITIALIZED for the caller to fill via `prim.store64`. The list-building
+        // sibling of `DynStr`. Cert: one `Alloc` = i, init-agnostic — no checker change.
+        // A DynList (List[Int], scalar slots) OR a DynListStr (List[String], heap-handle
+        // slots) — physically IDENTICAL: alloc `LIST_HEADER + len*ELEM_SIZE`, rc=1, len=cap.
+        // (The DropListStr free is what distinguishes the nested-ownership variant.)
+        // The rung-4 SCALAR-list literal — the SAME `[rc][len][cap][slots…]` block the
+        // inline `Alloc{DynList}`+store sequence built (byte-behavior identical): alloc
+        // len==cap==N, store each raw i64 slot value at its offset. One op, so the
+        // native leg can map it to `vec![…]` without prim-idiom guessing.
+        Op::ListLit { .. } | Op::ListGetScalar { .. } | Op::ListSetScalar { .. } => {
+            render_op_list_slot(op, floats)
+        }
         Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } => {
+            // Same full-i64 wrap guard as DynStr above: this path calls $alloc
+            // DIRECTLY (not $list_new), so without it a slot count whose
+            // `LIST_HEADER + len*ELEM_SIZE` passes 2^32 wraps the i32 multiply to a
+            // tiny block and the element stores scribble past it. The bound is the
+            // exact wrap boundary — floor((2^32 - LIST_HEADER) / ELEM_SIZE) =
+            // 536870910 — a C-197 no-forged-block BACKSTOP only: the 2^31-byte
+            // POLICY ceiling (C-169/C-161) is enforced by the stdlib constructors
+            // on both targets, and `list_repeat_size_ceiling` pins that its
+            // 268435456-slot boundary still allocates here. Unsigned compare, so a
+            // negative len aborts the same way.
             let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
             let bytes = format!("(i32.mul {wlen} (i32.const {ELEM_SIZE}))");
             format!(
-                "    (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {bytes})))\n\
+                "    (if (i64.gt_u (local.get {n}) (i64.const 536870910))\n\
+                 \x20     (then (call $oom)))\n\
+                 \x20   (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {bytes})))\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) {wlen})\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) {wlen})\n",
                 d = local(*dst),
+                n = local(*len),
             )
         }
         // `None` SIZED LIKE `OptSome` (len 0, cap 1+headroom) so the size-bucketed free-list

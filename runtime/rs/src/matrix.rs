@@ -99,7 +99,14 @@ pub const ALMIDE_MATRIX_MAX_ELEMS: i64 = 1 << 28;
 pub fn almide_rt_matrix_dims(rows: i64, cols: i64) -> (usize, usize) {
     let r = rows.max(0);
     let c = cols.max(0);
-    if r.saturating_mul(c) > ALMIDE_MATRIX_MAX_ELEMS {
+    // The ROW COUNT is bounded ALONE, not only the r*c product: `zeros(2^31, -7)`
+    // has 0 elements after the cols clamp but still asks for 2^31 ROW headers —
+    // 16 GiB of row-pointer array on wasm (OOM kill) while native's unused-value
+    // allocation was elided by LLVM (ran clean): two verdicts for one program
+    // (differential fuzz, 2026-08-10 night). Rows over the element ceiling can
+    // never produce an in-ceiling matrix anyway (cols >= 1 overflows the product;
+    // cols = 0 is useless at that scale), so both targets die in the T6 form.
+    if r > ALMIDE_MATRIX_MAX_ELEMS || r.saturating_mul(c) > ALMIDE_MATRIX_MAX_ELEMS {
         eprintln!("Error: matrix dimensions too large");
         std::process::exit(1);
     }
@@ -268,7 +275,7 @@ pub fn almide_rt_matrix_neg(m: &AlmideMatrix) -> AlmideMatrix {
 }
 
 pub fn almide_rt_matrix_pow(m: &AlmideMatrix, exp: f64) -> AlmideMatrix {
-    m.iter().map(|r| r.iter().map(|x| x.powf(exp)).collect()).collect()
+    m.iter().map(|r| r.iter().map(|x| almide_rt_libm_pow(*x, exp)).collect()).collect()
 }
 
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
@@ -430,7 +437,7 @@ pub fn almide_rt_matrix_swiglu_gate(
                 g += xi[k] * wg[k];
                 u += xi[k] * wu[k];
             }
-            let sig = 1.0 / (1.0 + (-g).exp());
+            let sig = 1.0 / (1.0 + almide_rt_libm_exp(-g));
             out[i][j] = g * sig * u;
         }
     }
@@ -541,7 +548,7 @@ pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideM
             let mut max = f64::NEG_INFINITY;
             for &x in row.iter() { if x > max { max = x; } }
             let mut sum = 0.0;
-            for x in row.iter_mut() { *x = (*x - max).exp(); sum += *x; }
+            for x in row.iter_mut() { *x = almide_rt_libm_exp(*x - max); sum += *x; }
             let inv = 1.0 / sum;
             for x in row.iter_mut() { *x *= inv; }
         }

@@ -96,28 +96,7 @@ impl<'a> Interpreter<'a> {
         // 2. Variant constructor (Unit / Tuple). Record-variant ctors arrive
         //    as `Record` nodes, handled in eval. Look up in the registry.
         if let Some((ty_name, kind)) = self.variant_ctor(name) {
-            return match kind {
-                CtorKind::Unit => Flow::val(Value::Variant {
-                    ty: Some(ty_name),
-                    ctor: name,
-                    payload: VariantPayload::Unit,
-                }),
-                CtorKind::Tuple => {
-                    let mut evaled = Vec::with_capacity(args.len());
-                    for a in args {
-                        evaled.push(val!(self.eval_expr(a, scope)));
-                    }
-                    Flow::val(Value::Variant {
-                        ty: Some(ty_name),
-                        ctor: name,
-                        payload: VariantPayload::Tuple(evaled),
-                    })
-                }
-                CtorKind::Record => {
-                    // Should not arrive as a Named call, but handle defensively.
-                    Flow::Unsupported(format!("record-variant ctor call {}", n))
-                }
-            };
+            return self.eval_variant_ctor_call(ty_name, name, kind, args, scope);
         }
 
         // 2b. The stdlib's only BUNDLED variant type (bytes.Endian): its decl
@@ -133,38 +112,121 @@ impl<'a> Interpreter<'a> {
             });
         }
 
-        // 3. A user / stdlib free function lowered into the program.
+        // 3. A user / stdlib free function lowered into the program. A stdlib
+        //    IMPL name (`string_slice` — how a lowered MODULE body spells
+        //    `string.slice`) first tries the SAME native bridge a
+        //    module-spelled call takes, so both spellings share one resolution
+        //    order; the lowered body stays the fallback. Mut-param impls skip
+        //    the shortcut (the bridge has no write-back path, #1022).
         if let Some(func) = self.fns.get(&name).copied() {
-            // #1022: mut-parameter copy-in/copy-out. The backends' lowering
-            // returns each `mut` param's final buffer and writes it back at
-            // EVERY call position (C-132) — the interp mirrors that by keeping
-            // the callee frame alive and assigning each recorded caller lvalue
-            // from the param's final value. Recorded BEFORE evaluation, while
-            // the argument is still an expression with a binding identity.
-            let writebacks = match self.mut_param_lvalues(func, args) {
-                Ok(wb) => wb,
-                Err(flow) => return flow,
-            };
-            let mut evaled = Vec::with_capacity(args.len());
-            for a in args {
-                evaled.push(val!(self.eval_expr(a, scope)));
-            }
-            let root = self.root_scope();
-            let (flow, frame) = self.call_function_keeping_frame(func, evaled, &root);
-            // Copy-out only on a normal return — an abort/abstain never
-            // half-writes state the backends would not have written either.
-            if matches!(flow, Flow::Value(_)) {
-                for (idx, lv) in writebacks {
-                    let Some(final_v) = frame.get(func.params[idx].var) else { continue };
-                    if let Err(e) = self.write_mut_lvalue(lv, final_v, scope) {
-                        return e;
+            if let Some((m, f)) = crate::stdlib_pool::module_of_impl(name) {
+                // The in-interp HOFs take closure ARGUMENTS and must see the
+                // arg EXPRS — same tier order as `eval_module_call`.
+                if is_hof(m.as_str(), f.as_str()) {
+                    return self.eval_hof(m, f, args, scope);
+                }
+                if !func.params.iter().any(|p| p.is_mut) {
+                    let mut evaled = Vec::with_capacity(args.len());
+                    for a in args {
+                        evaled.push(val!(self.eval_expr(a, scope)));
                     }
+                    if let Some(result) = self.eval_container_op(m.as_str(), f.as_str(), &evaled)
+                    {
+                        return result;
+                    }
+                    if let Some(result) = crate::bridge::dispatch(m.as_str(), f.as_str(), &evaled)
+                    {
+                        return result;
+                    }
+                    let root = self.root_scope();
+                    return self.call_function(func, evaled, &root);
                 }
             }
-            return flow;
+            return self.eval_lowered_fn_call(func, args, scope);
+        }
+
+        // 4. A bare Named target inside a LOWERED MODULE body calling a module
+        //    sibling (args' `option_or` → `option`). Runs only on a flat-table
+        //    MISS (program fns stay authoritative) and only when exactly ONE
+        //    loaded module defines the name — an ambiguous name abstains
+        //    honestly rather than resolving from the wrong source (#1087).
+        {
+            let mut hits = self
+                .module_fns
+                .iter()
+                .filter(|((_, f), _)| *f == name)
+                .map(|(_, func)| *func);
+            if let (Some(func), None) = (hits.next(), hits.next()) {
+                return self.eval_lowered_fn_call(func, args, scope);
+            }
         }
 
         Flow::Unsupported(format!("named call `{}`", n))
+    }
+
+    /// Step 2 of [`Self::eval_named_call`]: build the variant value a Unit- or
+    /// Tuple-payload constructor names.
+    fn eval_variant_ctor_call(
+        &mut self,
+        ty_name: Sym,
+        ctor: Sym,
+        kind: CtorKind,
+        args: &[IrExpr],
+        scope: &Scope,
+    ) -> Flow {
+        let payload = match kind {
+            CtorKind::Unit => VariantPayload::Unit,
+            CtorKind::Tuple => {
+                let mut evaled = Vec::with_capacity(args.len());
+                for a in args {
+                    evaled.push(val!(self.eval_expr(a, scope)));
+                }
+                VariantPayload::Tuple(evaled)
+            }
+            CtorKind::Record => {
+                // Should not arrive as a Named call, but handle defensively.
+                return Flow::Unsupported(format!("record-variant ctor call {}", ctor));
+            }
+        };
+        Flow::val(Value::Variant { ty: Some(ty_name), ctor, payload })
+    }
+
+    /// Step 3 of [`Self::eval_named_call`]: call a lowered Almide function.
+    ///
+    /// #1022: mut-parameter copy-in/copy-out. The backends' lowering returns
+    /// each `mut` param's final buffer and writes it back at EVERY call
+    /// position (C-132) — the interp mirrors that by keeping the callee frame
+    /// alive and assigning each recorded caller lvalue from the param's final
+    /// value. Recorded BEFORE evaluation, while the argument is still an
+    /// expression with a binding identity.
+    fn eval_lowered_fn_call(
+        &mut self,
+        func: &'a almide_ir::IrFunction,
+        args: &[IrExpr],
+        scope: &Scope,
+    ) -> Flow {
+        let writebacks = match self.mut_param_lvalues(func, args) {
+            Ok(wb) => wb,
+            Err(flow) => return flow,
+        };
+        let mut evaled = Vec::with_capacity(args.len());
+        for a in args {
+            evaled.push(val!(self.eval_expr(a, scope)));
+        }
+        let root = self.root_scope();
+        let (flow, frame) = self.call_function_keeping_frame(func, evaled, &root);
+        // Copy-out only on a normal return — an abort/abstain never
+        // half-writes state the backends would not have written either.
+        if !matches!(flow, Flow::Value(_)) {
+            return flow;
+        }
+        for (idx, lv) in writebacks {
+            let Some(final_v) = frame.get(func.params[idx].var) else { continue };
+            if let Err(e) = self.write_mut_lvalue(lv, final_v, scope) {
+                return e;
+            }
+        }
+        flow
     }
 
     /// The caller-side lvalues of a call's `mut`-parameter arguments — the
@@ -254,7 +316,7 @@ impl<'a> Interpreter<'a> {
     /// `eval_named_call`'s builtins group (println/print/eprintln/eprint/
     /// assert/assert_eq/assert_ne/panic). `None` means `n` is not a builtin —
     /// the caller falls through to variant-ctor / user-fn dispatch.
-    fn eval_builtin_call(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+    pub(crate) fn eval_builtin_call(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
         match n {
             "println" | "print" | "eprintln" | "eprint" => self.eval_builtin_print(n, args, scope),
             _ => self.eval_builtin_assert(n, args, scope),
@@ -359,12 +421,64 @@ impl<'a> Interpreter<'a> {
             return self.eval_inplace_mutation(module, func, args, scope);
         }
 
+        // Third: `fan.any`, evaluated at the DETERMINISTIC contract's spec
+        // point rather than with threads: first-Ok in LIST ORDER with
+        // side-effect order pinned sequential (C-185, C-004's own comment:
+        // "any (sequential in list order)"), so it must NOT ride the eager
+        // loop below — an arm after the winner is never evaluated. All-fail
+        // is the defined Err (C-005). `fan.settle`'s block form never gets
+        // here: it lowers to `IrExprKind::Fan`, which `eval_fan` already
+        // evaluates (tuple of per-arm Results, the no-1-tuple rule).
+        if module.as_str() == "fan" && func.as_str() == "any" {
+            return self.eval_fan_any(args, scope);
+        }
+
         // Otherwise evaluate all args eagerly, then dispatch.
         let mut evaled = Vec::with_capacity(args.len());
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
         self.dispatch_module_resolved(module, func, evaled)
+    }
+
+    /// `fan.any`, first-Ok short-circuit — see the dispatch comment above for
+    /// the contract pins. The block form arrives as ONE argument: the literal
+    /// LIST of 0-ary thunk closures the parser synthesized. Each thunk is
+    /// CALLED in list order; a thunk returns its raw Result when the arm is an
+    /// effect call (the interp's effect convention) and a bare value when pure
+    /// — the pure case takes the Ok adapter here, mirroring what FanLowering
+    /// bakes into both backends (#514).
+    fn eval_fan_any(&mut self, args: &[IrExpr], scope: &Scope) -> Flow {
+        let [thunks_expr] = args else {
+            // The mapper form (list + fn) has its own runtime name upstream
+            // (`any_map`); anything else reaching here is not the block ABI.
+            return Flow::Unsupported(format!(
+                "fan.any with {} args (thunk-list ABI takes 1)",
+                args.len()
+            ));
+        };
+        let thunks_val = val!(self.eval_expr(thunks_expr, scope));
+        let Value::List(thunks) = thunks_val else {
+            return Flow::Unsupported("fan.any over a non-list thunk carrier".to_string());
+        };
+        for t in thunks.iter() {
+            let Value::Closure(clo) = t else {
+                return Flow::Unsupported("fan.any arm that is not a thunk closure".to_string());
+            };
+            let v = val!(self.apply_closure(clo, Vec::new()));
+            match v {
+                // First Ok wins; later arms are never evaluated — the pinned
+                // sequential side-effect order (C-004/C-185).
+                ok @ Value::Result(Ok(_)) => return Flow::val(ok),
+                Value::Result(Err(_)) => {}
+                // A pure arm cannot fail: its value IS the winner (#514's
+                // Ok adapter), and evaluation stops here too.
+                pure => return Flow::val(Value::Result(Ok(Box::new(pure)))),
+            }
+        }
+        Flow::val(Value::Result(Err(Box::new(Value::str(
+            "fan.any: all candidates failed".to_string(),
+        )))))
     }
 
     /// An in-place `mut`-receiver mutator, evaluated as a read → transform →
@@ -491,65 +605,163 @@ impl<'a> Interpreter<'a> {
             return result;
         }
 
+        // The argv floor (Stage 2 BRIDGEABLE burn-down): value-clean prims the
+        // STATELESS bridge cannot serve — they read the run's argv, which is
+        // interpreter state (`with_args`, empty by default = exactly how the
+        // oracle harness runs every fixture on all three legs).
+        // `args_get_list` answers argv[1..]; `args_get_list_full` prepends an
+        // argv[0] whose only cross-target observable is NONEMPTINESS (the
+        // fixtures assert it, never print it — C-181's argv0 normalization).
+        if module.as_str() == "prim" {
+            match func.as_str() {
+                "args_get_list" => {
+                    let items: Vec<Value> =
+                        self.args.iter().map(|s| Value::str(s.clone())).collect();
+                    return Flow::val(Value::list(items));
+                }
+                "args_get_list_full" => {
+                    let mut items = vec![Value::str("interp")];
+                    items.extend(self.args.iter().map(|s| Value::str(s.clone())));
+                    return Flow::val(Value::list(items));
+                }
+                // The env floor (same tier as argv, C-133): `prim.env_get`
+                // reads the LIVE process environment — exactly what the other
+                // two legs observe (native getenv; wasm WASI environ with
+                // inherit-env), so all three answer the same bytes. Without
+                // this arm the resolve below finds the lowered `env_get`
+                // stdlib fn BY BARE NAME — the very fn whose body is this
+                // prim — and the interp spun in that cycle until fuel ran
+                // out (the module-identity bug class, #1087–#1094, one tier
+                // down: a prim resolved from the wrong source).
+                "env_get" => {
+                    let Some(Value::Str(name)) = args.first() else {
+                        return Flow::Abort("internal: prim.env_get expects a String".into());
+                    };
+                    return Flow::val(match std::env::var(name.as_str()) {
+                        Ok(v) => Value::Option(Some(Box::new(Value::str(v)))),
+                        Err(_) => Value::Option(None),
+                    });
+                }
+                // The sandboxed fs floor (#1218, vfs.rs): writes land in the
+                // per-interpreter overlay, reads fall back to the real fs
+                // read-only. Same tier as the argv/env floors — these prims
+                // read INTERPRETER state, which the stateless bridge cannot.
+                "read_text_file" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.read_text_file expects a String".into());
+                    };
+                    return Flow::val(match crate::vfs::read_text(&self.vfs, path) {
+                        Ok(s) => Value::Result(Ok(Box::new(Value::str(s)))),
+                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    });
+                }
+                "write_text_file" => {
+                    let (Some(Value::Str(path)), Some(Value::Str(content))) =
+                        (args.first(), args.get(1))
+                    else {
+                        return Flow::Abort(
+                            "internal: prim.write_text_file expects (String, String)".into(),
+                        );
+                    };
+                    let (path, content) = (path.to_string(), content.to_string());
+                    return Flow::val(match crate::vfs::write_text(&mut self.vfs, &path, &content) {
+                        Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
+                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    });
+                }
+                "make_dir" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.make_dir expects a String".into());
+                    };
+                    let path = path.to_string();
+                    return Flow::val(match crate::vfs::make_dir(&mut self.vfs, &path) {
+                        Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
+                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    });
+                }
+                "path_exists" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.path_exists expects a String".into());
+                    };
+                    return Flow::val(Value::Bool(crate::vfs::exists(&self.vfs, path)));
+                }
+                "remove_all" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.remove_all expects a String".into());
+                    };
+                    let path = path.to_string();
+                    return match crate::vfs::remove_all(&mut self.vfs, &path) {
+                        crate::vfs::RemoveOutcome::Removed => {
+                            Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
+                        }
+                        // A host path the overlay never wrote: refusing to
+                        // delete real files is the sandbox's point, and
+                        // pretending to would be a wrong vote — abstain.
+                        crate::vfs::RemoveOutcome::HostOnly => Flow::Unsupported(
+                            "prim.remove_all on a host path (the overlay is read-only toward the real fs)".into(),
+                        ),
+                        crate::vfs::RemoveOutcome::Missing => {
+                            Flow::val(Value::Result(Err(Box::new(Value::str(
+                                "No such file or directory (os error 2)".to_string(),
+                            )))))
+                        }
+                    };
+                }
+                _ => {}
+            }
+        }
+
         // Scalar / string / math native bridge (intrinsic-symbol surface).
         if let Some(result) = crate::bridge::dispatch(module.as_str(), func.as_str(), &args) {
             return result;
         }
 
-        // An almide-bodied stdlib fn lowered into the program (pre-ir_link it
-        // lives under program.modules; some helpers are top-level fns).
-        //
+        let Some((func_def, gate_mut)) = self.resolve_lowered_body(module, func) else {
+            return Flow::Unsupported(format!("{}.{}", module, func));
+        };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
         // cannot run here. A mut-param callee must abstain rather than
         // silently drop the write-back (a wrong third vote).
-        let mut_param_gate = |func_def: &almide_ir::IrFunction| -> Option<Flow> {
-            func_def.params.iter().any(|p| p.is_mut).then(|| {
-                Flow::Unsupported(format!(
-                    "module call `{}.{}` with a `mut` parameter through the \
-                     eager dispatch path (no caller lvalue to copy out — #1022)",
-                    module.as_str(),
-                    func.as_str()
-                ))
-            })
-        };
-        if let Some(func_def) = self.module_fns.get(&(module, func)).copied() {
-            // Only interpret if it has a real (non-Hole) body.
-            if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
-                if let Some(flow) = mut_param_gate(func_def) {
-                    return flow;
-                }
-                let root = self.root_scope();
-                return self.call_function(func_def, args, &root);
-            }
+        if gate_mut && func_def.params.iter().any(|p| p.is_mut) {
+            return Flow::Unsupported(format!(
+                "module call `{}.{}` with a `mut` parameter through the \
+                 eager dispatch path (no caller lvalue to copy out — #1022)",
+                module.as_str(),
+                func.as_str()
+            ));
         }
-        // A top-level fn named exactly `func` (some stdlib helpers flatten).
-        if let Some(func_def) = self.fns.get(&func).copied() {
-            if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
-                if let Some(flow) = mut_param_gate(func_def) {
-                    return flow;
-                }
-                let root = self.root_scope();
-                return self.call_function(func_def, args, &root);
-            }
-        }
+        let root = self.root_scope();
+        self.call_function(func_def, args, &root)
+    }
 
-        // The self-hosted stdlib body from the shared registry (stdlib_pool):
-        // the SAME source the wasm leg links for this call name, lowered once and
-        // layered into `self.fns` at construction. Consulted LAST so the
-        // interp-native surfaces above keep their vote provenance; what the body
-        // itself cannot evaluate (a heap/effect prim outside the scalar floor)
-        // abstains from inside with that prim named — a skip, never a guess.
-        if let Some(impl_name) = crate::stdlib_pool::impl_fn(module, func) {
-            if let Some(func_def) = self.fns.get(&impl_name).copied() {
-                if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
-                    let root = self.root_scope();
-                    return self.call_function(func_def, args, &root);
-                }
-            }
+    /// The lowered Almide body `module.func` resolves to, paired with whether
+    /// the eager-dispatch `mut`-parameter gate applies to it.
+    ///
+    /// Three sources in order: the module's own fn table; a top-level fn named
+    /// exactly `func` (some stdlib helpers flatten); and LAST the self-hosted
+    /// stdlib body from the shared registry (stdlib_pool) — the SAME source the
+    /// wasm leg links for this call name, lowered once and layered into
+    /// `self.fns` at construction. Consulted last so the interp-native surfaces
+    /// above keep their vote provenance; what a pool body itself cannot
+    /// evaluate (a heap/effect prim outside the scalar floor) abstains from
+    /// inside with that prim named — a skip, never a guess — so the mut gate
+    /// does not apply to it.
+    ///
+    /// A `Hole` body is an intrinsic stub, not an interpretable definition:
+    /// each source skips it and falls through to the next.
+    fn resolve_lowered_body(&self, module: Sym, func: Sym) -> Option<(&'a almide_ir::IrFunction, bool)> {
+        fn bodied(d: &&almide_ir::IrFunction) -> bool {
+            !matches!(d.body.kind, almide_ir::IrExprKind::Hole)
         }
-
-        Flow::Unsupported(format!("{}.{}", module, func))
+        if let Some(d) = self.module_fns.get(&(module, func)).copied().filter(bodied) {
+            return Some((d, true));
+        }
+        if let Some(d) = self.fns.get(&func).copied().filter(bodied) {
+            return Some((d, true));
+        }
+        let impl_name = crate::stdlib_pool::impl_fn(module, func)?;
+        self.fns.get(&impl_name).copied().filter(bodied).map(|d| (d, false))
     }
 
     // ── FnRef ───────────────────────────────────────────────────
@@ -672,6 +884,20 @@ pub(crate) fn is_hof(module: &str, func: &str) -> bool {
             | ("list", "zip_with")
             | ("list", "unique_by")
             | ("list", "each")
+            // The `__fallible_*` carriers (ADR-0006): what the checker instantiates
+            // in place of the plain name above when the callback propagates
+            // with `!`. They take a closure exactly like their siblings, so
+            // they belong on this allowlist — omitting them made the whole
+            // family fall through to `Unsupported`, which silently removed the
+            // third oracle from the DEFAULT way to write a fallible traversal.
+            // Bodies: `hofs.rs::eval_hof_list_try`.
+            | ("list", "__fallible_map")
+            | ("list", "__fallible_filter")
+            | ("list", "__fallible_filter_map")
+            | ("list", "__fallible_flat_map")
+            | ("list", "__fallible_find")
+            | ("list", "__fallible_fold")
+            | ("list", "__fallible_each")
             | ("map", "map")
             | ("map", "filter")
             | ("map", "fold")

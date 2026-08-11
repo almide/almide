@@ -56,23 +56,34 @@ pub fn insert_probe_charges(functions: &mut Vec<MirFunction>) {
 fn charge_fn(f: &mut MirFunction) {
     let mut idx: u32 = 0;
     let mut out: Vec<Op> = Vec::with_capacity(f.ops.len() + 4);
-    out.push(Op::Charge { site: site_id(&f.name, idx), cost: 1 });
+    out.push(Op::Charge {
+        site: site_id(&f.name, idx),
+        cost: 1,
+    });
     idx += 1;
     for op in f.ops.drain(..) {
         let is_loop_start = matches!(op, Op::LoopStart);
         // T3-5: a bulk string concat charges 1 + result_len/16 (the dyn
         // charge reads the result AFTER the op, so it sits right behind it).
         let dyn_src = match &op {
-            Op::CallFn { name, dst: Some(d), .. } if name == "__str_concat" => Some(*d),
+            Op::CallFn {
+                name, dst: Some(d), ..
+            } if name == "__str_concat" => Some(*d),
             _ => None,
         };
         out.push(op);
         if is_loop_start {
-            out.push(Op::Charge { site: site_id(&f.name, idx), cost: 1 });
+            out.push(Op::Charge {
+                site: site_id(&f.name, idx),
+                cost: 1,
+            });
             idx += 1;
         }
         if let Some(src) = dyn_src {
-            out.push(Op::ChargeDyn { site: site_id(&f.name, idx), src });
+            out.push(Op::ChargeDyn {
+                site: site_id(&f.name, idx),
+                src,
+            });
             idx += 1;
         }
     }
@@ -86,9 +97,15 @@ fn charge_fn(f: &mut MirFunction) {
 /// the one documented remainder of "zero metering outside regions".
 fn specialize_metered_clones(functions: &mut Vec<MirFunction>) {
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
-    let names: BTreeSet<String> = functions.iter().map(|f| f.name.as_str().to_string()).collect();
-    let by_name: BTreeMap<String, usize> =
-        functions.iter().enumerate().map(|(i, f)| (f.name.as_str().to_string(), i)).collect();
+    let names: BTreeSet<String> = functions
+        .iter()
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let by_name: BTreeMap<String, usize> = functions
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.name.as_str().to_string(), i))
+        .collect();
     let is_root = |n: &str| n.starts_with("__almd_bounded_");
 
     // Transitive CallFn closure from the region roots (user fns only), plus
@@ -96,8 +113,7 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>) {
     // lambda the clone map cannot retarget).
     let mut reachable: BTreeSet<String> = BTreeSet::new();
     let mut uses_funcref = false;
-    let mut queue: VecDeque<String> =
-        names.iter().filter(|n| is_root(n)).cloned().collect();
+    let mut queue: VecDeque<String> = names.iter().filter(|n| is_root(n)).cloned().collect();
     let mut visited: BTreeSet<String> = queue.iter().cloned().collect();
     while let Some(n) = queue.pop_front() {
         let Some(&i) = by_name.get(&n) else { continue };
@@ -213,7 +229,8 @@ mod cert_tests {
 
     #[test]
     fn native_extraction_orders_and_parses() {
-        let rs = "fn main() {\n    __almd_charge(42, 1);\n    let x = 5;\n    __almd_charge(7, 1);\n}\n";
+        let rs =
+            "fn main() {\n    __almd_charge(42, 1);\n    let x = 5;\n    __almd_charge(7, 1);\n}\n";
         assert_eq!(native_charge_sites(rs), vec![42, 7]);
     }
 
@@ -282,7 +299,10 @@ pub fn timeout_used() -> bool {
 /// the artifact cuts at the n-th wall check without reading the clock).
 /// `-1` = live mode (read the clock).
 pub fn omega_replay() -> i64 {
-    std::env::var("ALMIDE_OMEGA").ok().and_then(|v| v.parse().ok()).unwrap_or(-1)
+    std::env::var("ALMIDE_OMEGA")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(-1)
 }
 
 /// T5-2 record: `ALMIDE_OMEGA_RECORD=1` at compile time — the NATIVE artifact

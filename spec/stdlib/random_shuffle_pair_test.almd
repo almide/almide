@@ -1,0 +1,58 @@
+// #1169: `random.shuffle` over `(String, String)` elements — the omikuji
+// table's other half — links the `random.shuffle_pair` twin on the wasm leg
+// instead of the unlinked `_x` wall. The twin's Fisher-Yates swap is
+// `list.swap` (a raw slot exchange within the COW copy — ownership-invariant,
+// element-type-agnostic), so the source list is untouched. Entropy makes the
+// order nondeterministic, so the assertions pin LENGTH, full two-way
+// MEMBERSHIP, source intactness, and the small-list edges — never an order.
+import random
+
+let TABLE = [("A", "1"), ("B", "2"), ("C", "3"), ("D", "4"), ("E", "5")]
+
+fn count_in(xs: List[(String, String)], p: (String, String)) -> Int = {
+  var found = 0
+  for q in xs {
+    if p.0 == q.0 and p.1 == q.1 then {
+      found = found + 1
+    } else {
+      found = found
+    }
+  }
+  found
+}
+
+effect fn shuffled() -> List[(String, String)] = random.shuffle(TABLE)
+
+test "a shuffled pair list is a permutation of the source" {
+  let mixed = shuffled()!
+  assert_eq(list.len(mixed), 5)
+  var hits = 0
+  for p in TABLE {
+    hits = hits + count_in(mixed, p)
+  }
+  assert_eq(hits, 5)
+}
+
+test "the source list is untouched" {
+  let _ = shuffled()
+  var intact = 0
+  for p in TABLE {
+    let a = p.0
+    let b = p.1
+    if string.len(a) == 1 and string.len(b) == 1 then {
+      intact = intact + 1
+    } else {
+      intact = intact
+    }
+  }
+  assert_eq(intact, 5)
+}
+
+test "empty and single-element lists shuffle to themselves" {
+  let empty: List[(String, String)] = []
+  assert_eq(list.len(random.shuffle(empty)!), 0)
+  let one = [("only", "row")]
+  let s = random.shuffle(one)!
+  assert_eq(list.len(s), 1)
+  assert_eq(count_in(s, ("only", "row")), 1)
+}

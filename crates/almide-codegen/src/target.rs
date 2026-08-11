@@ -15,6 +15,7 @@ use super::pass::{
 use super::pass_auto_parallel::AutoParallelPass;
 use super::pass_box_deref::BoxDerefPass;
 use super::pass_capture_clone::CaptureClonePass;
+use super::pass_shared_cell_borrow::SharedCellBorrowPass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_result_propagation::ResultPropagationPass;
@@ -150,6 +151,11 @@ fn build_pipeline(target: Target) -> Pipeline {
                 .add(NormalizeRuntimeCallsPass)
                 // Final: flatten modules into root (after UnifyVarTables)
                 .add(IrLinkFlattenPass)
+                // Borrow captured cells in place for statement-proven-safe
+                // reads (#1143). Runs after flatten (all fns in root) and
+                // after every Borrow-shaping pass, so it sees final call
+                // and borrow forms.
+                .add(SharedCellBorrowPass)
                 // §4 Stage 1: compute the unified top-let storage attribute
                 // at pipeline end (VarIds final, modules flattened); the
                 // walker asserts every legacy predicate agrees with it.

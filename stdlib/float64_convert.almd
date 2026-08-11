@@ -2,7 +2,6 @@
 // `float.to_<dst>(float.from_float64(x))` unrolled to two `let`s (no call-as-arg),
 // byte-matching float64.almd. Cross-file callees, pure scalar. There is no `to_float64` —
 // identity.
-
 fn float64_to_string(x: Float64) -> String = {
   let v = float.from_float64(x)
   float.to_string(v)

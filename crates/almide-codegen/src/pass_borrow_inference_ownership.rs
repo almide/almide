@@ -1,3 +1,107 @@
+/// The control-flow half of [`check_needs_ownership`], plus the forms whose
+/// result ESCAPES the expression.
+///
+/// Leaves and nodes that carry no borrowable child use of `var` in this analysis
+/// fall through to the `_` arm: borrow inference is sensitive to which refs are
+/// seen, so an un-handled variant deliberately contributes nothing rather than
+/// being traversed further.
+fn check_needs_ownership_flow(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    match &expr.kind {
+        IrExprKind::If { cond, then, else_ } => check_needs_ownership_if(cond, then, else_, var, needs),
+        IrExprKind::Match { .. } => check_needs_ownership_match(expr, var, needs),
+        IrExprKind::While { cond, body } => {
+            check_needs_ownership(cond, var, needs);
+            for s in body { check_needs_ownership_stmt(s, var, needs); }
+        }
+        // Both the unwrapped value and the `??` fallback flow OUT as the result,
+        // so a param used as either ESCAPES and needs ownership — else the
+        // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
+        // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
+        // the If/Match/Option-wrapping escaping-child handling.
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            check_needs_ownership_unwrap_or(expr, fallback, var, needs)
+        }
+        // Explicit-preserve (traversal-totality): every other variant belongs
+        // to a SIBLING group dispatcher (or is a leaf) — this fn contributes
+        // nothing for them, verbatim the `_ => {}` it replaces.
+        IrExprKind::Var { .. } | IrExprKind::Call { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::Block { .. } | IrExprKind::BinOp { .. }
+        | IrExprKind::UnOp { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::Range { .. } | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+    }
+}
+
+/// The positions that CONSUME their operand: collection and record
+/// construction, Result/Option wrapping, a lambda capture, interpolation, and
+/// the loop/iterator sources. A param appearing directly in one of these must be
+/// owned; anything deeper is recursed into normally.
+fn check_needs_ownership_consuming(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    match &expr.kind {
+        IrExprKind::Record { fields, .. } => check_needs_ownership_record(fields, var, needs),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            check_needs_ownership_elements(elements, var, needs)
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            check_needs_ownership_spread_record(base, fields, var, needs)
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                if is_var(k, var) || is_var(v, var) {
+                    *needs = true;
+                    return;
+                }
+            }
+        }
+        IrExprKind::ResultOk { expr: inner } | IrExprKind::ResultErr { expr: inner }
+        | IrExprKind::OptionSome { expr: inner } => {
+            if is_var(inner, var) {
+                *needs = true;
+                return;
+            }
+            check_needs_ownership(inner, var, needs);
+        }
+        // A captured var is moved into the closure.
+        IrExprKind::Lambda { body, .. } => {
+            if uses_var(body, var) {
+                *needs = true;
+            }
+        }
+        IrExprKind::StringInterp { parts } => {
+            check_needs_ownership_string_interp(parts, var, needs)
+        }
+        // ForIn: the iterable is consumed. IterChain: its source is, when
+        // `consume` is set.
+        IrExprKind::ForIn { iterable, body, .. } => {
+            check_needs_ownership_for_in(iterable, body, var, needs)
+        }
+        IrExprKind::IterChain { .. } => check_needs_ownership_iter_chain(expr, var, needs),
+        _ => unreachable!("check_needs_ownership_consuming on a non-consuming kind"),
+    }
+}
+
 /// Check if a parameter variable needs ownership.
 /// Conservative: marks as Owned if used in ANY ownership-requiring position.
 fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
@@ -26,105 +130,51 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         // also borrows it.
         IrExprKind::Call { .. } => check_needs_ownership_call(expr, var, needs),
 
-        // ── Collection construction consumes ──
-        IrExprKind::Record { fields, .. } => check_needs_ownership_record(fields, var, needs),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } =>
-            check_needs_ownership_elements(elements, var, needs),
-        IrExprKind::SpreadRecord { base, fields } =>
-            check_needs_ownership_spread_record(base, fields, var, needs),
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { if is_var(k, var) || is_var(v, var) { *needs = true; return; } }
-        }
+        // ── The consuming positions: construction, wrapping, capture ──
+        IrExprKind::Record { .. } | IrExprKind::List { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::IterChain { .. } => check_needs_ownership_consuming(expr, var, needs),
 
-        // ── Wrapping in Result/Option/Some ──
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } => {
-            if is_var(expr, var) { *needs = true; return; }
-            check_needs_ownership(expr, var, needs);
+        // ── Safe reads: indexing and field access BORROW, and a non-concat
+        // binop (comparison, arithmetic) reads its operands. Recurse only. ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::Try { expr: e } | IrExprKind::Unwrap { expr: e }
+        | IrExprKind::ToOption { expr: e } | IrExprKind::Clone { expr: e }
+        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => {
+            check_needs_ownership(e, var, needs)
         }
-
-        // ── Lambda capture: captured vars need ownership ──
-        IrExprKind::Lambda { body, .. } => {
-            if uses_var(body, var) { *needs = true; }
+        IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::Range { start: a, end: b, .. } => {
+            check_needs_ownership(a, var, needs);
+            check_needs_ownership(b, var, needs);
         }
-
-        // ── String interpolation consumes ──
-        IrExprKind::StringInterp { parts } => check_needs_ownership_string_interp(parts, var, needs),
-
-        // ── ForIn: iterable is consumed ──
-        IrExprKind::ForIn { iterable, body, .. } => check_needs_ownership_for_in(iterable, body, var, needs),
-
-        // ── IterChain: source consumed if consume=true ──
-        IrExprKind::IterChain { .. } => check_needs_ownership_iter_chain(expr, var, needs),
-
-        // ── Safe reads (no ownership needed) ──
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            // Indexing borrows — safe
-            check_needs_ownership(object, var, needs);
-            check_needs_ownership(index, var, needs);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            check_needs_ownership(object, var, needs);
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            // Non-concat binop: comparison, arithmetic — safe reads
-            check_needs_ownership(left, var, needs);
-            check_needs_ownership(right, var, needs);
-        }
-
-        // ── Control flow: recurse ──
-        IrExprKind::If { cond, then, else_ } => check_needs_ownership_if(cond, then, else_, var, needs),
-        IrExprKind::Match { .. } => check_needs_ownership_match(expr, var, needs),
-        IrExprKind::While { cond, body } => {
-            check_needs_ownership(cond, var, needs);
-            for s in body { check_needs_ownership_stmt(s, var, needs); }
-        }
-
-        // ── Wrappers: recurse ──
-        IrExprKind::UnOp { operand, .. } => check_needs_ownership(operand, var, needs),
-        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } => {
-            check_needs_ownership(expr, var, needs);
-        }
-        // Both the unwrapped value and the `??` fallback flow OUT as the result,
-        // so a param used as either ESCAPES and needs ownership — else the
-        // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
-        // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
-        // the If/Match/Option-wrapping escaping-child handling above.
-        IrExprKind::UnwrapOr { expr, fallback } => check_needs_ownership_unwrap_or(expr, fallback, var, needs),
-        IrExprKind::OptionalChain { expr, .. } => check_needs_ownership(expr, var, needs),
-        IrExprKind::Range { start, end, .. } => {
-            check_needs_ownership(start, var, needs);
-            check_needs_ownership(end, var, needs);
-        }
+        // A `fan` arm's value is moved into the join, so an element that IS the
+        // param consumes it. A macro argument is only READ (`println!("{}", x)`
+        // borrows), so it merely recurses — merging the two made every
+        // macro-arg param Owned and the generated Rust stopped compiling.
         IrExprKind::Fan { exprs } => check_needs_ownership_elements(exprs, var, needs),
         IrExprKind::RustMacro { args, .. } => {
-            for a in args { check_needs_ownership(a, var, needs); }
+            for a in args {
+                check_needs_ownership(a, var, needs);
+            }
         }
+
         // RuntimeCall: lowered form of `@intrinsic` / bundled Module call.
         // Its borrow signature lives in SIGS_SNAPSHOT keyed by the mangled
         // symbol. If the arg slot is Own, the call consumes that arg and
         // the enclosing var must also be owned.
         IrExprKind::RuntimeCall { .. } => check_needs_ownership_runtime_call(expr, var, needs),
-        // Leaves and nodes that carry no borrowable child use of `var` in this
-        // analysis. Explicit-preserve (not recurse-more): borrow inference is
-        // sensitive to which refs are seen, so every un-handled variant is
-        // listed with the original `=> {}` behaviour, total-by-construction.
-        // `Var { id }` where `id != var` (the `id == var` case is the guarded
-        // arm at the top — a bare self-reference whose ownership is decided by
-        // its enclosing context, e.g. Block tail / arg position).
-        IrExprKind::Var { .. }
-        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-        | IrExprKind::Unit | IrExprKind::FnRef { .. }
-        | IrExprKind::Break | IrExprKind::Continue
-        | IrExprKind::TailCall { .. } | IrExprKind::EmptyMap
-        | IrExprKind::OptionNone | IrExprKind::RcWrap { .. }
-        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
-        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+
+        // ── Control flow, the escaping-result forms, and the leaves ──
+        _ => check_needs_ownership_flow(expr, var, needs),
     }
 }
 
@@ -615,48 +665,72 @@ fn uses_var_match_arms(arms: &[IrMatchArm], var: VarId) -> bool {
     })
 }
 
+/// Grouped by CHILD SHAPE: apart from `Var` itself, a node uses `var` exactly
+/// when one of its children does.
 fn uses_var(expr: &IrExpr, var: VarId) -> bool {
+    let uses = |e: &IrExpr| uses_var(e, var);
     match &expr.kind {
         IrExprKind::Var { id } => *id == var,
-        IrExprKind::Block { stmts, expr } => uses_var_block(stmts, expr, var),
-        IrExprKind::If { cond, then, else_ } => uses_var(cond, var) || uses_var(then, var) || uses_var(else_, var),
+
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e } => uses(e),
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => uses(a) || uses(b),
+
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => uses(cond) || uses(then) || uses(else_),
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RustMacro { args: xs, .. }
+        | IrExprKind::RuntimeCall { args: xs, .. } => xs.iter().any(uses),
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| uses(v)),
+        IrExprKind::SpreadRecord { base, fields } => {
+            uses(base) || fields.iter().any(|(_, v)| uses(v))
+        }
+
+        // ── Shapes with their own traversal ──
+        _ => uses_var_nested(expr, var),
+    }
+}
+
+/// The [`uses_var`] arms whose children are not a plain list of
+/// sub-expressions — calls, keyed containers, and the nodes carrying statement
+/// bodies or match arms.
+fn uses_var_nested(expr: &IrExpr, var: VarId) -> bool {
+    let uses = |e: &IrExpr| uses_var(e, var);
+    match &expr.kind {
         IrExprKind::Call { args, target, .. } => call_uses_var(target, args, var),
-        IrExprKind::BinOp { left, right, .. } => uses_var(left, var) || uses_var(right, var),
-        IrExprKind::UnOp { operand, .. } => uses_var(operand, var),
-        IrExprKind::Lambda { body, .. } => uses_var(body, var),
-        IrExprKind::Match { subject, arms } => uses_var(subject, var) || uses_var_match_arms(arms, var),
-        IrExprKind::ForIn { iterable, body, .. } => {
-            uses_var(iterable, var) || body.iter().any(|s| stmt_uses_var(s, var))
+        IrExprKind::Block { stmts, expr } => uses_var_block(stmts, expr, var),
+        IrExprKind::Match { subject, arms } => uses(subject) || uses_var_match_arms(arms, var),
+        IrExprKind::ForIn { iterable: lead, body, .. }
+        | IrExprKind::While { cond: lead, body } => {
+            uses(lead) || body.iter().any(|s| stmt_uses_var(s, var))
         }
-        IrExprKind::While { cond, body } => {
-            uses_var(cond, var) || body.iter().any(|s| stmt_uses_var(s, var))
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => uses_var(object, var),
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            uses_var(object, var) || uses_var(index, var)
+        IrExprKind::MapLiteral { entries } => {
+            entries.iter().any(|(k, v)| uses(k) || uses(v))
         }
         IrExprKind::StringInterp { parts } => parts.iter().any(|p| {
-            matches!(p, IrStringPart::Expr { expr } if uses_var(expr, var))
+            matches!(p, IrStringPart::Expr { expr } if uses(expr))
         }),
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } => uses_var(expr, var),
-        IrExprKind::UnwrapOr { expr, fallback } => uses_var(expr, var) || uses_var(fallback, var),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => elements.iter().any(|e| uses_var(e, var)),
-        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| uses_var(v, var)),
-        IrExprKind::SpreadRecord { base, fields } => {
-            uses_var(base, var) || fields.iter().any(|(_, v)| uses_var(v, var))
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            iter_chain_uses_var(source, steps, collector, var)
         }
-        IrExprKind::IterChain { source, steps, collector, .. } => iter_chain_uses_var(source, steps, collector, var),
-        IrExprKind::RustMacro { args, .. } => args.iter().any(|a| uses_var(a, var)),
-        IrExprKind::RuntimeCall { args, .. } => args.iter().any(|a| uses_var(a, var)),
-        IrExprKind::Range { start, end, .. } => uses_var(start, var) || uses_var(end, var),
-        IrExprKind::MapLiteral { entries } => entries.iter().any(|(k, v)| uses_var(k, var) || uses_var(v, var)),
         _ => false,
     }
 }

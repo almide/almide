@@ -6,68 +6,89 @@ use super::Parser;
 
 impl Parser {
     pub(crate) fn parse_pattern(&mut self) -> Result<Pattern, String> {
+        if let Some(p) = self.parse_structural_pattern() {
+            return p;
+        }
+        if let Some(p) = self.parse_literal_pattern()? {
+            return Ok(p);
+        }
+        if let Some(p) = self.parse_name_pattern() {
+            return p;
+        }
+        Err(self.pattern_expected_error())
+    }
+
+    /// The patterns a single leading token selects: `_`, `none`, the
+    /// `some`/`ok`/`err` wrappers, and the `(…)` / `[…]` bracket forms. `None`
+    /// means the head is not one of them.
+    fn parse_structural_pattern(&mut self) -> Option<Result<Pattern, String>> {
         if self.check(TokenType::Underscore) {
             self.advance();
-            return Ok(Pattern::Wildcard);
+            return Some(Ok(Pattern::Wildcard));
         }
         if self.check(TokenType::None) {
             self.advance();
-            return Ok(Pattern::None);
+            return Some(Ok(Pattern::None));
         }
         if self.check(TokenType::Some) {
-            return self.parse_some_pattern();
+            return Some(self.parse_some_pattern());
         }
         if self.check(TokenType::Ok) {
-            return self.parse_ok_pattern();
+            return Some(self.parse_ok_pattern());
         }
         if self.check(TokenType::Err) {
-            return self.parse_err_pattern();
+            return Some(self.parse_err_pattern());
         }
         if self.check(TokenType::LParen) {
-            return self.parse_tuple_or_paren_pattern();
+            return Some(self.parse_tuple_or_paren_pattern());
         }
         // List pattern: [], [a], [a, b, ...]
         if self.check(TokenType::LBracket) {
-            return self.parse_list_pattern();
+            return Some(self.parse_list_pattern());
         }
-        // Negative numeric literal: -1, -3.14
+        None
+    }
+
+    /// The literal patterns: a negative numeric (`-1`, `-3.14`), a plain
+    /// int/float/string, or a bool keyword. `Ok(None)` means the head is not a
+    /// literal; an `Err` is a real parse failure inside one.
+    fn parse_literal_pattern(&mut self) -> Result<Option<Pattern>, String> {
         if self.check(TokenType::Minus)
             && self.peek_at(1).map(|t| matches!(t.token_type, TokenType::Int | TokenType::Float)).unwrap_or(false)
         {
-            return self.parse_negative_literal_pattern();
+            return self.parse_negative_literal_pattern().map(Some);
         }
         if self.check(TokenType::Int) || self.check(TokenType::Float) || self.check(TokenType::String) {
             let expr = self.parse_primary()?;
-            return Ok(Pattern::Literal { value: Box::new(expr) });
+            return Ok(Some(Pattern::Literal { value: Box::new(expr) }));
         }
-        if self.check(TokenType::True) {
-            let span = Some(self.current_span());
-            self.advance();
-            return Ok(Pattern::Literal {
-                value: Box::new(Expr::new(self.next_id(), span, ExprKind::Bool { value: true })),
-            });
-        }
-        if self.check(TokenType::False) {
-            let span = Some(self.current_span());
-            self.advance();
-            return Ok(Pattern::Literal {
-                value: Box::new(Expr::new(self.next_id(), span, ExprKind::Bool { value: false })),
-            });
-        }
+        let value = match () {
+            _ if self.check(TokenType::True) => true,
+            _ if self.check(TokenType::False) => false,
+            _ => return Ok(None),
+        };
+        let span = Some(self.current_span());
+        self.advance();
+        Ok(Some(Pattern::Literal {
+            value: Box::new(Expr::new(self.next_id(), span, ExprKind::Bool { value })),
+        }))
+    }
+
+    /// The name-headed patterns: a constructor (`Ctor`), a module-qualified
+    /// constructor (`binary.Unreachable`), or a plain binder.
+    fn parse_name_pattern(&mut self) -> Option<Result<Pattern, String>> {
         if self.check(TokenType::TypeName) {
-            return self.parse_constructor_pattern();
+            return Some(self.parse_constructor_pattern());
         }
-        // Module-qualified constructor pattern: module.TypeName (e.g. binary.Unreachable)
         if self.check(TokenType::Ident) && self.peek_dot_type_name() {
-            return self.parse_qualified_constructor_pattern();
+            return Some(self.parse_qualified_constructor_pattern());
         }
         if self.check(TokenType::Ident) {
             let name = sym(&self.current().value);
             self.advance();
-            return Ok(Pattern::Ident { name });
+            return Some(Ok(Pattern::Ident { name }));
         }
-
-        Err(self.pattern_expected_error())
+        None
     }
 
     fn parse_some_pattern(&mut self) -> Result<Pattern, String> {

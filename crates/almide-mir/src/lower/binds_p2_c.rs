@@ -94,6 +94,40 @@ impl LowerCtx {
     /// Extracted from `Self::lower_bind_heap_call_module` (second-round split, cog
     /// reduction): the `faithful`-gated + self-host fn-name read-shape tracking,
     /// verbatim.
+    /// The READ-shapes a FAITHFUL self-host result seeds.
+    ///
+    /// A `List[scalar]` or `List[heap]` result (`string.split`/`chars`/`lines` →
+    /// `List[String]`, or a heap-element list combinator) is a REAL, POPULATED
+    /// nested-ownership block whose slots hold owned element HANDLES — so a
+    /// value-position `xs[i]` over the bound var can LoadHandle element i at
+    /// `$elem_addr` (the heap-element borrow path in
+    /// `try_lower_heap_field_borrow`, gated on `materialized_lists`). Without
+    /// registering it, `parts[i]` fell to the container-grain `Dup` of the WHOLE
+    /// list and a String consumer read the list HEADER bytes. Narrowed to
+    /// `List[heap]` (NOT the broader Option/Result/Map that `is_heap_elem_list_ty`
+    /// also matches) — only a real list is `[i]`-indexable here.
+    ///
+    /// A RECORD/TUPLE result (`list.partition` → (List, List)) seeds the same
+    /// way — without it a `.0`/`.1` projection falls to the container-grain Dup
+    /// and a consumer reads the TUPLE header (`list.len(result.0)` returned the
+    /// tuple's len 2, not the slot list's 5 — the pipe_chain partition
+    /// miscompile, 2026-07-17). READ-shape ONLY: the drop stays the pre-existing
+    /// flat one (re-routing it through `record_masks` here imbalanced the
+    /// ownership cert — the callee's fills are opaque to the caller's witness;
+    /// the Named arm's mask rides a different accounting).
+    fn seed_faithful_read_shape(&mut self, dst: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let list_shape = is_scalar_elem_list_ty(ty)
+            || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && is_heap_ty(&a[0]));
+        if list_shape {
+            self.materialized_lists.insert(dst);
+        }
+        if self.aggregate_field_tys(ty).is_some() {
+            self.materialized_aggregates.insert(dst);
+        }
+    }
+
     fn seed_call_module_heap_read_shape(
         &mut self,
         dst: ValueId,
@@ -102,34 +136,8 @@ impl LowerCtx {
         func: &str,
         faithful: bool,
     ) {
-        if is_scalar_elem_list_ty(ty) && faithful {
-            self.materialized_lists.insert(dst);
-        }
-        // A faithful `List[heap]` result (`string.split`/`chars`/`lines` → `List[String]`,
-        // or a heap-element list combinator) is ALSO a REAL, POPULATED nested-ownership block
-        // whose slots hold owned element HANDLES — so a value-position `xs[i]` over the bound
-        // var can LoadHandle element i at `$elem_addr` (the heap-element borrow path in
-        // `try_lower_heap_field_borrow`, gated on `materialized_lists`). Without registering
-        // it, `parts[i]` fell to the container-grain `Dup` of the WHOLE list → a String
-        // consumer read the list HEADER bytes (the `string.split`-subscript miscompiles).
-        // Narrowed to `List[heap]` (NOT the broader Option/Result/Map that
-        // `is_heap_elem_list_ty` also matches) — only a real list is `[i]`-indexable here.
-        if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                if a.len() == 1 && is_heap_ty(&a[0]))
-            && faithful
-        {
-            self.materialized_lists.insert(dst);
-        }
-        // A self-host returning a RECORD/TUPLE (`list.partition` → (List, List)):
-        // seed the READ-shape — without it a `.0`/`.1` projection falls to the
-        // container-grain Dup and a consumer reads the TUPLE header
-        // (list.len(result.0) returned the tuple's len 2, not the slot list's 5 —
-        // the pipe_chain partition miscompile, 2026-07-17). READ-shape ONLY: the
-        // drop stays the pre-existing flat one (re-routing it through record_masks
-        // here imbalanced the ownership cert — the callee's fills are opaque to
-        // the caller's witness; the Named arm's mask rides a different accounting).
-        if faithful && self.aggregate_field_tys(ty).is_some() {
-            self.materialized_aggregates.insert(dst);
+        if faithful {
+            self.seed_faithful_read_shape(dst, ty);
         }
         // A BORROW result (`prim.load_str` of a list slot — the list still owns it) is NOT
         // added to the scope-end drop set; everything else is a fresh owned value.
@@ -153,6 +161,29 @@ impl LowerCtx {
         // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
         if is_self_host_result_module_fn(module, func) {
             self.materialized_results.insert(dst);
+            // A VARIANT-Err payload (`option.to_result(o, Missing("cfg"))` →
+            // `Result[Int, LoadError]`, #1114's typed-error route): route the drop —
+            // a RICH variant (heap fields) through the generated `$__drop_res_<V>`
+            // (a flat rc_dec would leak the payload's fields), a FLAT one through
+            // the one-level `DropListStr` — which is ALSO what admits the
+            // `err(e)` payload BIND in the statement-position Result match
+            // (`result_err_bind` keys on exactly these two sets). Without this the
+            // bound subject was tracked but its Err bind declined, and the whole
+            // match fell to the untracked-subject wall.
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = ty {
+                if a.len() == 2 && !is_heap_ty(&a[0]) {
+                    if let Some(vname) = self.custom_variant_type_name(&a[1]) {
+                        let needs_rec = self.variant_layouts.needs_recursive_drop(&vname, &|rn| {
+                            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                        });
+                        if needs_rec {
+                            self.variant_drop_handles.insert(dst, format!("res_{vname}"));
+                        } else {
+                            self.heap_elem_lists.insert(dst);
+                        }
+                    }
+                }
+            }
         }
         // A self-host HEAP-Ok Result fn (`value.as_string`/`value.as_array`) — track it in the
         // cap-as-tag set so a `match` reads tag @16 + binds the @12 payload. The DROP differs
@@ -166,6 +197,16 @@ impl LowerCtx {
                 // `Result[Value, String]` (value.get) — a single dynamic Value Ok, freed
                 // recursively by `Op::DropResultValue` (Ok → `$__drop_value`).
                 self.value_result_results.insert(dst);
+            } else if crate::lower::is_res_map_si_ty(ty)
+                || crate::lower::is_res_list_map_si_ty(ty)
+            {
+                // fs.fold_lines msi / chunked — the tag-aware `$__drop_res_msi` /
+                // `$__drop_res_lmsi` (Ok → the skv key sweep); heap_elem_lists
+                // also inserted for the bind-gate admission (drop precedence:
+                // variant_drop_handles wins).
+                let route = if crate::lower::is_res_map_si_ty(ty) { "res_msi" } else { "res_lmsi" };
+                self.variant_drop_handles.insert(dst, route.to_string());
+                self.heap_elem_lists.insert(dst);
             } else {
                 self.heap_elem_lists.insert(dst);
             }
@@ -246,45 +287,8 @@ impl LowerCtx {
     /// reduction): the second half of the mutually-exclusive `if/else if` chain, verbatim
     /// (only reached when the first half's chain did not match).
     fn seed_call_module_heap_drop_route_b(&mut self, dst: ValueId, ty: &Ty) {
-        // Guard-clause flattening (codopsy7 max-depth sweep, same rationale as `_a` above).
-        if crate::lower::is_map_msv_ty(ty) {
-            // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
-            // last-ref inner map's String slots (a flat rc_dec would leak them).
-            self.variant_drop_handles.insert(dst, "map_msv".to_string());
-            return;
-        }
-        if crate::lower::is_map_msb_ty(ty) {
-            // `Map[String, Map[String, <scalar>]]` — `$__drop_map_msb` key-sweeps each
-            // last-ref inner map (the skv split layout owns no heap values).
-            self.variant_drop_handles.insert(dst, "map_msb".to_string());
-            return;
-        }
-        if crate::lower::is_map_mlo_ty(ty) {
-            // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
-            // last-ref value list's Option slots (a flat rc_dec would leak them).
-            self.variant_drop_handles.insert(dst, "map_mlo".to_string());
-            return;
-        }
-        if let Some(rname) = (match ty {
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                if a.len() == 1 =>
-            {
-                self.record_or_anon_drop_type_name(&a[0])
-            }
-            _ => None,
-        }) {
-            // A `List[<recursive-drop record>]` result (`list.unique` over a
-            // String-field record via the `__krec_*` twins): route to the generated
-            // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the
-            // flat per-slot dec freed each element block but LEAKED its String
-            // fields (the krec-unique residue).
-            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
-            return;
-        }
-        if crate::lower::is_lenlist_list_ty(ty) {
-            // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
-            // flat DropListStr would leak each element's owned payload slots.
-            self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+        if let Some(route) = self.nested_result_drop_route(ty) {
+            self.variant_drop_handles.insert(dst, route);
             return;
         }
         if crate::lower::is_opt_list_str_ty(ty) {
@@ -294,20 +298,58 @@ impl LowerCtx {
             self.list_list_str_lists.insert(dst);
             return;
         }
-        if matches!(ty,
+        // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
+        // rc_decs exactly the n deep-copied key Strings (scalar value slots
+        // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
+        // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
+        let map_str_scalar = matches!(ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
-        {
-            // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
-            // rc_decs exactly the n deep-copied key Strings (scalar value slots
-            // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
-            // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
-            self.heap_elem_lists.insert(dst);
-            return;
-        }
-        if is_heap_elem_list_ty(ty) {
+                if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]));
+        if map_str_scalar || is_heap_elem_list_ty(ty) {
             self.heap_elem_lists.insert(dst);
         }
+    }
+
+    /// The named `$__drop_*` route a NESTED-container self-host result needs,
+    /// because a flat rc_dec would leak its inner blocks. `None` leaves the value
+    /// to the caller's flat / element-sweep routes.
+    ///
+    /// * `map_msv` — `Map[String, Map[String, String]]`: sweeps each last-ref
+    ///   inner map's String slots.
+    /// * `map_msb` — `Map[String, Map[String, <scalar>]]`: key-sweeps each
+    ///   last-ref inner map (the skv split layout owns no heap values).
+    /// * `map_mlo` — `Map[String, List[Option[Int]]]`: sweeps each last-ref value
+    ///   list's Option slots.
+    /// * `list_<R>` — `List[<recursive-drop record>]` (`list.unique` over a
+    ///   String-field record via the `__krec_*` twins): the generated
+    ///   `$__drop_list_<R>`, emitted for EVERY recursive-drop record. The flat
+    ///   per-slot dec freed each element block but LEAKED its String fields (the
+    ///   krec-unique residue).
+    /// * `list_lenlist` — `List[Result[_, String]]` / `List[Option[String]]`: the
+    ///   len-loop drop; the flat DropListStr would leak each element's owned
+    ///   payload slots.
+    fn nested_result_drop_route(&self, ty: &Ty) -> Option<String> {
+        if crate::lower::is_map_msv_ty(ty) {
+            return Some("map_msv".to_string());
+        }
+        if crate::lower::is_map_msb_ty(ty) {
+            return Some("map_msb".to_string());
+        }
+        if crate::lower::is_map_mlo_ty(ty) {
+            return Some("map_mlo".to_string());
+        }
+        let elem_record = match ty {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 =>
+            {
+                self.record_or_anon_drop_type_name(&a[0])
+            }
+            _ => None,
+        };
+        if let Some(rname) = elem_record {
+            return Some(format!("list_{rname}"));
+        }
+        crate::lower::is_lenlist_list_ty(ty).then(|| "list_lenlist".to_string())
     }
 
     /// Extracted from `Self::lower_bind_heap` (pattern-2 uniform-arm split, cog reduction):
@@ -423,7 +465,12 @@ impl LowerCtx {
         // owned rc=1 block (released-merge-dst `i` credit) — then bind +
         // scope-track it and SEED its variant read-shape so a following
         // `match $r` / `$r!` takes the executing tag-read path.
-        if is_variant_ty(ty) {
+        // ALSO entered for a VARIANT SUBJECT with a non-variant HEAP result (`let a =
+        // match <Result[List[Int],String]> { ok(p) => p, err(_) => [0] }` — the
+        // fallible-HOF `??` bind rewrite, #1134 Shape 2): the tail position runs the
+        // SAME routers with no result-type gate, and the merge is the one owned rc=1
+        // block either way — only the variant read-shape seeding is variant-only.
+        if is_variant_ty(ty) || is_variant_ty(&subject.ty) {
             let mark = self.ops.len();
             let lhh_mark = self.live_heap_handles.len();
             let mut dst = self.try_lower_custom_variant_match(subject, arms, ty);
@@ -441,7 +488,16 @@ impl LowerCtx {
                 if !self.live_heap_handles.contains(&obj) {
                     self.live_heap_handles.push(obj);
                 }
-                self.seed_variant_param(obj, ty);
+                if is_variant_ty(ty) {
+                    self.seed_variant_param(obj, ty);
+                } else if crate::lower::is_heap_elem_list_ty(ty)
+                    || matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 && !is_heap_ty(&a[0]))
+                {
+                    // A List-valued merge binds as a REAL populated block —
+                    // register it so later element reads take the executing path.
+                    self.materialized_lists.insert(obj);
+                }
                 return Ok(());
             }
             self.ops.truncate(mark);

@@ -28,8 +28,20 @@ impl InterpOracle {
         Self { fuel: DEFAULT_FUEL }
     }
 
-    fn evaluate_inner(&self, source: &str) -> Option<String> {
-        use almide::interp::{Interpreter, RunStatus};
+    /// An oracle with an explicit budget. Only the tests use this — they
+    /// need a budget small enough to exhaust in milliseconds, and the
+    /// `FuelExhausted` verdict does not depend on the budget's size.
+    #[cfg(test)]
+    pub fn with_fuel(fuel: u64) -> Self {
+        Self { fuel }
+    }
+
+    /// Run `source` to completion (or to fuel exhaustion) and hand back the
+    /// raw outcome. Both public answers are read off this one run: the
+    /// stdout vote wants `Ok` only, the termination probe wants
+    /// `FuelExhausted` only, and neither may see the other's status.
+    fn run_inner(&self, source: &str) -> Option<almide::interp::RunOutcome> {
+        use almide::interp::Interpreter;
 
         let tokens = almide::lexer::Lexer::tokenize(source);
         let mut parser = almide::parser::Parser::new(tokens);
@@ -53,24 +65,119 @@ impl InterpOracle {
         almide::mono::monomorphize(&mut ir);
         almide::ir_link::ir_link(&mut ir);
 
-        let out = Interpreter::new(&ir).with_fuel(self.fuel).run_main();
-        match out.status {
-            // Only a CLEAN run casts a vote: the ladder compares stdout of
-            // clean native/wasm runs, and abort stderr text is not part of
-            // the cross-target byte contract at this rung.
-            RunStatus::Ok => Some(out.stdout),
-            RunStatus::Aborted | RunStatus::Unsupported(_) | RunStatus::FuelExhausted => None,
-        }
+        Some(Interpreter::new(&ir).with_fuel(self.fuel).run_main())
     }
 }
 
 impl ReferenceOracle for InterpOracle {
     fn evaluate(&self, source: &str) -> Option<String> {
+        use almide::interp::RunStatus;
+
         // The frontend is panic-free on the fuzz corpus by its own gates,
         // but the oracle must never kill the campaign: a panic = abstain
         // (and the shape will surface through the panic-fuzz lane instead).
-        catch_unwind(AssertUnwindSafe(|| self.evaluate_inner(source)))
+        let out = catch_unwind(AssertUnwindSafe(|| self.run_inner(source)))
             .ok()
-            .flatten()
+            .flatten()?;
+        match out.status {
+            // Only a CLEAN run casts a vote: the ladder compares stdout of
+            // clean native/wasm runs, and abort stderr text is not part of
+            // the cross-target byte contract at this rung.
+            RunStatus::Ok => Some(out.stdout),
+            // `Exited(n)` is an explicit `process.exit(n)` — a deliberate
+            // non-zero exit, not a clean run, so it abstains from the stdout
+            // vote exactly like `Aborted` (this rung compares the stdout of
+            // CLEAN runs; the exit code is the ladder's own comparison).
+            RunStatus::Aborted
+            | RunStatus::Exited(_)
+            | RunStatus::Unsupported(_)
+            | RunStatus::FuelExhausted => None,
+        }
+    }
+
+    fn exhausts_fuel(&self, source: &str) -> bool {
+        use almide::interp::RunStatus;
+
+        // ONLY `FuelExhausted`. `Unsupported` means the interpreter lacks a
+        // feature — it says nothing about whether the program terminates —
+        // and treating it as non-termination would suppress real findings on
+        // every shape the interpreter has not caught up to yet.
+        matches!(
+            catch_unwind(AssertUnwindSafe(|| self.run_inner(source))).ok().flatten(),
+            Some(out) if matches!(out.status, RunStatus::FuelExhausted)
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The #924 shape: an effect-free counting loop seeded at `i64::MIN`.
+    /// LLVM deletes it and computes the exit value analytically, so the
+    /// native leg finishes in milliseconds while wasm — which elides
+    /// nothing — runs it for real and times out. Native therefore cannot
+    /// answer "does this terminate"; the fuel-bounded interpreter can.
+    const NON_TERMINATING: &str = r#"
+fn main() -> Unit = {
+  var seq = -9223372036854775808
+  while seq < 3 {
+    seq = seq + 1
+  }
+  println("loop=${seq}")
+}
+"#;
+
+    /// The same program with the literal the mutation replaced. This is the
+    /// A/B partner: if `exhausts_fuel` said `true` here too, the rule would
+    /// suppress every wasm-hang finding rather than just the elided ones.
+    const TERMINATING: &str = r#"
+fn main() -> Unit = {
+  var seq = 0
+  while seq < 3 {
+    seq = seq + 1
+  }
+  println("loop=${seq}")
+}
+"#;
+
+    #[test]
+    fn non_terminating_loop_exhausts_fuel() {
+        let oracle = InterpOracle::with_fuel(100_000);
+        assert!(
+            oracle.exhausts_fuel(NON_TERMINATING),
+            "a ~9.2e18-iteration loop must exhaust the budget, not abstain"
+        );
+    }
+
+    #[test]
+    fn terminating_loop_does_not_exhaust_fuel() {
+        let oracle = InterpOracle::with_fuel(100_000);
+        assert!(
+            !oracle.exhausts_fuel(TERMINATING),
+            "a 3-iteration loop must not be reported as non-terminating"
+        );
+        assert_eq!(oracle.evaluate(TERMINATING).as_deref(), Some("loop=3\n"));
+    }
+
+    /// Fuel exhaustion abstains from the STDOUT vote as it always has —
+    /// `exhausts_fuel` is a separate question, and answering it must not
+    /// turn a timed-out run into a third vote.
+    #[test]
+    fn fuel_exhaustion_still_abstains_from_the_stdout_vote() {
+        let oracle = InterpOracle::with_fuel(100_000);
+        assert_eq!(oracle.evaluate(NON_TERMINATING), None);
+    }
+
+    /// A shape the interpreter cannot run must NOT be read as
+    /// non-termination: `Unsupported` says nothing about whether the
+    /// program halts, and conflating the two would silently suppress real
+    /// findings on every feature the interpreter has not caught up to.
+    #[test]
+    fn unsupported_is_not_non_termination() {
+        let oracle = InterpOracle::with_fuel(100_000);
+        // Not parseable / not checkable ⇒ run_inner bails before the
+        // interpreter ever runs, which is the strongest form of "no answer".
+        assert!(!oracle.exhausts_fuel("fn main() -> Unit = { nonexistent_fn() }"));
     }
 }

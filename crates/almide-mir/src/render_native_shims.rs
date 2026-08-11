@@ -89,7 +89,10 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
 ];
 
 pub(crate) fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
-    SHIMS.iter().find(|(n, ..)| *n == name).map(|(_, p, r, src)| (*p, *r, *src))
+    SHIMS
+        .iter()
+        .find(|(n, ..)| *n == name)
+        .map(|(_, p, r, src)| (*p, *r, *src))
 }
 
 pub(crate) fn shim_rust_name(name: &str) -> String {
@@ -124,8 +127,18 @@ pub(crate) const CHARGE_DYN_SHIM: &str = "fn __almd_charge_dyn(site: i64, len: i
 /// `__ALMD_OMEGA <ord>` on stderr at each fired region exit.
 pub(crate) static TIMEOUT_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     TIMEOUT_SHIM_TEMPLATE
-        .replace("__ALMD_OMEGA_V__", &crate::charge_probe::omega_replay().to_string())
-        .replace("__ALMD_OMEGA_REC__", if crate::charge_probe::omega_record() { "true" } else { "false" })
+        .replace(
+            "__ALMD_OMEGA_V__",
+            &crate::charge_probe::omega_replay().to_string(),
+        )
+        .replace(
+            "__ALMD_OMEGA_REC__",
+            if crate::charge_probe::omega_record() {
+                "true"
+            } else {
+                "false"
+            },
+        )
 });
 
 pub(crate) const TIMEOUT_SHIM_TEMPLATE: &str = "const __ALMD_OMEGA: i64 = __ALMD_OMEGA_V__;
@@ -215,8 +228,10 @@ impl Drop for __AlmdProbeGuard {
 /// definition ([`crate::charge_probe::CM1_NS_PER_CHARGE`]) so this shim cannot
 /// drift from the wasm BudgetEnter render.
 pub(crate) static BUDGET_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    BUDGET_SHIM_TEMPLATE
-        .replace("__ALMD_CM1_NS__", &crate::charge_probe::CM1_NS_PER_CHARGE.to_string())
+    BUDGET_SHIM_TEMPLATE.replace(
+        "__ALMD_CM1_NS__",
+        &crate::charge_probe::CM1_NS_PER_CHARGE.to_string(),
+    )
 });
 
 pub(crate) const BUDGET_SHIM_TEMPLATE: &str = "fn __almd_budget_enter(budget_ns: i64) -> i64 {

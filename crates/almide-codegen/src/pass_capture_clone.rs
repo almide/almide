@@ -353,6 +353,31 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &
     changed
 }
 
+/// The [`transform_expr`] arms whose children are not a plain list of
+/// sub-expressions: a lambda extends the scope, and the calls, keyed containers
+/// and statement-bearing nodes each have their own order.
+fn transform_expr_scoped(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    match &mut expr.kind {
+        IrExprKind::Lambda { body, params, .. } => {
+            let mut inner_scope = scope_vars.clone();
+            for (v, _) in params.iter() { inner_scope.insert(*v); }
+            transform_expr(body, vt, &inner_scope)
+        }
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
+        }
+        IrExprKind::MapLiteral { entries } => transform_expr_kv_pairs(entries, vt, scope_vars),
+        IrExprKind::StringInterp { parts } => transform_string_parts(parts, vt, scope_vars),
+        IrExprKind::Block { .. } => transform_expr_block(expr, vt, scope_vars),
+        IrExprKind::Match { .. } => transform_expr_match(expr, vt, scope_vars),
+        IrExprKind::ForIn { .. } => transform_expr_for_in(expr, vt, scope_vars),
+        IrExprKind::While { .. } => transform_expr_while(expr, vt, scope_vars),
+        IrExprKind::IterChain { .. } => transform_expr_iter_chain(expr, vt, scope_vars),
+        // Every other kind is handled by `transform_expr`'s shape arms.
+        _ => false,
+    }
+}
+
 /// Walk the IR tree. When we find a Lambda that captures clone-worthy outer
 /// variables, wrap it in a block with pre-clone bindings.
 fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
@@ -360,80 +385,73 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
     // Every arm uses `|` (non-short-circuiting bool-or), never `||` — all
     // children must always be visited so their captures get pre-cloned,
     // regardless of what an earlier sibling returned.
+    // Arms are grouped by CHILD SHAPE (no children / one / two / three /
+    // sequence / name-tagged), with the shapes that need their own scope or
+    // order delegating to a named helper. Exhaustive with no wildcard, so a new
+    // child-bearing `IrExprKind` is a compile error here, not a silently
+    // dropped subtree (the native↔WASM capture-divergence class).
     let mut changed = match &mut expr.kind {
-        IrExprKind::Block { .. } => transform_expr_block(expr, vt, scope_vars),
-        IrExprKind::If { cond, then, else_ } => {
-            transform_expr(cond, vt, scope_vars)
-                | transform_expr(then, vt, scope_vars)
-                | transform_expr(else_, vt, scope_vars)
-        }
-        IrExprKind::Match { .. } => transform_expr_match(expr, vt, scope_vars),
-        IrExprKind::Lambda { body, params, .. } => {
-            let mut inner_scope = scope_vars.clone();
-            for (v, _) in params.iter() { inner_scope.insert(*v); }
-            transform_expr(body, vt, &inner_scope)
-        }
-        IrExprKind::Call { target, args, .. } => {
-            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
-        }
-        IrExprKind::RuntimeCall { args, .. } => transform_expr_list(args, vt, scope_vars),
-        IrExprKind::BinOp { left, right, .. } => {
-            transform_expr(left, vt, scope_vars) | transform_expr(right, vt, scope_vars)
-        }
-        IrExprKind::UnOp { operand, .. } => transform_expr(operand, vt, scope_vars),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-            transform_expr_list(elements, vt, scope_vars)
-        }
-        IrExprKind::Record { fields, .. } => transform_expr_pairs(fields, vt, scope_vars),
-        IrExprKind::SpreadRecord { base, fields } => {
-            transform_expr(base, vt, scope_vars) | transform_expr_pairs(fields, vt, scope_vars)
-        }
-        IrExprKind::ForIn { .. } => transform_expr_for_in(expr, vt, scope_vars),
-        IrExprKind::While { .. } => transform_expr_while(expr, vt, scope_vars),
-        IrExprKind::StringInterp { parts } => transform_string_parts(parts, vt, scope_vars),
-        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-        // Single-expr wrappers introduced by earlier passes (BorrowInsertion,
-        // BoxDeref, ToVec materialisation, async). A lambda nested inside one of
-        // these — e.g. `list.join(&list.map(keys, k => …g…), …)` wraps the inner
-        // `map` in `Borrow` — was invisible to the capture-clone walk, so its
-        // captured non-Copy vars never got the pre-clone wrap and a later use of
-        // the var failed to compile (E0382). `replace_vars` already descends these,
-        // so the walk and the rename now agree.
-        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::ToVec { expr: e } => {
-            transform_expr(e, vt, scope_vars)
-        }
-        IrExprKind::RustMacro { args, .. } => transform_expr_list(args, vt, scope_vars),
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            transform_expr(e, vt, scope_vars) | transform_expr(f, vt, scope_vars)
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            transform_expr(object, vt, scope_vars) | transform_expr(index, vt, scope_vars)
-        }
-        IrExprKind::Range { start, end, .. } => {
-            transform_expr(start, vt, scope_vars) | transform_expr(end, vt, scope_vars)
-        }
-        IrExprKind::MapLiteral { entries } => transform_expr_kv_pairs(entries, vt, scope_vars),
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => transform_expr(object, vt, scope_vars),
-        IrExprKind::IterChain { .. } => transform_expr_iter_chain(expr, vt, scope_vars),
-        IrExprKind::TailCall { target, args } => {
-            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
-        }
-        IrExprKind::RcWrap { expr: e, .. } => transform_expr(e, vt, scope_vars),
-        IrExprKind::InlineRust { args, .. } => transform_expr_pairs(args, vt, scope_vars),
-        // True leaves (no child `IrExpr`). Listed explicitly so a new
-        // child-bearing IrExprKind is a compile error here, not a silently
-        // dropped subtree (the native↔WASM capture-divergence class).
+        // ── No children ──
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
         | IrExprKind::FnRef { .. } | IrExprKind::Break | IrExprKind::Continue
         | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RenderedCall { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
+
+        // ── One child ──
+        //
+        // The single-expr wrappers introduced by earlier passes
+        // (BorrowInsertion, BoxDeref, ToVec materialisation, async) belong
+        // here: a lambda nested inside one — e.g. `list.join(&list.map(keys, k
+        // => …g…), …)` wraps the inner `map` in `Borrow` — was invisible to the
+        // capture-clone walk, so its captured non-Copy vars never got the
+        // pre-clone wrap and a later use of the var failed to compile (E0382).
+        // `replace_vars` already descends these, so the walk and the rename
+        // now agree.
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
+            transform_expr(e, vt, scope_vars)
+        }
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => {
+            transform_expr(a, vt, scope_vars) | transform_expr(b, vt, scope_vars)
+        }
+
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => {
+            transform_expr(cond, vt, scope_vars)
+                | transform_expr(then, vt, scope_vars)
+                | transform_expr(else_, vt, scope_vars)
+        }
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RuntimeCall { args: xs, .. }
+        | IrExprKind::RustMacro { args: xs, .. } => transform_expr_list(xs, vt, scope_vars),
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } | IrExprKind::InlineRust { args: fields, .. } => {
+            transform_expr_pairs(fields, vt, scope_vars)
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            transform_expr(base, vt, scope_vars) | transform_expr_pairs(fields, vt, scope_vars)
+        }
+
+        // ── Shapes with their own scope or traversal order ──
+        _ => transform_expr_scoped(expr, vt, scope_vars),
     };
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
@@ -710,74 +728,78 @@ fn replace_vars_iter_chain(expr: &mut IrExpr, renames: &Renames) {
     }
 }
 
+/// Rename every `Var` read in the tree, grouped by child shape exactly like
+/// [`transform_expr`] — the two walks must agree on which nodes have children.
 fn replace_vars(expr: &mut IrExpr, renames: &Renames) {
     match &mut expr.kind {
         IrExprKind::Var { id } => {
             if let Some(&new_id) = renames.get(id) { *id = new_id; }
         }
-        IrExprKind::Call { target, args, .. } => {
-            replace_call_target(target, renames);
-            replace_vars_list(args, renames);
-        }
-        IrExprKind::RuntimeCall { args, .. } => replace_vars_list(args, renames),
-        IrExprKind::BinOp { left, right, .. } => {
-            replace_vars(left, renames); replace_vars(right, renames);
-        }
-        IrExprKind::UnOp { operand, .. } => replace_vars(operand, renames),
-        IrExprKind::If { cond, then, else_ } => {
-            replace_vars(cond, renames); replace_vars(then, renames); replace_vars(else_, renames);
-        }
-        IrExprKind::Block { .. } => replace_vars_block(expr, renames),
-        IrExprKind::Lambda { body, .. } => replace_vars(body, renames),
-        IrExprKind::Match { .. } => replace_vars_match(expr, renames),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => replace_vars_list(elements, renames),
-        IrExprKind::Record { fields, .. } => replace_vars_pairs(fields, renames),
-        IrExprKind::SpreadRecord { base, fields } => {
-            replace_vars(base, renames);
-            replace_vars_pairs(fields, renames);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => replace_vars(object, renames),
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            replace_vars(object, renames); replace_vars(index, renames);
-        }
-        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => replace_vars(e, renames),
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            replace_vars(e, renames); replace_vars(f, renames);
-        }
-        IrExprKind::StringInterp { parts } => replace_vars_string_parts(parts, renames),
-        IrExprKind::ForIn { .. } => replace_vars_for_in(expr, renames),
-        IrExprKind::While { .. } => replace_vars_while(expr, renames),
-        IrExprKind::Range { start, end, .. } => {
-            replace_vars(start, renames); replace_vars(end, renames);
-        }
-        IrExprKind::MapLiteral { entries } => replace_vars_kv_pairs(entries, renames),
-        IrExprKind::Borrow { expr: e, .. }
-        | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::ToVec { expr: e }
- => {
-            replace_vars(e, renames);
-        }
-        IrExprKind::RustMacro { args, .. } => replace_vars_list(args, renames),
-        IrExprKind::Fan { exprs } => replace_vars_list(exprs, renames),
-        IrExprKind::IterChain { .. } => replace_vars_iter_chain(expr, renames),
-        IrExprKind::TailCall { target, args } => {
-            replace_call_target(target, renames);
-            replace_vars_list(args, renames);
-        }
-        IrExprKind::RcWrap { expr: e, .. } => replace_vars(e, renames),
-        IrExprKind::InlineRust { args, .. } => replace_vars_pairs(args, renames),
-        // True leaves (no child `IrExpr`); `Var` is renamed above. Listed
-        // explicitly so a new child-bearing IrExprKind is a compile error.
+
+        // ── No children (`Var` is renamed above) ──
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::FnRef { .. }
         | IrExprKind::Break | IrExprKind::Continue
         | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RenderedCall { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
+            replace_vars(e, renames);
+        }
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => {
+            replace_vars(a, renames);
+            replace_vars(b, renames);
+        }
+
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => {
+            replace_vars(cond, renames);
+            replace_vars(then, renames);
+            replace_vars(else_, renames);
+        }
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RuntimeCall { args: xs, .. }
+        | IrExprKind::RustMacro { args: xs, .. } => replace_vars_list(xs, renames),
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } | IrExprKind::InlineRust { args: fields, .. } => {
+            replace_vars_pairs(fields, renames)
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            replace_vars(base, renames);
+            replace_vars_pairs(fields, renames);
+        }
+
+        // ── Shapes with their own traversal order ──
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+            replace_call_target(target, renames);
+            replace_vars_list(args, renames);
+        }
+        IrExprKind::MapLiteral { entries } => replace_vars_kv_pairs(entries, renames),
+        IrExprKind::StringInterp { parts } => replace_vars_string_parts(parts, renames),
+        IrExprKind::Block { .. } => replace_vars_block(expr, renames),
+        IrExprKind::Match { .. } => replace_vars_match(expr, renames),
+        IrExprKind::ForIn { .. } => replace_vars_for_in(expr, renames),
+        IrExprKind::While { .. } => replace_vars_while(expr, renames),
+        IrExprKind::IterChain { .. } => replace_vars_iter_chain(expr, renames),
     }
 }
 

@@ -1,0 +1,14 @@
+// E043: the `__fallible_*` carriers are the INTERNAL form the checker instantiates
+// when a callback propagates — they are not a spelling source may name.
+//
+// Deleting the public `list.try_map` in 0.56.0 removed one name but left the
+// carrier reachable, which renamed the second spelling rather than removing
+// it: this file compiled, ran, and warned about nothing. Two working spellings
+// where only one is documented is worse for a writer than the deprecated name
+// was, because nothing tells them which is blessed.
+fn parse1(s: String) -> Result[Int, String] = int.parse(s)
+
+fn main() -> Unit = {
+  let r = list.__fallible_map(["1", "2"], (s) => parse1(s))
+  println("r=${r ?? []}")
+}

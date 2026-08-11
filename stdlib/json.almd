@@ -20,19 +20,19 @@ fn stringify_pretty(j: Value) -> String = _
 
 // ── key-based typed extraction ──
 @intrinsic("almide_json_get_string")
-fn get_string(j: Value, key: String) -> Option[String] = _
+fn get_string(j: Value, key: String) -> String? = _
 
 @intrinsic("almide_json_get_int")
-fn get_int(j: Value, key: String) -> Option[Int] = _
+fn get_int(j: Value, key: String) -> Int? = _
 
 @intrinsic("almide_json_get_float")
-fn get_float(j: Value, key: String) -> Option[Float] = _
+fn get_float(j: Value, key: String) -> Float? = _
 
 @intrinsic("almide_json_get_bool")
-fn get_bool(j: Value, key: String) -> Option[Bool] = _
+fn get_bool(j: Value, key: String) -> Bool? = _
 
 @intrinsic("almide_json_get_array")
-fn get_array(j: Value, key: String) -> Option[List[Value]] = _
+fn get_array(j: Value, key: String) -> List[Value]? = _
 
 // ── path API ──
 @intrinsic("almide_rt_json_root")
@@ -46,7 +46,7 @@ fn index(path: JsonPath, i: Int) -> JsonPath = _
 
 @intrinsic("almide_json_get_path")
 @borrow_ref(path)
-fn get_path(j: Value, path: JsonPath) -> Option[Value] = _
+fn get_path(j: Value, path: JsonPath) -> Value? = _
 
 @intrinsic("almide_json_set_path")
 @borrow_ref(path)
@@ -58,4 +58,4 @@ fn set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String] = _
 fn remove_path(j: Value, path: JsonPath) -> Value = _
 
 @intrinsic("almide_json_to_map")
-fn to_map(j: Value) -> Option[Map[String, String]] = _
+fn to_map(j: Value) -> Map[String, String]? = _

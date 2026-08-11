@@ -20,9 +20,16 @@ pub trait IrVisitor: Sized {
 }
 
 /// Walk all child expressions/statements/patterns of an expression.
+///
+/// Arms are grouped by CHILD SHAPE rather than by node family: every
+/// variant whose traversal is "visit one child" shares one arm, every
+/// "visit two children" variant shares the next, and so on. Or-pattern
+/// binding renames (`Member { object: e, .. }`) make the shapes line up.
+/// The match stays exhaustive with no wildcard, so a new `IrExprKind`
+/// variant is still a compile error here until its shape is declared.
 pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
     match &expr.kind {
-        // ── Leaf nodes ──
+        // ── No children ──
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
         | IrExprKind::FnRef { .. } | IrExprKind::EmptyMap | IrExprKind::OptionNone
@@ -30,104 +37,80 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         | IrExprKind::Todo { .. } | IrExprKind::RenderedCall { .. }
         | IrExprKind::EnvLoad { .. } | IrExprKind::ClosureCreate { .. } => {}
 
-        // ── Operators ──
-        IrExprKind::BinOp { left, right, .. } => {
-            v.visit_expr(left);
-            v.visit_expr(right);
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            v.visit_expr(operand);
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
+            v.visit_expr(e);
         }
 
-        // ── Control flow ──
+        // ── Two children, left to right ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::Range { start: a, end: b, .. }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b } => {
+            v.visit_expr(a);
+            v.visit_expr(b);
+        }
+
+        // ── Three children ──
         IrExprKind::If { cond, then, else_ } => {
             v.visit_expr(cond);
             v.visit_expr(then);
             v.visit_expr(else_);
         }
-        IrExprKind::Match { subject, arms } => walk_expr_match(v, subject, arms),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { v.visit_stmt(s); }
-            if let Some(e) = expr { v.visit_expr(e); }
-        }
 
-        // ── Loops ──
-        IrExprKind::ForIn { iterable, body, .. } => walk_expr_loop_body(v, iterable, body),
-        IrExprKind::While { cond, body } => walk_expr_loop_body(v, cond, body),
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RuntimeCall { args: xs, .. }
+        | IrExprKind::RustMacro { args: xs, .. } => walk_expr_each(v, xs),
 
-        // ── Calls ──
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            walk_expr_call(v, target, args)
+        // ── Name-tagged children (record fields, inline-Rust args) ──
+        IrExprKind::Record { fields, .. } | IrExprKind::InlineRust { args: fields, .. } => {
+            walk_expr_fields(v, fields)
         }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { v.visit_expr(a); }
-        }
-
-        // ── Collections ──
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { v.visit_expr(e); }
-        }
-        IrExprKind::Record { fields, .. } => walk_expr_fields(v, fields),
         IrExprKind::SpreadRecord { base, fields } => {
             v.visit_expr(base);
             walk_expr_fields(v, fields);
         }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, val) in entries { v.visit_expr(k); v.visit_expr(val); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            v.visit_expr(start);
-            v.visit_expr(end);
-        }
 
-        // ── Access ──
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            v.visit_expr(object);
+        // ── Shapes with their own traversal order ──
+        IrExprKind::Match { subject, arms } => walk_expr_match(v, subject, arms),
+        IrExprKind::Block { stmts, expr } => walk_expr_block(v, stmts, expr.as_deref()),
+        IrExprKind::ForIn { iterable: lead, body, .. }
+        | IrExprKind::While { cond: lead, body } => walk_expr_loop_body(v, lead, body),
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+            walk_expr_call(v, target, args)
         }
-        IrExprKind::IndexAccess { object, index } => {
-            v.visit_expr(object);
-            v.visit_expr(index);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            v.visit_expr(object);
-            v.visit_expr(key);
-        }
-
-        // ── Functions ──
-        IrExprKind::Lambda { body, .. } => {
-            v.visit_expr(body);
-        }
-
-        // ── Strings ──
+        IrExprKind::MapLiteral { entries } => walk_expr_map_entries(v, entries),
         IrExprKind::StringInterp { parts } => walk_expr_string_interp(v, parts),
-
-        // ── Wrappers (single child) ──
-        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::RcWrap { expr: e, .. }
-        | IrExprKind::ToVec { expr: e } => {
-            v.visit_expr(e);
-        }
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            v.visit_expr(e);
-            v.visit_expr(f);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { v.visit_expr(a); }
-        }
-        IrExprKind::InlineRust { args, .. } => {
-            for (_, a) in args { v.visit_expr(a); }
-        }
         IrExprKind::IterChain { source, steps, collector, .. } => {
             walk_expr_iter_chain(v, source, steps, collector)
         }
     }
+}
+
+/// The "flat sequence of children" arm of [`walk_expr`].
+fn walk_expr_each<V: IrVisitor>(v: &mut V, exprs: &[IrExpr]) {
+    for e in exprs { v.visit_expr(e); }
+}
+
+/// `Block` arm of [`walk_expr`]: every statement, then the tail expression.
+fn walk_expr_block<V: IrVisitor>(v: &mut V, stmts: &[IrStmt], tail: Option<&IrExpr>) {
+    for s in stmts { v.visit_stmt(s); }
+    if let Some(e) = tail { v.visit_expr(e); }
+}
+
+/// `MapLiteral` arm of [`walk_expr`]: each entry's key, then its value.
+fn walk_expr_map_entries<V: IrVisitor>(v: &mut V, entries: &[(IrExpr, IrExpr)]) {
+    for (k, val) in entries { v.visit_expr(k); v.visit_expr(val); }
 }
 
 /// `Match` arm of [`walk_expr`]: subject + per-arm pattern/guard/body.
@@ -184,7 +167,9 @@ fn walk_expr_loop_body<V: IrVisitor>(v: &mut V, lead: &IrExpr, body: &[IrStmt]) 
     for s in body { v.visit_stmt(s); }
 }
 
-/// `Record`/`SpreadRecord` field-value loop shared by [`walk_expr`].
+/// Name-tagged child loop shared by [`walk_expr`] — `Record` /
+/// `SpreadRecord` fields and `InlineRust` args all carry `(Sym, IrExpr)`
+/// pairs whose name plays no part in traversal.
 fn walk_expr_fields<V: IrVisitor>(v: &mut V, fields: &[(Sym, IrExpr)]) {
     for (_, val) in fields { v.visit_expr(val); }
 }

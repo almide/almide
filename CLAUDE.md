@@ -45,12 +45,21 @@ If you already shipped a broken release:
 
 ## Development Setup
 
-After cloning, install the git hooks:
+After cloning, fetch the submodules and install the git hooks:
 
 ```bash
+git submodule update --init --recursive
 brew install lefthook  # or: https://github.com/evilmartians/lefthook
 lefthook install
 ```
+
+Submodules (`actions/checkout` does NOT fetch them, so CI never sees these — they are
+local-only conveniences and nothing in the build depends on them):
+
+| Path | Repo | Used by |
+|---|---|---|
+| `grammar/` | [almide/almide-grammar](https://github.com/almide/almide-grammar) | grammar definition consumed by the editor/tree-sitter repos |
+| `research/benchmark/lang-bench/upstream/` | [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) | `/almide-lang-bench` |
 
 ## Project Overview
 
@@ -89,8 +98,11 @@ almide compile parser             # Module interface (by name)
 almide compile app.almd --json    # Module interface (JSON)
 almide check app.almd             # Type check only
 almide fmt app.almd               # Format source
+almide fmt --check spec/          # Formatting gate (non-zero on drift)
+almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-context sources)
 almide clean                     # Clear dependency cache
 almide add almide/pkg@v0.1.0    # Add dependency (github.com/almide/ default)
+almide update [dep]              # Advance a locked git dep to its ref's remote head (tags never move)
 almide deps                      # List dependencies
 almide dep-path bindgen          # Print cached source dir of a dependency
 almide app.almd --target rust    # Emit Rust source
@@ -264,7 +276,7 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 
 - **Multi-target**: Same IR emits to Rust or WASM via `--target rust|wasm` (TS codegen は削除済み)
 - **Codegen v3**: Nanopass pipeline (semantic rewrites) + TOML template renderer (syntax)
-- **Effect fn (Rust)**: `effect fn` → `Result<T, String>`, auto `?` propagation
+- **Effect fn (Rust)**: `effect fn` → `Result<T, String>`。伝搬は **明示のみ**（ADR-0008）— `expr!` が `?` に落ちる。暗黙伝搬は E041、statement 位置の握り潰しは E042
 - **`==`/`!=`**: `almide_eq!` macro in Rust
 - **`+`**: Concatenation for strings and lists (overloaded with addition)
 - **Diagnostics**: Every error includes file:line, context, and actionable hint
@@ -273,7 +285,8 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 
 - **This repo** = compiler correctness. `spec/` tests, `cargo test`, grammar-lab experiments, lang-bench.
 - **[almide/almide-dojo](https://github.com/almide/almide-dojo)** = LLM writability. Daily MSR measurement, task bank, malicious-hint detection, diagnostics feedback loop.
-- New MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` are archived.
+- All MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` were removed from this repo (2026-08-08) — the local harness had an empty `results/` since the April 2026 hand-off, so running it would have overwritten Dojo's README number with a locally-measured one. Recover with `git log --diff-filter=D -- research/benchmark/msr/`.
+- Still here and live: `research/benchmark/perf/` (gated by `scripts/check-perf-ratio.sh`), `lang-bench/`, `exercises/` (corpus for `tools/v1_gap_measure.py`), `grammar-lab/`, `spike/`.
 - The bridge: Dojo's PR gate will run a task subset as part of this repo's CI (future).
 
 ## Behavior Contracts

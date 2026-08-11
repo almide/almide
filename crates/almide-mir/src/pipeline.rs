@@ -26,7 +26,11 @@ use std::collections::HashMap;
 /// (`bindgen` + `get_str` → `almide_rt_bindgen_get_str`) — the v1 analogue of v0's
 /// `ir_link_flatten` module-fn renaming, and the call-site target this resolution emits.
 fn user_module_fn_name(module: &str, func: &str) -> String {
-    format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"))
+    format!(
+        "almide_rt_{}_{}",
+        module.replace('.', "_"),
+        func.replace('.', "_")
+    )
 }
 
 /// Resolve a USER-package/-module call (`bindgen.get_str(…)` via `import self as bindgen`,
@@ -54,18 +58,19 @@ pub(crate) fn is_linkable_module(m: &almide_ir::IrModule) -> bool {
     if !almide_lang::stdlib_info::is_any_stdlib(n) {
         return true;
     }
-    almide_lang::stdlib_info::is_bundled_module(n)
-        && m.functions.iter().all(is_pure_almide_fn)
+    almide_lang::stdlib_info::is_bundled_module(n) && m.functions.iter().all(is_pure_almide_fn)
 }
 
 /// A function with a real Almide body and no host boundary — linkable as an
 /// ordinary sibling fn.
 fn is_pure_almide_fn(f: &almide_ir::IrFunction) -> bool {
     f.extern_attrs.is_empty()
-        && !f
-            .attrs
-            .iter()
-            .any(|a| matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic"))
+        && !f.attrs.iter().any(|a| {
+            matches!(
+                a.name.as_str(),
+                "intrinsic" | "inline_rust" | "wasm_intrinsic"
+            )
+        })
         && !matches!(f.body.kind, almide_ir::IrExprKind::Hole)
 }
 
@@ -93,7 +98,10 @@ fn registry_served_names() -> &'static std::collections::HashSet<&'static str> {
 /// in the binary. Its intrinsic-backed fns keep registry-backed dispatch.
 pub fn linkable_module_fns(m: &almide_ir::IrModule) -> std::collections::HashSet<String> {
     let all = |m: &almide_ir::IrModule| {
-        m.functions.iter().map(|f| f.name.as_str().to_string()).collect()
+        m.functions
+            .iter()
+            .map(|f| f.name.as_str().to_string())
+            .collect()
     };
     let n = m.name.as_str();
     if !almide_lang::stdlib_info::is_any_stdlib(n) {
@@ -187,7 +195,9 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
                 if let CallTarget::Module { module, func, .. } = target {
                     let (m, f) = (module.as_str(), func.as_str());
                     if let Some(owner) = self.resolve_module(m, f) {
-                        *target = CallTarget::Named { name: sym(&user_module_fn_name(owner, f)) };
+                        *target = CallTarget::Named {
+                            name: sym(&user_module_fn_name(owner, f)),
+                        };
                     }
                 } else if let CallTarget::Named { name } = target {
                     // A BARE Named call to a fn that lives in exactly ONE linked user module: the
@@ -199,16 +209,25 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
                     if !self.root_fns.contains(f) {
                         let mut owners = self.user_mods.iter().filter(|(_, fs)| fs.contains(f));
                         if let (Some((m, _)), None) = (owners.next(), owners.next()) {
-                            *target = CallTarget::Named { name: sym(&user_module_fn_name(m, f)) };
+                            *target = CallTarget::Named {
+                                name: sym(&user_module_fn_name(m, f)),
+                            };
                         }
                     }
                 }
             }
         }
     }
-    let root_fns: std::collections::HashSet<String> =
-        ir.functions.iter().map(|f| f.name.as_str().to_string()).collect();
-    let mut rw = Rw { user_mods: &user_mods, root_fns, enclosing: None };
+    let root_fns: std::collections::HashSet<String> = ir
+        .functions
+        .iter()
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let mut rw = Rw {
+        user_mods: &user_mods,
+        root_fns,
+        enclosing: None,
+    };
     for func in &mut ir.functions {
         rw.visit_expr_mut(&mut func.body);
     }
@@ -237,7 +256,9 @@ fn unresolved_import_wall(
     modules: &[(String, almide_lang::ast::Program, bool)],
 ) -> Option<LowerError> {
     for imp in &prog.imports {
-        let almide_lang::ast::Decl::Import { path, span, .. } = imp else { continue };
+        let almide_lang::ast::Decl::Import { path, span, .. } = imp else {
+            continue;
+        };
         let Some(root) = path.first() else { continue };
         let wanted = if root.as_str() == "self" {
             match path.get(1) {
@@ -258,8 +279,16 @@ fn unresolved_import_wall(
                 || n.rsplit('.').next() == Some(wanted)
         });
         if !satisfied {
-            let spelled = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-            let kind = if root.as_str() == "self" { "package sibling" } else { "dependency module" };
+            let spelled = path
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            let kind = if root.as_str() == "self" {
+                "package sibling"
+            } else {
+                "dependency module"
+            };
             return Some(LowerError::at(
                 *span,
                 format!(
@@ -277,29 +306,73 @@ fn unresolved_import_wall(
 /// cross-module siblings (empty ⇒ the single-file path); each is inferred + `lower_module`d into
 /// `ir.modules` so a cross-module record/variant type reaches `build_record_layouts`. A parse or
 /// type error is a clean WALL (`Err`), never an abort.
+/// `source_to_ir_with` for the certificate pre-flight (test bodies included).
+pub(crate) fn source_to_ir_for_certs(
+    source: &str,
+) -> Result<almide_ir::IrProgram, crate::lower::LowerError> {
+    source_to_ir_with(source, &[])
+}
+
+/// A NON-bundled stdlib module contributes nothing to lower: its defs come from
+/// the runtime / self-host registry, not from a carried AST.
+fn skip_stdlib_module(name: &str) -> bool {
+    almide_lang::stdlib_info::is_stdlib_module(name)
+        && !almide_lang::stdlib_info::is_bundled_module(name)
+}
+
+/// Type-check the program, or wall with the error diagnostics.
+fn infer_or_wall(
+    checker: &mut Checker,
+    prog: &mut almide_lang::ast::Program,
+) -> Result<(), LowerError> {
+    let diags = checker.infer_program(prog);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.level == almide_frontend::diagnostic::Level::Error)
+        .map(|d| d.message.clone())
+        .collect();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    Err(LowerError::Unsupported(format!("type errors: {errors:?}")))
+}
+
+/// Parse `source`, or wall with every recorded diagnostic.
+///
+/// `Parser::parse()` is a recovery parser: it can return `Ok` with a partial
+/// `Program` (unparseable top-level items dropped) while still recording the
+/// failures in `.errors` — the CLI's own `parse_file` checks this separately
+/// (main.rs). Skipping the check here would silently compile a TRUNCATED program
+/// instead of walling honestly.
+fn parse_or_wall(source: &str) -> Result<almide_lang::ast::Program, LowerError> {
+    let tokens = Lexer::tokenize(source);
+    let mut parser = Parser::new(tokens);
+    let prog = parser
+        .parse()
+        .map_err(|e| LowerError::Unsupported(format!("parse error: {e:?}")))?;
+    if parser.errors.is_empty() {
+        return Ok(prog);
+    }
+    let messages: Vec<String> = parser.errors.iter().map(|d| d.display()).collect();
+    let nlines = source.lines().count();
+    let head: String = source
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(60)
+        .collect();
+    Err(LowerError::Unsupported(format!(
+        "parse error [{nlines} lines, head {head:?}]: {}",
+        messages.join("\n")
+    )))
+}
+
 fn source_to_ir_with(
     source: &str,
     modules: &[(String, almide_lang::ast::Program, bool)],
 ) -> Result<almide_ir::IrProgram, LowerError> {
-    let tokens = Lexer::tokenize(source);
-    let mut parser = Parser::new(tokens);
-    let mut prog = parser
-        .parse()
-        .map_err(|e| LowerError::Unsupported(format!("parse error: {e:?}")))?;
-    // `Parser::parse()` is a recovery parser: it can return `Ok` with a
-    // partial `Program` (unparseable top-level items dropped) while still
-    // recording the failures in `.errors` — the CLI's own `parse_file`
-    // checks this separately (main.rs). Skipping this check here would
-    // silently compile a truncated program instead of walling honestly.
-    if !parser.errors.is_empty() {
-        let messages: Vec<String> = parser.errors.iter().map(|d| d.display()).collect();
-        let nlines = source.lines().count();
-        let head: String = source.lines().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(60).collect();
-        return Err(LowerError::Unsupported(format!(
-            "parse error [{nlines} lines, head {head:?}]: {}",
-            messages.join("\n")
-        )));
-    }
+    let mut prog = parse_or_wall(source)?;
     // #1052: an import this render was NOT handed a module for can never
     // type-check — every reference through it would surface as "undefined
     // function" and the wall would land in the "type errors" bucket, the one
@@ -322,9 +395,7 @@ fn source_to_ir_with(
     // {…})`) sees the registration seed `Option[Unknown]`, the match payload
     // binding stays Unknown, and the whole program walls.
     for (name, mod_prog, is_self_mod) in modules {
-        if almide_lang::stdlib_info::is_stdlib_module(name)
-            && !almide_lang::stdlib_info::is_bundled_module(name)
-        {
+        if skip_stdlib_module(name) {
             continue;
         }
         let saved_self = checker.env.self_module_name;
@@ -333,15 +404,7 @@ fn source_to_ir_with(
         checker.refresh_module_top_lets(mod_prog, name);
         checker.env.self_module_name = saved_self;
     }
-    let diags = checker.infer_program(&mut prog);
-    let errors: Vec<_> = diags
-        .iter()
-        .filter(|d| d.level == almide_frontend::diagnostic::Level::Error)
-        .map(|d| d.message.clone())
-        .collect();
-    if !errors.is_empty() {
-        return Err(LowerError::Unsupported(format!("type errors: {errors:?}")));
-    }
+    infer_or_wall(&mut checker, &mut prog)?;
     let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
 
     // Lower each resolved sibling MODULE into `ir.modules` — the SAME sequence the real driver runs
@@ -349,9 +412,7 @@ fn source_to_ir_with(
     // stdlib modules carried by `resolve` are skipped (their defs come from the runtime/self-host
     // registry); only real user siblings contribute their type_decls + fns.
     for (name, mod_prog, is_self) in modules {
-        if almide_lang::stdlib_info::is_stdlib_module(name)
-            && !almide_lang::stdlib_info::is_bundled_module(name)
-        {
+        if skip_stdlib_module(name) {
             continue;
         }
         let mut mod_prog = mod_prog.clone();
@@ -420,12 +481,24 @@ fn source_to_ir_with(
     crate::lower::desugar_loop_early_returns(&mut ir);
     crate::lower::hoist_spread_call_bases(&mut ir);
     crate::lower::hoist_record_literal_args(&mut ir);
+    // #1147: poison-oracle-driven continuation lift, LAST in the shared chain
+    // so the oracle lowers exactly what the real lowering will see (shared
+    // with classify: desugar-before-both) — outlines the loop-bearing
+    // `!`-continuations whose UN-lifted certificate actually poisons,
+    // restoring kernel-witness coverage. Transactional: any chain piece that
+    // walls or still poisons rolls the fn back untouched.
+    crate::lower::lift_poisoning_continuations(&mut ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
     if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
-        for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
+        for f in ir
+            .functions
+            .iter()
+            .chain(ir.modules.iter().flat_map(|m| m.functions.iter()))
+        {
             if f.name.as_str().contains(&pat) {
-                crate::trace::trace("ALMIDE_DUMP_IR", || format!(
-                    "=== ALMIDE_DUMP_IR {} ===\n{:#?}", f.name.as_str(), f.body));
+                crate::trace::trace("ALMIDE_DUMP_IR", || {
+                    format!("=== ALMIDE_DUMP_IR {} ===\n{:#?}", f.name.as_str(), f.body)
+                });
             }
         }
     }
@@ -437,7 +510,6 @@ fn source_to_ir_with(
 fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
     source_to_ir_with(source, &[])
 }
-
 
 /// `verbose` gates the honest per-function "outside the lowering subset" diagnostics to stderr.
 ///
@@ -461,8 +533,12 @@ pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Prog
         if seen.contains(name) {
             return;
         }
-        let Some(src) = almide_lang::stdlib_info::bundled_source(name) else { return };
-        let Some(prog) = almide_lang::parse_cached(src) else { return };
+        let Some(src) = almide_lang::stdlib_info::bundled_source(name) else {
+            return;
+        };
+        let Some(prog) = almide_lang::parse_cached(src) else {
+            return;
+        };
         let prog = prog.clone();
         seen.insert(name.to_string());
         for imp in &prog.imports {
@@ -621,6 +697,17 @@ fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
 /// manages its own memory). In `test_mode`, promote `test "…"` fns to a synthesized
 /// runner `main`. Returns the FINAL linked `IrProgram` the rest of the pipeline
 /// (globals, layouts, MIR lowering) continues from.
+/// One conditional drop/repr routine: its source text is spliced into the
+/// re-lower only when the program actually reaches it. An unneeded routine
+/// contributes the empty string, so the concatenation below stays a flat list.
+fn gated(needed: bool, src: &'static str) -> &'static str {
+    if needed {
+        src
+    } else {
+        ""
+    }
+}
+
 fn build_ir_with_drops(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
@@ -649,8 +736,10 @@ fn build_ir_with_drops(
     // into `all_type_decls` so the SAME `generate_variant_drop_sources` call already below
     // covers it too (no separate/duplicate drop-generation call).
     let pre_relower_variant_layouts = crate::lower::build_variant_layouts(&all_type_decls);
-    let generic_variant_list_insts =
-        crate::lower::discover_generic_variant_list_instantiations(&ir, &pre_relower_variant_layouts);
+    let generic_variant_list_insts = crate::lower::discover_generic_variant_list_instantiations(
+        &ir,
+        &pre_relower_variant_layouts,
+    );
     let (generic_variant_type_decl_src, generic_variant_synthetic_decls) =
         crate::lower::generate_generic_variant_instantiation_type_decls(
             &generic_variant_list_insts,
@@ -667,49 +756,46 @@ fn build_ir_with_drops(
     let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
     // First-class function values need the UNIFORM closure-block release
     // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
-    let closure_drop =
-        if crate::lower::program_uses_closures(&ir) { crate::lower::CLOSURE_DROP_SRC } else { "" };
+    let closure_drop = gated(
+        crate::lower::program_uses_closures(&ir),
+        crate::lower::CLOSURE_DROP_SRC,
+    );
     // A `List[<Fn>]` LITERAL (`[(x)=>x+1, (x)=>x*2]`) routes its scope-end drop to the
     // generated `$__drop_list_closure` (per-element `$__drop_closure` — required, not a
     // blind rc_dec, since a captured heap slot would otherwise leak). Needs
     // `CLOSURE_DROP_SRC` in scope, which `program_uses_closures` already guarantees
     // whenever a closure LIST exists (the list's elements are Lambda exprs).
-    let list_closure_drop = if crate::lower::program_uses_closure_list(&ir) {
-        crate::lower::LIST_CLOSURE_DROP_SRC
-    } else {
-        ""
-    };
+    let list_closure_drop = gated(
+        crate::lower::program_uses_closure_list(&ir),
+        crate::lower::LIST_CLOSURE_DROP_SRC,
+    );
     // A `Map[String, <Fn>]` (the closure-valued map — mclo class) routes its scope-end
     // drop to `$__drop_map_mclo` (per-value `$__drop_closure` over the split layout).
     // Needs `CLOSURE_DROP_SRC` in scope, which `program_uses_closures` guarantees
     // whenever a closure-valued map exists (its values are Fn-typed exprs).
-    let map_mclo_drop = if crate::lower::program_uses_map_closure(&ir) {
-        crate::lower::MAP_MCLO_DROP_SRC
-    } else {
-        ""
-    };
+    let map_mclo_drop = gated(
+        crate::lower::program_uses_map_closure(&ir),
+        crate::lower::MAP_MCLO_DROP_SRC,
+    );
     // A `List[(String, <Fn>)]` pairs literal (the closure-valued map's from_list
     // input) routes its scope-end drop to `$__drop_list_str_clo` (per-tuple: key
     // rc_dec + `$__drop_closure` on the value slot).
-    let list_str_clo_drop = if crate::lower::program_uses_str_clo_pairs(&ir) {
-        crate::lower::LIST_STR_CLO_DROP_SRC
-    } else {
-        ""
-    };
+    let list_str_clo_drop = gated(
+        crate::lower::program_uses_str_clo_pairs(&ir),
+        crate::lower::LIST_STR_CLO_DROP_SRC,
+    );
     // An `Option[(String, String)]` (the if-merged `some((s1, s2))` ctor) routes
     // its scope-end drop to `$__drop_opt_str_str`.
-    let opt_str_str_drop = if crate::lower::program_uses_opt_str_str(&ir) {
-        crate::lower::OPT_STR_STR_DROP_SRC
-    } else {
-        ""
-    };
+    let opt_str_str_drop = gated(
+        crate::lower::program_uses_opt_str_str(&ir),
+        crate::lower::OPT_STR_STR_DROP_SRC,
+    );
     // A `List[Option/Result]` literal with owned-handle-slot elements routes its drop to the
     // generated `$__drop_list_lenlist` (the shared `lenlist_elem_class` decides both sides).
-    let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
-        crate::lower::LENLIST_DROP_SRC
-    } else {
-        ""
-    };
+    let lenlist_drop = gated(
+        crate::lower::program_uses_lenlist_elem_lists(&ir),
+        crate::lower::LENLIST_DROP_SRC,
+    );
     // `__drop_list_str` (a `List[String]` record OR variant ctor field, OR a closure's
     // nested-heap capture — `CLOSURE_DROP_SRC`'s `__drop_closure_loop` unconditionally
     // references it once ANY closure exists, since a capture's concrete type isn't known
@@ -719,41 +805,59 @@ fn build_ir_with_drops(
     // the record and variant drop generators, so it is emitted ONCE here rather than by
     // either generator inline (two independent copies would be a duplicate-fn compile
     // error).
-    let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&all_type_decls)
-        || crate::lower::program_uses_anon_list_str_record(&ir, &all_type_decls)
-        || crate::lower::program_uses_closures(&ir)
-    {
-        crate::lower::LIST_STR_DROP_SRC
-    } else {
-        ""
-    };
+    let list_str_drop = gated(
+        crate::lower::program_uses_list_str_drop_field(&all_type_decls)
+            || crate::lower::program_uses_anon_list_str_record(&ir, &all_type_decls)
+            || crate::lower::program_uses_closures(&ir),
+        crate::lower::LIST_STR_DROP_SRC,
+    );
     // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
     // TAG-AWARE `$__drop_res_ilsl` (Err → recursive string free; Ok → flat).
-    let res_ilsl_drop = if crate::lower::program_uses_res_intlist_strlist(&ir) {
-        crate::lower::RES_ILSL_DROP_SRC
-    } else {
-        ""
-    };
+    let res_ilsl_drop = gated(
+        crate::lower::program_uses_res_intlist_strlist(&ir),
+        crate::lower::RES_ILSL_DROP_SRC,
+    );
+    // `Result[Map[String, <scalar>], String]` / its chunked List-of-maps sibling
+    // (the fs.fold_lines msi twins) route their drops to the TAG-AWARE
+    // `$__drop_res_msi` / `$__drop_res_lmsi` (Ok → the skv key sweep; Err → the
+    // message). One gate injects both — `res_lmsi` shares `res_msi`'s key loop.
+    let res_msi_drop = gated(
+        crate::lower::program_uses_res_map_si(&ir),
+        crate::lower::RES_MSI_DROP_SRC,
+    );
+    let res_lmsi_drop = gated(
+        crate::lower::program_uses_res_map_si(&ir),
+        crate::lower::RES_LMSI_DROP_SRC,
+    );
     // An `Option[(String, <scalar>)]` (map.find's result, or a plain `some((s, n))` ctor)
     // routes its drop to the TAG-AWARE `$__drop_opt_str_int` (Some → recursive String-slot
     // free; None → nothing) — a blind flat `rc_dec` of the Option's payload slot would only
     // free the TUPLE's own refcount, leaking its String. Type-driven gate (#840): the old
     // `map.find` name-heuristic missed the literal-ctor producer and left the routed call
     // dangling in the WAT.
-    let opt_str_int_drop = if crate::lower::program_uses_opt_str_scalar(&ir) {
-        crate::lower::OPT_STR_INT_DROP_SRC
-    } else {
-        ""
-    };
+    let opt_str_int_drop = gated(
+        crate::lower::program_uses_opt_str_scalar(&ir),
+        crate::lower::OPT_STR_INT_DROP_SRC,
+    );
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
-        crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
-        crate::lower::generate_variant_repr_sources(&repr_type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
+        crate::lower::generate_record_drop_sources(
+            &all_type_decls,
+            &anon_recs,
+            uses_result_opt_str
+        ),
+        crate::lower::generate_variant_repr_sources(
+            &repr_type_decls,
+            &crate::lower::collect_interp_anon_records(&ir),
+            &crate::lower::collect_interp_repr_containers(&ir)
+        ),
         crate::lower::generate_krec_sources(&ir, &all_type_decls),
         closure_drop,
         res_ilsl_drop,
+        res_msi_drop,
+        res_lmsi_drop,
         lenlist_drop,
         list_str_drop,
         list_closure_drop,
@@ -774,11 +878,16 @@ fn build_ir_with_drops(
     } else {
         ""
     };
-    crate::trace::trace("ALMIDE_DUMP_DROPS", || format!("=== ALMIDE_DUMP_DROPS ===\n{drops}\n=== end ==="));
+    crate::trace::trace("ALMIDE_DUMP_DROPS", || {
+        format!("=== ALMIDE_DUMP_DROPS ===\n{drops}\n=== end ===")
+    });
     let mut ir = if drops.trim().is_empty() {
         ir
     } else {
-        source_to_ir_with(&format!("{source}\n{value_core_src}\n{drops}"), self_modules)?
+        source_to_ir_with(
+            &format!("{source}\n{value_core_src}\n{drops}"),
+            self_modules,
+        )?
     };
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;

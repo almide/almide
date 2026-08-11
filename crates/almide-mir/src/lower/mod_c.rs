@@ -379,6 +379,28 @@ fn unit_tail_result_abi_ty(func: &IrFunction, body: &IrExpr) -> Option<Ty> {
     tail_is_unit(body).then_some(result_ty)
 }
 
+/// The FULL ABI-effective body — BOTH root retypes the lowering applies before its
+/// desugar ladder, in order: the `AUTO_WRAP_ABI_FNS` synthetic-Result retype
+/// ([`auto_wrap_abi_body`]) and the unit-tail Result-ABI ok-wrap
+/// (`unit_tail_result_abi_ty` + `wrap_unit_body_in_ok`). `pub` for the SAME
+/// #1176 reason `auto_wrap_abi_body` is: the classify count-side must apply the
+/// IDENTICAL retypes before `desugar_all`, or `desugar_loop_unwrap`'s
+/// `Result[T, String]` root gate declines on the count side while the lowering
+/// fires it — the rewrite's injected owned-copy concats then become MIR ops with
+/// no counted IR node (a false `mir > ir` breach). The second retype's
+/// registry-independent arm (a CAN-ERR declared-Unit effect fn ∉ NEVER_ERR) is
+/// what the first alone misses: a `effect_cont_synth_*` continuation is
+/// synthesized AFTER the registry fixpoint, so it sits in NEITHER set and the
+/// lowering wraps it through exactly that arm (the fs_streaming false breach).
+pub fn abi_effective_body(func: &IrFunction) -> Option<IrExpr> {
+    let auto = auto_wrap_abi_body(func);
+    let base: &IrExpr = auto.as_ref().unwrap_or(&func.body);
+    if let Some(result_ty) = unit_tail_result_abi_ty(func, base) {
+        return Some(wrap_unit_body_in_ok(base, result_ty));
+    }
+    auto
+}
+
 /// `{ stmts…; unit_tail }` → `{ stmts…; unit_tail; ok(()) }` — the old Unit tail becomes a
 /// statement (the standard stmt-position effect shape), and the fn returns the real ok-Unit
 /// Result block its ABI classification promises. Only the TOP-level Block is flattened; a
@@ -412,34 +434,57 @@ fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
     }
 }
 
-fn lower_function_all_impl(
+/// The desugar-before-both chain, as a pass table. Each pass returns `None` when
+/// it does not apply; a pass that fires feeds its rewrite to the next, so the
+/// whole chain is one fold. `None` overall means nothing rewrote the body.
+///
+/// - `desugar_assert_calls` — assert/assert_eq/assert_ne → the controlled-halt `if`/die shape.
+/// - `desugar_map_access_calls` — `m[k]` → `map.get(m, k)`.
+/// - `desugar_bytes_index_calls` — `buf[i]` over Bytes → `bytes.index(buf, i)`.
+/// - `desugar_matrix_binops` — matrix `a * b` / `+` / `-` → matrix.mul/add/sub.
+/// - `desugar_hof_chain_anf` — the C-127 piped HOF chain → its source-`let` form.
+/// - `desugar_heap_if_call_args` — a HEAP-result `if` in argument position → let-decomposed (#881).
+/// - `desugar_mutable_global_projection_args` / `desugar_bytes_index_assign` —
+///   the two that need the fn's PARAMS to decide.
+/// - `desugar_list_slice_calls`, `desugar_optional_chain` — the remaining surface forms.
+fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Option<IrExpr> {
+    type Pass = fn(&IrExpr) -> Option<IrExpr>;
+    const PASSES: &[Pass] = &[
+        desugar_assert_calls,
+        desugar_map_access_calls,
+        desugar_bytes_index_calls,
+        desugar_matrix_binops,
+        desugar_hof_chain_anf,
+        desugar_heap_if_call_args,
+        desugar_mutable_global_projection_args,
+    ];
+    let mut cur: Option<IrExpr> = None;
+    for pass in PASSES {
+        if let Some(next) = pass(cur.as_ref().unwrap_or(body)) {
+            cur = Some(next);
+        }
+    }
+    if let Some(next) = desugar_bytes_index_assign(cur.as_ref().unwrap_or(body), params) {
+        cur = Some(next);
+    }
+    for pass in [desugar_list_slice_calls as Pass, desugar_optional_chain as Pass] {
+        if let Some(next) = pass(cur.as_ref().unwrap_or(body)) {
+            cur = Some(next);
+        }
+    }
+    cur
+}
+
+/// The lowering context for one function: its layouts, plus the return-type
+/// facts every `!`/tail rule keys on.
+fn new_lower_ctx(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
     global_inits: &HashMap<VarId, IrExpr>,
     record_layouts: &RecordLayouts,
     variant_layouts: &VariantLayouts,
-) -> Result<Vec<MirFunction>, LowerError> {
-    // A body-less `@extern(wasm, module, name)` function lowers to a thin host-IMPORT
-    // call (the browser dom/fetch/timer/console stubs) — its behavior IS the host's, so
-    // it CALLS the import, never fabricates a value. Gated STRICTLY on target == "wasm"
-    // (a `rust`/`rs` extern has no wasm host → `None` → it keeps walling as before).
-    if let Some(import_fn) = try_lower_extern_wasm(func)? {
-        return Ok(vec![import_fn]);
-    }
-    // A `mut` param's write-back rides v0's tuple-return + place-writeback
-    // convention (C-131/C-132). The v1 lower has NO move-mode calling convention
-    // yet: a mutation through the borrowed param COWs a copy and silently DROPS
-    // the caller-visible write (`push9(v, 20)` left `v` unchanged on the verified
-    // default while v0 pushed — the #790 mut_list_param row, main-reachable).
-    // WALL the fn — v0 emits the correct convention on both targets.
-    if !func.mutated_params.is_empty() {
-        return Err(LowerError::Unsupported(format!(
-            "fn `{}` mutates its `mut` param(s) — the move-mode write-back \
-             convention (C-132) not in this brick",
-            func.name
-        )));
-    }
-    let mut ctx = LowerCtx {
+) -> LowerCtx {
+    LowerCtx {
         globals: globals.clone(),
         global_inits: global_inits.clone(),
         fn_name: func.name.as_str().to_string(),
@@ -476,7 +521,53 @@ fn lower_function_all_impl(
             _ => Some(Ty::String),
         },
         ..Default::default()
-    };
+    }
+}
+
+/// The synthetic-Result ABI retype the lowering applies before its desugar ladder: an
+/// `AUTO_WRAP_ABI_FNS` member's root body is retyped to the TRUE compiled carrier
+/// `Result[<declared>, String]` (`func.ret_ty` keeps the bare sugar type). `pub` because
+/// the classify count-side must apply the SAME retype before `desugar_all` —
+/// desugar-before-both means BOTH: without it `desugar_loop_unwrap`'s `Result[T, String]`
+/// root gate declines on the count side while the lowering fires it, and the rewrite's
+/// injected owned-copy concat becomes a MIR op with no counted IR node (a false
+/// `mir > ir` breach on every in-profile loop-`!` fn — the #1176 drift).
+pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
+    if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(func.name.as_str())) {
+        Some(IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() })
+    } else {
+        None
+    }
+}
+
+fn lower_function_all_impl(
+    func: &IrFunction,
+    globals: &HashMap<VarId, Ty>,
+    global_inits: &HashMap<VarId, IrExpr>,
+    record_layouts: &RecordLayouts,
+    variant_layouts: &VariantLayouts,
+) -> Result<Vec<MirFunction>, LowerError> {
+    // A body-less `@extern(wasm, module, name)` function lowers to a thin host-IMPORT
+    // call (the browser dom/fetch/timer/console stubs) — its behavior IS the host's, so
+    // it CALLS the import, never fabricates a value. Gated STRICTLY on target == "wasm"
+    // (a `rust`/`rs` extern has no wasm host → `None` → it keeps walling as before).
+    if let Some(import_fn) = try_lower_extern_wasm(func)? {
+        return Ok(vec![import_fn]);
+    }
+    // A `mut` param's write-back rides v0's tuple-return + place-writeback
+    // convention (C-131/C-132). The v1 lower has NO move-mode calling convention
+    // yet: a mutation through the borrowed param COWs a copy and silently DROPS
+    // the caller-visible write (`push9(v, 20)` left `v` unchanged on the verified
+    // default while v0 pushed — the #790 mut_list_param row, main-reachable).
+    // WALL the fn — v0 emits the correct convention on both targets.
+    if !func.mutated_params.is_empty() {
+        return Err(LowerError::Unsupported(format!(
+            "fn `{}` mutates its `mut` param(s) — the move-mode write-back \
+             convention (C-132) not in this brick",
+            func.name
+        )));
+    }
+    let mut ctx = new_lower_ctx(func, globals, global_inits, record_layouts, variant_layouts);
     let params = ctx.bind_params(&func.params)?;
     // TCO: a tail-self-recursive heap-result function is rewritten to a scalar loop + post-loop
     // dispatch (the existing self-rec guard would otherwise wall it). The rewritten body lowers
@@ -491,106 +582,17 @@ fn lower_function_all_impl(
     // SAME desugared tree (desugar-before-both), so mir == ir. Unblocks base64 encode/decode_chunks +
     // toml read_basic/parse_val (the let-bound-heap-`if`-in-a-loop frontier).
     let owned_body;
-    let func_body: &IrExpr = if crate::lower::AUTO_WRAP_ABI_FNS
-        .with(|s| s.borrow().contains(func.name.as_str()))
-    {
-        owned_body = IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() };
+    let func_body: &IrExpr = if let Some(b) = auto_wrap_abi_body(func) {
+        owned_body = b;
         &owned_body
     } else {
         &func.body
     };
-    // assert/assert_eq/assert_ne → the controlled-halt `if`/die shape (see
-    // `desugar_assert_calls`). Desugar-before-both: every downstream consumer
-    // (counting, TCO, lowering) sees the same tree.
-    let assert_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_assert_calls(func_body) {
-        assert_body = rewritten;
-        &assert_body
-    } else {
-        func_body
-    };
-    // `m[k]` → `map.get(m, k)` (see `desugar_map_access_calls`) — same
-    // desugar-before-both slot.
-    let map_access_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_map_access_calls(func_body) {
-        map_access_body = rewritten;
-        &map_access_body
-    } else {
-        func_body
-    };
-    // `buf[i]` over Bytes → `bytes.index(buf, i)` (see `desugar_bytes_index_calls`).
-    let bytes_index_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_bytes_index_calls(func_body) {
-        bytes_index_body = rewritten;
-        &bytes_index_body
-    } else {
-        func_body
-    };
-    // Matrix `a * b`/`+`/`-` → matrix.mul/add/sub (see `desugar_matrix_binops`) —
-    // same desugar-before-both slot.
-    let matrix_binop_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_matrix_binops(func_body) {
-        matrix_binop_body = rewritten;
-        &matrix_binop_body
-    } else {
-        func_body
-    };
-    // The C-127 piped HOF chain (`… |> option.map(λ) |> option.unwrap_or(d)`) →
-    // its source-`let` decomposed form (see `desugar_hof_chain_anf`) — same
-    // desugar-before-both slot.
-    let hof_chain_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_hof_chain_anf(func_body) {
-        hof_chain_body = rewritten;
-        &hof_chain_body
-    } else {
-        func_body
-    };
-    // A HEAP-result `if` in call-argument position → its let-decomposed
-    // form (see `desugar_heap_if_call_args`, #881) — same slot.
-    let heap_if_arg_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_heap_if_call_args(func_body) {
-        heap_if_arg_body = rewritten;
-        &heap_if_arg_body
-    } else {
-        func_body
-    };
-    // A call argument projecting a heap value out of a MUTABLE global
-    // (`s(cached_items[i].content)`) → its let-decomposed form (see
-    // `desugar_mutable_global_projection_args`, #881) — same slot.
-    let mg_projection_body;
-    let func_body: &IrExpr =
-        if let Some(rewritten) = desugar_mutable_global_projection_args(func_body) {
-            mg_projection_body = rewritten;
-            &mg_projection_body
-        } else {
-            func_body
-        };
-    // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` (see
-    // `desugar_bytes_index_assign`) — same desugar-before-both slot.
-    let bytes_index_assign_body;
-    let func_body: &IrExpr =
-        if let Some(rewritten) = desugar_bytes_index_assign(func_body, &func.params) {
-            bytes_index_assign_body = rewritten;
-            &bytes_index_assign_body
-        } else {
-            func_body
-        };
-    // `xs[a..b]` slice RuntimeCall → `list.slice(xs, a, b)` (see `desugar_list_slice_calls`).
-    let list_slice_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_list_slice_calls(func_body) {
-        list_slice_body = rewritten;
-        &list_slice_body
-    } else {
-        func_body
-    };
-    // `p?.f` → the some/none match (see `desugar_optional_chain`).
-    let opt_chain_body;
-    let func_body: &IrExpr = if let Some(rewritten) = desugar_optional_chain(func_body) {
-        opt_chain_body = rewritten;
-        &opt_chain_body
-    } else {
-        func_body
-    };
+    // The desugar-before-both chain: every downstream consumer (counting, TCO,
+    // lowering) sees the SAME tree, so `mir == ir` holds for whatever the
+    // rewrites introduce.
+    let desugared = apply_pre_lower_desugars(func_body, &func.params);
+    let func_body: &IrExpr = desugared.as_ref().unwrap_or(func_body);
     // A RESULT-ABI fn (declared `Result[Unit, E]`, or a declared-Unit AUTO_WRAP lift) whose
     // effective TAIL is Unit-typed produces NO value on the unit path — the never-err strips
     // reduce a lifted tail call to a raw Unit effect call, and a declared-Result effect fn can
@@ -734,6 +736,7 @@ include!("desugar_b.rs");
 include!("desugar_call_arg_anf.rs");
 include!("desugar_unwrap.rs");
 include!("desugar_unwrap_b.rs");
+include!("desugar_nested_unwrap.rs");
 include!("desugar_loop.rs");
 include!("desugar_loop_b.rs");
 include!("desugar_branch.rs");

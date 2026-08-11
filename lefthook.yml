@@ -12,10 +12,26 @@ pre-commit:
     contracts:
       glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/gen-claims.sh,README.md}"
       run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+    libm-determinism:
+      glob: "{runtime/rs/src/*.rs,crates/almide-kernel/src/*.rs,proofs/libm-determinism-audit.toml,scripts/check-libm-determinism.sh,scripts/lib/libm-call-enumerate.py}"
+      run: bash scripts/check-libm-determinism.sh
+    scalar-read-audit:
+      glob: "{crates/almide-mir/src/lower/*.rs,proofs/scalar-read-audit.toml,scripts/check-scalar-read-audit.sh,scripts/lib/scalar-read-enumerate.py}"
+      run: bash scripts/check-scalar-read-audit.sh
+    wat-prelude-audit:
+      # STRUCTURE only pre-commit (no reachability re-render — that needs the
+      # render_program example binary and runs in CI). Catches the common local
+      # failure: a `(func $…)` added or edited without its ledger row.
+      glob: "{crates/almide-mir/src/render_wasm*.rs,proofs/wat-prelude-audit.toml,scripts/check-wat-prelude-audit.sh,scripts/lib/wat-prelude-enumerate.py}"
+      run: bash scripts/check-wat-prelude-audit.sh
     ratchet-separation:
       run: scripts/check-ratchet-separation.sh
     semantics-manifest:
-      glob: "{docs/stdlib/semantics-manifest.toml,stdlib/string.almd,spec/stdlib/string_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
+      # Globbed by PATTERN, not by covered module: the hook named
+      # stdlib/string.almd literally, so the next module onto the ratchet
+      # would edit its surface without ever arming the gate. COVERED_MODULES
+      # in the check script is the one place the module list lives.
+      glob: "{docs/stdlib/semantics-manifest.toml,stdlib/*.almd,spec/stdlib/*_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
       run: scripts/check-semantics-manifest.sh
 
 commit-msg:

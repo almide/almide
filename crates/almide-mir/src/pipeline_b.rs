@@ -86,25 +86,7 @@ pub(crate) fn disambiguate_module_global_regions(ir: &mut almide_ir::IrProgram) 
         .max()
         .unwrap_or(0) as u32;
     for m in &mut ir.modules {
-        let mut map: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
-            std::collections::HashMap::new();
-        for tl in &mut m.top_lets {
-            let old = tl.var;
-            let fresh = almide_ir::VarId(next);
-            next += 1;
-            // Keep the by-index var-table lookup alive for the fresh id: pad
-            // with clones up to the new index (the pad entries are never
-            // indexed — only the fresh id is) and place the var's own info
-            // there. A top-let whose old id had no entry keeps having none.
-            if let Some(info) = m.var_table.entries.get(old.0 as usize).cloned() {
-                while m.var_table.entries.len() < fresh.0 as usize {
-                    m.var_table.entries.push(info.clone());
-                }
-                m.var_table.entries.push(info);
-            }
-            map.insert(old, fresh);
-            tl.var = fresh;
-        }
+        let map = renumber_module_top_lets(m, &mut next);
         if map.is_empty() {
             continue;
         }
@@ -116,6 +98,33 @@ pub(crate) fn disambiguate_module_global_regions(ir: &mut almide_ir::IrProgram) 
             almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut tl.value);
         }
     }
+}
+
+/// Give every top-let in `m` a fresh program-unique VarId, returning old → new.
+///
+/// The by-index var-table lookup stays alive for the fresh id: pad with clones
+/// up to the new index (the pad entries are never indexed — only the fresh id
+/// is) and place the var's own info there. A top-let whose old id had no entry
+/// keeps having none.
+fn renumber_module_top_lets(
+    m: &mut almide_ir::IrModule,
+    next: &mut u32,
+) -> std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> {
+    let mut map = std::collections::HashMap::new();
+    for tl in &mut m.top_lets {
+        let old = tl.var;
+        let fresh = almide_ir::VarId(*next);
+        *next += 1;
+        if let Some(info) = m.var_table.entries.get(old.0 as usize).cloned() {
+            while m.var_table.entries.len() < fresh.0 as usize {
+                m.var_table.entries.push(info.clone());
+            }
+            m.var_table.entries.push(info);
+        }
+        map.insert(old, fresh);
+        tl.var = fresh;
+    }
+    map
 }
 
 /// Phase 2: collect top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs
@@ -494,42 +503,51 @@ fn bridge_cross_module_derived_methods(
         main_types: &'a std::collections::HashSet<&'a str>,
         owners: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
     }
+    impl Rw<'_> {
+        /// The module-qualified name of a `Type.encode`/`Type.decode` call, when
+        /// exactly ONE module owns that type and the reference does not shadow a
+        /// MAIN type of the same name.
+        ///
+        /// `varlib.Pigment.decode` gives qualifier "varlib" plus base "Pigment";
+        /// `Pigment.decode` gives the base only. A qualified ref must match the
+        /// owner; a bare ref must not shadow a main type.
+        fn qualified_codec_fn(&self, n: &str) -> Option<String> {
+            if n.starts_with("almide_rt_") || n.starts_with("__") {
+                return None;
+            }
+            let (ty_name, method) = n.rsplit_once('.')?;
+            if method != "encode" && method != "decode" {
+                return None;
+            }
+            let (qualifier, base) = match ty_name.rsplit_once('.') {
+                Some((q, b)) => (Some(q), b),
+                None => (None, ty_name),
+            };
+            if qualifier.is_none() && self.main_types.contains(base) {
+                return None;
+            }
+            let ms = self.owners.get(base)?;
+            let [only] = ms.as_slice() else { return None };
+            if qualifier.is_some() && qualifier != Some(only) {
+                return None;
+            }
+            Some(user_module_fn_name(only, &format!("{base}.{method}")))
+        }
+
+    }
+
     impl almide_ir::IrMutVisitor for Rw<'_> {
         fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
             almide_ir::walk_expr_mut(self, e);
-            if let almide_ir::IrExprKind::Call {
+            let almide_ir::IrExprKind::Call {
                 target: almide_ir::CallTarget::Named { name },
                 ..
             } = &mut e.kind
-            {
-                let n = name.as_str();
-                if n.starts_with("almide_rt_") || n.starts_with("__") {
-                    return;
-                }
-                let Some((ty_name, method)) = n.rsplit_once('.') else { return };
-                if method != "encode" && method != "decode" {
-                    return;
-                }
-                // `varlib.Pigment.decode` → qualifier "varlib" + base "Pigment";
-                // `Pigment.decode` → base only. A qualified ref must match the
-                // owner; a bare ref must not shadow a MAIN type of the same name.
-                let (qualifier, base) = match ty_name.rsplit_once('.') {
-                    Some((q, b)) => (Some(q), b),
-                    None => (None, ty_name),
-                };
-                if qualifier.is_none() && self.main_types.contains(base) {
-                    return;
-                }
-                if let Some(ms) = self.owners.get(base) {
-                    if let [only] = ms.as_slice() {
-                        if qualifier.is_none() || qualifier == Some(only) {
-                            *name = almide_lang::intern::sym(&user_module_fn_name(
-                                only,
-                                &format!("{base}.{method}"),
-                            ));
-                        }
-                    }
-                }
+            else {
+                return;
+            };
+            if let Some(qualified) = self.qualified_codec_fn(name.as_str()) {
+                *name = almide_lang::intern::sym(&qualified);
             }
         }
     }
@@ -564,6 +582,26 @@ fn bridge_cross_module_derived_methods(
 /// this map it had no inner cause to name; a reader then saw "the wasm module must carry
 /// its export" for a wall that was really a receiver-shape decline one level down, which
 /// is the exact mis-attribution that cost hours on #904 (#906).
+/// Print the walled-fn histogram under `--verbose`.
+///
+/// Every walled fn's own reason is worth keeping, `main`'s most of all: when
+/// `main` walls there is no `$main` and the whole module declines, and reporting
+/// only the absence turned every distinct cause into one unattributable bucket
+/// (#812). An exported `pub fn` declines the module the same way (#906).
+fn report_walled_fns(walled: &[String], total_ir_fn_count: usize, verbose: bool) {
+    if walled.is_empty() || !verbose {
+        return;
+    }
+    eprintln!(
+        "[v1-wall] {} of {} function(s) outside the lowering subset (NOT rendered):",
+        walled.len(),
+        total_ir_fn_count
+    );
+    for w in walled {
+        eprintln!("  {w}");
+    }
+}
+
 fn lower_main_and_sibling_fns(
     inlined_fns: &[almide_ir::IrFunction],
     module_fn_sibs: &[almide_ir::IrFunction],
@@ -600,16 +638,7 @@ fn lower_main_and_sibling_fns(
             }
         }
     }
-    if !walled.is_empty() && verbose {
-        eprintln!(
-            "[v1-wall] {} of {} function(s) outside the lowering subset (NOT rendered):",
-            walled.len(),
-            total_ir_fn_count
-        );
-        for w in &walled {
-            eprintln!("  {w}");
-        }
-    }
+    report_walled_fns(&walled, total_ir_fn_count, verbose);
 
     let already: std::collections::HashSet<String> =
         functions.iter().map(|f| f.name.clone()).collect();

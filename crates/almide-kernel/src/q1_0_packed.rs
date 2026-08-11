@@ -82,6 +82,8 @@ fn q1_0_block_dot_packed_wasm(x: &[f64], sign: &[u8], scale: f64) -> f64 {
     use std::arch::wasm32::*;
     let negzero = f64::from_bits(0x8000_0000_0000_0000);
     let mut acc = f64x2_splat(0.0);
+    // 128 f64 = exactly 64 two-lane windows; the cast is proved by the type.
+    let (lanes, _) = x.as_chunks::<2>();
     for g in 0..64 {
         let bit_base = g * 2;
         let byte = sign[bit_base / 8];
@@ -90,8 +92,7 @@ fn q1_0_block_dot_packed_wasm(x: &[f64], sign: &[u8], scale: f64) -> f64 {
             if two & 1 != 0 { negzero } else { 0.0 },
             if two & 2 != 0 { negzero } else { 0.0 },
         );
-        // SAFETY: g in 0..64, g*2 in 0..128, x has 128 elems.
-        let xv = unsafe { v128_load(x.as_ptr().add(g * 2) as *const v128) };
+        let xv = crate::simd_wasm::load_f64x2(&lanes[g]);
         acc = f64x2_add(acc, v128_xor(xv, mask));
     }
     (f64x2_extract_lane::<0>(acc) + f64x2_extract_lane::<1>(acc)) * scale
@@ -149,26 +150,41 @@ pub fn q1_0_block_dot_packed(x: &[f64], sign: &[u8], scale: f64) -> f64 {
 /// Full quantized linear, Almide's ABI: out[i,j] = Σ_blocks dot(x[i, block],
 /// W[j, block]·scale). x: `[x_rows*n_in]` f64; w_bytes: packed Q1_0 with
 /// `w_offset`; w_rows = out cols. Writes `[x_rows*w_rows]` row-major.
+/// A packed Q1_0 weight matrix: the byte blob, where this matrix starts inside
+/// it, and how many output rows it has. Each row is `blocks` × 18 bytes — two
+/// bytes of fp16 scale followed by sixteen of packed signs.
+#[derive(Clone, Copy)]
+pub struct PackedWeights<'a> {
+    pub bytes: &'a [u8],
+    pub offset: usize,
+    pub rows: usize,
+}
+
 pub fn linear_q1_0_packed(
     x: &[f64], x_rows: usize, n_in: usize,
-    w_bytes: &[u8], w_offset: usize, w_rows: usize,
+    w: PackedWeights<'_>,
     out: &mut [f64],
 ) {
     let blocks = n_in / 128;
     for i in 0..x_rows {
         let xi = &x[i * n_in..(i + 1) * n_in];
-        for j in 0..w_rows {
-            let row_off = w_offset + j * blocks * 18;
-            let mut sum = 0.0f64;
-            for b in 0..blocks {
-                let bs = row_off + b * 18;
-                let scale = fp16_to_f64(w_bytes[bs], w_bytes[bs + 1]);
-                let sign = &w_bytes[bs + 2..bs + 18];
-                sum += q1_0_block_dot_packed(&xi[b * 128..b * 128 + 128], sign, scale);
-            }
-            out[i * w_rows + j] = sum;
+        for j in 0..w.rows {
+            out[i * w.rows + j] = packed_row_dot(xi, &w, j, blocks);
         }
     }
+}
+
+/// One output cell: Σ over the row's blocks of `dot(x[block], W[j, block]·scale)`.
+fn packed_row_dot(xi: &[f64], w: &PackedWeights<'_>, j: usize, blocks: usize) -> f64 {
+    let row_off = w.offset + j * blocks * 18;
+    let mut sum = 0.0f64;
+    for b in 0..blocks {
+        let bs = row_off + b * 18;
+        let scale = fp16_to_f64(w.bytes[bs], w.bytes[bs + 1]);
+        let sign = &w.bytes[bs + 2..bs + 18];
+        sum += q1_0_block_dot_packed(&xi[b * 128..b * 128 + 128], sign, scale);
+    }
+    sum
 }
 
 #[cfg(test)]

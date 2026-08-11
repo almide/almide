@@ -127,35 +127,43 @@ impl<'a> Interpreter<'a> {
         binds: &mut Vec<(VarId, Value)>,
     ) -> Option<bool> {
         Some(match pattern {
-            IrPattern::Some { inner } => match value {
-                Value::Option(Some(v)) => self.try_match(inner, v, binds),
-                _ => false,
-            },
+            // Carrier patterns: unwrap the matching carrier, then recurse.
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+                match carrier_payload(pattern, value) {
+                    Some(v) => self.try_match(inner, v, binds),
+                    None => false,
+                }
+            }
             IrPattern::None => matches!(value, Value::Option(None)),
-            IrPattern::Ok { inner } => match value {
-                Value::Result(Ok(v)) => self.try_match(inner, v, binds),
-                _ => false,
-            },
-            IrPattern::Err { inner } => match value {
-                Value::Result(Err(v)) => self.try_match(inner, v, binds),
-                _ => false,
-            },
-            IrPattern::Constructor { name, args } => match value {
-                Value::Variant { ctor, payload, .. } if ctor.as_str() == name => match payload {
-                    VariantPayload::Unit => args.is_empty(),
-                    VariantPayload::Tuple(items) if items.len() == args.len() => args
-                        .iter()
-                        .zip(items.iter())
-                        .all(|(p, v)| self.try_match(p, v, binds)),
-                    _ => false,
-                },
-                _ => false,
-            },
+            IrPattern::Constructor { name, args } => self.try_match_ctor(name, args, value, binds),
             IrPattern::RecordPattern { name, fields, rest } => {
                 self.try_match_record(name, fields, *rest, value, binds)
             }
             _ => return None,
         })
+    }
+
+    /// `try_match`'s `Constructor` arm: the ctor name must agree, and the
+    /// payload arity must match the sub-pattern count.
+    fn try_match_ctor(
+        &mut self,
+        name: &str,
+        args: &[IrPattern],
+        value: &Value,
+        binds: &mut Vec<(VarId, Value)>,
+    ) -> bool {
+        let Value::Variant { ctor, payload, .. } = value else { return false };
+        if ctor.as_str() != name {
+            return false;
+        }
+        match payload {
+            VariantPayload::Unit => args.is_empty(),
+            VariantPayload::Tuple(items) if items.len() == args.len() => args
+                .iter()
+                .zip(items.iter())
+                .all(|(p, v)| self.try_match(p, v, binds)),
+            _ => false,
+        }
     }
 
     /// `try_match`'s `RecordPattern` arm, split out as its own method — see
@@ -169,44 +177,36 @@ impl<'a> Interpreter<'a> {
         value: &Value,
         binds: &mut Vec<(VarId, Value)>,
     ) -> bool {
-        let (obj_name, obj_fields): (Option<Sym>, &Vec<(Sym, Value)>) = match value {
-            Value::Record { name, fields } => (*name, fields),
-            Value::Variant { ctor, payload: VariantPayload::Record(fields), .. } => {
-                (Some(*ctor), fields)
-            }
-            _ => return false,
-        };
+        let Some((obj_name, obj_fields)) = record_shape(value) else { return false };
         // Name must match when the pattern names a constructor.
-        if !name.is_empty() {
-            match obj_name {
-                Some(n) if n.as_str() == name => {}
-                _ => return false,
-            }
+        if !name.is_empty() && obj_name.is_none_or(|n| n.as_str() != name) {
+            return false;
         }
         if !rest && fields.len() != obj_fields.len() {
             return false;
         }
-        for fp in fields {
-            let fname = fp.name.as_str();
-            let fv = match obj_fields.iter().find(|(k, _)| k.as_str() == fname) {
-                Some((_, v)) => v,
-                None => return false,
-            };
-            match &fp.pattern {
-                // Shorthand `{ x, y }` lowers to explicit `Bind`
-                // sub-patterns (verified via IR dump), so binding is
-                // handled here uniformly.
-                Some(sub) => {
-                    if !self.try_match(sub, fv, binds) {
-                        return false;
-                    }
-                }
-                // A field with no sub-pattern is a structural-only
-                // match (the field must exist, but binds nothing).
-                None => {}
-            }
+        fields.iter().all(|fp| self.try_match_field(fp, obj_fields, binds))
+    }
+
+    /// One `{ field: pat }` entry of a record pattern. The field must exist;
+    /// its sub-pattern must then match. Shorthand `{ x, y }` lowers to explicit
+    /// `Bind` sub-patterns (verified via IR dump), so binding is handled here
+    /// uniformly, and a field with NO sub-pattern is a structural-only match
+    /// (the field must exist, but binds nothing).
+    fn try_match_field(
+        &mut self,
+        fp: &IrFieldPattern,
+        obj_fields: &[(Sym, Value)],
+        binds: &mut Vec<(VarId, Value)>,
+    ) -> bool {
+        let fname = fp.name.as_str();
+        let Some((_, fv)) = obj_fields.iter().find(|(k, _)| k.as_str() == fname) else {
+            return false;
+        };
+        match &fp.pattern {
+            Some(sub) => self.try_match(sub, fv, binds),
+            None => true,
         }
-        true
     }
 
     // ── Operators ───────────────────────────────────────────────
@@ -350,131 +350,59 @@ impl<'a> Interpreter<'a> {
         })
     }
 
+    /// Apply a resolved binary operator. The operator alone picks the family,
+    /// so the values move straight into the arm that uses them — no operand is
+    /// cloned to probe a table that will not claim it.
     pub(crate) fn apply_binop(&mut self, op: BinOp, l: Value, r: Value) -> Flow {
-        // `l`/`r` are moved into the half that claims the operator, so the first
-        // attempt gets clones and the second gets the originals.
-        if let Some(f) = self.apply_binop_a(op, l.clone(), r.clone()) {
-            return f;
-        }
-        self.apply_binop_b(op, l, r)
-            .unwrap_or_else(|| Flow::Abort(format!("internal: no rule for binop {:?}", op)))
-    }
-
-    /// The first half of `apply_binop`'s arm table.
-    ///
-    /// Extracted from `apply_binop` (arm-table halving): arms verbatim and in
-    /// source order, so the router's order is the only ordering that matters.
-    pub(crate) fn apply_binop_a(&mut self, op: BinOp, l: Value, r: Value) -> Option<Flow> {
         use BinOp::*;
-        Some(match op {
-            // Integer arithmetic. Native release emits bare `+`/`-`/`*` which
-            // WRAP (no panic) — replicate with wrapping ops.
-            AddInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_add(b)))),
-            SubInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_sub(b)))),
-            MulInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_mul(b)))),
-            // Total div / mod: `almide_div!` / `almide_mod!` semantics —
-            // checked_div/checked_rem, None → abort with the exact native msg.
-            DivInt => int2(l, r, |a, b| match a.checked_div(b) {
-                Some(v) => Flow::val(Value::Int(v)),
-                None => Flow::Abort(div_msg(b)),
-            }),
-            ModInt => int2(l, r, |a, b| match a.checked_rem(b) {
-                Some(v) => Flow::val(Value::Int(v)),
-                None => Flow::Abort(div_msg(b)),
-            }),
-            // Total pow: `almide_pow!` / `almide_rt_math_pow` semantics —
-            // exponentiation by squaring over the FULL i64 exponent, wrapping
-            // multiply, and a negative exponent aborts with the same message as
-            // both compiled targets (#895). `wrapping_pow(b as u32)` diverged
-            // twice: it wrapped a negative exponent into a huge u32 and it
-            // truncated exponents past 2^32.
-            PowInt => int2(l, r, |a, b| match int_pow(a, b) {
-                Some(v) => Flow::val(Value::Int(v)),
-                None => Flow::Abort("negative exponent".to_string()),
-            }),
-
-            AddFloat => float2(l, r, |a, b| a + b),
-            SubFloat => float2(l, r, |a, b| a - b),
-            MulFloat => float2(l, r, |a, b| a * b),
-            _ => return None,
-        })
-    }
-
-    /// The second half of `apply_binop`'s arm table.
-    ///
-    /// Extracted from `apply_binop` (arm-table halving): arms verbatim and in
-    /// source order, so the router's order is the only ordering that matters.
-    pub(crate) fn apply_binop_b(&mut self, op: BinOp, l: Value, r: Value) -> Option<Flow> {
-        use BinOp::*;
-        Some(match op {
-            DivFloat => float2(l, r, |a, b| a / b),
-            ModFloat => float2(l, r, |a, b| a % b),
-            PowFloat => float2(l, r, |a, b| a.powf(b)),
-
-            ConcatStr => match (l, r) {
-                (Value::Str(a), Value::Str(b)) => {
-                    let out = format!("{}{}", a, b);
-                    // T3-5 dynamic charge mirror: 1 + result_byte_len/16,
-                    // keyed on the same result both backends key on.
-                    if self.det_in_user.get() {
-                        self.det_fuel.set(
-                            self.det_fuel.get().wrapping_sub(1 + (out.len() as i64 >> 4)),
-                        );
-                        if self.det_cut() {
-                            return Some(Flow::Return(Value::Int(0)));
-                        }
-                    }
-                    Flow::val(Value::str(out))
-                }
-                (a, b) => Flow::Abort(format!(
-                    "internal: string concat on {} and {}",
-                    a.type_name(),
-                    b.type_name()
-                )),
-            },
-            ConcatList => match (l, r) {
-                (Value::List(a), Value::List(b)) => {
-                    let mut v = (*a).clone();
-                    v.extend((*b).clone());
-                    Flow::val(Value::list(v))
-                }
-                (a, b) => Flow::Abort(format!(
-                    "internal: list concat on {} and {}",
-                    a.type_name(),
-                    b.type_name()
-                )),
-            },
-
-            Eq => Flow::val(Value::Bool(l == r)),
-            Neq => Flow::val(Value::Bool(l != r)),
-            Lt | Gt | Lte | Gte => match l.partial_cmp_val(&r) {
-                Some(ord) => {
-                    let res = match op {
-                        Lt => ord == std::cmp::Ordering::Less,
-                        Gt => ord == std::cmp::Ordering::Greater,
-                        Lte => ord != std::cmp::Ordering::Greater,
-                        Gte => ord != std::cmp::Ordering::Less,
-                        _ => unreachable!(),
-                    };
-                    Flow::val(Value::Bool(res))
-                }
-                // #556 F2: a None here is the NaN case (Float partial_cmp) —
-                // both backends return IEEE false for every NaN comparison
-                // (`<`/`>`/`<=`/`>=`), so the interp must too, NOT abort. A
-                // genuine type-mismatch ordering can't reach here: the checker
-                // rejects it, and codegen never emits cross-type compares.
-                None => Flow::val(Value::Bool(false)),
-            },
-
-            And | Or => unreachable!("short-circuited above"),
-
+        match op {
+            AddInt | SubInt | MulInt | DivInt | ModInt | PowInt => apply_binop_int(op, l, r),
+            AddFloat | SubFloat | MulFloat | DivFloat | ModFloat | PowFloat => {
+                apply_binop_float(op, l, r)
+            }
+            ConcatStr | ConcatList => self.apply_binop_concat(op, l, r),
+            Eq | Neq | Lt | Gt | Lte | Gte => apply_binop_compare(op, l, r),
             // Matrix ops would dispatch to the runtime matrix bridge; not yet
             // implemented in this phase.
             MulMatrix | AddMatrix | SubMatrix | ScaleMatrix => {
                 Flow::Unsupported("matrix arithmetic".into())
             }
-            _ => return None,
-        })
+            And | Or => unreachable!("short-circuited above"),
+        }
+    }
+
+    /// `ConcatStr` / `ConcatList`. String concat is the one arithmetic form
+    /// that charges determinism fuel by RESULT SIZE, so it needs `self`.
+    fn apply_binop_concat(&mut self, op: BinOp, l: Value, r: Value) -> Flow {
+        match (op, l, r) {
+            (BinOp::ConcatStr, Value::Str(a), Value::Str(b)) => {
+                let out = format!("{}{}", a, b);
+                // T3-5 dynamic charge mirror: 1 + result_byte_len/16,
+                // keyed on the same result both backends key on.
+                if self.det_in_user.get() {
+                    self.det_fuel
+                        .set(self.det_fuel.get().wrapping_sub(1 + (out.len() as i64 >> 4)));
+                    if self.det_cut() {
+                        return Flow::Return(Value::Int(0));
+                    }
+                }
+                Flow::val(Value::str(out))
+            }
+            (BinOp::ConcatList, Value::List(a), Value::List(b)) => {
+                let mut v = (*a).clone();
+                v.extend((*b).clone());
+                Flow::val(Value::list(v))
+            }
+            (op, a, b) => {
+                let what = if matches!(op, BinOp::ConcatStr) { "string" } else { "list" };
+                Flow::Abort(format!(
+                    "internal: {} concat on {} and {}",
+                    what,
+                    a.type_name(),
+                    b.type_name()
+                ))
+            }
+        }
     }
 
     fn eval_unop(&mut self, op: UnOp, v: Value) -> Flow {
@@ -560,5 +488,118 @@ fn div_msg(divisor: i64) -> String {
         "division by zero".to_string()
     } else {
         "integer overflow".to_string()
+    }
+}
+
+/// The signed integer operators. Native release emits bare `+`/`-`/`*` which
+/// WRAP (no panic) — replicate with wrapping ops. Div/mod are total
+/// (`almide_div!` / `almide_mod!`): checked_div/checked_rem, `None` aborts with
+/// the exact native message.
+///
+/// Total pow mirrors `almide_pow!` / `almide_rt_math_pow`: exponentiation by
+/// squaring over the FULL i64 exponent, wrapping multiply, and a negative
+/// exponent aborts with the same message as both compiled targets (#895).
+/// `wrapping_pow(b as u32)` diverged twice: it wrapped a negative exponent into
+/// a huge u32 and it truncated exponents past 2^32.
+fn apply_binop_int(op: BinOp, l: Value, r: Value) -> Flow {
+    use BinOp::*;
+    match op {
+        AddInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_add(b)))),
+        SubInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_sub(b)))),
+        MulInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_mul(b)))),
+        DivInt => int2(l, r, |a, b| match a.checked_div(b) {
+            Some(v) => Flow::val(Value::Int(v)),
+            None => Flow::Abort(div_msg(b)),
+        }),
+        ModInt => int2(l, r, |a, b| match a.checked_rem(b) {
+            Some(v) => Flow::val(Value::Int(v)),
+            None => Flow::Abort(div_msg(b)),
+        }),
+        PowInt => int2(l, r, |a, b| match int_pow(a, b) {
+            Some(v) => Flow::val(Value::Int(v)),
+            None => Flow::Abort("negative exponent".to_string()),
+        }),
+        op => Flow::Abort(format!("internal: no rule for binop {:?}", op)),
+    }
+}
+
+/// The f64 operators.
+///
+/// The float `**` / `^` OPERATOR is the same vendored-musl-libm transcendental
+/// the MODULE path (`math.pow`, bridge.rs) already abstains on: both backends
+/// route it through the vendored pow, Rust's `f64::powf` calls the PLATFORM
+/// libm, and the two differ in the last ULP. The module path returned
+/// `Unsupported` (an honest skip) while this operator arm silently voted with
+/// the platform result — so the 3-way oracle cast a WRONG third vote and the
+/// nightly fuzzer reported the disagreement as a finding (seed
+/// 1785995202102876112 index 388: interp "5.340981952686458" vs both targets
+/// "5.340981952686457", #924). Abstain here too — the interp does not vendor
+/// the libm.
+fn apply_binop_float(op: BinOp, l: Value, r: Value) -> Flow {
+    use BinOp::*;
+    match op {
+        AddFloat => float2(l, r, |a, b| a + b),
+        SubFloat => float2(l, r, |a, b| a - b),
+        MulFloat => float2(l, r, |a, b| a * b),
+        DivFloat => float2(l, r, |a, b| a / b),
+        ModFloat => float2(l, r, |a, b| a % b),
+        // The float `**` operator runs the SAME vendored musl-libm `pow` both
+        // backends do (`crate::vendored_libm`) — #924's rule: a transcendental
+        // reachable through an OPERATOR must agree with its module-fn spelling,
+        // and both now compute the consensus algorithm instead of abstaining on
+        // the platform libm's last ULP.
+        PowFloat => float2(l, r, crate::vendored_libm::almide_rt_libm_pow),
+        op => Flow::Abort(format!("internal: no rule for binop {:?}", op)),
+    }
+}
+
+/// Equality and the four orderings.
+///
+/// #556 F2: a `None` from `partial_cmp_val` is the NaN case (Float
+/// partial_cmp) — both backends return IEEE false for every NaN comparison
+/// (`<`/`>`/`<=`/`>=`), so the interp must too, NOT abort. A genuine
+/// type-mismatch ordering can't reach here: the checker rejects it, and codegen
+/// never emits cross-type compares.
+fn apply_binop_compare(op: BinOp, l: Value, r: Value) -> Flow {
+    use BinOp::*;
+    use std::cmp::Ordering;
+    match op {
+        Eq => return Flow::val(Value::Bool(l == r)),
+        Neq => return Flow::val(Value::Bool(l != r)),
+        _ => {}
+    }
+    let Some(ord) = l.partial_cmp_val(&r) else {
+        return Flow::val(Value::Bool(false));
+    };
+    let res = match op {
+        Lt => ord == Ordering::Less,
+        Gt => ord == Ordering::Greater,
+        Lte => ord != Ordering::Greater,
+        Gte => ord != Ordering::Less,
+        op => return Flow::Abort(format!("internal: no rule for binop {:?}", op)),
+    };
+    Flow::val(Value::Bool(res))
+}
+
+/// The payload a `Some` / `Ok` / `Err` pattern matches against, or `None` when
+/// the value carries the wrong shape (a `Some` pattern against an `Err`, …).
+fn carrier_payload<'v>(pattern: &IrPattern, value: &'v Value) -> Option<&'v Value> {
+    match (pattern, value) {
+        (IrPattern::Some { .. }, Value::Option(Some(v)))
+        | (IrPattern::Ok { .. }, Value::Result(Ok(v)))
+        | (IrPattern::Err { .. }, Value::Result(Err(v))) => Some(v.as_ref()),
+        _ => None,
+    }
+}
+
+/// A record-shaped value as `(constructor name, fields)`. A record literal has
+/// no ctor unless it is nominal; a record-payload variant reports its ctor.
+fn record_shape(value: &Value) -> Option<(Option<Sym>, &Vec<(Sym, Value)>)> {
+    match value {
+        Value::Record { name, fields } => Some((*name, fields)),
+        Value::Variant { ctor, payload: VariantPayload::Record(fields), .. } => {
+            Some((Some(*ctor), fields))
+        }
+        _ => None,
     }
 }

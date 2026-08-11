@@ -32,6 +32,8 @@ struct ConcatListElemShape {
     rich_variant_elem: Option<String>,
     closure_elem: bool,
     list_scalar_aggregate_elem: bool,
+    lenlist_elem: Option<crate::lower::CtorElemClass>,
+    opt_record_elem: Option<String>,
 }
 
 impl ConcatListElemShape {
@@ -45,6 +47,7 @@ impl ConcatListElemShape {
             && !self.str_int_elem && !self.scalar_aggregate_elem && !self.flat_variant_elem
             && !self.closure_elem && !self.list_scalar_aggregate_elem
             && self.rich_variant_elem.is_none() && self.record_elem.is_none()
+            && self.lenlist_elem.is_none() && self.opt_record_elem.is_none()
     }
 }
 
@@ -263,6 +266,35 @@ impl LowerCtx {
         // element recursively via `__drop_closure` — the SAME route the List[Fn] LITERAL
         // builder registers (`ListElemDrop::Closure`), so build and concat agree on the drop.
         let closure_elem = matches!(elem_ty, Ty::Fn { .. });
+        // An Option/Result CTOR element (`acc + [_x]` where `acc: List[Int?]` /
+        // `List[String?]` — the derived-codec `__dec_list_opt_*_go` accumulator,
+        // #1134 Shape 2): the SAME two classes the list-LITERAL builder admits
+        // (`lenlist_elem_class`). A Flat class element (scalar payload) is a
+        // single flat block — per-element rc_dec IS its full free (the
+        // flat-variant physics); a LenLoop class element (String/List[scalar]
+        // payload) owns its payload through the len-counted slot, freed by the
+        // SAME `$__drop_list_lenlist` route the literal builder registers, so
+        // build and concat agree on the drop. An Option[record] element stays
+        // out (None) on both sides — the recursive-drop brick.
+        let lenlist_elem = crate::lower::lenlist_elem_class(elem_ty);
+        // An `Option[<record>]` element (`acc + [some(Inner { … })]` — the codec
+        // opt-record accumulator, #1134): the same OptRecord class the literal
+        // builder registers; the generated tag-aware `$__drop_list_opt_<R>`
+        // frees each element (Some → the record's free, None → the bare block).
+        let opt_record_elem = (|| {
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            if let Ty::Applied(TC::Option, oa) = elem_ty {
+                if let [Ty::Named(n, args)] = &oa[..] {
+                    if args.is_empty()
+                        && self.custom_variant_type_name(&oa[0]).is_none()
+                        && self.aggregate_field_tys(&oa[0]).is_some()
+                    {
+                        return Some(n.as_str().to_string());
+                    }
+                }
+            }
+            None
+        })();
         ConcatListElemShape {
             scalar_elem,
             heap_elem,
@@ -278,6 +310,8 @@ impl LowerCtx {
             rich_variant_elem,
             closure_elem,
             list_scalar_aggregate_elem: self.is_list_scalar_aggregate_elem(elem_ty),
+            lenlist_elem,
+            opt_record_elem,
         }
     }
 
@@ -473,6 +507,28 @@ impl LowerCtx {
         }
         if shape.scalar_aggregate_elem {
             self.heap_elem_lists.insert(dst);
+            return true;
+        }
+        // An Option/Result CTOR element (the codec `__dec_list_opt_*_go` accumulator):
+        // Flat (scalar payload) → the per-element-rc_dec `DropListStr` IS its full free
+        // (the flat-variant physics); LenLoop (String/List[scalar] payload) → the SAME
+        // `$__drop_list_lenlist` len-counted sweep the literal builder registers, so
+        // build and concat agree on the drop.
+        if let Some(class) = &shape.lenlist_elem {
+            match class {
+                crate::lower::CtorElemClass::Flat => {
+                    self.heap_elem_lists.insert(dst);
+                }
+                crate::lower::CtorElemClass::LenLoop => {
+                    self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+                }
+            }
+            return true;
+        }
+        // An `Option[<record>]` element — the generated tag-aware per-record sweep.
+        if let Some(rname) = &shape.opt_record_elem {
+            self.variant_drop_handles
+                .insert(dst, format!("list_opt_{}", crate::lower::drop_fn_ident(rname)));
             return true;
         }
         false

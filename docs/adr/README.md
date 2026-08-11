@@ -8,7 +8,7 @@
 どちらも**なぜそう決めたか**を保存しない。結果として同じ議論が半年後に再演され、
 一度却下した案が根拠を失ったまま復活する。ADR はその 3 つ目の軸を持つ。
 
-[REJECTED_PATTERNS.md](../REJECTED_PATTERNS.md) は「採用しない機能」の一覧であり、
+[REJECTED_PATTERNS.md](../design/REJECTED_PATTERNS.md) は「採用しない機能」の一覧であり、
 ADR はその**決定に至る過程**（調査した証拠、比較した代替案、反証条件）を保存する。
 却下が REJECTED_PATTERNS に載るときは、根拠として ADR を指す。
 
@@ -55,3 +55,5 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0008](./0008-explicit-propagation-only.md) | Propagation is always explicit — auto-? abolished, `!` only, Result is must-use | Accepted | 2026-08-05 |
 | [0009](./0009-fn-type-quadrant-transparency.md) | Function types complete the capability quadrant; fn params are transparent by default | Accepted | 2026-08-06 |
 | [0010](./0010-option-type-shorthand.md) | T? is general Option shorthand — every type position, atom-tight binding, fmt-normalized | Accepted | 2026-08-06 |
+| [0011](./0011-execution-substrate-is-a-free-variable.md) | The execution substrate is a free variable — and one arm's output is the last hole in the determinism claim | Proposed | 2026-08-07 |
+| [0012](./0012-typed-error-refinement-in-the-marker.md) | Error-surface end state — refinement stays in the marker (`T!E`), erasure stays the default | Accepted | 2026-08-11 |

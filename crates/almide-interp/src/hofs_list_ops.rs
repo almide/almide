@@ -63,6 +63,11 @@ impl<'a> Interpreter<'a> {
             "get_or" => Some(self.list_get_or(args)),
             "binary_search" => Some(self.list_binary_search(args)),
             "contains" => Some(self.list_contains(args)),
+            // First index of an equal element — `PartialEq` equality, the same
+            // relation `contains` uses (measured against native on the corpus;
+            // found abstaining via args.option's `list.index_of(args, long)`,
+            // #1217 — the gap predates the args work and was simply unexercised).
+            "index_of" => Some(self.list_index_of(args)),
             // `list.append` is the FUNCTIONAL append (returns a new list); the
             // mutating `list.push` is intercepted by the in-place-mutation guard
             // above and never reaches here.
@@ -113,10 +118,6 @@ impl<'a> Interpreter<'a> {
         let n = items.len();
         // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
         let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
-        // An unsigned index; `None` when out of range (the no-op / default path).
-        let index = |i: i64| -> Option<usize> {
-            if i < 0 { None } else { let u = i as usize; (u < n).then_some(u) }
-        };
         let int_arg = |k: usize| -> Option<i64> {
             match args.get(k) { Some(Value::Int(i)) => Some(*i), _ => None }
         };
@@ -185,10 +186,13 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    // Read-only accessors borrow via `as_iter_slice` (no per-call clone of the
+    // whole container — see the doc there); the `as_iter_items` arm keeps the
+    // Range fallback byte-identical.
     fn list_len(&mut self, args: &[Value]) -> Flow {
         match args.first() {
-            Some(v) => match v.as_iter_items() {
-                Some(items) => Flow::val(Value::Int(items.len() as i64)),
+            Some(v) => match v.as_iter_slice().map(<[Value]>::len).or_else(|| v.as_iter_items().map(|i| i.len())) {
+                Some(n) => Flow::val(Value::Int(n as i64)),
                 None => Flow::Abort("internal: list.len on non-list".into()),
             },
             None => Flow::Abort("internal: list.len no arg".into()),
@@ -196,8 +200,8 @@ impl<'a> Interpreter<'a> {
     }
 
     fn list_is_empty(&mut self, args: &[Value]) -> Flow {
-        match args.first().and_then(|v| v.as_iter_items()) {
-            Some(items) => Flow::val(Value::Bool(items.is_empty())),
+        match args.first().and_then(|v| v.as_iter_slice().map(<[Value]>::is_empty).or_else(|| v.as_iter_items().map(|i| i.is_empty()))) {
+            Some(b) => Flow::val(Value::Bool(b)),
             None => Flow::Abort("internal: list.is_empty on non-list".into()),
         }
     }
@@ -213,15 +217,27 @@ impl<'a> Interpreter<'a> {
     }
 
     fn list_first(&mut self, args: &[Value]) -> Flow {
-        match args.first().and_then(|v| v.as_iter_items()) {
-            Some(items) => Flow::val(Value::Option(items.first().cloned().map(Box::new))),
+        match args.first() {
+            Some(v) => match v.as_iter_slice() {
+                Some(items) => Flow::val(Value::Option(items.first().cloned().map(Box::new))),
+                None => match v.as_iter_items() {
+                    Some(items) => Flow::val(Value::Option(items.first().cloned().map(Box::new))),
+                    None => Flow::Abort("internal: list.first on non-list".into()),
+                },
+            },
             None => Flow::Abort("internal: list.first on non-list".into()),
         }
     }
 
     fn list_last(&mut self, args: &[Value]) -> Flow {
-        match args.first().and_then(|v| v.as_iter_items()) {
-            Some(items) => Flow::val(Value::Option(items.last().cloned().map(Box::new))),
+        match args.first() {
+            Some(v) => match v.as_iter_slice() {
+                Some(items) => Flow::val(Value::Option(items.last().cloned().map(Box::new))),
+                None => match v.as_iter_items() {
+                    Some(items) => Flow::val(Value::Option(items.last().cloned().map(Box::new))),
+                    None => Flow::Abort("internal: list.last on non-list".into()),
+                },
+            },
             None => Flow::Abort("internal: list.last on non-list".into()),
         }
     }
@@ -248,9 +264,33 @@ impl<'a> Interpreter<'a> {
     }
 
     fn list_contains(&mut self, args: &[Value]) -> Flow {
-        match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
-            (Some(items), Some(x)) => Flow::val(Value::Bool(items.contains(x))),
+        match (args.first(), args.get(1)) {
+            (Some(v), Some(x)) => match v.as_iter_slice() {
+                Some(items) => Flow::val(Value::Bool(items.contains(x))),
+                None => match v.as_iter_items() {
+                    Some(items) => Flow::val(Value::Bool(items.contains(x))),
+                    None => Flow::Abort("internal: list.contains bad args".into()),
+                },
+            },
             _ => Flow::Abort("internal: list.contains bad args".into()),
+        }
+    }
+
+    fn list_index_of(&mut self, args: &[Value]) -> Flow {
+        fn pos(items: &[Value], x: &Value) -> Flow {
+            Flow::val(Value::Option(
+                items.iter().position(|e| e == x).map(|i| Box::new(Value::Int(i as i64))),
+            ))
+        }
+        match (args.first(), args.get(1)) {
+            (Some(v), Some(x)) => match v.as_iter_slice() {
+                Some(items) => pos(items, x),
+                None => match v.as_iter_items() {
+                    Some(items) => pos(&items, x),
+                    None => Flow::Abort("internal: list.index_of bad args".into()),
+                },
+            },
+            _ => Flow::Abort("internal: list.index_of bad args".into()),
         }
     }
 
@@ -543,29 +583,41 @@ impl<'a> Interpreter<'a> {
     // get_or(xs, i, default) — the OOB/negative index yields the default
     // (runtime/rs list.rs get_or; the Value-level twin of list_get's some/none).
     pub(crate) fn list_get_or(&mut self, args: &[Value]) -> Flow {
-        match (args.first().and_then(|v| v.as_iter_items()), args.get(1), args.get(2)) {
-            (Some(items), Some(Value::Int(i)), Some(default)) => {
-                let i = *i;
-                if i < 0 || (i as usize) >= items.len() {
-                    Flow::val(default.clone())
-                } else {
-                    Flow::val(items[i as usize].clone())
-                }
+        fn at(items: &[Value], i: i64, default: &Value) -> Flow {
+            if i < 0 || (i as usize) >= items.len() {
+                Flow::val(default.clone())
+            } else {
+                Flow::val(items[i as usize].clone())
             }
+        }
+        match (args.first(), args.get(1), args.get(2)) {
+            (Some(v), Some(Value::Int(i)), Some(default)) => match v.as_iter_slice() {
+                Some(items) => at(items, *i, default),
+                None => match v.as_iter_items() {
+                    Some(items) => at(&items, *i, default),
+                    None => Flow::Abort("internal: list.get_or bad args".into()),
+                },
+            },
             _ => Flow::Abort("internal: list.get_or bad args".into()),
         }
     }
 
     fn list_get(&mut self, args: &[Value]) -> Flow {
-        match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
-            (Some(items), Some(Value::Int(i))) => {
-                let i = *i;
-                if i < 0 || (i as usize) >= items.len() {
-                    Flow::val(Value::Option(None))
-                } else {
-                    Flow::val(Value::Option(Some(Box::new(items[i as usize].clone()))))
-                }
+        fn at(items: &[Value], i: i64) -> Flow {
+            if i < 0 || (i as usize) >= items.len() {
+                Flow::val(Value::Option(None))
+            } else {
+                Flow::val(Value::Option(Some(Box::new(items[i as usize].clone()))))
             }
+        }
+        match (args.first(), args.get(1)) {
+            (Some(v), Some(Value::Int(i))) => match v.as_iter_slice() {
+                Some(items) => at(items, *i),
+                None => match v.as_iter_items() {
+                    Some(items) => at(&items, *i),
+                    None => Flow::Abort("internal: list.get bad args".into()),
+                },
+            },
             _ => Flow::Abort("internal: list.get bad args".into()),
         }
     }

@@ -127,3 +127,41 @@ fn importing_the_whole_package_still_loads_its_siblings() {
     assert!(mods.iter().any(|m| m == "dep"), "got {mods:?}");
     assert!(mods.iter().any(|m| m == "dep.demo"), "the root's sibling must come along: {mods:?}");
 }
+
+/// #1131: `almide update` is the sanctioned path FORWARD for a locked git
+/// dependency. The lock is sticky by design (reproducibility), `add`
+/// re-pins the same commit, and the lock file's own header says not to edit
+/// it — so before this command a stale pin (e.g. a dep whose API moved) was
+/// unescapable without hand-editing. A TAG-pinned dep must never move: that
+/// would silently change what the manifest asked for.
+#[test]
+fn update_advances_a_branch_pin_but_never_a_tag_pin() {
+    let dir = std::env::temp_dir().join(format!("almide-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("tempdir");
+    std::fs::write(
+        dir.join("almide.toml"),
+        "[package]\nname = \"probe\"\n\n[dependencies]\npinned = { git = \"https://github.com/almide/base64.git\", tag = \"v0.1.0\" }\n",
+    ).expect("write toml");
+    std::fs::write(
+        dir.join("almide.lock"),
+        "# almide.lock — auto-generated, do not edit\n\npinned = { git = \"https://github.com/almide/base64.git\", ref = \"v0.1.0\", commit = \"0000000000000000000000000000000000000000\" }\n",
+    ).expect("write lock");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["update"])
+        .current_dir(&dir)
+        .output()
+        .expect("run almide update");
+    let combined = format!("{}{}",
+        String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(
+        combined.contains("pinned to tag"),
+        "a tag-pinned dep must be reported as skipped, got:\n{combined}"
+    );
+    let lock = std::fs::read_to_string(dir.join("almide.lock")).expect("read lock");
+    assert!(
+        lock.contains("0000000000000000000000000000000000000000"),
+        "a tag-pinned dep's lock entry must stay byte-identical, got:\n{lock}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

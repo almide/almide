@@ -10,8 +10,6 @@ codopsy-report.json
 tools/stdlib-crawler/data/
 __pycache__/
 *.pyc
-research/benchmark/framework/config.yaml
-research/benchmark/framework/results/
 docs-site/
 
 # The tree+toolchain fingerprint `make verify-trust` records so `make receipt`

@@ -14,7 +14,7 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
         Ty::TypeVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
         Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| subst_ty(a, subst)).collect()),
         Ty::Named(name, args) => Ty::Named(*name, args.iter().map(|a| subst_ty(a, subst)).collect()),
-        Ty::Fn { params, ret } => Ty::Fn { params: params.iter().map(|p| subst_ty(p, subst)).collect(), ret: Box::new(subst_ty(ret, subst)) },
+        Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, params: params.iter().map(|p| subst_ty(p, subst)).collect(), ret: Box::new(subst_ty(ret, subst)) },
         Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| subst_ty(e, subst)).collect()),
         Ty::Record { fields } => Ty::Record { fields: fields.iter().map(|(n, t)| (*n, subst_ty(t, subst))).collect() },
         _ => ty.clone(),
@@ -129,7 +129,7 @@ impl Checker {
             _ => {
                 let ct = self.infer_expr(callee);
                 let ret = self.fresh_var();
-                self.constrain(ct, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
+                self.constrain(ct, Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
             }
         }
@@ -148,7 +148,16 @@ impl Checker {
             } else { None };
             let prev_hint = self.lambda_arg_hint.take();
             self.lambda_arg_hint = pinned;
+            // #1055: a lambda landing in an `effect (…) -> …` slot is checked
+            // with effect-fn body ergonomics (the flag is consumed by the
+            // lambda inference and reset around every other arg).
+            let prev_slot_effect = self.lambda_slot_effect;
+            self.lambda_slot_effect = is_lambda_arg(a)
+                && call_sig.as_ref().and_then(|sig| sig.params.get(i)).is_some_and(
+                    |(_, pty)| matches!(pty, Ty::Fn { is_effect: true, .. }),
+                );
             let aty = self.infer_expr(a);
+            self.lambda_slot_effect = prev_slot_effect;
             self.lambda_arg_hint = prev_hint;
             self.enqueue_ctor_arg_unresolved(a, &aty);
             self.pin_arg_literal_context(callee, call_sig, i, a);
@@ -359,7 +368,7 @@ impl Checker {
         }
     }
     /// Effect isolation: pure fn cannot call effect fn. Verbatim text move out of [`Self::check_named_call_with_type_args`].
-    fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
+    pub(crate) fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
         if sig.is_effect && !self.env.can_call_effect {
             let (msg, hint) = match self.env.metered_region {
                 // Inside a metered region the caller usually IS an effect fn —
@@ -581,10 +590,23 @@ impl Checker {
             return Some(Ty::Named(type_name, generic_args));
         }
         let ty = self.env.lookup_var(name).cloned()?;
-        if let Ty::Fn { params, ret } = &ty {
+        if let Ty::Fn { is_effect, params, ret } = &ty {
             arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
                 self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
             });
+            // #1055: calling an `effect (A) -> B` VALUE is an effect call —
+            // it needs the effect permission and yields the effect carrier
+            // `Result[B, String]`, so `h(x)!` propagates exactly like a
+            // named effect-fn call.
+            if *is_effect {
+                if !self.env.can_call_effect {
+                    self.emit(super::err(
+                        format!("cannot call effect function value `{}` from a pure context", name),
+                        "Mark the enclosing function as `effect fn`".to_string(),
+                        format!("call to {}()", name)).with_code("E006"));
+                }
+                return Some(Ty::result(ret.as_ref().clone(), Ty::String));
+            }
             return Some(ret.as_ref().clone());
         }
         // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.
@@ -598,7 +620,7 @@ impl Checker {
         }
         // #623: `f` is an as-yet-unresolved inference var being CALLED — so it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and return `?ret`, not `f`'s own type. Returning `ty` typed the call result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map` lambda became `((Int)->Int) -> ((Int)->Int)` instead of `((Int)->Int) -> Int`), so codegen emitted a closure body that returns a closure where it returns the call result (invalid Rust / wrong wasm). `?ret` is resolved from context — e.g. the element type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
         let ret = self.fresh_var();
-        let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
+        let fn_ty = Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
         self.constrain(fn_ty, ty, format!("call to {}()", name));
         Some(ret)
     }
@@ -623,7 +645,7 @@ impl Checker {
                 } else if let Some(suggestion) = almide_base::diagnostic::suggest(
                     func,
                     // `__`-prefixed fns are INTERNAL carriers (e.g. the
-                    // fallibility-polymorphic `__try_*` bodies, ADR-0006 D3) —
+                    // fallibility-polymorphic `__fallible_*` bodies, ADR-0006 D3) —
                     // never suggest one; `list.try_map` must not hint the
                     // carrier it was removed in favor of.
                     module_funcs.iter().copied().filter(|f| !f.starts_with("__")),

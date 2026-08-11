@@ -19,9 +19,7 @@
 // int are now authoritative here. The handwritten `almide_rt_int_*`
 // Rust fns in `runtime/rs/src/int.rs` remain — they are the actual
 // implementations referenced by the templates.
-
 // ── Conversions ──
-
 @intrinsic("almide_rt_int_to_string")
 fn to_string(n: Int) -> String = _
 
@@ -48,7 +46,6 @@ fn bits_to_float(bits: Int) -> Float = _
 fn bits_to_f32(bits: Int) -> Float = _
 
 // ── Arithmetic ──
-
 @intrinsic("almide_rt_int_abs")
 fn abs(n: Int) -> Int = _
 
@@ -62,7 +59,6 @@ fn max(a: Int, b: Int) -> Int = _
 fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 
 // ── Bitwise ──
-
 @intrinsic("almide_rt_int_band")
 fn band(a: Int, b: Int) -> Int = _
 
@@ -82,7 +78,6 @@ fn bshl(a: Int, n: Int) -> Int = _
 fn bshr(a: Int, n: Int) -> Int = _
 
 // ── Bit introspection ──
-
 @intrinsic("almide_rt_int_count_leading_zeros")
 fn count_leading_zeros(n: Int) -> Int = _
 
@@ -114,7 +109,6 @@ fn next_power_of_two(n: Int) -> Int = _
 fn prev_power_of_two(n: Int) -> Int = _
 
 // ── Wrapping / masking ──
-
 @intrinsic("almide_rt_int_wrap_add")
 fn wrap_add(a: Int, b: Int, bits: Int) -> Int = _
 
@@ -196,88 +190,55 @@ fn from_uint64(n: UInt64) -> Int = _
 // Widening sources (Int is Int64) are implicit here — e.g.
 // `to_int64_checked` is omitted because the identity conversion can't
 // fail.
+fn to_int8_checked(n: Int) -> Int8? = if n < -128 or n > 127 then none else some(int.to_int8(n))
 
-fn to_int8_checked(n: Int) -> Option[Int8] =
-  if n < -128 or n > 127 then None
-  else Some(int.to_int8(n))
+fn to_int16_checked(n: Int) -> Int16? = if n < -32768 or n > 32767 then none else some(int.to_int16(n))
 
-fn to_int16_checked(n: Int) -> Option[Int16] =
-  if n < -32768 or n > 32767 then None
-  else Some(int.to_int16(n))
+fn to_int32_checked(n: Int) -> Int32? = if n < -2147483648 or n > 2147483647 then none else some(int.to_int32(n))
 
-fn to_int32_checked(n: Int) -> Option[Int32] =
-  if n < -2147483648 or n > 2147483647 then None
-  else Some(int.to_int32(n))
+fn to_uint8_checked(n: Int) -> UInt8? = if n < 0 or n > 255 then none else some(int.to_uint8(n))
 
-fn to_uint8_checked(n: Int) -> Option[UInt8] =
-  if n < 0 or n > 255 then None
-  else Some(int.to_uint8(n))
+fn to_uint16_checked(n: Int) -> UInt16? = if n < 0 or n > 65535 then none else some(int.to_uint16(n))
 
-fn to_uint16_checked(n: Int) -> Option[UInt16] =
-  if n < 0 or n > 65535 then None
-  else Some(int.to_uint16(n))
-
-fn to_uint32_checked(n: Int) -> Option[UInt32] =
-  if n < 0 or n > 4294967295 then None
-  else Some(int.to_uint32(n))
+fn to_uint32_checked(n: Int) -> UInt32? = if n < 0 or n > 4294967295 then none else some(int.to_uint32(n))
 
 // Only the sign bit can fail for `Int → UInt64` since `|Int64| ≤ UInt64::MAX`.
-fn to_uint64_checked(n: Int) -> Option[UInt64] =
-  if n < 0 then None
-  else Some(int.to_uint64(n))
+fn to_uint64_checked(n: Int) -> UInt64? = if n < 0 then none else some(int.to_uint64(n))
 
 // `Int → Float32` loses precision for `|n| > 2^24`. Round-trip through
 // `Float32 → Int` to detect the loss.
-fn to_float32_checked(n: Int) -> Option[Float32] = {
+fn to_float32_checked(n: Int) -> Float32? = {
   let f: Float32 = int.to_float32(n)
-  if float.to_int(float.from_float32(f)) == n then Some(f)
-  else None
+  if float.to_int(float.from_float32(f)) == n then some(f) else none
 }
 
-fn to_int8_saturating(n: Int) -> Int8 =
-  if n < -128 then int.to_int8(-128)
-  else if n > 127 then int.to_int8(127)
-  else int.to_int8(n)
+fn to_int8_saturating(n: Int) -> Int8 = if n < -128 then int.to_int8(-128)
+else if n > 127 then int.to_int8(127) else int.to_int8(n)
 
-fn to_int16_saturating(n: Int) -> Int16 =
-  if n < -32768 then int.to_int16(-32768)
-  else if n > 32767 then int.to_int16(32767)
-  else int.to_int16(n)
+fn to_int16_saturating(n: Int) -> Int16 = if n < -32768 then int.to_int16(-32768)
+else if n > 32767 then int.to_int16(32767) else int.to_int16(n)
 
-fn to_int32_saturating(n: Int) -> Int32 =
-  if n < -2147483648 then int.to_int32(-2147483648)
-  else if n > 2147483647 then int.to_int32(2147483647)
-  else int.to_int32(n)
+fn to_int32_saturating(n: Int) -> Int32 = if n < -2147483648 then int.to_int32(-2147483648)
+else if n > 2147483647 then int.to_int32(2147483647) else int.to_int32(n)
 
-fn to_uint8_saturating(n: Int) -> UInt8 =
-  if n < 0 then int.to_uint8(0)
-  else if n > 255 then int.to_uint8(255)
-  else int.to_uint8(n)
+fn to_uint8_saturating(n: Int) -> UInt8 = if n < 0 then int.to_uint8(0)
+else if n > 255 then int.to_uint8(255) else int.to_uint8(n)
 
-fn to_uint16_saturating(n: Int) -> UInt16 =
-  if n < 0 then int.to_uint16(0)
-  else if n > 65535 then int.to_uint16(65535)
-  else int.to_uint16(n)
+fn to_uint16_saturating(n: Int) -> UInt16 = if n < 0 then int.to_uint16(0)
+else if n > 65535 then int.to_uint16(65535) else int.to_uint16(n)
 
-fn to_uint32_saturating(n: Int) -> UInt32 =
-  if n < 0 then int.to_uint32(0)
-  else if n > 4294967295 then int.to_uint32(4294967295)
-  else int.to_uint32(n)
+fn to_uint32_saturating(n: Int) -> UInt32 = if n < 0 then int.to_uint32(0)
+else if n > 4294967295 then int.to_uint32(4294967295) else int.to_uint32(n)
 
-fn to_uint64_saturating(n: Int) -> UInt64 =
-  if n < 0 then int.to_uint64(0)
-  else int.to_uint64(n)
+fn to_uint64_saturating(n: Int) -> UInt64 = if n < 0 then int.to_uint64(0) else int.to_uint64(n)
 
 // ── U64 → Int is the one lossy widening (the upper half exceeds i64::MAX);
 //    checked/saturating complete its trio next to the plain `from_uint64` ──
-fn from_uint64_checked(n: UInt64) -> Option[Int] =
-  if int.from_uint64(n) >= 0 then Some(int.from_uint64(n))
-  else None
+fn from_uint64_checked(n: UInt64) -> Int? = if int.from_uint64(n) >= 0 then some(int.from_uint64(n)) else none
 
-fn from_uint64_saturating(n: UInt64) -> Int =
-  if int.from_uint64(n) >= 0 then int.from_uint64(n)
-  else 9223372036854775807
+fn from_uint64_saturating(n: UInt64) -> Int = if int.from_uint64(n) >= 0 then int.from_uint64(n) else 9223372036854775807
 
 // ── Bounds ──
 fn min_value() -> Int = -9223372036854775807 - 1
+
 fn max_value() -> Int = 9223372036854775807

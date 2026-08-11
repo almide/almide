@@ -375,14 +375,45 @@
     fn self_hosted_math_exp_bit_exact() {
         // SELF-HOSTED math.exp (faithful libm) — BIT-EXACT vs v0: exp(1)=4613303445314885482,
         // exp(0)=4607182418800017408, exp(2.5)=4623047752462491835, exp(-1)=4600298746774613816.
+        // The last four points sit INSIDE the argument-reduction threshold bands
+        // (fuzz seed 424245 index 112): the transcription's three bare-decimal hx
+        // gates drifted from the vendored hex, so exactly these bands took the
+        // wrong k reduction and rounded a different last ulp — while every point
+        // OUTSIDE the bands (the first four) stayed bit-exact. A threshold edit
+        // that survives the headline points cannot survive these.
         let src = "fn main() -> Unit = {\n  \
             let a = math.exp(1.0)\n  println(int.to_string(float.to_bits(a)))\n  \
             let b = math.exp(0.0)\n  println(int.to_string(float.to_bits(b)))\n  \
             let c = math.exp(2.5)\n  println(int.to_string(float.to_bits(c)))\n  \
-            let d = math.exp(0.0 - 1.0)\n  println(int.to_string(float.to_bits(d))) }\n";
+            let d = math.exp(0.0 - 1.0)\n  println(int.to_string(float.to_bits(d)))\n  \
+            let e = math.exp(0.34658)\n  println(int.to_string(float.to_bits(e)))\n  \
+            let f = math.exp(1.1051709180756477)\n  println(int.to_string(float.to_bits(f)))\n  \
+            let g = math.exp(0.0 - 1.1051709180756477)\n  println(int.to_string(float.to_bits(g)))\n  \
+            let h = math.exp(708.0)\n  println(int.to_string(float.to_bits(h))) }\n";
         let prog = lower_source(src);
         if let Some(out) = build_and_run("self_hosted_math_exp_bit_exact", &render_wasm_program(&prog)) {
-            assert_eq!(out, "4613303445314885482\n4607182418800017408\n4623047752462491835\n4600298746774613816");
+            assert_eq!(out, "4613303445314885482\n4607182418800017408\n4623047752462491835\n4600298746774613816\n4609047911669141580\n4613982270014517924\n4599637165034657865\n9206913407555865841");
+        }
+    }
+
+    #[test]
+    fn dynstr_alloc_wrap_is_the_defined_oom_abort() {
+        // C-197's failure-shape promise, at the i64→i32 seam: `bytes.new(4294967295)`
+        // wraps `i32.wrap_i64` to -1, rounds to a ZERO block size, and $alloc's own
+        // guards never see the real request — the zerofill then scribbled off the
+        // memory end as an OOB trap (exit 134; fuzz seed 424245 index 104). The
+        // full-i64 guard in the DynStr render must turn this into the DEFINED abort:
+        // `Error: out of memory` on stderr and a clean exit 1, never a trap.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.new(4294967295)\n  \
+            println(int.to_string(bytes.len(b))) }\n";
+        let prog = lower_source(src);
+        if let Some((code, stderr)) = run_output("dynstr_alloc_wrap_oom", &render_wasm_program(&prog)) {
+            assert_eq!(code, Some(1), "expected the defined oom exit 1, got {code:?}: {stderr}");
+            assert!(
+                stderr.contains("out of memory"),
+                "expected the C-197 abort line on stderr, got: {stderr}"
+            );
         }
     }
 

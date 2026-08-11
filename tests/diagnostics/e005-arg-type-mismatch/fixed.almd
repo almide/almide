@@ -1,3 +1,6 @@
 fn sum(a: Int, b: Int) -> Int = a + b
 
-fn main() -> Int = sum(1, 2)
+fn main() -> Unit = {
+  let r = sum(1, 2)
+  println("${r}")
+}

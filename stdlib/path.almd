@@ -4,15 +4,13 @@
 // `SafePath` is an opaque type: external modules cannot construct it
 // from raw String. Construction goes through from_string() which
 // rejects path traversal attempts (.. segments).
-
 mod type SafePath = String
 
 // Validate and construct a SafePath. Rejects paths containing ".." segments.
 fn from_string(s: String) -> Result[SafePath, String] = {
   let segments = string.split(s, "/")
   let has_traversal = list.any(segments, (seg) => seg == "..")
-  if has_traversal then err("path traversal rejected: " + s)
-  else ok(SafePath(s))
+  if has_traversal then err("path traversal rejected: " + s) else ok(SafePath(s))
 }
 
 // Trust a raw path — explicit opt-in for known-safe paths.
@@ -20,16 +18,16 @@ fn trusted(s: String) -> SafePath = SafePath(s)
 
 // Unwrap SafePath to String
 fn to_string(p: SafePath) -> String = match p {
-  SafePath(s) => s,
+  SafePath(s) => s
 }
 
 fn join(base: String, child: String) -> String = {
   // If child is absolute, it replaces base (matches Rust Path::join behavior)
   if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1) else base
-    if string.len(b) == 0 then child
-    else b + "/" + child
+    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
+    else base
+    if string.len(b) == 0 then child else b + "/" + child
   }
 }
 
@@ -41,8 +39,7 @@ fn dirname(p: String) -> String = {
     let parent_parts = list.take(parts, n - 1)
     let joined = string.join(parent_parts, "/")
     // Preserve root "/" for absolute paths
-    if string.len(joined) == 0 and string.starts_with(p, "/") then "/"
-    else joined
+    if string.len(joined) == 0 and string.starts_with(p, "/") then "/" else joined
   }
 }
 
@@ -50,16 +47,15 @@ fn basename(p: String) -> String = {
   let parts = string.split(p, "/")
   let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
-    some(name) => name
-    none => ""
+    some(name) => name,
+    none => "",
   }
 }
 
-fn extension(p: String) -> Option[String] = {
+fn extension(p: String) -> String? = {
   let name = basename(p)
   let parts = string.split(name, ".")
-  if list.len(parts) <= 1 then none
-  else list.last(parts)
+  if list.len(parts) <= 1 then none else list.last(parts)
 }
 
 fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
@@ -91,22 +87,19 @@ fn normalize(p: String) -> String = {
         // Nothing to pop — keep ".." only if relative
         if absolute then acc
         else [".."] + acc
-      }
-      else {
+      } else {
         let top = match list.first(acc) {
-          some(v) => v
-          none => ""
+          some(v) => v,
+          none => "",
         }
         // Can't pop past ".."
         if top == ".." then [".."] + acc
         else list.drop(acc, 1)
       }
-    }
-    else [seg] + acc
+    } else [seg] + acc
   })
   let ordered = list.reverse(resolved)
   let joined = string.join(ordered, "/")
   if absolute then "/" + joined
-  else if string.len(joined) == 0 then "."
-  else joined
+  else if string.len(joined) == 0 then "." else joined
 }

@@ -4,14 +4,12 @@
 //   mask = bits>=64 ? all-ones : (1<<bits)-1     (wasm i64 add/mul already wrap = u64 wrap)
 //   to_u32(n) = n & 0xFFFFFFFF,  to_u8(n) = n & 0xFF     (zero-extended low bits)
 // Composed from the prim bitwise floor (bshl/band); cert-untouching (scalar).
-
-fn __wrap_mask(s: Int, bits: Int) -> Int =
-  if bits >= 64 then s
-  else {
-    let hi = prim.bshl(1, bits)
-    let mask = hi - 1
-    prim.band(s, mask)
-  }
+fn __wrap_mask(s: Int, bits: Int) -> Int = if bits >= 64 then s
+else {
+  let hi = prim.bshl(1, bits)
+  let mask = hi - 1
+  prim.band(s, mask)
+}
 
 fn int_wrap_add(a: Int, b: Int, bits: Int) -> Int = {
   let s = a + b

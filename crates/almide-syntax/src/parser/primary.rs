@@ -301,19 +301,22 @@ impl Parser {
         let name = sym(&tok.value);
         self.advance();
 
-        if self.check(TokenType::LBracket) {
+        // `Name[...]` is a type application ONLY when the brackets name a type
+        // and a call follows (`Pair[Int, String](a, b)`). Uppercase VALUE
+        // bindings are house style (`let STATIONS = [...]`), so `STATIONS[i]`
+        // must stay an index: fall through to the bare TypeName and let the
+        // postfix loop read the brackets, with the same gate the postfix
+        // position already uses for `fs[0]()` (#1142).
+        if self.check(TokenType::LBracket) && self.peek_type_args_call() {
             let ta = self.parse_type_args()?;
-            if self.check(TokenType::LParen) {
-                let open_call = self.current().clone();
-                self.advance();
-                let (args, named_args) = self.parse_call_args()?;
-                self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
-                return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
-                    callee: Box::new(Expr::new(self.next_id(), span, ExprKind::TypeName { name })),
-                    args, named_args, type_args: Some(ta),
-                }));
-            }
-            return Ok(Expr::new(self.next_id(), span, ExprKind::TypeName { name }));
+            let open_call = self.current().clone();
+            self.advance();
+            let (args, named_args) = self.parse_call_args()?;
+            self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+                callee: Box::new(Expr::new(self.next_id(), span, ExprKind::TypeName { name })),
+                args, named_args, type_args: Some(ta),
+            }));
         }
         if self.check(TokenType::LParen) {
             let open_call = self.current().clone();

@@ -6,26 +6,14 @@
 // into f each iteration (f consumes it and returns the next acc — the fn never frees it);
 // each element is read as a BORROW (`prim.load_str`, the list keeps ownership); the final
 // acc is the owned result. Left fold in element order, matching v0's fold(xs, init, f).
+fn __fold_ols_loop(h: Int, f: fn(List[String]?, String) -> List[String]?, n: Int, i: Int, acc: List[String]?) -> List[String]? = if i >= n then acc
+else {
+  let x = prim.load_str(h + 12 + i * 8)
+  let nacc = f(acc, x)
+  __fold_ols_loop(h, f, n, i + 1, nacc)
+}
 
-fn __fold_ols_loop(
-  h: Int,
-  f: (Option[List[String]], String) -> Option[List[String]],
-  n: Int,
-  i: Int,
-  acc: Option[List[String]],
-) -> Option[List[String]] =
-  if i >= n then acc
-  else {
-    let x = prim.load_str(h + 12 + i * 8)
-    let nacc = f(acc, x)
-    __fold_ols_loop(h, f, n, i + 1, nacc)
-  }
-
-fn list_fold_ols(
-  xs: List[String],
-  init: Option[List[String]],
-  f: (Option[List[String]], String) -> Option[List[String]],
-) -> Option[List[String]] = {
+fn list_fold_ols(xs: List[String], init: List[String]?, f: fn(List[String]?, String) -> List[String]?) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __fold_ols_loop(h, f, n, 0, init)
@@ -41,21 +29,14 @@ fn list_fold_ols(
 // `Set[String]` shares it: a `Set[String]` IS a DynListStr block of unique,
 // insertion-ordered Strings (set_str.almd), the same layout `List[String]` has,
 // so one walk serves both subjects.
-fn __fold_str_hacc_loop(
-  h: Int,
-  f: (Value, String) -> Value,
-  n: Int,
-  i: Int,
-  acc: Value,
-) -> Value =
-  if i >= n then acc
-  else {
-    let x = prim.load_str(h + 12 + i * 8)
-    let nacc = f(acc, x)
-    __fold_str_hacc_loop(h, f, n, i + 1, nacc)
-  }
+fn __fold_str_hacc_loop(h: Int, f: fn(Value, String) -> Value, n: Int, i: Int, acc: Value) -> Value = if i >= n then acc
+else {
+  let x = prim.load_str(h + 12 + i * 8)
+  let nacc = f(acc, x)
+  __fold_str_hacc_loop(h, f, n, i + 1, nacc)
+}
 
-fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value) -> Value = {
+fn list_fold_str_hacc(xs: List[String], init: Value, f: fn(Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __fold_str_hacc_loop(h, f, n, 0, init)
@@ -64,7 +45,7 @@ fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value
 // `Set[String]` shares the walk above under its own name: the registry maps one
 // impl fn to one call name, so the alias needs a definition rather than a second
 // row over `list_fold_str_hacc`.
-fn set_fold_str_hacc(xs: Set[String], init: Value, f: (Value, String) -> Value) -> Value = {
+fn set_fold_str_hacc(xs: Set[String], init: Value, f: fn(Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __fold_str_hacc_loop(h, f, n, 0, init)

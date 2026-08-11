@@ -2,7 +2,6 @@
 // CORRECTLY-ROUNDED wasm transcendental-ish instruction, so math.sqrt = prim.fsqrt is
 // byte-exact with v0's `x.sqrt()`. (sin/cos/log/exp need a libm-matching polynomial — they
 // have no wasm instruction and are deferred.) Pure scalar — cert untouched.
-
 fn math_sqrt(x: Float) -> Float = prim.fsqrt(x)
 
 // math.fmin/fmax are NaN-AWARE (return the non-NaN operand, unlike wasm f64.min/max which
@@ -40,4 +39,5 @@ fn math_fmax(a: Float, b: Float) -> Float = {
 // LitFloat tail-lowering). Zero-arg, pure. (floor/ceil/round/is_nan are float-only in the v1
 // frontend — not callable as math.*, so not self-hosted here.)
 fn math_pi() -> Float = 3.141592653589793
+
 fn math_e() -> Float = 2.718281828459045

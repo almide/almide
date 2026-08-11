@@ -42,7 +42,9 @@ gparam      = TYPENAME (":" (TYPENAME ("+" TYPENAME)* | "{" fields "}"))?   (* b
   project, `local` = same file. `pub type` is not accepted (types take only
   `local`/`mod`).
 - `effect fn` marks side-effecting functions; on the Rust target it compiles to
-  `Result<T, String>` with automatic `?` propagation.
+  `Result<T, String>`. Propagation is always **explicit** (ADR-0008): the postfix
+  `!` is what lowers to `?`. A fallible call with no `!` keeps its `Result` value
+  (E041 when the binding is un-annotated, E042 in statement position).
 
 ## Types
 

@@ -42,7 +42,7 @@ pub(super) fn subst_type_var(
         Ty::Named(name, args) => {
             Ty::Named(*name, args.iter().map(|a| subst_type_var(a, subst)).collect())
         }
-        Ty::Fn { params, ret } => Ty::Fn {
+        Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
             params: params.iter().map(|p| subst_type_var(p, subst)).collect(),
             ret: Box::new(subst_type_var(ret, subst)),
         },
@@ -56,6 +56,116 @@ pub(super) fn subst_type_var(
 }
 
 impl LowerCtx {
+
+    /// The special-cased value-position calls, tried before the generic
+    /// `CallFn` path: `Some(dst)` when one of them produced the result,
+    /// `None` when the call falls through to the generic lowering.
+    fn try_lower_value_call_special(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Result<Option<ValueId>, LowerError> {
+        // The primitive floor: `prim.load32(a)` / `prim.handle(s)` / `prim.fd_write(…)`
+        // map to an Op::Prim, not a real CallFn (the v1 self-host floor).
+        if module == "prim" {
+            return self
+                .lower_prim_call(func, args)?
+                .ok_or_else(|| LowerError::Unsupported(format!("prim.{func} yields no value here")))
+                .map(Some);
+        }
+        // A sized-int WIDENING conversion reaching this generic path — the IDENTITY
+        // on the canonical-i64 slot: forward the operand, NO CallFn. The caps
+        // counter skips the IR node by the same predicate, so any producer that
+        // EMITS the call breaches `mir <= ir` — which is exactly what happened when
+        // the widening sat in ARGUMENT position (`to_int8_checked(int.to_int64(v))`)
+        // or in a heap-result arm's interpolation part (`"${x.to_int64()}"`):
+        // `lower_scalar_call_form` elides the operand position, but every other
+        // producer funnels here (#958's C-195 fixture, `classify` mir 6 > ir 5).
+        if crate::lower::is_identity_int_widening(module, func, args) {
+            return self
+                .lower_scalar_value(&args[0])
+                .ok_or_else(|| {
+                    LowerError::shaped(
+                        args[0].span,
+                        WallShape::CallArgument,
+                        "identity int-widening operand outside the scalar subset not in this brick",
+                    )
+                })
+                .map(Some);
+        }
+        // `float.from_int(x)` — the single-instruction sitofp floor, same
+        // counter-alignment reasoning as the widening above.
+        if crate::lower::is_float_from_int_prim(module, func, args) {
+            let v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::shaped(
+                    args[0].span,
+                    WallShape::CallArgument,
+                    "float.from_int operand outside the scalar subset not in this brick",
+                )
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::F64FromInt,
+                dst: Some(dst),
+                args: vec![v],
+            });
+            return Ok(Some(dst));
+        }
+        // INLINE `value.null()` to a tag-0 Value block (Alloc + store32 tag) instead of a CallFn — a
+        // trivial pure constructor (value_core: `alloc_value(1); store32(h+4, 0)`). As a CallFn it would
+        // OVER-COUNT vs the IR when the TCO synthesizes it for a `(Value,Int)` result-accumulator empty
+        // (`mir>ir` caps breach — the synthetic call has no IR node to credit). Inlined it is NO CallFn,
+        // so the TCO's synthetic empty adds no mir call; an explicit `value.null()` source node still
+        // counts in the IR (mir < ir, allowed). The result is a fresh OWNED Value (cert `i`, same as the
+        // call), tracked by the caller via `is_value_ty` exactly as before.
+        if module == "value" && func == "null" && args.is_empty() {
+            use crate::{IntOp, PrimKind};
+            let len = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: len, value: 1 });
+            let dst = self.fresh_value();
+            self.ops.push(Op::Alloc {
+                dst,
+                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                init: crate::Init::DynList { len },
+            });
+            let h = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 4 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let zero = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![addr, zero] });
+            return Ok(Some(dst));
+        }
+        // C1 DEFUNCTIONALIZATION — a `list.map`/`filter`/`fold` whose closure arg is an
+        // INLINE lambda is specialized as a loop at the call site (no runtime closure, no
+        // CallIndirect, no lifted fn). This is tried FIRST so a CAPTURING inline lambda
+        // (`(x) => x * k`) WORKS via inline rather than walling at the self-host path below
+        // (a capturing lambda has no liftable FuncRef). A non-inlinable form (a first-class
+        // Var closure, a heap element/result, a side-effecting body) returns `None` and
+        // falls through to the existing `lift_lambda` / self-host-combinator routing.
+        // `fan.map` with a PURE lambda is OBSERVABLY list.map (the native runtime maps
+        // in list order and collects; fan lambdas cannot capture a `var`, so the only
+        // difference — parallelism — is unobservable, and the auto-`?` has already
+        // stripped the effect Result by the time the call reaches a value position).
+        // Route it through the same C1 defunctionalization; a non-inlinable form falls
+        // through and WALLS (an unregistered `fan.*` CallFn), never the elided Const-0
+        // that printed all-zero fan results (fan_map_inline_lambda, 2026-07-03).
+        // STRUCTURAL dispatch (no name whitelist): any HIGHER-ORDER list/fan call is offered
+        // to the defunc engine; WHICH combinators it inlines is the engine's own `match func`
+        // — the single source of truth, so adding one there needs no second edit here (the
+        // duplicated-list drift already caused a silent miss once).
+        if (module == "list" || module == "fan") && crate::lower::is_higher_order(args) {
+            if let Some(dst) = self.try_lower_defunc_list_hof(func, args, result_ty) {
+                return Ok(Some(dst));
+            }
+        }
+        Ok(None)
+    }
 
     /// Lower a stdlib `Module` call (`<module>.<func>(args)`) in a VALUE position
     /// (bind or tail) to an `Op::CallFn` named `"<module>.<func>"`, IFF admissible.
@@ -93,98 +203,8 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Result<ValueId, LowerError> {
-        // The primitive floor: `prim.load32(a)` / `prim.handle(s)` / `prim.fd_write(…)`
-        // map to an Op::Prim, not a real CallFn (the v1 self-host floor).
-        if module == "prim" {
-            return self
-                .lower_prim_call(func, args)?
-                .ok_or_else(|| LowerError::Unsupported(format!("prim.{func} yields no value here")));
-        }
-        // A sized-int WIDENING conversion reaching this generic path — the IDENTITY
-        // on the canonical-i64 slot: forward the operand, NO CallFn. The caps
-        // counter skips the IR node by the same predicate, so any producer that
-        // EMITS the call breaches `mir <= ir` — which is exactly what happened when
-        // the widening sat in ARGUMENT position (`to_int8_checked(int.to_int64(v))`)
-        // or in a heap-result arm's interpolation part (`"${x.to_int64()}"`):
-        // `lower_scalar_call_form` elides the operand position, but every other
-        // producer funnels here (#958's C-195 fixture, `classify` mir 6 > ir 5).
-        if crate::lower::is_identity_int_widening(module, func, args) {
-            return self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::shaped(
-                    args[0].span,
-                    WallShape::CallArgument,
-                    "identity int-widening operand outside the scalar subset not in this brick",
-                )
-            });
-        }
-        // `float.from_int(x)` — the single-instruction sitofp floor, same
-        // counter-alignment reasoning as the widening above.
-        if crate::lower::is_float_from_int_prim(module, func, args) {
-            let v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::shaped(
-                    args[0].span,
-                    WallShape::CallArgument,
-                    "float.from_int operand outside the scalar subset not in this brick",
-                )
-            })?;
-            let dst = self.fresh_value();
-            self.ops.push(Op::Prim {
-                kind: crate::PrimKind::F64FromInt,
-                dst: Some(dst),
-                args: vec![v],
-            });
+        if let Some(dst) = self.try_lower_value_call_special(module, func, args, result_ty)? {
             return Ok(dst);
-        }
-        // INLINE `value.null()` to a tag-0 Value block (Alloc + store32 tag) instead of a CallFn — a
-        // trivial pure constructor (value_core: `alloc_value(1); store32(h+4, 0)`). As a CallFn it would
-        // OVER-COUNT vs the IR when the TCO synthesizes it for a `(Value,Int)` result-accumulator empty
-        // (`mir>ir` caps breach — the synthetic call has no IR node to credit). Inlined it is NO CallFn,
-        // so the TCO's synthetic empty adds no mir call; an explicit `value.null()` source node still
-        // counts in the IR (mir < ir, allowed). The result is a fresh OWNED Value (cert `i`, same as the
-        // call), tracked by the caller via `is_value_ty` exactly as before.
-        if module == "value" && func == "null" && args.is_empty() {
-            use crate::{IntOp, PrimKind};
-            let len = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: len, value: 1 });
-            let dst = self.fresh_value();
-            self.ops.push(Op::Alloc {
-                dst,
-                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-                init: crate::Init::DynList { len },
-            });
-            let h = self.fresh_value();
-            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
-            let off = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: off, value: 4 });
-            let addr = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            let zero = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![addr, zero] });
-            return Ok(dst);
-        }
-        // C1 DEFUNCTIONALIZATION — a `list.map`/`filter`/`fold` whose closure arg is an
-        // INLINE lambda is specialized as a loop at the call site (no runtime closure, no
-        // CallIndirect, no lifted fn). This is tried FIRST so a CAPTURING inline lambda
-        // (`(x) => x * k`) WORKS via inline rather than walling at the self-host path below
-        // (a capturing lambda has no liftable FuncRef). A non-inlinable form (a first-class
-        // Var closure, a heap element/result, a side-effecting body) returns `None` and
-        // falls through to the existing `lift_lambda` / self-host-combinator routing.
-        // `fan.map` with a PURE lambda is OBSERVABLY list.map (the native runtime maps
-        // in list order and collects; fan lambdas cannot capture a `var`, so the only
-        // difference — parallelism — is unobservable, and the auto-`?` has already
-        // stripped the effect Result by the time the call reaches a value position).
-        // Route it through the same C1 defunctionalization; a non-inlinable form falls
-        // through and WALLS (an unregistered `fan.*` CallFn), never the elided Const-0
-        // that printed all-zero fan results (fan_map_inline_lambda, 2026-07-03).
-        // STRUCTURAL dispatch (no name whitelist): any HIGHER-ORDER list/fan call is offered
-        // to the defunc engine; WHICH combinators it inlines is the engine's own `match func`
-        // — the single source of truth, so adding one there needs no second edit here (the
-        // duplicated-list drift already caused a silent miss once).
-        if (module == "list" || module == "fan") && crate::lower::is_higher_order(args) {
-            if let Some(dst) = self.try_lower_defunc_list_hof(func, args, result_ty) {
-                return Ok(dst);
-            }
         }
         // The in-place `list.pop` in a VALUE position (`let last = list.pop(xs)`):
         // the same receiver discipline as the statement position — COW a local var,
@@ -265,20 +285,7 @@ impl LowerCtx {
         func: &str,
         args: &[IrExpr],
     ) -> Result<Vec<CallArg>, LowerError> {
-        let is_admitted_effectful = is_admitted_effectful_pure_module_call(module, func);
-        // `fan.map` is a compiler-known concurrency primitive whose WASM lowering is a SEQUENTIAL
-        // fallible traverse (PURE control flow — it reaches NO host capability itself; the CALLBACK's
-        // caps are counted transitively through the lifted funcref, exactly like `list.map`). Admit it
-        // (2-arg form); the per-(input, output)-element self-host is selected in `list_heap_call_name`,
-        // where an UNSUPPORTED element pairing routes to the UNLINKED `fan.map_x` and walls cleanly at
-        // render — never linked to a wrong-typed self-host (no invalid wasm).
-        let is_admitted_fan_map =
-            module == "fan" && matches!(func, "map" | "any_map") && args.len() == 2;
-        if !purity::is_pure(module, func) && !is_admitted_effectful && !is_admitted_fan_map {
-            return Err(LowerError::Unsupported(format!(
-                "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
-            )));
-        }
+        admit_module_call_purity(module, func, args)?;
         // OUR OWN verdict, kept in a LOCAL. The flag on `self` is reset by every
         // nested `lower_pure_module_call_args`, and an argument can contain one:
         // `map.fold(if result.is_ok(t) then … else …, acc, (a, k, v) => acc)` lowers
@@ -687,35 +694,76 @@ fn is_admitted_effectful_pure_module_call(module: &str, func: &str) -> bool {
         || is_admitted_effectful_io(module, func)
 }
 
-/// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up, group 1
-/// of 3): Entropy (`random.*`), CliArgs (`process.args`/`env.args`/`env.get`), and Clock
-/// (`env.unix_timestamp`/`env.millis`/`datetime.now`) admitted calls. Verbatim.
+/// Gate this `module.func` on purity: a pure call, one of the admitted effectful
+/// calls, or `fan.map`/`fan.any_map`.
+///
+/// `fan.map` is a compiler-known concurrency primitive whose WASM lowering is a
+/// SEQUENTIAL fallible traverse (PURE control flow — it reaches NO host
+/// capability itself; the CALLBACK's caps are counted transitively through the
+/// lifted funcref, exactly like `list.map`). The per-(input, output)-element
+/// self-host is selected in `list_heap_call_name`, where an UNSUPPORTED element
+/// pairing routes to the UNLINKED `fan.map_x` and walls cleanly at render —
+/// never linked to a wrong-typed self-host (no invalid wasm).
+fn admit_module_call_purity(module: &str, func: &str, args: &[IrExpr]) -> Result<(), LowerError> {
+    let admitted_fan_map =
+        module == "fan" && matches!(func, "map" | "any_map") && args.len() == 2;
+    if purity::is_pure(module, func)
+        || is_admitted_effectful_pure_module_call(module, func)
+        || admitted_fan_map
+    {
+        return Ok(());
+    }
+    Err(LowerError::Unsupported(format!(
+        "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
+    )))
+}
+
+/// The Entropy / CliArgs / Clock admitted calls, as a table.
+///
+/// - `random.int` / `choice` / `shuffle` / `float` — the entropy floor
+///   (`random_float.almd` → `prim.random_get`, `Capability::Entropy`).
+/// - `process.args` is argv[0]-inclusive CLI args (`std::env::args`), self-hosted
+///   over the SAME WASI args bridge as `env.args` (skip=0) —
+///   `Capability::CliArgs`.
+/// - `env.get` READS the process environment, also `Capability::CliArgs` (the Env
+///   profile's canonical cap: argv and environ are the same initial-state class).
+///   Self-hosted to `prim.env_get` (env_get.almd → the WASI environ `$env_get`
+///   floor), so its prim is in the program map and the transitive `cap_witness`
+///   counts CliArgs. Returns `Option[String]` (heap Option block).
+/// - `env.temp_dir` / `fs.temp_dir` are one temp-dir observable with two
+///   spellings (C-189), self-hosted to `$TMPDIR ?? "/tmp"` (the Go/Python WASI
+///   rule), so their reach is exactly `env.get`'s.
+/// - `env.unix_timestamp` / `env.millis` / `datetime.now` share the WASI
+///   wall-clock floor (clock_now.almd → `prim.clock_time_get`,
+///   `Capability::Clock`). All scalar returns.
+/// - `datetime.monotonic_ns` reaches the SAME prim with clock_id 1
+///   (CLOCK_MONOTONIC) instead of 0, so it carries the identical
+///   `Capability::Clock` and scalar-Int shape. It was the one datetime fn with
+///   no wasm body at all, which pushed every file touching it off the wasm leg.
+const ADMITTED_ENTROPY_ENV_CLOCK: &[(&str, &str)] = &[
+    ("random", "int"),
+    ("random", "choice"),
+    ("random", "shuffle"),
+    ("random", "float"),
+    ("process", "args"),
+    ("env", "args"),
+    ("env", "get"),
+    ("env", "temp_dir"),
+    ("fs", "temp_dir"),
+    ("env", "unix_timestamp"),
+    ("env", "millis"),
+    // `env.cwd` reads the PWD environment variable (the C-137 relative-path
+    // convention's cwd) — the SAME Capability::CliArgs env.get carries
+    // (env_cwd.almd composes over env.get).
+    ("env", "cwd"),
+    ("datetime", "now"),
+    ("datetime", "monotonic_ns"),
+];
+
+/// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up,
+/// group 1 of 3): the [`ADMITTED_ENTROPY_ENV_CLOCK`] table's membership test.
 fn is_admitted_effectful_entropy_env_clock(module: &str, func: &str) -> bool {
-    (module == "random" && func == "int")
-        // `process.args` = argv[0]-inclusive CLI args (std::env::args) — self-hosted
-        // over the SAME WASI args bridge as env.args (skip=0), Capability::CliArgs.
-        || (module == "process" && func == "args")
-        || (module == "random" && matches!(func, "choice" | "shuffle"))
-        || (module == "env" && func == "args")
-        // `env.get` READS the process environment — Capability::CliArgs (the Env
-        // profile's canonical cap, argv and environ are the same initial-state
-        // class). Self-hosted to `prim.env_get` (env_get.almd → the WASI environ
-        // $env_get floor), so its prim is in the program map and the transitive
-        // cap_witness counts CliArgs. Returns Option[String] (heap Option block).
-        || (module == "env" && func == "get")
-        // `env.temp_dir` / `fs.temp_dir` — one temp-dir observable, two spellings
-        // (C-189). Self-hosted to `$TMPDIR ?? "/tmp"` (the Go/Python WASI rule),
-        // so the reach is exactly env.get's: Capability::CliArgs (environ).
-        || (module == "env" && func == "temp_dir")
-        || (module == "fs" && func == "temp_dir")
-        || (module == "env" && func == "unix_timestamp")
-        // `datetime.now` (Unix seconds) / `env.millis` (milliseconds) — the SAME WASI
-        // wall-clock floor as env.unix_timestamp (clock_now.almd → prim.clock_time_get,
-        // Capability::Clock). `random.float` — the SAME entropy floor as random.int
-        // (random_float.almd → prim.random_get, Capability::Entropy). All scalar returns.
-        || (module == "datetime" && func == "now")
-        || (module == "env" && func == "millis")
-        || (module == "random" && func == "float")
+    ADMITTED_ENTROPY_ENV_CLOCK.contains(&(module, func))
 }
 
 /// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up, group 2
@@ -723,11 +771,20 @@ fn is_admitted_effectful_entropy_env_clock(module: &str, func: &str) -> bool {
 /// (`write`/`mkdir_p`/`remove_all`) admitted calls. Verbatim.
 fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
     (module == "fs" && func == "read_text")
+        // `fs.read_lines` READS the filesystem — REUSES Capability::FsRead. Self-hosted
+        // as prim.read_text_file + string.lines (fs_read_lines.almd), the exact
+        // composition the native oracle is (`read_to_string(...).map(|s| s.lines()...)`).
+        || (module == "fs" && func == "read_lines")
         || (module == "fs" && func == "read_bytes_raw")
         || (module == "fs" && func == "list_dir")
         || (module == "fs" && func == "read_bytes")
         || (module == "fs" && func == "write")
         || (module == "fs" && func == "mkdir_p")
+        // `fs.create_temp_dir` WRITES the filesystem (a mkdir under the temp
+        // root) — REUSES Capability::FsWrite, plus Entropy for the unique
+        // suffix. Self-hosted over prim.make_dir + prim.random_get
+        // (fs_create_temp_dir.almd).
+        || (module == "fs" && func == "create_temp_dir")
         || (module == "fs" && func == "remove_all")
         // `fs.exists` READS the filesystem (a path stat) — it REUSES Capability::FsRead
         // (the SAME accounting as `fs.read_text`, NOT a new cap). Self-hosted to
@@ -740,6 +797,38 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // prim floor is in the program map and the transitive cap_witness counts FsRead.
         // Returns Result[FileStat, String] (a record Ok payload).
         || (module == "fs" && func == "stat")
+        // `fs.file_size` / `fs.modified_at` / `fs.is_dir` / `fs.is_file` READ the
+        // filesystem (each a path_filestat query) — REUSE Capability::FsRead, the
+        // fs.stat accounting. Self-hosted over prim.path_filestat (fs_file_size.almd /
+        // fs_modified_at.almd / fs_is_dir.almd — is_dir and is_file share one file).
+        || (module == "fs" && matches!(func, "file_size" | "modified_at" | "is_dir" | "is_file"))
+        // `fs.copy` READS src and WRITES dst (prim.read_text_file + prim.write_text_file,
+        // fs_copy.almd) — FsRead + FsWrite. `fs.append` is the same composition over one
+        // path (read-concat-write, fs_append.almd). `fs.create_temp_file` WRITES the
+        // fresh empty file + draws the entropy suffix (fs_create_temp_file.almd) — the
+        // fs.create_temp_dir accounting (FsWrite + Entropy).
+        || (module == "fs" && matches!(func, "copy" | "append" | "create_temp_file"))
+        // `fs.remove` READS the target's type + emptiness (path_filestat / read_dir)
+        // then WRITES the removal (remove_all floor) — FsRead + FsWrite (fs_remove.almd).
+        // `fs.write_bytes` / `fs.write_bytes_raw` WRITE the materialized byte buffer
+        // through the write floor (fs_write_bytes.almd / fs_write_bytes_raw.almd) — FsWrite.
+        // `fs.walk` / `fs.glob` recursively READ directories (read_dir + path_filestat,
+        // fs_walk.almd — glob shares the walk machinery and reads PWD, adding CliArgs).
+        || (module == "fs" && matches!(func, "remove" | "write_bytes" | "write_bytes_raw" | "walk" | "glob"))
+        // `fs.rename` WRITES the filesystem (the path_rename floor, fs_rename.almd) —
+        // FsWrite. `fs.is_symlink` READS it (the no-follow stat, fs_is_symlink.almd) — FsRead.
+        || (module == "fs" && matches!(func, "rename" | "is_symlink"))
+        // `fs.read_text_if_exists` READS the filesystem (path_filestat + the read floor,
+        // fs_read_text_if_exists.almd) — FsRead.
+        || (module == "fs" && matches!(func, "read_text_if_exists" | "read_lines_if_exists" | "read_bytes_if_exists" | "read_bytes_raw_if_exists"))
+        // `fs.fold_lines` / `fs.fold_lines_chunked` READ the filesystem — REUSE
+        // Capability::FsRead. Self-hosted typed twins over prim.read_text_file +
+        // the byte-level read_line walk (fs_fold_lines.almd); the `Map[String,
+        // Int]` accumulator routes to `_msi` in `list_heap_call_name`, any other
+        // acc to an unregistered name that walls cleanly at render. Their
+        // CLOSURE argument rides the same lift machinery every pure fold twin
+        // uses — the callback's own capabilities are captured by the lift.
+        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range"))
 }
 
 /// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up, group 3
@@ -763,6 +852,10 @@ fn is_admitted_effectful_io(module: &str, func: &str) -> bool {
         // cap_witness reaches the same prim.read_n_bytes floor and counts Stdin. Returns an
         // owned String (flat Drop).
         || (module == "io" && func == "read_all")
+        // `io.read_byte` READS one byte of standard input — REUSES Capability::Stdin.
+        // Self-hosted over the same prim.read_n_bytes floor (io_read_byte.almd),
+        // returning the byte 0..255 or -1 on EOF (a SCALAR Int, no ownership).
+        || (module == "io" && func == "read_byte")
 }
 
 include!("calls_b.rs");

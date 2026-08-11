@@ -82,6 +82,20 @@ impl Value {
 
     /// Materialize a `Range` (or pass through a `List`) to a concrete element
     /// vector for iteration / container ops. Returns `None` for non-iterables.
+    /// Borrow the elements of a List/Set WITHOUT materializing. The read-only
+    /// accessors (len / get / contains / …) go through this: `as_iter_items`
+    /// clones the whole container per call, which turns the everyday
+    /// `while i < list.len(xs)` + `list.get(xs, i)` read loop quadratic
+    /// (measured 450 ms at 8k elements). Range has no backing slice — callers
+    /// needing Range fall back to `as_iter_items`.
+    pub fn as_iter_slice(&self) -> Option<&[Value]> {
+        match self {
+            Value::List(xs) => Some(xs),
+            Value::Set(xs) => Some(xs),
+            _ => None,
+        }
+    }
+
     pub fn as_iter_items(&self) -> Option<Vec<Value>> {
         match self {
             Value::List(xs) => Some((**xs).clone()),
@@ -237,6 +251,15 @@ impl Value {
             (Unit, Unit) => Some(std::cmp::Ordering::Equal),
             (List(a), List(b)) => Self::cmp_seq(a, b),
             (Tuple(a), Tuple(b)) => Self::cmp_seq(a, b),
+            // `none < some(x)` — Rust's derived `Ord` on `Option`, which is
+            // what both backends' list orderings inherit (C-053's o_min/o_max
+            // pin it: min of [some(5), none, some(2)] is none).
+            (Option(a), Option(b)) => match (a, b) {
+                (None, None) => Some(std::cmp::Ordering::Equal),
+                (None, Some(_)) => Some(std::cmp::Ordering::Less),
+                (Some(_), None) => Some(std::cmp::Ordering::Greater),
+                (Some(x), Some(y)) => x.partial_cmp_val(y),
+            },
             _ => None,
         }
     }
@@ -265,6 +288,10 @@ impl Value {
             (Float(a), Float(b)) => Some(a.total_cmp(b)),
             (List(a), List(b)) => Self::total_cmp_seq(a, b),
             (Tuple(a), Tuple(b)) => Self::total_cmp_seq(a, b),
+            // Option payloads stay on the TOTAL order (a Float inside a some
+            // must totalOrder like a bare Float would); the none/some shell
+            // ordering itself is shared with `partial_cmp_val`.
+            (Option(Some(x)), Option(Some(y))) => x.total_cmp_val(y),
             _ => self.partial_cmp_val(other),
         }
     }

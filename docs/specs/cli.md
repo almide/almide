@@ -152,6 +152,7 @@ almide fmt                              # src/**/*.almd を整形
 almide fmt app.almd                     # 指定ファイルを整形
 almide fmt --check                      # 差分があれば非ゼロで終了（CI 用）
 almide fmt --dry-run                    # 書き込みせず差分表示
+almide fmt --no-import-edit stdlib/     # import 行を一切触らず整形(splice-context ソース用)
 ```
 
 ---
@@ -214,6 +215,24 @@ CLAUDE.md                 AI 向けプロジェクト説明
 `name` はカレントディレクトリ名から自動生成。
 
 ---
+
+### `almide update`
+
+ロック済み git 依存を、その ref の**現在の remote head** へ前進させる(#1131)。
+
+```bash
+almide update almai      # 指定の依存だけ
+almide update            # tag 固定でない全依存
+```
+
+- `almide.lock` は意図的に sticky(`fetch_all_deps` が pin を再利用して再現性を守り、
+  既存依存への `almide add` も同じ pin を書き戻す)。前進の唯一の正規手段が本コマンド。
+- **tag 固定の依存は動かさない**(マニフェストの要求そのものが変わるため。skip を報告)。
+- 変更した entry だけを書き換え、他の pin はバイト単位で不変。
+- 前進時は当該 ref のキャッシュディレクトリを破棄し、次のフェッチで再取得させる。
+- `git ls-remote` 1 回で解決(clone しない)。
+
+出力は `name <old12> -> <new12>`(初回ロックは `name -> <new12>`)。
 
 ### `almide add`
 

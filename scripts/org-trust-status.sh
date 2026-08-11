@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # org-trust-status.sh — sweep the github.com/almide org's Almide-written repos through the v1
-# trust-spine lowering wall and regenerate docs/org-trust-status.md.
+# trust-spine lowering wall and regenerate docs/project/org-trust-status.md.
 #
 # For each repo it runs the MIR `classify_corpus` example over EVERY `src/*.almd` module (a barrel
 # entry hides the real code in submodules; cross-module importers are skipped, surfaced as `+N xmod`)
@@ -17,7 +17,7 @@
 # wall=0 first, byte-match SECOND and AUTHORITATIVE.
 #
 # Usage:
-#   scripts/org-trust-status.sh                 # sweep + rewrite docs/org-trust-status.md
+#   scripts/org-trust-status.sh                 # sweep + rewrite docs/project/org-trust-status.md
 #   ALMIDE_ORG_DIR=/path/to/almide scripts/org-trust-status.sh
 #
 # Env:
@@ -34,7 +34,7 @@ work_root="$(git rev-parse --show-toplevel)"
 # The org dir holds the sibling target repos (yaml, sha1, …) next to the MAIN almide repo.
 main_repo="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 ORG_DIR="${ALMIDE_ORG_DIR:-$(dirname "$main_repo")}"
-OUT="$work_root/docs/org-trust-status.md"
+OUT="$work_root/docs/project/org-trust-status.md"
 BIN="$work_root/target/debug/examples/classify_corpus"
 RBIN="$work_root/target/debug/examples/render_program"
 

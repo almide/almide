@@ -18,7 +18,7 @@ declaration. Eight built-in protocols are registered in
 |---|---|
 | `Eq` | `fn eq(a: Self, b: Self) -> Bool` |
 | `Repr` | `fn repr(v: Self) -> String` |
-| `Ord` | `fn compare(a: Self, b: Self) -> Int` |
+| `Ord` | `fn cmp(a: Self, b: Self) -> Int` |
 | `Hash` | `fn hash(v: Self) -> Int` |
 | `Codec` | `fn encode(v: Self) -> Value`, `fn decode(v: Value) -> Result[Self, String]` |
 | `Encode` / `Decode` | the one-directional halves of Codec |

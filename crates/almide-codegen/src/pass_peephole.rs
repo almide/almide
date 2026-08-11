@@ -165,86 +165,104 @@ impl Peephole {
     /// through `visit_expr_mut` (so the per-expr rewrites still fire inside
     /// statements), then collapses the recognized multi-statement idioms.
     fn rewrite_stmts(&mut self, stmts: &mut Vec<IrStmt>) {
-        // First recurse into sub-exprs of each stmt
         for stmt in stmts.iter_mut() {
-            match &mut stmt.kind {
-                IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-                | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-                    self.visit_expr_mut(value);
-                }
-                IrStmtKind::IndexAssign { index, value, .. } => {
-                    self.visit_expr_mut(index);
-                    self.visit_expr_mut(value);
-                }
-                IrStmtKind::MapInsert { key, value, .. } => {
-                    self.visit_expr_mut(key);
-                    self.visit_expr_mut(value);
-                }
-                IrStmtKind::Guard { cond, else_ } => {
-                    self.visit_expr_mut(cond);
-                    self.visit_expr_mut(else_);
-                }
-                IrStmtKind::Expr { expr } => {
-                    self.visit_expr_mut(expr);
-                }
-                IrStmtKind::ListSwap { a, b, .. } => {
-                    self.visit_expr_mut(a);
-                    self.visit_expr_mut(b);
-                }
-                IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-                    self.visit_expr_mut(end);
-                }
-                IrStmtKind::ListCopySlice { len, .. } => {
-                    self.visit_expr_mut(len);
-                }
-                // No recursable sub-exprs (Comment / RcInc / RcDec).
-                IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
-            }
+            self.visit_stmt_exprs(stmt);
         }
+        *stmts = self.collapse_idioms(std::mem::take(stmts));
+    }
 
-        // Multi-stmt peephole: work on indices, collect results
-        let orig = std::mem::take(stmts);
-        let mut result = Vec::with_capacity(orig.len());
+    /// Recurse the per-expr rewrites into one statement's sub-expressions.
+    /// Grouped by how many expressions the statement carries.
+    fn visit_stmt_exprs(&mut self, stmt: &mut IrStmt) {
+        match &mut stmt.kind {
+            // One sub-expression.
+            IrStmtKind::Bind { value: e, .. } | IrStmtKind::BindDestructure { value: e, .. }
+            | IrStmtKind::Assign { value: e, .. } | IrStmtKind::FieldAssign { value: e, .. }
+            | IrStmtKind::Expr { expr: e }
+            | IrStmtKind::ListReverse { end: e, .. } | IrStmtKind::ListRotateLeft { end: e, .. }
+            | IrStmtKind::ListCopySlice { len: e, .. } => self.visit_expr_mut(e),
+            // Two sub-expressions, left to right.
+            IrStmtKind::IndexAssign { index: a, value: b, .. }
+            | IrStmtKind::MapInsert { key: a, value: b, .. }
+            | IrStmtKind::Guard { cond: a, else_: b }
+            | IrStmtKind::ListSwap { a, b, .. } => {
+                self.visit_expr_mut(a);
+                self.visit_expr_mut(b);
+            }
+            // No recursable sub-exprs (Comment / RcInc / RcDec).
+            IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
+        }
+    }
+
+    /// The multi-statement peephole: scan the list left to right, replacing any
+    /// recognized idiom with its collapsed form and dropping self-assignments.
+    fn collapse_idioms(&mut self, orig: Vec<IrStmt>) -> Vec<IrStmt> {
         let len = orig.len();
-        // Convert to indexable slice, consume via into_iter at the end
-        let slice = &orig;
+        let mut result = Vec::with_capacity(len);
         let mut i = 0;
         while i < len {
-            // 3-stmt patterns
-            if i + 2 < len {
-                if let Some(s) = try_detect_vec_init(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                    result.push(s); i += 3; self.changed = true; continue;
-                }
-                if let Some(s) = try_detect_reverse_block(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                    result.push(s); i += 3; self.changed = true; continue;
-                }
-                if let Some(s) = try_detect_rotate(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                    result.push(s); i += 3; self.changed = true; continue;
-                }
-                if let Some(s) = try_detect_swap(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                    result.push(s); i += 3; self.changed = true; continue;
-                }
+            if let Some(s) = self.try_three_stmt_idiom(&orig, i) {
+                result.push(s);
+                i += 3;
+                continue;
             }
-
-            // Self-assignment elimination
-            if let IrStmtKind::Assign { var, value } = &slice[i].kind {
-                let is_self = match &value.kind {
-                    IrExprKind::Var { id } => id == var,
-                    IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if id == var),
-                    _ => false,
-                };
-                if is_self { i += 1; self.changed = true; continue; }
+            if is_self_assign(&orig[i]) {
+                i += 1;
+                self.changed = true;
+                continue;
             }
-
             result.push(orig[i].clone());
             i += 1;
         }
+        result
+    }
 
-        *stmts = result;
+    /// The three-statement idioms, tried in a fixed order at position `i`.
+    fn try_three_stmt_idiom(&mut self, stmts: &[IrStmt], i: usize) -> Option<IrStmt> {
+        let (a, b, c) = (stmts.get(i)?, stmts.get(i + 1)?, stmts.get(i + 2)?);
+        let hit = try_detect_vec_init(a, b, c)
+            .or_else(|| try_detect_reverse_block(a, b, c))
+            .or_else(|| try_detect_rotate(a, b, c))
+            .or_else(|| try_detect_swap(a, b, c))?;
+        self.changed = true;
+        Some(hit)
+    }
+}
+
+/// `x = x` / `x = x.clone()` — a no-op the earlier passes can leave behind.
+fn is_self_assign(stmt: &IrStmt) -> bool {
+    let IrStmtKind::Assign { var, value } = &stmt.kind else { return false };
+    match &value.kind {
+        IrExprKind::Var { id } => id == var,
+        IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if id == var),
+        _ => false,
     }
 }
 
 // ── Pattern detectors ──────────────────────────────────────────
+
+/// `x = x + licm` — the accumulator append this idiom collapses. Either side
+/// may be wrapped in a `Clone` inserted by CloneInsertion.
+fn is_self_append(stmt: &IrStmt, x_var: &VarId, licm_var: &VarId) -> bool {
+    let IrStmtKind::Assign { var: assign_var, value } = &stmt.kind else { return false };
+    if assign_var != x_var {
+        return false;
+    }
+    let IrExprKind::BinOp { op: BinOp::ConcatList, left, right } = &value.kind else { return false };
+    read_var(left) == Some(*x_var) && read_var(right) == Some(*licm_var)
+}
+
+/// The variable a `Var` — or a `Clone` of one — reads.
+fn read_var(expr: &IrExpr) -> Option<VarId> {
+    match &expr.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Clone { expr } => match &expr.kind {
+            IrExprKind::Var { id } => Some(*id),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 /// Vec init: `var x = []; let __licm = [val]; for _ in 0..n { x = x + __licm }`
 /// → `var x = vec![val; n]` (O(n) instead of O(n²))
@@ -269,30 +287,9 @@ fn try_detect_vec_init(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> 
     if body.len() != 1 { return None; }
 
     // body[0]: Assign { var: x, value: BinOp { ConcatList, Clone(x), Clone(__licm) } }
-    let IrStmtKind::Assign { var: assign_var, value: assign_val } = &body[0].kind else { return None; };
-    if assign_var != x_var { return None; }
-
-    // Unwrap the concat: ConcatList(left, right) where left contains x and right contains __licm
-    let (left, right) = match &assign_val.kind {
-        IrExprKind::BinOp { op: BinOp::ConcatList, left, right } => (left.as_ref(), right.as_ref()),
-        _ => return None,
-    };
-
-    // left should be Var(x) or Clone(Var(x))
-    let left_var = match &left.kind {
-        IrExprKind::Var { id } => *id,
-        IrExprKind::Clone { expr } => match &expr.kind { IrExprKind::Var { id } => *id, _ => return None },
-        _ => return None,
-    };
-    if left_var != *x_var { return None; }
-
-    // right should be Var(__licm) or Clone(Var(__licm))
-    let right_var = match &right.kind {
-        IrExprKind::Var { id } => *id,
-        IrExprKind::Clone { expr } => match &expr.kind { IrExprKind::Var { id } => *id, _ => return None },
-        _ => return None,
-    };
-    if right_var != *licm_var { return None; }
+    if !is_self_append(&body[0], x_var, licm_var) {
+        return None;
+    }
 
     // Match! Replace with: Bind { var: x, value: RenderedCall { "vec![val; n as usize]" } }
     // We can't render here, so use a Call to a synthetic runtime function
@@ -363,49 +360,104 @@ fn try_detect_reverse_block(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrS
 
     let IrStmtKind::Expr { expr: while_expr } = &s3.kind else { return None; };
     let IrExprKind::While { cond, body } = &while_expr.kind else { return None; };
+    if !is_lt_of(cond, lo_id, hi_id) {
+        return None;
+    }
+    if body.len() != 5 {
+        return None;
+    }
+    // body[3] / body[4]: the cursors close in by one per iteration.
+    if !is_step_by_one(&body[3], lo_id, BinOp::AddInt) {
+        return None;
+    }
+    if !is_step_by_one(&body[4], hi_id, BinOp::SubInt) {
+        return None;
+    }
+    // body[0..3]: the three-statement swap of xs[lo] and xs[hi].
+    let xs_id = swapped_list(&body[0..3], lo_id, hi_id)?;
 
-    let IrExprKind::BinOp { op: BinOp::Lt, left, right } = &cond.kind else { return None; };
-    if !matches!(&left.kind, IrExprKind::Var { id } if id == lo_id) { return None; }
-    if !matches!(&right.kind, IrExprKind::Var { id } if id == hi_id) { return None; }
+    Some(IrStmt {
+        kind: IrStmtKind::ListReverse { target: xs_id, end: hi_val.clone() },
+        span: s1.span,
+    })
+}
 
-    if body.len() != 5 { return None; }
+/// `lo < hi`, with exactly those two variables on those two sides.
+fn is_lt_of(cond: &IrExpr, lo_id: &VarId, hi_id: &VarId) -> bool {
+    let IrExprKind::BinOp { op: BinOp::Lt, left, right } = &cond.kind else { return false };
+    matches!(&left.kind, IrExprKind::Var { id } if id == lo_id)
+        && matches!(&right.kind, IrExprKind::Var { id } if id == hi_id)
+}
 
-    // body[3]: lo = lo + 1
-    let IrStmtKind::Assign { var: inc_var, value: inc_val } = &body[3].kind else { return None; };
-    if inc_var != lo_id { return None; }
-    let IrExprKind::BinOp { op: BinOp::AddInt, left: il, right: ir } = &inc_val.kind else { return None; };
-    if !matches!(&il.kind, IrExprKind::Var { id } if id == lo_id) { return None; }
-    if !matches!(&ir.kind, IrExprKind::LitInt { value: 1 }) { return None; }
+/// `v = v ± 1` for the given variable and direction.
+fn is_step_by_one(stmt: &IrStmt, v: &VarId, op: BinOp) -> bool {
+    let IrStmtKind::Assign { var, value } = &stmt.kind else { return false };
+    if var != v {
+        return false;
+    }
+    let IrExprKind::BinOp { op: found, left, right } = &value.kind else { return false };
+    *found == op
+        && matches!(&left.kind, IrExprKind::Var { id } if id == v)
+        && matches!(&right.kind, IrExprKind::LitInt { value: 1 })
+}
 
-    // body[4]: hi = hi - 1
-    let IrStmtKind::Assign { var: dec_var, value: dec_val } = &body[4].kind else { return None; };
-    if dec_var != hi_id { return None; }
-    let IrExprKind::BinOp { op: BinOp::SubInt, left: dl, right: dr } = &dec_val.kind else { return None; };
-    if !matches!(&dl.kind, IrExprKind::Var { id } if id == hi_id) { return None; }
-    if !matches!(&dr.kind, IrExprKind::LitInt { value: 1 }) { return None; }
-
-    // body[0..3]: swap pattern
-    let IrStmtKind::Bind { var: tmp_var, value: bind_val, .. } = &body[0].kind else { return None; };
+/// The three-statement `xs[lo] ⇄ xs[hi]` swap:
+///
+/// ```text
+/// let tmp = xs[lo]; xs[lo] = xs[hi]; xs[hi] = tmp
+/// ```
+///
+/// Returns the list being swapped, which must be the same binding throughout.
+fn swapped_list(stmts: &[IrStmt], lo_id: &VarId, hi_id: &VarId) -> Option<VarId> {
+    let IrStmtKind::Bind { var: tmp_var, value: bind_val, .. } = &stmts[0].kind else { return None; };
     let IrExprKind::IndexAccess { object, index: swap_lo } = &bind_val.kind else { return None; };
     let IrExprKind::Var { id: xs_id } = &object.kind else { return None; };
     if !matches!(&swap_lo.kind, IrExprKind::Var { id } if id == lo_id) { return None; }
 
-    let IrStmtKind::IndexAssign { target: xs2, index: a_lo, value: a_val } = &body[1].kind else { return None; };
+    let IrStmtKind::IndexAssign { target: xs2, index: a_lo, value: a_val } = &stmts[1].kind else { return None; };
     if xs2 != xs_id { return None; }
     if !matches!(&a_lo.kind, IrExprKind::Var { id } if id == lo_id) { return None; }
     let IrExprKind::IndexAccess { object: o2, index: a_hi } = &a_val.kind else { return None; };
     if !matches!(&o2.kind, IrExprKind::Var { id } if id == xs_id) { return None; }
     if !matches!(&a_hi.kind, IrExprKind::Var { id } if id == hi_id) { return None; }
 
-    let IrStmtKind::IndexAssign { target: xs3, index: b_hi, value: tmp_val } = &body[2].kind else { return None; };
+    let IrStmtKind::IndexAssign { target: xs3, index: b_hi, value: tmp_val } = &stmts[2].kind else { return None; };
     if xs3 != xs_id { return None; }
     if !matches!(&b_hi.kind, IrExprKind::Var { id } if id == hi_id) { return None; }
     if !matches!(&tmp_val.kind, IrExprKind::Var { id } if id == tmp_var) { return None; }
 
-    Some(IrStmt {
-        kind: IrStmtKind::ListReverse { target: *xs_id, end: hi_val.clone() },
-        span: s1.span,
-    })
+    Some(*xs_id)
+}
+
+/// `for i in 0..end { <one statement> }` as a statement — the loop shape both
+/// the rotate and the copy idioms are built on. Returns the loop variable, the
+/// exclusive end, and the single-statement body.
+fn simple_zero_range_loop(stmt: &IrStmt) -> Option<(VarId, &IrExpr, &[IrStmt])> {
+    let IrStmtKind::Expr { expr: for_expr } = &stmt.kind else { return None };
+    let IrExprKind::ForIn { var, iterable, body, var_tuple } = &for_expr.kind else { return None };
+    if var_tuple.is_some() || body.len() != 1 {
+        return None;
+    }
+    let IrExprKind::Range { start, end, inclusive: false } = &iterable.kind else { return None };
+    if !matches!(&start.kind, IrExprKind::LitInt { value: 0 }) {
+        return None;
+    }
+    Some((*var, end, body))
+}
+
+/// `xs[i] = xs[i + 1]` — one step of the rotate-left shift.
+fn is_shift_left_by_one(stmt: &IrStmt, xs_id: &VarId, loop_var: &VarId) -> bool {
+    let IrStmtKind::IndexAssign { target, index, value } = &stmt.kind else { return false };
+    if target != xs_id || !matches!(&index.kind, IrExprKind::Var { id } if id == loop_var) {
+        return false;
+    }
+    let IrExprKind::IndexAccess { object, index: plus1 } = &value.kind else { return false };
+    if !matches!(&object.kind, IrExprKind::Var { id } if id == xs_id) {
+        return false;
+    }
+    let IrExprKind::BinOp { op: BinOp::AddInt, left, right } = &plus1.kind else { return false };
+    matches!(&left.kind, IrExprKind::Var { id } if id == loop_var)
+        && matches!(&right.kind, IrExprKind::LitInt { value: 1 })
 }
 
 /// rotate: p0=xs[0]; for i in 0..r { xs[i]=xs[i+1] }; xs[r]=p0
@@ -415,23 +467,10 @@ fn try_detect_rotate(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> {
     let IrExprKind::Var { id: xs_id } = &obj1.kind else { return None; };
     let IrExprKind::LitInt { value: 0 } = &idx0.kind else { return None; };
 
-    let IrStmtKind::Expr { expr: for_expr } = &s2.kind else { return None; };
-    let IrExprKind::ForIn { var: loop_var, iterable, body, var_tuple } = &for_expr.kind else { return None; };
-    if var_tuple.is_some() { return None; }
-    let IrExprKind::Range { start, end, inclusive } = &iterable.kind else { return None; };
-    if *inclusive { return None; }
-    if !matches!(&start.kind, IrExprKind::LitInt { value: 0 }) { return None; }
-    if body.len() != 1 { return None; }
-
-    let IrStmtKind::IndexAssign { target: xs2, index: assign_idx, value: assign_val } = &body[0].kind else { return None; };
-    if xs2 != xs_id { return None; }
-    if !matches!(&assign_idx.kind, IrExprKind::Var { id } if id == loop_var) { return None; }
-
-    let IrExprKind::IndexAccess { object: obj2, index: plus1 } = &assign_val.kind else { return None; };
-    if !matches!(&obj2.kind, IrExprKind::Var { id } if id == xs_id) { return None; }
-    let IrExprKind::BinOp { op: BinOp::AddInt, left: pl, right: pr } = &plus1.kind else { return None; };
-    if !matches!(&pl.kind, IrExprKind::Var { id } if id == loop_var) { return None; }
-    if !matches!(&pr.kind, IrExprKind::LitInt { value: 1 }) { return None; }
+    let (loop_var, end, body) = simple_zero_range_loop(s2)?;
+    if !is_shift_left_by_one(&body[0], xs_id, &loop_var) {
+        return None;
+    }
 
     let IrStmtKind::IndexAssign { target: xs3, index: r_idx, value: p0_val } = &s3.kind else { return None; };
     if xs3 != xs_id { return None; }
@@ -441,7 +480,7 @@ fn try_detect_rotate(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> {
     if format!("{:?}", r_idx) != format!("{:?}", end) { return None; }
 
     Some(IrStmt {
-        kind: IrStmtKind::ListRotateLeft { target: *xs_id, end: (**end).clone() },
+        kind: IrStmtKind::ListRotateLeft { target: *xs_id, end: end.clone() },
         span: s1.span,
     })
 }

@@ -10,19 +10,74 @@
 #      unit.
 #   2. PROBES: every entry carries an executable probe (multibyte input) +
 #      expected output. The script REGENERATES
-#      spec/stdlib/string_semantics_manifest_test.almd from these and fails
+#      spec/stdlib/<module>_semantics_manifest_test.almd from these and fails
 #      on diff — doc and test can never drift apart, and the test failing
 #      means the IMPLEMENTATION drifted from the declared semantics.
 #
-# index_unit vocabulary:
+# OPTIONAL `setup` key: a list of statements emitted before the probe inside
+# the same test block. A probe is ONE expression, and a block expression inside
+# the interpolation walls the wasm renderer — so a dimension that needs two
+# reads to compare (a clock's monotonicity) binds them here instead of inlining
+# a block. Keep probes single-expression where they already fit.
+#
+# THE RULE for `index_unit`: it names the unit of the Int the function's
+# MEANING hinges on — the one a caller gets wrong. For `string.len` that is the
+# return (codepoints); for `string.slice` the position params; for
+# `datetime.day` the return (a civil field), not the `ts` param it reads.
+#
+# index_unit vocabulary — string:
 #   codepoint — positions/lengths count Unicode scalar values (C-065)
 #   byte      — positions/lengths count UTF-8 bytes (only where the NAME
 #               says bytes)
 #   scalar    — the Int is a Unicode scalar VALUE, not a position
 #   count     — the Int is an occurrence/repetition count, not a position
 #
+# index_unit vocabulary — datetime:
+#   second      — the Int counts SECONDS: a Unix-epoch timestamp, a duration,
+#                 or an offset. The module's timestamp scale (NOT millis)
+#   day/hour/   — the Int is an offset COUNT in that calendar unit, which the
+#     minute      function scales to seconds itself (add_days(0, 1) = 86400)
+#   nanosecond  — the Int counts NANOSECONDS (monotonic_ns)
+#   civil-field — the Int is a calendar/clock field value — year, month 1–12,
+#                 day-of-month 1–31, hour 0–23, minute/second 0–59 — not a
+#                 duration and not a position. The probes pin the ORIGIN
+#                 (month of 2024-01-15 is 1, so months are 1-based)
+#
+# index_unit vocabulary — bytes (every value below verified by execution over
+# the fixed buffer [1,2,3,4,5,6,7,8], not read off the prose):
+#   byte-offset   — the Int is a position in BYTES from the start, 0-based.
+#                   `read_i32_be(b, 4)` starts at byte 4, NOT at the 4th i32
+#   byte-count    — the Int counts BYTES: a length, a chunk size, a pad target
+#   element-count — the Int counts ELEMENTS of the decoded type, NOT bytes.
+#                   The `_array` trap: `read_i32_be_array(b, 0, 2)` consumes 8
+#                   bytes, and nothing in the name or the prose says so
+#   cursor        — the RETURNED Int is the next byte offset after the read,
+#                   not a length. The `_at` family returns `(cursor, T?)`:
+#                   `read_i32_be_at(b, 0)` is `(4, some(…))`
+#   byte-value    — the Int is one byte's value, 0–255 (`read_u8`, `set_at`'s
+#                   val, `fill`'s val)
+#   value         — the Int is the number encoded/decoded at exactly the width
+#                   AND byte order the name declares. `_be` vs `_le` is the
+#                   whole point: 0x0102 reads 258 big-endian, 513 little-endian
+#   ordering      — the Int is a comparison sign (-1 / 0 / 1), not a magnitude
+#   address       — the Int is a raw address or an opaque heap token
+#                   (`data_ptr`, `heap_save`) — meaningless to arithmetic on
+#
+# OPTIONAL `note` key: prose recording what the probe does NOT prove, for the
+# rare entry whose declared dimension is not fully probe-reachable. It is never
+# a substitute for a probe — an entry still needs one — and it exists so a
+# trusted-not-proven edge is written down instead of implied (the
+# docs/contracts/proven-vs-trusted.md discipline).
+#
 # Modules ratchet on: string is the founding module (the #419 home);
-# adding a module = extend COVERED_MODULES in the check script.
+# adding a module = extend COVERED_MODULES in the check script. Each module
+# generates its own spec/stdlib/<module>_semantics_manifest_test.almd.
+#   ordering      — the Int is a comparison verdict, strictly -1/0/1 (measured:
+#                   NOT a byte difference)
+#   address       — the Int is a linear-memory/native address or allocator
+#                   checkpoint (data_ptr, heap_save). Never a stable value —
+#                   probes pin only leg-independent properties (non-zero,
+#                   monotonicity, restore-then-allocate works)
 
 [string]
 default_index_unit = "codepoint"
@@ -140,3 +195,2119 @@ name = "run_length_encode"
 index_unit = "count"
 probe = 'string.run_length_encode("ééa")'
 expect = """[("é", 2), ("a", 1)]"""
+
+# ---------------------------------------------------------------------------
+# datetime — the second module on the ratchet. The #419 question here is the
+# TIMESTAMP SCALE (seconds, not milliseconds — a JS-shaped assumption is off by
+# 1000x and still type-checks) and the CIVIL-FIELD ORIGIN (month/day 1-based,
+# hour/minute/second 0-based). Every field probe reads the same fixed instant,
+# 1705322096 = 2024-01-15T12:34:56Z, as a LITERAL rather than through
+# from_parts, so a bug in from_parts cannot mask a bug in an extractor.
+# ---------------------------------------------------------------------------
+
+[datetime]
+default_index_unit = "second"
+
+[[datetime.fn]]
+name = "add_days"
+index_unit = "day"
+probe = 'datetime.add_days(0, 1)'
+expect = "86400"
+
+[[datetime.fn]]
+name = "add_hours"
+index_unit = "hour"
+probe = 'datetime.add_hours(0, 1)'
+expect = "3600"
+
+[[datetime.fn]]
+name = "add_minutes"
+index_unit = "minute"
+probe = 'datetime.add_minutes(0, 1)'
+expect = "60"
+
+[[datetime.fn]]
+name = "add_seconds"
+index_unit = "second"
+probe = 'datetime.add_seconds(0, 1)'
+expect = "1"
+
+[[datetime.fn]]
+name = "day"
+index_unit = "civil-field"
+probe = 'datetime.day(1705322096)'
+expect = "15"
+
+[[datetime.fn]]
+name = "diff_seconds"
+index_unit = "second"
+probe = 'datetime.diff_seconds(90, 30)'
+expect = "60"
+
+[[datetime.fn]]
+name = "format"
+index_unit = "second"
+probe = 'datetime.format(1705322096, "%Y-%m-%dT%H:%M:%SZ")'
+expect = "2024-01-15T12:34:56Z"
+
+[[datetime.fn]]
+name = "from_parts"
+index_unit = "civil-field"
+probe = 'datetime.from_parts(2024, 1, 15, 12, 34, 56)'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "from_unix"
+index_unit = "second"
+probe = 'datetime.from_unix(1705322096)'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "hour"
+index_unit = "civil-field"
+probe = 'datetime.hour(1705322096)'
+expect = "12"
+
+[[datetime.fn]]
+name = "is_after"
+index_unit = "second"
+probe = 'datetime.is_after(0, 1)'
+expect = "false"
+
+[[datetime.fn]]
+name = "is_before"
+index_unit = "second"
+probe = 'datetime.is_before(0, 1)'
+expect = "true"
+
+[[datetime.fn]]
+name = "minute"
+index_unit = "civil-field"
+probe = 'datetime.minute(1705322096)'
+expect = "34"
+
+[[datetime.fn]]
+name = "monotonic_ns"
+index_unit = "nanosecond"
+setup = [
+  "let a = datetime.monotonic_ns()",
+  "let b = datetime.monotonic_ns()",
+]
+probe = 'b >= a'
+expect = "true"
+note = """
+Proves the ORDER property the clock promises — never goes backwards. It does
+NOT prove the nanosecond SCALE, and it cannot pin a VALUE: the origin is an
+unspecified reference point that differs by target BY DESIGN (native counts
+from the first call, WASI from its own epoch), so only differences are
+meaningful. The only executable discriminator between ns/us/ms is a wall-clock
+lower bound over a timed workload, and a timing assertion inside a correctness
+gate is a flake source this repo does not accept. The scale is TRUSTED from the
+two implementations — Instant::elapsed().as_nanos() natively,
+prim.clock_time_get(1, …) undivided on WASI — not proven here.
+"""
+
+[[datetime.fn]]
+name = "month"
+index_unit = "civil-field"
+probe = 'datetime.month(1705322096)'
+expect = "1"
+
+[[datetime.fn]]
+name = "now"
+index_unit = "second"
+probe = 'if datetime.now() > 1700000000 and datetime.now() < 100000000000 then "second" else "other"'
+expect = "second"
+note = """
+Reads the host clock, so the probe cannot assert a value — it asserts the
+SCALE, which is the dimension that bites. The window is the discriminator: a
+seconds clock lands in it (1.7e9) and a millisecond clock does not (1.7e12
+exceeds the 1e11 ceiling), so a unit regression fails here rather than silently
+shipping a 1000x error.
+"""
+
+[[datetime.fn]]
+name = "parse_iso"
+index_unit = "second"
+probe = 'match datetime.parse_iso("2024-01-15T12:34:56Z") { ok(v) => v, err(_) => -1 }'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "second"
+index_unit = "civil-field"
+probe = 'datetime.second(1705322096)'
+expect = "56"
+
+[[datetime.fn]]
+name = "to_iso"
+index_unit = "second"
+probe = 'datetime.to_iso(1705322096)'
+expect = "2024-01-15T12:34:56Z"
+
+[[datetime.fn]]
+name = "to_unix"
+index_unit = "second"
+probe = 'datetime.to_unix(1705322096)'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "weekday"
+index_unit = "second"
+probe = 'datetime.weekday(1705322096)'
+expect = "Monday"
+
+[[datetime.fn]]
+name = "year"
+index_unit = "civil-field"
+probe = 'datetime.year(1705322096)'
+expect = "2024"
+
+# ---------------------------------------------------------------------------
+# bytes — the third module on the ratchet, and the widest API FAMILY in the
+# stdlib: read/set/append x {i16,i32,i64,u16,u32,u8,f16,f32,f64} x {be,le}.
+# CLAUDE.md's rule is that a family is extended BY MATRIX, never point-wise —
+# this table is that matrix for the semantic axis, so a cell whose byte order
+# or width silently disagrees with its NAME cannot survive.
+#
+# The scalar-read probes use the fixture [255,254,253,252,251,250,249,248]:
+# with the high bit SET, signed and unsigned disagree (i16_be = -2 vs
+# u16_be = 65534) and big- and little-endian disagree (i16_be = -2 vs
+# i16_le = -257), so one probe pins width, signedness and byte order at once.
+# A low-byte fixture like [1,2,3,4] would have let a signed/unsigned mixup
+# through. Every expectation below is computed independently by Python's
+# `struct` and then checked against the implementation, never transcribed
+# from a run.
+#
+# The float probes invert that: the byte PATTERN is derived from 1.5 for the
+# target order, so the expectation is 1.5 by construction and a byte-order
+# regression shows up as a garbage float rather than a value someone has to
+# recognise.
+# ---------------------------------------------------------------------------
+
+[bytes]
+default_index_unit = "byte-offset"
+
+[[bytes.fn]]
+name = "read_i16_be"
+index_unit = "value"
+probe = 'bytes.read_i16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-2"
+
+[[bytes.fn]]
+name = "read_i16_le"
+index_unit = "value"
+probe = 'bytes.read_i16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-257"
+
+[[bytes.fn]]
+name = "read_u16_be"
+index_unit = "value"
+probe = 'bytes.read_u16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "65534"
+
+[[bytes.fn]]
+name = "read_u16_le"
+index_unit = "value"
+probe = 'bytes.read_u16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "65279"
+
+[[bytes.fn]]
+name = "read_i32_be"
+index_unit = "value"
+probe = 'bytes.read_i32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-66052"
+
+[[bytes.fn]]
+name = "read_i32_le"
+index_unit = "value"
+probe = 'bytes.read_i32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-50462977"
+
+[[bytes.fn]]
+name = "read_u32_be"
+index_unit = "value"
+probe = 'bytes.read_u32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "4294901244"
+
+[[bytes.fn]]
+name = "read_u32_le"
+index_unit = "value"
+probe = 'bytes.read_u32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "4244504319"
+
+[[bytes.fn]]
+name = "read_i64_be"
+index_unit = "value"
+probe = 'bytes.read_i64_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-283686952306184"
+
+[[bytes.fn]]
+name = "read_i64_le"
+index_unit = "value"
+probe = 'bytes.read_i64_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-506097522914230529"
+
+[[bytes.fn]]
+name = "read_u8"
+index_unit = "byte-value"
+probe = 'bytes.read_u8(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 1)'
+expect = "254"
+
+[[bytes.fn]]
+name = "read_f32_be"
+index_unit = "value"
+probe = 'bytes.read_f32_be(bytes.from_list([63, 192, 0, 0]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f32_le"
+index_unit = "value"
+probe = 'bytes.read_f32_le(bytes.from_list([0, 0, 192, 63]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f64_be"
+index_unit = "value"
+probe = 'bytes.read_f64_be(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f64_le"
+index_unit = "value"
+probe = 'bytes.read_f64_le(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f16_le"
+index_unit = "value"
+probe = 'bytes.read_f16_le(bytes.from_list([0, 62]), 0)'
+expect = "1.5"
+
+# The `_at` CURSOR family. The returned Int is the NEXT byte offset, not a
+# length — `read_i32_be_at(b, 0)` is `(4, some(…))`, and a caller who reads it
+# as "4 bytes consumed" happens to be right here and wrong for a
+# length-prefixed string, where the cursor jumps the prefix too (7, not 3).
+# The probe destructures instead of stringifying the whole tuple: `(Int, T?)`
+# in interpolation position walls the wasm renderer, and the destructured form
+# both lowers AND pins the decoded value alongside the cursor.
+
+[[bytes.fn]]
+name = "read_i16_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/258"
+
+[[bytes.fn]]
+name = "read_i16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/513"
+
+[[bytes.fn]]
+name = "read_u16_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/258"
+
+[[bytes.fn]]
+name = "read_u16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/513"
+
+[[bytes.fn]]
+name = "read_i32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/16909060"
+
+[[bytes.fn]]
+name = "read_i32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/67305985"
+
+[[bytes.fn]]
+name = "read_u32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/16909060"
+
+[[bytes.fn]]
+name = "read_u32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/67305985"
+
+[[bytes.fn]]
+name = "read_i64_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i64_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "8/72623859790382856"
+
+[[bytes.fn]]
+name = "read_i64_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i64_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "8/578437695752307201"
+
+[[bytes.fn]]
+name = "read_u8_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u8_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "1/1"
+
+[[bytes.fn]]
+name = "read_f32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f32_be_at(bytes.from_list([63, 192, 0, 0]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "4/1.5"
+
+[[bytes.fn]]
+name = "read_f32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f32_le_at(bytes.from_list([0, 0, 192, 63]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "4/1.5"
+
+[[bytes.fn]]
+name = "read_f64_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f64_be_at(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "8/1.5"
+
+[[bytes.fn]]
+name = "read_f64_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f64_le_at(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "8/1.5"
+
+[[bytes.fn]]
+name = "read_f16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f16_le_at(bytes.from_list([0, 62]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "2/1.5"
+
+[[bytes.fn]]
+name = "read_bool_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_bool_at(bytes.from_list([1, 0]), 0)',
+  'let combined = "${cur}/${v ?? false}"',
+]
+probe = 'combined'
+expect = "1/true"
+
+[[bytes.fn]]
+name = "read_string_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_string_be_at(bytes.from_list([0, 0, 0, 3, 97, 98, 99]), 0)',
+  'let combined = "${cur}/${v ?? \"?\"}"',
+]
+probe = 'combined'
+expect = "7/abc"
+
+# The `_array` ELEMENT-COUNT family — the trap this table exists to catch.
+# `count` counts ELEMENTS of the decoded type, not bytes:
+# `read_i32_be_array(b, 0, 2)` consumes EIGHT bytes. Nothing in the name, the
+# signature or the prose says so, and the sibling `pos` argument immediately
+# above it IS a byte offset — so the two Ints in one call have different units.
+# The i64 probes need a 16-byte fixture for the same reason.
+
+[[bytes.fn]]
+name = "read_i16_be_array"
+index_unit = "element-count"
+probe = 'bytes.read_i16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[258, 772]"
+
+[[bytes.fn]]
+name = "read_i16_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_i16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[513, 1027]"
+
+[[bytes.fn]]
+name = "read_u16_be_array"
+index_unit = "element-count"
+probe = 'bytes.read_u16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[258, 772]"
+
+[[bytes.fn]]
+name = "read_u16_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_u16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[513, 1027]"
+
+[[bytes.fn]]
+name = "read_i32_be_array"
+index_unit = "element-count"
+probe = 'bytes.read_i32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[16909060, 84281096]"
+
+[[bytes.fn]]
+name = "read_i32_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_i32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[67305985, 134678021]"
+
+[[bytes.fn]]
+name = "read_u32_be_array"
+index_unit = "element-count"
+probe = 'bytes.read_u32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[16909060, 84281096]"
+
+[[bytes.fn]]
+name = "read_u32_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_u32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[67305985, 134678021]"
+
+[[bytes.fn]]
+name = "read_i64_be_array"
+index_unit = "element-count"
+probe = 'bytes.read_i64_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2)'
+expect = "[72623859790382856, 651345242494996240]"
+
+[[bytes.fn]]
+name = "read_i64_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_i64_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2)'
+expect = "[578437695752307201, 1157159078456920585]"
+
+[[bytes.fn]]
+name = "read_f32_be_array"
+index_unit = "element-count"
+probe = 'bytes.read_f32_be_array(bytes.from_list([63, 192, 0, 0, 64, 32, 0, 0]), 0, 2)'
+expect = "[1.5, 2.5]"
+
+[[bytes.fn]]
+name = "read_f32_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_f32_le_array(bytes.from_list([0, 0, 192, 63, 0, 0, 32, 64]), 0, 2)'
+expect = "[1.5, 2.5]"
+
+[[bytes.fn]]
+name = "read_f64_be_array"
+index_unit = "element-count"
+probe = 'bytes.read_f64_be_array(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0, 64, 4, 0, 0, 0, 0, 0, 0]), 0, 2)'
+expect = "[1.5, 2.5]"
+
+[[bytes.fn]]
+name = "read_f64_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_f64_le_array(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 4, 64]), 0, 2)'
+expect = "[1.5, 2.5]"
+
+[[bytes.fn]]
+name = "read_f16_le_array"
+index_unit = "element-count"
+probe = 'bytes.read_f16_le_array(bytes.from_list([0, 62, 0, 65]), 0, 2)'
+expect = "[1.5, 2.5]"
+
+[[bytes.fn]]
+name = "append_i16_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i16_be(b, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 254]"
+
+[[bytes.fn]]
+name = "append_i16_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i16_le(b, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[254, 255]"
+
+[[bytes.fn]]
+name = "append_i32_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i32_be(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 1, 2]"
+
+[[bytes.fn]]
+name = "append_i32_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i32_le(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[2, 1, 0, 0]"
+
+[[bytes.fn]]
+name = "append_i64_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i64_be(b, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 255, 255, 255, 255, 255, 255, 254]"
+
+[[bytes.fn]]
+name = "append_i64_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i64_le(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[2, 1, 0, 0, 0, 0, 0, 0]"
+
+[[bytes.fn]]
+name = "append_u16_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u16_be(b, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 254]"
+
+[[bytes.fn]]
+name = "append_u16_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u16_le(b, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[254, 255]"
+
+[[bytes.fn]]
+name = "append_u32_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_be(b, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 255, 255, 254]"
+
+[[bytes.fn]]
+name = "append_u32_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_le(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[2, 1, 0, 0]"
+
+[[bytes.fn]]
+name = "append_u8"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u8(b, 200)",
+]
+probe = "bytes.to_list(b)"
+expect = "[200]"
+
+[[bytes.fn]]
+name = "chunks"
+index_unit = "byte-count"
+probe = "bytes.chunks(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 3) |> list.map((c) => bytes.len(c))"
+expect = "[3, 3, 2]"
+
+[[bytes.fn]]
+name = "cmp"
+index_unit = "ordering"
+setup = [
+  'let sm_out = "${bytes.cmp(bytes.from_list([1, 2]), bytes.from_list([1, 3]))} ${bytes.cmp(bytes.from_list([1, 2]), bytes.from_list([1, 2]))} ${bytes.cmp(bytes.from_list([1, 3]), bytes.from_list([1, 2]))}"',
+]
+probe = "sm_out"
+expect = "-1 0 1"
+
+[[bytes.fn]]
+name = "copy_from"
+index_unit = "byte-offset"
+setup = [
+  "var dst = bytes.new(4)",
+  "bytes.copy_from(dst, bytes.from_list([9, 8, 7, 6]), 1, 2, 2)",
+]
+probe = "bytes.to_list(dst)"
+expect = "[0, 7, 6, 0]"
+
+[[bytes.fn]]
+name = "copy_to_ptr"
+index_unit = "byte-count"
+setup = [
+  "var dst = bytes.new(4)",
+  "let n = bytes.copy_to_ptr(bytes.from_list([9, 8, 7]), bytes.as_mut_ptr(dst), 2)",
+  'let sm_out = "${n} ${bytes.to_list(dst)}"',
+]
+probe = "sm_out"
+expect = "2 [9, 8, 0, 0]"
+
+[[bytes.fn]]
+name = "data_ptr"
+index_unit = "address"
+probe = "bytes.data_ptr(bytes.from_list([1])) != 0"
+expect = "true"
+
+[[bytes.fn]]
+name = "eof"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.eof(b8, 7)} ${bytes.eof(b8, 8)}"',
+]
+probe = "sm_out"
+expect = "false true"
+
+[[bytes.fn]]
+name = "fill"
+index_unit = "byte-value"
+setup = [
+  "var b = bytes.new(3)",
+  "bytes.fill(b, 7)",
+]
+probe = "bytes.to_list(b)"
+expect = "[7, 7, 7]"
+
+[[bytes.fn]]
+name = "from_list"
+index_unit = "byte-value"
+probe = "bytes.to_list(bytes.from_list([0, 128, 255]))"
+expect = "[0, 128, 255]"
+
+[[bytes.fn]]
+name = "from_raw_ptr"
+index_unit = "byte-count"
+setup = [
+  "let src = bytes.from_list([1, 2, 3, 4])",
+]
+probe = "bytes.to_list(bytes.from_raw_ptr(bytes.as_ptr(src), 3))"
+expect = "[1, 2, 3]"
+
+[[bytes.fn]]
+name = "get"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.get(b8, 0) ?? -1} ${bytes.get(b8, 8) ?? -1}"',
+]
+probe = "sm_out"
+expect = "1 -1"
+
+[[bytes.fn]]
+name = "get_or"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.get_or(b8, 2, 42)} ${bytes.get_or(b8, 9, 42)}"',
+]
+probe = "sm_out"
+expect = "3 42"
+
+[[bytes.fn]]
+name = "index_of"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.index_of(b8, bytes.from_list([3, 4])) ?? -1} ${bytes.index_of(b8, bytes.from_list([9])) ?? -1}"',
+]
+probe = "sm_out"
+expect = "2 -1"
+
+[[bytes.fn]]
+name = "insert"
+index_unit = "byte-offset"
+probe = "bytes.to_list(bytes.insert(bytes.from_list([1, 2, 3]), 1, 9))"
+expect = "[1, 9, 2, 3]"
+
+[[bytes.fn]]
+name = "len"
+index_unit = "byte-count"
+probe = "bytes.len(bytes.from_list([1, 2, 3]))"
+expect = "3"
+
+[[bytes.fn]]
+name = "map_each"
+index_unit = "byte-value"
+probe = "bytes.to_list(bytes.map_each(bytes.from_list([1, 2, 200]), (x) => x * 2))"
+expect = "[2, 4, 144]"
+
+[[bytes.fn]]
+name = "new"
+index_unit = "byte-count"
+probe = "bytes.to_list(bytes.new(3))"
+expect = "[0, 0, 0]"
+
+[[bytes.fn]]
+name = "pad_left"
+index_unit = "byte-count"
+probe = "bytes.to_list(bytes.pad_left(bytes.from_list([1, 2]), 4, 9))"
+expect = "[9, 9, 1, 2]"
+
+[[bytes.fn]]
+name = "pad_right"
+index_unit = "byte-count"
+probe = "bytes.to_list(bytes.pad_right(bytes.from_list([1, 2]), 4, 9))"
+expect = "[1, 2, 9, 9]"
+
+[[bytes.fn]]
+name = "push"
+index_unit = "byte-value"
+setup = [
+  "var b = bytes.from_list([1])",
+  "bytes.push(b, 2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[1, 2]"
+
+[[bytes.fn]]
+name = "set_at"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.from_list([1, 2, 3])",
+  "bytes.set_at(b, 1, 9)",
+]
+probe = "bytes.to_list(b)"
+expect = "[1, 9, 3]"
+
+[[bytes.fn]]
+name = "copy_within"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  "bytes.copy_within(b, 0, 3, 5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[1, 2, 3, 4, 5, 1, 2, 3]"
+
+[[bytes.fn]]
+name = "read_bool"
+index_unit = "byte-offset"
+setup = [
+  "let bb = bytes.from_list([0, 1, 2])",
+  'let sm_out = "${bytes.read_bool(bb, 0)} ${bytes.read_bool(bb, 1)} ${bytes.read_bool(bb, 2)}"',
+]
+probe = "sm_out"
+expect = "false true true"
+
+[[bytes.fn]]
+name = "read_length_prefixed_strings_le"
+index_unit = "element-count"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_le(b, 1)",
+  "bytes.append_u8(b, 65)",
+  "bytes.append_u32_le(b, 2)",
+  "bytes.append_u8(b, 66)",
+  "bytes.append_u8(b, 67)",
+]
+probe = 'bytes.read_length_prefixed_strings_le(b, 0, 2) |> list.join(",")'
+expect = "A,BC"
+
+[[bytes.fn]]
+name = "read_string_at"
+index_unit = "byte-count"
+probe = 'bytes.read_string_at(bytes.from_string("héllo"), 1, 2)'
+expect = "é"
+
+[[bytes.fn]]
+name = "read_string_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(0)",
+  'bytes.write_string_be(b, "hi")',
+]
+probe = "bytes.read_string_be(b, 0)"
+expect = "hi"
+
+[[bytes.fn]]
+name = "remove_at"
+index_unit = "byte-offset"
+probe = "bytes.to_list(bytes.remove_at(bytes.from_list([1, 2, 3]), 1))"
+expect = "[1, 3]"
+
+[[bytes.fn]]
+name = "repeat"
+index_unit = "count"
+probe = "bytes.to_list(bytes.repeat(bytes.from_list([1, 2]), 3))"
+expect = "[1, 2, 1, 2, 1, 2]"
+
+[[bytes.fn]]
+name = "set"
+index_unit = "byte-offset"
+setup = [
+  "let a = bytes.from_list([1, 2])",
+  "let c = bytes.set(a, 0, 9)",
+  'let sm_out = "${bytes.to_list(a)} ${bytes.to_list(c)}"',
+]
+probe = "sm_out"
+expect = "[1, 2] [9, 2]"
+
+[[bytes.fn]]
+name = "set_f32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_f32_be(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 192, 0, 0, 0]"
+
+[[bytes.fn]]
+name = "set_f32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_f32_le(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 192, 63, 0]"
+
+[[bytes.fn]]
+name = "set_f64_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_f64_be(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 248, 0, 0, 0, 0, 0, 0, 0]"
+
+[[bytes.fn]]
+name = "set_f64_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_f64_le(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 0, 0, 0, 0, 248, 63, 0]"
+
+[[bytes.fn]]
+name = "set_i16_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_i16_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_i16_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_i16_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 0]"
+
+[[bytes.fn]]
+name = "set_i32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_i32_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_i32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_i32_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 0]"
+
+[[bytes.fn]]
+name = "set_i64_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_i64_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 255, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_i64_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_i64_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 255, 255, 255, 255, 0]"
+
+[[bytes.fn]]
+name = "set_u16_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_u16_be(b, 1, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_u16_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_u16_le(b, 1, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 0]"
+
+[[bytes.fn]]
+name = "set_u32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_u32_be(b, 1, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_u32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_u32_le(b, 1, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 0]"
+
+[[bytes.fn]]
+name = "set_u8"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(3)",
+  "bytes.set_u8(b, 1, 200)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 200, 0]"
+
+[[bytes.fn]]
+name = "skip"
+index_unit = "cursor"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.skip(b8, 2, 3)} ${bytes.skip(b8, 6, 5)}"',
+]
+probe = "sm_out"
+expect = "5 8"
+
+[[bytes.fn]]
+name = "skip_length_prefixed_le"
+index_unit = "cursor"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_le(b, 1)",
+  "bytes.append_u8(b, 65)",
+  "bytes.append_u32_le(b, 2)",
+  "bytes.append_u8(b, 66)",
+  "bytes.append_u8(b, 67)",
+]
+probe = "bytes.skip_length_prefixed_le(b, 0, 2)"
+expect = "11"
+
+[[bytes.fn]]
+name = "slice"
+index_unit = "byte-offset"
+probe = "bytes.to_list(bytes.slice(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 5))"
+expect = "[3, 4, 5]"
+
+[[bytes.fn]]
+name = "take_at"
+index_unit = "cursor"
+setup = [
+  "let (p, t) = bytes.take_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 3)",
+  "let ts = match t { Some(v) => v, None => bytes.new(0) }",
+  'let sm_out = "${p} ${bytes.to_list(ts)}"',
+]
+probe = "sm_out"
+expect = "5 [3, 4, 5]"
+
+[[bytes.fn]]
+name = "to_list"
+index_unit = "byte-value"
+probe = "bytes.to_list(bytes.from_list([200, 255]))"
+expect = "[200, 255]"
+
+[[bytes.fn]]
+name = "write_i64_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.write_i64_be(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 0, 0, 0, 1, 2]"
+
+[[bytes.fn]]
+name = "write_u32_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.write_u32_be(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 1, 2]"
+
+[[bytes.fn]]
+name = "write_u8"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.write_u8(b, 200)",
+]
+probe = "bytes.to_list(b)"
+expect = "[200]"
+
+[[bytes.fn]]
+name = "heap_save"
+index_unit = "address"
+setup = [
+  "let cp1 = bytes.heap_save()",
+  "let _spacer = bytes.new(64)",
+  "let cp2 = bytes.heap_save()",
+]
+probe = "cp2 >= cp1"
+expect = "true"
+
+[[bytes.fn]]
+name = "heap_restore"
+index_unit = "address"
+setup = [
+  "let cp = bytes.heap_save()",
+  "let _spacer = bytes.new(64)",
+  "bytes.heap_restore(cp)",
+  "let after = bytes.from_list([5, 6])",
+]
+probe = "bytes.to_list(after)"
+expect = "[5, 6]"
+
+[[bytes.fn]]
+name = "read_uint16"
+index_unit = "value"
+setup = [
+  "let tb = bytes.from_list([1, 2, 3, 4])",
+  'let sm_out = "${bytes.read_uint16(tb, 0, BigEndian).to_int64()} ${bytes.read_uint16(tb, 0, LittleEndian).to_int64()}"',
+]
+probe = "sm_out"
+expect = "258 513"
+
+[[bytes.fn]]
+name = "read_uint32"
+index_unit = "value"
+setup = [
+  "let tb = bytes.from_list([1, 2, 3, 4])",
+  'let sm_out = "${bytes.read_uint32(tb, 0, BigEndian).to_int64()} ${bytes.read_uint32(tb, 0, LittleEndian).to_int64()}"',
+]
+probe = "sm_out"
+expect = "16909060 67305985"
+
+[[bytes.fn]]
+name = "read_int32"
+index_unit = "value"
+setup = [
+  "let nb = bytes.from_list([255, 255, 255, 254])",
+]
+probe = "bytes.read_int32(nb, 0, BigEndian).to_int64()"
+expect = "-2"
+
+[[bytes.fn]]
+name = "read_float32"
+index_unit = "value"
+setup = [
+  "var fb = bytes.new(4)",
+  "bytes.set_f32_be(fb, 0, 1.5)",
+  "let fv = bytes.read_float32(fb, 0, BigEndian).to_float64()",
+]
+probe = "float.to_string(fv)"
+expect = "1.5"
+
+[[bytes.fn]]
+name = "set_uint16"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_uint16(b, 1, (258).to_uint16(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 1, 2, 0]"
+
+[[bytes.fn]]
+name = "set_uint32"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_uint32(b, 1, (258).to_uint32(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 1, 2, 0]"
+
+[[bytes.fn]]
+name = "set_int32"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_int32(b, 1, (-2).to_int32(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_float32"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_float32(b, 1, 1.5.to_float32(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 192, 0, 0, 0]"
+
+
+# index_unit vocabulary — list (the GENERIC fns — len[A], get[A], take[A] … —
+# sit outside the signature sweep, which reads only non-generic signatures; the
+# element-position dimension for those lives with the list module docs until
+# the sweep grows a generics parser. What IS swept is pinned below):
+#   value         — the Int is an element value or an arithmetic result over
+#                   element values (sum/product; range's start/end are the
+#                   VALUES the produced elements run over, end EXCLUSIVE)
+#   element-index — the Int is a 0-based ELEMENT position (binary_search's
+#                   some(i) — over a SORTED list)
+[list]
+default_index_unit = "value"
+
+[[list.fn]]
+name = "sum"
+index_unit = "value"
+probe = 'list.sum([1, 2, 3])'
+expect = "6"
+
+[[list.fn]]
+name = "product"
+index_unit = "value"
+probe = 'list.product([2, 3, 4])'
+expect = "24"
+
+[[list.fn]]
+name = "range"
+index_unit = "value"
+probe = 'list.range(2, 5)'
+expect = "[2, 3, 4]"
+note = """
+End-EXCLUSIVE: range(2, 5) yields 2, 3, 4 — the end VALUE never appears. The
+probe pins both the origin (start included) and the exclusivity in one image.
+"""
+
+[[list.fn]]
+name = "binary_search"
+index_unit = "element-index"
+probe = 'list.binary_search([10, 20, 30], 20) ?? (0 - 1)'
+expect = "1"
+
+[[list.fn]]
+name = "bundled_probe"
+index_unit = "value"
+probe = 'list.bundled_probe(7)'
+expect = "8"
+
+# index_unit vocabulary — math:
+#   value    — the Int is a plain numeric value (abs/min/max/pow)
+#   count    — the Int counts arrangements or factors (choose, factorial)
+#   ordering — the Int is a comparison sign, strictly -1/0/1 (sign)
+[math]
+default_index_unit = "value"
+
+[[math.fn]]
+name = "abs"
+index_unit = "value"
+probe = 'math.abs(0 - 5)'
+expect = "5"
+
+[[math.fn]]
+name = "choose"
+index_unit = "count"
+probe = 'math.choose(5, 2)'
+expect = "10"
+
+[[math.fn]]
+name = "factorial"
+index_unit = "count"
+probe = 'math.factorial(5)'
+expect = "120"
+
+[[math.fn]]
+name = "max"
+index_unit = "value"
+probe = 'math.max(3, 9)'
+expect = "9"
+
+[[math.fn]]
+name = "min"
+index_unit = "value"
+probe = 'math.min(3, 9)'
+expect = "3"
+
+[[math.fn]]
+name = "pow"
+index_unit = "value"
+probe = 'math.pow(2, 10)'
+expect = "1024"
+
+[[math.fn]]
+name = "sign"
+index_unit = "ordering"
+probe = 'math.sign(0 - 7)'
+expect = "-1"
+
+# index_unit vocabulary — float:
+#   value       — the Int carries the number at integer precision. to_int
+#                 TRUNCATES TOWARD ZERO (native `as i64`): 3.9 → 3, -3.9 → -3
+#   bit-pattern — the Int is the raw IEEE-754 bit pattern, not a magnitude
+#   count       — the Int counts digits (to_fixed's decimals)
+[float]
+default_index_unit = "value"
+
+[[float.fn]]
+name = "to_int"
+index_unit = "value"
+probe = 'float.to_int(0.0 - 3.9)'
+expect = "-3"
+note = """
+Truncation TOWARD ZERO (native `as i64`), not floor: -3.9 becomes -3. The
+negative operand is the discriminating case — floor would give -4.
+"""
+
+[[float.fn]]
+name = "from_int"
+index_unit = "value"
+probe = 'float.from_int(2)'
+expect = "2"
+
+[[float.fn]]
+name = "to_fixed"
+index_unit = "count"
+probe = 'float.to_fixed(3.14159, 2)'
+expect = "3.14"
+
+[[float.fn]]
+name = "to_bits"
+index_unit = "bit-pattern"
+probe = 'float.to_bits(1.0)'
+expect = "4607182418800017408"
+
+# index_unit vocabulary — io:
+#   byte-value — the Int is one byte 0–255, or -1 as the EOF sentinel
+#   byte-count — the Int counts bytes to read
+[io]
+default_index_unit = "byte-value"
+
+[[io.fn]]
+name = "read_byte"
+index_unit = "byte-value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: `almide test` does not pipe per-file stdin (an
+interactive terminal would BLOCK a reading probe, and EOF behavior varies by
+harness). The -1 EOF sentinel and byte range are pinned by the stdin-piping
+executable evidence in tests/ (the io_read_all_test.rs harness family).
+"""
+
+[[io.fn]]
+name = "read_n_bytes"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed — the same stdin-harness constraint as read_byte. The
+count-consumes-bytes dimension is pinned by the piping tests in tests/.
+"""
+
+[[io.fn]]
+name = "write_bytes"
+index_unit = "byte-value"
+setup = [
+  "io.write_bytes([])",
+]
+probe = "true"
+expect = "true"
+note = """
+The empty write proves the call shape without polluting the test's stdout
+(each element would be written as one raw byte; a non-empty probe would
+corrupt the harness's output comparison). The byte-value dimension of the
+elements is pinned by the C-042-family stdout fixtures.
+"""
+
+# index_unit vocabulary — env (the datetime scales, one module over):
+#   second      — Unix-epoch seconds (unix_timestamp — NOT millis)
+#   millisecond — Unix-epoch milliseconds (millis — 1000× the second scale)
+[env]
+default_index_unit = "second"
+
+[[env.fn]]
+name = "unix_timestamp"
+index_unit = "second"
+setup = [
+  "let ts = env.unix_timestamp()",
+]
+probe = 'ts > 1700000000 and ts < 100000000000'
+expect = "true"
+note = """
+The window pins the SCALE: seconds since the epoch sit near 1.7e9 in this era,
+while a milliseconds value would exceed the 1e11 upper bound — the exact
+confusion the second/millisecond split exists to prevent.
+"""
+
+[[env.fn]]
+name = "millis"
+index_unit = "millisecond"
+setup = [
+  "let ms = env.millis()",
+]
+probe = 'ms > 1700000000000'
+expect = "true"
+note = """
+Milliseconds exceed 1.7e12 in this era — a seconds value could never reach the
+bound, so the probe separates the two scales.
+"""
+
+[[env.fn]]
+name = "sleep_ms"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: env.sleep_ms is HOST_CAPABILITY on the wasm leg (no
+WASI sleep), so a calling probe would push this whole generated file off the
+wasm leg — and the millisecond SCALE would be flaky to assert anyway. The
+native semantics are pinned by the duration tests.
+"""
+
+# index_unit vocabulary — random:
+#   value — the Int is a produced or bounding value. int(min, max) is
+#           INCLUSIVE ON BOTH ENDS (range = max - min + 1), and min >= max
+#           collapses to min — both pinned below
+[random]
+default_index_unit = "value"
+
+[[random.fn]]
+name = "int"
+index_unit = "value"
+setup = [
+  "let r = random.int(1, 6)",
+  "let collapsed = random.int(9, 3)",
+]
+probe = 'r >= 1 and r <= 6 and collapsed == 9'
+expect = "true"
+note = """
+Both ends inclusive (a die roll reaches 6), and the degenerate min >= max
+case returns min — the two bound behaviors a caller gets wrong.
+"""
+
+# index_unit vocabulary — json:
+#   value         — the Int is the number a JSON field decodes to
+#   element-index — the Int is a 0-based ARRAY position in a JsonPath
+[json]
+default_index_unit = "value"
+
+[[json.fn]]
+name = "get_int"
+index_unit = "value"
+setup = [
+  'let v = json.parse("{\"a\": 42}")!',
+]
+probe = 'json.get_int(v, "a") ?? (0 - 1)'
+expect = "42"
+
+[[json.fn]]
+name = "index"
+index_unit = "element-index"
+setup = [
+  'let v = json.parse("[10, 20, 30]")!',
+  "let p = json.index(json.root(), 1)",
+]
+probe = 'value.as_int(json.get_path(v, p) ?? value.int(0 - 1)) ?? (0 - 1)'
+expect = "20"
+note = """
+0-based: index 1 of [10, 20, 30] is 20 — the second element, not the first.
+"""
+
+# index_unit vocabulary — value:
+#   value — the Int is the number the dynamic Value wraps or yields
+[value]
+default_index_unit = "value"
+
+[[value.fn]]
+name = "as_int"
+index_unit = "value"
+probe = 'value.as_int(value.int(7)) ?? (0 - 1)'
+expect = "7"
+
+[[value.fn]]
+name = "int"
+index_unit = "value"
+probe = 'value.as_int(value.int(9)) ?? 0'
+expect = "9"
+
+# index_unit vocabulary — int:
+#   value       — the Int is a plain numeric value at full i64 precision
+#   bit-pattern — the Int is (or the fn operates on) the raw two's-complement
+#                 64-bit pattern: to_hex(-1) is the full 16-f image, bnot(0) is
+#                 -1, bit_reverse(1) is i64::MIN — magnitudes are meaningless
+#   count       — the Int counts BITS: a shift distance, a leading/trailing/
+#                 population count, a width, a log2, or the wrap/rotate family's
+#                 `bits` width parameter
+#
+# The sized-conversion matrix (#956: lossy ⇒ trio) pins one discriminating
+# input per cell: the PLAIN cast WRAPS (two's-complement truncation, 200 as
+# i8 = -56), `_checked` yields none on overflow, `_saturating` clamps to the
+# target's bound. The lossless from_* family is plain-only by design.
+[int]
+default_index_unit = "value"
+
+[[int.fn]]
+name = "to_string"
+index_unit = "value"
+probe = 'int.to_string(0 - 42)'
+expect = "-42"
+
+[[int.fn]]
+name = "to_hex"
+index_unit = "bit-pattern"
+probe = 'int.to_hex(0 - 1)'
+expect = "ffffffffffffffff"
+note = """
+The image is the raw two's-complement 64-bit pattern in lowercase hex, no
+prefix: -1 is sixteen f's, never "-1" in hex.
+"""
+
+[[int.fn]]
+name = "parse"
+index_unit = "value"
+probe = 'int.parse("-42") ?? 0'
+expect = "-42"
+
+[[int.fn]]
+name = "from_hex"
+index_unit = "value"
+probe = 'int.from_hex("ff") ?? 0'
+expect = "255"
+
+[[int.fn]]
+name = "to_float"
+index_unit = "value"
+probe = 'int.to_float(3)'
+expect = "3"
+
+[[int.fn]]
+name = "bits_to_float"
+index_unit = "bit-pattern"
+probe = 'int.bits_to_float(4607182418800017408)'
+expect = "1"
+
+[[int.fn]]
+name = "bits_to_f32"
+index_unit = "bit-pattern"
+probe = 'int.bits_to_f32(1065353216)'
+expect = "1"
+
+[[int.fn]]
+name = "abs"
+index_unit = "value"
+probe = 'int.abs(0 - 5)'
+expect = "5"
+
+[[int.fn]]
+name = "min"
+index_unit = "value"
+probe = 'int.min(3, 9)'
+expect = "3"
+
+[[int.fn]]
+name = "max"
+index_unit = "value"
+probe = 'int.max(3, 9)'
+expect = "9"
+
+[[int.fn]]
+name = "clamp"
+index_unit = "value"
+probe = 'int.clamp(15, 0, 10)'
+expect = "10"
+
+[[int.fn]]
+name = "band"
+index_unit = "bit-pattern"
+probe = 'int.band(12, 10)'
+expect = "8"
+
+[[int.fn]]
+name = "bor"
+index_unit = "bit-pattern"
+probe = 'int.bor(12, 10)'
+expect = "14"
+
+[[int.fn]]
+name = "bxor"
+index_unit = "bit-pattern"
+probe = 'int.bxor(12, 10)'
+expect = "6"
+
+[[int.fn]]
+name = "bnot"
+index_unit = "bit-pattern"
+probe = 'int.bnot(0)'
+expect = "-1"
+
+[[int.fn]]
+name = "bshl"
+index_unit = "count"
+probe = 'int.bshl(1, 4)'
+expect = "16"
+
+[[int.fn]]
+name = "bshr"
+index_unit = "count"
+probe = 'int.bshr(0 - 8, 1)'
+expect = "-4"
+note = """
+ARITHMETIC shift: the sign bit propagates, -8 >> 1 is -4 — a logical shift
+would give a huge positive. The negative operand is the discriminating case.
+"""
+
+[[int.fn]]
+name = "count_leading_zeros"
+index_unit = "count"
+probe = 'int.count_leading_zeros(1)'
+expect = "63"
+
+[[int.fn]]
+name = "count_trailing_zeros"
+index_unit = "count"
+probe = 'int.count_trailing_zeros(8)'
+expect = "3"
+
+[[int.fn]]
+name = "pop_count"
+index_unit = "count"
+probe = 'int.pop_count(255)'
+expect = "8"
+
+[[int.fn]]
+name = "bit_reverse"
+index_unit = "bit-pattern"
+probe = 'int.bit_reverse(1)'
+expect = "-9223372036854775808"
+
+[[int.fn]]
+name = "byte_swap"
+index_unit = "bit-pattern"
+probe = 'int.byte_swap(1)'
+expect = "72057594037927936"
+
+[[int.fn]]
+name = "bit_width"
+index_unit = "count"
+probe = 'int.bit_width(255)'
+expect = "8"
+
+[[int.fn]]
+name = "log2_floor"
+index_unit = "count"
+probe = 'int.log2_floor(9)'
+expect = "3"
+
+[[int.fn]]
+name = "log2_ceil"
+index_unit = "count"
+probe = 'int.log2_ceil(9)'
+expect = "4"
+
+[[int.fn]]
+name = "next_power_of_two"
+index_unit = "value"
+probe = 'int.next_power_of_two(9)'
+expect = "16"
+
+[[int.fn]]
+name = "prev_power_of_two"
+index_unit = "value"
+probe = 'int.prev_power_of_two(9)'
+expect = "8"
+
+[[int.fn]]
+name = "wrap_add"
+index_unit = "count"
+probe = 'int.wrap_add(255, 1, 8)'
+expect = "0"
+note = """
+The `bits` param is a WIDTH count: the sum wraps at 2^bits (255+1 at width 8
+is 0), independent of the i64 carrier.
+"""
+
+[[int.fn]]
+name = "wrap_mul"
+index_unit = "count"
+probe = 'int.wrap_mul(16, 16, 8)'
+expect = "0"
+
+[[int.fn]]
+name = "rotate_right"
+index_unit = "count"
+probe = 'int.rotate_right(1, 1, 8)'
+expect = "128"
+
+[[int.fn]]
+name = "rotate_left"
+index_unit = "count"
+probe = 'int.rotate_left(128, 1, 8)'
+expect = "1"
+
+[[int.fn]]
+name = "to_u32"
+index_unit = "value"
+probe = 'int.to_u32(0 - 1)'
+expect = "4294967295"
+
+[[int.fn]]
+name = "to_u8"
+index_unit = "value"
+probe = 'int.to_u8(0 - 1)'
+expect = "255"
+
+[[int.fn]]
+name = "to_int8"
+index_unit = "value"
+probe = 'int.to_int8(200)'
+expect = "-56"
+note = """
+The PLAIN cast WRAPS (two's-complement truncation, `as i8`): 200 becomes -56.
+The trio's other cells answer none (checked) and 127 (saturating) on the same
+input — three different answers to one question is why the matrix exists.
+"""
+
+[[int.fn]]
+name = "to_int16"
+index_unit = "value"
+probe = 'int.to_int16(40000)'
+expect = "-25536"
+
+[[int.fn]]
+name = "to_int32"
+index_unit = "value"
+probe = 'int.to_int32(4294967296)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint8"
+index_unit = "value"
+probe = 'int.to_uint8(0 - 1)'
+expect = "255"
+
+[[int.fn]]
+name = "to_uint16"
+index_unit = "value"
+probe = 'int.to_uint16(0 - 1)'
+expect = "65535"
+
+[[int.fn]]
+name = "to_uint32"
+index_unit = "value"
+probe = 'int.to_uint32(0 - 1)'
+expect = "4294967295"
+
+[[int.fn]]
+name = "to_uint64"
+index_unit = "value"
+setup = [
+  "let u = int.to_uint64(0 - 1)",
+]
+probe = 'int.from_uint64_checked(u) ?? (0 - 1)'
+expect = "-1"
+note = """
+-1 wraps to 2^64-1: the checked back-edge refusing it (none -> -1 fallback)
+is the probe-visible witness that the value exceeds i64::MAX. The full
+18446744073709551615 image is native-pinned (UInt64 display is the wasm
+leg's unlinked edge, so the probe avoids displaying the UInt64 itself).
+"""
+
+[[int.fn]]
+name = "to_float32"
+index_unit = "value"
+probe = 'float.from_float32(int.to_float32(3))'
+expect = "3"
+
+[[int.fn]]
+name = "to_float64"
+index_unit = "value"
+probe = 'float.from_float64(int.to_float64(3))'
+expect = "3"
+
+[[int.fn]]
+name = "to_int64"
+index_unit = "value"
+probe = 'int.to_int64(0 - 42)'
+expect = "-42"
+
+[[int.fn]]
+name = "from_int8"
+index_unit = "value"
+probe = 'int.from_int8(int.to_int8(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_int16"
+index_unit = "value"
+probe = 'int.from_int16(int.to_int16(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_int32"
+index_unit = "value"
+probe = 'int.from_int32(int.to_int32(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_int64"
+index_unit = "value"
+probe = 'int.from_int64(int.to_int64(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_uint8"
+index_unit = "value"
+probe = 'int.from_uint8(int.to_uint8(200))'
+expect = "200"
+
+[[int.fn]]
+name = "from_uint16"
+index_unit = "value"
+probe = 'int.from_uint16(int.to_uint16(40000))'
+expect = "40000"
+
+[[int.fn]]
+name = "from_uint32"
+index_unit = "value"
+probe = 'int.from_uint32(int.to_uint32(3000000000))'
+expect = "3000000000"
+
+[[int.fn]]
+name = "from_uint64"
+index_unit = "value"
+probe = 'int.from_uint64(int.to_uint64(7))'
+expect = "7"
+note = """
+Lossless for values that fit i64; the OVERFLOW edge (a UInt64 above i64::MAX)
+belongs to the checked/saturating back-edge cells below.
+"""
+
+[[int.fn]]
+name = "to_int8_checked"
+index_unit = "value"
+probe = 'int.to_int8_checked(200) ?? int.to_int8(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_int16_checked"
+index_unit = "value"
+probe = 'int.to_int16_checked(40000) ?? int.to_int16(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_int32_checked"
+index_unit = "value"
+probe = 'int.to_int32_checked(4294967296) ?? int.to_int32(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint8_checked"
+index_unit = "value"
+probe = 'int.to_uint8_checked(0 - 1) ?? int.to_uint8(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint16_checked"
+index_unit = "value"
+probe = 'int.to_uint16_checked(0 - 1) ?? int.to_uint16(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint32_checked"
+index_unit = "value"
+probe = 'int.to_uint32_checked(0 - 1) ?? int.to_uint32(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint64_checked"
+index_unit = "value"
+probe = 'int.from_uint64(int.to_uint64_checked(0 - 1) ?? int.to_uint64(0))'
+expect = "0"
+
+[[int.fn]]
+name = "to_float32_checked"
+index_unit = "value"
+probe = 'float.from_float32(int.to_float32_checked(16777217) ?? int.to_float32(0))'
+expect = "0"
+note = """
+16777217 = 2^24 + 1, the first integer an f32 cannot represent exactly — the
+checked conversion refuses precision loss, not just range overflow.
+"""
+
+[[int.fn]]
+name = "to_int8_saturating"
+index_unit = "value"
+probe = 'int.to_int8_saturating(200)'
+expect = "127"
+
+[[int.fn]]
+name = "to_int16_saturating"
+index_unit = "value"
+probe = 'int.to_int16_saturating(40000)'
+expect = "32767"
+
+[[int.fn]]
+name = "to_int32_saturating"
+index_unit = "value"
+probe = 'int.to_int32_saturating(4294967296)'
+expect = "2147483647"
+
+[[int.fn]]
+name = "to_uint8_saturating"
+index_unit = "value"
+probe = 'int.to_uint8_saturating(0 - 1)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint16_saturating"
+index_unit = "value"
+probe = 'int.to_uint16_saturating(0 - 1)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint32_saturating"
+index_unit = "value"
+probe = 'int.to_uint32_saturating(0 - 1)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint64_saturating"
+index_unit = "value"
+probe = 'int.from_uint64(int.to_uint64_saturating(0 - 1))'
+expect = "0"
+
+[[int.fn]]
+name = "from_uint64_checked"
+index_unit = "value"
+probe = 'int.from_uint64_checked(int.to_uint64(0 - 1)) ?? (0 - 1)'
+expect = "-1"
+
+[[int.fn]]
+name = "from_uint64_saturating"
+index_unit = "value"
+probe = 'int.from_uint64_saturating(int.to_uint64(0 - 1))'
+expect = "9223372036854775807"
+
+[[int.fn]]
+name = "min_value"
+index_unit = "value"
+probe = 'int.min_value()'
+expect = "-9223372036854775808"
+
+[[int.fn]]
+name = "max_value"
+index_unit = "value"
+probe = 'int.max_value()'
+expect = "9223372036854775807"
+
+# index_unit vocabulary — process (HOST_CAPABILITY on the wasm leg: no WASI
+# spawn/kill/pid, so every entry is DECLARED with a non-calling probe — a
+# calling probe would push the whole generated file off the wasm leg. The
+# native semantics are pinned by spec/ process tests):
+#   value          — exit code, pid, or signal number (POSIX numbering:
+#                    kill's signal 9 is SIGKILL, 15 SIGTERM)
+#   millisecond    — a duration in MILLISECONDS (sleep's ms,
+#                    exec_status_timeout's timeout_ms — never seconds)
+[process]
+default_index_unit = "value"
+
+[[process.fn]]
+name = "exit"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (exiting would end the harness): the Int is the process
+EXIT CODE, observable to the parent — 0 is success by convention.
+"""
+
+[[process.fn]]
+name = "exec_status_timeout"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): timeout_ms is MILLISECONDS — the
+second/millisecond confusion is the #419-class trap this row exists for.
+"""
+
+[[process.fn]]
+name = "pid"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): the Int is the calling process's own
+OS pid, strictly positive on every supported host.
+"""
+
+[[process.fn]]
+name = "spawn"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): the Ok Int is the CHILD's pid — the
+handle kill/is_alive consume.
+"""
+
+[[process.fn]]
+name = "kill"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): pid is a process id and signal a
+POSIX signal NUMBER (9 = SIGKILL, 15 = SIGTERM) — not an exit code.
+"""
+
+[[process.fn]]
+name = "sleep"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (a sleeping probe is flaky by construction): ms is
+MILLISECONDS — process.sleep(1000) is one second.
+"""
+
+[[process.fn]]
+name = "is_alive"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): the Int is a pid.
+"""
+
+# Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
+# regex and bool bear no Int in any swept signature today, so their entry
+# lists are empty — but COVERED_MODULES holds them, so the first Int-bearing
+# fn to land in any of them cannot merge without declaring its unit here.
+[map]
+default_index_unit = "value"
+fn = []
+
+[set]
+default_index_unit = "value"
+fn = []
+
+[option]
+default_index_unit = "value"
+fn = []
+
+[result]
+default_index_unit = "value"
+fn = []
+
+[error]
+default_index_unit = "value"
+fn = []
+
+[regex]
+default_index_unit = "value"
+fn = []
+
+[bool]
+default_index_unit = "value"
+fn = []

@@ -5,8 +5,9 @@
 // i32-slot variant (a later refinement). Reads only — `xs` borrowed.
 fn list_get_or(xs: List[Int], i: Int, default: Int) -> Int = {
   let h = prim.handle(xs)
-  let len = prim.load32(h + 4)              // element count at LIST_LEN_OFFSET(4)
+  let len = prim.load32(h + 4)
+  // element count at LIST_LEN_OFFSET(4)
+  // element i at LIST_HEADER + i*ELEM_SIZE(8)
   if i < 0 then default
-  else if i >= len then default
-  else prim.load64(h + 12 + i * 8)          // element i at LIST_HEADER + i*ELEM_SIZE(8)
+  else if i >= len then default else prim.load64(h + 12 + i * 8)
 }

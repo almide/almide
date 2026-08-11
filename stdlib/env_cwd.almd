@@ -1,0 +1,15 @@
+// env_cwd — SELF-HOSTED `env.cwd()` for the wasm leg. WASI has no cwd: the C-137
+// convention already resolves every relative fs path against the PWD environment
+// variable (inherited by every harness via `-S inherit-env=y`), so the observable
+// cwd IS that variable — reading it here keeps `env.cwd()` and relative-path fs
+// resolution telling one story. Missing PWD falls back to "/" (the preopen root,
+// where an unprefixed relative path resolves). The Ok payload is a String, so the
+// Result rides the fs.read_text-class cap-as-tag rails. Reaching prim.env_get
+// (through env.get) carries Capability::CliArgs — argv and environ are the same
+// initial-state class.
+import env
+
+effect fn env_cwd() -> Result[String, String] = {
+  let c = env.get("PWD") ?? "/"
+  ok(c)
+}

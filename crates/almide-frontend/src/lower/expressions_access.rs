@@ -96,7 +96,7 @@ fn lower_module_member(
     // A module fn used as a first-class value (`list.map(xs, string.len)`)
     // lowers to a wrapper lambda `(x) => string.len(x)`, so user code needs no
     // manual eta expansion.
-    if let Ty::Fn { params, ret } = ty {
+    if let Ty::Fn { is_effect: _, params, ret } = ty {
         let resolved_mod_for_fn = ctx.env.import_table.resolve(&mod_name)
             .map(|s| s.to_string())
             .unwrap_or_else(|| mod_name.to_string());
@@ -174,7 +174,7 @@ fn lower_expr_compose(ctx: &mut LowerCtx, expr: &ast::Expr, _ty: Ty, span: Optio
             let ir_right = lower_expr(ctx, right);
             // Extract types: left is Fn[A] -> B, right is Fn[B] -> C
             let (param_ty, mid_ty) = match &ir_left.ty {
-                Ty::Fn { params, ret } => (
+                Ty::Fn { is_effect: _, params, ret } => (
                     params.first().cloned().unwrap_or(Ty::Unknown),
                     *ret.clone(),
                 ),
@@ -199,7 +199,7 @@ fn lower_expr_compose(ctx: &mut LowerCtx, expr: &ast::Expr, _ty: Ty, span: Optio
             }, ret_ty.clone(), span.clone());
             ctx.pop_scope();
             let lambda_id = Some(ctx.next_lambda_id());
-            let lambda_ty = Ty::Fn { params: vec![param_ty.clone()], ret: Box::new(ret_ty) };
+            let lambda_ty = Ty::Fn { is_effect: false, params: vec![param_ty.clone()], ret: Box::new(ret_ty) };
             ctx.mk(IrExprKind::Lambda {
                 params: vec![(param_var, param_ty)],
                 body: Box::new(g_call),
@@ -234,7 +234,7 @@ fn lower_expr_for_in(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                     ctx.define_var(n, ty, Mutability::Let, None)
                 }).collect()
             });
-            let ir_body: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
+            let ir_body: Vec<IrStmt> = super::expressions::lower_loop_body_stmts(ctx, body);
             ctx.pop_scope();
             ctx.mk(IrExprKind::ForIn { var: var_id, var_tuple: tuple_vars, iterable: Box::new(ir_iter), body: ir_body }, ty, span)
 }
@@ -594,7 +594,7 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                     } else { ty }
                 } else { ty };
                 ctx.mk(IrExprKind::Var { id: var_id }, resolved, span)
-            } else if let Ty::Fn { params: param_tys, ret } = &ty {
+            } else if let Ty::Fn { is_effect: _, params: param_tys, ret } = &ty {
                 // Function/top-let used as a value → eta-expand to lambda
                 // so borrow insertion handles param types correctly (e.g. String → &str).
                 // Use the type (not env.functions) to detect: module-scoped functions
@@ -619,4 +619,37 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
             }
+}
+
+/// A PURE fn value flowing into an `effect (A) -> B` slot must become a
+/// carrier-returning closure — the slot's runtime shape is
+/// `(A) -> Result[B, String]` (ALS-M15, #1148). Wraps the value as
+/// `(a0..an) => ok(value(a0..an))`. No-op when the slot is not an effect
+/// slot or the value already returns the carrier (a named effect fn's value,
+/// which the checker bakes — `fn_value_ty`).
+pub(super) fn adapt_fn_value_to_effect_slot(ctx: &mut LowerCtx, val: IrExpr, slot: &Ty) -> IrExpr {
+    let Ty::Fn { is_effect: true, .. } = slot else { return val };
+    let Ty::Fn { params: vparams, ret: vret, is_effect: false } = &val.ty else { return val };
+    if vret.is_result() {
+        return val;
+    }
+    let span = val.span;
+    let vparams = vparams.clone();
+    let inner_ret = vret.as_ref().clone();
+    let params: Vec<(VarId, Ty)> = vparams.iter().enumerate().map(|(i, pt)| {
+        let vid = ctx.var_table.alloc(sym(&format!("__eff_wrap{}", i)), pt.clone(), Mutability::Let, None);
+        (vid, pt.clone())
+    }).collect();
+    let args: Vec<IrExpr> = params.iter()
+        .map(|(vid, pt)| ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span))
+        .collect();
+    let call = ctx.mk(IrExprKind::Call {
+        target: CallTarget::Computed { callee: Box::new(val) },
+        args, type_args: vec![],
+    }, inner_ret.clone(), span);
+    let carrier = Ty::result(inner_ret, Ty::String);
+    let body = ctx.mk(IrExprKind::ResultOk { expr: Box::new(call) }, carrier.clone(), span);
+    let lambda_ty = Ty::Fn { params: vparams, ret: Box::new(carrier), is_effect: false };
+    let lambda_id = Some(ctx.next_lambda_id());
+    ctx.mk(IrExprKind::Lambda { params, body: Box::new(body), lambda_id }, lambda_ty, span)
 }

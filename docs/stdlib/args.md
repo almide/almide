@@ -68,14 +68,12 @@ let input = args.positional_at(0) ?? "-"
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (8 functions)
+## Signature index (6 functions)
 
 ```
 args.raw() -> List[String]
 args.flag(name: String) -> Bool
-args.__flag_at(args: List[String], long: String, short: String, i: Int) -> Bool
 args.option(name: String) -> Option[String]
-args.__find_prefixed(args: List[String], prefix: String, i: Int) -> Option[String]
 args.option_or(name: String, fallback: String) -> String
 args.positional() -> List[String]
 args.positional_at(i: Int) -> Option[String]

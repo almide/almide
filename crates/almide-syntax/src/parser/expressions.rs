@@ -63,37 +63,63 @@ impl Parser {
         TokenType::Caret,
     ];
 
+    /// Allow an infix operator to open the next line (multiline expressions).
+    ///
+    /// Disambiguation: a leading `-` on a new line that is ATTACHED to its
+    /// operand (no whitespace, e.g. `-1`, `-x`) is a unary on a new statement,
+    /// not a binary continuation. `a\n  - b` (with spaces) still continues as
+    /// binary subtraction.
+    fn skip_infix_continuation_newlines(&mut self) {
+        let saved_before_skip = self.pos;
+        self.skip_newlines_if_followed_by_any(Self::INFIX_TOKENS);
+        if self.pos != saved_before_skip
+            && self.check(TokenType::Minus)
+            && self.minus_attached_to_operand()
+        {
+            self.pos = saved_before_skip;
+        }
+    }
+
+    /// `||` / `&&` are not Almide spellings — reject them with the hint table's
+    /// suggestion rather than letting them fall through as unknown operators.
+    fn reject_c_style_boolean_operator(&mut self) -> Result<(), String> {
+        if self.check(TokenType::PipePipe) {
+            return Err(self.check_hint_or_err(
+                None, super::hints::HintScope::Expression,
+                "'||' is not valid in Almide",
+            ));
+        }
+        if self.check(TokenType::AmpAmp) {
+            return Err(self.check_hint_or_err(
+                None, super::hints::HintScope::Expression,
+                "'&&' is not valid in Almide",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Reject chained comparisons: `a < b < c`.
+    fn reject_chained_comparison(&mut self, tt: &TokenType) -> Result<(), String> {
+        let is_cmp = |t: &TokenType| matches!(t, TokenType::EqEq | TokenType::BangEq
+            | TokenType::LAngle | TokenType::RAngle
+            | TokenType::LtEq | TokenType::GtEq);
+        if !is_cmp(tt) || !is_cmp(&self.current().token_type) {
+            return Ok(());
+        }
+        let tok = self.current();
+        Err(format!(
+            "Chained comparison operators are not allowed at line {}:{}\n  Hint: Use 'and' to combine comparisons. Write: a < b and b < c",
+            tok.line, tok.col
+        ))
+    }
+
     fn parse_expr_bp(&mut self, min_bp: u8) -> Result<Expr, String> {
         let mut left = self.parse_unary()?;
 
         loop {
             // Allow operators on next line for multiline expressions
-            let saved_before_skip = self.pos;
-            self.skip_newlines_if_followed_by_any(Self::INFIX_TOKENS);
-            // Disambiguate: a leading `-` on a new line that is attached to its
-            // operand (no whitespace, e.g. `-1`, `-x`) is a unary on a new
-            // statement, not binary continuation. `a\n  - b` (with spaces) still
-            // continues as binary subtraction.
-            if self.pos != saved_before_skip
-                && self.check(TokenType::Minus)
-                && self.minus_attached_to_operand()
-            {
-                self.pos = saved_before_skip;
-            }
-
-            // Error hints for invalid operators
-            if self.check(TokenType::PipePipe) {
-                return Err(self.check_hint_or_err(
-                    None, super::hints::HintScope::Expression,
-                    "'||' is not valid in Almide",
-                ));
-            }
-            if self.check(TokenType::AmpAmp) {
-                return Err(self.check_hint_or_err(
-                    None, super::hints::HintScope::Expression,
-                    "'&&' is not valid in Almide",
-                ));
-            }
+            self.skip_infix_continuation_newlines();
+            self.reject_c_style_boolean_operator()?;
 
             let tt = self.current().token_type.clone();
             let Some((l_bp, r_bp)) = Self::infix_bp(&tt) else { break };
@@ -118,34 +144,8 @@ impl Parser {
             // ── Build AST node ──
             left = self.build_infix_node(tt, span, &op_tok, left, right);
 
-            // ── Reject chained comparisons: a < b < c ──
-            let is_cmp = |t: &TokenType| matches!(t, TokenType::EqEq | TokenType::BangEq
-                | TokenType::LAngle | TokenType::RAngle
-                | TokenType::LtEq | TokenType::GtEq);
-            if is_cmp(&tt) && is_cmp(&self.current().token_type) {
-                let tok = self.current();
-                return Err(format!(
-                    "Chained comparison operators are not allowed at line {}:{}\n  Hint: Use 'and' to combine comparisons. Write: a < b and b < c",
-                    tok.line, tok.col
-                ));
-            }
-
-            // ── Reject chained ranges: 0..1..2 ──
-            // `..` is non-associative for the same reason `<` is: there is no
-            // reading of `0..1..2` that means anything. It used to parse (`..`
-            // binds right, so as `0..(1..2)`), pass `almide check`, and only
-            // fall over in codegen as a rustc type error in generated code
-            // (#899). Inspecting the built node rather than the next token
-            // catches it whichever way the operator associates.
-            if let ExprKind::Range { start, end, .. } = &left.kind {
-                if matches!(start.kind, ExprKind::Range { .. }) || matches!(end.kind, ExprKind::Range { .. }) {
-                    let (line, col) = left.span.map(|s| (s.line, s.col)).unwrap_or((0, 0));
-                    return Err(format!(
-                        "Chained range operators are not allowed at line {}:{}\n  Hint: A range has one start and one end. Write: 0..<2",
-                        line, col
-                    ));
-                }
-            }
+            self.reject_chained_comparison(&tt)?;
+            reject_chained_range(&left)?;
         }
 
         Ok(left)
@@ -274,21 +274,31 @@ impl Parser {
             // `obj\n  .method()` — the leading-dot half of the chain
             // continuation rule (#1091).
             self.skip_newlines_if_method_chain();
-            if self.check(TokenType::Dot) {
-                expr = self.parse_postfix_dot(expr)?;
-            } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
-                expr = self.parse_postfix_type_args_call(expr)?;
-            } else if self.check(TokenType::LBracket) && !self.newline_before_current() {
-                expr = self.parse_postfix_index(expr)?;
-            } else if self.check(TokenType::LParen) && !self.newline_before_current() {
-                expr = self.parse_postfix_call(expr)?;
-            } else {
-                let (next, consumed) = self.parse_postfix_unwrap_op(expr)?;
-                expr = next;
-                if !consumed { break; }
-            }
+            let (next, consumed) = self.parse_one_postfix(expr)?;
+            expr = next;
+            if !consumed { break; }
         }
         Ok(expr)
+    }
+
+    /// One postfix step applied to `expr`: a `.` chain link, a `[T](args)` call,
+    /// an `[index]`, a `(args)` call, or one of the unwrap-family operators.
+    /// Returns `(expr, consumed)`; `consumed = false` means nothing applied and
+    /// the caller's loop ends.
+    fn parse_one_postfix(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
+        if self.check(TokenType::Dot) {
+            return Ok((self.parse_postfix_dot(expr)?, true));
+        }
+        if self.check(TokenType::LBracket) && self.peek_type_args_call() {
+            return Ok((self.parse_postfix_type_args_call(expr)?, true));
+        }
+        if self.check(TokenType::LBracket) && !self.newline_before_current() {
+            return Ok((self.parse_postfix_index(expr)?, true));
+        }
+        if self.check(TokenType::LParen) && !self.newline_before_current() {
+            return Ok((self.parse_postfix_call(expr)?, true));
+        }
+        self.parse_postfix_unwrap_op(expr)
     }
 
     /// `expr[T](args)` — a call with explicit type arguments.
@@ -315,6 +325,65 @@ impl Parser {
         }))
     }
 
+    /// `expr ?? fallback` — unwrap with a default.
+    ///
+    /// Two diagnostics live here because both are silent-miscompile guards: a
+    /// TERMINAL `??` (nothing that can start an expression follows), and — at
+    /// statement level (delimiter depth 0) — a fallback that is not on the same
+    /// line as the `??`. #1112: without the second, the next statement is
+    /// silently swallowed as the fallback (`let v = f()??\n-5` parsed as
+    /// `f() ?? -5`, and a following `println(v)` became the fallback expr,
+    /// surfacing as a distant E003). Multiline fallbacks are spelled with parens.
+    fn parse_unwrap_or_postfix(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
+        // expr ?? fallback — unwrap with default
+        let span = Some(self.current_span());
+        let qq_tok = (self.current().line, self.current().col, self.current().end_col);
+        let qq_after_newline = self.newline_before_current();
+        self.advance();
+        self.skip_newlines();
+        // Terminal `??` — nothing that can start an expression follows.
+        if matches!(self.current().token_type, TokenType::RBrace | TokenType::EOF) {
+            let mut d = crate::diagnostic::Diagnostic::error(
+                "`??` is missing its fallback operand",
+                "Write the default after ??: `expr ?? fallback`",
+                "?? fallback",
+            ).with_code("E038");
+            if let Some(f) = &self.file { d.file = Some(f.clone()); }
+            d.line = Some(qq_tok.0);
+            d.col = Some(qq_tok.1);
+            d.end_col = Some(qq_tok.2);
+            self.errors.push(d);
+            return Ok((expr, true));
+        }
+        // #1112: at statement level (delimiter depth 0) the fallback must
+        // start on the SAME line as `??`, and `??` on the same line as its
+        // operand — otherwise the next statement is silently swallowed as
+        // the fallback (`let v = f()??\n-5` parsed as `f() ?? -5`, and a
+        // following `println(v)` became the fallback expr, surfacing as a
+        // distant E003). Multiline fallbacks are spelled with parens.
+        if self.delim_depth == 0
+            && (qq_after_newline || self.current().line != qq_tok.0)
+        {
+            let mut d = crate::diagnostic::Diagnostic::error(
+                "the ?? fallback is not on this line",
+                "Write the fallback on the same line as `??`; for a multiline \
+                 fallback wrap the whole expression in parentheses with `??` \
+                 trailing:\n        (expr ??\n          fallback)",
+                "?? fallback",
+            ).with_code("E038");
+            if let Some(f) = &self.file { d.file = Some(f.clone()); }
+            d.line = Some(qq_tok.0);
+            d.col = Some(qq_tok.1);
+            d.end_col = Some(qq_tok.2);
+            self.errors.push(d);
+        }
+        let fallback = self.parse_unary()?;
+        return Ok((Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
+            expr: Box::new(expr), fallback: Box::new(fallback),
+        }), true));
+    
+    }
+
     /// The unwrap-family postfixes: `expr!` (propagating unwrap),
     /// `expr ?? fallback`, `expr?.field` (optional chain), `expr?`
     /// (Result→Option). Returns `(expr, consumed)`; `consumed = false` hands
@@ -329,52 +398,7 @@ impl Parser {
             }), true));
         }
         if self.check(TokenType::QuestionQuestion) {
-            // expr ?? fallback — unwrap with default
-            let span = Some(self.current_span());
-            let qq_tok = (self.current().line, self.current().col, self.current().end_col);
-            let qq_after_newline = self.newline_before_current();
-            self.advance();
-            self.skip_newlines();
-            // Terminal `??` — nothing that can start an expression follows.
-            if matches!(self.current().token_type, TokenType::RBrace | TokenType::EOF) {
-                let mut d = crate::diagnostic::Diagnostic::error(
-                    "`??` is missing its fallback operand",
-                    "Write the default after ??: `expr ?? fallback`",
-                    "?? fallback",
-                ).with_code("E038");
-                if let Some(f) = &self.file { d.file = Some(f.clone()); }
-                d.line = Some(qq_tok.0);
-                d.col = Some(qq_tok.1);
-                d.end_col = Some(qq_tok.2);
-                self.errors.push(d);
-                return Ok((expr, true));
-            }
-            // #1112: at statement level (delimiter depth 0) the fallback must
-            // start on the SAME line as `??`, and `??` on the same line as its
-            // operand — otherwise the next statement is silently swallowed as
-            // the fallback (`let v = f()??\n-5` parsed as `f() ?? -5`, and a
-            // following `println(v)` became the fallback expr, surfacing as a
-            // distant E003). Multiline fallbacks are spelled with parens.
-            if self.delim_depth == 0
-                && (qq_after_newline || self.current().line != qq_tok.0)
-            {
-                let mut d = crate::diagnostic::Diagnostic::error(
-                    "the ?? fallback is not on this line",
-                    "Write the fallback on the same line as `??`; for a multiline \
-                     fallback wrap the whole expression in parentheses with `??` \
-                     trailing:\n        (expr ??\n          fallback)",
-                    "?? fallback",
-                ).with_code("E038");
-                if let Some(f) = &self.file { d.file = Some(f.clone()); }
-                d.line = Some(qq_tok.0);
-                d.col = Some(qq_tok.1);
-                d.end_col = Some(qq_tok.2);
-                self.errors.push(d);
-            }
-            let fallback = self.parse_unary()?;
-            return Ok((Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
-                expr: Box::new(expr), fallback: Box::new(fallback),
-            }), true));
+            return self.parse_unwrap_or_postfix(expr);
         }
         if self.check(TokenType::QuestionDot) && !self.newline_before_current() {
             // expr?.field — optional chaining
@@ -600,4 +624,25 @@ impl Parser {
         }
         Ok(())
     }
+}
+
+/// Reject chained ranges: `0..1..2`.
+///
+/// `..` is non-associative for the same reason `<` is: there is no reading of
+/// `0..1..2` that means anything. It used to parse (`..` binds right, so as
+/// `0..(1..2)`), pass `almide check`, and only fall over in codegen as a rustc
+/// type error in generated code (#899). Inspecting the BUILT node rather than
+/// the next token catches it whichever way the operator associates.
+fn reject_chained_range(left: &Expr) -> Result<(), String> {
+    let ExprKind::Range { start, end, .. } = &left.kind else { return Ok(()) };
+    if !matches!(start.kind, ExprKind::Range { .. })
+        && !matches!(end.kind, ExprKind::Range { .. })
+    {
+        return Ok(());
+    }
+    let (line, col) = left.span.map(|s| (s.line, s.col)).unwrap_or((0, 0));
+    Err(format!(
+        "Chained range operators are not allowed at line {}:{}\n  Hint: A range has one start and one end. Write: 0..<2",
+        line, col
+    ))
 }

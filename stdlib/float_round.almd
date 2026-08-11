@@ -2,7 +2,6 @@
 // round to nearest, HALF AWAY FROM ZERO (round(2.5)=3, round(-2.5)=-3) — NOT wasm's
 // `f64.nearest` (half to even). Replicated as floor(x+0.5) for x>=0, ceil(x-0.5) for x<0.
 // Pure scalar — cert untouched. The cond is bound first (a Float compare is a scalar call).
-
 fn __round_pos(x: Float) -> Float = {
   let xp = prim.fadd(x, 0.5)
   prim.ffloor(xp)

@@ -1,6 +1,168 @@
 
 /// See the module comment above: rewrite the FIRST `for` loop (in a `Result[T, E]`-returning block)
 /// whose body contains an effect-`!` into the loop-carried error-flag form.
+/// Does this loop-body statement carry a VALUE early-exit (`guard c else ok(n)`
+/// — the heterogeneous-else form desugar_guard leaves in a loop body)?
+///
+/// BOTH forms count: the raw `guard c else <value>` statement (this pass can run
+/// BEFORE desugar_guard's loop-body rewrite in the shared fixpoint) and its
+/// desugared heterogeneous-else `if` form.
+fn stmt_guard_value_exit(s: &IrStmt, ret_ty: &Ty) -> bool {
+    match &s.kind {
+        IrStmtKind::Guard { else_, .. } => else_.ty == *ret_ty,
+        IrStmtKind::Expr { expr } | IrStmtKind::Bind { value: expr, .. } => {
+            expr_has_value_exit(expr, Some((VarId(u32::MAX), VarId(u32::MAX), ret_ty)))
+        }
+        _ => false,
+    }
+}
+
+/// Is this statement a `for`/`while` whose body holds an `!`?
+///
+/// Detection fires ONLY on `!`-bearing bodies (the legacy criterion): a
+/// value-exit-only loop has nothing this pass can rewrite while the value-exit
+/// delivery is disabled, and firing on it would make the desugar fixpoint
+/// re-enter forever (the entry fast-path returns an unchanged clone as `Some` —
+/// a probe-confirmed stack overflow).
+fn unwrap_bearing_loop_stmt(s: &IrStmt) -> bool {
+    let IrStmtKind::Expr { expr } = &s.kind else { return false };
+    let (IrExprKind::ForIn { body: lbody, .. } | IrExprKind::While { body: lbody, .. }) = &expr.kind
+    else {
+        return false;
+    };
+    lbody.iter().any(stmt_has_unwrap)
+}
+
+/// The VALUE-exit flag/result pair, allocated ONLY when the body carries one so
+/// existing `!`-only loops keep their exact prior variable numbering (zero churn).
+fn alloc_value_exit_pair(has_vx: bool, next_var: &mut u32) -> (Option<VarId>, Option<VarId>) {
+    if !has_vx {
+        return (None, None);
+    }
+    let pair = (Some(VarId(*next_var)), Some(VarId(*next_var + 1)));
+    *next_var += 2;
+    pair
+}
+
+/// The BRANCH-FREE 0/1 product of two Bool flags (`MulInt` over the bits), used
+/// instead of a short-circuit `and`: `and` lowers to nested IfThen merges, and a
+/// merge nested inside the loop's certificate region flushes as the
+/// always-rejecting poison `{i|}` (flush_branch's conservative nested-delimiter
+/// rule) — the corpus-wall unbacked-`+1` breach. Every factor is a PURE flag, so
+/// eager evaluation is effect-identical.
+fn bool_prod(a: IrExpr, b: IrExpr) -> IrExpr {
+    loop_uw_node(
+        IrExprKind::BinOp { op: almide_ir::BinOp::MulInt, left: Box::new(a), right: Box::new(b) },
+        Ty::Bool,
+    )
+}
+
+/// The combined not-exited condition: `not __ef`, times `not __vf` when the
+/// value-exit pair exists — the ForIn body-guard / the While condition injection.
+///
+/// Combined via the BRANCH-FREE 0/1 product (`MulInt` over Bool bits), NOT
+/// `and`: the short-circuit `and` lowers to nested IfThen merges, and a merge
+/// nested inside the loop's certificate region flushes as the always-rejecting
+/// poison `{i|}` (flush_branch's conservative nested-delimiter rule) — the
+/// corpus-wall unbacked-`+1` breach. Every factor is a PURE flag, so eager
+/// evaluation is effect-identical.
+fn not_exited_cond(ef: VarId, vf: Option<VarId>) -> IrExpr {
+    let not_flag = |v: VarId| {
+        loop_uw_node(
+            IrExprKind::UnOp {
+                op: almide_ir::UnOp::Not,
+                operand: Box::new(loop_uw_node(IrExprKind::Var { id: v }, Ty::Bool)),
+            },
+            Ty::Bool,
+        )
+    };
+    let base = not_flag(ef);
+    match vf {
+        None => base,
+        Some(f) => bool_prod(base, not_flag(f)),
+    }
+}
+
+/// `<stmts before loop>; var __ef=false; var __ev=<empty>` plus, when the
+/// value-exit pair exists, `var __vf=false; var __vn=0`.
+///
+/// The value slots are valid placeholders never read unless `__vf` was set,
+/// which always assigns first; both are bound BEFORE the loop.
+#[allow(clippy::too_many_arguments)]
+fn loop_exit_slot_binds(
+    before: &[IrStmt],
+    ef: VarId,
+    ev: VarId,
+    empty_err: IrExpr,
+    err_ty: &Ty,
+    value_exit: (Option<VarId>, Option<VarId>),
+    ok_scalar_ty: &Ty,
+) -> Vec<IrStmt> {
+    let var_bind = |var: VarId, ty: Ty, value: IrExpr| IrStmt {
+        kind: IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Var, ty, value },
+        span: None,
+    };
+    let lit_false = || loop_uw_node(IrExprKind::LitBool { value: false }, Ty::Bool);
+    let mut out: Vec<IrStmt> = before.to_vec();
+    out.push(var_bind(ef, Ty::Bool, lit_false()));
+    out.push(var_bind(ev, err_ty.clone(), empty_err));
+    if let (Some(f), Some(r)) = value_exit {
+        out.push(var_bind(f, Ty::Bool, lit_false()));
+        let zero = loop_uw_node(IrExprKind::LitInt { value: 0 }, ok_scalar_ty.clone());
+        out.push(var_bind(r, ok_scalar_ty.clone(), zero));
+    }
+    out
+}
+
+/// Rebuild the loop with the exit flags in place.
+///
+/// A `ForIn` guards its iteration BODY — `if <not-exited> then { … } else ()`
+/// (the iterable is finite, so the remaining no-op iterations terminate). A
+/// `While` INJECTS the flags into its CONDITION instead: the body holds the
+/// induction update, so a body-guard alone would never terminate after an exit
+/// fires.
+fn rebuild_guarded_loop(
+    for_parts: Option<(&VarId, &Option<Vec<VarId>>, &Box<IrExpr>)>,
+    while_parts: Option<&Box<IrExpr>>,
+    rewritten: IrExpr,
+    not_exited: IrExpr,
+) -> IrExpr {
+    if let Some((var, var_tuple, iterable)) = for_parts {
+        // ForIn: guard the iteration body — `if <not-exited> then { <rewritten> } else ()`
+        // (a finite iterable, so the remaining no-op iterations terminate).
+        let guard_if = loop_uw_node(
+            IrExprKind::If {
+                cond: Box::new(not_exited),
+                then: Box::new(rewritten),
+                else_: Box::new(loop_uw_node(IrExprKind::Unit, Ty::Unit)),
+            },
+            Ty::Unit,
+        );
+        loop_uw_node(
+            IrExprKind::ForIn {
+                var: *var,
+                var_tuple: var_tuple.clone(),
+                iterable: iterable.clone(),
+                body: vec![IrStmt { kind: IrStmtKind::Expr { expr: guard_if }, span: None }],
+            },
+            Ty::Unit,
+        )
+    } else {
+        // While: INJECT the flags into the condition (`<not-exited> and cond`) — the body
+        // holds the induction update, so a body-guard alone would never terminate after an
+        // exit fires.
+        let cond = while_parts.expect("for/while dichotomy");
+        let new_cond = bool_prod(not_exited.clone(), (**cond).clone());
+        loop_uw_node(
+            IrExprKind::While {
+                cond: Box::new(new_cond),
+                body: vec![IrStmt { kind: IrStmtKind::Expr { expr: rewritten }, span: None }],
+            },
+            Ty::Unit,
+        )
+    }
+}
+
 pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     use almide_lang::types::constructor::TypeConstructorId;
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
@@ -23,36 +185,9 @@ pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> 
     // forever once an exit fires — the induction update lives in the now-skipped body; this
     // is exactly why `while` was originally excluded).
     let body_has_value_exit = |lbody: &[IrStmt]| -> bool {
-        // BOTH forms: the raw `guard c else <value>` statement (this pass can run BEFORE
-        // desugar_guard's loop-body rewrite in the shared fixpoint), and its desugared
-        // heterogeneous-else `if` form.
-        fn stmt_guard_value_exit(s: &IrStmt, ret_ty: &Ty) -> bool {
-            match &s.kind {
-                IrStmtKind::Guard { else_, .. } => else_.ty == *ret_ty,
-                IrStmtKind::Expr { expr } | IrStmtKind::Bind { value: expr, .. } => {
-                    expr_has_value_exit(
-                        expr,
-                        Some((VarId(u32::MAX), VarId(u32::MAX), ret_ty)),
-                    )
-                }
-                _ => false,
-            }
-        }
         lbody.iter().any(|s| stmt_guard_value_exit(s, &body.ty))
     };
-    // Detection fires ONLY on `!`-bearing bodies (the legacy criterion): a value-exit-only
-    // loop has nothing this pass can rewrite while the value-exit delivery is disabled, and
-    // firing on it would make the desugar fixpoint re-enter forever (the entry fast-path
-    // returns an unchanged clone as `Some` — a probe-confirmed stack overflow).
-    let loop_idx = stmts.iter().position(|s| match &s.kind {
-        IrStmtKind::Expr { expr } => match &expr.kind {
-            IrExprKind::ForIn { body: lbody, .. } | IrExprKind::While { body: lbody, .. } => {
-                lbody.iter().any(stmt_has_unwrap)
-            }
-            _ => false,
-        },
-        _ => false,
-    })?;
+    let loop_idx = stmts.iter().position(unwrap_bearing_loop_stmt)?;
     let IrStmtKind::Expr { expr: loop_expr } = &stmts[loop_idx].kind else {
         return None;
     };
@@ -86,14 +221,7 @@ pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> 
     let ef = VarId(*next_var);
     let ev = VarId(*next_var + 1);
     *next_var += 2;
-    let (vf, vres): (Option<VarId>, Option<VarId>) = if has_vx {
-        let f = VarId(*next_var);
-        let r = VarId(*next_var + 1);
-        *next_var += 2;
-        (Some(f), Some(r))
-    } else {
-        (None, None)
-    };
+    let (vf, vres) = alloc_value_exit_pair(has_vx, next_var);
     // Rewrite the loop body's `!`s (declining the whole pass if any cannot be cleanly placed).
     let body_block =
         loop_uw_node(IrExprKind::Block { stmts: lbody.clone(), expr: None }, Ty::Unit);
@@ -105,112 +233,9 @@ pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> 
         loop_uw_rewrite(&body_block, UwEnv { ef, ev, err_ty: &err_ty, vx }, next_var)?;
     // The combined not-exited condition: `not __ef` (and `not __vf` when the value pair
     // exists) — the ForIn body-guard / the While condition injection.
-    let not_flag = |v: VarId| {
-        loop_uw_node(
-            IrExprKind::UnOp {
-                op: almide_ir::UnOp::Not,
-                operand: Box::new(loop_uw_node(IrExprKind::Var { id: v }, Ty::Bool)),
-            },
-            Ty::Bool,
-        )
-    };
-    // Combine via the BRANCH-FREE 0/1 product (`MulInt` over Bool bits), NOT `and`:
-    // the short-circuit `and` lowers to nested IfThen merges, and a merge nested
-    // inside the loop's certificate region flushes as the always-rejecting poison
-    // `{i|}` (flush_branch's conservative nested-delimiter rule) — the corpus-wall
-    // unbacked-`+1` breach. Every factor here is a PURE flag/comparison, so eager
-    // evaluation is effect-identical.
-    let bool_prod = |a: IrExpr, b: IrExpr| {
-        loop_uw_node(
-            IrExprKind::BinOp {
-                op: almide_ir::BinOp::MulInt,
-                left: Box::new(a),
-                right: Box::new(b),
-            },
-            Ty::Bool,
-        )
-    };
-    let mut not_exited = not_flag(ef);
-    if let Some(f) = vf {
-        not_exited = bool_prod(not_exited, not_flag(f));
-    }
-    let new_loop = if let Some((var, var_tuple, iterable)) = for_parts {
-        // ForIn: guard the iteration body — `if <not-exited> then { <rewritten> } else ()`
-        // (a finite iterable, so the remaining no-op iterations terminate).
-        let guard_if = loop_uw_node(
-            IrExprKind::If {
-                cond: Box::new(not_exited),
-                then: Box::new(rewritten),
-                else_: Box::new(loop_uw_node(IrExprKind::Unit, Ty::Unit)),
-            },
-            Ty::Unit,
-        );
-        loop_uw_node(
-            IrExprKind::ForIn {
-                var: *var,
-                var_tuple: var_tuple.clone(),
-                iterable: iterable.clone(),
-                body: vec![IrStmt { kind: IrStmtKind::Expr { expr: guard_if }, span: None }],
-            },
-            Ty::Unit,
-        )
-    } else {
-        // While: INJECT the flags into the condition (`<not-exited> and cond`) — the body
-        // holds the induction update, so a body-guard alone would never terminate after an
-        // exit fires.
-        let cond = while_parts.expect("for/while dichotomy");
-        let new_cond = bool_prod(not_exited.clone(), (**cond).clone());
-        loop_uw_node(
-            IrExprKind::While {
-                cond: Box::new(new_cond),
-                body: vec![IrStmt { kind: IrStmtKind::Expr { expr: rewritten }, span: None }],
-            },
-            Ty::Unit,
-        )
-    };
-    // `<stmts before loop>; var __ef=false; var __ev=<empty>; <new_loop>`.
-    let mut new_stmts: Vec<IrStmt> = stmts[..loop_idx].to_vec();
-    new_stmts.push(IrStmt {
-        kind: IrStmtKind::Bind {
-            var: ef,
-            mutability: almide_ir::Mutability::Var,
-            ty: Ty::Bool,
-            value: loop_uw_node(IrExprKind::LitBool { value: false }, Ty::Bool),
-        },
-        span: None,
-    });
-    new_stmts.push(IrStmt {
-        kind: IrStmtKind::Bind {
-            var: ev,
-            mutability: almide_ir::Mutability::Var,
-            ty: err_ty.clone(),
-            value: empty_err,
-        },
-        span: None,
-    });
-    // The VALUE-exit slot: `var __vres: <RetTy> = err("")` — a valid len-tag placeholder
-    // (never read unless `__vf` was set, which always assigns first). Bound BEFORE the loop.
-    if let (Some(f), Some(r)) = (vf, vres) {
-        new_stmts.push(IrStmt {
-            kind: IrStmtKind::Bind {
-                var: f,
-                mutability: almide_ir::Mutability::Var,
-                ty: Ty::Bool,
-                value: loop_uw_node(IrExprKind::LitBool { value: false }, Ty::Bool),
-            },
-            span: None,
-        });
-        // `var __vn: <T> = 0` — the SCALAR Ok-payload slot (never read unless `__vf`).
-        new_stmts.push(IrStmt {
-            kind: IrStmtKind::Bind {
-                var: r,
-                mutability: almide_ir::Mutability::Var,
-                ty: ok_scalar_ty.clone(),
-                value: loop_uw_node(IrExprKind::LitInt { value: 0 }, ok_scalar_ty.clone()),
-            },
-            span: None,
-        });
-    }
+    let not_exited = not_exited_cond(ef, vf);
+    let new_loop = rebuild_guarded_loop(for_parts, while_parts, rewritten, not_exited);
+    let mut new_stmts = loop_exit_slot_binds(&stmts[..loop_idx], ef, ev, empty_err, &err_ty, (vf, vres), &ok_scalar_ty);
     new_stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: new_loop }, span: None });
     // Post-loop dispatch. LEGACY (no value-exit): `if __ef then err(__ev) else { <post> }` —
     // the shipped one-level shape, untouched. VALUE-exit variant: the SECOND dispatch level

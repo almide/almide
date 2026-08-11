@@ -335,7 +335,11 @@ impl Checker {
         self.env.lambda_depth = 0;
         let body_ity = self.infer_expr(body);
         self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
-        if effect.unwrap_or(false) {
+        // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
+        // value-tail acceptance an effect fn's lifted body has — the
+        // lowering wraps the T-typed exits in ok(...).
+        let fallible_marker = matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!");
+        if effect.unwrap_or(false) || fallible_marker {
             self.constrain_effect_body(name, &ret_ty, body_ity);
         } else {
             // Capture the trailing `let` binding name (if any) to specialize
@@ -497,7 +501,7 @@ impl Checker {
                 let mut r = response.clone();
                 let ret_ty = self.infer_expr(&mut r);
                 let ret_resolved = resolve_ty(&ret_ty, &self.uf);
-                let fn_ty = Ty::Fn { params: param_tys, ret: Box::new(ret_resolved) };
+                let fn_ty = Ty::Fn { is_effect: false, params: param_tys, ret: Box::new(ret_resolved) };
                 let override_name = format!("__where_{}", target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"));
                 self.env.define_var(&override_name, fn_ty);
             }
@@ -529,6 +533,7 @@ impl Checker {
         };
         let Some(sig) = self.env.functions.get(&name) else { return };
         let sig_ty = Ty::Fn {
+            is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
             params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
             ret: Box::new(sig.ret.clone()),
         };

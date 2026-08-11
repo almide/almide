@@ -1,0 +1,30 @@
+// fs_create_temp_file — SELF-HOSTED `fs.create_temp_file(prefix)` for the wasm
+// leg: a fresh EMPTY file under the temp root (`$TMPDIR` ?? "/tmp"), named
+// `<prefix><entropy>`, created through the WASI write floor
+// (prim.write_text_file with empty content — O_CREAT|O_TRUNC). Native uses a
+// nanosecond-clock suffix; the wasm leg uses the entropy floor (prim.random_get)
+// — both are uniqueness devices and the produced PATH is never a byte-compared
+// observable (the fs_create_temp_dir.almd precedent). Reaching
+// prim.write_text_file carries Capability::FsWrite; prim.random_get adds Entropy.
+import env
+
+fn __ctf_rand() -> Int = {
+  let buf = prim.alloc_bytes(8)
+  let p = prim.handle(buf) + 12
+  let _e = prim.random_get(p, 8)
+  let r = prim.load64(p)
+  int.band(r, 0x7FFFFFFFFFFFFFFF)
+}
+
+effect fn fs_create_temp_file(prefix: String) -> Result[String, String] = {
+  let base = env.get("TMPDIR") ?? "/tmp"
+  let n = __ctf_rand()
+  let path = "${base}/${prefix}${n}"
+  let empty = prim.alloc_str(0)
+  let w: Result[Unit, String] = prim.write_text_file(path, empty)
+  let wh = prim.handle(w)
+  if prim.load32(wh + 16) != 0 then {
+    let m: String = prim.load_handle(wh + 12)
+    err(m)
+  } else { ok(path) }
+}

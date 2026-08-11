@@ -1,7 +1,6 @@
 // uint32_convert — SELF-HOSTED uint32.to_* via the two-hop int composition (int.from_uint32
 // zero-widens to i64, int.to_<dst> narrows) — byte-identical to v0's uint32.almd bodies.
 // Nested call unrolled to two lets; callees are cross-file. Pure scalar.
-
 fn uint32_to_int8(x: UInt32) -> Int8 = {
   let i = int.from_uint32(x)
   int.to_int8(i)
@@ -53,7 +52,7 @@ fn uint32_to_string(x: UInt32) -> String = {
 }
 
 // Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
-fn uint32_to_int8_checked(x: UInt32) -> Option[Int8] = {
+fn uint32_to_int8_checked(x: UInt32) -> Int8? = {
   let i = int.from_uint32(x)
   int.to_int8_checked(i)
 }
@@ -63,7 +62,7 @@ fn uint32_to_int8_saturating(x: UInt32) -> Int8 = {
   int.to_int8_saturating(i)
 }
 
-fn uint32_to_int16_checked(x: UInt32) -> Option[Int16] = {
+fn uint32_to_int16_checked(x: UInt32) -> Int16? = {
   let i = int.from_uint32(x)
   int.to_int16_checked(i)
 }
@@ -73,7 +72,7 @@ fn uint32_to_int16_saturating(x: UInt32) -> Int16 = {
   int.to_int16_saturating(i)
 }
 
-fn uint32_to_int32_checked(x: UInt32) -> Option[Int32] = {
+fn uint32_to_int32_checked(x: UInt32) -> Int32? = {
   let i = int.from_uint32(x)
   int.to_int32_checked(i)
 }
@@ -83,7 +82,7 @@ fn uint32_to_int32_saturating(x: UInt32) -> Int32 = {
   int.to_int32_saturating(i)
 }
 
-fn uint32_to_uint8_checked(x: UInt32) -> Option[UInt8] = {
+fn uint32_to_uint8_checked(x: UInt32) -> UInt8? = {
   let i = int.from_uint32(x)
   int.to_uint8_checked(i)
 }
@@ -93,7 +92,7 @@ fn uint32_to_uint8_saturating(x: UInt32) -> UInt8 = {
   int.to_uint8_saturating(i)
 }
 
-fn uint32_to_uint16_checked(x: UInt32) -> Option[UInt16] = {
+fn uint32_to_uint16_checked(x: UInt32) -> UInt16? = {
   let i = int.from_uint32(x)
   int.to_uint16_checked(i)
 }
@@ -102,4 +101,3 @@ fn uint32_to_uint16_saturating(x: UInt32) -> UInt16 = {
   let i = int.from_uint32(x)
   int.to_uint16_saturating(i)
 }
-

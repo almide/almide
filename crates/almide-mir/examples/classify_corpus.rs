@@ -31,11 +31,12 @@ use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
 use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
+use almide_ir::IrTypeDeclKind;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_ir::IrTypeDeclKind;
 use almide_mir::certificate::{
-    name_witness_string, ownership_certificate, program_cap_graph_witness, reachable_caps_or_tainted,
+    name_witness_string, ownership_certificate, program_cap_graph_witness,
+    reachable_caps_or_tainted,
 };
 use almide_mir::{Capability, MirFunction, MirProgram, Op};
 use almide_optimize::{mono, optimize};
@@ -60,7 +61,15 @@ use std::path::{Path, PathBuf};
 /// "unanalyzable callee". SOUND: the concat reaches no Stdout, and its operands'
 /// own calls are captured separately by the same marker pass.
 const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
-    "assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string", "__str_concat", "__list_concat", "option.unwrap_or_str",
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "eprintln",
+    "panic",
+    "to_string",
+    "__str_concat",
+    "__list_concat",
+    "option.unwrap_or_str",
 ];
 
 /// Count call nodes (Call / RuntimeCall / TailCall) in an IR expression tree —
@@ -116,6 +125,34 @@ fn count_eq_calls_depth(
                     return almide_mir::lower::eq_helper_call_count(variant_layouts, &es[0]);
                 }
             }
+            // List[<record>] — the synthesized record loop-helper route (the engine's
+            // container tier): the site's list-helper call + the list body's ONE
+            // record-helper call + the record helper body's static per-field calls
+            // (this recursion — a nested List[record] field re-enters this arm exactly
+            // as the generator nests). A repeated element type over-credits (helpers
+            // dedup on the MIR side), landing only on the conservative ir > mir taint.
+            if let [almide_lang::types::Ty::Named(n, args)] = &es[..] {
+                if args.is_empty()
+                    && !variant_layouts.by_type.contains_key(n.as_str())
+                    && registry.get(n.as_str()).is_some()
+                {
+                    return 2 + count_eq_calls_depth(&es[0], registry, variant_layouts, depth + 1);
+                }
+            }
+            // List[Option[<record>]] — the synthesized option-element route: the
+            // site's list-helper call + the list body's ONE opt-helper call + the
+            // opt body's ONE record-helper call + the record helper's per-field
+            // calls (the same over-credit-on-dedup conservatism as List[record]).
+            if let [Ty::Applied(TC::Option, oa)] = &es[..] {
+                if let [almide_lang::types::Ty::Named(n, args)] = &oa[..] {
+                    if args.is_empty()
+                        && !variant_layouts.by_type.contains_key(n.as_str())
+                        && registry.get(n.as_str()).is_some()
+                    {
+                        return 3 + count_eq_calls_depth(&oa[0], registry, variant_layouts, depth + 1);
+                    }
+                }
+            }
         }
         let nested_list = matches!(&es[..],
             [Ty::Applied(TC::List, inner)]
@@ -124,13 +161,20 @@ fn count_eq_calls_depth(
         // Option-element arm; Float payloads stay outside on both sides).
         let opt_scalar_elem = matches!(&es[..],
             [Ty::Applied(TC::Option, inner)]
-                if matches!(inner[..], [Ty::Int | Ty::Bool]));
+                if matches!(inner[..], [Ty::Int | Ty::Bool | Ty::String]));
+        // List[Result[Int/Bool, String]] — ONE list.eq_res_int CallFn (the
+        // engine's Result-element arm, same scalar-Ok/String-Err gate).
+        let res_scalar_elem = matches!(&es[..],
+            [Ty::Applied(TC::Result, ra)]
+                if ra.len() == 2 && matches!(ra[0], Ty::Int | Ty::Bool)
+                    && matches!(ra[1], Ty::String));
         return usize::from(
             es.len() == 1
                 && (matches!(es[0], Ty::Int | Ty::String | Ty::Float | Ty::Bool)
                     || almide_mir::lower::is_value_ty(&es[0])
                     || nested_list
-                    || opt_scalar_elem),
+                    || opt_scalar_elem
+                    || res_scalar_elem),
         );
     }
     // Map/Set `==` — the implemented repr variants lower to ONE synthetic eq CallFn
@@ -140,10 +184,7 @@ fn count_eq_calls_depth(
         return 1;
     }
     if let Ty::Applied(TC::Map, kv) = ty {
-        if kv.len() == 2
-            && matches!(kv[0], Ty::String)
-            && !almide_mir::lower::is_heap_ty(&kv[1])
-        {
+        if kv.len() == 2 && matches!(kv[0], Ty::String) && !almide_mir::lower::is_heap_ty(&kv[1]) {
             return 1;
         }
     }
@@ -278,7 +319,13 @@ fn count_ir_calls(
             // not yet lowered in some position just leaves mir < ir (honest caps taint), never the
             // mir > ir over-count that would falsely caps-verify a fn. __str_concat is pure (the
             // transitive fold sees no Stdout), so the synthetic call adds no real capability.
-            if matches!(&e.kind, almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }) {
+            if matches!(
+                &e.kind,
+                almide_ir::IrExprKind::BinOp {
+                    op: almide_ir::BinOp::ConcatStr,
+                    ..
+                }
+            ) {
                 self.n += 1;
             }
             // A STRING equality `a == b` / `a != b` (BinOp::Eq/Neq over String operands) lowers
@@ -307,7 +354,11 @@ fn count_ir_calls(
             // with 0, a prim). Credit the operator node so `mir_calls <= ir_calls` holds. string.cmp
             // is pure (byte compare, no Stdout).
             if let almide_ir::IrExprKind::BinOp {
-                op: almide_ir::BinOp::Lt | almide_ir::BinOp::Lte | almide_ir::BinOp::Gt | almide_ir::BinOp::Gte,
+                op:
+                    almide_ir::BinOp::Lt
+                    | almide_ir::BinOp::Lte
+                    | almide_ir::BinOp::Gt
+                    | almide_ir::BinOp::Gte,
                 left,
                 ..
             } = &e.kind
@@ -336,7 +387,11 @@ fn count_ir_calls(
             // emits a call for (scalar, or String/Value heap-element); a heap-FIELD aggregate element
             // (tuple/record) still DEFERS (no MIR call, no count). `mir_calls <= ir_calls` holds BY
             // CONSTRUCTION. Both concat runtimes are pure (prim memory ops, no Stdout).
-            if let almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } = &e.kind {
+            if let almide_ir::IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatList,
+                ..
+            } = &e.kind
+            {
                 // `try_lower_concat_list` emits AT MOST ONE synthetic `__list_concat`/`__list_concat_rc`
                 // per ConcatList node (its operands materialize without their own concat call), and a
                 // ConcatList it cannot lower WALLS the enclosing function (so that function is not
@@ -357,9 +412,13 @@ fn count_ir_calls(
             // position just leaves mir < ir — honest caps taint, never the mir > ir over-count that
             // would falsely caps-verify a fn). Both callees are PURE (math/math_fpow modules reach
             // no Stdout), so the synthetic call adds no real capability.
-            if matches!(&e.kind, almide_ir::IrExprKind::BinOp {
-                op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt, ..
-            }) {
+            if matches!(
+                &e.kind,
+                almide_ir::IrExprKind::BinOp {
+                    op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt,
+                    ..
+                }
+            ) {
                 self.n += 1;
             }
             // A HEAP `Range` in a call-ARGUMENT position (`f(0..n)`) lowers to ONE synthetic
@@ -513,7 +572,11 @@ fn count_ir_calls(
             almide_ir::visit::walk_expr(self, e);
         }
     }
-    let mut cc = CallCounter { n: 0, registry, variant_layouts };
+    let mut cc = CallCounter {
+        n: 0,
+        registry,
+        variant_layouts,
+    };
     // `visit_expr` (NOT `walk_expr`) so a ROOT-position call is counted too — an
     // expression-bodied `fn f() = g(x)` has the call AT the body root; `walk_expr`
     // would descend past it and undercount (masking a nested elision in its args,
@@ -530,37 +593,11 @@ fn count_ir_calls(
 /// If a future lowering re-introduces an unbacked param `+1`, this equality breaks
 /// and the corpus gate fails — making the class structurally impossible to ship.
 fn plus_one_events_backed(mir: &MirFunction) -> bool {
-    let cert = ownership_certificate(mir);
-    let i = cert.chars().filter(|c| *c == 'i').count();
-    let a = cert.chars().filter(|c| *c == 'a').count();
-    // A rung-4 `ListLit` is alloc-class (the `Alloc{DynList}` it replaced) — it
-    // backs its `i` exactly like an Alloc.
-    let allocs = mir
-        .ops
-        .iter()
-        .filter(|o| matches!(o, Op::Alloc { .. } | Op::ListLit { .. }))
-        .count();
-    let heap_results = mir
-        .ops
-        .iter()
-        .filter(|o| match o {
-            Op::Call { dst: Some(_), result: Some(r), .. }
-            | Op::CallFn { dst: Some(_), result: Some(r), .. }
-            // A heap-returning CallIndirect (a closure that moves out a fresh owned value)
-            // backs an `i` exactly like a heap-returning CallFn — keep the gate consistent.
-            | Op::CallIndirect { dst: Some(_), result: Some(r), .. } => r.is_heap(),
-            _ => false,
-        })
-        .count();
-    let dups = mir.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count();
-    // A branch-merge dst's `i` (a RELEASED merge's moved-in reference, or a
-    // slot-FEEDER merge's routed `i` — see ownership_certificate) is backed by
-    // the arm value's real producer: the merge is a reference changing hands
-    // (the wasm merge local.set), not a synthetic +1. The certificate module
-    // itself counts the merges it credits so the two stay in lockstep by
-    // construction.
-    let merge_credits = almide_mir::certificate::merge_dst_i_credits(mir);
-    i == allocs + heap_results + merge_credits && a == dups
+    // Shared with the LOWERING EXIT since #1146 — the lowering now walls an
+    // imbalanced certificate itself, so this classifier check is the
+    // belt-and-suspenders assertion that the wall is total (a breach here
+    // means a fn escaped the exit gate).
+    almide_mir::certificate::plus_one_events_backed(mir)
 }
 
 /// Outcome of driving one `.almd` source through the frontend to linked IR.
@@ -594,7 +631,10 @@ fn dep_paths_for(path: &Path) -> Vec<(almide::project::PkgId, std::path::PathBuf
         if toml.exists() {
             if let Ok(proj) = almide::project::parse_toml(&toml) {
                 if let Ok(deps) = almide::project_fetch::fetch_all_deps(&proj) {
-                    return deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect();
+                    return deps
+                        .into_iter()
+                        .map(|fd| (fd.pkg_id, fd.source_dir))
+                        .collect();
                 }
             }
             return Vec::new();

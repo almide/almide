@@ -33,18 +33,18 @@ pub mod certificate;
 pub mod charge_probe;
 pub mod concat_to_append;
 pub mod coown_names;
-pub mod region_alloc;
-pub mod region_compact;
-pub mod scalar_call_inline;
 pub mod lower;
-pub mod pipeline;
-pub mod purity;
 pub(crate) mod mir_wellformed;
 pub mod native_result_rewrite;
+pub mod pipeline;
+pub mod purity;
+pub mod region_alloc;
+pub mod region_compact;
 pub mod render_native;
-mod render_native_shims;
 mod render_native_op_families;
+mod render_native_shims;
 pub mod render_wasm;
+pub mod scalar_call_inline;
 pub mod translation_validation;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -214,7 +214,11 @@ pub enum Init {
 pub enum Op {
     /// `dst = alloc(repr, init)` — a fresh owned heap value with refcount 1. The
     /// only +1 besides [`Op::Dup`]. `repr` must be a heap repr.
-    Alloc { dst: ValueId, repr: Repr, init: Init },
+    Alloc {
+        dst: ValueId,
+        repr: Repr,
+        init: Init,
+    },
     /// `dst = <scalar>` — a `Copy` value whose CONTENT is DEFERRED (a placeholder;
     /// no refcount, no ownership). Renders to nothing — the local stays the wasm
     /// zero default. Used where the scalar value is not yet computed by lowering.
@@ -380,7 +384,12 @@ pub enum Op {
     /// else flat `rc_dec` the @12 Ok payload. Same single cert `d` as [`Op::Drop`]; the recursion
     /// is the trusted generated routine (leak-loop verified). The record-payload counterpart of
     /// `DropResultValue` (whose Ok payload is a `Value`, not a record).
-    DropWrapperRec { v: ValueId, drop_fn: String, is_result: bool, err_rec: bool },
+    DropWrapperRec {
+        v: ValueId,
+        drop_fn: String,
+        is_result: bool,
+        err_rec: bool,
+    },
     /// `consume v` — transfer v's reference OUT (into a container, a return, or
     /// a callee that takes ownership). v is dead here; the reference lives on
     /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).
@@ -404,7 +413,12 @@ pub enum Op {
     /// hand-written one, ultimately Almide compiled through this same path). A
     /// renderer never re-implements a runtime operation inline — that is the
     /// discipline that keeps the hand-written wasm surface tiny.
-    Call { dst: Option<ValueId>, func: RtFn, args: Vec<CallArg>, result: Option<Repr> },
+    Call {
+        dst: Option<ValueId>,
+        func: RtFn,
+        args: Vec<CallArg>,
+        result: Option<Repr>,
+    },
 
     /// Call a USER/runtime MIR function by name (the mechanism that lets the
     /// runtime be self-hosted: a runtime fn is just a [`MirFunction`] called
@@ -413,7 +427,12 @@ pub enum Op {
     /// to the caller, who now owns it: a +1, like [`Op::Alloc`]). This is the
     /// callee's RETURN-mode signature, read at the call site WITHOUT opening the
     /// callee (the compositionality lever for ownership).
-    CallFn { dst: Option<ValueId>, name: String, args: Vec<CallArg>, result: Option<Repr> },
+    CallFn {
+        dst: Option<ValueId>,
+        name: String,
+        args: Vec<CallArg>,
+        result: Option<Repr>,
+    },
 
     /// Call a host-provided WASM IMPORT — the body of an `@extern(wasm, module,
     /// name)` function. The renderer emits `(call $<import>)` and DECLARES the
@@ -448,7 +467,12 @@ pub enum Op {
     /// is therefore caps-VERIFIED only if it DECLARES the cap, never silently (a closure
     /// that reaches Stdout could otherwise pass un-witnessed = accept-but-unsafe). Args are
     /// borrowed/moved like a `CallFn`; a heap result is a fresh owned value.
-    CallIndirect { dst: Option<ValueId>, table_idx: ValueId, args: Vec<CallArg>, result: Option<Repr> },
+    CallIndirect {
+        dst: Option<ValueId>,
+        table_idx: ValueId,
+        args: Vec<CallArg>,
+        result: Option<Repr>,
+    },
 
     /// `dst = the function-table slot of the lifted function `name`` — a scalar index
     /// (carried in the i64-uniform value) used as a `CallIndirect.table_idx`. The render
@@ -471,17 +495,30 @@ pub enum Op {
     /// (idx < 0 or >= cap TRAPs, matching native's halt). Replaces the inline
     /// `Handle` + `ElemAddr` + `Load{8}` sequence one-for-one; ownership-NEUTRAL
     /// (the list handle is borrowed/live-checked, the scalar result carries none).
-    ListGetScalar { dst: ValueId, list: ValueId, idx: ValueId },
+    ListGetScalar {
+        dst: ValueId,
+        list: ValueId,
+        idx: ValueId,
+    },
 
     /// `list[idx] = val` for a SCALAR element — the bounds-checked element store
     /// (COW is the caller's existing `MakeUnique` BEFORE this op). Replaces the
     /// inline `Handle` + `ElemAddr` + `Store{8}` sequence one-for-one;
     /// ownership-NEUTRAL like the load.
-    ListSetScalar { list: ValueId, idx: ValueId, val: ValueId },
+    ListSetScalar {
+        list: ValueId,
+        idx: ValueId,
+        val: ValueId,
+    },
 
     /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
     /// functions need.
-    IntBinOp { dst: ValueId, op: IntOp, a: ValueId, b: ValueId },
+    IntBinOp {
+        dst: ValueId,
+        op: IntOp,
+        a: ValueId,
+        b: ValueId,
+    },
 
     /// A PRIMITIVE FLOOR op — raw memory / host access the self-hosted runtime needs,
     /// below the language (`prim.load32`/`prim.store32`/`prim.fd_write`/…). The
@@ -492,7 +529,11 @@ pub enum Op {
     /// a scalar result (loads, fd_write, handle→address). No ownership: scalars carry
     /// none and a handle arg is BORROWED (read, no refcount change).
     /// [`PrimKind::FdWrite`] reaches [`Capability::Stdout`] (the only sandbox exit).
-    Prim { kind: PrimKind, dst: Option<ValueId>, args: Vec<ValueId> },
+    Prim {
+        kind: PrimKind,
+        dst: Option<ValueId>,
+        args: Vec<ValueId>,
+    },
 
     /// Structured control flow as FLAT MARKERS. `IfThen` begins an `if` on a Bool
     /// scalar `cond` (i64 0/1); the ops up to [`Op::Else`] are the THEN arm, the ops

@@ -83,8 +83,18 @@ fn classify_lower_one_fn(
             // BOTH the MIR and this counted IR — `mir == ir` by construction. A subset
             // (only guard + heap-branches) missed `desugar_tuple_unwrap_or`, so a
             // `let r = opt.unwrap_or((tuple)); f(r.0)` mir>ir-breached.
+            // BOTH ABI root retypes FIRST — the same root-ty adjustments
+            // `lower_function_all_impl` makes before ITS desugar ladder, via the same
+            // helper (single source of truth). `desugar_loop_unwrap`'s root gate keys on
+            // the Result carrier ty; counting the bare-sugar-typed body instead declined
+            // the loop-`!` flag rewrite the lowering applied, so its injected owned-copy
+            // concat was a MIR op with no counted IR node (#1176). The unit-tail ok-wrap
+            // half is registry-INDEPENDENT for a CAN-ERR declared-Unit effect fn — a
+            // post-registry `effect_cont_synth_*` continuation lowers through it, so the
+            // AUTO_WRAP retype alone re-opened the same false breach (fs_streaming).
+            let abi_body = almide_mir::lower::abi_effective_body(func);
             let eff_body = almide_mir::lower::desugar_all(
-                &func.body,
+                abi_body.as_ref().unwrap_or(&func.body),
                 func.name.as_str() == "main",
                 ctx.variant_layouts,
                 ctx.record_layouts,
@@ -126,7 +136,21 @@ fn classify_lower_one_fn(
                 }
                 // Ownership is one heap object per line; names are one line per
                 // function. Both are LOCAL properties — no transitivity.
-                let cert = ownership_certificate(mir);
+                let (cert, poisoned) =
+                    almide_mir::certificate::ownership_certificate_with_poison(mir);
+                // A POISONED certificate (a nested-region arm flushed as the
+                // always-rejecting `{i|}`) is kernel-UNREPRESENTABLE by its own
+                // declaration — shipping it in the witness would fail the gate
+                // by design, not by finding a bug (#1146: the C-220 test fns
+                // were the first in-profile poisoned certs; every earlier
+                // poisoned fn sat outside the witness). EXCLUDE it, COUNTED —
+                // the render is still covered by the executable verifier.
+                if poisoned {
+                    t.cert_poisoned_excluded += 1;
+                    s.names.push_str(&name_witness_string(mir));
+                    s.names.push('\n');
+                    continue;
+                }
                 // Parallel name index (ownership.names): one `<file>::<fn>` line per
                 // cert line, so a checker REJECT bisects straight to its function
                 // (the anonymous 20k-line cert made a reject a needle hunt).
@@ -629,6 +653,12 @@ fn print_wall_report(t: &Tally) {
     );
     for (callee, n) in t.would_wall_callees.iter() {
         eprintln!("        {n:>4}  {callee}");
+    }
+    if t.cert_poisoned_excluded > 0 {
+        eprintln!(
+            "  cert-poisoned (excluded from witness): {}  <- kernel-unrepresentable nested-region arms (#1146); render covered by the executable verifier",
+            t.cert_poisoned_excluded
+        );
     }
     for p in &t.cert_backing_breaches {
         eprintln!("      UNBACKED {p}");

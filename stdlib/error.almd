@@ -6,7 +6,6 @@
 // default `Result → Own` would collide with their `&Result<T, String>`
 // runtime fn; `chain`'s two `String`s flow through the default
 // `String → RefStr` decoration without an override.
-
 @intrinsic("almide_rt_error_chain")
 fn chain(outer: String, cause: String) -> String = _
 

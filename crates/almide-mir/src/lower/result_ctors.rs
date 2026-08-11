@@ -15,6 +15,69 @@ impl LowerCtx {
                     && !matches!(ts[0], Ty::String)))
     }
 
+    /// The `Option[<leaf>]` Ok type of a `Result[Option[L], String]` plus whether
+    /// that leaf is a String (the alternative being a plain scalar). `None` for
+    /// any other shape — a heap leaf has no flat block form here.
+    fn option_leaf_str_or_scalar<'t>(result_ty: &'t Ty) -> Option<(&'t Ty, bool)> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Result, a) = result_ty else { return None };
+        if a.len() != 2 || !matches!(a[1], Ty::String) {
+            return None;
+        }
+        let ok_ty = &a[0];
+        let Ty::Applied(TypeConstructorId::Option, oa) = ok_ty else { return None };
+        if oa.len() != 1 {
+            return None;
+        }
+        let is_str = matches!(oa[0], Ty::String);
+        let is_scalar = matches!(oa[0], Ty::Int | Ty::Float | Ty::Bool);
+        (is_str || is_scalar).then_some((ok_ty, is_str))
+    }
+
+    /// The `(record, Int)` Ok payload of a `Result[(R, Int), String]`, when the
+    /// record half is a real aggregate (not a String). `None` for any other
+    /// Result shape.
+    fn rec_int_ok_payload(&self, result_ty: &Ty) -> Option<Ty> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Result, a) = result_ty else { return None };
+        if a.len() != 2 || !matches!(a[1], Ty::String) {
+            return None;
+        }
+        let Ty::Tuple(ts) = &a[0] else { return None };
+        let ok = ts.len() == 2
+            && matches!(ts[1], Ty::Int)
+            && self.aggregate_field_tys(&ts[0]).is_some()
+            && !matches!(ts[0], Ty::String);
+        ok.then(|| ts[0].clone())
+    }
+
+    /// Wrap a built payload as the Result block: a RECURSIVE-drop record routes
+    /// through the generated `$__drop_tup_int_<R>` wrapper, a FLAT one REUSES
+    /// `DropResultStrInt` (its tuple frees exactly like a `(String, Int)`).
+    fn wrap_rec_int_result(
+        &mut self,
+        payload: ValueId,
+        repr: crate::Repr,
+        is_err: bool,
+        drop_fn: Option<&str>,
+    ) -> ValueId {
+        if let Some(df) = drop_fn {
+            return self.materialize_result_aggregate(payload, repr, is_err, df.to_string());
+        }
+        let obj = self.materialize_result_str(payload, repr, is_err, false);
+        self.heap_elem_lists.remove(&obj);
+        self.str_int_result_results.insert(obj);
+        obj
+    }
+
+    /// Roll the ops and live handles this attempt pushed back to their marks and
+    /// decline, so the caller sees the lowerer exactly as it was.
+    fn rollback_ops(&mut self, ops_mark: usize, lhh_mark: usize) -> Option<ValueId> {
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        None
+    }
+
     pub(crate) fn try_lower_result_rec_int_ctor(
         &mut self,
         expr: &IrExpr,
@@ -22,24 +85,7 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
         use almide_lang::types::constructor::TypeConstructorId;
-        let rec_ty = match result_ty {
-            Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2 && matches!(a[1], Ty::String) =>
-            {
-                match &a[0] {
-                    Ty::Tuple(ts)
-                        if ts.len() == 2
-                            && matches!(ts[1], Ty::Int)
-                            && self.aggregate_field_tys(&ts[0]).is_some()
-                            && !matches!(ts[0], Ty::String) =>
-                    {
-                        ts[0].clone()
-                    }
-                    _ => return None,
-                }
-            }
-            _ => return None,
-        };
+        let rec_ty = self.rec_int_ok_payload(result_ty)?;
         // A RECURSIVE-drop record routes through the generated `$__drop_tup_int_<R>`
         // wrapper; a FLAT (all-scalar-field) record's tuple frees exactly like the
         // (String, Int) tuple — slot0 rc_dec + blocks — so it REUSES DropResultStrInt.
@@ -59,19 +105,11 @@ impl LowerCtx {
                     .or_else(|| self.lower_result_str_piece(&elements[0]))
                 {
                     Some(v) => v,
-                    None => {
-                        self.ops.truncate(ops_mark);
-                        self.live_heap_handles.truncate(lhh_mark);
-                        return None;
-                    }
+                    None => return self.rollback_ops(ops_mark, lhh_mark),
                 };
                 let n = match self.lower_scalar_value(&elements[1]) {
                     Some(v) => v,
-                    None => {
-                        self.ops.truncate(ops_mark);
-                        self.live_heap_handles.truncate(lhh_mark);
-                        return None;
-                    }
+                    None => return self.rollback_ops(ops_mark, lhh_mark),
                 };
                 // The 2-slot tuple block OWNING the record (moved in) + the scalar.
                 let two = self.fresh_value();
@@ -94,27 +132,11 @@ impl LowerCtx {
                 let s1 = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst: s1, op: IntOp::Add, a: th, b: s1o });
                 self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s1, n] });
-                Some(match &drop_fn {
-                    Some(df) => self.materialize_result_aggregate(tup, repr, false, df.clone()),
-                    None => {
-                        let obj = self.materialize_result_str(tup, repr, false, false);
-                        self.heap_elem_lists.remove(&obj);
-                        self.str_int_result_results.insert(obj);
-                        obj
-                    }
-                })
+                Some(self.wrap_rec_int_result(tup, repr, false, drop_fn.as_deref()))
             }
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;
-                Some(match &drop_fn {
-                    Some(df) => self.materialize_result_aggregate(piece, repr, true, df.clone()),
-                    None => {
-                        let obj = self.materialize_result_str(piece, repr, true, false);
-                        self.heap_elem_lists.remove(&obj);
-                        self.str_int_result_results.insert(obj);
-                        obj
-                    }
-                })
+                Some(self.wrap_rec_int_result(piece, repr, true, drop_fn.as_deref()))
             }
             _ => None,
         }
@@ -400,24 +422,7 @@ impl LowerCtx {
         expr: &IrExpr,
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        use almide_lang::types::constructor::TypeConstructorId;
-        let ok_ty = match result_ty {
-            Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2 && matches!(a[1], Ty::String) =>
-            {
-                &a[0]
-            }
-            _ => return None,
-        };
-        let leaf = match ok_ty {
-            Ty::Applied(TypeConstructorId::Option, oa) if oa.len() == 1 => &oa[0],
-            _ => return None,
-        };
-        let is_str = matches!(leaf, Ty::String);
-        let is_scalar = matches!(leaf, Ty::Int | Ty::Float | Ty::Bool);
-        if !is_str && !is_scalar {
-            return None;
-        }
+        let (ok_ty, is_str) = Self::option_leaf_str_or_scalar(result_ty)?;
         let repr = repr_of(result_ty).ok()?;
         match &expr.kind {
             IrExprKind::ResultOk { expr: inner } => {

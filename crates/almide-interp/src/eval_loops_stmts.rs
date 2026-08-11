@@ -209,41 +209,14 @@ impl<'a> Interpreter<'a> {
         }
         match &stmt.kind {
             IrStmtKind::Bind { var, value, .. } => {
-                let v = match self.eval_expr(value, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
+                let v = self.eval_value(value, scope)?;
                 scope.bind(*var, v);
                 Ok(())
             }
             IrStmtKind::BindDestructure { pattern, value } => {
-                let v = match self.eval_expr(value, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                let mut binds = Vec::new();
-                if self.try_match(pattern, &v, &mut binds) {
-                    for (id, val) in binds {
-                        scope.bind(id, val);
-                    }
-                    Ok(())
-                } else {
-                    Err(Flow::Abort("internal: irrefutable destructure failed".into()))
-                }
+                self.exec_stmt_destructure(pattern, value, scope)
             }
-            IrStmtKind::Assign { var, value } => {
-                let v = match self.eval_expr(value, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                if !scope.assign(*var, v) {
-                    return Err(Flow::Abort(format!(
-                        "internal: assign to unbound variable {:?}",
-                        var
-                    )));
-                }
-                Ok(())
-            }
+            IrStmtKind::Assign { var, value } => self.exec_stmt_assign(*var, value, scope),
             IrStmtKind::IndexAssign { target, index, value } => {
                 self.exec_stmt_index_assign(*target, index, value, scope)
             }
@@ -254,10 +227,10 @@ impl<'a> Interpreter<'a> {
                 self.exec_stmt_field_assign(*target, *field, value, scope)
             }
             IrStmtKind::Guard { cond, else_ } => self.exec_stmt_guard(cond, else_, scope),
-            IrStmtKind::Expr { expr } => match self.eval_expr(expr, scope) {
-                Flow::Value(_) => Ok(()),
-                other => Err(other),
-            },
+            IrStmtKind::Expr { expr } => {
+                self.eval_value(expr, scope)?;
+                Ok(())
+            }
             IrStmtKind::Comment { .. } => Ok(()),
 
             // ── Codegen-inserted statement kinds ──
@@ -274,17 +247,59 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    /// Evaluate `expr` for its VALUE. Any other `Flow` (a return, a loop
+    /// signal, an abort, an abstain) is what the enclosing statement list
+    /// propagates, so it leaves as `Err`.
+    pub(crate) fn eval_value(&mut self, expr: &IrExpr, scope: &Scope) -> Result<Value, Flow> {
+        match self.eval_expr(expr, scope) {
+            Flow::Value(v) => Ok(v),
+            other => Err(other),
+        }
+    }
+
+    /// `let <pattern> = value` — the pattern is irrefutable by construction
+    /// (the checker rejects a refutable one), so a failed match is an ICE.
+    fn exec_stmt_destructure(
+        &mut self,
+        pattern: &almide_ir::IrPattern,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let v = self.eval_value(value, scope)?;
+        let mut binds = Vec::new();
+        if !self.try_match(pattern, &v, &mut binds) {
+            return Err(Flow::Abort("internal: irrefutable destructure failed".into()));
+        }
+        for (id, val) in binds {
+            scope.bind(id, val);
+        }
+        Ok(())
+    }
+
+    /// `var = value` — the binding must already exist in an enclosing scope.
+    fn exec_stmt_assign(
+        &mut self,
+        var: almide_ir::VarId,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let v = self.eval_value(value, scope)?;
+        if !scope.assign(var, v) {
+            return Err(Flow::Abort(format!(
+                "internal: assign to unbound variable {:?}",
+                var
+            )));
+        }
+        Ok(())
+    }
+
     /// `guard cond else E` — the early-return form. A false condition evaluates
     /// `E` and returns its value from the ENCLOSING function, so the else branch
     /// leaves as `Flow::Return`, not as a value. Extracted from `exec_stmt`: this
     /// one arm carried three nested matches, which was most of that function's
     /// complexity.
     fn exec_stmt_guard(&mut self, cond: &IrExpr, else_: &IrExpr, scope: &Scope) -> Result<(), Flow> {
-        let c = match self.eval_expr(cond, scope) {
-            Flow::Value(v) => v,
-            other => return Err(other),
-        };
-        match c {
+        match self.eval_value(cond, scope)? {
             Value::Bool(true) => Ok(()),
             Value::Bool(false) => match self.eval_expr(else_, scope) {
                 Flow::Value(v) => Err(Flow::Return(v)),
@@ -314,21 +329,25 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => v,
             other => return Err(other),
         };
-        let cur = scope
-            .get(target)
-            .ok_or_else(|| Flow::Abort("internal: index-assign to unbound list".into()))?;
-        match (cur, iv) {
-            (Value::List(xs), Value::Int(i)) => {
-                if i < 0 || (i as usize) >= xs.len() {
-                    return Err(Flow::Abort("index out of bounds".into()));
+        // Mutate through the binding's own slot (not get → assign): `get`
+        // hands back a clone, so the Rc is never sole-owned and every
+        // `xs[i] = v` copies the whole list — a fill loop turns quadratic.
+        // `Rc::make_mut` copies only when an alias exists (C-033 COW).
+        let Value::Int(i) = iv else {
+            return Err(Flow::Abort("internal: malformed index-assign".into()));
+        };
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::List(xs) => {
+                    if i < 0 || (i as usize) >= xs.len() {
+                        return Err(Flow::Abort("index out of bounds".into()));
+                    }
+                    Rc::make_mut(xs)[i as usize] = vv;
+                    Ok(())
                 }
-                let mut new = (*xs).clone();
-                new[i as usize] = vv;
-                scope.assign(target, Value::list(new));
-                Ok(())
-            }
-            _ => Err(Flow::Abort("internal: malformed index-assign".into())),
-        }
+                _ => Err(Flow::Abort("internal: malformed index-assign".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: index-assign to unbound list".into()))?
     }
 
     fn exec_stmt_map_insert(
@@ -346,18 +365,16 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => v,
             other => return Err(other),
         };
-        let cur = scope
-            .get(target)
-            .ok_or_else(|| Flow::Abort("internal: map-insert to unbound map".into()))?;
-        match cur {
-            Value::Map(entries) => {
-                let mut new = (*entries).clone();
-                map_insert(&mut new, kv, vv);
-                scope.assign(target, Value::Map(Rc::new(new)));
-                Ok(())
-            }
-            _ => Err(Flow::Abort("internal: map-insert on non-Map".into())),
-        }
+        // Slot mutation, not get → assign: see exec_stmt_index_assign.
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::Map(entries) => {
+                    map_insert(Rc::make_mut(entries), kv, vv);
+                    Ok(())
+                }
+                _ => Err(Flow::Abort("internal: map-insert on non-Map".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: map-insert to unbound map".into()))?
     }
 
     fn exec_stmt_field_assign(
@@ -371,21 +388,20 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => v,
             other => return Err(other),
         };
-        let cur = scope
-            .get(target)
-            .ok_or_else(|| Flow::Abort("internal: field-assign to unbound record".into()))?;
-        match cur {
-            Value::Record { name, fields } => {
-                let mut new = (*fields).clone();
-                if let Some(slot) = new.iter_mut().find(|(k, _)| *k == field) {
-                    slot.1 = vv;
-                } else {
-                    new.push((field, vv));
+        // Slot mutation, not get → assign: see exec_stmt_index_assign.
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::Record { fields, .. } => {
+                    let fields = Rc::make_mut(fields);
+                    if let Some(slot) = fields.iter_mut().find(|(k, _)| *k == field) {
+                        slot.1 = vv;
+                    } else {
+                        fields.push((field, vv));
+                    }
+                    Ok(())
                 }
-                scope.assign(target, Value::Record { name, fields: Rc::new(new) });
-                Ok(())
-            }
-            _ => Err(Flow::Abort("internal: field-assign on non-Record".into())),
-        }
+                _ => Err(Flow::Abort("internal: field-assign on non-Record".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: field-assign to unbound record".into()))?
     }
 }

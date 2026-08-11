@@ -63,6 +63,27 @@ result.context 却下(ADR-0004 Alternatives 7)と同型の「イディオムの�
 判定条件の反転(`is_empty` の if 分岐逆転)は型で捕まらないことを確認済み —
 これが将来の証拠候補。
 
+### D4(2026-08-07 追記): option 側は現状維持を正式決定
+
+`result.collect` を殺した理由は「Rust の最強事前分布と**真逆**の意味」であって
+"collect" という語そのものではない。option 側は測って裏切っていないので、同じ理由では
+殺せない — よって以下を正式決定とし、#1135 クラスタ4 を閉じる:
+
+- **`option.collect` / `option.collect_map` は残す**。`[some(1), none, some(3)]` は
+  first-none で打ち切って `none` を返す = Rust の `Option` collect と一致。名前と意味が
+  合っている綴りを、対称性のためだけに消す理由はない(D1 の根拠は「名前が嘘」であり
+  「名前が同じ」ではない)。
+- **`option.to_result` の E は String 固定のまま**。汎用 `ok_or`(E 多相)は入れない —
+  ADR-0002 D2(E は String 固定)と ADR-0004(カスタム E は明示 `Result[T, MyError]` で
+  綴る)の一貫適用。カスタム E が要る場所は `match o { some(v) => ok(v), none => err(MyErr(..)) }`
+  と書く。
+- 結果として first-err/all-errs の「命名規約」は**規約を作らない**という決着になる:
+  各関数は自分の意味に正直な名前を持ち、`result` 側の all-errs は `partition`(実体)、
+  first-err は可謬多相 `list.map(xs, (x) => f(x)!)!`(ADR-0006)が担う。
+
+反証条件: option.collect の first-none 打ち切りを all-none 収集と誤読した実例、または
+汎用 `ok_or` の不在が明示 match で回避できなかった実例が Dojo MSR で計測されたら再考。
+
 ## Rationale
 
 - **事前分布と真逆の名前は毎回税金を取る**: 型差(List[E] vs E)で誤用は check に

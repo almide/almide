@@ -2,7 +2,7 @@
 <!-- done: 2026-06-02 -->
 # Closure Codegen Cross-Target Gaps
 
-> Beyond [Closure Architecture v2](closure-architecture-v2.md) (capture *cells*),
+> Beyond [Closure Architecture v2](../active/closure-architecture-v2.md) (capture *cells*),
 > a second adversarial cross-target differential sweep (re-run of the saved
 > `p6-cross-target-sweep` workflow: machine-generate diverse closure programs,
 > diff `almide run` vs `wasmtime`, completeness critic) found a batch of

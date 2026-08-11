@@ -1,7 +1,6 @@
 // int16_convert — SELF-HOSTED int16.to_* sized conversions for v1: `int.to_<dst>(int.from_int16(x))`
 // unrolled to two `let`s (no call-as-arg), byte-matching v0's int16.almd. Cross-file callees, pure
 // scalar. `to_string` routes through signed int.to_string.
-
 fn int16_to_string(x: Int16) -> String = {
   let i = int.from_int16(x)
   int.to_string(i)
@@ -53,7 +52,7 @@ fn int16_to_float64(x: Int16) -> Float64 = {
 }
 
 // Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
-fn int16_to_int8_checked(x: Int16) -> Option[Int8] = {
+fn int16_to_int8_checked(x: Int16) -> Int8? = {
   let i = int.from_int16(x)
   int.to_int8_checked(i)
 }
@@ -63,7 +62,7 @@ fn int16_to_int8_saturating(x: Int16) -> Int8 = {
   int.to_int8_saturating(i)
 }
 
-fn int16_to_uint8_checked(x: Int16) -> Option[UInt8] = {
+fn int16_to_uint8_checked(x: Int16) -> UInt8? = {
   let i = int.from_int16(x)
   int.to_uint8_checked(i)
 }
@@ -73,7 +72,7 @@ fn int16_to_uint8_saturating(x: Int16) -> UInt8 = {
   int.to_uint8_saturating(i)
 }
 
-fn int16_to_uint16_checked(x: Int16) -> Option[UInt16] = {
+fn int16_to_uint16_checked(x: Int16) -> UInt16? = {
   let i = int.from_int16(x)
   int.to_uint16_checked(i)
 }
@@ -83,7 +82,7 @@ fn int16_to_uint16_saturating(x: Int16) -> UInt16 = {
   int.to_uint16_saturating(i)
 }
 
-fn int16_to_uint32_checked(x: Int16) -> Option[UInt32] = {
+fn int16_to_uint32_checked(x: Int16) -> UInt32? = {
   let i = int.from_int16(x)
   int.to_uint32_checked(i)
 }
@@ -93,7 +92,7 @@ fn int16_to_uint32_saturating(x: Int16) -> UInt32 = {
   int.to_uint32_saturating(i)
 }
 
-fn int16_to_uint64_checked(x: Int16) -> Option[UInt64] = {
+fn int16_to_uint64_checked(x: Int16) -> UInt64? = {
   let i = int.from_int16(x)
   int.to_uint64_checked(i)
 }
@@ -102,4 +101,3 @@ fn int16_to_uint64_saturating(x: Int16) -> UInt64 = {
   let i = int.from_int16(x)
   int.to_uint64_saturating(i)
 }
-

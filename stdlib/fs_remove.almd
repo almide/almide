@@ -1,0 +1,42 @@
+// fs_remove — SELF-HOSTED `fs.remove(path)` composed over the WASI floors:
+// native removes ONE entry (`remove_dir` for a directory — failing when it is
+// non-empty — `remove_file` otherwise). The recursive floor prim.remove_all
+// would happily delete a populated tree, so a directory is first checked
+// empty through prim.read_dir; only then (or for a file / missing path, where
+// the floor errs exactly like remove_file) does the removal run. The err
+// message for a non-empty directory is this leg's own wording — err MESSAGES
+// are already per-leg in this family (io_err vs the WASI wording); fixtures
+// pin the ok/err CLASS. Reaching read_dir carries Capability::FsRead and
+// remove_all Capability::FsWrite.
+fn __rm_ftype(path: String) -> Int = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat(p, path)
+  if errno != 0 then 0
+  else prim.load8(p + 16)
+}
+
+fn __rm_floor(path: String) -> Result[Unit, String] = {
+  let r: Result[Unit, String] = prim.remove_all(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else ok(())
+}
+
+effect fn fs_remove(path: String) -> Result[Unit, String] = {
+  let t = __rm_ftype(path)
+  if t == 3 then {
+    let r: Result[List[String], String] = prim.read_dir(path)
+    let rh = prim.handle(r)
+    if prim.load32(rh + 16) != 0 then {
+      let m: String = prim.load_handle(rh + 12)
+      err(m)
+    } else {
+      let entries: List[String] = prim.load_handle(rh + 12)
+      if list.len(entries) > 0 then err("directory not empty: " + path)
+      else __rm_floor(path)
+    }
+  } else __rm_floor(path)
+}

@@ -506,37 +506,153 @@ fn count_expr_nodes(e: &IrExpr) -> usize {
 /// One branch-desugar PASS: rewrite the body (or return `None` = not mine).
 type BranchPass = fn(&IrExpr, &mut u32, &crate::lower::VariantLayouts) -> Option<IrExpr>;
 
+/// The node-kind evidence a row needs before it can possibly fire in the
+/// OWNED region of the current fixpoint subtree (the region excludes the
+/// fully-fixpointed child positions — If arms, Match arm bodies, Block tail —
+/// which compute their own triggers when their fixpoint runs; see
+/// `for_each_owned_region`). A cleared trigger PROVES the row declines, so
+/// the fixpoint skips the row's own clone+walk entirely. Deep rows used to
+/// re-walk the whole subtree at every recursion level, which is what kept a
+/// deep continuation chain quadratic after the nested-arms skip (#1220).
+/// The trigger sits NEXT TO its row so a new row cannot silently inherit the
+/// wrong gate. When in doubt use `Always`.
+#[derive(Clone, Copy, PartialEq)]
+enum RowTrigger {
+    Always,
+    /// `IrExprKind::MapLiteral` present (`desugar_map_literal` anchors there).
+    MapLiteral,
+    /// A `fan` module call present (`desugar_fan_race_any` anchors at
+    /// `Call{Module fan.race|any}`).
+    FanCall,
+    /// Any `Match` present (`desugar_grouped_variant_match` fires only on
+    /// Match nodes; its exact per-arm probe runs second).
+    AnyMatch,
+    /// A `Match` with tuple evidence — subject typed `Ty::Tuple`, a literal
+    /// `Tuple` subject, or a `Tuple` arm pattern (the three tuple-match rows'
+    /// anchors; set on ANY of the three so no row can be under-gated).
+    TupleMatch,
+    /// `IrExprKind::StringInterp` present
+    /// (`desugar_interp_literal_aggregate_hoist` hoists interp parts).
+    StringInterp,
+}
+
+/// The trigger evidence found in one owned region.
+#[derive(Default, Clone, Copy)]
+struct RegionTriggers {
+    map_literal: bool,
+    fan_call: bool,
+    any_match: bool,
+    tuple_match: bool,
+    string_interp: bool,
+}
+
+impl RegionTriggers {
+    fn allows(&self, t: RowTrigger) -> bool {
+        match t {
+            RowTrigger::Always => true,
+            RowTrigger::MapLiteral => self.map_literal,
+            RowTrigger::FanCall => self.fan_call,
+            RowTrigger::AnyMatch => self.any_match,
+            RowTrigger::TupleMatch => self.tuple_match,
+            RowTrigger::StringInterp => self.string_interp,
+        }
+    }
+    fn saturated(&self) -> bool {
+        self.map_literal && self.fan_call && self.any_match && self.tuple_match && self.string_interp
+    }
+}
+
+/// Scan the owned region of `root` for row triggers (one walk, shared by
+/// every gated row of this fixpoint iteration).
+fn region_triggers(root: &IrExpr) -> RegionTriggers {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct T(RegionTriggers);
+    impl IrVisitor for T {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.0.saturated() {
+                return;
+            }
+            match &e.kind {
+                IrExprKind::MapLiteral { .. } => self.0.map_literal = true,
+                IrExprKind::Call { target: CallTarget::Module { module, .. }, .. }
+                    if module.as_str() == "fan" =>
+                {
+                    self.0.fan_call = true;
+                }
+                IrExprKind::StringInterp { .. } => self.0.string_interp = true,
+                IrExprKind::Match { subject, arms } => {
+                    self.0.any_match = true;
+                    let tuple_subject = matches!(subject.ty, almide_lang::types::Ty::Tuple(_))
+                        || matches!(subject.kind, IrExprKind::Tuple { .. });
+                    if tuple_subject
+                        || arms.iter().any(|a| matches!(a.pattern, almide_ir::IrPattern::Tuple { .. }))
+                    {
+                        self.0.tuple_match = true;
+                    }
+                }
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut t = T(RegionTriggers::default());
+    for_each_owned_region(root, &mut |e| t.visit_expr(e));
+    // The root node itself is not part of any owned sub-region, but rows may
+    // fire ON it (e.g. a root Match): account for its own kind.
+    match &root.kind {
+        IrExprKind::Match { subject, arms } => {
+            t.0.any_match = true;
+            if matches!(subject.ty, almide_lang::types::Ty::Tuple(_))
+                || matches!(subject.kind, IrExprKind::Tuple { .. })
+                || arms.iter().any(|a| matches!(a.pattern, almide_ir::IrPattern::Tuple { .. }))
+            {
+                t.0.tuple_match = true;
+            }
+        }
+        IrExprKind::MapLiteral { .. } => t.0.map_literal = true,
+        IrExprKind::StringInterp { .. } => t.0.string_interp = true,
+        IrExprKind::Call { target: CallTarget::Module { module, .. }, .. }
+            if module.as_str() == "fan" =>
+        {
+            t.0.fan_call = true;
+        }
+        _ => {}
+    }
+    t.0
+}
+
 /// The branch-desugar pass PIPELINE, applied to a fixpoint in order — the
 /// order is load-bearing (each row's comment says why it sits where it
-/// does). Adding a pass is adding a row.
-const BRANCH_PASSES: &[BranchPass] = &[
+/// does). Adding a pass is adding a row (trigger first, `Always` when in
+/// doubt).
+const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // FIRST: hoist a non-pure (call) match subject to a single eval, so the literal-arm chain
     // dispatches on a cheap Var instead of duplicating the call per arm — a correctness fix
     // (single eval) and the alignment that keeps `mir <= ir` for a resolved cross-module/self-pkg
     // call subject. Runs before the call-arg lifts so they see the hoisted (Var-subject) form.
-    |src, next_var, _| desugar_match_subject_hoist(src, next_var),
+    (RowTrigger::Always, |src, next_var, _| desugar_match_subject_hoist(src, next_var)),
     // Route a non-empty map literal through `map.from_list` so it materializes a real map (else a
     // deferred-Opaque empty block silently miscompiles every subsequent map op).
-    |src, _, _| desugar_map_literal(src),
+    (RowTrigger::MapLiteral, |src, _, _| desugar_map_literal(src)),
     // Inline a `fan.race`/`fan.any` over a literal thunk list (avoids an unrepresentable
     // List[funcref]) into a plain match-over-a-call chain.
-    |src, next_var, _| desugar_fan_race_any(src, next_var),
+    (RowTrigger::FanCall, |src, next_var, _| desugar_fan_race_any(src, next_var)),
     // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
     // the guarded-variant case reduces to the two already-proven pieces.
-    |src, next_var, layouts| desugar_grouped_variant_match(src, next_var, layouts),
+    (RowTrigger::AnyMatch, |src, next_var, layouts| desugar_grouped_variant_match(src, next_var, layouts)),
     // Hoist a LITERAL record/tuple interpolation part (`"${(1, \"x\", true)}"`) to a
     // temp binding so the part becomes a materialized Var the EXPAND display folds
     // (a literal part is never a tracked block, so it fell to the unlinked
     // `compound.to_string` wall).
-    |src, next_var, _| desugar_interp_literal_aggregate_hoist(src, next_var),
+    (RowTrigger::StringInterp, |src, next_var, _| desugar_interp_literal_aggregate_hoist(src, next_var)),
     // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
     // tuple sub-match a multi-field variant regroup produces).
-    |src, _, _| desugar_tuple_match(src),
-    |src, _, _| desugar_if_arm_unwrap(src),
-    |src, _, _| desugar_flatten_let_block(src),
-    |src, _, _| desugar_inline_tail_accumulator(src),
-    |src, next_var, _| desugar_callarg_heap_if(src, next_var),
-    |src, next_var, _| desugar_callarg_unwrap(src, next_var),
+    (RowTrigger::TupleMatch, |src, _, _| desugar_tuple_match(src)),
+    (RowTrigger::Always, |src, _, _| desugar_if_arm_unwrap(src)),
+    (RowTrigger::Always, |src, _, _| desugar_flatten_let_block(src)),
+    (RowTrigger::Always, |src, _, _| desugar_inline_tail_accumulator(src)),
+    (RowTrigger::Always, |src, next_var, _| desugar_callarg_heap_if(src, next_var)),
+    (RowTrigger::Always, |src, next_var, _| desugar_callarg_unwrap(src, next_var)),
     // Compile a tuple-of-VARIANTS match while it is still a VALUE match (binder-free
     // literal arms) — AFTER the call-arg lift above has pulled it out of an argument
     // position (`println(match (Red, Green) {…})` → `let tmp = match …; println(tmp)`,
@@ -544,33 +660,38 @@ const BRANCH_PASSES: &[BranchPass] = &[
     // `let tmp = …; <rest>` continuations into its arms (duplicated binder-carrying
     // bodies the column compilers must decline). Both also run in the outer chains
     // (idempotent there).
-    |src, _, _| desugar_tuple_variant_match(src),
-    |src, _, layouts| desugar_tuple_variant_match_deep(src, layouts),
-    |src, _, _| desugar_let_bound_heap_branch(src),
+    (RowTrigger::TupleMatch, |src, _, _| desugar_tuple_variant_match(src)),
+    (RowTrigger::TupleMatch, |src, _, layouts| desugar_tuple_variant_match_deep(src, layouts)),
+    (RowTrigger::Always, |src, _, _| desugar_let_bound_heap_branch(src)),
     // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
     // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
     // bare tail-call arms instead of a heap-Option continuation match.
-    |src, _, _| desugar_unwrap_rewrap_identity(src),
-    |src, _, _| desugar_let_unwrap(src),
+    (RowTrigger::Always, |src, _, _| desugar_unwrap_rewrap_identity(src)),
+    (RowTrigger::Always, |src, _, _| desugar_let_unwrap(src)),
     // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
     // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
     // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
-    |src, _, _| desugar_flatten_empty_block(src),
+    (RowTrigger::Always, |src, _, _| desugar_flatten_empty_block(src)),
+    // #1183: hoist an expression-NESTED scalar `!` out of a Bind/Assign value to its own
+    // bind-position stmt (`out = out + [conv(s)!]` → `let $t = conv(s)!; out = out + [$t]`),
+    // so the proven bind-position machinery — including the loop flag rewrite right below —
+    // handles it instead of the tag-blind scalar-operand payload read.
+    (RowTrigger::Always, |src, next_var, _| desugar_stmt_value_nested_unwrap(src, next_var)),
     // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
     // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
-    |src, next_var, _| desugar_loop_unwrap(src, next_var),
+    (RowTrigger::Always, |src, next_var, _| desugar_loop_unwrap(src, next_var)),
     // `break` inside a `for`/`while` body → the `__bk` flag form (whole-arm breaks only;
     // see `desugar_loop_break`). Runs in this SHARED desugar (count-invariant flag ops).
-    |src, next_var, _| desugar_loop_break(src, next_var),
+    (RowTrigger::Always, |src, next_var, _| desugar_loop_break(src, next_var)),
     // A UNIT `if` conditionally reassigning ONE heap var → SSA-ify to a let-bound
     // value-`if` (the lp5 wrong-value class; see `desugar_unit_if_heap_reassign`).
-    |src, next_var, _| desugar_unit_if_heap_reassign(src, next_var),
+    (RowTrigger::Always, |src, next_var, _| desugar_unit_if_heap_reassign(src, next_var)),
     // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
     // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
     // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
     // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
-    |src, _, layouts| desugar_stmt_control_unwrap(src, layouts),
-    |src, next_var, layouts| desugar_nested_branch_arms(src, next_var, layouts),
+    (RowTrigger::Always, |src, _, layouts| desugar_stmt_control_unwrap(src, layouts)),
+    (RowTrigger::Always, |src, next_var, layouts| desugar_nested_branch_arms(src, next_var, layouts)),
 ];
 
 fn desugar_heap_branches_inner(
@@ -579,11 +700,31 @@ fn desugar_heap_branches_inner(
     layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     let mut cur: Option<IrExpr> = None;
+    // When the LAST row (`desugar_nested_branch_arms`) was the pass that just
+    // fired, every arm it rewrote is already at its own fixpoint. If the next
+    // iteration then gets through every OTHER pass with no fire, the tree is
+    // bit-identical to what that normalization produced, so re-running the
+    // nested-arms descent would deterministically decline (each pass fires on
+    // shape alone; `next_var` only mints ids on a fire). Skipping that final
+    // verify-descent is therefore exact — and it is what breaks the
+    // re-verification cascade down a deeply nested continuation chain (a
+    // 200-`!` effect fn cost 135 s / ~O(n³) from descents that could never
+    // fire again).
+    let nested_arms_row = BRANCH_PASSES.len() - 1;
+    let mut arms_normalized = false;
     'fixpoint: loop {
         let src = cur.as_ref().unwrap_or(body);
-        for pass in BRANCH_PASSES {
+        // One owned-region scan licenses (or skips) every gated row of this
+        // iteration; the tree is fresh per iteration, so recompute.
+        let triggers = region_triggers(src);
+        let rows = if arms_normalized { &BRANCH_PASSES[..nested_arms_row] } else { BRANCH_PASSES };
+        for (i, (trigger, pass)) in rows.iter().enumerate() {
+            if !triggers.allows(*trigger) {
+                continue;
+            }
             if let Some(r) = pass(src, next_var, layouts) {
                 cur = Some(r);
+                arms_normalized = i == nested_arms_row;
                 continue 'fixpoint;
             }
         }

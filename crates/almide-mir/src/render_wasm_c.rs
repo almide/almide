@@ -8,6 +8,7 @@ fn float_un_name(op: FUnOp) -> &'static str {
         FUnOp::Floor => "floor",
         FUnOp::Ceil => "ceil",
         FUnOp::Neg => "neg",
+        FUnOp::Nearest => "nearest",
     }
 }
 
@@ -210,6 +211,7 @@ fn prim_result_is_ptr(kind: &PrimKind) -> bool {
             | PrimKind::WriteTextFile
             | PrimKind::MakeDir
             | PrimKind::RemoveAll
+            | PrimKind::Rename
     )
 }
 

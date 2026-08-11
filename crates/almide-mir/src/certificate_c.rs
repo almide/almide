@@ -57,60 +57,25 @@ fn call_modes_witness_sites(
     is_known_convention: &dyn Fn(&str) -> bool,
     func_table: (&[&str], bool),
 ) -> Vec<String> {
-    let (table_targets, table_unseeable) = func_table;
     let mut sites: Vec<String> = Vec::new();
     for name in names {
         for op in &program[*name].ops {
             match op {
                 Op::CallFn { name: callee, args, .. } => {
-                    let idx = match index_of.get(callee.as_str()) {
-                        Some(&i) => i,
-                        None if is_known_convention(callee) => continue, // renderer-contract callee
-                        None => unknown, // unknown callee — the checker rejects the site
+                    let Some(idx) = direct_callee_index(callee, index_of, unknown, is_known_convention)
+                    else {
+                        continue; // renderer-contract callee — no row
                     };
-                    let mut site = vec![idx.to_string()];
-                    site.extend(args.iter().filter_map(|a| match a {
-                        CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
-                        CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
-                    }));
-                    sites.push(site.join(" "));
+                    sites.push(site_row(idx, &borrow_modes(args)));
                 }
                 Op::CallIndirect { args, .. } => {
-                    let actual: Vec<String> = args
-                        .iter()
-                        .filter_map(|a| match a {
-                            CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
-                            CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
-                        })
-                        .collect();
-                    // Possible callees: table targets whose param shape matches the
-                    // site (any other target traps at dispatch — excluded soundly).
-                    let possible: Vec<usize> = if table_unseeable {
-                        Vec::new()
-                    } else {
-                        table_targets
-                            .iter()
-                            .filter(|t| {
-                                let f = &program[**t];
-                                f.params.len() == args.len()
-                                    && f.params.iter().zip(args).all(|(p, a)| {
-                                        p.repr.is_heap() == matches!(a, CallArg::Handle(_))
-                                    })
-                            })
-                            .filter_map(|t| index_of.get(*t).copied())
-                            .collect()
-                    };
+                    let actual = borrow_modes(args);
+                    let possible = indirect_callee_indices(program, index_of, args, func_table);
                     if possible.is_empty() {
                         // Unknowable dispatch — the sentinel row rejects the build.
-                        let mut site = vec![unknown.to_string()];
-                        site.extend(actual.iter().cloned());
-                        sites.push(site.join(" "));
+                        sites.push(site_row(unknown, &actual));
                     } else {
-                        for idx in possible {
-                            let mut site = vec![idx.to_string()];
-                            site.extend(actual.iter().cloned());
-                            sites.push(site.join(" "));
-                        }
+                        sites.extend(possible.into_iter().map(|idx| site_row(idx, &actual)));
                     }
                 }
                 _ => {}
@@ -118,6 +83,70 @@ fn call_modes_witness_sites(
         }
     }
     sites
+}
+
+/// One witness row: the callee index, then one mode token per heap arg.
+fn site_row(idx: usize, modes: &[String]) -> String {
+    let mut site = vec![idx.to_string()];
+    site.extend(modes.iter().cloned());
+    site.join(" ")
+}
+
+/// The MODE tokens a call site declares: only a heap `Handle` arg carries one
+/// (a scalar/immediate/label has no ownership mode).
+fn borrow_modes(args: &[CallArg]) -> Vec<String> {
+    args.iter()
+        .filter_map(|a| match a {
+            CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
+            CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
+        })
+        .collect()
+}
+
+/// A direct callee's index: its position when the program declares it, the
+/// `unknown` sentinel when it does not (the checker rejects that site), or
+/// `None` for a renderer-contract callee, which gets no row at all.
+fn direct_callee_index(
+    callee: &str,
+    index_of: &BTreeMap<&str, usize>,
+    unknown: usize,
+    is_known_convention: &dyn Fn(&str) -> bool,
+) -> Option<usize> {
+    match index_of.get(callee) {
+        Some(&i) => Some(i),
+        None if is_known_convention(callee) => None,
+        None => Some(unknown),
+    }
+}
+
+/// The possible callees of an indirect site: table targets whose PARAM SHAPE
+/// matches the site (any other target traps at dispatch, so excluding it is
+/// sound). An unseeable table yields none, which the caller turns into the
+/// sentinel row.
+fn indirect_callee_indices(
+    program: &BTreeMap<String, MirFunction>,
+    index_of: &BTreeMap<&str, usize>,
+    args: &[CallArg],
+    func_table: (&[&str], bool),
+) -> Vec<usize> {
+    let (table_targets, table_unseeable) = func_table;
+    if table_unseeable {
+        return Vec::new();
+    }
+    table_targets
+        .iter()
+        .filter(|t| shape_matches(&program[**t], args))
+        .filter_map(|t| index_of.get(*t).copied())
+        .collect()
+}
+
+/// Does `f`'s signature accept this arg list — same arity, same heap-ness per slot?
+fn shape_matches(f: &MirFunction, args: &[CallArg]) -> bool {
+    f.params.len() == args.len()
+        && f.params
+            .iter()
+            .zip(args)
+            .all(|(p, a)| p.repr.is_heap() == matches!(a, CallArg::Handle(_)))
 }
 
 #[cfg(test)]

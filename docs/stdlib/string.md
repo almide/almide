@@ -356,11 +356,12 @@ string.drop_end("hello", 2) // => "hel"
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (48 functions)
+## Signature index (49 functions)
 
 ```
 string.trim(s: String) -> String
 string.split(s: String, sep: String) -> List[String]
+string.split_once(s: String, sep: String) -> Option[()]
 string.join(list: List[String], sep: String) -> String
 string.len(s: String) -> Int
 string.length(s: String) -> Int

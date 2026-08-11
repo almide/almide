@@ -1193,7 +1193,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 17. Standard Library
 
-962 functions across 41 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+959 functions across 41 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
 ### 17.1 Auto-Imported Modules
 
@@ -1350,7 +1350,7 @@ Templates are defined in TOML files (`codegen/templates/*.toml`), separating syn
 |---------|------|------|
 | `Result[T, E]` | `Result<T, String>` | Tag-based (0=Ok, 1=Err) |
 | `Option[T]` | `Option<T>` | Tag-based (0=None, 1=Some) |
-| `effect fn` | returns `Result<T, String>`, auto `?` | Tag check + early return |
+| `effect fn` | returns `Result<T, String>`; `expr!` lowers to `?` | Tag check + early return |
 | `==` / `!=` | `almide_eq!` macro (deep) | Byte comparison |
 | `+` on String | `format!` / owned concat | `string_concat` runtime |
 | `+` on List | `[...a, ...b]` | `list_concat` runtime |

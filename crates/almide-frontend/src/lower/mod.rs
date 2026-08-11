@@ -262,8 +262,67 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     let annotated_result_vars = std::mem::take(&mut ctx.annotated_result_vars);
     let mut program = build_ir_program(ctx, functions, top_lets, type_decls, env);
     finalize_ir_program(&mut program, env, &annotated_result_vars);
+    normalize_effect_fn_types(&mut program);
 
     program
+}
+
+/// #1055: rewrite every `effect (A) -> B` fn TYPE in the IR to its runtime
+/// carrier `(A) -> Result[B, String]`. The checker keeps the effect form for
+/// its diagnostics; downstream (v0 codegen, the v1 renders, almide-interp)
+/// then see EXACTLY the shape the landed D3 fallible-slot machinery already
+/// handles — no backend learns a new type. Recursive, so a nested effect fn
+/// type inside a container or another fn type normalizes too.
+fn normalize_effect_fn_types(program: &mut IrProgram) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+
+    fn norm(ty: &Ty) -> Ty {
+        let mapped = ty.map_children(&mut |c: &Ty| norm(c));
+        match mapped {
+            Ty::Fn { params, ret, is_effect: true } => Ty::Fn {
+                params,
+                ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![*ret, Ty::String])),
+                is_effect: false,
+            },
+            other => other,
+        }
+    }
+
+    fn has_effect_fn(ty: &Ty) -> bool {
+        if let Ty::Fn { is_effect: true, .. } = ty {
+            return true;
+        }
+        ty.children().into_iter().any(has_effect_fn)
+    }
+
+    struct Norm;
+    impl IrMutVisitor for Norm {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            if has_effect_fn(&expr.ty) {
+                expr.ty = norm(&expr.ty);
+            }
+            walk_expr_mut(self, expr);
+        }
+    }
+
+    let mut v = Norm;
+    for f in program.functions.iter_mut().chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut())) {
+        for p in f.params.iter_mut() {
+            if has_effect_fn(&p.ty) {
+                p.ty = norm(&p.ty);
+            }
+        }
+        if has_effect_fn(&f.ret_ty) {
+            f.ret_ty = norm(&f.ret_ty);
+        }
+        v.visit_expr_mut(&mut f.body);
+    }
+    for entry in program.var_table.entries.iter_mut() {
+        if has_effect_fn(&entry.ty) {
+            entry.ty = norm(&entry.ty);
+        }
+    }
 }
 
 // Register cross-package top-level lets that weren't in register_decls
@@ -368,11 +427,20 @@ fn lower_decls(
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
 
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
+            ast::Decl::Fn { name, params, body: Some(body), effect, span, generics, extern_attrs, export_attrs, attrs, visibility, return_type, .. } => {
                 let mut f = lower_fn(ctx, &FnToLower {
                     name, params, body: body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
+                // ADR-0002 Phase 1b (#1103): a `-> T!` fn's VALUE tail lifts
+                // into ok(...) — the same ergonomics an effect fn's lifted
+                // body has. Done HERE, before the IR splits to the three
+                // consumers (codegen / mir / interp), so one wrap serves all.
+                // Result-typed exits (Phase 1a's pass-through / ok / err
+                // bodies) are left untouched — the wrap is type-driven.
+                if matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!") {
+                    f.body = wrap_fallible_value_tail(f.body);
+                }
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
                 functions.push(f);
@@ -518,3 +586,68 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
 
 include!("module_lowering.rs");
 include!("test_lowering.rs");
+
+/// ADR-0002 Phase 1b (#1103): lift a `-> T!` fn's VALUE exits into `ok(...)`.
+/// Type-driven, mirroring codegen's `wrap_tail_in_ok` discipline: an exit
+/// whose IR type is already Result (Phase 1a's pass-through / `ok` / `err`
+/// bodies, a call to a Result-returning fn) passes through untouched; a
+/// T-typed exit wraps in `ResultOk` at `Result[T, String]`. Runs in the
+/// FRONTEND lowering so all three IR consumers (codegen, mir, interp) see
+/// the same lifted body.
+pub(crate) fn wrap_fallible_value_tail(body: IrExpr) -> IrExpr {
+    let ty = body.ty.clone();
+    let span = body.span.clone();
+    match body.kind {
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            let stmts = stmts
+                .into_iter()
+                .map(|stmt| {
+                    let sspan = stmt.span.clone();
+                    match stmt.kind {
+                        IrStmtKind::Guard { cond, else_ } if !else_.ty.is_result() => IrStmt {
+                            kind: IrStmtKind::Guard { cond, else_: wrap_fallible_value_tail(else_) },
+                            span: sspan,
+                        },
+                        other => IrStmt { kind: other, span: sspan },
+                    }
+                })
+                .collect();
+            let wrapped = wrap_fallible_value_tail(*tail);
+            let wty = wrapped.ty.clone();
+            IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) }, ty: wty, span, def_id: None }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            let then = Box::new(wrap_fallible_value_tail(*then));
+            let else_ = Box::new(wrap_fallible_value_tail(*else_));
+            let wty = then.ty.clone();
+            IrExpr { kind: IrExprKind::If { cond, then, else_ }, ty: wty, span, def_id: None }
+        }
+        IrExprKind::Match { subject, arms } => {
+            let arms: Vec<IrMatchArm> = arms
+                .into_iter()
+                .map(|arm| IrMatchArm {
+                    pattern: arm.pattern,
+                    guard: arm.guard,
+                    body: wrap_fallible_value_tail(arm.body),
+                })
+                .collect();
+            let wty = arms
+                .first()
+                .map(|a| a.body.ty.clone())
+                .unwrap_or_else(|| Ty::result(ty, Ty::String));
+            IrExpr { kind: IrExprKind::Match { subject, arms }, ty: wty, span, def_id: None }
+        }
+        // Already Result — Phase 1a's forms stay untouched.
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => body,
+        _ if ty.is_result() => body,
+        _ => {
+            let result_ty = Ty::result(ty.clone(), Ty::String);
+            IrExpr {
+                kind: IrExprKind::ResultOk { expr: Box::new(IrExpr { kind: body.kind, ty, span: span.clone(), def_id: None }) },
+                ty: result_ty,
+                span,
+                def_id: None,
+            }
+        }
+    }
+}

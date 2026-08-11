@@ -1,6 +1,5 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 108
 expression: text
 ---
 # @stdlib/string
@@ -41,6 +40,7 @@ fn string.reverse(s: String) -> String
 fn string.run_length_encode(s: String) -> List[(String, Int)]
 fn string.slice(s: String, start: Int, end: Int) -> String
 fn string.split(s: String, sep: String) -> List[String]
+fn string.split_once(s: String, sep: String) -> Option[(String, String)]
 fn string.starts_with(s: String, prefix: String) -> Bool
 fn string.strip_prefix(s: String, prefix: String) -> Option[String]
 fn string.strip_suffix(s: String, suffix: String) -> Option[String]
@@ -54,13 +54,13 @@ fn string.trim_end(s: String) -> String
 fn string.trim_start(s: String) -> String
 
 # @stdlib/list
-fn list.__try_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E]
-fn list.__try_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
-fn list.__try_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E]
-fn list.__try_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
-fn list.__try_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E]
-fn list.__try_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
-fn list.__try_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E]
+fn list.__fallible_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E]
+fn list.__fallible_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
+fn list.__fallible_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E]
+fn list.__fallible_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
+fn list.__fallible_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E]
+fn list.__fallible_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
+fn list.__fallible_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E]
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
@@ -257,6 +257,7 @@ fn map.new[K, V]() -> Map[K, V]
 fn map.remove[K, V](m: Map[K, V], key: K) -> Map[K, V]
 fn map.set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V]
 fn map.update[K, V](m: Map[K, V], key: K, f: fn(V) -> V) -> Map[K, V]
+fn map.upsert[K, V](m: Map[K, V], key: K, init: V, f: fn(V) -> V) -> Map[K, V]
 fn map.values[K, V](m: Map[K, V]) -> List[V]
 
 # @stdlib/set

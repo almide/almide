@@ -194,6 +194,7 @@ fn build_identity_lambda(elem_ty: Ty, vt: &mut VarTable) -> IrExpr {
         ty: Ty::Fn {
             params: vec![elem_ty.clone()],
             ret: Box::new(elem_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     }
@@ -232,6 +233,7 @@ fn compose_lambdas_fresh(
         ty: Ty::Fn {
             params: vec![f_param_ty],
             ret: Box::new(ret_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -277,6 +279,7 @@ fn compose_predicates_fresh(
         ty: Ty::Fn {
             params: vec![p_param_ty],
             ret: Box::new(Ty::Bool),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -311,15 +314,58 @@ fn binary_lambda_parts(
 /// so that existing variable names (`acc`, `x`, …) round-trip
 /// through codegen. Substitutes `g`'s elem param with `f`'s body
 /// (re-written to use `f_param_id`). `f` is unary, `g` is binary.
+/// Give `elem` a name distinct from `acc`, renaming it in `body` if they clash.
+///
+/// The two-binder composition rules (`map`-into-`fold`, `filter_map`-into-
+/// `fold`) put params from TWO independently lowered lambdas into ONE binder
+/// list — the only place in this file where that happens, and therefore the
+/// only place their NAMES can collide. Eta-expanding a bare fn argument names
+/// every param `_fn_arg<i>` counting from zero
+/// (`almide-frontend/src/lower/expressions_access.rs`), so
+///
+/// ```text
+/// xs |> list.map(double) |> list.filter(is_positive) |> list.fold(0, sum_pair)
+/// ```
+///
+/// hands a rule two lambdas whose params are both `_fn_arg0`, and the emitted
+/// closure was `move |_fn_arg0: i64, _fn_arg0: i64|` — rustc E0415, so the
+/// whole program failed to build
+/// (`spec/regression/monkey23_higher_order_test.almd`).
+///
+/// Distinct VarIds are NOT enough: the Rust backend prints parameters by NAME,
+/// so distinctness has to hold at the name level too. Both rules route through
+/// here so a future third one cannot fix only its own half.
+fn distinct_elem_binder(
+    acc_id: VarId,
+    elem_id: VarId,
+    elem_ty: &Ty,
+    body: &IrExpr,
+    vt: &mut VarTable,
+) -> (VarId, IrExpr) {
+    if vt.get(elem_id).name != vt.get(acc_id).name {
+        return (elem_id, body.clone());
+    }
+    let fresh = vt.alloc(fresh_sym(vt), elem_ty.clone(), Mutability::Let, None);
+    let fresh_ref = IrExpr {
+        kind: IrExprKind::Var { id: fresh },
+        ty: elem_ty.clone(),
+        span: None,
+        def_id: None,
+    };
+    (fresh, substitute_var_in_expr(body, elem_id, &fresh_ref))
+}
+
 fn compose_map_into_fold_fresh(
     f: &IrExpr,
     g: &IrExpr,
-    _vt: &mut VarTable,
+    vt: &mut VarTable,
 ) -> Result<IrExpr, LowerError> {
     let (f_param_id, f_param_ty, f_body) = unary_lambda_parts(f)?;
     let (g_acc_id, g_acc_ty, g_elem_id, _g_elem_ty, g_body) = binary_lambda_parts(g)?;
 
-    let composed_body = substitute_var_in_expr(g_body, g_elem_id, f_body);
+    let (f_param_id, f_body) =
+        distinct_elem_binder(g_acc_id, f_param_id, &f_param_ty, f_body, vt);
+    let composed_body = substitute_var_in_expr(g_body, g_elem_id, &f_body);
     let ret_ty = composed_body.ty.clone();
     Ok(IrExpr {
         kind: IrExprKind::Lambda {
@@ -333,6 +379,7 @@ fn compose_map_into_fold_fresh(
         ty: Ty::Fn {
             params: vec![g_acc_ty, f_param_ty],
             ret: Box::new(ret_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -373,6 +420,7 @@ fn compose_flatmaps_fresh(
         ty: Ty::Fn {
             params: vec![f_param_ty],
             ret: Box::new(g_ret),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -418,6 +466,7 @@ fn compose_map_filter_fresh(
         ty: Ty::Fn {
             params: vec![f_param_ty],
             ret: Box::new(Ty::option(result_ty)),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -430,10 +479,14 @@ fn compose_map_filter_fresh(
 fn compose_filter_map_into_fold_fresh(
     fm: &IrExpr,
     g: &IrExpr,
-    _vt: &mut VarTable,
+    vt: &mut VarTable,
 ) -> Result<IrExpr, LowerError> {
     let (fm_param_id, fm_param_ty, fm_body) = unary_lambda_parts(fm)?;
     let (g_acc_id, g_acc_ty, g_elem_id, g_elem_ty, g_body) = binary_lambda_parts(g)?;
+
+    let (fm_param_fresh, fm_body) =
+        distinct_elem_binder(g_acc_id, fm_param_id, &fm_param_ty, fm_body, vt);
+    let fm_body = &fm_body;
 
     let acc_ref = IrExpr {
         kind: IrExprKind::Var { id: g_acc_id },
@@ -467,7 +520,7 @@ fn compose_filter_map_into_fold_fresh(
         kind: IrExprKind::Lambda {
             params: vec![
                 (g_acc_id, g_acc_ty.clone()),
-                (fm_param_id, fm_param_ty.clone()),
+                (fm_param_fresh, fm_param_ty.clone()),
             ],
             body: Box::new(match_expr),
             lambda_id: None,
@@ -475,6 +528,7 @@ fn compose_filter_map_into_fold_fresh(
         ty: Ty::Fn {
             params: vec![g_acc_ty.clone(), fm_param_ty],
             ret: Box::new(g_acc_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     })

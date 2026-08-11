@@ -389,6 +389,16 @@ fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
         {
             args.last_mut().map(unbox_consumed).unwrap_or(false)
         }
+        // Same set, RuntimeCall spelling: an intrinsic-lowered stdlib call
+        // (`fs.fold_lines_range` → `almide_rt_fs_fold_lines_range`) reaches
+        // this pass as a `RuntimeCall`, and its raw-`F: Fn` last arg needs
+        // the identical un-box (the threaded `fold_lines_chunked` also NEEDS
+        // it — `Rc<dyn Fn>` can never satisfy its Send + Sync bound).
+        IrExprKind::RuntimeCall { symbol, args }
+            if crate::generated::runtime_fn_modes::takes_raw_fn_last_arg(symbol.as_str()) =>
+        {
+            args.last_mut().map(unbox_consumed).unwrap_or(false)
+        }
         _ => false,
     }
 }

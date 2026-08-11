@@ -1,3 +1,112 @@
+/// The `Var` a `list.first(Var(cs))` match subject reads, plus that subject's
+/// `Option[T]` type.
+fn list_first_subject_var(subject: &IrExpr) -> Option<(VarId, Ty)> {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
+        &subject.kind
+    else {
+        return None;
+    };
+    if module.as_str() != "list" || func.as_str() != "first" || args.len() != 1 {
+        return None;
+    }
+    let IrExprKind::Var { id } = &args[0].kind else { return None };
+    Some((*id, subject.ty.clone()))
+}
+
+/// Does EVERY self-call anywhere in `body` (not just tail position) pass
+/// `list.drop(cs, 1)` in slot `ci`, and is there at least one? That makes `cs` a
+/// pure forward iterator with no other use — the precondition for replacing the
+/// recursion with an index walk.
+fn every_self_call_advances_by_one(fn_name: &str, body: &IrExpr, ci: usize, cs_var: VarId) -> bool {
+    use almide_ir::visit::IrVisitor;
+    struct W<'a> {
+        fn_name: &'a str,
+        ci: usize,
+        cs_var: VarId,
+        ok: bool,
+        any: bool,
+    }
+    impl W<'_> {
+        fn is_drop1(&self, e: &IrExpr) -> bool {
+            matches!(&e.kind, IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "list" && func.as_str() == "drop" && args.len() == 2
+                    && matches!(&args[0].kind, IrExprKind::Var { id } if *id == self.cs_var)
+                    && matches!(&args[1].kind, IrExprKind::LitInt { value: 1 }))
+        }
+    }
+    impl IrVisitor for W<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
+                if name.as_str() == self.fn_name {
+                    self.any = true;
+                    if self.ci >= args.len() || !self.is_drop1(&args[self.ci]) {
+                        self.ok = false;
+                    }
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut w = W { fn_name, ci, cs_var, ok: true, any: false };
+    w.visit_expr(body);
+    w.ok && w.any
+}
+
+/// Split the two arms into the `None` arm (the BASE) and the `Some(ch | _)` arm
+/// (the BODY, with its optional scalar element bind — `ch` is bound to `cs[idx]`,
+/// a borrow, in the rewrite). `None` for a guarded arm, a duplicate arm or any
+/// other pattern shape.
+#[allow(clippy::type_complexity)]
+fn split_option_match_arms(
+    arms: &[almide_ir::IrMatchArm],
+) -> Option<(&IrExpr, (&IrExpr, Option<(VarId, Ty)>))> {
+    use almide_ir::IrPattern;
+    let mut none_body: Option<&IrExpr> = None;
+    let mut some_body: Option<(&IrExpr, Option<(VarId, Ty)>)> = None;
+    for arm in arms {
+        if arm.guard.is_some() {
+            return None;
+        }
+        match &arm.pattern {
+            IrPattern::None | IrPattern::Wildcard if none_body.is_none() => {
+                none_body = Some(&arm.body)
+            }
+            IrPattern::Some { inner } if some_body.is_none() => {
+                let bind = match inner.as_ref() {
+                    IrPattern::Bind { var, ty } => Some((*var, ty.clone())),
+                    IrPattern::Wildcard => None,
+                    _ => return None,
+                };
+                some_body = Some((&arm.body, bind));
+            }
+            _ => return None,
+        }
+    }
+    Some((none_body?, some_body?))
+}
+
+/// `list.len(cs)`: clone the `list.first` subject node and retarget it to `len`,
+/// typed `Int`.
+fn retarget_module_call_to_len(subject: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Call { target: CallTarget::Module { module, def_id, .. }, args, type_args } =
+        &subject.kind
+    else {
+        return None;
+    };
+    Some(tco_ir(
+        IrExprKind::Call {
+            target: CallTarget::Module {
+                module: *module,
+                func: almide_lang::intern::sym("len"),
+                def_id: *def_id,
+            },
+            args: args.clone(),
+            type_args: type_args.clone(),
+        },
+        Ty::Int,
+    ))
+}
+
 /// Detect + rewrite the LIST-ITERATOR heap-loop-carried pattern (oct_rec/bin_rec): a heap carried
 /// param `cs` consumed in EVERY self-call ONLY as `list.drop(Var(cs), 1)`, with the body an outer
 /// `match list.first(Var(cs)) { none => BASE, some(ch) => BODY }`. Returns the rewritten body (the
@@ -16,84 +125,18 @@ fn try_list_iter_rewrite(
     if arms.len() != 2 {
         return None;
     }
-    let (cs_var, first_ty) = match &subject.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            if module.as_str() == "list" && func.as_str() == "first" && args.len() == 1 =>
-        {
-            match &args[0].kind {
-                IrExprKind::Var { id } => (*id, subject.ty.clone()),
-                _ => return None,
-            }
-        }
-        _ => return None,
-    };
+    let (cs_var, first_ty) = list_first_subject_var(subject)?;
     // `cs` must be a param, and EVERY self-call must pass `list.drop(Var(cs), 1)` in its slot.
     let ci = params.iter().position(|p| p.var == cs_var)?;
     if !is_heap_ty(&params[ci].ty) {
         return None;
     }
-    let is_drop1 = |e: &IrExpr| -> bool {
-        matches!(&e.kind, IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            if module.as_str() == "list" && func.as_str() == "drop" && args.len() == 2
-                && matches!(&args[0].kind, IrExprKind::Var { id } if *id == cs_var)
-                && matches!(&args[1].kind, IrExprKind::LitInt { value: 1 }))
-    };
-    // Collect EVERY self-call anywhere in the body (not just tail position) and require each to pass
-    // `list.drop(cs,1)` in slot `ci` — so `cs` is a pure forward iterator with no other use.
-    let mut ok = true;
-    let mut any_self = false;
-    {
-        use almide_ir::visit::IrVisitor;
-        struct W<'a> {
-            fn_name: &'a str,
-            ci: usize,
-            is_drop1: &'a dyn Fn(&IrExpr) -> bool,
-            ok: &'a mut bool,
-            any: &'a mut bool,
-        }
-        impl IrVisitor for W<'_> {
-            fn visit_expr(&mut self, e: &IrExpr) {
-                if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
-                    if name.as_str() == self.fn_name {
-                        *self.any = true;
-                        if self.ci >= args.len() || !(self.is_drop1)(&args[self.ci]) {
-                            *self.ok = false;
-                        }
-                    }
-                }
-                almide_ir::visit::walk_expr(self, e);
-            }
-        }
-        let mut w = W { fn_name, ci, is_drop1: &is_drop1, ok: &mut ok, any: &mut any_self };
-        w.visit_expr(body);
-    }
-    if !ok || !any_self {
+    if !every_self_call_advances_by_one(fn_name, body, ci, cs_var) {
         return None;
     }
     // Parse the two arms: a `None` arm (the BASE) and a `Some(ch | _)` arm (the BODY). `ch` is a
     // scalar element bind (String element) — bound to `cs[idx]` (a borrow) in the rewrite.
-    use almide_ir::IrPattern;
-    let mut none_body: Option<&IrExpr> = None;
-    let mut some_body: Option<(&IrExpr, Option<(VarId, Ty)>)> = None;
-    for arm in arms {
-        if arm.guard.is_some() {
-            return None;
-        }
-        match &arm.pattern {
-            IrPattern::None | IrPattern::Wildcard if none_body.is_none() => none_body = Some(&arm.body),
-            IrPattern::Some { inner } if some_body.is_none() => {
-                let bind = match inner.as_ref() {
-                    IrPattern::Bind { var, ty } => Some((*var, ty.clone())),
-                    IrPattern::Wildcard => None,
-                    _ => return None,
-                };
-                some_body = Some((&arm.body, bind));
-            }
-            _ => return None,
-        }
-    }
-    let none_body = none_body?;
-    let (some_body, ch_bind) = some_body?;
+    let (none_body, (some_body, ch_bind)) = split_option_match_arms(arms)?;
     let idx = VarId(fresh);
     let elem_ty = match &first_ty {
         Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1 => {
@@ -102,23 +145,7 @@ fn try_list_iter_rewrite(
         _ => return None,
     };
     // list.len(cs): clone the `list.first` subject node + retarget to `len`, typed Int.
-    let len_call = match &subject.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, def_id, .. }, args, type_args } => {
-            tco_ir(
-                IrExprKind::Call {
-                    target: CallTarget::Module {
-                        module: *module,
-                        func: almide_lang::intern::sym("len"),
-                        def_id: *def_id,
-                    },
-                    args: args.clone(),
-                    type_args: type_args.clone(),
-                },
-                Ty::Int,
-            )
-        }
-        _ => return None,
-    };
+    let len_call = retarget_module_call_to_len(subject)?;
     // cond: `idx < list.len(cs)`
     let cond = tco_ir(
         IrExprKind::BinOp {

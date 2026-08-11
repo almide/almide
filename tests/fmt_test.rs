@@ -366,6 +366,77 @@ fn fmt_record_type_without_comments_stays_single_line() {
     assert!(out.contains("type Point = { x: Int, y: Int }"), "{out}");
 }
 
+// ---- #1129: comment ATTACHMENT (not just idempotence) ----
+
+/// The fmt roundtrip gate is blind to this class: a shifted output is itself
+/// a fixpoint. A leading declaration comment must stay on ITS declaration
+/// even when the file's import list changes during formatting (an unused
+/// import removal used to leave a stale `comment_map` slot, so every later
+/// decl read its predecessor's comments — silent doc corruption, #1090's
+/// "the compiler cannot reconstruct a comment" principle).
+#[test]
+fn fmt_keeps_leading_comments_on_their_declaration() {
+    let src = "// header line one\n\
+               // header line two\n\
+               import testing\n\
+               \n\
+               fn alpha() -> Int = 1\n\
+               \n\
+               // label A: belongs to beta\n\
+               fn beta(c: Bool) -> Int = 2\n\
+               \n\
+               // label B: belongs to gamma\n\
+               fn gamma() -> Int = 3\n";
+    let out = roundtrip(src);
+    let lines: Vec<&str> = out.lines().collect();
+    for (comment, decl) in [
+        ("// label A: belongs to beta", "fn beta"),
+        ("// label B: belongs to gamma", "fn gamma"),
+    ] {
+        let ci = lines.iter().position(|l| l.trim() == comment)
+            .unwrap_or_else(|| panic!("comment {comment:?} vanished:\n{out}"));
+        assert!(
+            lines.get(ci + 1).is_some_and(|l| l.trim_start().starts_with(decl)),
+            "{comment:?} no longer sits above {decl:?}:\n{out}"
+        );
+    }
+    assert!(out.starts_with("// header line one"), "file header moved:\n{out}");
+}
+
+/// A comment after a variant type declaration belongs to the NEXT declaration,
+/// not to the variant. Both variant parse paths used to end each case with a
+/// bare `skip_newlines()`, which discards `Comment` tokens — so `parse()` never
+/// recorded the comment and `fmt` printed a file with it deleted.
+///
+/// The formatter is the only thing that reads `comment_map`, so this was silent
+/// source loss on a CI-gated path: `almide fmt --check spec/ examples/` reported
+/// such a file as unformatted, and `almide fmt` "fixed" it by dropping the text.
+/// The leading-`|`-less spelling made it worse by hiding one pass deep — pass 1
+/// inserts the `|`, pass 2 takes the eating path — which also broke the
+/// `format(format(x)) == format(x)` contract in almide-tools/CLAUDE.md.
+#[test]
+fn fmt_keeps_comments_after_variant_declarations() {
+    // Both spellings, and both kinds of following declaration.
+    for src in [
+        "type Aid = | Aid(String)\n\n// c\ntype Bid = | Bid(String)\n\nfn main() -> Unit = println(\"x\")\n",
+        "type Aid = Aid(String)\n\n// c\ntype Bid = Bid(String)\n\nfn main() -> Unit = println(\"x\")\n",
+        "type Color = | Red | Green\n\n// c\nfn main() -> Unit = println(\"x\")\n",
+        "type Color =\n  | Red\n  | Green\n\n// c\nfn main() -> Unit = println(\"x\")\n",
+    ] {
+        let once = roundtrip(src);
+        assert!(once.contains("// c"), "comment deleted by fmt for {src:?}:\n{once}");
+        // …and it must still sit above the declaration it introduces.
+        let lines: Vec<&str> = once.lines().collect();
+        let ci = lines.iter().position(|l| l.trim() == "// c").unwrap();
+        assert!(
+            lines.get(ci + 1).is_some_and(|l| l.starts_with("type Bid") || l.starts_with("fn main")),
+            "comment drifted off its declaration for {src:?}:\n{once}"
+        );
+        // The fixpoint must be reached at pass 1, not pass 2.
+        assert_eq!(roundtrip(&once), once, "not idempotent for {src:?}");
+    }
+}
+
 // ---- ADR-0010: `T?` Option shorthand ----
 
 // The shorthand round-trips in every type position, and a written
@@ -385,7 +456,7 @@ fn fmt_option_shorthand_roundtrips_and_normalizes() {
 #[test]
 fn fmt_option_shorthand_parenthesizes_non_atoms() {
     let out = roundtrip("module app\ntype Hooks = { on_tick: Option[(Int) -> Unit] }");
-    assert!(out.contains("on_tick: (fn(Int) -> Unit)?"), "{out}");
+    assert!(out.contains("on_tick: ((Int) -> Unit)?"), "{out}");
     let out = roundtrip("module app\nfn f() -> Option[Option[Int]] = some(none)");
     assert!(out.contains("-> (Int?)? ="), "{out}");
     let out = roundtrip("module app\nfn f() -> Option[(String, Int)] = none");
@@ -406,7 +477,7 @@ fn fmt_option_shorthand_parenthesizes_non_atoms() {
 #[test]
 fn fmt_option_shorthand_atom_binding() {
     let out = roundtrip("module app\nfn pick(f: (Int) -> Int?) -> Int = 0");
-    assert!(out.contains("f: fn(Int) -> Int?"), "{out}");
+    assert!(out.contains("f: (Int) -> Int?"), "{out}");
     let out = roundtrip("module app\nfn g(s: String) -> Int?! = ok(none)");
     assert!(out.contains("-> Int?! ="), "{out}");
 }

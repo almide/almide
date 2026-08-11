@@ -120,101 +120,82 @@ impl LowerCtx {
     /// Rung 2b: the `(String, <container/closure/variant>)` pair shapes —
     /// the ordered continuation of rung 2 (same ladder, same order).
     fn classify_elem_drop_str_keyed_pairs(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
-        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
-                if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
+        let Ty::Tuple(tys) = elem_ty else { return None };
+        let [k, v] = &tys[..] else { return None };
+        if matches!(k, Ty::String) {
+            return self.str_keyed_pair_drop(v);
+        }
+        // A `(<RECURSIVE-DROP record>, <scalar>)` TUPLE element (`[({name: "alice", age:
+        // 30}, 1), …]` — compound_eq's `Map[P, Int]` from_list pairs): the RECORD mirror
+        // of `StrVariant`. `DropListStrInt` only rc_decs slot0 one level — P owns a String
+        // field, so a flat rc_dec LEAKS it; slot0 must recurse via `$__drop_<R>`. The
+        // element's record slot is FORCED to this declared/classified type at construction
+        // (below), so classification name, construction layout, and the generated
+        // `$__drop_list_<R>_int` teardown all key on ONE name — the mismatch that produced
+        // the earlier attempt's dangling `$__drop_list_anonrec_<hash>_int`.
+        if is_heap_ty(v) {
+            return None;
+        }
+        Some(ListElemDrop::RecordInt(self.record_or_anon_drop_type_name(k)?))
+    }
+
+    /// The drop a `(String, V)` pair element needs, by its VALUE half `v`.
+    /// Ordered most-specific first: every arm below is checked BEFORE the generic
+    /// `StrVariant` one, whose variant-name lookup would DECLINE a Map/Fn slot and
+    /// kill the whole builder.
+    fn str_keyed_pair_drop(&self, v: &Ty) -> Option<ListElemDrop> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        // A `Map[String, String]` value (the map_fold_heap_acc nested-map literal's
+        // pairs list, `["k0": ["k0": "x"]]` desugared to `map.from_list_msv([("k0",
+        // <inner map>)])`): slot1 is a MAP owning its own String slots — the static
+        // `$__drop_list_str_mss` (map_msv.almd) frees slot0 flat and sweeps the
+        // last-ref inner map (a flat rc_dec would leak every inner key/value String).
+        if matches!(v, Ty::Applied(TypeConstructorId::Map, b)
+            if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String))
         {
-            // A `(String, Map[String, String])` TUPLE element (the map_fold_heap_acc
-            // nested-map literal's pairs list, `["k0": ["k0": "x"]]` desugared to
-            // `map.from_list_msv([("k0", <inner map>)])`): slot1 is a MAP owning its own
-            // String slots — the static `$__drop_list_str_mss` (map_msv.almd) frees
-            // slot0 flat and sweeps the last-ref inner map (a flat rc_dec would leak
-            // every inner key/value String). Checked BEFORE the generic StrVariant arm
-            // (a Map is not a custom variant, so that arm's name lookup would decline).
             return Some(ListElemDrop::StrMapStr);
         }
-        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && (matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
-                if b.len() == 2 && matches!(b[0], Ty::String)
-                    && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
-                || matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
-                    if o.len() == 1 && matches!(o[0], Ty::String))
-                || matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, e)
-                    if e.len() == 2 && matches!(e[1], Ty::String)
-                        && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
-                || matches!(&tys[1], Ty::Tuple(ts)
-                    if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))))
-        {
-            // A `(String, Map[String, <scalar>])` or `(String, Option[String])` TUPLE
-            // element (the msb pairs list — both value shapes follow the len@4-counted
-            // String-slot discipline, see `is_map_msb_ty`): slot1 owns exactly its
-            // len-counted String slots — the static `$__drop_list_str_msb`
-            // (map_msv.almd) frees slot0 flat and len-sweeps the last-ref value block.
-            // Same placement rationale as StrMapStr above.
+        // A `Map[String, <scalar>]` / `Option[String]` / len-counted value: all follow
+        // the len@4-counted String-slot discipline (see `is_map_msb_ty`), so slot1 owns
+        // exactly its len-counted String slots — the static `$__drop_list_str_msb`
+        // (map_msv.almd) frees slot0 flat and len-sweeps the last-ref value block.
+        if is_msb_pair_value(v) {
             return Some(ListElemDrop::StrMapSkv);
         }
-        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
-                if b.len() == 1
-                    && matches!(&b[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
-                        if o.len() == 1 && matches!(o[0], Ty::Int))))
+        // A `List[Option[Int]]` value (compound_repr_interp's `deep` pairs list,
+        // `["k": [some(1), none]]` desugared to `map.from_list_mlo([("k", <lenlist>)])`):
+        // slot1 is a LIST owning its Option-block slots — the static
+        // `$__drop_list_str_mlo` (map_mlo.almd) frees slot0 flat and sweeps the last-ref
+        // inner list (a flat rc_dec would leak every Option block).
+        if matches!(v, Ty::Applied(TypeConstructorId::List, b)
+            if b.len() == 1
+                && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                    if o.len() == 1 && matches!(o[0], Ty::Int)))
         {
-            // A `(String, List[Option[Int]])` TUPLE element (compound_repr_interp's `deep`
-            // pairs list, `["k": [some(1), none]]` desugared to `map.from_list_mlo([("k",
-            // <lenlist>)])`): slot1 is a LIST owning its Option-block slots — the static
-            // `$__drop_list_str_mlo` (map_mlo.almd) frees slot0 flat and sweeps the
-            // last-ref inner list (a flat rc_dec would leak every Option block). Same
-            // placement rationale as StrMapStr above.
             return Some(ListElemDrop::StrListOpt);
         }
-        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && matches!(tys[1], Ty::Fn { .. }))
-        {
-            // A `(String, <Fn>)` TUPLE element (`map.from_list([("a", () => …)])` — the
-            // closure-valued map's pairs list): slot1 is a CLOSURE BLOCK whose captured
-            // env a flat rc_dec would leak — the static `$__drop_list_str_clo` frees
-            // slot0 flat (String rc_dec) and routes slot1 through `__drop_closure`.
-            // Checked BEFORE the generic `(String, <non-flat heap>)` StrVariant arm
-            // below, whose variant-name lookup would DECLINE a Fn slot (killing the
-            // whole builder).
+        // A `<Fn>` value (`map.from_list([("a", () => …)])` — the closure-valued map's
+        // pairs list): slot1 is a CLOSURE BLOCK whose captured env a flat rc_dec would
+        // leak — the static `$__drop_list_str_clo` frees slot0 flat (String rc_dec) and
+        // routes slot1 through `__drop_closure`.
+        if matches!(v, Ty::Fn { .. }) {
             return Some(ListElemDrop::StrClosure);
         }
-        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && is_heap_ty(&tys[1]) && !self.is_flat_heap_tuple_slot(&tys[1]))
-        {
-            // A `(String, <RICH variant>)` TUPLE element (`[("x", ValInt(64)), ("y",
-            // ValStr("s"))]` — generic_chain_unwrap_or's `List[(String, V)]` metadata
-            // pairs, `type V = ValInt(Int) | ValStr(String)`): the MIRROR of `StrInt`,
-            // but slot1 is NOT scalar — it is a variant needing its OWN recursive drop
-            // (a `ValStr` payload owns a String). `DropListStrInt`'s render only ever
-            // rc_decs slot0 and leaves slot1 UNTOUCHED (sound only when slot1 is truly
-            // scalar) — reusing it here would silently LEAK every `ValStr` element's
-            // String, so this is a genuinely new drop shape: a generated
-            // `$__drop_list_str_<V>` (drop_sources.rs) frees slot0 (String, flat
-            // rc_dec) AND recurses into slot1 via the variant's own already-generated
-            // `$__drop_<V>` (V is a real, non-generic type — no shadow-type machinery
-            // needed, unlike B117's generic-instantiation case).
-            let Ty::Tuple(tys) = elem_ty else { unreachable!() };
-            let Some(vname) = self.custom_variant_type_name(&tys[1]) else { return None };
-            return Some(ListElemDrop::StrVariant(vname));
+        // A RICH variant value (`[("x", ValInt(64)), ("y", ValStr("s"))]` —
+        // generic_chain_unwrap_or's `List[(String, V)]` metadata pairs,
+        // `type V = ValInt(Int) | ValStr(String)`): the MIRROR of `StrInt`, but slot1 is
+        // NOT scalar — it is a variant needing its OWN recursive drop (a `ValStr` payload
+        // owns a String). `DropListStrInt`'s render only ever rc_decs slot0 and leaves
+        // slot1 UNTOUCHED (sound only when slot1 is truly scalar) — reusing it here would
+        // silently LEAK every `ValStr` element's String, so this is a genuinely new drop
+        // shape: a generated `$__drop_list_str_<V>` (drop_sources.rs) frees slot0 (String,
+        // flat rc_dec) AND recurses into slot1 via the variant's own already-generated
+        // `$__drop_<V>` (V is a real, non-generic type — no shadow-type machinery needed,
+        // unlike B117's generic-instantiation case).
+        if !is_heap_ty(v) || self.is_flat_heap_tuple_slot(v) {
+            return None;
         }
-        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2
-            && !is_heap_ty(&tys[1])
-            && self.record_or_anon_drop_type_name(&tys[0]).is_some())
-        {
-            // A `(<RECURSIVE-DROP record>, <scalar>)` TUPLE element (`[({name: "alice", age:
-            // 30}, 1), …]` — compound_eq's `Map[P, Int]` from_list pairs): the RECORD mirror
-            // of `StrVariant`. `DropListStrInt` only rc_decs slot0 one level — P owns a String
-            // field, so a flat rc_dec LEAKS it; slot0 must recurse via `$__drop_<R>`. The
-            // element's record slot is FORCED to this declared/classified type at construction
-            // (below), so classification name, construction layout, and the generated
-            // `$__drop_list_<R>_int` teardown all key on ONE name — the mismatch that produced
-            // the earlier attempt's dangling `$__drop_list_anonrec_<hash>_int`.
-            let Ty::Tuple(tys) = elem_ty else { unreachable!() };
-            let Some(rname) = self.record_or_anon_drop_type_name(&tys[0]) else { return None };
-            return Some(ListElemDrop::RecordInt(rname));
-        }
-        None
+        Some(ListElemDrop::StrVariant(self.custom_variant_type_name(v)?))
     }
 
     /// Rung 3: the container elements (List/Map/Option families and the
@@ -303,6 +284,26 @@ impl LowerCtx {
                 && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
         {
             return Some(ListElemDrop::MapSkv);
+        }
+        // An `Option[<record>]` element (`[some(Inner { n: 1 }), none]` — the codec
+        // `lc: List[Inner?]` cell, #1134): each element is a 0-or-1 Option block whose
+        // Some payload is the record — freed via the generated tag-aware
+        // `$__drop_list_opt_<R>` (Some → the record's own free: one rc_dec for a flat
+        // record, `$__drop_<R>` recursion for a rich one). Decided BEFORE the lenlist
+        // arm (lenlist's flat_heap test would decline the record payload and fall to
+        // the nested-ownership wall). Gated to a NON-generic Named record with a
+        // resolvable layout; variants keep their own classes.
+        if let almide_lang::types::Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::Option, oa) = elem_ty
+        {
+            if let [Ty::Named(n, args)] = &oa[..] {
+                if args.is_empty()
+                    && self.custom_variant_type_name(&oa[0]).is_none()
+                    && self.aggregate_field_tys(&oa[0]).is_some()
+                {
+                    return Some(ListElemDrop::OptRecord(n.as_str().to_string()));
+                }
+            }
         }
         if let Some(class) = crate::lower::lenlist_elem_class(elem_ty) {
             return Some(match class {
@@ -689,6 +690,7 @@ fn drop_route_name(kind: ListElemDrop) -> String {
         ListElemDrop::Closure => "list_closure".to_string(),
         ListElemDrop::StrClosure => "list_str_clo".to_string(),
         ListElemDrop::RecordInt(rname) => format!("list_{}_int", drop_fn_ident(&rname)),
+        ListElemDrop::OptRecord(rname) => format!("list_opt_{}", drop_fn_ident(&rname)),
         ListElemDrop::StrVariant(vname) => format!("list_str_{}", drop_fn_ident(&vname)),
         ListElemDrop::StrStr
         | ListElemDrop::ScalarAggregate
@@ -699,3 +701,19 @@ fn drop_route_name(kind: ListElemDrop) -> String {
     }
 }
 
+/// The `(String, V)` value shapes that follow the len@4-counted String-slot
+/// discipline (see `is_map_msb_ty`): a scalar-valued string map, an
+/// `Option[String]`, a String-erring `Result` over a flat Ok, or an all-String
+/// tuple.
+fn is_msb_pair_value(v: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(v, Ty::Applied(TypeConstructorId::Map, b)
+        if b.len() == 2 && matches!(b[0], Ty::String)
+            && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
+        || matches!(v, Ty::Applied(TypeConstructorId::Option, o)
+            if o.len() == 1 && matches!(o[0], Ty::String))
+        || matches!(v, Ty::Applied(TypeConstructorId::Result, e)
+            if e.len() == 2 && matches!(e[1], Ty::String)
+                && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
+        || matches!(v, Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))
+}

@@ -449,12 +449,65 @@ impl LowerCtx {
                     // Ok payload @12 (len-as-tag: Ok = len 0, the scalar in slot 0 @12).
                     let h = self.fresh_value();
                     self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
+                    // TAG DISPATCH FIRST (#1183): this arm's contract is the v1
+                    // unwrap — "die on Err" — but it read the payload with NO
+                    // tag check, so an Err block's slot 0 (the err-message
+                    // handle) flowed onward as the scalar value: silent wrong
+                    // output where native propagated/panicked. Propagation-
+                    // position unwraps are now ANF-hoisted to bind position
+                    // before lowering (`desugar_stmt_value_nested_unwrap`), so
+                    // what still reaches this arm is the plain-unwrap world
+                    // (L9 test blocks and genuine die-on-err spellings) — make
+                    // the die REAL: len-as-tag != 0 → die with the err message
+                    // the block already carries.
+                    let tagoff = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: tagoff, value: 4 });
+                    let tagaddr = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: tagaddr, op: crate::IntOp::Add, a: h, b: tagoff });
+                    let tag = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 4 }, dst: Some(tag), args: vec![tagaddr] });
                     let off = self.fresh_value();
                     self.ops.push(Op::ConstInt { dst: off, value: 12 });
                     let addr = self.fresh_value();
                     self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
+                    self.ops.push(Op::IfThen { cond: tag, dst: None });
+                    let msgh = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(msgh), args: vec![addr] });
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Die, dst: None, args: vec![msgh] });
+                    self.ops.push(Op::Else { val: None });
+                    self.ops.push(Op::EndIf { val: None });
                     let payload = self.fresh_value();
                     self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(payload), args: vec![addr] });
+                    // RELEASE the Result block. The payload is a SCALAR by the
+                    // arm's own guard (`!is_heap_ty(&expr.ty)`), so it cannot
+                    // alias the container — freeing the box cannot free what
+                    // the payload holds, and the load above already happened.
+                    //
+                    // Without this the block leaked once PER EVALUATION. In a
+                    // straight-line body that is one abandoned Result; inside a
+                    // HOF whose lambda unwraps (`list.map(xs, (x) => f(x)!)` in
+                    // a test block, where L9 keeps `!` as unwrap instead of
+                    // instantiating the fallible form) it is one per ELEMENT,
+                    // and the loop lowering's per-iteration balance is broken.
+                    // The kernel-proven ownership checker caught it as the
+                    // witness `i` — an acquire with no matching release.
+                    //
+                    // Which release depends on who owns the block: anything the
+                    // inner lowering registered since `lhh_mark` is this
+                    // sub-expression's own temporary and is released here (so a
+                    // loop iteration stays internally balanced); a block the
+                    // OUTER scope already tracks stays its owner's to free; and
+                    // an untracked block — the common case, since the Result is
+                    // a fresh call result nobody registered — needs the drop
+                    // emitted explicitly or it is simply abandoned.
+                    let split = lhh_mark.min(self.live_heap_handles.len());
+                    let owned_outside = self.live_heap_handles[..split].contains(&block);
+                    let owned_inside = self.live_heap_handles[split..].contains(&block);
+                    self.drop_arm_locals(lhh_mark);
+                    if !owned_outside && !owned_inside {
+                        let op = self.drop_op_for(block);
+                        self.ops.push(op);
+                    }
                     return Some(payload);
                 }
                 self.ops.truncate(ops_mark);

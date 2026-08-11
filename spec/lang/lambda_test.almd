@@ -1,7 +1,7 @@
 // lambda_test — Lambda edge cases
-fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
 
-fn apply_str(f: fn(String) -> String, s: String) -> String = f(s)
+fn apply_str(f: (String) -> String, s: String) -> String = f(s)
 
 test "lambda as argument" {
   let result = apply((x) => x * 2, 5)

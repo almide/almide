@@ -177,6 +177,13 @@ impl LowerCtx {
             IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => is_result_ty(&expr.ty),
             // A USER function returning Result — read its tag INVERSELY (Ok = tag 0).
             _ if is_named_variant_call => is_result_ty(&expr.ty),
+            // A FALLIBLE-CLOSURE call (`g("21") ?? -1` — the ADR-0009 carrier): the
+            // call's declared type IS the carrier, so a Result carrier reads INVERSELY.
+            // Without this arm a closure-call Result operand fell to the Option read
+            // and would have taken the wrong tag sense.
+            IrExprKind::Call { target: CallTarget::Computed { .. }, .. } => {
+                is_result_ty(&expr.ty)
+            }
             _ => is_self_host_result_call(expr),
         }
     }
@@ -205,6 +212,24 @@ impl LowerCtx {
         if matches!(&expr.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
             return self.field_unwrap_or_operand(expr);
         }
+        // A NESTED `??` operand (`(list.find(..) ?? none) ?? -1` — the fallible-HOF
+        // find shape, #1134 Shape 2): ANF it — bind the INNER `??` to a synthetic
+        // temp through the ordinary bind machinery (which owns + scope-tracks it and
+        // seeds its variant read shape), then resolve the temp exactly like a
+        // user-written two-step `let inner = ..; inner ?? d`. The bind declining
+        // rolls back to None (the wall stays honest).
+        if matches!(&expr.kind, IrExprKind::UnwrapOr { .. }) {
+            let tmp = self.fresh_synth_var();
+            if self.lower_bind(tmp, &expr.ty, expr).is_err() {
+                self.unwrap_or_rollback(cx);
+                return None;
+            }
+            let Ok(v) = self.value_for(tmp) else {
+                self.unwrap_or_rollback(cx);
+                return None;
+            };
+            return self.var_unwrap_or_operand_value(v, &expr.ty);
+        }
         if is_self_host_option_call(expr)
             || is_self_host_result_call(expr)
             || (is_self_host_result_str_call(expr)
@@ -214,6 +239,44 @@ impl LowerCtx {
             || is_named_variant_call
         {
             return self.call_unwrap_or_operand(expr, cx);
+        }
+        // A FALLIBLE-CLOSURE call operand (`g("21") ?? -1` where `g = (x) => parse1(x)! * 2`
+        // — the ADR-0009 first-class fallible lambda, #1134 Shape 2): dispatch through the
+        // tracked closure block exactly like the bind-position Computed arm — the call
+        // returns the fresh OWNED len-as-tag carrier block, tracked + type-routed for the
+        // scope-end drop like any owned call temp, and seeded as a materialized read shape
+        // so the downstream tag read is over a KNOWN layout. Gated to a SCALAR-payload
+        // Option/Result carrier: the scalar route reads tag + payload with no ownership
+        // transfer (a heap-payload carrier stays walled — the recursive-ownership frontier).
+        if let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &expr.kind {
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            let scalar_opt = matches!(&expr.ty,
+                Ty::Applied(TC::Option, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+            let scalar_res = matches!(&expr.ty,
+                Ty::Applied(TC::Result, a)
+                    if a.len() == 2 && !is_heap_ty(&a[0]) && matches!(a[1], Ty::String));
+            if !scalar_opt && !scalar_res {
+                return None;
+            }
+            let route = (|s: &mut Self| {
+                let blk = s.closure_block_of_mut(callee)?;
+                let repr = repr_of(&expr.ty).ok()?;
+                let lowered = s.lower_call_args(args).ok()?;
+                let obj = s.fresh_value();
+                s.emit_closure_call(blk, Some(obj), lowered, Some(repr));
+                s.live_heap_handles.push(obj);
+                s.register_owned_heap_eq_drop(obj, &expr.ty);
+                if scalar_res {
+                    s.materialized_results.insert(obj);
+                } else {
+                    s.materialized_options.insert(obj);
+                }
+                Some(obj)
+            })(self);
+            if route.is_none() {
+                self.unwrap_or_rollback(cx);
+            }
+            return route;
         }
         // A `??` over a variant-returning call NOT in the self-host registries — the
         // `json.parse(s) ?? d` (PURE heap-Result) / `process.env(k) ?? d` (IMPURE intrinsic
@@ -228,28 +291,30 @@ impl LowerCtx {
     /// borrowed variant PARAM (`param_values` — same calling-convention soundness as the
     /// match): a deferred Opaque Var (len 0) would MISREAD as None/Err, so it is excluded.
     fn var_unwrap_or_operand(&self, id: VarId, expr_ty: &Ty) -> Option<ValueId> {
-        match self.value_for(id) {
-            Ok(v)
-                if self.materialized_options.contains(&v)
-                    || self.materialized_results.contains(&v)
-                    // a Value/List-Ok Result Var (`value.get`/`value.as_array` result) — its `??`
-                    // routes to the value_unwrap helper route. A String-Ok Result (heap_elem_lists)
-                    // is NOT admitted here: it keeps its original path (the String branch is for
-                    // OPTION[String], and counting a str-Result there falsely taints mir>ir).
-                    || self.value_result_results.contains(&v)
-                    || self.value_result_lists.contains(&v)
-                    // A `Result[String, String]` Var (cap-as-tag, materialized_results_str)
-                    // routes to the `result.str_unwrap_or` helper route — admitted ONLY for
-                    // that type (any other _str-set shape would mis-take the len-as-tag
-                    // String branch, reading an Err payload as Some).
-                    || (self.materialized_results_str.contains(&v)
-                        && crate::lower::is_result_str_str_ty(expr_ty))
-                    || self.param_values.contains(&v) =>
-            {
-                Some(v)
-            }
-            _ => None,
-        }
+        let v = self.value_for(id).ok()?;
+        self.var_unwrap_or_operand_value(v, expr_ty)
+    }
+
+    /// The admission half of [`Self::var_unwrap_or_operand`], keyed on the resolved
+    /// `ValueId` — shared with the nested-`??` ANF route, whose synthetic temp has a
+    /// value but no user-facing var lookup to repeat.
+    fn var_unwrap_or_operand_value(&self, v: ValueId, expr_ty: &Ty) -> Option<ValueId> {
+        let admitted = self.materialized_options.contains(&v)
+            || self.materialized_results.contains(&v)
+            // a Value/List-Ok Result Var (`value.get`/`value.as_array` result) — its `??`
+            // routes to the value_unwrap helper route. A String-Ok Result (heap_elem_lists)
+            // is NOT admitted here: it keeps its original path (the String branch is for
+            // OPTION[String], and counting a str-Result there falsely taints mir>ir).
+            || self.value_result_results.contains(&v)
+            || self.value_result_lists.contains(&v)
+            // A `Result[String, String]` Var (cap-as-tag, materialized_results_str)
+            // routes to the `result.str_unwrap_or` helper route — admitted ONLY for
+            // that type (any other _str-set shape would mis-take the len-as-tag
+            // String branch, reading an Err payload as Some).
+            || (self.materialized_results_str.contains(&v)
+                && crate::lower::is_result_str_str_ty(expr_ty))
+            || self.param_values.contains(&v);
+        admitted.then_some(v)
     }
 
     /// `r.opt ?? d` — an `Option[scalar/String]` FIELD of a materialized record: BORROW the

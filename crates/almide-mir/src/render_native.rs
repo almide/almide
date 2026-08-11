@@ -73,7 +73,8 @@ pub enum NativeSigKind {
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
 /// the declared `Ty` is visible; the render trusts it (the precision wall already
 /// rejected anything outside these kinds).
-pub type NativeSigs = std::collections::BTreeMap<String, (Vec<NativeSigKind>, Option<NativeSigKind>)>;
+pub type NativeSigs =
+    std::collections::BTreeMap<String, (Vec<NativeSigKind>, Option<NativeSigKind>)>;
 
 pub(crate) fn wall(msg: impl Into<String>) -> LowerError {
     LowerError::Unsupported(msg.into())
@@ -115,13 +116,84 @@ pub(crate) fn as_f64_arg(code: &str, t: NTy) -> Result<String, LowerError> {
 /// is adding to the trusted floor — keep it tiny; everything else walls. Every
 /// addition needs a differential-corpus row in the same PR
 /// (tests/native_v1_differential_test.rs).
-use crate::render_native_op_families::{render_native_meter_op, render_native_result_op, render_native_termination_op, render_native_scalar_op, render_native_float_op};
-use crate::render_native_shims::{shim, shim_rust_name, CUT_RET_MARKER, FUEL_LT0_SHIM, CHARGE_DYN_SHIM, TIMEOUT_SHIM, COUNTER_SHIM, CHARGE_SHIM, BUDGET_SHIM};
+use crate::render_native_op_families::{
+    render_native_float_op, render_native_meter_op, render_native_result_op,
+    render_native_scalar_op, render_native_termination_op,
+};
+use crate::render_native_shims::{
+    shim, shim_rust_name, BUDGET_SHIM, CHARGE_DYN_SHIM, CHARGE_SHIM, COUNTER_SHIM, CUT_RET_MARKER,
+    FUEL_LT0_SHIM, TIMEOUT_SHIM,
+};
+
+/// The Perceus balance is machine-checked on the SAME ops this render erases
+/// Drops from — the certificate that scope-end drop realizes it. A violation is
+/// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
+    let Err(violations) = crate::verify_ownership(func) else {
+        return Ok(());
+    };
+    if std::env::var_os("ALMIDE_DUMP_VERIFY").is_some() {
+        eprintln!("== verify-stage fn {} ==", func.name);
+        for (i, op) in func.ops.iter().enumerate() {
+            eprintln!("  [{i}] {op:?}");
+        }
+    }
+    Err(wall(format!(
+        "native: ownership verification failed for `{}`: {violations:?}",
+        func.name
+    )))
+}
+
+/// Rung-5 closures slab: the CallIndirect dispatch tables. One dispatcher per
+/// ARITY (user args beyond the env block); the index space is the SAME
+/// name-sorted lambda order `Op::FuncRef` renders (both derive from the
+/// `user_fns` BTreeMap, so def and call site agree by construction). Only an
+/// i64-returning lambda gets an arm — a heap-returning one is reachable only
+/// through a CallIndirect with a heap result, which walls in `render_fn`, so its
+/// missing arm can never be hit; the `_` arm is the §13 controlled halt.
+fn push_closure_dispatch_tables(
+    out: &mut String,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+    fn_rets: &BTreeMap<String, Option<NTy>>,
+) {
+    let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
+    let lambda_names = user_fns
+        .keys()
+        .copied()
+        .filter(|n| n.starts_with("__lambda_"));
+    for (idx, name) in lambda_names.enumerate() {
+        if fn_rets.get(name) != Some(&Some(NTy::I64)) {
+            continue;
+        }
+        let arity = user_fns[name].params.len().saturating_sub(1);
+        arities.entry(arity).or_default().push((idx, name));
+    }
+    for (arity, fns) in arities {
+        let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect();
+        let args: String = (0..arity).map(|i| format!(", a{i}")).collect();
+        out.push_str(&format!(
+            "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
+        ));
+        for (idx, name) in fns {
+            out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
+        }
+        out.push_str(
+            "        _ => { eprintln!(\"Error: closure index out of range\"); \
+             std::process::exit(1) }\n    }\n}\n\n",
+        );
+    }
+}
 
 /// Render a whole MIR program to a self-contained Rust source, or WALL.
-pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
-    let user_fns: BTreeMap<&str, &MirFunction> =
-        prog.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+pub fn try_render_native_program(
+    prog: &MirProgram,
+    sigs: &NativeSigs,
+) -> Result<String, LowerError> {
+    let user_fns: BTreeMap<&str, &MirFunction> = prog
+        .functions
+        .iter()
+        .map(|f| (f.name.as_str(), f))
+        .collect();
     if !user_fns.contains_key("main") {
         return Err(wall("native: no main in the MIR program"));
     }
@@ -130,20 +202,7 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
     let mut bodies = String::new();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
-        // The Perceus balance is machine-checked on the SAME ops this render
-        // erases Drops from — the certificate that scope-end drop realizes it.
-        if let Err(violations) = crate::verify_ownership(func) {
-            if std::env::var_os("ALMIDE_DUMP_VERIFY").is_some() {
-                eprintln!("== verify-stage fn {} ==", func.name);
-                for (i, op) in func.ops.iter().enumerate() {
-                    eprintln!("  [{i}] {op:?}");
-                }
-            }
-            return Err(wall(format!(
-                "native: ownership verification failed for `{}`: {violations:?}",
-                func.name
-            )));
-        }
+        verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
         fn_rets.insert(func.name.clone(), ret_nty);
@@ -169,35 +228,7 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
     // i64-returning lambda gets an arm — a heap-returning one is reachable only
     // through a CallIndirect with a heap result, which walls above, so its
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
-    let lambda_names: Vec<&str> = user_fns
-        .keys()
-        .copied()
-        .filter(|n| n.starts_with("__lambda_"))
-        .collect();
-    if !lambda_names.is_empty() {
-        let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
-        for (idx, name) in lambda_names.iter().enumerate() {
-            if fn_rets.get(*name) != Some(&Some(NTy::I64)) {
-                continue;
-            }
-            let arity = user_fns[name].params.len().saturating_sub(1);
-            arities.entry(arity).or_default().push((idx, name));
-        }
-        for (arity, fns) in arities {
-            let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect::<String>();
-            let args: String = (0..arity).map(|i| format!(", a{i}")).collect::<String>();
-            out.push_str(&format!(
-                "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
-            ));
-            for (idx, name) in fns {
-                out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
-            }
-            out.push_str(
-                "        _ => { eprintln!(\"Error: closure index out of range\"); \
-                 std::process::exit(1) }\n    }\n}\n\n",
-            );
-        }
-    }
+    push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets);
     Ok(out)
 }
 
@@ -205,7 +236,10 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
 /// NAME-SORTED lambda list (the `user_fns` BTreeMap order — the same order the
 /// dispatch tables above are generated from).
 fn lambda_index(user_fns: &BTreeMap<&str, &MirFunction>, name: &str) -> Option<usize> {
-    user_fns.keys().filter(|n| n.starts_with("__lambda_")).position(|n| *n == name)
+    user_fns
+        .keys()
+        .filter(|n| n.starts_with("__lambda_"))
+        .position(|n| *n == name)
 }
 
 /// Native param/result NTy for a repr: scalars are i64; a heap repr is a STRING
@@ -279,43 +313,90 @@ fn render_fn(
     }
     for op in &func.ops {
         match op {
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), .. } if !used.contains(d) => {
+            Op::Prim {
+                kind: crate::PrimKind::Handle,
+                dst: Some(d),
+                ..
+            } if !used.contains(d) => {
                 line!("// dead handle elided");
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
             // (the name-sorted position shared with the `__almd_ci_*` tables).
             Op::FuncRef { dst, name } => {
-                let idx = lambda_index(user_fns, name).ok_or_else(|| {
-                    wall(format!("native: FuncRef to unknown lambda `{name}`"))
-                })?;
+                let idx = lambda_index(user_fns, name)
+                    .ok_or_else(|| wall(format!("native: FuncRef to unknown lambda `{name}`")))?;
                 tys.insert(*dst, NTy::I64);
                 line!("let mut {}: i64 = {idx}; // fn table: {name}", var(*dst));
             }
-            Op::CallFn { dst, name, args, result } => {
-                render_call_fn(
-                    crate::render_native::NativeCall { dst, name, args, result },
-                    crate::render_native::NativeSink {
-                        user_fns, sigs, tys: &mut tys, out: &mut out, indent, used_shims,
-                    },
-                )?
-            }
+            Op::CallFn {
+                dst,
+                name,
+                args,
+                result,
+            } => render_call_fn(
+                crate::render_native::NativeCall {
+                    dst,
+                    name,
+                    args,
+                    result,
+                },
+                crate::render_native::NativeSink {
+                    user_fns,
+                    sigs,
+                    tys: &mut tys,
+                    out: &mut out,
+                    indent,
+                    used_shims,
+                },
+            )?,
             other => {
                 let handled = render_native_call_op(
                     other,
-                    crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
+                    crate::render_native::OpSink {
+                        tys: &mut tys,
+                        out: &mut out,
+                        indent,
+                        used_shims,
+                    },
                 )? || render_native_meter_op(
                     other,
-                    crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
+                    crate::render_native::OpSink {
+                        tys: &mut tys,
+                        out: &mut out,
+                        indent,
+                        used_shims,
+                    },
                 )? || render_native_result_op(
                     other,
-                    crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
+                    crate::render_native::OpSink {
+                        tys: &mut tys,
+                        out: &mut out,
+                        indent,
+                        used_shims,
+                    },
                 )? || render_native_termination_op(
                     other,
-                    crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
+                    crate::render_native::OpSink {
+                        tys: &mut tys,
+                        out: &mut out,
+                        indent,
+                        used_shims,
+                    },
                 )? || render_native_scalar_op(
                     other,
-                    crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
-                )? || render_native_flow_op(other, &mut tys, &mut out, &mut indent, &mut if_stack)?;
+                    crate::render_native::OpSink {
+                        tys: &mut tys,
+                        out: &mut out,
+                        indent,
+                        used_shims,
+                    },
+                )? || render_native_flow_op(
+                    other,
+                    &mut tys,
+                    &mut out,
+                    &mut indent,
+                    &mut if_stack,
+                )?;
                 if !handled {
                     let detail = if let Op::Prim { kind, .. } = other {
                         format!("Prim {kind:?}")
@@ -348,14 +429,16 @@ fn finish_native_fn(
     tys: &mut BTreeMap<ValueId, NTy>,
     mut out: String,
 ) -> Result<(String, Option<NTy>), LowerError> {
-
     // A LIFTED effect fn (declared scalar ret, wrapped carrier ABI — the sigs
     // table widening in the pipeline): the body computes the raw scalar and
     // the `Ok(..)` wrap happens HERE, at the single return seam. The body was
     // already rendered with the scalar typing, so retyping the ret value now
     // affects only the signature and the cut-marker patch below.
     let lifted_wrap = !is_main
-        && matches!(sigs.get(func.name.as_str()), Some((_, Some(NativeSigKind::Res))))
+        && matches!(
+            sigs.get(func.name.as_str()),
+            Some((_, Some(NativeSigKind::Res)))
+        )
         && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
     if lifted_wrap {
         if let Some(v) = func.ret {
@@ -394,7 +477,6 @@ fn finish_native_fn(
     Ok((format!("{sig}{out}"), ret_nty))
 }
 
-
 /// The trailing return expression: a borrowed param is moved out as a fresh
 /// owned value; everything else returns the local directly.
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
@@ -420,6 +502,19 @@ fn render_native_fn_sig(
         }
         return Ok(String::from("fn main()"));
     }
+    // A param that any `Op::SetLocal` retargets (the MIR tail-recursion loop
+    // reassigns its params each iteration) must render `mut` — without it the
+    // loop body's `v0 = …;` is an E0384 on a plain scalar accumulator
+    // recursion (`count(n - 1, acc + 1)`), a compile error rustc only surfaces
+    // on the run path because every test harness rides the v0 fallback.
+    let reassigned: std::collections::HashSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::SetLocal { local, .. } => Some(*local),
+            _ => None,
+        })
+        .collect();
     let params: Vec<String> = func
         .params
         .iter()
@@ -432,7 +527,12 @@ fn render_native_fn_sig(
                 NTy::F64 => "f64",
                 NTy::Res => "Result<i64, String>",
             };
-            format!("{}: {}", var(p.value), spelled)
+            let mut_prefix = if reassigned.contains(&p.value) {
+                "mut "
+            } else {
+                ""
+            };
+            format!("{mut_prefix}{}: {}", var(p.value), spelled)
         })
         .collect();
     let ret = match func.ret {
@@ -448,7 +548,12 @@ fn render_native_fn_sig(
             None => return Err(wall("native: return value untyped")),
         },
     };
-    Ok(format!("fn {}({}){}", mangle(&func.name), params.join(", "), ret))
+    Ok(format!(
+        "fn {}({}){}",
+        mangle(&func.name),
+        params.join(", "),
+        ret
+    ))
 }
 
 /// The values a function's ops (or its return) actually READ — the read-set the
@@ -500,12 +605,17 @@ fn native_op_reads(op: &Op) -> Vec<ValueId> {
 /// native emit. `Ok(false)` = not this tier's op.
 fn render_native_call_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     match op {
-        Op::CallIndirect { dst, table_idx, args, result } => {
-            render_call_indirect(dst, table_idx, args, result, s)?
-        }
+        Op::CallIndirect {
+            dst,
+            table_idx,
+            args,
+            result,
+        } => render_call_indirect(dst, table_idx, args, result, s)?,
         Op::ListGetScalar { dst, list, idx } => render_list_get_scalar(dst, list, idx, s)?,
         Op::ListSetScalar { list, idx, val } => render_list_set_scalar(list, idx, val, s)?,
-        Op::Call { dst, func, args, .. } => render_call_witness(dst, func, args, s)?,
+        Op::Call {
+            dst, func, args, ..
+        } => render_call_witness(dst, func, args, s)?,
         _ => return Ok(false),
     }
     Ok(true)
@@ -575,21 +685,21 @@ fn render_native_drop_op(
         // no nested, no closure slots to free). A non-Vec value here would be a
         // heap-capturing block (prim-built) — its OWNING fn walls on the prims
         // long before this drop renders.
-        Op::DropVariant { v, ty } if ty.as_str() == "closure" => {
-            match tys.get(v) {
-                Some(NTy::Vec) => line!("// drop(closure block): scope-end"),
-                other => {
-                    return Err(wall(format!(
-                        "native: DropVariant(closure) of a non-Vec value ({other:?})"
-                    )))
-                }
+        Op::DropVariant { v, ty } if ty.as_str() == "closure" => match tys.get(v) {
+            Some(NTy::Vec) => line!("// drop(closure block): scope-end"),
+            other => {
+                return Err(wall(format!(
+                    "native: DropVariant(closure) of a non-Vec value ({other:?})"
+                )))
             }
-        }
+        },
         // Drop is ERASED: Rust frees at scope end (or at reassignment for a
         // loop-carried handle). `verify_ownership` above certified balance.
         Op::Drop { v } => {
             if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) {
-                return Err(wall("native: Drop of a borrowed param — MIR call-mode violation"));
+                return Err(wall(
+                    "native: Drop of a borrowed param — MIR call-mode violation",
+                ));
             }
             line!("// drop: scope-end");
         }
@@ -604,12 +714,14 @@ fn render_native_drop_op(
                 // The T1-3 Result carrier frees like any owned Rust value.
                 Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
                 Some(NTy::VecRef) => {
-                    return Err(wall("native: DropListStr of a borrowed param — MIR call-mode violation"))
+                    return Err(wall(
+                        "native: DropListStr of a borrowed param — MIR call-mode violation",
+                    ))
                 }
                 other => {
                     return Err(wall(format!(
-                        "native: DropListStr of a non-list value ({other:?}) — outside the rung subset"
-                    )))
+                    "native: DropListStr of a non-list value ({other:?}) — outside the rung subset"
+                )))
                 }
             }
         }
@@ -633,7 +745,9 @@ pub(crate) fn render_dup(
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    let t = *tys.get(src).ok_or_else(|| wall("native: Dup of untyped value"))?;
+    let t = *tys
+        .get(src)
+        .ok_or_else(|| wall("native: Dup of untyped value"))?;
     match t {
         NTy::I64 => {
             tys.insert(*dst, NTy::I64);
@@ -670,5 +784,3 @@ pub(crate) fn render_dup(
 }
 
 include!("render_native_b.rs");
-
-

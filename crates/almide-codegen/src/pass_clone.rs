@@ -32,13 +32,29 @@ impl NanoPass for CloneInsertionPass {
 
         let always_marks = program.codegen_annotations.always_clone_vars.clone();
         let tco_owned = program.codegen_annotations.tco_owned_params.clone();
+        let tco_fns = program.codegen_annotations.tco_rewritten_fns.clone();
         let (always, eligible) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &tco_owned);
+        // #1130: the TCO exemption holds ONLY inside the body TailCallOpt
+        // rewrote. A VarId can live in another function too — `branch_lift`
+        // lifts an in-loop branch into a helper whose params ARE the
+        // enclosing fn's vars — and there the compensating clone plan does
+        // not exist, so its bare moves were a rustc E0382. Everything else
+        // gets the ordinary last-use analysis.
+        let no_exempt: HashSet<VarId> = HashSet::new();
+        let (always_plain, eligible_plain) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &no_exempt);
         let mut remaining = build_remaining(&eligible, &syntactic);
+        let mut remaining_plain = build_remaining(&eligible_plain, &syntactic);
 
         for func in &mut program.functions {
             // Reset remaining for each function (vars are function-scoped)
-            reset_remaining(&mut remaining, &eligible, &syntactic);
-            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false });
+            let tco_here = tco_fns.contains(&func.name);
+            let (a, e, r) = if tco_here {
+                (&always, &eligible, &mut remaining)
+            } else {
+                (&always_plain, &eligible_plain, &mut remaining_plain)
+            };
+            reset_remaining(r, e, &syntactic);
+            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false });
         }
         for tl in &mut program.top_lets {
             reset_remaining(&mut remaining, &eligible, &syntactic);
@@ -50,11 +66,18 @@ impl NanoPass for CloneInsertionPass {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
             let module_syntactic = compute_syntactic_counts_module(module);
             let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &tco_owned);
+            let (m_always_plain, m_eligible_plain) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &no_exempt);
             let mut m_remaining = build_remaining(&m_eligible, &module_syntactic);
+            let mut m_remaining_plain = build_remaining(&m_eligible_plain, &module_syntactic);
 
             for func in module.functions.iter_mut() {
-                reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
-                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false });
+                let (a, e, r) = if tco_fns.contains(&func.name) {
+                    (&m_always, &m_eligible, &mut m_remaining)
+                } else {
+                    (&m_always_plain, &m_eligible_plain, &mut m_remaining_plain)
+                };
+                reset_remaining(r, e, &module_syntactic);
+                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false });
             }
             for tl in module.top_lets.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
@@ -254,13 +277,36 @@ fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) 
     IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None }
 }
 
+/// Deduct a sibling branch's syntactic uses from `remaining` on entry to a
+/// branch (#1143): `remaining` is a whole-fn count, so without this a use in
+/// one branch still counts the mutually-exclusive sibling's uses — the true
+/// last use on a path can never reach 0 and every branch tail pays a spurious
+/// clone (`step`'s fold-accumulator `map.set(acc, …)` cloned the Map per
+/// line). Counting is the same `SyntacticCounter` that built `remaining`, so
+/// deductions stay 1:1 with the decrements the branch walk will perform.
+fn deduct_sibling_uses(remaining: &mut HashMap<VarId, u32>, sibling: &HashMap<VarId, u32>) {
+    for (id, n) in sibling {
+        if let Some(r) = remaining.get_mut(id) {
+            *r = r.saturating_sub(*n);
+        }
+    }
+}
+
 /// `If { cond, then, else_ }` arm of [`insert_clones_live`]: save/restore/min
-/// for branches (the branch that consumed more `remaining` wins — conservative).
+/// for branches (the branch that consumed more `remaining` wins — conservative),
+/// with the sibling branch's uses deducted on entry so a path's genuine last
+/// use can move.
 fn insert_clones_if(cond: IrExpr, then: IrExpr, else_: IrExpr, ctx: &mut CloneCtx) -> IrExprKind {
     let new_cond = insert_clones_live(cond, ctx);
+    let mut then_counts = HashMap::new();
+    count_syntactic(&then, &mut then_counts);
+    let mut else_counts = HashMap::new();
+    count_syntactic(&else_, &mut else_counts);
     let saved = ctx.remaining.clone();
+    deduct_sibling_uses(ctx.remaining, &else_counts);
     let new_then = insert_clones_live(then, ctx);
     let then_remaining = std::mem::replace(ctx.remaining, saved);
+    deduct_sibling_uses(ctx.remaining, &then_counts);
     let new_else = insert_clones_live(else_, ctx);
     for &id in ctx.eligible.iter() {
         let t = then_remaining.get(&id).copied().unwrap_or(0);
@@ -275,15 +321,42 @@ fn insert_clones_if(cond: IrExpr, then: IrExpr, else_: IrExpr, ctx: &mut CloneCt
 }
 
 /// `Match { subject, arms }` arm of [`insert_clones_live`]: same save/min
-/// strategy as [`insert_clones_if`], generalized to N arms.
+/// strategy as [`insert_clones_if`], generalized to N arms, with every
+/// sibling arm's uses deducted on entry (see [`deduct_sibling_uses`]).
 fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCtx) -> IrExprKind {
     let new_subject = insert_clones_live(subject, ctx);
+    let arm_counts: Vec<HashMap<VarId, u32>> = arms
+        .iter()
+        .map(|arm| {
+            let mut c = HashMap::new();
+            if let Some(g) = &arm.guard {
+                count_syntactic(g, &mut c);
+            }
+            count_syntactic(&arm.body, &mut c);
+            c
+        })
+        .collect();
+    let mut total_counts: HashMap<VarId, u32> = HashMap::new();
+    for c in &arm_counts {
+        for (id, n) in c {
+            *total_counts.entry(*id).or_insert(0) += n;
+        }
+    }
     let saved = ctx.remaining.clone();
     let mut min_remaining = HashMap::new();
     let mut new_arms = Vec::with_capacity(arms.len());
 
     for (i, arm) in arms.into_iter().enumerate() {
         *ctx.remaining = saved.clone();
+        // siblings = total - own, computed elementwise BEFORE the saturating
+        // deduction so saturation can't distort the difference.
+        let mut siblings = total_counts.clone();
+        for (id, n) in &arm_counts[i] {
+            if let Some(t) = siblings.get_mut(id) {
+                *t -= n;
+            }
+        }
+        deduct_sibling_uses(ctx.remaining, &siblings);
         let new_guard = arm.guard.map(|g| insert_clones_live(g, ctx));
         let new_body = insert_clones_live(arm.body, ctx);
         new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
@@ -492,11 +565,6 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         IrExprKind::ForIn { var, var_tuple, iterable, body } => insert_clones_for_in(var, var_tuple, *iterable, body, ctx),
         IrExprKind::While { cond, body } => insert_clones_while(*cond, body, ctx),
 
-        // ── Lambda: body recurses normally ─────────────────────────
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(insert_clones_live(*body, ctx)), lambda_id,
-        },
-
         IrExprKind::Call { target, args, type_args } => insert_clones_call(target, args, type_args, ctx),
         IrExprKind::RuntimeCall { symbol, args } => {
             let args = insert_clones_runtime_call(args, ctx);
@@ -506,64 +574,12 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         IrExprKind::IndexAccess { object, index } => return insert_clones_index_access(*object, *index, ty, span, ctx),
         IrExprKind::MapAccess { object, key } => return insert_clones_map_access(*object, *key, ty, span, ctx),
 
-        // ── Simple recursion cases ─────────────────────────────────
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op,
-            left: Box::new(insert_clones_live(*left, ctx)),
-            right: Box::new(insert_clones_live(*right, ctx)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(insert_clones_live(*operand, ctx)),
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| insert_clones_live(e, ctx)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect(),
-        },
         IrExprKind::Member { object, field } => return insert_clones_member(*object, field, ty, span, ctx),
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(insert_clones_live(*expr, ctx)), field,
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: insert_clones_live(expr, ctx) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(insert_clones_live(*expr, ctx)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(insert_clones_live(*expr, ctx)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(insert_clones_live(*expr, ctx)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(insert_clones_live(*expr, ctx)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_clones_live(*expr, ctx)) },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(insert_clones_live(*expr, ctx)) },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(insert_clones_live(*expr, ctx)),
-            fallback: Box::new(insert_clones_live(*fallback, ctx)),
-        },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(insert_clones_live(*expr, ctx)) },
-        IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| insert_clones_live(e, ctx)).collect(),
-        },
         IrExprKind::SpreadRecord { base, fields } => {
             // Fields are evaluated before the spread base in Rust struct literals
             let new_fields: Vec<_> = fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect();
             let new_base = insert_clones_live(*base, ctx);
             IrExprKind::SpreadRecord { base: Box::new(new_base), fields: new_fields }
-        },
-        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(insert_clones_live(*start, ctx)),
-            end: Box::new(insert_clones_live(*end, ctx)),
-            inclusive,
-        },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| insert_clones_live(e, ctx)).collect(),
-        },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (insert_clones_live(k, ctx), insert_clones_live(v, ctx))).collect(),
-        },
-        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
-            object: Box::new(insert_clones_live(*object, ctx)), index,
         },
         IrExprKind::Borrow { expr, as_str, mutable } => {
             let mut inner = insert_clones_live(*expr, ctx);
@@ -573,18 +589,14 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
             }
             IrExprKind::Borrow { expr: Box::new(inner), as_str, mutable }
         },
-        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew {
-            expr: Box::new(insert_clones_live(*expr, ctx)),
-        },
-        IrExprKind::ToVec { expr } => IrExprKind::ToVec {
-            expr: Box::new(insert_clones_live(*expr, ctx)),
-        },
-        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
-            name, args: args.into_iter().map(|a| insert_clones_live(a, ctx)).collect(),
-        },
         // Default: recurse into every child through the exhaustive `map_children`
-        // chokepoint, so no un-listed node kind (`IterChain`/`RcWrap`/`TailCall`/
-        // future variants) silently drops its subtree — that was the DIV2-sibling
+        // chokepoint. Every node whose clone insertion is just "recurse into the
+        // children, left to right" lands here — BinOp/UnOp/Lambda/StringInterp/
+        // UnwrapOr/Range/MapLiteral/BoxNew included: their former hand-written
+        // arms were byte-for-byte what `map_children` does for the same kind — `map_children` visits them in
+        // exactly that order, which is what the liveness countdown needs — so no
+        // un-listed node kind (`IterChain`/`RcWrap`/`TailCall`/future variants)
+        // silently drops its subtree — that was the DIV2-sibling
         // (clone insertion blind to closures fused inside a chain). Leaf kinds have
         // no children and pass through unchanged.
         other => {

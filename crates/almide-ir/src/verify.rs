@@ -31,16 +31,34 @@ impl std::fmt::Display for IrVerifyError {
     }
 }
 
+/// The call-target surface a `Verifier` validates against, computed once per
+/// program and shared by every function-, module- and top-let-level verifier.
+struct KnownNames {
+    /// Known module→function mappings for CallTarget::Module validation.
+    ///
+    /// `Named` targets are deliberately NOT collected — see
+    /// [`Verifier::check_call_target`] for why gating them would be a
+    /// false-positive factory.
+    module_functions: std::collections::HashMap<String, std::collections::HashSet<String>>,
+}
+
 struct Verifier<'a> {
     var_table: &'a VarTable,
     fn_name: String,
     in_loop: bool,
     errors: Vec<IrVerifyError>,
-    /// Known function names for CallTarget::Named validation
-    known_functions: &'a std::collections::HashSet<String>,
-    /// Known module→function mappings for CallTarget::Module validation
-    known_module_functions: &'a std::collections::HashMap<String, std::collections::HashSet<String>>,
-    /// VarIds that have been defined (by Bind, param, pattern, lambda, for-in)
+    known: &'a KnownNames,
+    /// Every VarId below this bound is pre-defined: the whole VarTable at
+    /// construction time is trusted as the source of truth, because some
+    /// vars are introduced implicitly (open record fields, monomorphization)
+    /// without explicit Bind stmts. Kept as a bound rather than a
+    /// materialized `HashSet` of `0..len` — after `UnifyVarTablesPass` the
+    /// table is program-wide, so building that set per function was
+    /// O(functions × table): the single dominant codegen cost on
+    /// many-function programs.
+    predefined: u32,
+    /// VarIds at or above `predefined` that have been defined during the
+    /// walk (by Bind, param, pattern, lambda, for-in).
     defined_vars: std::collections::HashSet<u32>,
 }
 
@@ -63,7 +81,9 @@ impl<'a> Verifier<'a> {
     }
 
     fn define_var(&mut self, id: VarId) {
-        self.defined_vars.insert(id.0);
+        if id.0 >= self.predefined {
+            self.defined_vars.insert(id.0);
+        }
     }
 
     fn check_var_defined(&mut self, id: VarId, span: Option<Span>) {
@@ -71,7 +91,7 @@ impl<'a> Verifier<'a> {
         if (id.0 as usize) >= self.var_table.len() {
             return;
         }
-        if !self.defined_vars.contains(&id.0) {
+        if id.0 >= self.predefined && !self.defined_vars.contains(&id.0) {
             self.err(
                 format!("VarId({}) used but never defined (no Bind/param/pattern)", id.0),
                 span,
@@ -84,6 +104,80 @@ impl<'a> Verifier<'a> {
     // demoted `Var` to `Let` for variables that are assigned but
     // whose assignments were eliminated by DCE. Checking mutability
     // after optimization would produce false positives.
+}
+
+impl<'a> Verifier<'a> {
+    /// `Break`/`Continue`: legal only inside a loop body.
+    fn check_loop_context(&mut self, expr: &IrExpr) {
+        if !self.in_loop {
+            let kind = if matches!(expr.kind, IrExprKind::Break) { "break" } else { "continue" };
+            self.err(format!("{} outside of loop", kind), expr.span);
+        }
+    }
+
+    /// Walk a `ForIn`/`While` node with `in_loop` set, restoring it after —
+    /// so `Break`/`Continue` anywhere in the body verifies, and one after the
+    /// loop does not.
+    fn walk_in_loop(&mut self, expr: &IrExpr) {
+        let prev = self.in_loop;
+        self.in_loop = true;
+        walk_expr(self, expr);
+        self.in_loop = prev;
+    }
+
+    /// `ForIn` binders: the loop var, plus each element of a destructured tuple.
+    fn define_loop_vars(&mut self, var: VarId, var_tuple: Option<&Vec<VarId>>, span: Option<Span>) {
+        self.check_var_id(var, span);
+        self.define_var(var);
+        for v in var_tuple.into_iter().flatten() {
+            self.check_var_id(*v, span);
+            self.define_var(*v);
+        }
+    }
+
+    /// `Lambda` binders: every parameter is in scope for the body.
+    fn define_lambda_params(&mut self, params: &[(VarId, Ty)], span: Option<Span>) {
+        for (var, _) in params {
+            self.check_var_id(*var, span);
+            self.define_var(*var);
+        }
+    }
+
+    /// `Call` target validation.
+    ///
+    /// `Named` is intentionally NOT gated: it covers stdlib functions,
+    /// builtins (println, assert_eq), constructors and user functions alike,
+    /// and several of those are only resolved at codegen time — gating here
+    /// would be a false-positive factory. `Module` is gated only for modules
+    /// present in `known.module_functions` (stdlib modules are absent and
+    /// handled by codegen). `Method`/`Computed` are validated structurally,
+    /// by walking their object/callee.
+    fn check_call_target(&mut self, target: &CallTarget, span: Option<Span>) {
+        let CallTarget::Module { module, func, .. } = target else { return };
+        let absent = self
+            .known
+            .module_functions
+            .get::<str>(module)
+            .is_some_and(|funcs| !funcs.contains::<str>(func));
+        if absent {
+            self.err(format!("call to unknown function '{}.{}'", module, func), span);
+        }
+    }
+
+    /// `IndexAccess`/`MapAccess` must agree with the object's type: list
+    /// indexing on a Map (or map lookup on a non-Map) means an earlier pass
+    /// picked the wrong node.
+    fn check_indexing(&mut self, object: &IrExpr, want_map: bool, span: Option<Span>) {
+        if is_unresolved(&object.ty) || object.ty.is_map() == want_map {
+            return;
+        }
+        let message = if want_map {
+            format!("MapAccess used on non-Map type '{}'", object.ty.display())
+        } else {
+            "IndexAccess used on Map type (should be MapAccess)".to_string()
+        };
+        self.err(message, span);
+    }
 }
 
 impl<'a> IrVisitor for Verifier<'a> {
@@ -104,90 +198,28 @@ impl<'a> IrVisitor for Verifier<'a> {
             }
 
             // ── Loop context ──
-            IrExprKind::Break | IrExprKind::Continue => {
-                if !self.in_loop {
-                    let kind = if matches!(expr.kind, IrExprKind::Break) { "break" } else { "continue" };
-                    self.err(format!("{} outside of loop", kind), expr.span);
-                }
-            }
+            IrExprKind::Break | IrExprKind::Continue => self.check_loop_context(expr),
 
-            // ── ForIn: check var ids, define vars, then walk with in_loop=true ──
+            // ── Loops own their walk: the body must see `in_loop` ──
             IrExprKind::ForIn { var, var_tuple, .. } => {
-                self.check_var_id(*var, expr.span);
-                self.define_var(*var);
-                if let Some(tuple_vars) = var_tuple {
-                    for v in tuple_vars {
-                        self.check_var_id(*v, expr.span);
-                        self.define_var(*v);
-                    }
-                }
-                let prev = self.in_loop;
-                self.in_loop = true;
-                walk_expr(self, expr);
-                self.in_loop = prev;
+                self.define_loop_vars(*var, var_tuple.as_ref(), expr.span);
+                self.walk_in_loop(expr);
+                return; // already walked
+            }
+            IrExprKind::While { .. } => {
+                self.walk_in_loop(expr);
                 return; // already walked
             }
 
-            // ── While: walk with in_loop=true ──
-            IrExprKind::While { .. } => {
-                let prev = self.in_loop;
-                self.in_loop = true;
-                walk_expr(self, expr);
-                self.in_loop = prev;
-                return;
-            }
-
             // ── Lambda: check param VarIds, define them, before walking body ──
-            IrExprKind::Lambda { params, .. } => {
-                for (var, _) in params {
-                    self.check_var_id(*var, expr.span);
-                    self.define_var(*var);
-                }
-            }
+            IrExprKind::Lambda { params, .. } => self.define_lambda_params(params, expr.span),
 
             // ── Call target validation ──
-            IrExprKind::Call { target, .. } => {
-                match target {
-                    CallTarget::Named { name } => {
-                        // Named calls include stdlib functions, builtins (println, assert_eq),
-                        // constructors, and user functions. Only validate user-defined functions
-                        // — skip constructors (uppercase) and anything not in known_functions
-                        // (may be stdlib/builtin resolved at codegen time).
-                        // This is intentionally lenient to avoid false positives.
-                        let is_constructor = name.chars().next().map_or(false, |c| c.is_uppercase());
-                        if !is_constructor && self.known_functions.contains::<str>(name) {
-                            // Valid: known user function — no error
-                        }
-                        // else: could be stdlib, builtin, or test function — skip
-                    }
-                    CallTarget::Module { module, func, .. } => {
-                        // Only validate user modules (present in known_module_functions).
-                        // Stdlib modules are not in known_module_functions and are handled by codegen.
-                        if let Some(funcs) = self.known_module_functions.get::<str>(module) {
-                            if !funcs.contains::<str>(func) {
-                                self.err(format!("call to unknown function '{}.{}'", module, func), expr.span);
-                            }
-                        }
-                    }
-                    // Method and Computed targets are validated structurally (object/callee are walked)
-                    _ => {}
-                }
-            }
+            IrExprKind::Call { target, .. } => self.check_call_target(target, expr.span),
 
             // ── Access: type constraints ──
-            IrExprKind::IndexAccess { object, .. } => {
-                if !is_unresolved(&object.ty) && object.ty.is_map() {
-                    self.err("IndexAccess used on Map type (should be MapAccess)".into(), expr.span);
-                }
-            }
-            IrExprKind::MapAccess { object, .. } => {
-                if !is_unresolved(&object.ty) && !object.ty.is_map() {
-                    self.err(
-                        format!("MapAccess used on non-Map type '{}'", object.ty.display()),
-                        expr.span,
-                    );
-                }
-            }
+            IrExprKind::IndexAccess { object, .. } => self.check_indexing(object, false, expr.span),
+            IrExprKind::MapAccess { object, .. } => self.check_indexing(object, true, expr.span),
 
             _ => {}
         }
@@ -235,133 +267,141 @@ impl<'a> IrVisitor for Verifier<'a> {
 /// Intended for debug builds — call after optimization, before monomorphization.
 pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     let mut errors = Vec::new();
+    let known = KnownNames {
+        module_functions: collect_known_module_functions(program),
+    };
 
-    // Build known function sets for CallTarget validation
-    let mut known_functions = std::collections::HashSet::new();
-    for f in &program.functions {
-        known_functions.insert(f.name.to_string());
-    }
-    for m in &program.modules {
-        for f in &m.functions {
-            known_functions.insert(f.name.to_string());
-        }
-    }
-
-    let mut known_module_functions: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
-    for m in &program.modules {
-        // Skip bundled stdlib modules: their `module.func` calls intermix
-        // bundled fns with TOML-backed runtime fns, and the latter are not in
-        // `m.functions`. Codegen handles dispatch — verify must not gate on
-        // an incomplete view of the module surface.
-        if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
-            continue;
-        }
-        let mut funcs: std::collections::HashSet<String> =
-            m.functions.iter().map(|f| f.name.to_string()).collect();
-        // MONOMORPHIZATION renames a generic module fn to its specialized
-        // instances (`get` → `get__Int`, …) and the ORIGINAL disappears from
-        // `m.functions`, while a call site that mono did not rewrite still
-        // names the generic (#884: `ceangal.cell.get` reported unknown while
-        // the non-generic `is_dirty` in the same module verified fine — and
-        // only when the module was reached through a consumer's import graph,
-        // which is what made it look import-order dependent). Credit the
-        // generic BASE name of every specialized instance: an instance is
-        // `<base>__<suffix>`, so the base is what a not-yet-rewritten call
-        // spells. This keeps the gate on genuinely-absent names.
-        let bases: Vec<String> = funcs
-            .iter()
-            .filter_map(|n| n.split_once("__").map(|(b, _)| b.to_string()))
-            .filter(|b| !b.is_empty())
-            .collect();
-        funcs.extend(bases);
-        // The module's EXPORTS are its DECLARED surface, captured at lowering
-        // — before monomorphization, which drops a generic fn that no
-        // reachable call instantiated. A dependency module linked but never
-        // reached from the consumer's entry still has its body verified, and
-        // its calls into a sibling's generic fn then named something mono had
-        // removed (#884: `ceangal.cell.get`, while the non-generic
-        // `is_dirty` in the same module verified fine). The declared surface
-        // is the right question for "does this function exist".
-        funcs.extend(m.exports.iter().filter_map(|e| match e {
-            crate::IrExport::Function { name, .. } => Some(name.to_string()),
-            _ => None,
-        }));
-        // A duplicate module NAME must not silently overwrite: two IrModules
-        // sharing a name (a dependency's root and a sibling, #884) would leave
-        // the map holding whichever came last, and every call into the other
-        // would report unknown. Merge instead — the union is the honest
-        // surface, and the gate still catches a genuinely absent name.
-        known_module_functions
-            .entry(m.name.to_string())
-            .or_default()
-            .extend(funcs);
-    }
-
-    // Verify type declarations
     verify_type_decls(&program.type_decls, "", &mut errors);
-
-    // Verify main module functions
     for f in &program.functions {
-        verify_function(f, &program.var_table, &f.name, &known_functions, &known_module_functions, &mut errors);
+        verify_function(f, &program.var_table, &f.name, &known, &mut errors);
     }
     for tl in &program.top_lets {
-        let mut v = Verifier {
-            var_table: &program.var_table,
-            fn_name: "<top-level>".into(),
-            in_loop: false,
-            errors: Vec::new(),
-            known_functions: &known_functions,
-            known_module_functions: &known_module_functions,
-            defined_vars: (0..program.var_table.len() as u32).collect(),
-        };
-        v.check_var_id(tl.var, None);
-        v.visit_expr(&tl.value);
-        errors.append(&mut v.errors);
+        verify_top_let(tl, &program.var_table, "<top-level>".into(), &known, &mut errors);
     }
 
     // Verify imported modules. All module-scoped VarIds live in
     // `program.var_table` after `UnifyVarTablesPass` merges them, so
     // the verifier reuses the program-level table rather than the
-    // module's now-empty one.
-    let module_vt: &VarTable = if program.modules.iter().all(|m| m.var_table.entries.is_empty()) {
-        &program.var_table
-    } else {
-        // Pre-unification callers still have per-module tables.
-        // Fall through per-module below.
-        &program.var_table
-    };
+    // module's now-empty one. Pre-unification callers still have
+    // per-module tables and fall through to them below.
     for m in &program.modules {
-        verify_type_decls(&m.type_decls, &m.name, &mut errors);
-        let vt: &VarTable = if m.var_table.entries.is_empty() { module_vt } else { &m.var_table };
-        for f in &m.functions {
-            let qual_name = format!("{}.{}", m.name, f.name);
-            verify_function(f, vt, &qual_name, &known_functions, &known_module_functions, &mut errors);
-        }
-        for tl in &m.top_lets {
-            let mut v = Verifier {
-                var_table: vt,
-                fn_name: format!("{}.<top-level>", m.name),
-                in_loop: false,
-                errors: Vec::new(),
-                known_functions: &known_functions,
-                known_module_functions: &known_module_functions,
-                defined_vars: (0..vt.len() as u32).collect(),
-            };
-            v.check_var_id(tl.var, None);
-            v.visit_expr(&tl.value);
-            errors.append(&mut v.errors);
-        }
+        verify_module(m, &program.var_table, &known, &mut errors);
     }
 
     errors
+}
+
+/// module name → the function names a `module.func` call may legally name.
+///
+/// Bundled stdlib modules are skipped entirely: their `module.func` calls
+/// intermix bundled fns with TOML-backed runtime fns, and the latter are not
+/// in `m.functions`. Codegen handles dispatch — verify must not gate on an
+/// incomplete view of the module surface.
+fn collect_known_module_functions(
+    program: &IrProgram,
+) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
+    let mut known = std::collections::HashMap::new();
+    for m in &program.modules {
+        if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
+            continue;
+        }
+        // A duplicate module NAME must not silently overwrite: two IrModules
+        // sharing a name (a dependency's root and a sibling, #884) would leave
+        // the map holding whichever came last, and every call into the other
+        // would report unknown. Merge instead — the union is the honest
+        // surface, and the gate still catches a genuinely absent name.
+        known
+            .entry(m.name.to_string())
+            .or_insert_with(std::collections::HashSet::new)
+            .extend(module_call_surface(m));
+    }
+    known
+}
+
+/// The names a call into `m` may legally spell: its surviving functions, the
+/// generic BASE name behind every monomorphized instance, and its declared
+/// exports.
+///
+/// MONOMORPHIZATION renames a generic module fn to its specialized instances
+/// (`get` → `get__Int`, …) and the ORIGINAL disappears from `m.functions`,
+/// while a call site that mono did not rewrite still names the generic (#884:
+/// `ceangal.cell.get` reported unknown while the non-generic `is_dirty` in the
+/// same module verified fine — and only when the module was reached through a
+/// consumer's import graph, which is what made it look import-order dependent).
+/// An instance is `<base>__<suffix>`, so the base is what a not-yet-rewritten
+/// call spells.
+///
+/// The EXPORTS are the module's DECLARED surface, captured at lowering — before
+/// monomorphization, which drops a generic fn that no reachable call
+/// instantiated. A dependency module linked but never reached from the
+/// consumer's entry still has its body verified, and its calls into a sibling's
+/// generic fn then named something mono had removed. The declared surface is
+/// the right question for "does this function exist".
+fn module_call_surface(m: &IrModule) -> std::collections::HashSet<String> {
+    let mut funcs: std::collections::HashSet<String> =
+        m.functions.iter().map(|f| f.name.to_string()).collect();
+    let bases: Vec<String> = funcs
+        .iter()
+        .filter_map(|n| n.split_once("__").map(|(b, _)| b.to_string()))
+        .filter(|b| !b.is_empty())
+        .collect();
+    funcs.extend(bases);
+    funcs.extend(m.exports.iter().filter_map(|e| match e {
+        crate::IrExport::Function { name, .. } => Some(name.to_string()),
+        _ => None,
+    }));
+    funcs
+}
+
+/// Verify one module's type decls, functions and top-level lets. `program_vt`
+/// is the merged program table used when the module's own table is empty
+/// (post-`UnifyVarTablesPass`).
+fn verify_module(
+    m: &IrModule,
+    program_vt: &VarTable,
+    known: &KnownNames,
+    errors: &mut Vec<IrVerifyError>,
+) {
+    verify_type_decls(&m.type_decls, &m.name, errors);
+    let vt: &VarTable = if m.var_table.entries.is_empty() { program_vt } else { &m.var_table };
+    for f in &m.functions {
+        let qual_name = format!("{}.{}", m.name, f.name);
+        verify_function(f, vt, &qual_name, known, errors);
+    }
+    for tl in &m.top_lets {
+        verify_top_let(tl, vt, format!("{}.<top-level>", m.name), known, errors);
+    }
+}
+
+/// Verify one top-level let's binder and value. Every VarId in `var_table` is
+/// pre-defined: a top-let value may reference any other top-let regardless of
+/// declaration order.
+fn verify_top_let(
+    tl: &IrTopLet,
+    var_table: &VarTable,
+    fn_name: String,
+    known: &KnownNames,
+    errors: &mut Vec<IrVerifyError>,
+) {
+    let mut v = Verifier {
+        var_table,
+        fn_name,
+        in_loop: false,
+        errors: Vec::new(),
+        known,
+        predefined: var_table.len() as u32,
+        defined_vars: std::collections::HashSet::new(),
+    };
+    v.check_var_id(tl.var, None);
+    v.visit_expr(&tl.value);
+    errors.append(&mut v.errors);
 }
 
 fn verify_function(
     f: &IrFunction,
     var_table: &VarTable,
     name: &str,
-    known_functions: &std::collections::HashSet<String>,
-    known_module_functions: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+    known: &KnownNames,
     errors: &mut Vec<IrVerifyError>,
 ) {
     let mut v = Verifier {
@@ -369,17 +409,13 @@ fn verify_function(
         fn_name: name.to_string(),
         in_loop: false,
         errors: Vec::new(),
-        known_functions,
-        known_module_functions,
+        known,
+        // Pre-populate defined_vars with all VarIds in VarTable.
+        // Some vars are introduced implicitly (open record fields, monomorphization)
+        // without explicit Bind stmts, so we trust the VarTable as the source of truth.
+        predefined: var_table.len() as u32,
         defined_vars: std::collections::HashSet::new(),
     };
-
-    // Pre-populate defined_vars with all VarIds in VarTable.
-    // Some vars are introduced implicitly (open record fields, monomorphization)
-    // without explicit Bind stmts, so we trust the VarTable as the source of truth.
-    for i in 0..var_table.len() {
-        v.defined_vars.insert(i as u32);
-    }
 
     // Check parameter VarIds are valid and unique
     let mut seen_param_ids = std::collections::HashSet::new();
@@ -461,16 +497,16 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, v: &mut Verifier
     }
 
     // And/Or require Bool
-    if matches!(op, BinOp::And | BinOp::Or) {
-        if !ty_matches(lt, &Ty::Bool) || !ty_matches(rt, &Ty::Bool) {
-            v.err(
-                format!(
-                    "{:?} expects Bool operands, got {} and {}",
-                    op, lt.display(), rt.display()
-                ),
-                span,
-            );
-        }
+    if matches!(op, BinOp::And | BinOp::Or)
+        && (!ty_matches(lt, &Ty::Bool) || !ty_matches(rt, &Ty::Bool))
+    {
+        v.err(
+            format!(
+                "{:?} expects Bool operands, got {} and {}",
+                op, lt.display(), rt.display()
+            ),
+            span,
+        );
     }
 }
 

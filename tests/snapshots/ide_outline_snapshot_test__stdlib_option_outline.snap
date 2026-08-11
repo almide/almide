@@ -1,6 +1,5 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 49
 expression: "run_outline(&[\"@stdlib/option\"])"
 ---
 fn option.collect[T](xs: List[Option[T]]) -> Option[List[T]]

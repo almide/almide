@@ -757,3 +757,57 @@ impl LowerCtx {
         ))
     }
 }
+
+impl LowerCtx {
+    /// #1134: the TAIL-position heap `??`. `r ?? fb` returns the payload when
+    /// present and the fallback otherwise — exactly `match r { ok($p) => $p,
+    /// err(_) => fb }` (Option's polarity is the some/none pair). Building
+    /// that match here hands the construct to `lower_tail_heap_match`, whose
+    /// executable subset is already proven; nothing else in the pipeline
+    /// changes, so the shapes that lower today keep their own paths.
+    fn lower_tail_heap_unwrap_or(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        use almide_ir::{IrMatchArm, IrPattern, VarId};
+        let IrExprKind::UnwrapOr { expr, fallback } = &tail.kind else { unreachable!() };
+        // ONLY the Result polarity was walled. A tail-position OPTION `??`
+        // already lowers through `lower_call_args` → `option.unwrap_or_str`,
+        // a proven executable path — rewriting it into a match takes a
+        // working shape off that path for nothing, which is the same
+        // over-reach that made the first (whole-body) version of this fix
+        // regress the C-149 share shapes. Pinned by
+        // `heap_unwrap_or_tail_position_executes`, which asserts the
+        // `option.unwrap_or_str` route survives.
+        if !expr.ty.is_result() {
+            return self.lower_tail_heap_fresh(tail);
+        }
+        let payload_ty = tail.ty.clone();
+        let p = VarId(crate::lower::max_var_id(tail) + 1);
+        let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
+        let (hit, miss) = if expr.ty.is_result() {
+            (
+                IrPattern::Ok { inner: Box::new(bind) },
+                IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+            )
+        } else {
+            (IrPattern::Some { inner: Box::new(bind) }, IrPattern::None)
+        };
+        let payload = IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty: payload_ty,
+            span: tail.span.clone(),
+            def_id: None,
+        };
+        let rewritten = IrExpr {
+            kind: IrExprKind::Match {
+                subject: expr.clone(),
+                arms: vec![
+                    IrMatchArm { pattern: hit, guard: None, body: payload },
+                    IrMatchArm { pattern: miss, guard: None, body: (**fallback).clone() },
+                ],
+            },
+            ty: tail.ty.clone(),
+            span: tail.span.clone(),
+            def_id: tail.def_id,
+        };
+        self.lower_tail_heap_match(&rewritten)
+    }
+}

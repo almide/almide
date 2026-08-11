@@ -53,10 +53,17 @@ impl NanoPass for TailCallOptPass {
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
-        let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, tco_owned_params, always_clone_vars, .. } = codegen_annotations;
-        run_tco(functions, var_table, &mut reverted, infer_binding_tys, tco_owned_params, always_clone_vars);
+        let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, tco_owned_params, tco_rewritten_fns, always_clone_vars, .. } = codegen_annotations;
+        let mut run = TcoRun {
+            reverted: &mut reverted,
+            infer_bindings: infer_binding_tys,
+            tco_owned_params,
+            tco_rewritten_fns,
+            always_clone_vars,
+        };
+        run_tco(functions, var_table, &mut run);
         for module in modules.iter_mut() {
-            run_tco(&mut module.functions, var_table, &mut reverted, infer_binding_tys, tco_owned_params, always_clone_vars);
+            run_tco(&mut module.functions, var_table, &mut run);
         }
         if !reverted.is_empty() {
             strip_borrows_at_tco_calls(&mut program, &reverted);
@@ -65,20 +72,31 @@ impl NanoPass for TailCallOptPass {
     }
 }
 
-fn run_tco(
-    functions: &mut [IrFunction],
-    var_table: &mut VarTable,
-    reverted: &mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
-    infer_bindings: &mut std::collections::BTreeSet<VarId>,
-    tco_owned_params: &mut HashSet<VarId>,
-    always_clone_vars: &HashSet<VarId>,
-) {
+/// The state one TCO sweep accumulates across every function it rewrites: the
+/// reverted-borrow map the caller uses to fix external call sites, the three
+/// codegen-annotation sets the rewrite feeds, and the read-only always-clone set.
+struct TcoRun<'a> {
+    reverted: &'a mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
+    infer_bindings: &'a mut std::collections::BTreeSet<VarId>,
+    tco_owned_params: &'a mut HashSet<VarId>,
+    tco_rewritten_fns: &'a mut HashSet<almide_base::intern::Sym>,
+    always_clone_vars: &'a HashSet<VarId>,
+}
+
+fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable, run: &mut TcoRun<'_>) {
     for func in functions.iter_mut() {
         if is_tco_candidate(func) {
             let fn_name = func.name.clone();
-            let reverted_here = rewrite_to_loop(func, var_table, infer_bindings, tco_owned_params, always_clone_vars);
+            let reverted_here = rewrite_to_loop(
+                func,
+                var_table,
+                run.infer_bindings,
+                run.tco_owned_params,
+                run.tco_rewritten_fns,
+                run.always_clone_vars,
+            );
             if !reverted_here.is_empty() {
-                reverted.insert(fn_name, reverted_here);
+                run.reverted.insert(fn_name, reverted_here);
             }
         } else if is_binary_rec_candidate(func) {
             rewrite_binary_rec(func, var_table);
@@ -146,9 +164,7 @@ fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
 
     // Extract step from right_call: self(n - step) → step value
     // left_call: self(n - 1), right_call: self(n - 2) typically
-    let step = extract_subtraction_const(&right_call, param.var);
-
-    if step.is_none() {
+    let Some(step_val) = extract_subtraction_const(&right_call, param.var) else {
         // Restore original
         func.body.kind = IrExprKind::If {
             cond: Box::new(cond),
@@ -159,8 +175,7 @@ fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
             }),
         };
         return;
-    }
-    let step_val = step.unwrap();
+    };
 
     // Create: var n_var = n; var acc = 0;
     let n_var = var_table.alloc(
@@ -273,21 +288,19 @@ fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
     };
 }
 
+/// The `k` of a self-call `self(param - k)`; `None` for any other argument shape.
 fn extract_subtraction_const(call_expr: &IrExpr, param_var: VarId) -> Option<i64> {
-    if let IrExprKind::Call { args, .. } = &call_expr.kind {
-        if let Some(arg) = args.first() {
-            if let IrExprKind::BinOp { op: almide_ir::BinOp::SubInt, left, right } = &arg.kind {
-                if let IrExprKind::Var { id } = &left.kind {
-                    if *id == param_var {
-                        if let IrExprKind::LitInt { value: n } = &right.kind {
-                            return Some(*n);
-                        }
-                    }
-                }
-            }
-        }
+    let IrExprKind::Call { args, .. } = &call_expr.kind else { return None };
+    let IrExprKind::BinOp { op: almide_ir::BinOp::SubInt, left, right } = &args.first()?.kind
+    else {
+        return None;
+    };
+    let IrExprKind::Var { id } = &left.kind else { return None };
+    if *id != param_var {
+        return None;
     }
-    None
+    let IrExprKind::LitInt { value: n } = &right.kind else { return None };
+    Some(*n)
 }
 
 fn substitute_var(expr: &mut IrExpr, from: VarId, to: VarId) {
@@ -452,43 +465,41 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str, is_effect: bool) -> 
 
         // If: condition is NOT tail, both branches ARE tail
         IrExprKind::If { cond, then, else_ } => {
-            let (cond_has, cond_all) = scan_non_tail(cond, fn_name);
-            if cond_has && !cond_all {
+            let cond_part = scan_non_tail(cond, fn_name);
+            if disqualifies(cond_part) {
                 return (true, false);
             }
-            let (then_has, then_all) = all_self_calls_in_tail_pos(then, fn_name, is_effect);
-            let (else_has, else_all) = all_self_calls_in_tail_pos(else_, fn_name, is_effect);
-            let has = cond_has || then_has || else_has;
-            let all = (!cond_has || cond_all) && (!then_has || then_all) && (!else_has || else_all);
-            (has, all)
+            let branches = merge_tail(
+                all_self_calls_in_tail_pos(then, fn_name, is_effect),
+                all_self_calls_in_tail_pos(else_, fn_name, is_effect),
+            );
+            merge_tail(cond_part, branches)
         }
 
         // Match: subject is NOT tail, arm bodies ARE tail
         IrExprKind::Match { subject, arms } => {
-            let (subj_has, subj_all) = scan_non_tail(subject, fn_name);
-            if subj_has && !subj_all {
+            let subj_part = scan_non_tail(subject, fn_name);
+            if disqualifies(subj_part) {
                 return (true, false);
             }
-            let (has, all) = arms.iter().fold((subj_has, !subj_has || subj_all), |(has, all), arm| {
-                let (arm_has, arm_all) = all_self_calls_in_tail_pos(&arm.body, fn_name, is_effect);
-                let (g_has, g_all) = arm.guard.as_ref().map_or((false, true), |g| scan_non_tail(g, fn_name));
-                (has || arm_has || g_has, all && (!arm_has || arm_all) && (!g_has || g_all))
-            });
-            (has, all)
+            arms.iter().fold(subj_part, |acc, arm| {
+                let body = all_self_calls_in_tail_pos(&arm.body, fn_name, is_effect);
+                let guard = arm
+                    .guard
+                    .as_ref()
+                    .map_or((false, true), |g| scan_non_tail(g, fn_name));
+                merge_tail(merge_tail(acc, body), guard)
+            })
         }
 
         // Block: stmts are NOT tail, only the trailing expr is tail
-
         IrExprKind::Block { stmts, expr } => {
-            let (has, all) = stmts.iter().fold((false, true), |(has, all), stmt| {
-                let (s_has, s_all) = scan_non_tail_stmt(stmt, fn_name);
-                (has || s_has, all && (!s_has || s_all))
+            let stmt_part = stmts.iter().fold((false, true), |acc, stmt| {
+                merge_tail(acc, scan_non_tail_stmt(stmt, fn_name))
             });
-            let (has, all) = expr.as_ref().map_or((has, all), |tail| {
-                let (t_has, t_all) = all_self_calls_in_tail_pos(tail, fn_name, is_effect);
-                (has || t_has, all && (!t_has || t_all))
-            });
-            (has, all)
+            expr.as_ref().map_or(stmt_part, |tail| {
+                merge_tail(stmt_part, all_self_calls_in_tail_pos(tail, fn_name, is_effect))
+            })
         }
 
         // #557: `expr!` / `expr?` wrapping a tail self-call. Since auto-? moved
@@ -550,132 +561,45 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str, is_effect: bool) -> 
     }
 }
 
-/// Check whether any expression in an iterator contains a self-call (non-tail).
-/// Returns `(has_any, !has_any)` — the `all` component is simply the negation of `has`.
-fn any_has_self_call<'a>(exprs: impl Iterator<Item = &'a IrExpr>, fn_name: &str) -> (bool, bool) {
-    let has = exprs.fold(false, |has, e| has || scan_non_tail(e, fn_name).0);
+/// Fold one part's `(has_self_call, all_in_tail_pos)` into a running answer.
+///
+/// `all` survives a part that has no self-call at all (`!h`), and otherwise
+/// demands that part's own calls were all in tail position (`a`) — the rule
+/// every composite arm applies to its children.
+fn merge_tail(acc: (bool, bool), part: (bool, bool)) -> (bool, bool) {
+    let (has, all) = acc;
+    let (h, a) = part;
+    (has || h, all && (!h || a))
+}
+
+/// A part that contains a self-call NOT in tail position kills the rewrite
+/// outright — no later part can rescue it.
+fn disqualifies(part: (bool, bool)) -> bool {
+    let (has, all) = part;
+    has && !all
+}
+
+fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
+    let has = non_tail_self_call(expr, fn_name);
     (has, !has)
 }
 
-/// Scan an expression that is NOT in tail position. Any self-call found here
-/// means the function has a non-tail self-call.
-fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
+/// Does this NON-tail expression contain a call to `fn_name`?
+///
+/// Arms are grouped by CHILD SHAPE, not by node family: the answer for every
+/// node that is not itself the self-call is "does any child contain one", so
+/// same-shaped variants share an arm. Exhaustive with no wildcard, so a new
+/// `IrExprKind` is a compile error here rather than a silently unscanned
+/// subtree.
+fn non_tail_self_call(expr: &IrExpr, fn_name: &str) -> bool {
+    let has = |e: &IrExpr| non_tail_self_call(e, fn_name);
     match &expr.kind {
-        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {
-            // Self-call in non-tail position: disqualify
-            // But also scan args for additional self-calls
-            let has = args.iter().fold(true, |has, arg| has || scan_non_tail(arg, fn_name).0);
-            (has, false)
-        }
-        IrExprKind::Call { target, args, .. } => {
-            let target_has = match target {
-                CallTarget::Computed { callee } => scan_non_tail(callee, fn_name).0,
-                CallTarget::Method { object, .. } => scan_non_tail(object, fn_name).0,
-                _ => false,
-            };
-            let has = args.iter().fold(target_has, |has, arg| has || scan_non_tail(arg, fn_name).0);
-            (has, !has)
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            let has = scan_non_tail(left, fn_name).0 || scan_non_tail(right, fn_name).0;
-            (has, !has)
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            scan_non_tail(operand, fn_name)
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            let has = scan_non_tail(cond, fn_name).0
-                || scan_non_tail(then, fn_name).0
-                || scan_non_tail(else_, fn_name).0;
-            (has, !has)
-        }
-        IrExprKind::Match { subject, arms } => {
-            let has = arms.iter().fold(scan_non_tail(subject, fn_name).0, |has, arm| {
-                let g_has = arm.guard.as_ref().map_or(false, |g| scan_non_tail(g, fn_name).0);
-                has || scan_non_tail(&arm.body, fn_name).0 || g_has
-            });
-            (has, !has)
-        }
-        IrExprKind::Block { stmts, expr } => {
-            let has = stmts.iter().fold(false, |has, stmt| has || scan_non_tail_stmt(stmt, fn_name).0);
-            let has = expr.as_ref().map_or(has, |e| has || scan_non_tail(e, fn_name).0);
-            (has, !has)
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            any_has_self_call(elements.iter(), fn_name)
-        }
-        IrExprKind::Record { fields, .. } => {
-            any_has_self_call(fields.iter().map(|(_, v)| v), fn_name)
-        }
-        IrExprKind::Lambda { body, .. } => {
-            // Lambdas are independent scopes; a self-call in a lambda
-            // is not a direct self-recursive tail call
-            let (b_has, _) = scan_non_tail(body, fn_name);
-            (b_has, !b_has)
-        }
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } => {
-            scan_non_tail(expr, fn_name)
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            let has = scan_non_tail(expr, fn_name).0 || scan_non_tail(fallback, fn_name).0;
-            (has, !has)
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            scan_non_tail(object, fn_name)
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            let has = scan_non_tail(object, fn_name).0 || scan_non_tail(index, fn_name).0;
-            (has, !has)
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            let has = fields.iter().fold(scan_non_tail(base, fn_name).0, |has, (_, v)| {
-                has || scan_non_tail(v, fn_name).0
-            });
-            (has, !has)
-        }
-        IrExprKind::StringInterp { parts } => {
-            let has = parts.iter().fold(false, |has, p| {
-                if let IrStringPart::Expr { expr } = p { has || scan_non_tail(expr, fn_name).0 } else { has }
-            });
-            (has, !has)
-        }
-        IrExprKind::MapLiteral { entries } => {
-            let has = entries.iter().fold(false, |has, (k, v)| {
-                has || scan_non_tail(k, fn_name).0 || scan_non_tail(v, fn_name).0
-            });
-            (has, !has)
-        }
-        IrExprKind::Range { start, end, .. } => {
-            let has = scan_non_tail(start, fn_name).0 || scan_non_tail(end, fn_name).0;
-            (has, !has)
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            let has = body.iter().fold(scan_non_tail(iterable, fn_name).0, |has, stmt| {
-                has || scan_non_tail_stmt(stmt, fn_name).0
-            });
-            (has, !has)
-        }
-        IrExprKind::While { cond, body } => {
-            let has = body.iter().fold(scan_non_tail(cond, fn_name).0, |has, stmt| {
-                has || scan_non_tail_stmt(stmt, fn_name).0
-            });
-            (has, !has)
-        }
-        IrExprKind::Fan { exprs } => {
-            any_has_self_call(exprs.iter(), fn_name)
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            any_has_self_call(args.iter(), fn_name)
-        }
-        // Leaf nodes (and codegen-internal nodes that never carry a TCO-relevant
-        // self-call): no self-calls. Explicit-preserve — same RHS the catch-all
-        // had, total-by-construction so a new IrExprKind is a compile error here.
+        // The self-call itself. Its args are not scanned further: the call
+        // already disqualifies the function.
+        IrExprKind::Call { target: CallTarget::Named { name }, .. } if name == fn_name => true,
+
+        // ── No children (and codegen-internal nodes that never carry a
+        // TCO-relevant self-call) ──
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
         | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
         | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
@@ -685,7 +609,84 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
         | IrExprKind::RcWrap { .. } | IrExprKind::RenderedCall { .. }
         | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
         | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => (false, true),
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
+
+        // ── One child. A lambda is an independent scope, but a self-call in
+        // its body still disqualifies the direct tail-call rewrite. ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e } => has(e),
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => has(a) || has(b),
+
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => has(cond) || has(then) || has(else_),
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RustMacro { args: xs, .. } => {
+            xs.iter().any(has)
+        }
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| has(v)),
+        IrExprKind::SpreadRecord { base, fields } => {
+            has(base) || fields.iter().any(|(_, v)| has(v))
+        }
+
+        // ── Shapes with their own traversal ──
+        _ => non_tail_self_call_nested(expr, fn_name),
+    }
+}
+
+/// The [`non_tail_self_call`] arms whose children are not a plain list of
+/// sub-expressions — calls, keyed containers, and the nodes carrying statement
+/// bodies or match arms.
+fn non_tail_self_call_nested(expr: &IrExpr, fn_name: &str) -> bool {
+    let has = |e: &IrExpr| non_tail_self_call(e, fn_name);
+    match &expr.kind {
+        IrExprKind::Call { target, args, .. } => {
+            let target_has = match target {
+                CallTarget::Computed { callee } => has(callee),
+                CallTarget::Method { object, .. } => has(object),
+                _ => false,
+            };
+            target_has || args.iter().any(has)
+        }
+        IrExprKind::Match { subject, arms } => {
+            has(subject)
+                || arms.iter().any(|arm| {
+                    has(&arm.body) || arm.guard.as_ref().is_some_and(|g| has(g))
+                })
+        }
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|stmt| scan_non_tail_stmt(stmt, fn_name).0)
+                || expr.as_ref().is_some_and(|e| has(e))
+        }
+        IrExprKind::MapLiteral { entries } => {
+            entries.iter().any(|(k, v)| has(k) || has(v))
+        }
+        IrExprKind::StringInterp { parts } => parts.iter().any(|p| match p {
+            IrStringPart::Expr { expr } => has(expr),
+            _ => false,
+        }),
+        IrExprKind::ForIn { iterable: lead, body, .. }
+        | IrExprKind::While { cond: lead, body } => {
+            has(lead) || body.iter().any(|stmt| scan_non_tail_stmt(stmt, fn_name).0)
+        }
+        // Every other kind is answered by `non_tail_self_call` itself.
+        _ => false,
     }
 }
 

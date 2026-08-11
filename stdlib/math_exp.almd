@@ -3,26 +3,26 @@
 // operators lower to the prim float floor). vscalbn is the single-level form: exp's |k| < 1024 <
 // 2046, so one (x*2^1023, n-1023) / (x*2^-969, n+969) adjustment is exact (the libm triple-nest
 // never deepens in this range — verified by the bit-exact test).
-
 // vscalbn(y, n) for |n| < 2046: y * 2^n with the extreme-exponent split.
 fn __exp_scalbn(y: Float, n: Int) -> Float = {
-  let fexpmax = prim.ffrombits(9214364837600034816)    // 2^1023
-  let fexpmin = prim.ffrombits(4503599627370496)        // 2^-1022
-  let fpowsub = prim.ffrombits(4845873199050653696)     // 2^53
+  let fexpmax = prim.ffrombits(9214364837600034816)
+  // 2^1023
+  let fexpmin = prim.ffrombits(4503599627370496)
+  // 2^-1022
+  let fpowsub = prim.ffrombits(4845873199050653696)
+  // 2^53
   if n > 1023 then {
     let y2 = y * fexpmax
     let n2 = n - 1023
     let scale = prim.ffrombits(prim.bshl(1023 + n2, 52))
     y2 * scale
-  }
-  else if n < 0 - 1022 then {
+  } else if n < 0 - 1022 then {
     let mul = fexpmin * fpowsub
     let y2 = y * mul
     let n2 = n + 969
     let scale = prim.ffrombits(prim.bshl(1023 + n2, 52))
     y2 * scale
-  }
-  else {
+  } else {
     let scale = prim.ffrombits(prim.bshl(1023 + n, 52))
     y * scale
   }
@@ -46,17 +46,18 @@ fn __exp_main(x: Float, hx: Int, sign: Int) -> Float = {
   let ln2hi = prim.ffrombits(4604418534311723008)
   let ln2lo = prim.ffrombits(4461442080421002358)
   let invln2 = prim.ffrombits(4609176140021203710)
-  if hx > 1071001650 then {                              // |x| > 0.5 ln2
+  // tiny: 1 + x
+  if hx > 1071001154 then {
+    // |x| > 0.5 ln2 (hx of 0x3FD62E42)
     let half = if sign == 0 then 0.5 else 0.0 - 0.5
-    let k = if hx >= 1072889522 then prim.f2i(invln2 * x + half) else 1 - sign - sign
+    let k = if hx >= 1072734898 then prim.f2i(invln2 * x + half) else 1 - sign - sign
     let dk = prim.i2f(k)
     let hi = x - dk * ln2hi
     let lo = dk * ln2lo
     let xr = hi - lo
     __exp_poly(xr, k, hi, lo)
-  }
-  else if hx > 1043333120 then __exp_poly(x, 0, x, 0.0)  // |x| > 2^-28
-  else 1.0 + x                                            // tiny: 1 + x
+  } else if hx > 1043333120 then __exp_poly(x, 0, x, 0.0)
+  else 1.0 + x
 }
 
 fn math_exp(x: Float) -> Float = {
@@ -64,15 +65,18 @@ fn math_exp(x: Float) -> Float = {
   let u32 = prim.band(prim.bshr(bits, 32), 4294967295)
   let sign = prim.bshr(u32, 31)
   let hx = prim.band(u32, 2147483647)
-  if hx >= 1082531627 then {                             // |x| >= 708.39...
+  if hx >= 1082532651 then {
+    // |x| >= 708.39... (hx of 0x4086232B)
     let isnan = prim.fne(x, x)
-    let ovf = prim.ffrombits(4649454530587146735)        // 709.782712893383973096
-    let zth = prim.ffrombits(0 - 4573606559926636463)    // -745.13321910194110842
-    let fexpmax = prim.ffrombits(9214364837600034816)    // 2^1023
+    let ovf = prim.ffrombits(4649454530587146735)
+    // 709.782712893383973096
+    let zth = prim.ffrombits(0 - 4573606559926636463)
+    // -745.13321910194110842
+    let fexpmax = prim.ffrombits(9214364837600034816)
+    // 2^1023
     if isnan then x
-    else if x > ovf then x * fexpmax                      // overflow -> +inf
-    else if x < zth then 0.0                              // underflow -> 0
+    else if x > ovf then x * fexpmax
+    else if x < zth then 0.0
     else __exp_main(x, hx, sign)
-  }
-  else __exp_main(x, hx, sign)
+  } else __exp_main(x, hx, sign)
 }

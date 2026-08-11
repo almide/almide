@@ -7,29 +7,44 @@
 // observable (the pointer VALUE differs per target by nature and is never
 // printed), matching the native *mut u8 semantics byte-for-byte on the data.
 // Address arithmetic runs on Int via the identity prim casts.
-fn bytes_as_ptr(b: Bytes) -> RawPtr = prim.int_to_ptr(prim.handle(b) + 12)
+// An EMPTY buffer has no data region, so both return NULL (address 0) — the
+// native `Vec::as_ptr` of an empty Vec is a DANGLING sentinel and writing
+// through it was UB (silent heap corruption + death) while this self-host
+// handed out `handle + 12` of a 0-len block and wrote over the NEXT allocation
+// (differential fuzz, 2026-08-10 night). Null moves nothing on either target.
+fn bytes_as_ptr(b: Bytes) -> RawPtr = {
+  let h = prim.handle(b)
+  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
+}
 
-fn bytes_as_mut_ptr(b: Bytes) -> RawPtr = prim.int_to_ptr(prim.handle(b) + 12)
+fn bytes_as_mut_ptr(b: Bytes) -> RawPtr = {
+  let h = prim.handle(b)
+  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
+}
 
-fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    prim.store8(dst + i, prim.load8(src + i))
-    __brp_copy(dst, src, n, i + 1)
-  }
+fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __brp_copy(dst, src, n, i + 1)
+}
 
+// NULL / non-positive guards mirror the native oracle exactly
+// (`if ptr.is_null() || len <= 0 { return Vec::new(); }`).
 fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
   let src = prim.ptr_to_int(p)
-  let out = prim.alloc_bytes(n)
-  let oh = prim.handle(out)
-  let _c = __brp_copy(oh + 12, src, n, 0)
-  out
+  if src == 0 or n <= 0 then prim.alloc_bytes(0)
+  else {
+    let out = prim.alloc_bytes(n)
+    let oh = prim.handle(out)
+    let _c = __brp_copy(oh + 12, src, n, 0)
+    out
+  }
 }
 
 fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
   let dst = prim.ptr_to_int(ptr)
   let h = prim.handle(b)
-  let len = prim.load32(h + 4)
+  let len = if dst == 0 then 0 else prim.load32(h + 4)
   // `cap` is an UNSIGNED capacity, matching the native oracle's
   // `b.len().min(cap as usize)`: a NEGATIVE cap is enormous as a usize and
   // saturates to the whole buffer (the C-034 unsigned-count rule). Comparing

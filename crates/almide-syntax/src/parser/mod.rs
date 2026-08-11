@@ -10,6 +10,7 @@ mod compounds;
 mod declarations;
 mod diagnostics;
 mod entry;
+mod fn_decls;
 mod expressions;
 mod fan;
 pub mod hints;

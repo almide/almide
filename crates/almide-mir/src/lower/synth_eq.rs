@@ -141,6 +141,178 @@ impl LowerCtx {
             return false;
         }
         let elem_call = self.eq_helper_name(elem_tyname);
+        let f = synth_list_eq_loop_fn(name, elem_call);
+        self.synth_eq_fns.push(f);
+        true
+    }
+
+    fn record_eq_helper_name(&self, key: &str) -> String {
+        format!("__eq_rec_{}__{}", sanitize_ty_ident(key), sanitize_ty_ident(&self.fn_name))
+    }
+
+    pub(crate) fn list_record_eq_helper_name(&self, key: &str) -> String {
+        format!("__eq_list_rec_{}__{}", sanitize_ty_ident(key), sanitize_ty_ident(&self.fn_name))
+    }
+
+    /// Generate (once per parent fn) the per-slot eq helper for RECORD `key` — the
+    /// body is the SAME declaration-order [`Self::aggregate_eq_from_handles`]
+    /// recursion the inline record eq uses, packaged as a callable fn so the
+    /// `List[record]` loop helper can invoke it per element. Returns `false` when
+    /// a field is outside the engine (the eq site then walls — never wrong bytes).
+    /// A record that reaches itself (through a `List[Self]` field) terminates the
+    /// same way the variant family does: the key joins `synth_eq_types` BEFORE the
+    /// body lowers, so the inner site emits the helper CALL instead of regenerating.
+    pub(crate) fn ensure_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+        let name = self.record_eq_helper_name(key);
+        let guard = format!("rec:{key}");
+        if self.synth_eq_fns.iter().any(|f| f.name == name) || self.synth_eq_types.contains(&guard)
+        {
+            return true;
+        }
+        self.synth_eq_types.insert(guard.clone());
+        let mut sub = LowerCtx {
+            variant_layouts: self.variant_layouts.clone(),
+            record_layouts: self.record_layouts.clone(),
+            fn_name: self.fn_name.clone(),
+            next_value: 2,
+            synth_eq_types: self.synth_eq_types.clone(),
+            ..Default::default()
+        };
+        sub.param_values.insert(ValueId(0));
+        sub.param_values.insert(ValueId(1));
+        let ha = sub.handle_of(ValueId(0));
+        let hb = sub.handle_of(ValueId(1));
+        let res = sub.aggregate_eq_from_handles(ha, hb, ftys, 0);
+        for f in std::mem::take(&mut sub.synth_eq_fns) {
+            if !self.synth_eq_fns.iter().any(|g| g.name == f.name) {
+                self.synth_eq_fns.push(f);
+            }
+        }
+        for t in sub.synth_eq_types {
+            self.synth_eq_types.insert(t);
+        }
+        match res {
+            Some(r) => {
+                let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
+                self.synth_eq_fns.push(MirFunction {
+                    name,
+                    params: vec![
+                        MirParam { value: ValueId(0), repr: ptr },
+                        MirParam { value: ValueId(1), repr: ptr },
+                    ],
+                    ops: sub.ops,
+                    ret: Some(r),
+                    declared_caps: Vec::new(),
+                    heap_slot_masks: Default::default(),
+                });
+                true
+            }
+            None => {
+                self.synth_eq_types.remove(&guard);
+                false
+            }
+        }
+    }
+
+    fn opt_record_eq_helper_name(&self, key: &str) -> String {
+        format!("__eq_opt_rec_{}__{}", sanitize_ty_ident(key), sanitize_ty_ident(&self.fn_name))
+    }
+
+    pub(crate) fn list_opt_record_eq_helper_name(&self, key: &str) -> String {
+        format!(
+            "__eq_list_opt_rec_{}__{}",
+            sanitize_ty_ident(key),
+            sanitize_ty_ident(&self.fn_name)
+        )
+    }
+
+    /// Generate (once per parent fn) the `Option[<record>]` ELEMENT eq helper —
+    /// the option layer over [`Self::ensure_record_eq_helper`]: tag eq (len@4),
+    /// the record compare GUARDED to both-Some (a None side's @12 is never
+    /// dereferenced), both-None equal. The `List[Option[record]]` loop helper
+    /// below calls this per element (#1134, the codec `lc: List[Inner?]` eq).
+    fn ensure_opt_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+        use crate::{IntOp, PrimKind};
+        let name = self.opt_record_eq_helper_name(key);
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
+        }
+        if !self.ensure_record_eq_helper(key, ftys) {
+            return false;
+        }
+        let rec_call = self.record_eq_helper_name(key);
+        let mut sub = LowerCtx { next_value: 2, ..Default::default() };
+        let ha = sub.handle_of(ValueId(0));
+        let hb = sub.handle_of(ValueId(1));
+        let tag_a = sub.load_at_offset(ha, 4, PrimKind::Load { width: 4 });
+        let tag_b = sub.load_at_offset(hb, 4, PrimKind::Load { width: 4 });
+        let both_some = sub.fresh_value();
+        sub.ops.push(Op::IntBinOp { dst: both_some, op: IntOp::And, a: tag_a, b: tag_b });
+        let dst = sub.fresh_value();
+        sub.ops.push(Op::IfThen { cond: both_some, dst: Some(dst) });
+        let pa = sub.load_payload_addr(ha, 12);
+        let pb = sub.load_payload_addr(hb, 12);
+        let pay_eq = sub.emit_eq_helper_call(rec_call, pa, pb);
+        sub.ops.push(Op::Else { val: Some(pay_eq) });
+        let tags_eq = sub.fresh_value();
+        sub.ops.push(Op::IntBinOp { dst: tags_eq, op: IntOp::Eq, a: tag_a, b: tag_b });
+        sub.ops.push(Op::EndIf { val: Some(tags_eq) });
+        let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
+        self.synth_eq_fns.push(MirFunction {
+            name,
+            params: vec![
+                MirParam { value: ValueId(0), repr: ptr },
+                MirParam { value: ValueId(1), repr: ptr },
+            ],
+            ops: sub.ops,
+            ret: Some(dst),
+            declared_caps: Vec::new(),
+            heap_slot_masks: Default::default(),
+        });
+        true
+    }
+
+    /// Generate (once per parent fn) the `List[Option[<record>]]` eq helper —
+    /// the shared branchless loop over the option-element helper above.
+    pub(crate) fn ensure_list_opt_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+        let name = self.list_opt_record_eq_helper_name(key);
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
+        }
+        if !self.ensure_opt_record_eq_helper(key, ftys) {
+            return false;
+        }
+        let elem_call = self.opt_record_eq_helper_name(key);
+        let f = synth_list_eq_loop_fn(name, elem_call);
+        self.synth_eq_fns.push(f);
+        true
+    }
+
+    /// Generate (once per parent fn) the `List[<record>]` eq helper — the record
+    /// twin of [`Self::ensure_list_eq_helper`]: the identical branchless
+    /// length+fold loop, its per-element call routed to the record helper.
+    pub(crate) fn ensure_list_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+        let name = self.list_record_eq_helper_name(key);
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
+        }
+        if !self.ensure_record_eq_helper(key, ftys) {
+            return false;
+        }
+        let elem_call = self.record_eq_helper_name(key);
+        let f = synth_list_eq_loop_fn(name, elem_call);
+        self.synth_eq_fns.push(f);
+        true
+    }
+}
+
+/// The shared `List[T]` eq LOOP body — branchless `res = (la == lb); n = la *
+/// res; for i < n { res &= elem_call(a[i], b[i]) }` — parameterized only by the
+/// per-element eq callee (the variant helper or the record helper). Extracted
+/// verbatim from [`LowerCtx::ensure_list_eq_helper`] so the record twin cannot
+/// drift from the proven variant loop.
+fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
+    {
         let mut sub = LowerCtx { next_value: 2, ..Default::default() };
         let ha = sub.handle_of(ValueId(0));
         let hb = sub.handle_of(ValueId(1));
@@ -195,7 +367,7 @@ impl LowerCtx {
         sub.ops.push(Op::SetLocal { local: i, src: i2 });
         sub.ops.push(Op::LoopEnd);
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
-        self.synth_eq_fns.push(MirFunction {
+        MirFunction {
             name,
             params: vec![
                 MirParam { value: ValueId(0), repr: ptr },
@@ -205,8 +377,7 @@ impl LowerCtx {
             ret: Some(res),
             declared_caps: Vec::new(),
             heap_slot_masks: Default::default(),
-        });
-        true
+        }
     }
 }
 
@@ -370,6 +541,27 @@ fn named_variant(layouts: &crate::lower::VariantLayouts, ty: &Ty) -> Option<Stri
     layouts.by_type.contains_key(&n).then_some(n)
 }
 
+/// The CallFn count for a `List[E]` field: one call for a variant-element
+/// list-helper, one for an element the module-eq table covers (`list.eq_int` /
+/// `eq_str` / … / `eq_opt_int` / the nested forms), none otherwise.
+fn list_eq_call_count(layouts: &crate::lower::VariantLayouts, es: &[Ty]) -> usize {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    if es.len() != 1 {
+        return 0;
+    }
+    if named_variant(layouts, &es[0]).is_some() {
+        return 1;
+    }
+    let module_eq = match &es[0] {
+        Ty::Int | Ty::String | Ty::Float | Ty::Bool => true,
+        t if crate::lower::is_value_ty(t) => true,
+        Ty::Applied(TC::List, i2) => i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Float | Ty::String),
+        Ty::Applied(TC::Option, i2) => i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Bool),
+        _ => false,
+    };
+    usize::from(module_eq)
+}
+
 /// The CallFn count `typed_slot_eq` emits for ONE field compare inside a
 /// generated helper body — mirrors the engine's field arms exactly.
 fn field_eq_call_count(layouts: &crate::lower::VariantLayouts, fty: &Ty) -> usize {
@@ -381,25 +573,7 @@ fn field_eq_call_count(layouts: &crate::lower::VariantLayouts, fty: &Ty) -> usiz
         return 1; // the helper call (self or mutual — both routed by the in-progress set)
     }
     if let Ty::Applied(TC::List, es) = fty {
-        if es.len() == 1 {
-            if named_variant(layouts, &es[0]).is_some() {
-                return 1; // the list-helper call
-            }
-            // the module-eq table (list.eq_int / eq_str / … / eq_opt_int / nested)
-            let inner_mod_eq = match &es[0] {
-                Ty::Int | Ty::String | Ty::Float | Ty::Bool => true,
-                t if crate::lower::is_value_ty(t) => true,
-                Ty::Applied(TC::List, i2) => {
-                    i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Float | Ty::String)
-                }
-                Ty::Applied(TC::Option, i2) => {
-                    i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Bool)
-                }
-                _ => false,
-            };
-            return usize::from(inner_mod_eq);
-        }
-        return 0;
+        return list_eq_call_count(layouts, es);
     }
     if let Ty::Applied(TC::Option, oa) = fty {
         if oa.len() == 1 {

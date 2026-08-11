@@ -652,7 +652,7 @@ fn ty_mentions_param(ty: &Ty, name: &str) -> bool {
         Ty::Named(n, args) => n.as_str() == name || args.iter().any(|a| ty_mentions_param(a, name)),
         Ty::Applied(_, args) => args.iter().any(|a| ty_mentions_param(a, name)),
         Ty::Tuple(elems) => elems.iter().any(|e| ty_mentions_param(e, name)),
-        Ty::Fn { params, ret } => params.iter().any(|p| ty_mentions_param(p, name)) || ty_mentions_param(ret, name),
+        Ty::Fn { is_effect: _, params, ret } => params.iter().any(|p| ty_mentions_param(p, name)) || ty_mentions_param(ret, name),
         Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_mentions_param(t, name)),
         _ => false,
     }

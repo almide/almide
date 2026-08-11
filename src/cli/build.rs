@@ -255,7 +255,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
 
     // The trust-spine ships the bytes ITS OWN rendering process produced —
     // reachability DCE and the name-section trim already ran inside that
-    // pipeline (docs/WASM-OUTPUT.md). `wasm-opt` is a different kind of
+    // pipeline (docs/wasm/WASM-OUTPUT.md). `wasm-opt` is a different kind of
     // thing: an EXTERNAL, unverified transform applied to the renderer's
     // finished output, so running it replaces bytes the trust-spine produced
     // with bytes a separate, un-certified tool rewrote. That is why it stays
@@ -611,7 +611,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
 ///
 /// `wat::parse_str` always emits a name section recording every symbolic
 /// `$name` the WAT source used — functions AND every per-function local
-/// (`$v1`, `$v2`, ...). `docs/WASM-OUTPUT.md` commits to keeping function
+/// (`$v1`, `$v2`, ...). `docs/wasm/WASM-OUTPUT.md` commits to keeping function
 /// names because they're what a wasmtime trap backtrace prints
 /// (`<unknown>!funcname`) — the one piece of this metadata with real
 /// diagnostic value. Local names carry none (wasmtime backtraces never

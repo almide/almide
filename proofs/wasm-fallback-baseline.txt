@@ -1,0 +1,41 @@
+# ── WASM COVERAGE RATCHET (mission-critical arc: wasm is a FIRST-CLASS target) ──
+#
+# Every spec file the wasm leg of `almide test` does not pass, with its wall
+# reason and class. Gate: proofs/check-wasm-fallback.sh — a file falling back
+# that is NOT here fails (a coverage regression); an entry whose file now runs
+# the wasm leg fails as STALE (prune it — the set only shrinks). Data feed:
+# `ALMIDE_FALLBACK_NAMES=1 almide test`.
+#
+# Classes:
+#   COMPILER_FRONTIER — the burn-down DEBT: the wasm pipeline cannot yet
+#                       compile the shape; each entry names its brick.
+#   HOST_CAPABILITY   — the tested API is an OS surface WASI does not provide
+#                       (TCP listen, subprocess, zlib); out of wasm scope BY
+#                       DESIGN until the WASI story changes.
+#   HARNESS_LIMITATION— the TESTING harness needs a mechanism wasm lacks
+#                       (assert_throws requires catching a panic; wasm traps
+#                       are uncatchable in-process).
+#
+# COMPILER_FRONTIER (10) — the debt, in leverage order:
+spec/lang/closure_capture_map_test.almd :: COMPILER_FRONTIER :: 1 fn outside the lowering subset (closure-capture map — the defunc closure frontier)
+spec/stdlib/codec_field_matrix_test.almd :: COMPILER_FRONTIER :: bind-position record brick (#1064)
+spec/integration/modules/cross_module_cell_update_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
+spec/integration/modules/cross_module_global_state_loop_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
+spec/lang/result_zip_test.almd :: COMPILER_FRONTIER :: result.zip_x unlinked (typed self-host twin missing)
+spec/stdlib/stdlib-test.almd :: COMPILER_FRONTIER :: list.sort_by_str_key_x unlinked (typed self-host twin missing)
+spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: test-mode heap-result match brick (create_temp_dir now self-hosted; the trio and the fixture's tmp() lower)
+spec/stdlib/fs_fold_lines_range_test.almd :: COMPILER_FRONTIER :: test-mode heap-result match brick (create_temp_dir now self-hosted; the trio and the fixture's tmp() lower)
+spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: non-msi accumulator twins + for_each_line (create_temp_dir now self-hosted)
+spec/stdlib/fs_if_exists_test.almd :: COMPILER_FRONTIER :: C-215 errno-carrying read prim not landed
+#
+# HOST_CAPABILITY (6):
+spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
+spec/stdlib/net_test.almd :: HOST_CAPABILITY :: net is an OS socket API
+spec/stdlib/process_exec_status_test.almd :: HOST_CAPABILITY :: subprocess exec
+spec/stdlib/process_ext_test.almd :: HOST_CAPABILITY :: subprocess exec
+spec/stdlib/process_timeout_test.almd :: HOST_CAPABILITY :: subprocess exec
+spec/stdlib/zlib_test.almd :: HOST_CAPABILITY :: zlib is a native library binding
+#
+# HARNESS_LIMITATION (2):
+spec/stdlib/coverage_assert_throws_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
+spec/stdlib/testing_polarity_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process

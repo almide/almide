@@ -100,7 +100,7 @@ impl SigType {
                     _ => None,
                 }
             }
-            TypeExpr::Fn { params, ret } => {
+            TypeExpr::Fn { params, ret, .. } => {
                 let mut ps = Vec::with_capacity(params.len());
                 for p in params {
                     ps.push(Self::from_type_expr(p)?);
