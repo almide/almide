@@ -9,6 +9,22 @@ pub(crate) fn preamble() -> String {
 /// [`preamble`] with the bump allocator starting at `bump_base` (`HEAP_BASE +
 /// 8*mutable_global_count`), so the mutable-global slots `[HEAP_BASE, bump_base)`
 /// are never allocated over. With no mutable globals this IS `preamble()`.
+///
+/// Every `(func $…)` below is HAND-WRITTEN wasm — the one part of the wasm leg
+/// that is not rendered from the shared MIR, so the 3-way oracle has no native
+/// counterpart to differ it against. Each one therefore carries a row in
+/// `proofs/wat-prelude-audit.toml` naming the evidence that reaches it, gated by
+/// `scripts/check-wat-prelude-audit.sh`. Add a function here ⇒ add its row.
+///
+/// `$__chk_div`/`$__chk_rem` sat here until that audit: #806 inline-expanded the
+/// checked division/remainder at every `/`/`%` site (`render_wasm_calls.rs`) and
+/// left the two functions behind with zero callers repo-wide. DCE already dropped
+/// their BODIES from every shipped module, so removing them is instruction-identical
+/// on all 367 corpus fixtures; the only textual delta is the three dead comment
+/// lines above them, which DCE keeps (it removes `(func …)` blocks, and the text
+/// between blocks is fixed). What they cost was audit surface: hand-written wasm no
+/// evidence could reach. The divisor-0 / MIN÷-1 abort bytes (C-001/C-035) are
+/// carried by the inline expansion and its fixtures, not by these two.
 pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     // Stage 2 fuel core: present when the program uses fan.bounded OR the
     // probe is on. Counters count DOWN from i64::MAX (consumed = MAX - fuel).
@@ -146,22 +162,6 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (call $__div_trap (i32.add (local.get $s) (i32.const 12))
       (i32.load (i32.add (local.get $s) (i32.const 4))))
     (unreachable))
-  ;; CHECKED i64 division/remainder: divisor 0 and the MIN/-1 overflow abort with
-  ;; the SAME bytes + exit code as native (never a bare wasm hard trap = exit 134).
-  (func $__chk_div (param $a i64) (param $b i64) (result i64)
-    (if (i64.eqz (local.get $b))
-      (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))
-    (if (i32.and (i64.eq (local.get $a) (i64.const -9223372036854775808))
-                 (i64.eq (local.get $b) (i64.const -1)))
-      (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))
-    (i64.div_s (local.get $a) (local.get $b)))
-  (func $__chk_rem (param $a i64) (param $b i64) (result i64)
-    (if (i64.eqz (local.get $b))
-      (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))
-    (if (i32.and (i64.eq (local.get $a) (i64.const -9223372036854775808))
-                 (i64.eq (local.get $b) (i64.const -1)))
-      (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))
-    (i64.rem_s (local.get $a) (local.get $b)))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
   ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
   ;; the head when it is EXACTLY the requested size. The link is stored in the dead
