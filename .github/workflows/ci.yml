@@ -318,6 +318,12 @@ jobs:
       - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-fallback.sh
 
+      # Per-FUNCTION parity. The ratchet above measures which spec FILES fall back,
+      # so a stdlib fn no test touches is invisible to it — datetime.monotonic_ns
+      # had no wasm body at all while that gate read a clean 18/18. ~70s.
+      - name: WASM reachability ratchet (every stdlib fn builds on both legs, or is listed)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-reachability.sh
+
       # The dogfood program (Unit 0.46, #1001). Its own tests cover the decision rules
       # extracted from the shell gates — the parity verdict, the nightly streak fold, the
       # contract link symmetry — which in bash are reachable only through their I/O. Gated
