@@ -2810,3 +2810,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/if_let_guard_let.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-225"
+spec      = "ALS-R6"
+title     = "fs.read_lines materializes a file's lines identically on both targets"
+statement = "`fs.read_lines(path)` returns the file's lines with `str::lines()` semantics byte-identically native <-> wasm: split on \\n, one trailing \\r stripped per line (CRLF), no phantom empty line after a trailing newline, a final newline-less line still yielded, the empty file `Ok([])`, and a missing file the err channel on both legs. The wasm self-host (stdlib/fs_read_lines.almd) is the native oracle's exact composition — `read_to_string(path).map(|s| s.lines()...)` becomes prim.read_text_file + string.lines — so the line-splitting semantics are shared with C-220's streaming family by construction, and the result rides fs.list_dir's proven `Result[List[String], String]` cap-as-tag rails (tag @16, recursive DropResultListStr). Before this contract fs.read_lines had NO wasm body at all: every program touching it fell off the wasm leg (a COMPILER_FRONTIER row in proofs/wasm-reachability-baseline.txt, burned down with this contract). `fs.read_lines_if_exists` stays native-only debt on that ledger — its `Result[List[String]?, String]` shape has no tracking rails yet, and the reachability ratchet keeps it honest."
+since     = "0.56.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_read_lines.almd", class = "fixture" },
+]
