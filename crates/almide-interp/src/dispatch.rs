@@ -112,9 +112,53 @@ impl<'a> Interpreter<'a> {
             });
         }
 
-        // 3. A user / stdlib free function lowered into the program.
+        // 3. A user / stdlib free function lowered into the program. A stdlib
+        //    IMPL name (`string_slice` — how a lowered MODULE body spells
+        //    `string.slice`) first tries the SAME native bridge a
+        //    module-spelled call takes, so both spellings share one resolution
+        //    order; the lowered body stays the fallback. Mut-param impls skip
+        //    the shortcut (the bridge has no write-back path, #1022).
         if let Some(func) = self.fns.get(&name).copied() {
+            if let Some((m, f)) = crate::stdlib_pool::module_of_impl(name) {
+                // The in-interp HOFs take closure ARGUMENTS and must see the
+                // arg EXPRS — same tier order as `eval_module_call`.
+                if is_hof(m.as_str(), f.as_str()) {
+                    return self.eval_hof(m, f, args, scope);
+                }
+                if !func.params.iter().any(|p| p.is_mut) {
+                    let mut evaled = Vec::with_capacity(args.len());
+                    for a in args {
+                        evaled.push(val!(self.eval_expr(a, scope)));
+                    }
+                    if let Some(result) = self.eval_container_op(m.as_str(), f.as_str(), &evaled)
+                    {
+                        return result;
+                    }
+                    if let Some(result) = crate::bridge::dispatch(m.as_str(), f.as_str(), &evaled)
+                    {
+                        return result;
+                    }
+                    let root = self.root_scope();
+                    return self.call_function(func, evaled, &root);
+                }
+            }
             return self.eval_lowered_fn_call(func, args, scope);
+        }
+
+        // 4. A bare Named target inside a LOWERED MODULE body calling a module
+        //    sibling (args' `option_or` → `option`). Runs only on a flat-table
+        //    MISS (program fns stay authoritative) and only when exactly ONE
+        //    loaded module defines the name — an ambiguous name abstains
+        //    honestly rather than resolving from the wrong source (#1087).
+        {
+            let mut hits = self
+                .module_fns
+                .iter()
+                .filter(|((_, f), _)| *f == name)
+                .map(|(_, func)| *func);
+            if let (Some(func), None) = (hits.next(), hits.next()) {
+                return self.eval_lowered_fn_call(func, args, scope);
+            }
         }
 
         Flow::Unsupported(format!("named call `{}`", n))
