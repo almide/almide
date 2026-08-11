@@ -64,6 +64,35 @@ impl LowerCtx {
                         self.ops.truncate(mark);
                         self.live_heap_handles.truncate(lhh_mark);
                     }
+                    // The C-132 WRITE-BACK into the fn's OWN mut-param slot inside an
+                    // executing arm (#1207 repro A — the recursive `walk(buf, n-1)`
+                    // writeback `buf = __mp_buf` in the else arm). The generic heap
+                    // rebind above excludes a borrowed-param slot because its drop-old
+                    // would release the CALLER's reference; the write-back is the one
+                    // shape where skipping drop-old is exactly right — the callee
+                    // CONSUMED the old buffer (it flowed in as the mut arg and came
+                    // back as the return, same handle or a realloc'd successor), so
+                    // the slot's old handle needs no release here. Dup the returned
+                    // temp into the slot (the temp's own scope-end drop balances the
+                    // callee's returned reference; the slot's reference exits through
+                    // the fn's own move-mode tail return of the param). NARROW: only
+                    // the rewriter's own `__mp_buf*` temp assigned to a param slot.
+                    if self.param_values.contains(&local) {
+                        if let IrExprKind::Var { id } = &value.kind {
+                            let is_writeback = self
+                                .call_bind_arg_vars
+                                .get(id)
+                                .is_some_and(|args| args.contains(&var));
+                            if is_writeback {
+                                if let Ok(src) = self.value_or_global(*id) {
+                                    let dup = self.fresh_value();
+                                    self.ops.push(Op::Dup { dst: dup, src });
+                                    self.ops.push(Op::SetLocal { local, src: dup });
+                                    return Some(Ok(()));
+                                }
+                            }
+                        }
+                    }
                 }
         None
     }
