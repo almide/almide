@@ -776,6 +776,15 @@ fn string_fn_structural(func: &str, args: &[Value]) -> Option<Flow> {
                     .map(|b| Box::new(Value::Int(s[..b].chars().count() as i64))),
             ))
         }
+        // Option-returning prefix strip (`args.option`'s `--name=` parse walked
+        // into the pool body's prim.handle without this — #1217's recon).
+        "strip_prefix" => {
+            let s = as_str(args.first())?;
+            let p = as_str(args.get(1))?;
+            Flow::val(Value::Option(
+                s.strip_prefix(p).map(|r| Box::new(Value::str(r.to_string()))),
+            ))
+        }
         "last_index_of" => {
             let s = as_str(args.first())?;
             Flow::val(Value::Option(

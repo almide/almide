@@ -63,6 +63,11 @@ impl<'a> Interpreter<'a> {
             "get_or" => Some(self.list_get_or(args)),
             "binary_search" => Some(self.list_binary_search(args)),
             "contains" => Some(self.list_contains(args)),
+            // First index of an equal element — `PartialEq` equality, the same
+            // relation `contains` uses (measured against native on the corpus;
+            // found abstaining via args.option's `list.index_of(args, long)`,
+            // #1217 — the gap predates the args work and was simply unexercised).
+            "index_of" => Some(self.list_index_of(args)),
             // `list.append` is the FUNCTIONAL append (returns a new list); the
             // mutating `list.push` is intercepted by the in-place-mutation guard
             // above and never reaches here.
@@ -247,6 +252,18 @@ impl<'a> Interpreter<'a> {
         match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
             (Some(items), Some(x)) => Flow::val(Value::Bool(items.contains(x))),
             _ => Flow::Abort("internal: list.contains bad args".into()),
+        }
+    }
+
+    fn list_index_of(&mut self, args: &[Value]) -> Flow {
+        match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
+            (Some(items), Some(x)) => Flow::val(Value::Option(
+                items
+                    .iter()
+                    .position(|e| e == x)
+                    .map(|i| Box::new(Value::Int(i as i64))),
+            )),
+            _ => Flow::Abort("internal: list.index_of bad args".into()),
         }
     }
 
