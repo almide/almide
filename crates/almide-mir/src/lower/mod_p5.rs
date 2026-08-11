@@ -41,6 +41,12 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // by the missing-src copy probe).
             | ("fs", "copy")
             | ("fs", "append")
+            // `fs.remove` / `fs.write_bytes` / `fs.write_bytes_raw` — the same
+            // ctor-built len-as-tag Result[Unit, String] (fs_remove.almd /
+            // fs_write_bytes.almd / fs_write_bytes_raw.almd).
+            | ("fs", "remove")
+            | ("fs", "write_bytes")
+            | ("fs", "write_bytes_raw")
     )
 }
 
@@ -89,6 +95,12 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
             // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
             | ("fs", "list_dir")
+            // `fs.walk` / `fs.glob` — Result[List[String], String] built by the
+            // ordinary ok()/err() ctors over the recursive read_dir walk
+            // (fs_walk.almd): a HEAP-Ok list payload = the cap-as-tag layout,
+            // exactly fs.list_dir's shape and drop route (DropResultListStr).
+            | ("fs", "walk")
+            | ("fs", "glob")
             // `fs.read_lines` returns the SAME cap-as-tag `Result[List[String], String]` shape
             // as fs.list_dir (the self-host builds it with the ordinary ok()/err() ctors —
             // payload @12 a List[String], tag @16), so a `match`/`!` over it reads tag @16 +
