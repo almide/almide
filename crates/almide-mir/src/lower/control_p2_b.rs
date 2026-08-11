@@ -274,7 +274,20 @@ impl LowerCtx {
         if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
             &subject.kind
         {
-            if crate::purity::is_pure(module.as_str(), func.as_str()) {
+            // ADMITTED-EFFECTFUL calls (fs.fold_lines*, io.*, …) take the same
+            // machinery as pure ones (#1233 brick 3a): the raw-name fallback
+            // below bypassed the acc-class router AND the closure lift, so the
+            // effect-unwrap ladder subject of fs.fold_lines_chunked emitted an
+            // unlinked plain name while its assert-position spelling linked
+            // the `_i` twin. lower_pure_module_value_call's admission gate
+            // (admit_module_call_purity) accepts exactly this set and captures
+            // the callback's capabilities through the lift.
+            if crate::purity::is_pure(module.as_str(), func.as_str())
+                || super::calls::is_admitted_effectful_pure_module_call(
+                    module.as_str(),
+                    func.as_str(),
+                )
+            {
                 let Ok(dst) = self.lower_pure_module_value_call(
                     module.as_str(),
                     func.as_str(),
