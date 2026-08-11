@@ -329,21 +329,25 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => v,
             other => return Err(other),
         };
-        let cur = scope
-            .get(target)
-            .ok_or_else(|| Flow::Abort("internal: index-assign to unbound list".into()))?;
-        match (cur, iv) {
-            (Value::List(xs), Value::Int(i)) => {
-                if i < 0 || (i as usize) >= xs.len() {
-                    return Err(Flow::Abort("index out of bounds".into()));
+        // Mutate through the binding's own slot (not get → assign): `get`
+        // hands back a clone, so the Rc is never sole-owned and every
+        // `xs[i] = v` copies the whole list — a fill loop turns quadratic.
+        // `Rc::make_mut` copies only when an alias exists (C-033 COW).
+        let Value::Int(i) = iv else {
+            return Err(Flow::Abort("internal: malformed index-assign".into()));
+        };
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::List(xs) => {
+                    if i < 0 || (i as usize) >= xs.len() {
+                        return Err(Flow::Abort("index out of bounds".into()));
+                    }
+                    Rc::make_mut(xs)[i as usize] = vv;
+                    Ok(())
                 }
-                let mut new = (*xs).clone();
-                new[i as usize] = vv;
-                scope.assign(target, Value::list(new));
-                Ok(())
-            }
-            _ => Err(Flow::Abort("internal: malformed index-assign".into())),
-        }
+                _ => Err(Flow::Abort("internal: malformed index-assign".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: index-assign to unbound list".into()))?
     }
 
     fn exec_stmt_map_insert(
@@ -361,18 +365,16 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => v,
             other => return Err(other),
         };
-        let cur = scope
-            .get(target)
-            .ok_or_else(|| Flow::Abort("internal: map-insert to unbound map".into()))?;
-        match cur {
-            Value::Map(entries) => {
-                let mut new = (*entries).clone();
-                map_insert(&mut new, kv, vv);
-                scope.assign(target, Value::Map(Rc::new(new)));
-                Ok(())
-            }
-            _ => Err(Flow::Abort("internal: map-insert on non-Map".into())),
-        }
+        // Slot mutation, not get → assign: see exec_stmt_index_assign.
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::Map(entries) => {
+                    map_insert(Rc::make_mut(entries), kv, vv);
+                    Ok(())
+                }
+                _ => Err(Flow::Abort("internal: map-insert on non-Map".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: map-insert to unbound map".into()))?
     }
 
     fn exec_stmt_field_assign(
@@ -386,21 +388,20 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => v,
             other => return Err(other),
         };
-        let cur = scope
-            .get(target)
-            .ok_or_else(|| Flow::Abort("internal: field-assign to unbound record".into()))?;
-        match cur {
-            Value::Record { name, fields } => {
-                let mut new = (*fields).clone();
-                if let Some(slot) = new.iter_mut().find(|(k, _)| *k == field) {
-                    slot.1 = vv;
-                } else {
-                    new.push((field, vv));
+        // Slot mutation, not get → assign: see exec_stmt_index_assign.
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::Record { fields, .. } => {
+                    let fields = Rc::make_mut(fields);
+                    if let Some(slot) = fields.iter_mut().find(|(k, _)| *k == field) {
+                        slot.1 = vv;
+                    } else {
+                        fields.push((field, vv));
+                    }
+                    Ok(())
                 }
-                scope.assign(target, Value::Record { name, fields: Rc::new(new) });
-                Ok(())
-            }
-            _ => Err(Flow::Abort("internal: field-assign on non-Record".into())),
-        }
+                _ => Err(Flow::Abort("internal: field-assign on non-Record".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: field-assign to unbound record".into()))?
     }
 }
