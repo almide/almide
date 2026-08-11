@@ -67,9 +67,8 @@ let_unwrap_propagation  out-of-interp-scope capability: prim.alloc_value
 list_chunk_windows  out-of-interp-scope capability: prim.handle
 list_chunk_zero  out-of-interp-scope capability: prim.handle
 list_comprehensive  out-of-interp-scope capability: prim.alloc_list
-list_count_index_truncation  out-of-interp-scope capability: HOF list.update
+list_count_index_truncation  out-of-interp-scope capability: prim.handle
 list_flatten_borrow  out-of-interp-scope capability: prim.handle
-list_heapelem_rc  out-of-interp-scope capability: HOF list.update
 list_modify_heap  out-of-interp-scope capability: prim.alloc_value
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list
 list_set_value  out-of-interp-scope capability: prim.alloc_value
@@ -81,8 +80,8 @@ list_windows_zero  out-of-interp-scope capability: prim.handle
 list_with_capacity  out-of-interp-scope capability: prim.alloc_list
 map_filter  out-of-interp-scope capability: prim.alloc_map
 map_fold  out-of-interp-scope capability: prim.alloc_map
-map_fold_heap_acc  out-of-interp-scope capability: HOF map.fold
-map_fold_heap_acc_skv  out-of-interp-scope capability: HOF map.fold
+map_fold_heap_acc  out-of-interp-scope capability: prim.handle
+map_fold_heap_acc_skv  out-of-interp-scope capability: prim.handle
 map_insertion_order  out-of-interp-scope capability: prim.handle
 map_set_eq  out-of-interp-scope capability: prim.alloc_map
 map_set_ops  out-of-interp-scope capability: prim.alloc_map
