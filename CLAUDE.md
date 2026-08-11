@@ -36,6 +36,10 @@ Correct flow:
 4. `git tag vX.Y.Z <merge-commit>` and `git push origin vX.Y.Z`
 5. **Let the workflow create the release.** It auto-generates notes from commits.
 6. If you want custom notes, edit after the workflow completes: `gh release edit vX.Y.Z --notes "..."`
+7. **Seal the release evidence** (audit freeze): `bash scripts/release-seal.sh gen vX.Y.Z`,
+   fill the `[recorded]` fields (the release-gate fuzz run, the asset inventory), commit
+   `proofs/releases/vX.Y.Z.toml` on `develop`. CI re-measures every `[derived]` field
+   against the tag forever after — the seal is the release's immutable evidence record.
 
 If you already shipped a broken release:
 
