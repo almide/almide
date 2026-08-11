@@ -27,9 +27,9 @@
 # 113 unprobeable.
 #
 # COMPILER_FRONTIER — the burn-down:
-env.set :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capabili
 #
-# HOST_CAPABILITY (39) — out of scope by design:
+# HOST_CAPABILITY (40) — out of scope by design:
+env.set :: HOST_CAPABILITY :: WASI preview1 has no environ-write syscall (environ_get is a read-only snapshot); an in-module overlay cannot reach the real environ the C-137 path resolution and child inheritance read — reclassified from COMPILER_FRONTIER 2026-08-11
 env.sleep_ms :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.sleep_ms needs a declared cap
 http.delete :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.delete needs a declared capa
 http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capabil
