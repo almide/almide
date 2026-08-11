@@ -237,10 +237,20 @@ fn list_heap_call_name_special_cases(
                 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
         let ls_acc = matches!(arg_tys.get(init_idx),
             Some(Ty::Applied(TC::List, a)) if a.len() == 1 && matches!(a[0], Ty::String));
+        // The Int accumulator (#1233 — the chunked error-path shape
+        // `fold_lines_chunked(p, w, 0, (acc, line) => acc)`) routes to the
+        // `_i` twin; its `Result[List[Int], String]` payload class rides the
+        // fan.map precedent (cap-as-tag @16, flat DropListStr — a List[scalar]
+        // block frees flat). The remaining family cells (fold_lines int acc,
+        // range int acc, non-String-element lists, …) stay `_x`-walled until
+        // their twins land — never a wrong-typed link.
+        let int_acc = matches!(arg_tys.get(init_idx), Some(Ty::Int));
         return Some(if msi_acc && func != "fold_lines_range" {
             format!("fs.{func}_msi")
         } else if ls_acc && func == "fold_lines_range" {
             format!("fs.{func}_ls")
+        } else if int_acc && func == "fold_lines_chunked" {
+            format!("fs.{func}_i")
         } else {
             format!("fs.{func}_x")
         });
