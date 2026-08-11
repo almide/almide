@@ -1655,14 +1655,13 @@ bound, so the probe separates the two scales.
 [[env.fn]]
 name = "sleep_ms"
 index_unit = "millisecond"
-setup = [
-  "env.sleep_ms(0)",
-]
-probe = "true"
-expect = "true"
+probe = "1"
+expect = "1"
 note = """
-The zero-duration sleep proves the call shape; the millisecond SCALE is not
-probe-pinned (a timing assertion would be flaky by construction).
+Declared, not probed: env.sleep_ms is HOST_CAPABILITY on the wasm leg (no
+WASI sleep), so a calling probe would push this whole generated file off the
+wasm leg — and the millisecond SCALE would be flaky to assert anyway. The
+native semantics are pinned by the duration tests.
 """
 
 # index_unit vocabulary — random:
@@ -1730,3 +1729,473 @@ name = "int"
 index_unit = "value"
 probe = 'value.as_int(value.int(9)) ?? 0'
 expect = "9"
+
+# index_unit vocabulary — int:
+#   value       — the Int is a plain numeric value at full i64 precision
+#   bit-pattern — the Int is (or the fn operates on) the raw two's-complement
+#                 64-bit pattern: to_hex(-1) is the full 16-f image, bnot(0) is
+#                 -1, bit_reverse(1) is i64::MIN — magnitudes are meaningless
+#   count       — the Int counts BITS: a shift distance, a leading/trailing/
+#                 population count, a width, a log2, or the wrap/rotate family's
+#                 `bits` width parameter
+#
+# The sized-conversion matrix (#956: lossy ⇒ trio) pins one discriminating
+# input per cell: the PLAIN cast WRAPS (two's-complement truncation, 200 as
+# i8 = -56), `_checked` yields none on overflow, `_saturating` clamps to the
+# target's bound. The lossless from_* family is plain-only by design.
+[int]
+default_index_unit = "value"
+
+[[int.fn]]
+name = "to_string"
+index_unit = "value"
+probe = 'int.to_string(0 - 42)'
+expect = "-42"
+
+[[int.fn]]
+name = "to_hex"
+index_unit = "bit-pattern"
+probe = 'int.to_hex(0 - 1)'
+expect = "ffffffffffffffff"
+note = """
+The image is the raw two's-complement 64-bit pattern in lowercase hex, no
+prefix: -1 is sixteen f's, never "-1" in hex.
+"""
+
+[[int.fn]]
+name = "parse"
+index_unit = "value"
+probe = 'int.parse("-42") ?? 0'
+expect = "-42"
+
+[[int.fn]]
+name = "from_hex"
+index_unit = "value"
+probe = 'int.from_hex("ff") ?? 0'
+expect = "255"
+
+[[int.fn]]
+name = "to_float"
+index_unit = "value"
+probe = 'int.to_float(3)'
+expect = "3"
+
+[[int.fn]]
+name = "bits_to_float"
+index_unit = "bit-pattern"
+probe = 'int.bits_to_float(4607182418800017408)'
+expect = "1"
+
+[[int.fn]]
+name = "bits_to_f32"
+index_unit = "bit-pattern"
+probe = 'int.bits_to_f32(1065353216)'
+expect = "1"
+
+[[int.fn]]
+name = "abs"
+index_unit = "value"
+probe = 'int.abs(0 - 5)'
+expect = "5"
+
+[[int.fn]]
+name = "min"
+index_unit = "value"
+probe = 'int.min(3, 9)'
+expect = "3"
+
+[[int.fn]]
+name = "max"
+index_unit = "value"
+probe = 'int.max(3, 9)'
+expect = "9"
+
+[[int.fn]]
+name = "clamp"
+index_unit = "value"
+probe = 'int.clamp(15, 0, 10)'
+expect = "10"
+
+[[int.fn]]
+name = "band"
+index_unit = "bit-pattern"
+probe = 'int.band(12, 10)'
+expect = "8"
+
+[[int.fn]]
+name = "bor"
+index_unit = "bit-pattern"
+probe = 'int.bor(12, 10)'
+expect = "14"
+
+[[int.fn]]
+name = "bxor"
+index_unit = "bit-pattern"
+probe = 'int.bxor(12, 10)'
+expect = "6"
+
+[[int.fn]]
+name = "bnot"
+index_unit = "bit-pattern"
+probe = 'int.bnot(0)'
+expect = "-1"
+
+[[int.fn]]
+name = "bshl"
+index_unit = "count"
+probe = 'int.bshl(1, 4)'
+expect = "16"
+
+[[int.fn]]
+name = "bshr"
+index_unit = "count"
+probe = 'int.bshr(0 - 8, 1)'
+expect = "-4"
+note = """
+ARITHMETIC shift: the sign bit propagates, -8 >> 1 is -4 — a logical shift
+would give a huge positive. The negative operand is the discriminating case.
+"""
+
+[[int.fn]]
+name = "count_leading_zeros"
+index_unit = "count"
+probe = 'int.count_leading_zeros(1)'
+expect = "63"
+
+[[int.fn]]
+name = "count_trailing_zeros"
+index_unit = "count"
+probe = 'int.count_trailing_zeros(8)'
+expect = "3"
+
+[[int.fn]]
+name = "pop_count"
+index_unit = "count"
+probe = 'int.pop_count(255)'
+expect = "8"
+
+[[int.fn]]
+name = "bit_reverse"
+index_unit = "bit-pattern"
+probe = 'int.bit_reverse(1)'
+expect = "-9223372036854775808"
+
+[[int.fn]]
+name = "byte_swap"
+index_unit = "bit-pattern"
+probe = 'int.byte_swap(1)'
+expect = "72057594037927936"
+
+[[int.fn]]
+name = "bit_width"
+index_unit = "count"
+probe = 'int.bit_width(255)'
+expect = "8"
+
+[[int.fn]]
+name = "log2_floor"
+index_unit = "count"
+probe = 'int.log2_floor(9)'
+expect = "3"
+
+[[int.fn]]
+name = "log2_ceil"
+index_unit = "count"
+probe = 'int.log2_ceil(9)'
+expect = "4"
+
+[[int.fn]]
+name = "next_power_of_two"
+index_unit = "value"
+probe = 'int.next_power_of_two(9)'
+expect = "16"
+
+[[int.fn]]
+name = "prev_power_of_two"
+index_unit = "value"
+probe = 'int.prev_power_of_two(9)'
+expect = "8"
+
+[[int.fn]]
+name = "wrap_add"
+index_unit = "count"
+probe = 'int.wrap_add(255, 1, 8)'
+expect = "0"
+note = """
+The `bits` param is a WIDTH count: the sum wraps at 2^bits (255+1 at width 8
+is 0), independent of the i64 carrier.
+"""
+
+[[int.fn]]
+name = "wrap_mul"
+index_unit = "count"
+probe = 'int.wrap_mul(16, 16, 8)'
+expect = "0"
+
+[[int.fn]]
+name = "rotate_right"
+index_unit = "count"
+probe = 'int.rotate_right(1, 1, 8)'
+expect = "128"
+
+[[int.fn]]
+name = "rotate_left"
+index_unit = "count"
+probe = 'int.rotate_left(128, 1, 8)'
+expect = "1"
+
+[[int.fn]]
+name = "to_u32"
+index_unit = "value"
+probe = 'int.to_u32(0 - 1)'
+expect = "4294967295"
+
+[[int.fn]]
+name = "to_u8"
+index_unit = "value"
+probe = 'int.to_u8(0 - 1)'
+expect = "255"
+
+[[int.fn]]
+name = "to_int8"
+index_unit = "value"
+probe = 'int.to_int8(200)'
+expect = "-56"
+note = """
+The PLAIN cast WRAPS (two's-complement truncation, `as i8`): 200 becomes -56.
+The trio's other cells answer none (checked) and 127 (saturating) on the same
+input — three different answers to one question is why the matrix exists.
+"""
+
+[[int.fn]]
+name = "to_int16"
+index_unit = "value"
+probe = 'int.to_int16(40000)'
+expect = "-25536"
+
+[[int.fn]]
+name = "to_int32"
+index_unit = "value"
+probe = 'int.to_int32(4294967296)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint8"
+index_unit = "value"
+probe = 'int.to_uint8(0 - 1)'
+expect = "255"
+
+[[int.fn]]
+name = "to_uint16"
+index_unit = "value"
+probe = 'int.to_uint16(0 - 1)'
+expect = "65535"
+
+[[int.fn]]
+name = "to_uint32"
+index_unit = "value"
+probe = 'int.to_uint32(0 - 1)'
+expect = "4294967295"
+
+[[int.fn]]
+name = "to_uint64"
+index_unit = "value"
+setup = [
+  "let u = int.to_uint64(0 - 1)",
+]
+probe = 'int.from_uint64_checked(u) ?? (0 - 1)'
+expect = "-1"
+note = """
+-1 wraps to 2^64-1: the checked back-edge refusing it (none -> -1 fallback)
+is the probe-visible witness that the value exceeds i64::MAX. The full
+18446744073709551615 image is native-pinned (UInt64 display is the wasm
+leg's unlinked edge, so the probe avoids displaying the UInt64 itself).
+"""
+
+[[int.fn]]
+name = "to_float32"
+index_unit = "value"
+probe = 'float.from_float32(int.to_float32(3))'
+expect = "3"
+
+[[int.fn]]
+name = "to_float64"
+index_unit = "value"
+probe = 'float.from_float64(int.to_float64(3))'
+expect = "3"
+
+[[int.fn]]
+name = "to_int64"
+index_unit = "value"
+probe = 'int.to_int64(0 - 42)'
+expect = "-42"
+
+[[int.fn]]
+name = "from_int8"
+index_unit = "value"
+probe = 'int.from_int8(int.to_int8(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_int16"
+index_unit = "value"
+probe = 'int.from_int16(int.to_int16(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_int32"
+index_unit = "value"
+probe = 'int.from_int32(int.to_int32(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_int64"
+index_unit = "value"
+probe = 'int.from_int64(int.to_int64(0 - 5))'
+expect = "-5"
+
+[[int.fn]]
+name = "from_uint8"
+index_unit = "value"
+probe = 'int.from_uint8(int.to_uint8(200))'
+expect = "200"
+
+[[int.fn]]
+name = "from_uint16"
+index_unit = "value"
+probe = 'int.from_uint16(int.to_uint16(40000))'
+expect = "40000"
+
+[[int.fn]]
+name = "from_uint32"
+index_unit = "value"
+probe = 'int.from_uint32(int.to_uint32(3000000000))'
+expect = "3000000000"
+
+[[int.fn]]
+name = "from_uint64"
+index_unit = "value"
+probe = 'int.from_uint64(int.to_uint64(7))'
+expect = "7"
+note = """
+Lossless for values that fit i64; the OVERFLOW edge (a UInt64 above i64::MAX)
+belongs to the checked/saturating back-edge cells below.
+"""
+
+[[int.fn]]
+name = "to_int8_checked"
+index_unit = "value"
+probe = 'int.to_int8_checked(200) ?? int.to_int8(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_int16_checked"
+index_unit = "value"
+probe = 'int.to_int16_checked(40000) ?? int.to_int16(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_int32_checked"
+index_unit = "value"
+probe = 'int.to_int32_checked(4294967296) ?? int.to_int32(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint8_checked"
+index_unit = "value"
+probe = 'int.to_uint8_checked(0 - 1) ?? int.to_uint8(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint16_checked"
+index_unit = "value"
+probe = 'int.to_uint16_checked(0 - 1) ?? int.to_uint16(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint32_checked"
+index_unit = "value"
+probe = 'int.to_uint32_checked(0 - 1) ?? int.to_uint32(0)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint64_checked"
+index_unit = "value"
+probe = 'int.from_uint64(int.to_uint64_checked(0 - 1) ?? int.to_uint64(0))'
+expect = "0"
+
+[[int.fn]]
+name = "to_float32_checked"
+index_unit = "value"
+probe = 'float.from_float32(int.to_float32_checked(16777217) ?? int.to_float32(0))'
+expect = "0"
+note = """
+16777217 = 2^24 + 1, the first integer an f32 cannot represent exactly — the
+checked conversion refuses precision loss, not just range overflow.
+"""
+
+[[int.fn]]
+name = "to_int8_saturating"
+index_unit = "value"
+probe = 'int.to_int8_saturating(200)'
+expect = "127"
+
+[[int.fn]]
+name = "to_int16_saturating"
+index_unit = "value"
+probe = 'int.to_int16_saturating(40000)'
+expect = "32767"
+
+[[int.fn]]
+name = "to_int32_saturating"
+index_unit = "value"
+probe = 'int.to_int32_saturating(4294967296)'
+expect = "2147483647"
+
+[[int.fn]]
+name = "to_uint8_saturating"
+index_unit = "value"
+probe = 'int.to_uint8_saturating(0 - 1)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint16_saturating"
+index_unit = "value"
+probe = 'int.to_uint16_saturating(0 - 1)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint32_saturating"
+index_unit = "value"
+probe = 'int.to_uint32_saturating(0 - 1)'
+expect = "0"
+
+[[int.fn]]
+name = "to_uint64_saturating"
+index_unit = "value"
+probe = 'int.from_uint64(int.to_uint64_saturating(0 - 1))'
+expect = "0"
+
+[[int.fn]]
+name = "from_uint64_checked"
+index_unit = "value"
+probe = 'int.from_uint64_checked(int.to_uint64(0 - 1)) ?? (0 - 1)'
+expect = "-1"
+
+[[int.fn]]
+name = "from_uint64_saturating"
+index_unit = "value"
+probe = 'int.from_uint64_saturating(int.to_uint64(0 - 1))'
+expect = "9223372036854775807"
+
+[[int.fn]]
+name = "min_value"
+index_unit = "value"
+probe = 'int.min_value()'
+expect = "-9223372036854775808"
+
+[[int.fn]]
+name = "max_value"
+index_unit = "value"
+probe = 'int.max_value()'
+expect = "9223372036854775807"
