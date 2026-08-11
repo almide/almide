@@ -329,7 +329,7 @@ rank を明示して限定的に行う**こと（無限定の "flight-grade" 表
 
 | 成果物 | 現状 | 評価 |
 |---|---|---|
-| ツール運用要求(TOR) | CLAUDE.md の Usage 節 + TRUSTED_BASE.md が断片的に相当。DO-330 の様式(想定運用環境・入力制約・既知制限の運用回避)としては**未編纂** | **MISSING** — G-F6 キット(flight-qualification §G-F6)の一章として編纂するのが自然 |
+| ツール運用要求(TOR) | CLAUDE.md の Usage 節 + TRUSTED_BASE.md が断片的に相当。DO-330 の様式(想定運用環境・入力制約・既知制限の運用回避)としては**未編纂** | **編纂済み(proofs/TOR.md)** — TOR-1〜9 の運用要求(各行が enforced-by 計器を指名、check-tor-refs.sh が参照整合を CI 強制)+ 運用視点の既知制限表。G-F6 キットへの整形が残 |
 | 検証ツール自身の検証 | checker = Coq 証明(qualified-by-proof、45 定理 + coqchk + cross-version)。**ゲートスクリプト群は負テスト文化が定着**(check-contracts は mutation テスト、監査ゲート 3 本は負テスト済み、release-seal も偽造/未記入の負テスト付き)。fuzz ハーネスに単体テスト(分類器の純関数化) | **一覧表は稼働**(proofs/gate-verification.toml + check-gate-verification.sh — 30 ゲート 5 分類、UNVERIFIED 18 は shrink-only 天井で直視)。残余 = UNVERIFIED 18 の焼却 |
 | 既知問題台帳の正式化 | GitHub issues + リリースノート既知制限(0.57.0 の #1229)+ `fuzz-perf` ラベル + flagged-for-revision 機構 + **リリース封印**(proofs/releases/ — v0.57.0 から、証拠のタグ束縛) | **PARTIAL** — 散在。リリース封印の `[recorded]` に known-problems 節を追加すれば形式が閉じる |
 

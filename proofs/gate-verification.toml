@@ -150,3 +150,8 @@ class = "UNVERIFIED"
 path = "scripts/check-gate-verification.sh"
 class = "NEGATIVE_TESTED"
 evidence = "bootstrap run (PR that landed this ledger): a mis-pathed row failed as STALE and this script's own missing row failed as UNCLASSIFIED — both fail directions demonstrated before first green"
+
+[[gate]]
+path = "scripts/check-tor-refs.sh"
+class = "NEGATIVE_TESTED"
+evidence = "landing PR: a TOR row retargeted to a nonexistent instrument demonstrated to FAIL before first green"
