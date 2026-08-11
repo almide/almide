@@ -162,8 +162,11 @@ stage_block() {
   printf '> **Stage 2 (translation validation): %s/%s fixtures cast a real 3-way vote (%s%%)** —\n' "$voting" "$corpus" "$((voting * 100 / corpus))"
   printf '> the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).\n'
   printf '>\n'
-  printf '> **Stage 3 (semantics freeze): %s/%s contracts spec-keyed, both directions gated** —\n' "$keyed" "$contracts"
-  printf '> the ALS authoring sweep (syntax-element coverage) is the remaining half.\n'
+  local els unwritten_els
+  els=$(grep -c '^\[\[element\]\]' proofs/als-element-coverage.toml)
+  unwritten_els=$(grep -c 'section = "UNWRITTEN"' proofs/als-element-coverage.toml || true)
+  printf '> **Stage 3 (semantics freeze): %s/%s contracts spec-keyed; syntax-element coverage\n' "$keyed" "$contracts"
+  printf '> %s/%s sectioned (%s UNWRITTEN, shrink-only — the freeze precondition is 0).**\n' "$((els - unwritten_els))" "$els" "$unwritten_els"
   printf '>\n'
   printf '> **Stage 4 (durability): fuzz true-green streak = %s day(s)** (dated meter;\n' "$streak"
   printf '> the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).\n'

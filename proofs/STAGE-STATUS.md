@@ -18,13 +18,13 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 > **Stage 2 (translation validation): 254/374 fixtures cast a real 3-way vote (67%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
-> **Stage 3 (semantics freeze): 230/230 contracts spec-keyed, both directions gated** —
-> the ALS authoring sweep (syntax-element coverage) is the remaining half.
+> **Stage 3 (semantics freeze): 230/230 contracts spec-keyed; syntax-element coverage
+> 0/73 sectioned (73 UNWRITTEN, shrink-only — the freeze precondition is 0).**
 >
 > **Stage 4 (durability): fuzz true-green streak = 0 day(s)** (dated meter;
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
 >
-> **Stage 5 (auditability): 1 release seal(s); 31 verification gates classified
+> **Stage 5 (auditability): 1 release seal(s); 32 verification gates classified
 > (9 UNVERIFIED under a shrink-only ceiling); TOR with 9 enforced rows.**
 <!-- stages:generated:end -->
 

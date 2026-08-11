@@ -1,0 +1,307 @@
+# ALS SYNTAX-ELEMENT COVERAGE LEDGER — Stage 3's element→section direction.
+#
+# Every surface-AST syntax element (ExprKind / Stmt / Decl variants,
+# enumerated by scripts/lib/als-element-enumerate.py — the ledger and the
+# gate share that enumerator) carries a row naming the ALS normative section
+# that specifies it, or the honest UNWRITTEN. The freeze precondition
+# (Stage 3) is UNWRITTEN = 0: a 1.0 cannot freeze semantics nobody wrote
+# down. Gate: scripts/check-als-element-coverage.sh — every enumerated
+# element rowed, stale rows fail, a `section` must resolve to a real
+# `ALS-<id>` header in docs/specs/als/, and the UNWRITTEN count may only
+# SHRINK (ceiling below). First measurement 2026-08-12: 73/73 UNWRITTEN —
+# the existing ALS sections (T1-T7, R-series, ...) are STDLIB-semantics
+# normative text; the syntax-element direction starts honestly at zero.
+#
+# unwritten_ceiling = "73"
+
+[[element]]
+name = "ExprKind::Int"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Float"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::String"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::InterpolatedString"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Bool"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Ident"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::TypeName"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::List"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::MapLiteral"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::EmptyMap"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Record"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::SpreadRecord"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Call"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Member"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::TupleIndex"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::IndexAccess"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Pipe"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Compose"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::If"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::IfLet"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Match"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Block"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Fan"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::FanBounded"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::FanRace"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::FanRaceMap"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::FanTimeout"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::FanSettle"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::ForIn"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::While"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Lambda"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Hole"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Todo"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Try"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Unwrap"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::UnwrapOr"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::ToOption"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::OptionalChain"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Binary"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Unary"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Paren"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Tuple"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Range"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Break"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Continue"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Placeholder"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Unit"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::None"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Some"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Ok"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Err"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::TypeAscription"
+section = "UNWRITTEN"
+
+[[element]]
+name = "ExprKind::Error"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::Let"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::LetDestructure"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::Var"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::Assign"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::IndexAssign"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::FieldAssign"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::Guard"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::GuardLet"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::Expr"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::Comment"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Stmt::Error"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::Module"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::Import"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::Type"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::Fn"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::TopLet"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::Protocol"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::Strict"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::Test"
+section = "UNWRITTEN"
+
+[[element]]
+name = "Decl::TestWhereDef"
+section = "UNWRITTEN"
