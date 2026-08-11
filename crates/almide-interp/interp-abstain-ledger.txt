@@ -60,7 +60,6 @@ list_modify_heap  out-of-interp-scope capability: prim.alloc_value
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list
 list_set_value  out-of-interp-scope capability: prim.alloc_value
 list_slice_oob  out-of-interp-scope capability: prim.handle
-list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
 list_update_heap  out-of-interp-scope capability: prim.alloc_value
 list_window_zero  out-of-interp-scope capability: prim.handle
 list_windows_zero  out-of-interp-scope capability: prim.handle
