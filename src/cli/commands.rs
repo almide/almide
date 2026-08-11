@@ -716,6 +716,17 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
         err(&format!("WASM TRAP {} (compiled for wasm, failed at runtime; native re-run PASSED — CI's Test WASM will fail this)", file));
         err_no_nl(detail);
     }
+    // The wasm COVERAGE ratchet's data feed (mission-critical arc): every
+    // file the wasm leg did not pass, one per line, so
+    // proofs/check-wasm-fallback.sh can diff the set against its shrink-only
+    // baseline. Names only under the flag — the summary line stays stable.
+    if std::env::var_os("ALMIDE_FALLBACK_NAMES").is_some() {
+        let mut sorted = fallback.clone();
+        sorted.sort();
+        for f in &sorted {
+            err(&format!("FALLBACK {}", f));
+        }
+    }
     let trap_note = if diverged.is_empty() {
         String::new()
     } else {
