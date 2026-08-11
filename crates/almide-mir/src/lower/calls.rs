@@ -767,6 +767,11 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         || (module == "fs" && func == "read_bytes")
         || (module == "fs" && func == "write")
         || (module == "fs" && func == "mkdir_p")
+        // `fs.create_temp_dir` WRITES the filesystem (a mkdir under the temp
+        // root) — REUSES Capability::FsWrite, plus Entropy for the unique
+        // suffix. Self-hosted over prim.make_dir + prim.random_get
+        // (fs_create_temp_dir.almd).
+        || (module == "fs" && func == "create_temp_dir")
         || (module == "fs" && func == "remove_all")
         // `fs.exists` READS the filesystem (a path stat) — it REUSES Capability::FsRead
         // (the SAME accounting as `fs.read_text`, NOT a new cap). Self-hosted to

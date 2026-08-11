@@ -1,0 +1,33 @@
+// fs_create_temp_dir — SELF-HOSTED `fs.create_temp_dir(prefix)` for the v1
+// trust-spine WASM target: a fresh directory under the temp root
+// (`$TMPDIR` ?? "/tmp" — the same C-189 surface fs.temp_dir reads), named
+// `<prefix><entropy>`, created through the WASI directory-create floor
+// (prim.make_dir — the fs_mkdir_p.almd machinery). Native uses a
+// nanosecond-clock suffix; the wasm leg uses the entropy floor
+// (prim.random_get) — BOTH are uniqueness devices, and the produced PATH is
+// never a byte-compared observable (it is entropy/clock-dependent on native
+// between any two runs already). Reaching prim.make_dir carries
+// Capability::FsWrite (a mkdir IS a filesystem write — the fs_mkdir_p
+// accounting, NOT a new capability); prim.random_get adds Entropy. A caller
+// must be an `effect fn` declaring them.
+import env
+
+fn __ctd_rand() -> Int = {
+  let buf = prim.alloc_bytes(8)
+  let p = prim.handle(buf) + 12
+  let _e = prim.random_get(p, 8)
+  let r = prim.load64(p)
+  int.band(r, 0x7FFFFFFFFFFFFFFF)
+}
+
+effect fn fs_create_temp_dir(prefix: String) -> Result[String, String] = {
+  let base = env.get("TMPDIR") ?? "/tmp"
+  let n = __ctd_rand()
+  let path = "${base}/${prefix}${n}"
+  let r: Result[Unit, String] = prim.make_dir(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else { ok(path) }
+}
