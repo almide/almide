@@ -2866,3 +2866,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows_oob.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-230"
+spec      = "ALS-R6"
+title     = "The flight reference PID kernel runs identically on both targets"
+statement = "The G-F4 reference application (#776, docs/roadmap/active/flight-reference-app.md): a single-axis PID control law in Q16.16 fixed point — saturation via `int.clamp`, integral anti-windup, pure-arithmetic `pid_step` — driven through a 16-step counted simulation loop against a first-order plant, printing the actuator command per step. The 16-line stdout trace is byte-identical native ⇄ wasm. The app is deliberately flight-subset-shaped: all-scalar Int state in driver `var`s, no allocation in the hot path beyond the per-step `int.to_string`, a literal loop bound, and exactly one declared {Stdout} capability exit — the artifact the qualification pitch runs end to end (`make verify-trust && make receipt`)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/flight_pid_control.almd", class = "fixture" },
+]

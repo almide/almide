@@ -1,0 +1,42 @@
+// @contract: C-230
+// G-F4 flight reference app (#776, docs/roadmap/active/flight-reference-app.md):
+// a single-axis PID control law in Q16.16 fixed point — saturation and
+// integral anti-windup — driven through a 16-step COUNTED simulation loop
+// against a first-order plant. Everything scalar Int, no allocation in the
+// hot path, one declared {Stdout} exit (the actuator command trace). The
+// design sketch's state updates live in the driver as scalar `var`s (the
+// per-iteration heap-tuple co-return is outside the flight subset — the
+// roadmap's own constraint note); `pid_step` stays pure arithmetic.
+// Q16.16: 1.0 == 65536.
+let SCALE: Int = 65536
+
+let OUT_MIN: Int = 0 - 6553600
+
+let OUT_MAX: Int = 6553600
+
+let I_MIN: Int = 0 - 3276800
+
+let I_MAX: Int = 3276800
+
+// (a*b) >> 16 — Q16.16 multiply.
+fn fmul(a: Int, b: Int) -> Int = (a * b) / SCALE
+
+// One PID step over pre-updated state. PURE: no capability, no heap.
+// kp·e + ki·∫e + kd·de, saturated to the actuator range.
+fn pid_step(kp: Int, ki: Int, kd: Int, e: Int, integ: Int, prev_e: Int) -> Int = int.clamp(fmul(kp, e) + fmul(ki, integ) + fmul(kd, e - prev_e), OUT_MIN, OUT_MAX)
+
+effect fn main() -> Unit = {
+  var integral = 0
+  var prev_e = 0
+  var measured = 0
+  let setpoint = 65536
+  // kp=0.2, ki=0.1, kd=0.05 in Q16.16.
+  for _t in 0..<16 {
+    let e = setpoint - measured
+    integral = int.clamp(integral + e, I_MIN, I_MAX)
+    let cmd = pid_step(13107, 6553, 3276, e, integral, prev_e)
+    prev_e = e
+    measured = measured + cmd / 256
+    println(int.to_string(cmd))
+  }
+}
