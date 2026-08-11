@@ -18,6 +18,12 @@ pre-commit:
     scalar-read-audit:
       glob: "{crates/almide-mir/src/lower/*.rs,proofs/scalar-read-audit.toml,scripts/check-scalar-read-audit.sh,scripts/lib/scalar-read-enumerate.py}"
       run: bash scripts/check-scalar-read-audit.sh
+    wat-prelude-audit:
+      # STRUCTURE only pre-commit (no reachability re-render — that needs the
+      # render_program example binary and runs in CI). Catches the common local
+      # failure: a `(func $…)` added or edited without its ledger row.
+      glob: "{crates/almide-mir/src/render_wasm*.rs,proofs/wat-prelude-audit.toml,scripts/check-wat-prelude-audit.sh,scripts/lib/wat-prelude-enumerate.py}"
+      run: bash scripts/check-wat-prelude-audit.sh
     ratchet-separation:
       run: scripts/check-ratchet-separation.sh
     semantics-manifest:
