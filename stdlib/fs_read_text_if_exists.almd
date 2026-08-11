@@ -1,0 +1,22 @@
+// fs_read_text_if_exists — SELF-HOSTED `fs.read_text_if_exists(path)` for the
+// wasm leg: the missing-file case is `Ok(none)` (native maps NotFound to
+// Ok(None)), a present file reads through the WASI read floor into `Ok(some(s))`,
+// and any OTHER read error keeps the err channel. The existence probe is the
+// same path_filestat query fs.exists uses; the read result is consumed by the
+// manual tag-read idiom, and the payload is COPIED into an owned String
+// (`t ++ ""`) before the prim Result block drops. Reaching both floors carries
+// Capability::FsRead.
+effect fn fs_read_text_if_exists(path: String) -> Result[String?, String] = {
+  if prim.path_exists(path) then {
+    let r: Result[String, String] = prim.read_text_file(path)
+    let rh = prim.handle(r)
+    if prim.load32(rh + 16) != 0 then {
+      let m: String = prim.load_handle(rh + 12)
+      err(m)
+    } else {
+      let t: String = prim.load_handle(rh + 12)
+      let owned = t + ""
+      ok(some(owned))
+    }
+  } else ok(none)
+}
