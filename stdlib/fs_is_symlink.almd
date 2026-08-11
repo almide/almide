@@ -1,0 +1,14 @@
+// fs_is_symlink — SELF-HOSTED `fs.is_symlink(path)` over the NO-FOLLOW stat
+// floor (prim.path_filestat_nofollow — the same path_filestat_get query with
+// lookupflags 0, so the final symlink is NOT followed and its own filetype, 7,
+// is observable at offset 16). A stat failure (missing path) is `false`,
+// matching native `Path::is_symlink()` (which swallows the io error). A SCALAR
+// Bool — the fs.exists shape, no Result rails. Reaching the stat floor carries
+// Capability::FsRead.
+effect fn fs_is_symlink(path: String) -> Bool = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat_nofollow(p, path)
+  if errno != 0 then false
+  else prim.load8(p + 16) == 7
+}
