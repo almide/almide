@@ -291,6 +291,30 @@ impl<'a> Interpreter<'a> {
                 module_fns.insert((m.name, f.name), f);
             }
         }
+        // A module's `__`-prefixed PRIVATE helpers also join the flat table:
+        // the module's own bodies call them as bare Named targets (`flag` →
+        // `__flag_at`), and #868 rejects the prefix in user code, so a program
+        // fn can never collide. Only a name defined in EXACTLY ONE module is
+        // indexed — a shared helper name across two modules stays module-keyed
+        // and abstains honestly rather than resolving from the wrong source
+        // (the #1087 class).
+        {
+            let mut count: HashMap<Sym, u32> = HashMap::new();
+            for m in &program.modules {
+                for f in &m.functions {
+                    if f.name.as_str().starts_with("__") {
+                        *count.entry(f.name).or_insert(0) += 1;
+                    }
+                }
+            }
+            for m in &program.modules {
+                for f in &m.functions {
+                    if f.name.as_str().starts_with("__") && count.get(&f.name) == Some(&1) {
+                        fns.entry(f.name).or_insert(f);
+                    }
+                }
+            }
+        }
         let named_records = index_named_records(program);
 
         Interpreter {
