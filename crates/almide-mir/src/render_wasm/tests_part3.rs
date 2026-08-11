@@ -722,5 +722,76 @@
         }
     }
 
+    /// The five MIR_ONLY prelude fns EXECUTED with pinned stdout (#1208, the
+    /// Stage 1c ledger's evidence upgrade). `$print_int`, `$print_list`,
+    /// `$list_push`, and through them `$itoa_append` + `$list_len` are
+    /// hand-written wasm reachable only from hand-built MIR — no .almd program
+    /// can reach them, so no corpus fixture pins their BODIES; the
+    /// translation-validation mutation test checks only their EMISSION. This
+    /// runs the bytes: negative int through the itoa sign path, a push that
+    /// rebinds the handle, and the labeled list print walking len + per-element
+    /// itoa. The expected bytes were MEASURED on wasmtime, not reasoned.
+    #[test]
+    fn mir_only_prelude_fns_execute_with_pinned_stdout() {
+        use crate::{CallArg, Init, MirFunction, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT};
+        let (xs, n, m) = (ValueId(0), ValueId(1), ValueId(2));
+        let mir = MirFunction {
+            name: "main".into(),
+            ops: vec![
+                Op::Alloc {
+                    dst: xs,
+                    repr: Repr::Ptr { layout: PLACEHOLDER_LAYOUT },
+                    init: Init::IntList(vec![1, 2, 3]),
+                },
+                Op::ConstInt { dst: n, value: -42 },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintInt,
+                    args: vec![CallArg::Scalar(n)],
+                    result: None,
+                },
+                // i64::MIN — the sign path's wrap-negation edge (2^63 has no
+                // positive i64 twin; the magnitude must still print exactly).
+                Op::ConstInt { dst: m, value: i64::MIN },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintInt,
+                    args: vec![CallArg::Scalar(m)],
+                    result: None,
+                },
+                // push may move the buffer — dst rebinds the SAME handle local.
+                Op::Call {
+                    dst: Some(xs),
+                    func: RtFn::ListPush,
+                    args: vec![CallArg::Handle(xs), CallArg::Imm(9)],
+                    result: None,
+                },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintList,
+                    args: vec![CallArg::Handle(xs), CallArg::Label("xs".into())],
+                    result: None,
+                },
+                Op::Drop { v: xs },
+            ],
+            ..Default::default()
+        };
+        let prog = crate::MirProgram { functions: vec![mir], ..Default::default() };
+        let wat = render_wasm_program(&prog);
+        for f in ["$print_int", "$print_list", "$list_push", "$itoa_append", "$list_len"] {
+            assert!(
+                wat.contains(&format!("(func {f} ")),
+                "{f} must be rendered for this MIR (the ledger's MIR_ONLY claim)"
+            );
+        }
+        if let Some(out) = build_and_run("mir_only_prelude", &wat) {
+            assert_eq!(
+                out,
+                "-42\n-9223372036854775808\nxs=1,2,3,9",
+                "the five bodies' observable bytes"
+            );
+        }
+    }
+
     include!("tests_part3_b.rs");
     include!("tests_part3_c.rs");
