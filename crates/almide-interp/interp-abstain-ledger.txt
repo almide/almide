@@ -35,6 +35,7 @@ empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
 fan_settle_tuple  out-of-interp-scope capability: prim.read_text_file
 fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file
+fs_read_lines  interp fuel/recursion budget exhausted
 fs_relative_path  out-of-interp-scope capability: prim.make_dir
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
