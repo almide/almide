@@ -150,10 +150,10 @@ impl LowerCtx {
         // drop is the flat DropListStr. Carries Capability::FsWrite (counted in cap_witness).
         if func == "rename" {
             let src = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported("prim.rename src is not a lowerable scalar/handle".into())
+                LowerError::at(args[0].span, "prim.rename src is not a lowerable scalar/handle")
             })?;
             let dstp = self.lower_scalar_value(&args[1]).ok_or_else(|| {
-                LowerError::Unsupported("prim.rename dst is not a lowerable scalar/handle".into())
+                LowerError::at(args[1].span, "prim.rename dst is not a lowerable scalar/handle")
             })?;
             let dst = self.fresh_value();
             self.ops.push(Op::Prim {
@@ -169,13 +169,15 @@ impl LowerCtx {
         // (fs.is_symlink): identical contract to path_filestat, lookupflags 0.
         if func == "path_filestat_nofollow" {
             let bufaddr = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported(
-                    "prim.path_filestat_nofollow buffer address is not a lowerable scalar".into(),
+                LowerError::at(
+                    args[0].span,
+                    "prim.path_filestat_nofollow buffer address is not a lowerable scalar",
                 )
             })?;
             let path = self.lower_scalar_value(&args[1]).ok_or_else(|| {
-                LowerError::Unsupported(
-                    "prim.path_filestat_nofollow path is not a lowerable scalar/handle".into(),
+                LowerError::at(
+                    args[1].span,
+                    "prim.path_filestat_nofollow path is not a lowerable scalar/handle",
                 )
             })?;
             let dst = self.fresh_value();
