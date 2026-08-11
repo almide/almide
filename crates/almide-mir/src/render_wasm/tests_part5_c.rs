@@ -1,6 +1,13 @@
 
 #[test]
-fn matrix_swiglu_gate_byte_matches_scalar_libm_oracle() {
+fn matrix_swiglu_gate_byte_matches_the_canonical_fast_exp() {
+    // ORACLE CHANGED (#1197): this pinned the retired promise "the wasm leg
+    // reproduces v0's scalar libm exp". The leg now runs the CANONICAL fast-exp
+    // — the same unfused algorithm, reduction order and scaling spelling the
+    // native SIMD kernel runs — so the pinned value is the one BOTH legs
+    // produce (verified by running this very program on native and wasm, and by
+    // spec/wasm_cross/matrix_softmax_fastexp.almd under C-223).
+
     // Phase D1: swiglu_gate — g/u are LEFT-TO-RIGHT dot products, sig = 1/(1+exp(clamp(-g,
     // ±40))) via scalar rt.math_exp (= math.exp), out = (g*sig)*u. The self-host transcribes
     // the exact accumulation + op order, byte-exact vs v0 `--target wasm`.
@@ -9,7 +16,7 @@ fn matrix_swiglu_gate_byte_matches_scalar_libm_oracle() {
     assert!(prog.functions.iter().any(|f| f.name == "matrix.swiglu_gate"), "swiglu self-host must link");
     if let Some(out) = build_and_run("matrix_swiglu", &render_wasm_program(&prog)) {
         assert_eq!(out.lines().count(), 8, "2 rows × 4 out channels");
-        assert_eq!(out.lines().next().unwrap(), "-0.1649501991937434");
+        assert_eq!(out.lines().next().unwrap(), "-0.16495019896903929");
     }
 }
 
@@ -28,7 +35,14 @@ fn matrix_rope_rotate_byte_matches_scalar_oracle() {
 }
 
 #[test]
-fn matrix_multi_head_attention_byte_matches_scalar_oracle() {
+fn matrix_multi_head_attention_byte_matches_the_canonical_fast_exp() {
+    // ORACLE CHANGED (#1197): this pinned the retired promise "the wasm leg
+    // reproduces v0's scalar libm exp". The leg now runs the CANONICAL fast-exp
+    // — the same unfused algorithm, reduction order and scaling spelling the
+    // native SIMD kernel runs — so the pinned value is the one BOTH legs
+    // produce (verified by running this very program on native and wasm, and by
+    // spec/wasm_cross/matrix_softmax_fastexp.almd under C-223).
+
     // Phase D1: MHA — per head, per query row: scaled Q·K^T (+ causal -1e9 mask), softmax
     // (scalar rt.math_exp = math.exp), weighted V-sum. Heads write DISJOINT columns so the
     // i-outer/h-inner self-host is byte-identical to v0's h-outer/i-inner `--target wasm`.
@@ -37,7 +51,7 @@ fn matrix_multi_head_attention_byte_matches_scalar_oracle() {
     assert!(prog.functions.iter().any(|f| f.name == "matrix.masked_multi_head_attention"), "masked mha self-host must link");
     if let Some(out) = build_and_run("matrix_mha", &render_wasm_program(&prog)) {
         assert_eq!(out.lines().count(), 24, "2×(3 rows × 4 cols)");
-        assert_eq!(out.lines().next().unwrap(), "1.0487146726713201");
+        assert_eq!(out.lines().next().unwrap(), "1.0487146726665257");
     }
 }
 
