@@ -1,0 +1,33 @@
+// @contract: C-228
+// The three matrix.select_rows selectors decode identically on both targets
+// (f32 LE, Q1_0 sign-bit blocks, Q8_0 fp16-scale int8 blocks — the same shared
+// decoders the full-matrix loaders use, on a row-subset schedule).
+import matrix
+import bytes
+
+effect fn main() -> Unit = {
+  var f32d = bytes.new(32)
+  bytes.set_f32_le(f32d, 0, 1.5)
+  bytes.set_f32_le(f32d, 4, 2.5)
+  bytes.set_f32_le(f32d, 8, 0.0 - 3.0)
+  bytes.set_f32_le(f32d, 12, 4.0)
+  bytes.set_f32_le(f32d, 16, 5.0)
+  bytes.set_f32_le(f32d, 20, 6.5)
+  bytes.set_f32_le(f32d, 24, 7.0)
+  bytes.set_f32_le(f32d, 28, 8.0)
+  let mf = matrix.select_rows_f32(f32d, 0, 2, [3, 0, 1])
+  println("f32=${matrix.to_lists(mf)}")
+  var q8 = bytes.new(68)
+  bytes.set_at(q8, 0, 0)
+  bytes.set_at(q8, 1, 56)
+  bytes.set_at(q8, 2, 10)
+  bytes.set_at(q8, 3, 246)
+  bytes.set_at(q8, 34, 0)
+  bytes.set_at(q8, 35, 64)
+  bytes.set_at(q8, 36, 3)
+  let mq = matrix.select_rows_q8_0_dq(q8, 0, 32, [1, 0])
+  let rows = matrix.to_lists(mq)
+  let r0 = list.get(rows, 0) ?? []
+  let r1 = list.get(rows, 1) ?? []
+  println("q8_r0=${list.get(r0, 0) ?? 9.9},${list.get(r0, 1) ?? 9.9} q8_r1=${list.get(r1, 0) ?? 9.9},${list.get(r1, 1) ?? 9.9}")
+}
