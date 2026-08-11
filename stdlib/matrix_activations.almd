@@ -388,3 +388,88 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
   let _x = __q10_rows(prim.handle(out), base, rows, cols, 0)
   out
 }
+
+// select_rows_q1_0(data, offset, cols, row_ids) — the ROW-SUBSET twin of
+// from_q1_0_bytes: each selected row rid (clamped to 0 like native's
+// `rid.max(0)`) decodes its cols weights through the SAME `__q10_row`
+// (row_k0 = rid·cols — the global-k schedule works because cols is a
+// 128-multiple, so a row starts on a block boundary).
+fn __q10_sel_rows(ho: Int, base: Int, ids: List[Int], cols: Int, i: Int) -> Int = if i >= list.len(ids) then 0
+else {
+  let rid0 = list.get(ids, i) ?? 0
+  let rid = if rid0 < 0 then 0 else rid0
+  let row = prim.alloc_list_f64(cols)
+  let _c = __q10_row(prim.handle(row), base, rid * cols, cols, 0)
+  prim.store_str(ho + 12 + i * 8, row)
+  __q10_sel_rows(ho, base, ids, cols, i + 1)
+}
+
+fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
+  let base = prim.handle(data) + 12 + offset
+  let n = list.len(row_ids)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __q10_sel_rows(prim.handle(out), base, row_ids, cols, 0)
+  out
+}
+
+// select_rows_q8_0_dq(data, offset, cols, row_ids) — Q8_0 row dequant: 34 bytes
+// per 32-weight block ([0..2] fp16 scale LE — decoded by the SAME `__q10_scale`
+// fp16 machinery — then 32 signed int8 quants; element = scale · quant). A cols
+// not divisible by 32 yields the all-zero matrix (native's guard). rid clamped
+// to 0 like native's `rid.max(0)`.
+fn __q8_i8(base: Int, addr: Int) -> Int = {
+  let v = prim.load8(base + addr)
+  if v > 127 then v - 256 else v
+}
+
+fn __q8_row(dh: Int, base: Int, row_off: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
+else {
+  let blk = prim.bshr_u(c, 5)
+  let block_start = row_off + blk * 34
+  let scale = __q10_scale(base, block_start)
+  let q = __q8_i8(base, block_start + 2 + prim.band(c, 31))
+  prim.store64(dh + 12 + c * 8, prim.fbits(scale * int.to_float(q)))
+  __q8_row(dh, base, row_off, cols, c + 1)
+}
+
+fn __q8_sel_rows(ho: Int, base: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int = if i >= list.len(ids) then 0
+else {
+  let rid0 = list.get(ids, i) ?? 0
+  let rid = if rid0 < 0 then 0 else rid0
+  let row = prim.alloc_list_f64(cols)
+  let _c = __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
+  prim.store_str(ho + 12 + i * 8, row)
+  __q8_sel_rows(ho, base, ids, cols, row_bytes, i + 1)
+}
+
+fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
+  let base = prim.handle(data) + 12 + offset
+  let n = list.len(row_ids)
+  if cols % 32 != 0 then __q8_zeros(n, cols)
+  else {
+    let out: List[List[Float]] = prim.alloc_list_str(n)
+    let row_bytes = cols / 32 * 34
+    let _x = __q8_sel_rows(prim.handle(out), base, row_ids, cols, row_bytes, 0)
+    out
+  }
+}
+
+fn __q8_zfill(dh: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
+else {
+  prim.store64(dh + 12 + c * 8, 0)
+  __q8_zfill(dh, cols, c + 1)
+}
+
+fn __q8_zero_rows(ho: Int, n: Int, cols: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let row = prim.alloc_list_f64(cols)
+  let _z = __q8_zfill(prim.handle(row), cols, 0)
+  prim.store_str(ho + 12 + i * 8, row)
+  __q8_zero_rows(ho, n, cols, i + 1)
+}
+
+fn __q8_zeros(n: Int, cols: Int) -> List[List[Float]] = {
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __q8_zero_rows(prim.handle(out), n, cols, 0)
+  out
+}
