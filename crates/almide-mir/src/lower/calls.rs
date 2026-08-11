@@ -449,17 +449,21 @@ impl LowerCtx {
         }
         let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
-        // `list.pop` keys its self-host on the ELEMENT type (scalar → the registered
-        // in-place impl; heap → the unregistered `_x`, walling at render) — route it
-        // through the SAME `list_heap_call_name` the value position uses, so a
-        // statement-position pop can never link the scalar impl over a heap element
-        // (which would leak the popped handle). Every other statement call keeps its
-        // raw dotted name, byte-identical to before.
-        let call_name = if module == "list" && func == "pop" {
-            list_heap_call_name(module, func, &arg_tys, result_ty, false, false)
-        } else {
-            format!("{module}.{func}")
-        };
+        // Route through the SAME `list_heap_call_name` the value position uses —
+        // for EVERY call, not just `list.pop` (#1233 brick 3a: this position
+        // emitted the RAW dotted name for `fs.fold_lines_chunked(...)!` under
+        // the effect-unwrap ladder, bypassing the `_i`/`_msi` acc routing,
+        // while the assert-position spelling of the SAME call routed
+        // correctly). The router returns the raw dotted name for every family
+        // outside its tables, so unrouted calls stay byte-identical; routed
+        // families now link their typed twin (or the honest `_x` wall) from
+        // this position exactly as from value position. (`list.pop`'s
+        // original special case — a heap-element pop must never link the
+        // scalar impl — is subsumed.)
+        let key_nullary = self.map_key_is_nullary_variant(&arg_tys, result_ty);
+        let key_scalar_rec = self.map_key_is_scalar_record(&arg_tys, result_ty);
+        let call_name =
+            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec);
         if is_heap_ty(result_ty) {
             let dst = self.fresh_value();
             let repr = repr_of(result_ty)?;
@@ -683,7 +687,7 @@ pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
 /// (random_choice.almd / random_shuffle.almd — typed element variants selected in
 /// `list_heap_call_name`, unsupported elements route `_x` and wall at render), so the
 /// transitive cap_witness counts Entropy exactly like `random.int`.
-fn is_admitted_effectful_pure_module_call(module: &str, func: &str) -> bool {
+pub(crate) fn is_admitted_effectful_pure_module_call(module: &str, func: &str) -> bool {
     // codopsy8 follow-up: the merged OR-chain still exceeded max-complexity on its own
     // (cyc42, cog1 — a flat lookup table with no nesting, so splitting doesn't reduce
     // real complexity, just brings each group under the per-function threshold). Split
