@@ -808,6 +808,13 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // fresh empty file + draws the entropy suffix (fs_create_temp_file.almd) — the
         // fs.create_temp_dir accounting (FsWrite + Entropy).
         || (module == "fs" && matches!(func, "copy" | "append" | "create_temp_file"))
+        // `fs.remove` READS the target's type + emptiness (path_filestat / read_dir)
+        // then WRITES the removal (remove_all floor) — FsRead + FsWrite (fs_remove.almd).
+        // `fs.write_bytes` / `fs.write_bytes_raw` WRITE the materialized byte buffer
+        // through the write floor (fs_write_bytes.almd / fs_write_bytes_raw.almd) — FsWrite.
+        // `fs.walk` / `fs.glob` recursively READ directories (read_dir + path_filestat,
+        // fs_walk.almd — glob shares the walk machinery and reads PWD, adding CliArgs).
+        || (module == "fs" && matches!(func, "remove" | "write_bytes" | "write_bytes_raw" | "walk" | "glob"))
         // `fs.fold_lines` / `fs.fold_lines_chunked` READ the filesystem — REUSE
         // Capability::FsRead. Self-hosted typed twins over prim.read_text_file +
         // the byte-level read_line walk (fs_fold_lines.almd); the `Map[String,
