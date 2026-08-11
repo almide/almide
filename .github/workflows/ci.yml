@@ -794,6 +794,9 @@ jobs:
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 
+      - name: TOR references (every operational requirement keeps its enforcing instrument)
+        run: bash scripts/check-tor-refs.sh
+
       - name: Scalar-read audit (every raw-load arm classified, zero unguarded — the #1183 class stays extinct)
         run: scripts/check-scalar-read-audit.sh
 

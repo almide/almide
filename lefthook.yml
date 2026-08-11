@@ -18,6 +18,9 @@ pre-commit:
     gate-verification:
       glob: "{proofs/gate-verification.toml,scripts/check-*.sh,proofs/*.sh}"
       run: bash scripts/check-gate-verification.sh
+    tor-refs:
+      glob: "{proofs/TOR.md,scripts/check-tor-refs.sh}"
+      run: bash scripts/check-tor-refs.sh
     libm-determinism:
       glob: "{runtime/rs/src/*.rs,crates/almide-kernel/src/*.rs,proofs/libm-determinism-audit.toml,scripts/check-libm-determinism.sh,scripts/lib/libm-call-enumerate.py}"
       run: bash scripts/check-libm-determinism.sh
