@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-227 contracts
+228 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -255,4 +255,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-225 | fs.read_lines materializes a file's lines identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 1 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
+| C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 2 |
 

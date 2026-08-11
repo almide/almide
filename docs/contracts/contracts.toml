@@ -2843,3 +2843,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_metadata_family.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-228"
+spec      = "ALS-R6"
+title     = "The fs composition family and the matrix row selectors answer identically on both targets"
+statement = "The final fifteen formerly native-only functions reach wasm parity, emptying the COMPILER_FRONTIER burn-down list (26 rows at its creation → 0): `fs.remove` (single-entry semantics — a NON-EMPTY directory errs like remove_dir, a file/empty dir removes, a missing path errs — composed as an emptiness check over read_dir before the recursive floor), `fs.write_bytes`/`fs.write_bytes_raw` (byte-list / Bytes materialized into the write floor), `fs.walk` (recursive read_dir, full paths, dirs included, flat-sorted like native's walk_recursive+sort), `fs.glob` (the same simple `*`-matcher native implements, over the C-137 cwd), `fs.rename` (a NEW WASI floor — path_rename imported, normalized two-path call, the write_text_file-class cap-as-tag Result with native errno text on NOENT/ACCES), `fs.is_symlink` (a NEW no-follow stat floor — lookupflags 0 exposes filetype 7; the follow-mode is_file through a symlink stays true, both pinned), all four `read_*_if_exists` twins (missing → Ok(none), present → Ok(some(payload)) through the Result-Option ctor rails — String, List[String], List[Int] and Bytes payloads all covered), and the three `matrix.select_rows_*` selectors (f32 LE, Q1_0 sign-bit blocks, Q8_0 fp16-scale int8 blocks — the shared decoders the full-matrix loaders use, on a row-subset schedule; the q8 fixture's expectations are hand-derived: 0.5·10=5, 0.5·(-10 as i8)=-5, 2.0·3=6). `env.set` is the one row NOT closed: WASI preview1 has no environ-write syscall and an in-module overlay cannot reach the real environ the C-137 path resolution reads — reclassified HOST_CAPABILITY with that reasoning in the ledger row itself."
+since     = "0.56.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_composition_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_select_rows.almd", class = "fixture" },
+]
