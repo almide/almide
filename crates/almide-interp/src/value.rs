@@ -237,6 +237,15 @@ impl Value {
             (Unit, Unit) => Some(std::cmp::Ordering::Equal),
             (List(a), List(b)) => Self::cmp_seq(a, b),
             (Tuple(a), Tuple(b)) => Self::cmp_seq(a, b),
+            // `none < some(x)` — Rust's derived `Ord` on `Option`, which is
+            // what both backends' list orderings inherit (C-053's o_min/o_max
+            // pin it: min of [some(5), none, some(2)] is none).
+            (Option(a), Option(b)) => match (a, b) {
+                (None, None) => Some(std::cmp::Ordering::Equal),
+                (None, Some(_)) => Some(std::cmp::Ordering::Less),
+                (Some(_), None) => Some(std::cmp::Ordering::Greater),
+                (Some(x), Some(y)) => x.partial_cmp_val(y),
+            },
             _ => None,
         }
     }
@@ -265,6 +274,10 @@ impl Value {
             (Float(a), Float(b)) => Some(a.total_cmp(b)),
             (List(a), List(b)) => Self::total_cmp_seq(a, b),
             (Tuple(a), Tuple(b)) => Self::total_cmp_seq(a, b),
+            // Option payloads stay on the TOTAL order (a Float inside a some
+            // must totalOrder like a bare Float would); the none/some shell
+            // ordering itself is shared with `partial_cmp_val`.
+            (Option(Some(x)), Option(Some(y))) => x.total_cmp_val(y),
             _ => self.partial_cmp_val(other),
         }
     }
