@@ -1,0 +1,32 @@
+// fs_copy — SELF-HOSTED `fs.copy(src, dst)` composed from the WASI read + write
+// floors (prim.read_text_file + prim.write_text_file): read src's bytes, write
+// them to dst (created or truncated), matching native `std::fs::copy` for the
+// observable content round-trip. Almide Strings are byte strings and both floors
+// move raw bytes, so binary content survives unchanged. Permissions are not
+// copied (WASI has no chmod) — native copies them; the observable divergence is
+// metadata-only and the content contract is what fixtures pin. Each half is a
+// ONE-LEVEL manual tag read (the fold_lines idiom — tag @16, payload @12) with
+// the write in its own helper: the nested two-Result if misread its result
+// through the registry splice (ok on a missing src) while the identical user
+// code answered err — the flat helper form byte-matches native on both paths.
+// Reaching both floors carries Capability::FsRead + Capability::FsWrite.
+fn __copy_write(dst: String, t: String) -> Result[Unit, String] = {
+  let w: Result[Unit, String] = prim.write_text_file(dst, t)
+  let wh = prim.handle(w)
+  if prim.load32(wh + 16) != 0 then {
+    let m2: String = prim.load_handle(wh + 12)
+    err(m2)
+  } else ok(())
+}
+
+effect fn fs_copy(src: String, dst: String) -> Result[Unit, String] = {
+  let r: Result[String, String] = prim.read_text_file(src)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let t: String = prim.load_handle(rh + 12)
+    __copy_write(dst, t)
+  }
+}
