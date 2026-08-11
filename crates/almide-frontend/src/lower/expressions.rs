@@ -330,7 +330,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         ast::ExprKind::While { cond, body, .. } => {
             let ir_cond = lower_expr(ctx, cond);
             ctx.push_scope();
-            let ir_body: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
+            let ir_body: Vec<IrStmt> = lower_loop_body_stmts(ctx, body);
             ctx.pop_scope();
             ctx.mk(IrExprKind::While { cond: Box::new(ir_cond), body: ir_body }, ty, span)
         }
@@ -691,6 +691,35 @@ fn lower_expr_misc(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<as
 /// scrutinee, and `alt` the wildcard arm. Statements before the guard stay as block
 /// stmts. Recurses so multiple guard-lets nest. Without a guard-let it lowers normally.
 /// The caller owns the block scope (push/pop around this).
+/// Lower a LOOP BODY's statement list (#1204).
+///
+/// A loop body is a statement list like a block's, but it has no tail — so it
+/// cannot go through `lower_block_body`, which is where `guard let` is
+/// rewritten into its `match { ok/some => rest, _ => else }` form. Mapping
+/// `lower_stmt` straight over the list therefore handed a `GuardLet` to
+/// `lower_stmt`, whose arm is an `unreachable!("guard let is desugared by the
+/// enclosing block")` — a compiler PANIC on `for … { guard let x = … else {
+/// continue } … }`, which is `guard let`'s most natural use (it exists for
+/// early exit, and `continue` is a loop's early exit). Present since the
+/// construct landed; `spec/lang/guard_let_test.almd` never put one in a loop.
+///
+/// The rewrite is the block one, minus the tail: everything after the guard
+/// becomes the Some/Ok arm's body, the `else` becomes the wildcard arm, and the
+/// result is ONE statement in the loop body. Nested guards fall out of the
+/// recursion, exactly as in a block.
+fn lower_loop_body_stmts(ctx: &mut LowerCtx, body: &[ast::Stmt]) -> Vec<IrStmt> {
+    let Some(i) = body.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) else {
+        return body.iter().map(|s| lower_stmt(ctx, s)).collect();
+    };
+    let mut out: Vec<IrStmt> = body[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
+    // `lower_block_body` owns the guard rewrite; a Unit-typed, tail-less block
+    // over the REST is exactly the shape it expects, and its result is a single
+    // expression statement here.
+    let rest = lower_block_body(ctx, &body[i..], None, &Ty::Unit, None);
+    out.push(IrStmt { kind: IrStmtKind::Expr { expr: rest }, span: None });
+    out
+}
+
 fn lower_block_body(
     ctx: &mut LowerCtx,
     stmts: &[ast::Stmt],
