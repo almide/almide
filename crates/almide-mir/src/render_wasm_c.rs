@@ -8,6 +8,7 @@ fn float_un_name(op: FUnOp) -> &'static str {
         FUnOp::Floor => "floor",
         FUnOp::Ceil => "ceil",
         FUnOp::Neg => "neg",
+        FUnOp::Nearest => "nearest",
     }
 }
 

@@ -20,7 +20,10 @@ fn tanh_via_fast_exp(y: f64) -> f64 {
 pub fn gelu_naive(data: &[f64], out: &mut [f64]) {
     for i in 0..data.len() {
         let x = data[i];
-        let inner = K * (x + 0.044715 * x * x * x);
+        // The cube associates as `(x*x)*x` and is scaled AFTER (#1197): the AVX
+        // lane and the wasm self-host both spell it that way, and
+        // `((c*x)*x)*x` rounds differently.
+        let inner = K * (x + 0.044715 * ((x * x) * x));
         out[i] = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
@@ -54,7 +57,10 @@ unsafe fn gelu_avx(data: &[f64], out: &mut [f64]) {
     }
     for i in (chunks * 4)..n {
         let x = data[i];
-        let inner = K * (x + 0.044715 * x * x * x);
+        // The cube associates as `(x*x)*x` and is scaled AFTER (#1197): the AVX
+        // lane and the wasm self-host both spell it that way, and
+        // `((c*x)*x)*x` rounds differently.
+        let inner = K * (x + 0.044715 * ((x * x) * x));
         out[i] = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
@@ -80,7 +86,10 @@ fn gelu_wasm(data: &[f64], out: &mut [f64]) {
         store_f64x2(ow, f64x2_mul(f64x2_mul(half, x), f64x2_add(one, t)));
     }
     for (x, o) in d_tail.iter().zip(o_tail) {
-        let inner = K * (x + 0.044715 * x * x * x);
+        // The cube associates as `(x*x)*x` and is scaled AFTER (#1197): the AVX
+        // lane and the wasm self-host both spell it that way, and
+        // `((c*x)*x)*x` rounds differently.
+        let inner = K * (x + 0.044715 * ((x * x) * x));
         *o = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
@@ -109,7 +118,10 @@ unsafe fn gelu_neon(data: &[f64], out: &mut [f64]) {
     }
     for i in (chunks * 2)..n {
         let x = data[i];
-        let inner = K * (x + 0.044715 * x * x * x);
+        // The cube associates as `(x*x)*x` and is scaled AFTER (#1197): the AVX
+        // lane and the wasm self-host both spell it that way, and
+        // `((c*x)*x)*x` rounds differently.
+        let inner = K * (x + 0.044715 * ((x * x) * x));
         out[i] = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
