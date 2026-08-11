@@ -1,0 +1,17 @@
+// fs_read_bytes_if_exists — SELF-HOSTED `fs.read_bytes_if_exists(path)` for the
+// wasm leg: missing file → `Ok(none)`, present → the raw read floor expanded to
+// the List[Int] byte list (`bytes.to_list`, the fs_read_bytes composition) into
+// `Ok(some(list))`, any other read error keeps the err channel. Reaching the
+// floors carries Capability::FsRead.
+effect fn fs_read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = {
+  if prim.path_exists(path) then {
+    let r = prim.read_bytes_file(path)
+    match r {
+      ok(b) => {
+        let xs = bytes.to_list(b)
+        ok(some(xs))
+      },
+      err(e) => err(e),
+    }
+  } else ok(none)
+}
