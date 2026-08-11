@@ -767,6 +767,10 @@ fn is_admitted_effectful_entropy_env_clock(module: &str, func: &str) -> bool {
 /// (`write`/`mkdir_p`/`remove_all`) admitted calls. Verbatim.
 fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
     (module == "fs" && func == "read_text")
+        // `fs.read_lines` READS the filesystem — REUSES Capability::FsRead. Self-hosted
+        // as prim.read_text_file + string.lines (fs_read_lines.almd), the exact
+        // composition the native oracle is (`read_to_string(...).map(|s| s.lines()...)`).
+        || (module == "fs" && func == "read_lines")
         || (module == "fs" && func == "read_bytes_raw")
         || (module == "fs" && func == "list_dir")
         || (module == "fs" && func == "read_bytes")
