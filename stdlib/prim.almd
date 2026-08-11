@@ -310,6 +310,22 @@ fn int_to_ptr(a: Int) -> RawPtr = _
 @intrinsic("almide_rt_prim_path_filestat")
 fn path_filestat(buf: Int, path: String) -> Int = _
 
+// The NO-FOLLOW twin of path_filestat: the same path_filestat_get query with
+// lookupflags = 0 (do NOT follow a final symlink), so a symlink's own filetype
+// (7) is observable — the fs.is_symlink floor. Same scratch/errno contract.
+// No native runtime impl — the native target uses fs.is_symlink's @intrinsic.
+@intrinsic("almide_rt_prim_path_filestat_nofollow")
+fn path_filestat_nofollow(buf: Int, path: String) -> Int = _
+
+// The path_rename WASI host call, packaged as ONE high-level HEAP-RESULT prim — a FS-WRITE
+// sandbox exit (Capability::FsWrite, the write_text_file accounting). Renames `src` to `dst`
+// (both preopen-relative, each normalized like every fs path) and returns a fresh OWNED
+// `Result[Unit, String]` in the cap-as-tag layout (Ok(()) len@4=0/tag@16=0, Err with the
+// native std::io Display text). Reached only by the self-hosted `fs.rename`
+// (fs_rename.almd). No native runtime impl — the native target uses fs.rename's @intrinsic.
+@intrinsic("almide_rt_prim_rename")
+fn rename(src: String, dst: String) -> Result[Unit, String] = _
+
 // The fd_read-from-stdin line-read WASI host call, packaged as ONE high-level HEAP-RESULT prim —
 // the STANDARD-INPUT sandbox exit (reaches Capability::Stdin, a DISTINCT capability: reading the
 // operator's input stream is neither a write, a filesystem, an entropy, nor a clock effect).
