@@ -131,6 +131,10 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
             // fs.write — same Ok-has-no-payload discipline, same flat DropListStr for both arms.
             | ("fs", "mkdir_p")
+            // `fs.rename` — the prim PASS-THROUGH twin of fs.write ($rename builds the
+            // identical cap-as-tag Result[Unit, String]: Ok len@4=0 + tag@16=0, Err with
+            // @12=msg + tag@16=1), so a `match`/`!` reads tag @16 like fs.write.
+            | ("fs", "rename")
             // `fs.remove_all` returns the SAME cap-as-tag `Result[Unit, String]` shape as fs.write
             // ($remove_all builds it identically — Ok with len@4=0 + @12=0 + tag@16=0, Err with
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
