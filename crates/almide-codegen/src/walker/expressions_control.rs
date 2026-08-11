@@ -630,7 +630,29 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         format!("&*{}", render_expr(ctx, inner))
     } else {
-        format!("&{}", render_expr(ctx, inner))
+        let rendered = render_expr(ctx, inner);
+        // #1210: a Bytes/Matrix-typed RVALUE that renders as a type-propagating
+        // expression (the `??` lowering's `match`, an `if`/`else`, a block)
+        // defeats the deref coercion `&var` relies on — rustc propagates the
+        // callee's expected `&Vec<u8>` INTO the arms, so the RcCow-typed arms
+        // fail E0308 ("expected Vec<u8>, found RcCow<Vec<u8>>"). `&*(…)` derefs
+        // through the RcCow explicitly — the same layer coercion strips from a
+        // plain var. Bytes/Matrix only: they are the two types whose value
+        // convention (RcCow) differs from the raw runtime signature (#617).
+        {
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            let rc_cow_valued = matches!(
+                inner.ty,
+                Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _)
+            );
+            let propagating = rendered.starts_with("match ")
+                || rendered.starts_with("if ")
+                || rendered.starts_with('{');
+            if rc_cow_valued && propagating {
+                return format!("&*({})", rendered);
+            }
+        }
+        format!("&{}", rendered)
     }
 }
 
