@@ -1,0 +1,15 @@
+// @contract: C-231, C-232
+// ALS-E1/E2 (docs/specs/als/expressions.md): the integer-literal surface —
+// decimal with underscore separators, hex/octal/binary radix prefixes, the
+// i64 bounds including the negated-MIN literal (the parser folds the sign
+// into the range check, so i64::MIN is writable directly) — and the boolean
+// literals, identical on both targets.
+effect fn main() -> Unit = {
+  println(int.to_string(1_000_000))
+  println(int.to_string(0xFF))
+  println(int.to_string(0o17))
+  println(int.to_string(0b101))
+  println(int.to_string(9223372036854775807))
+  println(int.to_string(-9223372036854775808))
+  println("${true} ${false}")
+}

@@ -2877,3 +2877,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/flight_pid_control.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-231"
+spec      = "ALS-E1"
+title     = "Integer and boolean literal forms evaluate identically on both targets"
+statement = "The integer-literal surface of ALS-E1 — decimal with underscore separators, hex/octal/binary radix prefixes, the full i64 range including the negated-MIN literal (the sign folds into the E024 range check, so -9223372036854775808 is writable directly) — and the ALS-E2 boolean literals produce byte-identical observables native <-> wasm, including the i64::MIN decimal round-trip through int.to_string (the $itoa edge pinned by execution in the WAT prelude audit). Out-of-range literals are a check-time E024 on both targets, never a silent wrap. First section pair of the syntax-element direction (proofs/als-element-coverage.toml): the four-part section form (grammar / value norm / rulings / fixture) is the template the remaining 71 rows follow."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/literal_int_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-232"
+spec      = "ALS-E2"
+title     = "Boolean literals and their display form are identical on both targets"
+statement = "ALS-E2: `true` / `false` are reserved-word literals of type Bool whose display form at every observable point (string interpolation, comparison operands) is the lowercase spelling — byte-identical native <-> wasm. Shares the literal-forms fixture with C-231 (the ALS-E1/E2 section pair landed together as the syntax-element direction's template)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/literal_int_forms.almd", class = "fixture" },
+]
