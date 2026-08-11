@@ -377,12 +377,64 @@ impl<'a> Interpreter<'a> {
             return self.eval_inplace_mutation(module, func, args, scope);
         }
 
+        // Third: `fan.any`, evaluated at the DETERMINISTIC contract's spec
+        // point rather than with threads: first-Ok in LIST ORDER with
+        // side-effect order pinned sequential (C-185, C-004's own comment:
+        // "any (sequential in list order)"), so it must NOT ride the eager
+        // loop below — an arm after the winner is never evaluated. All-fail
+        // is the defined Err (C-005). `fan.settle`'s block form never gets
+        // here: it lowers to `IrExprKind::Fan`, which `eval_fan` already
+        // evaluates (tuple of per-arm Results, the no-1-tuple rule).
+        if module.as_str() == "fan" && func.as_str() == "any" {
+            return self.eval_fan_any(args, scope);
+        }
+
         // Otherwise evaluate all args eagerly, then dispatch.
         let mut evaled = Vec::with_capacity(args.len());
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
         self.dispatch_module_resolved(module, func, evaled)
+    }
+
+    /// `fan.any`, first-Ok short-circuit — see the dispatch comment above for
+    /// the contract pins. The block form arrives as ONE argument: the literal
+    /// LIST of 0-ary thunk closures the parser synthesized. Each thunk is
+    /// CALLED in list order; a thunk returns its raw Result when the arm is an
+    /// effect call (the interp's effect convention) and a bare value when pure
+    /// — the pure case takes the Ok adapter here, mirroring what FanLowering
+    /// bakes into both backends (#514).
+    fn eval_fan_any(&mut self, args: &[IrExpr], scope: &Scope) -> Flow {
+        let [thunks_expr] = args else {
+            // The mapper form (list + fn) has its own runtime name upstream
+            // (`any_map`); anything else reaching here is not the block ABI.
+            return Flow::Unsupported(format!(
+                "fan.any with {} args (thunk-list ABI takes 1)",
+                args.len()
+            ));
+        };
+        let thunks_val = val!(self.eval_expr(thunks_expr, scope));
+        let Value::List(thunks) = thunks_val else {
+            return Flow::Unsupported("fan.any over a non-list thunk carrier".to_string());
+        };
+        for t in thunks.iter() {
+            let Value::Closure(clo) = t else {
+                return Flow::Unsupported("fan.any arm that is not a thunk closure".to_string());
+            };
+            let v = val!(self.apply_closure(clo, Vec::new()));
+            match v {
+                // First Ok wins; later arms are never evaluated — the pinned
+                // sequential side-effect order (C-004/C-185).
+                ok @ Value::Result(Ok(_)) => return Flow::val(ok),
+                Value::Result(Err(_)) => {}
+                // A pure arm cannot fail: its value IS the winner (#514's
+                // Ok adapter), and evaluation stops here too.
+                pure => return Flow::val(Value::Result(Ok(Box::new(pure)))),
+            }
+        }
+        Flow::val(Value::Result(Err(Box::new(Value::str(
+            "fan.any: all candidates failed".to_string(),
+        )))))
     }
 
     /// An in-place `mut`-receiver mutator, evaluated as a read → transform →
