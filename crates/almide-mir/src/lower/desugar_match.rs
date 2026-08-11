@@ -357,12 +357,102 @@ pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
 }
 
 
+/// Read-only pre-scan: would [`desugar_grouped_variant_match`] fire anywhere
+/// in the region this fixpoint level OWNS? The branch fixpoint re-runs that
+/// row at every level of the nested-arms recursion, and a whole-subtree
+/// clone+walk per level made a deep continuation chain quadratic (#1220).
+/// The probe calls the SAME decision fn as the rewrite, so the two cannot
+/// drift; ids minted into the scratch counter are discarded (the firing
+/// decision never depends on the counter's value).
+///
+/// Exactness: the mutating pass rewrites post-order over the same region, so
+/// its FIRST rewrite happens at a node whose subtree is still the original —
+/// a node this probe also fires on. Conversely a probe hit means SOME owned
+/// node fires on the original tree, so the mutating pass reports `changed`.
+fn grouped_variant_match_fires(body: &IrExpr, layouts: &crate::lower::VariantLayouts) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct P<'a> {
+        layouts: &'a crate::lower::VariantLayouts,
+        fires: bool,
+    }
+    impl IrVisitor for P<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.fires {
+                return;
+            }
+            if let IrExprKind::Match { subject, arms } = &e.kind {
+                let mut scratch = 0u32;
+                if group_option_result_arms(subject, arms, &mut scratch, self.layouts).is_some() {
+                    self.fires = true;
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut p = P { layouts, fires: false };
+    // Root-level check, then the owned region only.
+    if let IrExprKind::Match { subject, arms } = &body.kind {
+        let mut scratch = 0u32;
+        if group_option_result_arms(subject, arms, &mut scratch, layouts).is_some() {
+            return true;
+        }
+    }
+    for_each_owned_region(body, &mut |e| {
+        if !p.fires {
+            p.visit_expr(e);
+        }
+    });
+    p.fires
+}
+
+/// Visit the sub-regions of a branch-fixpoint subtree ROOT that the deep rows
+/// own, SKIPPING the child positions `desugar_nested_branch_arms` (the last
+/// `BRANCH_PASSES` row) hands to the FULL inner fixpoint: `If` arms, `Match`
+/// arm bodies, and the `Block` tail. Every row runs inside those regions when
+/// the recursion reaches them, so a deep row re-walking them from an ancestor
+/// level only re-verified an already-normalized subtree — once per ancestor,
+/// the O(n²) residual of #1220. The skip applies at the ROOT node only:
+/// deeper occurrences of these shapes (e.g. a `Match` inside a `Bind` value,
+/// or under a `BinOp` operand, whose recursion applies a restricted rewrite
+/// rather than the full row pipeline) are NOT fixpoint-covered and their
+/// whole subtree is handed to `f`.
+fn for_each_owned_region<'e>(root: &'e IrExpr, f: &mut impl FnMut(&'e IrExpr)) {
+    match &root.kind {
+        IrExprKind::If { cond, .. } => f(cond),
+        IrExprKind::Match { subject, arms } => {
+            f(subject);
+            for a in arms {
+                if let Some(g) = &a.guard {
+                    f(g);
+                }
+            }
+        }
+        IrExprKind::Block { stmts, expr: Some(_) } => {
+            for s in stmts {
+                match &s.kind {
+                    IrStmtKind::Expr { expr } => f(expr),
+                    IrStmtKind::Bind { value, .. } => f(value),
+                    IrStmtKind::Assign { value, .. } => f(value),
+                    _ => {}
+                }
+            }
+        }
+        // Any other root shape has no fully-fixpointed child region — hand
+        // the whole subtree over.
+        _ => f(root),
+    }
+}
+
 pub fn desugar_grouped_variant_match(
     body: &IrExpr,
     next_var: &mut u32,
     layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    if !grouped_variant_match_fires(body, layouts) {
+        return None;
+    }
     struct V<'a> {
         next: &'a mut u32,
         layouts: &'a crate::lower::VariantLayouts,
@@ -384,18 +474,52 @@ pub fn desugar_grouped_variant_match(
             }
         }
     }
+    let mut out = body.clone();
     let mut v = V {
         next: next_var,
         layouts,
         changed: false,
     };
-    let mut out = body.clone();
-    v.visit_expr_mut(&mut out);
-    if v.changed {
-        Some(out)
-    } else {
-        None
+    // Mirror the probe: rewrite the owned region deep, then the root's own
+    // match (the region walk skips exactly the child positions whose OWN
+    // fixpoint runs this row — see `for_each_owned_region`).
+    {
+        let out_ref = &mut out;
+        match &mut out_ref.kind {
+            IrExprKind::If { cond, .. } => v.visit_expr_mut(cond),
+            IrExprKind::Match { subject, arms } => {
+                v.visit_expr_mut(subject);
+                for a in arms.iter_mut() {
+                    if let Some(g) = &mut a.guard {
+                        v.visit_expr_mut(g);
+                    }
+                }
+            }
+            IrExprKind::Block { stmts, expr: Some(_) } => {
+                for s in stmts.iter_mut() {
+                    match &mut s.kind {
+                        IrStmtKind::Expr { expr } => v.visit_expr_mut(expr),
+                        IrStmtKind::Bind { value, .. } => v.visit_expr_mut(value),
+                        IrStmtKind::Assign { value, .. } => v.visit_expr_mut(value),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {
+                v.visit_expr_mut(out_ref);
+                return v.changed.then_some(out);
+            }
+        }
     }
+    // Root-level regroup (post-order: after the owned region).
+    if let IrExprKind::Match { subject, arms } = &out.kind {
+        if let Some(new_arms) = group_option_result_arms(subject, arms, v.next, v.layouts) {
+            let subject = subject.clone();
+            out.kind = IrExprKind::Match { subject, arms: new_arms };
+            v.changed = true;
+        }
+    }
+    v.changed.then_some(out)
 }
 
 /// The grouping transform for [`desugar_grouped_variant_match`]. `None` when the subject is not an
