@@ -82,6 +82,20 @@ impl Value {
 
     /// Materialize a `Range` (or pass through a `List`) to a concrete element
     /// vector for iteration / container ops. Returns `None` for non-iterables.
+    /// Borrow the elements of a List/Set WITHOUT materializing. The read-only
+    /// accessors (len / get / contains / …) go through this: `as_iter_items`
+    /// clones the whole container per call, which turns the everyday
+    /// `while i < list.len(xs)` + `list.get(xs, i)` read loop quadratic
+    /// (measured 450 ms at 8k elements). Range has no backing slice — callers
+    /// needing Range fall back to `as_iter_items`.
+    pub fn as_iter_slice(&self) -> Option<&[Value]> {
+        match self {
+            Value::List(xs) => Some(xs),
+            Value::Set(xs) => Some(xs),
+            _ => None,
+        }
+    }
+
     pub fn as_iter_items(&self) -> Option<Vec<Value>> {
         match self {
             Value::List(xs) => Some((**xs).clone()),
