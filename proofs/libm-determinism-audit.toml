@@ -1,0 +1,60 @@
+# ── LIBM DETERMINISM AUDIT (#1197) ──
+#
+# Almide vendors musl-libm (runtime/rs/src/libm.rs — the StrictMath/fdlibm
+# decision) so a transcendental is bit-identical native <-> wasm AND across host
+# platforms. A call to Rust's own `f64::exp`/`powf`/... escapes that contract.
+# Every such call site carries a verdict here; the gate is
+# scripts/check-libm-determinism.sh (CI + lefthook), enumeration is
+# scripts/lib/libm-call-enumerate.py — shared with this ledger so the two cannot
+# drift (the #1176 one-instrument rule).
+#
+# Vocabulary: VENDORED / IEEE_EXACT / UNREACHABLE / DECLARED_APPROX (needs a
+# `ref`) / TEST_ONLY. PLATFORM — a reachable, undeclared platform call — is the
+# FAILING verdict; that is what #1197 was.
+#
+# Round 1 (2026-08-11): the enumeration went 17 -> 5 as #1197 was closed. The
+# six runtime matrix sites that WERE the live divergence now call
+# almide_rt_libm_*; the whole SIMD activation family (softmax / gelu / silu,
+# every lane and every scalar tail) now computes the CANONICAL fast-exp, which
+# both legs share — so those sites left this audit entirely rather than being
+# excused by it. What remains reaches no Almide program: three scalar fns with
+# no `@intrinsic`, one IEEE-exact `powi`, and a test helper.
+#
+# ZERO entries are DECLARED_APPROX today. That verdict stays in the vocabulary
+# on purpose: the next accuracy/speed trade must be WRITTEN DOWN with a
+# contract or issue ref, which is exactly what #1197 found missing.
+
+[[site]]
+file = "crates/almide-kernel/src/q1_0.rs"
+fn = "tree_order_error_is_within_the_proven_bound"
+calls = 1
+verdict = "TEST_ONLY"
+why = "A #[test] checking the q1_0 tree-order error bound; never compiled into a shipped program."
+
+[[site]]
+file = "runtime/rs/src/bytes.rs"
+fn = "f16_bits_to_f64"
+calls = 2
+verdict = "IEEE_EXACT"
+why = "(2.0f32).powi(k) — powi is compiler-expanded multiplication, not a libm call, and both exponents here (-24 and exp-15) are exact powers of two, so every platform produces the same bits."
+
+[[site]]
+file = "runtime/rs/src/math.rs"
+fn = "almide_rt_math_acos"
+calls = 1
+verdict = "UNREACHABLE"
+why = "platform x.acos(), but NO `@intrinsic` in stdlib/*.almd names almide_rt_math_acos, so no Almide program can reach it. Adding that intrinsic without first routing through the vendored libm would re-open #1197 — the gate flags it the moment the site or its verdict changes."
+
+[[site]]
+file = "runtime/rs/src/math.rs"
+fn = "almide_rt_math_asin"
+calls = 1
+verdict = "UNREACHABLE"
+why = "platform x.asin(), but NO `@intrinsic` in stdlib/*.almd names almide_rt_math_asin, so no Almide program can reach it. Adding that intrinsic without first routing through the vendored libm would re-open #1197 — the gate flags it the moment the site or its verdict changes."
+
+[[site]]
+file = "runtime/rs/src/math.rs"
+fn = "almide_rt_math_atan2"
+calls = 1
+verdict = "UNREACHABLE"
+why = "platform y.atan2(x), but NO `@intrinsic` in stdlib/*.almd names almide_rt_math_atan2, so no Almide program can reach it. Adding that intrinsic without first routing through the vendored libm would re-open #1197 — the gate flags it the moment the site or its verdict changes. The vendored file provides atan, not atan2."
