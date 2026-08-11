@@ -30,6 +30,10 @@ pub struct ProcResult {
     /// `true` if the binary could not be spawned at all (e.g. `wasmtime`
     /// not installed). The ladder treats this as a *skip*, not a finding.
     pub spawn_failed: bool,
+    /// Wall clock the child actually consumed (up to the kill on a
+    /// timeout). The hang-vs-slow split (#1235) reports this, so a Slow
+    /// finding carries its measured time instead of just "over budget".
+    pub duration: Duration,
 }
 
 impl ProcResult {
@@ -55,6 +59,15 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
+    /// This toolchain with a different per-run budget. The hang-vs-slow
+    /// confirm re-run (#1235) is the only caller.
+    pub fn with_timeout(&self, timeout: Duration) -> Toolchain {
+        Toolchain {
+            timeout,
+            ..self.clone()
+        }
+    }
+
     /// `almide check <file>` — type-check only.
     pub fn check(&self, file: &Path) -> ProcResult {
         self.run_almide(&["check", &file.to_string_lossy()])
@@ -140,6 +153,7 @@ impl Toolchain {
             cmd.process_group(0);
         }
 
+        let started = Instant::now();
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -149,6 +163,7 @@ impl Toolchain {
                     exit_code: None,
                     timed_out: false,
                     spawn_failed: true,
+                    duration: Duration::ZERO,
                 };
             }
         };
@@ -173,7 +188,7 @@ impl Toolchain {
             })
         });
 
-        let deadline = Instant::now() + self.timeout;
+        let deadline = started + self.timeout;
         let poll_interval = Duration::from_millis(POLL_INTERVAL_MS);
 
         let timed_out = loop {
@@ -198,6 +213,10 @@ impl Toolchain {
             }
         };
 
+        // The child is done (or killed) HERE — measure before the reader
+        // joins, which cost nothing extra but are not the program.
+        let duration = started.elapsed();
+
         // Join the readers (they finish once the child's pipe ends close,
         // which the kill above guarantees).
         let stdout = out_handle.and_then(|h| h.join().ok()).unwrap_or_default();
@@ -210,6 +229,7 @@ impl Toolchain {
             exit_code,
             timed_out,
             spawn_failed: false,
+            duration,
         }
     }
 }
