@@ -577,6 +577,124 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                 | IrExprKind::Unit
         )
     }
+
+    /// The unwrap-operand hoist (#1191): for an assert whose operand CONTAINS
+    /// an unwrap, bind every non-atom operand to a fresh `let` IN ARGUMENT
+    /// ORDER (effects keep their sequence — the `desugar_heap_if_call_args`
+    /// discipline) and build the `if`/die over the Vars. Returns the binds and
+    /// the `if` — the CALLER splices them as SIBLING statements: both
+    /// downstream `!`-resolvers scan DIRECT statements only (`desugar_let_
+    /// unwrap`'s `find_let_unwrap_target`, `desugar_loop_unwrap`'s
+    /// `loop_uw_direct_unwrap`), so an expression-position Block wrapper is
+    /// invisible to them — measured on the fold_lines fixtures.
+    fn hoist_assert(
+        name: &str,
+        args: &[IrExpr],
+        next_var: &mut u32,
+    ) -> Option<(Vec<almide_ir::IrStmt>, IrExpr)> {
+        use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
+        let is_assert_shape = matches!(
+            (name, args.len()),
+            ("assert", 1 | 2) | ("assert_eq", 2) | ("assert_ne", 2)
+        );
+        if !is_assert_shape || !args.iter().any(contains_unwrap) {
+            return None;
+        }
+        let mut binds: Vec<IrStmt> = Vec::new();
+        let mut new_args: Vec<IrExpr> = Vec::with_capacity(args.len());
+        for a in args {
+            if is_atom(a) {
+                new_args.push(a.clone());
+                continue;
+            }
+            let tmp = VarId(*next_var);
+            *next_var += 1;
+            binds.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: tmp,
+                    mutability: Mutability::Let,
+                    ty: a.ty.clone(),
+                    value: a.clone(),
+                },
+                span: a.span.clone(),
+            });
+            new_args.push(IrExpr {
+                kind: IrExprKind::Var { id: tmp },
+                ty: a.ty.clone(),
+                span: a.span.clone(),
+                def_id: None,
+            });
+        }
+        let (cond, die) = assert_die_expr(name, &new_args)?;
+        let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+        let iff = IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(cond),
+                then: Box::new(unit),
+                else_: Box::new(die),
+            },
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        };
+        Some((binds, iff))
+    }
+
+    /// Splice statement-position unwrap-bearing asserts into `stmts` (and a
+    /// Unit-typed TAIL assert into the statement list, dropping the tail).
+    fn splice_assert_stmts(
+        stmts: &mut Vec<almide_ir::IrStmt>,
+        tail: Option<&mut Option<Box<IrExpr>>>,
+        next_var: &mut u32,
+    ) -> bool {
+        use almide_ir::IrStmtKind;
+        let mut changed = false;
+        let mut out: Vec<almide_ir::IrStmt> = Vec::with_capacity(stmts.len());
+        for s in stmts.drain(..) {
+            let hoisted = match &s.kind {
+                IrStmtKind::Expr { expr } => match &expr.kind {
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        hoist_assert(name.as_str(), args, next_var)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            match hoisted {
+                Some((binds, iff)) => {
+                    out.extend(binds);
+                    out.push(almide_ir::IrStmt {
+                        kind: IrStmtKind::Expr { expr: iff },
+                        span: s.span.clone(),
+                    });
+                    changed = true;
+                }
+                None => out.push(s),
+            }
+        }
+        *stmts = out;
+        if let Some(tail) = tail {
+            let hoisted = match tail.as_deref() {
+                Some(t) if matches!(t.ty, Ty::Unit) => match &t.kind {
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        hoist_assert(name.as_str(), args, next_var)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some((binds, iff)) = hoisted {
+                stmts.extend(binds);
+                stmts.push(almide_ir::IrStmt {
+                    kind: IrStmtKind::Expr { expr: iff },
+                    span: None,
+                });
+                *tail = None;
+                changed = true;
+            }
+        }
+        changed
+    }
 /// `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0 wasm
 /// form: prefix + message, then halt). The message expr is evaluated only on
 /// the abort path, like the computed assert message. `None` when the call is
@@ -612,6 +730,26 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
+            // #1191: SPLICE statement-position (and Unit-tail) asserts whose
+            // operands carry an unwrap — their binds must land as SIBLING
+            // statements (see `hoist_assert`). Runs AFTER the child walk, so
+            // the expression handler below (which SKIPS unwrap-bearing
+            // asserts) has already left them intact as Calls for this pass.
+            // ForIn/While bodies are RAW statement lists, not Blocks — they
+            // need their own arms or a loop-body assert is never spliced.
+            match &mut e.kind {
+                IrExprKind::Block { stmts, expr } => {
+                    if splice_assert_stmts(stmts, Some(expr), &mut self.next_var) {
+                        self.changed = true;
+                    }
+                }
+                IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => {
+                    if splice_assert_stmts(body, None, &mut self.next_var) {
+                        self.changed = true;
+                    }
+                }
+                _ => {}
+            }
             let is_panic = matches!(&e.kind,
                 IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
                     if name.as_str() == "panic" && args.len() == 1
@@ -630,69 +768,19 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
                 self.changed = true;
                 return;
             }
-            // #1191: an operand that CONTAINS an unwrap hoists every non-atom
-            // operand to a fresh `let` IN ARGUMENT ORDER (effects keep their
-            // sequence — the `desugar_heap_if_call_args` discipline), so the
-            // `if` compares plain Vars and `desugar_let_unwrap` ladder-izes
-            // the unwrap bind exactly like a source-level `let x = f()!`.
-            // Gated to unwrap-bearing operands only: everything else keeps
-            // its existing inline lowering byte-for-byte. (The NON-test
-            // assert desugar, `desugar_assert_abort`, has always temp-bound
-            // its operands — this brings the test-mode twin in line for the
-            // one class where inlining is not merely churn but a wall.)
+            // #1191: an unwrap-bearing assert stays a CALL here — building the
+            // `if` with the unwrap INLINE would wall at the cond (the operand
+            // has no propagation route), and the operand hoist needs a sibling
+            // STATEMENT slot this expression position cannot offer. The
+            // enclosing Block/loop's splice above rewrites it; a position with
+            // no statement slot keeps the call and walls honestly, exactly as
+            // the un-hoisted form always did.
             let is_assert_shape = matches!(
                 (name.as_str(), args.len()),
                 ("assert", 1 | 2) | ("assert_eq", 2) | ("assert_ne", 2)
             );
             if is_assert_shape && args.iter().any(contains_unwrap) {
-                use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
-                let mut binds: Vec<IrStmt> = Vec::new();
-                let mut new_args: Vec<IrExpr> = Vec::with_capacity(args.len());
-                for a in args {
-                    if is_atom(a) {
-                        new_args.push(a.clone());
-                        continue;
-                    }
-                    let tmp = VarId(self.next_var);
-                    self.next_var += 1;
-                    binds.push(IrStmt {
-                        kind: IrStmtKind::Bind {
-                            var: tmp,
-                            mutability: Mutability::Let,
-                            ty: a.ty.clone(),
-                            value: a.clone(),
-                        },
-                        span: a.span.clone(),
-                    });
-                    new_args.push(IrExpr {
-                        kind: IrExprKind::Var { id: tmp },
-                        ty: a.ty.clone(),
-                        span: a.span.clone(),
-                        def_id: None,
-                    });
-                }
-                if let Some((cond, die)) = assert_die_expr(name.as_str(), &new_args) {
-                    let unit =
-                        IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
-                    let iff = IrExpr {
-                        kind: IrExprKind::If {
-                            cond: Box::new(cond),
-                            then: Box::new(unit),
-                            else_: Box::new(die),
-                        },
-                        ty: Ty::Unit,
-                        span: e.span.clone(),
-                        def_id: e.def_id,
-                    };
-                    *e = IrExpr {
-                        kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(iff)) },
-                        ty: Ty::Unit,
-                        span: e.span.clone(),
-                        def_id: e.def_id,
-                    };
-                    self.changed = true;
-                    return;
-                }
+                return;
             }
             let Some((cond, die)) = assert_die_expr(name.as_str(), args) else { return };
             let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
