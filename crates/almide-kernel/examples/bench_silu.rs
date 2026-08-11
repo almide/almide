@@ -1,4 +1,5 @@
-// silu_mul: x*sigmoid(x)*b. SIMD fast-exp vs scalar libm (=Almide's path).
+// silu_mul: x*sigmoid(x)*b. SIMD fast-exp vs the SCALAR fast-exp — both run the
+// same canonical algorithm since #1197, so this measures VECTORIZATION alone.
 use almide_kernel::silu::{silu_mul, silu_mul_naive};
 use std::hint::black_box;
 use std::time::Instant;
@@ -16,7 +17,7 @@ fn main() {
     for r in 0..reps { a[0] = black_box(r as f64 * 1e-9); silu_mul(black_box(&a), &b, &mut out); black_box(&out); }
     let simd = t.elapsed();
     println!("[{arch}] silu_mul, n={n}");
-    println!("  scalar libm (=Almide): {naive:?}");
+    println!("  scalar fast-exp:      {naive:?}");
     println!("  almide-kernel SIMD:    {simd:?}");
     println!("  → {:.2}x", naive.as_secs_f64() / simd.as_secs_f64());
 }

@@ -14,7 +14,7 @@ pub fn softmax_rows_naive(data: &[f64], rows: usize, cols: usize, out: &mut [f64
         let max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         let mut sum = 0.0;
         for j in 0..cols {
-            let e = (row[j] - max).exp();
+            let e = crate::silu::fast_exp(row[j] - max);
             o[j] = e;
             sum += e;
         }

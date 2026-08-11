@@ -8,11 +8,20 @@ use crate::silu::exp_pd;
 
 const K: f64 = 0.7978845608028654; // sqrt(2/pi)
 
+/// `tanh(y) = 1 - 2/(exp(2y)+1)` over the CANONICAL fast-exp (#1197) — the same
+/// identity, in the same op order, every SIMD lane uses. The platform
+/// `f64::tanh` this replaced was a fourth answer: neither cross-arch nor
+/// cross-target stable, and different again from the lanes' own identity.
+#[inline]
+fn tanh_via_fast_exp(y: f64) -> f64 {
+    1.0 - 2.0 / (crate::silu::fast_exp(2.0 * y) + 1.0)
+}
+
 pub fn gelu_naive(data: &[f64], out: &mut [f64]) {
     for i in 0..data.len() {
         let x = data[i];
         let inner = K * (x + 0.044715 * x * x * x);
-        out[i] = 0.5 * x * (1.0 + inner.tanh());
+        out[i] = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
 
@@ -32,7 +41,10 @@ unsafe fn gelu_avx(data: &[f64], out: &mut [f64]) {
         let x = _mm256_loadu_pd(data.as_ptr().add(off));
         let x3 = _mm256_mul_pd(_mm256_mul_pd(x, x), x);
         // inner = K*(x + 0.044715*x3)
-        let inner = _mm256_mul_pd(k, _mm256_fmadd_pd(c, x3, x));
+        // UNFUSED (#1197): the scalar/NEON/wasm spellings compute
+        // `K*(x + c*x3)` with a separate mul and add, so a fused step here
+        // would make the AVX lane answer differently in the last ULP.
+        let inner = _mm256_mul_pd(k, _mm256_add_pd(_mm256_mul_pd(c, x3), x));
         // tanh(inner) = 1 - 2/(exp(2*inner)+1)
         let e = exp_pd(_mm256_mul_pd(two, inner));
         let t = _mm256_sub_pd(one, _mm256_div_pd(two, _mm256_add_pd(e, one)));
@@ -43,7 +55,7 @@ unsafe fn gelu_avx(data: &[f64], out: &mut [f64]) {
     for i in (chunks * 4)..n {
         let x = data[i];
         let inner = K * (x + 0.044715 * x * x * x);
-        out[i] = 0.5 * x * (1.0 + inner.tanh());
+        out[i] = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
 
@@ -69,7 +81,7 @@ fn gelu_wasm(data: &[f64], out: &mut [f64]) {
     }
     for (x, o) in d_tail.iter().zip(o_tail) {
         let inner = K * (x + 0.044715 * x * x * x);
-        *o = 0.5 * x * (1.0 + inner.tanh());
+        *o = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
 
@@ -98,7 +110,7 @@ unsafe fn gelu_neon(data: &[f64], out: &mut [f64]) {
     for i in (chunks * 2)..n {
         let x = data[i];
         let inner = K * (x + 0.044715 * x * x * x);
-        out[i] = 0.5 * x * (1.0 + inner.tanh());
+        out[i] = 0.5 * x * (1.0 + tanh_via_fast_exp(inner));
     }
 }
 
