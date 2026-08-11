@@ -25,10 +25,12 @@ use std::time::{Duration, Instant};
 
 use findings::FindingSink;
 use generator::Engine;
-use oracle::{run_ladder, Outcome, Rung, Toolchain};
+use oracle::{run_ladder, FindingKind, Outcome, Rung, Toolchain};
 
 /// Default per-program timeout. Generated programs are tiny and finite;
-/// anything slower than this is hanging.
+/// outrunning this budget makes a leg a SUSPECT, which one confirm re-run
+/// at 10x then classifies: completed = Slow (perf-class), still over =
+/// Hang (#1235 — the 0.57.0 release gate hit exactly this boundary).
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Default campaign duration when `--minutes` is given without a value
@@ -214,10 +216,17 @@ fn cmd_run(args: &[String]) {
     let elapsed = start.elapsed();
     print_summary(&stats, &sink, elapsed, &out_dir);
 
-    // Non-zero exit if any finding was recorded — the nightly CI gates on
-    // this to open an issue.
-    if sink.count() > 0 {
+    // Exit code carries the finding CLASS split (#1235): correctness
+    // findings exit 1; a campaign whose only findings are perf-class Slow
+    // exits 3, so a local caller can branch on it. (The nightly verdict
+    // does its own split from the finding directory-name prefixes and
+    // fails the night on correctness classes only.)
+    let slow = sink.slow_count();
+    if sink.count() > slow {
         std::process::exit(1);
+    }
+    if slow > 0 {
+        std::process::exit(3);
     }
 }
 
@@ -322,8 +331,17 @@ fn worker_loop(
                 // whenever it shrank — `repro.almd` and `native.out` /
                 // `wasm.out` must describe the same program, or a triager
                 // reasons about output the repro never produced.
-                let minimized =
-                    minimize::minimize(&tc, &gen.source, finding.kind, &work_dir, Some(&reference));
+                //
+                // Timeout-class findings are NOT minimized: with the #1235
+                // confirm re-run, every shrink candidate that still blows
+                // the budget costs (1 + 10)x the timeout — one pass would
+                // eat the whole shard. Generated programs are small by
+                // construction, so the original stands as the repro.
+                let minimized = if matches!(finding.kind, FindingKind::Hang | FindingKind::Slow) {
+                    minimize::Minimized { source: gen.source.clone(), finding: None }
+                } else {
+                    minimize::minimize(&tc, &gen.source, finding.kind, &work_dir, Some(&reference))
+                };
                 let evidence = minimized.finding.as_ref().unwrap_or(&finding);
                 let was_new = sink.record(
                     cfg.seed,
@@ -546,7 +564,17 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
     eprintln!("  skipped          = {}", stats.skipped.load(Ordering::Relaxed));
     let walls = stats.walled.load(Ordering::Relaxed);
     eprintln!("  walls (subset)   = {walls}");
-    eprintln!("  unique findings  = {}", sink.count());
+    let slow = sink.slow_count();
+    if slow > 0 {
+        eprintln!(
+            "  unique findings  = {} ({} correctness, {} perf-slow)",
+            sink.count(),
+            sink.count() - slow,
+            slow
+        );
+    } else {
+        eprintln!("  unique findings  = {}", sink.count());
+    }
     eprintln!("  throughput       = {:.1} programs/min", g as f64 / secs * 60.0);
     if walls > 0 {
         let reasons = stats.wall_reasons.lock().unwrap();
@@ -575,10 +603,10 @@ fn print_outcome(outcome: &Outcome) {
         Outcome::Finding(f) => {
             eprintln!("FINDING [{:?}] at rung {:?}: {}", f.kind, f.rung, f.summary);
             if let Some(n) = &f.native {
-                eprintln!("--- native stdout ---\n{}", n.stdout);
+                eprintln!("--- native stdout ({:.1}s) ---\n{}", n.duration_secs, n.stdout);
             }
             if let Some(w) = &f.wasm {
-                eprintln!("--- wasm stdout ---\n{}", w.stdout);
+                eprintln!("--- wasm stdout ({:.1}s) ---\n{}", w.duration_secs, w.stdout);
             }
         }
     }
