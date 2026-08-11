@@ -10,3 +10,4 @@ gate + meter: `scripts/check-abstain-classes.sh` (append a row with `--update`).
 | measured (UTC) | corpus | voting | HEAP_BOUNDARY | BRIDGEABLE | near-horizon |
 |---|---|---|---|---|---|
 | 2026-08-10 | 364 | 225 (61.8%) | 107 | 32 | 257 (70.6%) |
+| 2026-08-11 | 364 | 226 (62.1%) | 110 | 28 | 254 (69.8%) |

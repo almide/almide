@@ -53,6 +53,7 @@ impl<'a> Interpreter<'a> {
         // complexity threshold instead of one 30-armed match.
         match m {
             "list" => self.eval_hof_list(f, &evaled),
+            "map" => self.eval_hof_map_mod(f, &evaled),
             "option" => self.eval_hof_option(f, &evaled),
             "result" => self.eval_hof_result(f, &evaled),
             "set" => self.eval_hof_set(f, &evaled),
@@ -87,6 +88,7 @@ impl<'a> Interpreter<'a> {
             "zip_with" => self.hof_zip_with(evaled),
             "unique_by" => self.hof_unique_by(evaled),
             "scan" => self.hof_scan(evaled),
+            "update" => self.hof_list_update(evaled),
             _ => self.eval_hof_list_try(f, evaled),
         }
     }
@@ -113,6 +115,63 @@ impl<'a> Interpreter<'a> {
             "__fallible_each" => self.hof_try_each(evaled),
             _ => Flow::Unsupported(format!("HOF list.{}", f)),
         }
+    }
+
+    /// The Map-MODULE HOFs (`map.fold` — Stage 2 BRIDGEABLE burn-down). The
+    /// receiver is a `Value::Map` of insertion-ordered `(k, v)` entries — the
+    /// AlmideMap determinism contract — so a sequential fold over the backing
+    /// vec IS the spec order. The remaining map HOFs on the `is_hof` allowlist
+    /// keep the explicit Unsupported abstain until a fixture exercises them.
+    fn eval_hof_map_mod(&mut self, f: &str, evaled: &[Value]) -> Flow {
+        match f {
+            "fold" => self.hof_map_fold(evaled),
+            _ => Flow::Unsupported(format!("HOF map.{}", f)),
+        }
+    }
+
+    /// `map.fold(m, init, (acc, k, v) -> acc)` — the 3-ary callback form (the
+    /// list fold's callback is 2-ary, so it cannot be reused).
+    fn hof_map_fold(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.fold receiver not a Map".into()),
+        };
+        let mut acc = match args.get(1) {
+            Some(v) => v.clone(),
+            None => return Flow::Abort("internal: map.fold missing init".into()),
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for (k, v) in entries.iter() {
+            acc = val!(self.apply_closure(&clo, vec![acc, k.clone(), v.clone()]));
+        }
+        Flow::val(acc)
+    }
+
+    /// `list.update(xs, i, f)` — a copy with element `i` replaced by `f(xs[i])`;
+    /// an out-of-range index returns the list unchanged (the stdlib's total
+    /// contract — no abort channel in the signature).
+    fn hof_list_update(&mut self, args: &[Value]) -> Flow {
+        let mut items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let idx = match args.get(1) {
+            Some(Value::Int(i)) => *i,
+            _ => return Flow::Abort("internal: list.update index not an Int".into()),
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        if idx >= 0 && (idx as usize) < items.len() {
+            let i = idx as usize;
+            let updated = val!(self.apply_closure(&clo, vec![items[i].clone()]));
+            items[i] = updated;
+        }
+        Flow::val(Value::list(items))
     }
 
     fn eval_hof_option(&mut self, f: &str, evaled: &[Value]) -> Flow {
