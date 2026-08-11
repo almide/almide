@@ -2832,3 +2832,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_param_call_chain.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-227"
+spec      = "ALS-R6"
+title     = "The fs metadata and composition family answers identically on both targets"
+statement = "Ten formerly native-only fs/env/io functions are self-hosted on wasm and answer byte-identically to native: `fs.file_size` and `fs.modified_at` (the path_filestat floor, size@32 / mtim@48 nanoseconds to Unix seconds), `fs.is_dir`/`fs.is_file` (filetype@16; a missing path is `false` on both — the Path::is_dir/is_file error-swallow), `fs.append` (read-concat-write composition: append to an existing file and fresh-create both match native O_APPEND observables — the single-threaded WASI runtime has no interleaving writer to distinguish them), `fs.copy` (content round-trip; the missing-src err channel), `fs.create_temp_file` (exists-and-empty; the path itself carries an entropy suffix and is never a printed observable), `env.cwd` (the PWD read — the same C-137 variable relative fs paths resolve against, so cwd and path resolution tell one story), `env.get` under a `match` (the one admitted-effectful env fn whose Option result was untracked, walling every match over it), and `io.read_byte` (the stdin byte floor, -1 on EOF). One trap this family pinned: a `Result[Unit, String]` built by the ok(())/err(m) CTORS is the flat LEN-AS-TAG block (`materialize_result_ok`, tag @4) — NOT the cap-as-tag @16 layout the prim pass-throughs (fs.write) carry. Tracking copy/append on the @16 rails made every err read back as ok (dst never written, result ok — a silent wrong-branch caught by the missing-src probe); they ride the int.parse-family scalar-Result rails instead, and the fixture pins both err channels."
+since     = "0.56.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_metadata_family.almd", class = "fixture" },
+]
