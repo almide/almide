@@ -815,6 +815,9 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // `fs.walk` / `fs.glob` recursively READ directories (read_dir + path_filestat,
         // fs_walk.almd — glob shares the walk machinery and reads PWD, adding CliArgs).
         || (module == "fs" && matches!(func, "remove" | "write_bytes" | "write_bytes_raw" | "walk" | "glob"))
+        // `fs.rename` WRITES the filesystem (the path_rename floor, fs_rename.almd) —
+        // FsWrite. `fs.is_symlink` READS it (the no-follow stat, fs_is_symlink.almd) — FsRead.
+        || (module == "fs" && matches!(func, "rename" | "is_symlink"))
         // `fs.fold_lines` / `fs.fold_lines_chunked` READ the filesystem — REUSE
         // Capability::FsRead. Self-hosted typed twins over prim.read_text_file +
         // the byte-level read_line walk (fs_fold_lines.almd); the `Map[String,
