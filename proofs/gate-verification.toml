@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "15"
+# unverified_ceiling = "11"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -92,7 +92,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "proofs/check-stdlib-purity-registry.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: effectful module 'fs' forged into PURE_MODULES demonstrated to fail with the accept-but-unsafe rationale; restored green"
 
 [[gate]]
 path = "proofs/check-wasm-bytes.sh"
@@ -117,11 +118,13 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "scripts/check-embedded-size.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: baseline forged DOWN (measured > ceiling) demonstrated to fail with the raise-in-same-change instruction; restored green"
 
 [[gate]]
 path = "scripts/check-forbidden-impurities.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: a std::time::Instant::now planted in almide-codegen demonstrated to fail naming the exact line; restored green"
 
 [[gate]]
 path = "scripts/check-frees-churn.sh"
@@ -142,7 +145,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "scripts/check-rt-oracle-registry.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: the tombstone RE-ARM demonstrated — a recreated emit_wasm/ with a compile_* fn fails on the missing registry; removal returns to the RETIRED tombstone"
 
 [[gate]]
 path = "scripts/check-semantics-manifest.sh"
