@@ -1444,3 +1444,289 @@ setup = [
 probe = "bytes.to_list(b)"
 expect = "[0, 63, 192, 0, 0, 0]"
 
+
+# index_unit vocabulary — list (the GENERIC fns — len[A], get[A], take[A] … —
+# sit outside the signature sweep, which reads only non-generic signatures; the
+# element-position dimension for those lives with the list module docs until
+# the sweep grows a generics parser. What IS swept is pinned below):
+#   value         — the Int is an element value or an arithmetic result over
+#                   element values (sum/product; range's start/end are the
+#                   VALUES the produced elements run over, end EXCLUSIVE)
+#   element-index — the Int is a 0-based ELEMENT position (binary_search's
+#                   some(i) — over a SORTED list)
+[list]
+default_index_unit = "value"
+
+[[list.fn]]
+name = "sum"
+index_unit = "value"
+probe = 'list.sum([1, 2, 3])'
+expect = "6"
+
+[[list.fn]]
+name = "product"
+index_unit = "value"
+probe = 'list.product([2, 3, 4])'
+expect = "24"
+
+[[list.fn]]
+name = "range"
+index_unit = "value"
+probe = 'list.range(2, 5)'
+expect = "[2, 3, 4]"
+note = """
+End-EXCLUSIVE: range(2, 5) yields 2, 3, 4 — the end VALUE never appears. The
+probe pins both the origin (start included) and the exclusivity in one image.
+"""
+
+[[list.fn]]
+name = "binary_search"
+index_unit = "element-index"
+probe = 'list.binary_search([10, 20, 30], 20) ?? (0 - 1)'
+expect = "1"
+
+[[list.fn]]
+name = "bundled_probe"
+index_unit = "value"
+probe = 'list.bundled_probe(7)'
+expect = "8"
+
+# index_unit vocabulary — math:
+#   value    — the Int is a plain numeric value (abs/min/max/pow)
+#   count    — the Int counts arrangements or factors (choose, factorial)
+#   ordering — the Int is a comparison sign, strictly -1/0/1 (sign)
+[math]
+default_index_unit = "value"
+
+[[math.fn]]
+name = "abs"
+index_unit = "value"
+probe = 'math.abs(0 - 5)'
+expect = "5"
+
+[[math.fn]]
+name = "choose"
+index_unit = "count"
+probe = 'math.choose(5, 2)'
+expect = "10"
+
+[[math.fn]]
+name = "factorial"
+index_unit = "count"
+probe = 'math.factorial(5)'
+expect = "120"
+
+[[math.fn]]
+name = "max"
+index_unit = "value"
+probe = 'math.max(3, 9)'
+expect = "9"
+
+[[math.fn]]
+name = "min"
+index_unit = "value"
+probe = 'math.min(3, 9)'
+expect = "3"
+
+[[math.fn]]
+name = "pow"
+index_unit = "value"
+probe = 'math.pow(2, 10)'
+expect = "1024"
+
+[[math.fn]]
+name = "sign"
+index_unit = "ordering"
+probe = 'math.sign(0 - 7)'
+expect = "-1"
+
+# index_unit vocabulary — float:
+#   value       — the Int carries the number at integer precision. to_int
+#                 TRUNCATES TOWARD ZERO (native `as i64`): 3.9 → 3, -3.9 → -3
+#   bit-pattern — the Int is the raw IEEE-754 bit pattern, not a magnitude
+#   count       — the Int counts digits (to_fixed's decimals)
+[float]
+default_index_unit = "value"
+
+[[float.fn]]
+name = "to_int"
+index_unit = "value"
+probe = 'float.to_int(0.0 - 3.9)'
+expect = "-3"
+note = """
+Truncation TOWARD ZERO (native `as i64`), not floor: -3.9 becomes -3. The
+negative operand is the discriminating case — floor would give -4.
+"""
+
+[[float.fn]]
+name = "from_int"
+index_unit = "value"
+probe = 'float.from_int(2)'
+expect = "2"
+
+[[float.fn]]
+name = "to_fixed"
+index_unit = "count"
+probe = 'float.to_fixed(3.14159, 2)'
+expect = "3.14"
+
+[[float.fn]]
+name = "to_bits"
+index_unit = "bit-pattern"
+probe = 'float.to_bits(1.0)'
+expect = "4607182418800017408"
+
+# index_unit vocabulary — io:
+#   byte-value — the Int is one byte 0–255, or -1 as the EOF sentinel
+#   byte-count — the Int counts bytes to read
+[io]
+default_index_unit = "byte-value"
+
+[[io.fn]]
+name = "read_byte"
+index_unit = "byte-value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: `almide test` does not pipe per-file stdin (an
+interactive terminal would BLOCK a reading probe, and EOF behavior varies by
+harness). The -1 EOF sentinel and byte range are pinned by the stdin-piping
+executable evidence in tests/ (the io_read_all_test.rs harness family).
+"""
+
+[[io.fn]]
+name = "read_n_bytes"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed — the same stdin-harness constraint as read_byte. The
+count-consumes-bytes dimension is pinned by the piping tests in tests/.
+"""
+
+[[io.fn]]
+name = "write_bytes"
+index_unit = "byte-value"
+setup = [
+  "io.write_bytes([])",
+]
+probe = "true"
+expect = "true"
+note = """
+The empty write proves the call shape without polluting the test's stdout
+(each element would be written as one raw byte; a non-empty probe would
+corrupt the harness's output comparison). The byte-value dimension of the
+elements is pinned by the C-042-family stdout fixtures.
+"""
+
+# index_unit vocabulary — env (the datetime scales, one module over):
+#   second      — Unix-epoch seconds (unix_timestamp — NOT millis)
+#   millisecond — Unix-epoch milliseconds (millis — 1000× the second scale)
+[env]
+default_index_unit = "second"
+
+[[env.fn]]
+name = "unix_timestamp"
+index_unit = "second"
+setup = [
+  "let ts = env.unix_timestamp()",
+]
+probe = 'ts > 1700000000 and ts < 100000000000'
+expect = "true"
+note = """
+The window pins the SCALE: seconds since the epoch sit near 1.7e9 in this era,
+while a milliseconds value would exceed the 1e11 upper bound — the exact
+confusion the second/millisecond split exists to prevent.
+"""
+
+[[env.fn]]
+name = "millis"
+index_unit = "millisecond"
+setup = [
+  "let ms = env.millis()",
+]
+probe = 'ms > 1700000000000'
+expect = "true"
+note = """
+Milliseconds exceed 1.7e12 in this era — a seconds value could never reach the
+bound, so the probe separates the two scales.
+"""
+
+[[env.fn]]
+name = "sleep_ms"
+index_unit = "millisecond"
+setup = [
+  "env.sleep_ms(0)",
+]
+probe = "true"
+expect = "true"
+note = """
+The zero-duration sleep proves the call shape; the millisecond SCALE is not
+probe-pinned (a timing assertion would be flaky by construction).
+"""
+
+# index_unit vocabulary — random:
+#   value — the Int is a produced or bounding value. int(min, max) is
+#           INCLUSIVE ON BOTH ENDS (range = max - min + 1), and min >= max
+#           collapses to min — both pinned below
+[random]
+default_index_unit = "value"
+
+[[random.fn]]
+name = "int"
+index_unit = "value"
+setup = [
+  "let r = random.int(1, 6)",
+  "let collapsed = random.int(9, 3)",
+]
+probe = 'r >= 1 and r <= 6 and collapsed == 9'
+expect = "true"
+note = """
+Both ends inclusive (a die roll reaches 6), and the degenerate min >= max
+case returns min — the two bound behaviors a caller gets wrong.
+"""
+
+# index_unit vocabulary — json:
+#   value         — the Int is the number a JSON field decodes to
+#   element-index — the Int is a 0-based ARRAY position in a JsonPath
+[json]
+default_index_unit = "value"
+
+[[json.fn]]
+name = "get_int"
+index_unit = "value"
+setup = [
+  'let v = json.parse("{\"a\": 42}")!',
+]
+probe = 'json.get_int(v, "a") ?? (0 - 1)'
+expect = "42"
+
+[[json.fn]]
+name = "index"
+index_unit = "element-index"
+setup = [
+  'let v = json.parse("[10, 20, 30]")!',
+  "let p = json.index(json.root(), 1)",
+]
+probe = 'value.as_int(json.get_path(v, p) ?? value.int(0 - 1)) ?? (0 - 1)'
+expect = "20"
+note = """
+0-based: index 1 of [10, 20, 30] is 20 — the second element, not the first.
+"""
+
+# index_unit vocabulary — value:
+#   value — the Int is the number the dynamic Value wraps or yields
+[value]
+default_index_unit = "value"
+
+[[value.fn]]
+name = "as_int"
+index_unit = "value"
+probe = 'value.as_int(value.int(7)) ?? (0 - 1)'
+expect = "7"
+
+[[value.fn]]
+name = "int"
+index_unit = "value"
+probe = 'value.as_int(value.int(9)) ?? 0'
+expect = "9"
