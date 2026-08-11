@@ -31,6 +31,8 @@ empty_collection_annotated  out-of-interp-scope capability: prim.alloc_set
 empty_collection_fold  out-of-interp-scope capability: prim.alloc_map
 empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
+fs_composition_family  out-of-interp-scope capability: prim.alloc_bytes
+fs_metadata_family  out-of-interp-scope capability: prim.alloc_bytes
 fs_read_lines  out-of-interp-scope capability: prim.alloc_bytes
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
@@ -74,6 +76,7 @@ matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_rows  out-of-interp-scope capability: prim.alloc_list_str
 matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
 matrix_pow_libm  out-of-interp-scope capability: prim.handle
+matrix_select_rows  out-of-interp-scope capability: prim.handle
 matrix_softmax_fastexp  out-of-interp-scope capability: prim.handle
 memory_stress  out-of-interp-scope capability: prim.alloc_list
 module_global_const  out-of-interp-scope capability: prim.handle
