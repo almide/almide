@@ -67,6 +67,12 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
             // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
             | ("fs", "list_dir")
+            // `fs.read_lines` returns the SAME cap-as-tag `Result[List[String], String]` shape
+            // as fs.list_dir (the self-host builds it with the ordinary ok()/err() ctors —
+            // payload @12 a List[String], tag @16), so a `match`/`!` over it reads tag @16 +
+            // binds the @12 payload list handle, and the subject-seed routes its scope-end
+            // drop to the recursive DropResultListStr via the same is_list_str_result_ty arm.
+            | ("fs", "read_lines")
             // `fs.fold_lines` / `fs.fold_lines_chunked` (the msi twins,
             // fs_fold_lines.almd) build their Results with the ordinary
             // ok()/err() ctors = the same cap-as-tag layout (payload @12,
