@@ -355,3 +355,124 @@ name = "year"
 index_unit = "civil-field"
 probe = 'datetime.year(1705322096)'
 expect = "2024"
+
+# ---------------------------------------------------------------------------
+# bytes — the third module on the ratchet, and the widest API FAMILY in the
+# stdlib: read/set/append x {i16,i32,i64,u16,u32,u8,f16,f32,f64} x {be,le}.
+# CLAUDE.md's rule is that a family is extended BY MATRIX, never point-wise —
+# this table is that matrix for the semantic axis, so a cell whose byte order
+# or width silently disagrees with its NAME cannot survive.
+#
+# The scalar-read probes use the fixture [255,254,253,252,251,250,249,248]:
+# with the high bit SET, signed and unsigned disagree (i16_be = -2 vs
+# u16_be = 65534) and big- and little-endian disagree (i16_be = -2 vs
+# i16_le = -257), so one probe pins width, signedness and byte order at once.
+# A low-byte fixture like [1,2,3,4] would have let a signed/unsigned mixup
+# through. Every expectation below is computed independently by Python's
+# `struct` and then checked against the implementation, never transcribed
+# from a run.
+#
+# The float probes invert that: the byte PATTERN is derived from 1.5 for the
+# target order, so the expectation is 1.5 by construction and a byte-order
+# regression shows up as a garbage float rather than a value someone has to
+# recognise.
+# ---------------------------------------------------------------------------
+
+[bytes]
+default_index_unit = "byte-offset"
+
+[[bytes.fn]]
+name = "read_i16_be"
+index_unit = "value"
+probe = 'bytes.read_i16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-2"
+
+[[bytes.fn]]
+name = "read_i16_le"
+index_unit = "value"
+probe = 'bytes.read_i16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-257"
+
+[[bytes.fn]]
+name = "read_u16_be"
+index_unit = "value"
+probe = 'bytes.read_u16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "65534"
+
+[[bytes.fn]]
+name = "read_u16_le"
+index_unit = "value"
+probe = 'bytes.read_u16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "65279"
+
+[[bytes.fn]]
+name = "read_i32_be"
+index_unit = "value"
+probe = 'bytes.read_i32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-66052"
+
+[[bytes.fn]]
+name = "read_i32_le"
+index_unit = "value"
+probe = 'bytes.read_i32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-50462977"
+
+[[bytes.fn]]
+name = "read_u32_be"
+index_unit = "value"
+probe = 'bytes.read_u32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "4294901244"
+
+[[bytes.fn]]
+name = "read_u32_le"
+index_unit = "value"
+probe = 'bytes.read_u32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "4244504319"
+
+[[bytes.fn]]
+name = "read_i64_be"
+index_unit = "value"
+probe = 'bytes.read_i64_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-283686952306184"
+
+[[bytes.fn]]
+name = "read_i64_le"
+index_unit = "value"
+probe = 'bytes.read_i64_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-506097522914230529"
+
+[[bytes.fn]]
+name = "read_u8"
+index_unit = "byte-value"
+probe = 'bytes.read_u8(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 1)'
+expect = "254"
+
+[[bytes.fn]]
+name = "read_f32_be"
+index_unit = "value"
+probe = 'bytes.read_f32_be(bytes.from_list([63, 192, 0, 0]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f32_le"
+index_unit = "value"
+probe = 'bytes.read_f32_le(bytes.from_list([0, 0, 192, 63]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f64_be"
+index_unit = "value"
+probe = 'bytes.read_f64_be(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f64_le"
+index_unit = "value"
+probe = 'bytes.read_f64_le(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)'
+expect = "1.5"
+
+[[bytes.fn]]
+name = "read_f16_le"
+index_unit = "value"
+probe = 'bytes.read_f16_le(bytes.from_list([0, 62]), 0)'
+expect = "1.5"
