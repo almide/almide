@@ -26,19 +26,10 @@
 # Counts at last regen: 369 parity, 65 gap (39 host, 26 frontier),
 # 113 unprobeable.
 #
-# COMPILER_FRONTIER (26) — the burn-down:
-env.cwd :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.cwd needs a declared capabili
-env.get :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: match over an UNTRACKED subject with a call-bearing arm cannot take t
+# COMPILER_FRONTIER — the burn-down:
 env.set :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capabili
-fs.append :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.append needs a declared capabi
-fs.copy :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.copy needs a declared capabili
-fs.create_temp_file :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.create_temp_file needs a decla
-fs.file_size :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.file_size needs a declared cap
 fs.glob :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.glob needs a declared capabili
-fs.is_dir :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
-fs.is_file :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
 fs.is_symlink :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
-fs.modified_at :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.modified_at needs a declared c
 fs.read_bytes_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_bytes_if_exists needs a d
 fs.read_bytes_raw_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_bytes_raw_if_exists needs
 fs.read_lines_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_lines_if_exists needs a d
@@ -48,7 +39,6 @@ fs.rename :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effec
 fs.walk :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.walk needs a declared capabili
 fs.write_bytes :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.write_bytes needs a declared c
 fs.write_bytes_raw :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.write_bytes_raw needs a declar
-io.read_byte :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
 matrix.select_rows_f32 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_f32 — rendering them would emit a 
 matrix.select_rows_q1_0 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q1_0 — rendering them would emit a
 matrix.select_rows_q8_0_dq :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q8_0_dq — rendering them would emi
