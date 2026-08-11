@@ -56,3 +56,4 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0009](./0009-fn-type-quadrant-transparency.md) | Function types complete the capability quadrant; fn params are transparent by default | Accepted | 2026-08-06 |
 | [0010](./0010-option-type-shorthand.md) | T? is general Option shorthand — every type position, atom-tight binding, fmt-normalized | Accepted | 2026-08-06 |
 | [0011](./0011-execution-substrate-is-a-free-variable.md) | The execution substrate is a free variable — and one arm's output is the last hole in the determinism claim | Proposed | 2026-08-07 |
+| [0012](./0012-typed-error-refinement-in-the-marker.md) | Error-surface end state — refinement stays in the marker (`T!E`), erasure stays the default | Accepted | 2026-08-11 |
