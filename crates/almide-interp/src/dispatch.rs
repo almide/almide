@@ -272,7 +272,7 @@ impl<'a> Interpreter<'a> {
     /// `eval_named_call`'s builtins group (println/print/eprintln/eprint/
     /// assert/assert_eq/assert_ne/panic). `None` means `n` is not a builtin —
     /// the caller falls through to variant-ctor / user-fn dispatch.
-    fn eval_builtin_call(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+    pub(crate) fn eval_builtin_call(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
         match n {
             "println" | "print" | "eprintln" | "eprint" => self.eval_builtin_print(n, args, scope),
             _ => self.eval_builtin_assert(n, args, scope),
@@ -579,6 +579,24 @@ impl<'a> Interpreter<'a> {
                     let mut items = vec![Value::str("interp")];
                     items.extend(self.args.iter().map(|s| Value::str(s.clone())));
                     return Flow::val(Value::list(items));
+                }
+                // The env floor (same tier as argv, C-133): `prim.env_get`
+                // reads the LIVE process environment — exactly what the other
+                // two legs observe (native getenv; wasm WASI environ with
+                // inherit-env), so all three answer the same bytes. Without
+                // this arm the resolve below finds the lowered `env_get`
+                // stdlib fn BY BARE NAME — the very fn whose body is this
+                // prim — and the interp spun in that cycle until fuel ran
+                // out (the module-identity bug class, #1087–#1094, one tier
+                // down: a prim resolved from the wrong source).
+                "env_get" => {
+                    let Some(Value::Str(name)) = args.first() else {
+                        return Flow::Abort("internal: prim.env_get expects a String".into());
+                    };
+                    return Flow::val(match std::env::var(name.as_str()) {
+                        Ok(v) => Value::Option(Some(Box::new(Value::str(v)))),
+                        Err(_) => Value::Option(None),
+                    });
                 }
                 _ => {}
             }
