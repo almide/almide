@@ -72,6 +72,12 @@ for module in COVERED_MODULES:
         probe, unit = e["probe"], e["index_unit"]
         expect = e["expect"].replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f'test "{module}.{e["name"]} unit={unit}" {{')
+        # Optional `setup` statements run before the probe. A probe is ONE
+        # expression, and a block expression inside the interpolation walls the
+        # wasm renderer — so a dimension needing two reads to compare (a clock's
+        # monotonicity) has to bind them as statements first, not inline.
+        for stmt in e.get("setup", []):
+            lines.append(f"  {stmt}")
         lines.append(f'  assert_eq("${{{probe}}}", "{expect}")')
         lines.append("}")
         lines.append("")

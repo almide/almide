@@ -10,9 +10,15 @@
 #      unit.
 #   2. PROBES: every entry carries an executable probe (multibyte input) +
 #      expected output. The script REGENERATES
-#      spec/stdlib/string_semantics_manifest_test.almd from these and fails
+#      spec/stdlib/<module>_semantics_manifest_test.almd from these and fails
 #      on diff — doc and test can never drift apart, and the test failing
 #      means the IMPLEMENTATION drifted from the declared semantics.
+#
+# OPTIONAL `setup` key: a list of statements emitted before the probe inside
+# the same test block. A probe is ONE expression, and a block expression inside
+# the interpolation walls the wasm renderer — so a dimension that needs two
+# reads to compare (a clock's monotonicity) binds them here instead of inlining
+# a block. Keep probes single-expression where they already fit.
 #
 # index_unit vocabulary:
 #   codepoint — positions/lengths count Unicode scalar values (C-065)
