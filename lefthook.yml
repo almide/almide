@@ -18,7 +18,11 @@ pre-commit:
     ratchet-separation:
       run: scripts/check-ratchet-separation.sh
     semantics-manifest:
-      glob: "{docs/stdlib/semantics-manifest.toml,stdlib/string.almd,spec/stdlib/string_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
+      # Globbed by PATTERN, not by covered module: the hook named
+      # stdlib/string.almd literally, so the next module onto the ratchet
+      # would edit its surface without ever arming the gate. COVERED_MODULES
+      # in the check script is the one place the module list lives.
+      glob: "{docs/stdlib/semantics-manifest.toml,stdlib/*.almd,spec/stdlib/*_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
       run: scripts/check-semantics-manifest.sh
 
 commit-msg:
