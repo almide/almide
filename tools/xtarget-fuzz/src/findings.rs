@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::generator::Origin;
-use crate::oracle::{Finding, RunEvidence};
+use crate::oracle::{Finding, FindingKind, RunEvidence};
 
 /// Sink that owns the findings directory and the dedup set. Shared
 /// across worker threads behind a mutex (findings are rare, so the lock
@@ -25,6 +25,10 @@ pub struct FindingSink {
     seen: Mutex<HashSet<String>>,
     /// Count of *unique* findings written (after dedup).
     written: Mutex<usize>,
+    /// The perf-class subset of `written` (#1235): unique `Slow` findings.
+    /// The campaign's exit code fails on `written - slow` — correctness
+    /// classes only.
+    slow: Mutex<usize>,
 }
 
 impl FindingSink {
@@ -34,12 +38,18 @@ impl FindingSink {
             dir,
             seen: Mutex::new(HashSet::new()),
             written: Mutex::new(0),
+            slow: Mutex::new(0),
         })
     }
 
     /// Number of unique findings written so far.
     pub fn count(&self) -> usize {
         *self.written.lock().unwrap()
+    }
+
+    /// Number of unique perf-class (`Slow`) findings written so far.
+    pub fn slow_count(&self) -> usize {
+        *self.slow.lock().unwrap()
     }
 
     /// Record a finding. Returns `true` if it was new (written), `false`
@@ -77,6 +87,9 @@ impl FindingSink {
         }
 
         *self.written.lock().unwrap() += 1;
+        if finding.kind == FindingKind::Slow {
+            *self.slow.lock().unwrap() += 1;
+        }
         true
     }
 }
@@ -125,7 +138,7 @@ fn render_meta(seed: u64, index: u64, origin: &Origin, f: &Finding) -> String {
 
 fn render_evidence(ev: &RunEvidence) -> String {
     format!(
-        "exit_code = {:?}\ntimed_out = {}\n\n--- stdout ---\n{}\n--- stderr ---\n{}\n",
-        ev.exit_code, ev.timed_out, ev.stdout, ev.stderr
+        "exit_code = {:?}\ntimed_out = {}\nduration  = {:.1}s\n\n--- stdout ---\n{}\n--- stderr ---\n{}\n",
+        ev.exit_code, ev.timed_out, ev.duration_secs, ev.stdout, ev.stderr
     )
 }
