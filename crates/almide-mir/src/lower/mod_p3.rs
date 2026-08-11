@@ -328,27 +328,6 @@ impl LowerCtx {
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, mutability } => {
                 self.var_decl_tys.insert(*var, ty.clone());
-                // Record the Var-typed args of a call-valued bind (through the
-                // effect wrapper) for the unit-arm C-132 write-back admission —
-                // see `call_bind_arg_vars`.
-                {
-                    let callee = match &value.kind {
-                        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => expr,
-                        _ => value,
-                    };
-                    if let IrExprKind::Call { args, .. } = &callee.kind {
-                        let arg_vars: Vec<VarId> = args
-                            .iter()
-                            .filter_map(|a| match &a.kind {
-                                IrExprKind::Var { id } => Some(*id),
-                                _ => None,
-                            })
-                            .collect();
-                        if !arg_vars.is_empty() {
-                            self.call_bind_arg_vars.insert(*var, arg_vars);
-                        }
-                    }
-                }
                 // A MUTABLE (`var`) binding may be COW-mutated later, so a heap-field
                 // extraction (`var b = r.items`) must take an OWNED copy (container-grain
                 // `Dup`), NOT a precise borrow (which cannot be mutated in place). Flag it so
