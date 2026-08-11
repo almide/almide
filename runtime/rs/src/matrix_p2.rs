@@ -404,6 +404,12 @@ pub fn almide_rt_matrix_select_rows_q1_0(
         let r = rid.max(0) as usize;
         let row_off = off + r * n_blocks * 18;
         let mut row = vec![0.0f64; cols_u];
+        // OOB row → the all-zero row (the family's defined edge), never an
+        // unchecked byte index.
+        if row_off + n_blocks * 18 > data.len() {
+            out.push(row);
+            continue;
+        }
         for b in 0..n_blocks {
             let block_start = row_off + b * 18;
             let scale_raw = (data[block_start] as u16)
@@ -662,6 +668,15 @@ pub fn almide_rt_matrix_select_rows_f32(
     let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
     for &rid in row_ids {
         let base = off + (rid.max(0) as usize) * c * 4;
+        // A row past the buffer is the all-zero row — the same defined
+        // OOB→zeros edge `from_bytes_f32_le` (and the decoded-matrix
+        // `select_rows`) contract; an unchecked slice here was a raw panic
+        // while the wasm leg read undefined bytes (the 2026-08-12 fuzz
+        // divergence, run 31515916427).
+        if base + c * 4 > data.len() {
+            out.extend(std::iter::repeat(0.0f64).take(c));
+            continue;
+        }
         for ch in data[base..base + c * 4].chunks_exact(4) {
             out.push(f32::from_le_bytes([ch[0], ch[1], ch[2], ch[3]]) as f64);
         }
@@ -925,6 +940,12 @@ pub fn almide_rt_matrix_select_rows_q8_0_dq(
     let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
     for &rid in row_ids {
         let base = off + (rid.max(0) as usize) * row_bytes;
+        // OOB row → the all-zero row (the same defined edge as the
+        // non-multiple-cols guard above), never an unchecked slice.
+        if base + row_bytes > data.len() {
+            out.extend(std::iter::repeat(0.0f64).take(c));
+            continue;
+        }
         for blk in data[base..base + row_bytes].chunks_exact(Q8_BLOCK_BYTES) {
             let d = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]])) as f64;
             for k in 0..Q8_BLOCK {
