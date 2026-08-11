@@ -21,7 +21,6 @@ bytes_push_inplace  out-of-interp-scope capability: prim.handle
 bytes_rawptr  out-of-interp-scope capability: prim.handle
 bytes_set_value_semantics  out-of-interp-scope capability: prim.handle
 chunk_str  out-of-interp-scope capability: prim.handle
-closure_tail_recursion  interp fuel/recursion budget exhausted
 codec_decode_errors  out-of-interp-scope capability: prim.handle
 codec_float_int  out-of-interp-scope capability: prim.handle
 codec_none_omission  out-of-interp-scope capability: prim.alloc_value
@@ -29,14 +28,11 @@ compound_eq  out-of-interp-scope capability: prim.handle
 compound_repr_interp  out-of-interp-scope capability: prim.handle
 compound_repr_records_interp  out-of-interp-scope capability: prim.handle
 datetime_format  out-of-interp-scope capability: prim.alloc_str
-effect_tco  interp fuel/recursion budget exhausted
 effect_tuple_result_tco  out-of-interp-scope capability: prim.alloc_value
 empty_collection_annotated  out-of-interp-scope capability: prim.alloc_set
 empty_collection_fold  out-of-interp-scope capability: prim.alloc_map
 empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
-env_get  interp fuel/recursion budget exhausted
-env_platform_reporting  interp fuel/recursion budget exhausted
 fan_settle_tuple  out-of-interp-scope capability: prim.read_text_file
 fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file
 fs_relative_path  out-of-interp-scope capability: prim.make_dir
