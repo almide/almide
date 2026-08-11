@@ -273,6 +273,23 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         // another mut-call is already rewritten when the outer one wraps.
         walk_expr_mut(self, expr);
 
+        // The effect-call wrapper interaction (#1207): `h(a)!` arrives here as
+        // `Unwrap{Call}` (`Try{Call}` for the frontend's propagation wrap), and the
+        // bottom-up walk above has ALREADY turned the inner Call into the move-mode
+        // Block — leaving `Unwrap{Block{…}}`, a shape no downstream lowering accepts
+        // (the effect-statement lowerer wants a call, the match machinery an
+        // untracked-subject wall). Rotate the wrapper back onto the bound call:
+        //   Unwrap{ Block{ [let __mp_buf = call, <writeback>], () } }
+        //   → Block{ [let __mp_buf = Unwrap{call}, <writeback>], () }
+        // — semantically identical (the unwrap yields the buffer the ok arm
+        // carries; err propagates before any writeback, exactly the by-reference
+        // order native observes), and the tree now carries only proven shapes
+        // (the C-222 bind-position unwrap + a statement Block).
+        if self.wrapper_rotation_applies(expr) {
+            Self::rotate_wrapper_into_block(expr);
+            return;
+        }
+
         let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
             return;
         };
@@ -362,5 +379,65 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             span,
             def_id: None,
         };
+    }
+}
+
+impl CallSiteRewriter<'_> {
+    /// Is `expr` Unwrap/Try over a JUST-REWRITTEN move-mode Block whose first stmt
+    /// binds a was-Unit mut-fn call (the `h(a)!` shape, #1207)? Structurally
+    /// unambiguous: after the bottom-up walk, a USER-written `Bind` of a mut-fn
+    /// call has its Call already replaced by a Block, so a bare `Bind{value: Call}`
+    /// to a collected name can only be the rewriter's own bind.
+    fn wrapper_rotation_applies(&self, expr: &IrExpr) -> bool {
+        let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) = &expr.kind
+        else {
+            return false;
+        };
+        let IrExprKind::Block { stmts, expr: tail } = &inner.kind else { return false };
+        let Some(IrStmt { kind: IrStmtKind::Bind { value, .. }, .. }) = stmts.first() else {
+            return false;
+        };
+        let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &value.kind else {
+            return false;
+        };
+        matches!(self.mut_fns.get(name.as_str()), Some(&(_, _, true)))
+            && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Unit))
+    }
+
+    /// Perform the rotation [`Self::wrapper_rotation_applies`] admitted. The
+    /// wrapper's err-propagation moves INTO the bind (`let __mp_buf = call!`),
+    /// so on the err path the writeback never runs — matching the native
+    /// by-reference semantics (a failed callee's caller-visible buffer is
+    /// whatever the callee left in it; here the callee never returns a buffer
+    /// on err, and the caller's binding keeps its pre-call value).
+    fn rotate_wrapper_into_block(expr: &mut IrExpr) {
+        let span = expr.span;
+        let is_unwrap = matches!(expr.kind, IrExprKind::Unwrap { .. });
+        let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) =
+            std::mem::replace(&mut expr.kind, IrExprKind::Unit)
+        else {
+            unreachable!("wrapper_rotation_applies checked the wrapper kind");
+        };
+        let block = *inner;
+        let IrExprKind::Block { mut stmts, expr: tail } = block.kind else {
+            unreachable!("wrapper_rotation_applies checked the block");
+        };
+        {
+            let IrStmtKind::Bind { value, ty, .. } = &mut stmts[0].kind else {
+                unreachable!("wrapper_rotation_applies checked the bind");
+            };
+            let call = std::mem::replace(
+                value,
+                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+            );
+            let wrapped_kind = if is_unwrap {
+                IrExprKind::Unwrap { expr: Box::new(call) }
+            } else {
+                IrExprKind::Try { expr: Box::new(call) }
+            };
+            *value = IrExpr { kind: wrapped_kind, ty: ty.clone(), span, def_id: None };
+        }
+        expr.kind = IrExprKind::Block { stmts, expr: tail };
+        expr.ty = Ty::Unit;
     }
 }
