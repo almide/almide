@@ -1,0 +1,14 @@
+// fs_file_size — SELF-HOSTED `fs.file_size(path)` over the WASI full-stat floor
+// (prim.path_filestat), the fs_stat.almd machinery narrowed to the one size field:
+// the prim writes the raw 64-byte WASI filestat into this function's own scratch
+// Bytes and returns the errno; size lives at offset 32 (matching native
+// `metadata.len()`). The Ok payload is a SCALAR Int, so the Result rides the
+// int.parse-class scalar-Result rails (materialized_results, len-as-tag).
+// Reaching prim.path_filestat carries Capability::FsRead.
+effect fn fs_file_size(path: String) -> Result[Int, String] = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat(p, path)
+  if errno != 0 then err("stat failed: " + path)
+  else ok(prim.load64(p + 32))
+}
