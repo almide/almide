@@ -454,6 +454,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_get_or" => &[false, false, false],
         "almide_rt_map_insert" => &[true, false, false],
         "almide_rt_map_is_empty" => &[false],
+        "almide_rt_map_key_fingerprint" => &[false],
         "almide_rt_map_keys" => &[false],
         "almide_rt_map_len" => &[false],
         "almide_rt_map_map_values" => &[false, false],
