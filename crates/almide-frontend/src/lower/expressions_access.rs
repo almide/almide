@@ -234,7 +234,7 @@ fn lower_expr_for_in(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                     ctx.define_var(n, ty, Mutability::Let, None)
                 }).collect()
             });
-            let ir_body: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
+            let ir_body: Vec<IrStmt> = super::expressions::lower_loop_body_stmts(ctx, body);
             ctx.pop_scope();
             ctx.mk(IrExprKind::ForIn { var: var_id, var_tuple: tuple_vars, iterable: Box::new(ir_iter), body: ir_body }, ty, span)
 }
