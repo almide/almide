@@ -304,6 +304,11 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // random.choice delegates to the generic list.get (a materialized Option) /
         // returns a literal `none` — either way the bound result is a real len-tag block.
         "random" => func == "choice",
+        // env.get builds a materialized Option[String] via the self-hosted WASI
+        // environ read's ordinary some()/none ctors (env_get.almd) — a `match`
+        // over the bound result EXECUTES (it was the one admitted-effectful env
+        // fn whose result stayed untracked, walling every match over it).
+        "env" => func == "get",
         // result.to_option builds a materialized Option[Int] from a Result's len-tag (Ok → Some,
         // Err → None); option.map rebuilds a materialized Option (Some(f(x)) / None) — a `match`
         // over either result EXECUTES.
