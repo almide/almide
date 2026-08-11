@@ -47,7 +47,154 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
     }
     rewrite_signatures(program, &mut_fns);
     rewrite_call_sites(program, &mut_fns);
+    fold_tail_writebacks(program, &mut_fns);
     true
+}
+
+/// Phase 3: fold a write-back that immediately flows into the fn's own
+/// move-mode return INTO a direct tail call — the recursion/terminal-`if`
+/// shape (#1207 repro A):
+///
+///   fn walk(buf, n) -> Bytes = { if n == 0 then () else { …; let t = walk(buf, n-1)!; buf = t }; buf }
+///   →                          { if n == 0 then buf else { …; walk(buf, n-1)! } }
+///
+/// `{ let t = call; p = t }; return p` at the very end of the fn is the
+/// identity on `return call` (no read of `p` intervenes), so the fold is
+/// semantics-preserving — and it removes the one write-back the lowering has
+/// no sound ownership story for: a borrowed-param slot reassigned INSIDE a
+/// branch arm (drop-old frees the caller's reference; skipping drop-old
+/// either leaks a reference per call — the kernel-proven ownership checker
+/// rejects the witness — or, without the acquire, frees the buffer the slot
+/// still aliases). After the fold every path is a PROVEN shape: the untaken
+/// arm returns the borrowed param (the plain pass-through), the call arm is
+/// an ordinary effect/value tail call whose result IS the fn's result.
+///
+/// NARROW by construction: only a was-Unit mut fn whose phase-1 body is
+/// `Block{ …, Expr(If), tail: Var(mut_param) }` (the exact shape
+/// `rewrite_unit_body` built), and only arm LEAVES that are the phase-2
+/// rewriter's own write-back block targeting that same param. Anything else
+/// is left untouched (the lowering's honest wall keeps guarding it).
+fn fold_tail_writebacks(program: &mut IrProgram, mut_fns: &MutFns) {
+    for func in program
+        .functions
+        .iter_mut()
+        .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+    {
+        fold_one_fn_tail_writebacks(func, mut_fns);
+    }
+}
+
+fn fold_one_fn_tail_writebacks(func: &mut IrFunction, mut_fns: &MutFns) {
+    // Only a rewritten was-Unit mut fn (phase 1 cleared `mutated_params`; the
+    // name-keyed entry survives).
+    let Some(&(idx, ref mut_ty, was_unit)) = mut_fns.get(func.name.as_str()) else { return };
+    if !was_unit {
+        return;
+    }
+    let Some(p) = func.params.get(idx).map(|prm| prm.var) else { return };
+    let IrExprKind::Block { stmts, expr: tail } = &mut func.body.kind else { return };
+    // The phase-1 tail must be exactly the mut-param read.
+    if !matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Var { id }) if *id == p) {
+        return;
+    }
+    // The last statement must be the terminal Unit `if`.
+    let Some(last) = stmts.last_mut() else { return };
+    let IrStmtKind::Expr { expr: if_expr } = &mut last.kind else { return };
+    if !matches!(if_expr.kind, IrExprKind::If { .. }) {
+        return;
+    }
+    let mut folded = if_expr.clone();
+    if !fold_if_arms(&mut folded, p, mut_ty, mut_fns) {
+        return;
+    }
+    folded.ty = mut_ty.clone();
+    stmts.pop();
+    *tail = Some(Box::new(folded));
+}
+
+/// Rewrite every leaf arm of the terminal `if` tree: a write-back leaf becomes
+/// the direct tail call, any other Unit leaf becomes (or is followed by) the
+/// param read. Returns false (fold declined, tree possibly half-mutated — the
+/// caller drops the clone) if a leaf is outside the recognized set.
+fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, mut_fns: &MutFns) -> bool {
+    if let IrExprKind::If { then, else_, .. } = &mut e.kind {
+        e.ty = mut_ty.clone();
+        return fold_if_arms(then, p, mut_ty, mut_fns) && fold_if_arms(else_, p, mut_ty, mut_fns);
+    }
+    let param_read = |span| IrExpr {
+        kind: IrExprKind::Var { id: p },
+        ty: mut_ty.clone(),
+        span,
+        def_id: None,
+    };
+    // A write-back leaf: `Block{ …, let t = <call maybe under !>, p = t; () }`
+    // — the phase-2 rewriter's own output. Fold to `Block{ …, tail: <call> }`.
+    if let IrExprKind::Block { stmts: _, expr } = &mut e.kind {
+        // The rotation leaves the write-back block as the arm block's TAIL
+        // (`{ …; { let t = call!; p = t; () } }`) — recurse into a structured
+        // tail so the fold reaches the leaf.
+        if let Some(t) = expr.as_deref_mut() {
+            if matches!(t.kind, IrExprKind::Block { .. } | IrExprKind::If { .. }) {
+                if !fold_if_arms(t, p, mut_ty, mut_fns) {
+                    return false;
+                }
+                e.ty = mut_ty.clone();
+                return true;
+            }
+        }
+    }
+    if let IrExprKind::Block { stmts, expr } = &mut e.kind {
+        if matches!(expr.as_deref().map(|t| &t.kind), None | Some(IrExprKind::Unit))
+            && stmts.len() >= 2
+        {
+            let is_wb = {
+                let assign_ok = matches!(
+                    &stmts[stmts.len() - 1].kind,
+                    IrStmtKind::Assign { var, value } if *var == p
+                        && matches!(&value.kind, IrExprKind::Var { .. })
+                );
+                let bind_call = match &stmts[stmts.len() - 2].kind {
+                    IrStmtKind::Bind { value, .. } => {
+                        let inner = match &value.kind {
+                            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => expr,
+                            _ => value,
+                        };
+                        matches!(&inner.kind,
+                            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                                if mut_fns.contains_key(name.as_str())
+                                    && args.iter().any(|a| matches!(&a.kind, IrExprKind::Var { id } if *id == p)))
+                    }
+                    _ => false,
+                };
+                assign_ok && bind_call
+            };
+            if is_wb {
+                stmts.pop(); // the write-back Assign
+                let Some(IrStmt { kind: IrStmtKind::Bind { value, .. }, .. }) = stmts.pop() else {
+                    unreachable!("is_wb checked the bind");
+                };
+                e.ty = mut_ty.clone();
+                let IrExprKind::Block { expr, .. } = &mut e.kind else { unreachable!() };
+                *expr = Some(Box::new(value));
+                return true;
+            }
+        }
+        // A Unit block leaf with no write-back: keep its statements, return the param.
+        if matches!(expr.as_deref().map(|t| &t.kind), None | Some(IrExprKind::Unit)) {
+            let span = e.span;
+            e.ty = mut_ty.clone();
+            let IrExprKind::Block { expr, .. } = &mut e.kind else { unreachable!() };
+            *expr = Some(Box::new(param_read(span)));
+            return true;
+        }
+        return false;
+    }
+    // A bare Unit leaf (`()` arm): the param read.
+    if matches!(e.kind, IrExprKind::Unit) {
+        *e = param_read(e.span);
+        return true;
+    }
+    false
 }
 
 /// Functions eligible for the move-mode rewrite: name → (mut param index, its
