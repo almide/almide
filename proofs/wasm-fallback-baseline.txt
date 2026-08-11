@@ -16,15 +16,14 @@
 #                       (assert_throws requires catching a panic; wasm traps
 #                       are uncatchable in-process).
 #
-# COMPILER_FRONTIER (10) — the debt, in leverage order:
+# COMPILER_FRONTIER (9) — the debt, in leverage order:
 spec/lang/closure_capture_map_test.almd :: COMPILER_FRONTIER :: 1 fn outside the lowering subset (closure-capture map — the defunc closure frontier)
 spec/stdlib/codec_field_matrix_test.almd :: COMPILER_FRONTIER :: bind-position record brick (#1064)
 spec/integration/modules/cross_module_cell_update_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
 spec/integration/modules/cross_module_global_state_loop_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
 spec/lang/result_zip_test.almd :: COMPILER_FRONTIER :: result.zip_x unlinked (typed self-host twin missing)
 spec/stdlib/stdlib-test.almd :: COMPILER_FRONTIER :: list.sort_by_str_key_x unlinked (typed self-host twin missing)
-spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: test-mode heap-result match brick (create_temp_dir now self-hosted; the trio and the fixture's tmp() lower)
-spec/stdlib/fs_fold_lines_range_test.almd :: COMPILER_FRONTIER :: test-mode heap-result match brick (create_temp_dir now self-hosted; the trio and the fixture's tmp() lower)
+spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: testing.assert_err typed twin missing for the chunked payload class (assert_err_x; the #1191 ladder brick closed 2026-08-12)
 spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: non-msi accumulator twins + for_each_line (create_temp_dir now self-hosted)
 spec/stdlib/fs_if_exists_test.almd :: COMPILER_FRONTIER :: C-215 errno-carrying read prim not landed
 #
