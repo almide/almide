@@ -607,6 +607,7 @@ fn alloc_class_prim_dst(op: &Op) -> Option<ValueId> {
                 | PrimKind::WriteTextFile
                 | PrimKind::MakeDir
                 | PrimKind::RemoveAll
+                | PrimKind::Rename
                 | PrimKind::ReadLine
                 | PrimKind::ReadNBytes,
             dst: Some(d),

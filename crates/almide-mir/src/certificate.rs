@@ -295,10 +295,11 @@ fn prim_floor_capability(kind: &crate::PrimKind) -> Option<Capability> {
         P::RandomGet => Capability::Entropy,
         // env.args / env.get.
         P::ArgsGetList | P::ArgsGetListFull | P::EnvGet => Capability::CliArgs,
-        // fs.read_text / fs.list_dir / fs.exists / fs.stat.
-        P::ReadTextFile | P::ReadDir | P::PathExists | P::PathFilestat => Capability::FsRead,
-        // fs.write_text / fs.make_dir / fs.remove_all.
-        P::WriteTextFile | P::MakeDir | P::RemoveAll => Capability::FsWrite,
+        // fs.read_text / fs.list_dir / fs.exists / fs.stat / fs.is_symlink.
+        P::ReadTextFile | P::ReadDir | P::PathExists | P::PathFilestat
+        | P::PathFilestatNoFollow => Capability::FsRead,
+        // fs.write_text / fs.make_dir / fs.remove_all / fs.rename.
+        P::WriteTextFile | P::MakeDir | P::RemoveAll | P::Rename => Capability::FsWrite,
         // datetime's clock read.
         P::ClockTimeGet => Capability::Clock,
         // io.read_line / io.read_bytes.
