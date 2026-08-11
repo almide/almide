@@ -788,6 +788,9 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      - name: Release evidence seals (every seal re-measured against its tag — the audit freeze)
+        run: bash scripts/release-seal.sh check
+
       - name: Scalar-read audit (every raw-load arm classified, zero unguarded — the #1183 class stays extinct)
         run: scripts/check-scalar-read-audit.sh
 
