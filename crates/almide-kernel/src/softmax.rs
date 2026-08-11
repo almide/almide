@@ -14,7 +14,7 @@ pub fn softmax_rows_naive(data: &[f64], rows: usize, cols: usize, out: &mut [f64
         let max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         let mut sum = 0.0;
         for j in 0..cols {
-            let e = (row[j] - max).exp();
+            let e = crate::silu::fast_exp(row[j] - max);
             o[j] = e;
             sum += e;
         }
@@ -33,24 +33,21 @@ unsafe fn softmax_row_avx(row: &[f64], o: &mut [f64]) {
     let cols = row.len();
     let max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let vmax = _mm256_set1_pd(max);
-    let mut vsum = _mm256_setzero_pd();
     let chunks = cols / 4;
     for c in 0..chunks {
         let x = _mm256_loadu_pd(row.as_ptr().add(c * 4));
         let e = exp_pd(_mm256_sub_pd(x, vmax));
         _mm256_storeu_pd(o.as_mut_ptr().add(c * 4), e);
-        vsum = _mm256_add_pd(vsum, e);
     }
-    // horizontal sum of vsum
-    let hi = _mm256_extractf128_pd(vsum, 1);
-    let lo = _mm256_castpd256_pd128(vsum);
-    let s = _mm_add_pd(lo, hi);
-    let s = _mm_add_sd(s, _mm_unpackhi_pd(s, s));
-    let mut sum = _mm_cvtsd_f64(s);
     for j in (chunks * 4)..cols {
-        let e = (row[j] - max).exp();
-        o[j] = e;
-        sum += e;
+        o[j] = crate::silu::fast_exp(row[j] - max);
+    }
+    // ONE left-to-right sum over the stored exps (#1197): a lane-wise
+    // accumulator plus a horizontal combine adds in a different order, and
+    // float addition is not associative.
+    let mut sum = 0.0;
+    for j in 0..cols {
+        sum += o[j];
     }
     let inv = 1.0 / sum;
     let vinv = _mm256_set1_pd(inv);
@@ -71,25 +68,24 @@ fn softmax_row_wasm(row: &[f64], o: &mut [f64]) {
     use crate::simd_wasm::{load_f64x2, store_f64x2};
     let max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let vmax = f64x2_splat(max);
-    let mut vsum = f64x2_splat(0.0);
     let (rv, r_tail) = row.as_chunks::<2>();
-    // The ragged lane (`cols % 2`, so at most one element) is summed apart and
-    // folded in after the vector lanes — the same order the indexed form used.
-    let mut tail_sum = 0.0;
     {
         let (ov, o_tail) = o.as_chunks_mut::<2>();
         for (rw, ow) in rv.iter().zip(ov) {
             let e = exp_pd_wasm(f64x2_sub(load_f64x2(rw), vmax));
             store_f64x2(ow, e);
-            vsum = f64x2_add(vsum, e);
         }
         for (x, out) in r_tail.iter().zip(o_tail) {
-            let e = (x - max).exp();
-            *out = e;
-            tail_sum += e;
+            *out = crate::silu::fast_exp(x - max);
         }
     }
-    let sum = f64x2_extract_lane::<0>(vsum) + f64x2_extract_lane::<1>(vsum) + tail_sum;
+    // ONE left-to-right sum over the stored exps (#1197): a lane-wise
+    // accumulator plus a horizontal combine adds in a different order, and
+    // float addition is not associative.
+    let mut sum = 0.0;
+    for j in 0..o.len() {
+        sum += o[j];
+    }
     let inv = 1.0 / sum;
     let vinv = f64x2_splat(inv);
     let (ov, o_tail) = o.as_chunks_mut::<2>();
@@ -110,19 +106,24 @@ unsafe fn softmax_row_neon(row: &[f64], o: &mut [f64]) {
     let cols = row.len();
     let max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let vmax = vdupq_n_f64(max);
-    let mut vsum = vdupq_n_f64(0.0);
     let chunks = cols / 2;
     for c in 0..chunks {
         let x = vld1q_f64(row.as_ptr().add(c * 2));
         let e = exp_pd_neon(vsubq_f64(x, vmax));
         vst1q_f64(o.as_mut_ptr().add(c * 2), e);
-        vsum = vaddq_f64(vsum, e);
     }
-    let mut sum = vgetq_lane_f64::<0>(vsum) + vgetq_lane_f64::<1>(vsum);
     for j in (chunks * 2)..cols {
-        let e = (row[j] - max).exp();
-        o[j] = e;
-        sum += e;
+        o[j] = crate::silu::fast_exp(row[j] - max);
+    }
+    // ONE left-to-right sum over the stored exps (#1197). A lane-wise
+    // accumulator plus a horizontal combine adds in a DIFFERENT order, and
+    // float addition is not associative — that reduction order was the last
+    // ULP between the SIMD legs and the scalar/wasm one after the exp itself
+    // was unified. The exps are already in cache, so the extra pass is cheap
+    // next to the exp work it makes reproducible.
+    let mut sum = 0.0;
+    for j in 0..cols {
+        sum += o[j];
     }
     let inv = 1.0 / sum;
     let vinv = vdupq_n_f64(inv);

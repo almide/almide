@@ -6,11 +6,40 @@
 //! f64 AVX) lets almide-kernel beat the scalar path. Correctness is
 //! within-tolerance (exp is approximated ~1e-7 relative, fine for an activation).
 
-/// Naive reference: scalar libm exp.
+/// The CANONICAL fast-exp, scalar (#1197). Every lane — AVX, NEON, wasm-SIMD —
+/// is this function widened, op for op, and the scalar fallback IS this
+/// function; so a program's transcendental answer no longer depends on which
+/// arch or which target it ran on. Deliberately UNFUSED (no `mul_add`): wasm
+/// has no FMA instruction, and a fused multiply-add rounds once where a mul+add
+/// rounds twice, so a single fused step anywhere re-opens the divergence.
+///
+/// exp(x) = 2^k · exp(r), k = round(x·log2e), r = x - k·ln2 ∈ [-ln2/2, ln2/2],
+/// exp(r) by Taylor degree 6. Clamped to ±708 because `(k + 1023) << 52` needs
+/// the biased exponent inside (0, 2046) — beyond it the shift wraps and returns
+/// garbage (the softmax -1e9 mask value used to corrupt whole rows).
+#[inline]
+pub fn fast_exp(x: f64) -> f64 {
+    let x = if x < -708.0 { -708.0 } else if x > 708.0 { 708.0 } else { x };
+    let kf = (x * std::f64::consts::LOG2_E).round_ties_even();
+    let r = x - kf * std::f64::consts::LN_2;
+    let mut p = 1.0 / 720.0;
+    p = p * r + 1.0 / 120.0;
+    p = p * r + 1.0 / 24.0;
+    p = p * r + 1.0 / 6.0;
+    p = p * r + 0.5;
+    p = p * r + 1.0;
+    p = p * r + 1.0; // exp(r)
+    let biased = (kf as i64) + 1023;
+    p * f64::from_bits((biased as u64) << 52)
+}
+
+/// Scalar reference: the SAME fast-exp every SIMD lane runs (#1197), so the
+/// no-SIMD fallback answers identically instead of dropping to the platform
+/// libm (which is neither cross-arch nor cross-target stable).
 pub fn silu_mul_naive(a: &[f64], b: &[f64], out: &mut [f64]) {
     for i in 0..a.len() {
         let x = a[i];
-        let sig = 1.0 / (1.0 + (-x).exp());
+        let sig = 1.0 / (1.0 + fast_exp(-x));
         out[i] = x * sig * b[i];
     }
 }
@@ -35,15 +64,26 @@ pub(crate) unsafe fn exp_pd(x: std::arch::x86_64::__m256d) -> std::arch::x86_64:
     let kf = _mm256_round_pd::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(
         _mm256_mul_pd(x, log2e),
     );
-    let r = _mm256_fnmadd_pd(kf, ln2, x); // r = x - kf*ln2
+    // UNFUSED, deliberately (#1197): wasm has no FMA instruction — and
+    // relaxed-simd's fma is spec'd as "fused OR unfused, implementation's
+    // choice", so it cannot carry a determinism promise either. A fused
+    // multiply-add rounds ONCE where a mul+add rounds twice, so as long as one
+    // lane fuses and another does not, the lanes disagree in the last ULP. They
+    // did: AVX fused both the range reduction and the Horner chain, NEON fused
+    // only the Horner chain, and the wasm lane could fuse neither — three
+    // spellings, three answers, for one program. Every lane now runs the
+    // canonical UNFUSED form (the wasm lane's, since it is the constrained one),
+    // which costs ~1-2 tenths of the SIMD win and buys x86_64 == aarch64 ==
+    // wasm == scalar, bit for bit. Do not "optimize" an fmadd back in here.
+    let r = _mm256_sub_pd(x, _mm256_mul_pd(kf, ln2)); // r = x - kf*ln2
     // Taylor exp(r), Horner: ((((((1/720)r + 1/120)r + 1/24)r + 1/6)r + 1/2)r + 1)r + 1
     let mut p = _mm256_set1_pd(1.0 / 720.0);
-    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 120.0));
-    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 24.0));
-    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 6.0));
-    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(0.5));
-    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0));
-    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0)); // exp(r)
+    p = _mm256_add_pd(_mm256_mul_pd(p, r), _mm256_set1_pd(1.0 / 120.0));
+    p = _mm256_add_pd(_mm256_mul_pd(p, r), _mm256_set1_pd(1.0 / 24.0));
+    p = _mm256_add_pd(_mm256_mul_pd(p, r), _mm256_set1_pd(1.0 / 6.0));
+    p = _mm256_add_pd(_mm256_mul_pd(p, r), _mm256_set1_pd(0.5));
+    p = _mm256_add_pd(_mm256_mul_pd(p, r), _mm256_set1_pd(1.0));
+    p = _mm256_add_pd(_mm256_mul_pd(p, r), _mm256_set1_pd(1.0)); // exp(r)
     // 2^k via exponent bits: ((k + 1023) << 52)
     let ki = _mm256_cvtpd_epi32(kf); // __m128i, 4×i32
     let k64 = _mm256_cvtepi32_epi64(ki); // 4×i64
@@ -145,14 +185,16 @@ pub(crate) unsafe fn exp_pd_neon(
     let ln2 = vdupq_n_f64(std::f64::consts::LN_2);
     let kf = vrndnq_f64(vmulq_f64(x, log2e)); // round to nearest
     let r = vsubq_f64(x, vmulq_f64(kf, ln2));
-    // Taylor exp(r), Horner via fma: vfmaq_f64(acc, p, r) = acc + p*r
+    // Taylor exp(r), Horner — UNFUSED to match every other lane (#1197; see the
+    // note in `exp_pd`). vfmaq_f64 would round once where the others round
+    // twice, which is exactly the cross-arch divergence this unification ends.
     let mut p = vdupq_n_f64(1.0 / 720.0);
-    p = vfmaq_f64(vdupq_n_f64(1.0 / 120.0), p, r);
-    p = vfmaq_f64(vdupq_n_f64(1.0 / 24.0), p, r);
-    p = vfmaq_f64(vdupq_n_f64(1.0 / 6.0), p, r);
-    p = vfmaq_f64(vdupq_n_f64(0.5), p, r);
-    p = vfmaq_f64(vdupq_n_f64(1.0), p, r);
-    p = vfmaq_f64(vdupq_n_f64(1.0), p, r); // exp(r)
+    p = vaddq_f64(vmulq_f64(p, r), vdupq_n_f64(1.0 / 120.0));
+    p = vaddq_f64(vmulq_f64(p, r), vdupq_n_f64(1.0 / 24.0));
+    p = vaddq_f64(vmulq_f64(p, r), vdupq_n_f64(1.0 / 6.0));
+    p = vaddq_f64(vmulq_f64(p, r), vdupq_n_f64(0.5));
+    p = vaddq_f64(vmulq_f64(p, r), vdupq_n_f64(1.0));
+    p = vaddq_f64(vmulq_f64(p, r), vdupq_n_f64(1.0)); // exp(r)
     // 2^k: k = round(kf) as i64, (k+1023) << 52, reinterpret as f64
     let k = vcvtq_s64_f64(kf);
     let biased = vaddq_s64(k, vdupq_n_s64(1023));
@@ -228,6 +270,89 @@ mod tests {
                 naive[i],
                 a[i]
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod fast_exp_determinism {
+    use super::fast_exp;
+
+    /// Inputs that stress every branch of the canonical fast-exp: the clamp
+    /// edges, the range-reduction ties, denormal-adjacent k, and the ordinary
+    /// activation range.
+    fn probe_inputs() -> Vec<f64> {
+        let mut v = vec![
+            0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 1e-8, -1e-8,
+            0.6931471805599453, -0.6931471805599453, // ±ln2 (k = ±1 tie region)
+            0.34657359027997264, -0.34657359027997264, // ±ln2/2 (round-half boundary)
+            700.0, -700.0, 708.0, -708.0, 709.0, -709.0, 1e9, -1e9,
+        ];
+        // A DENSE deterministic sweep. A sparse one is worthless here: a fused
+        // multiply-add differs from mul+add only when the exact product has
+        // bits below the rounding point that tip the sum, which a coarse grid
+        // simply misses — a first version of this test stepped 0.37 across
+        // [-30, 30] and PASSED with an fmadd deliberately re-introduced. The
+        // LCG below draws ~60k values over the activation range, which finds
+        // witnesses in every lane.
+        let mut bits: u64 = 0x2545F4914F6CDD1D;
+        for _ in 0..60_000 {
+            bits = bits.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let unit = ((bits >> 11) as f64) / ((1u64 << 53) as f64); // [0,1)
+            v.push(unit * 120.0 - 60.0);
+        }
+        v
+    }
+
+    /// The SIMD lane must agree with the scalar reference BIT FOR BIT — that is
+    /// the whole #1197 promise (one algorithm, every arch and target). A lane
+    /// that fuses a multiply-add would fail here in the last ULP, which is
+    /// exactly how the divergence shipped in 0.56.0.
+    #[test]
+    fn every_simd_lane_matches_the_scalar_reference_bitwise() {
+        let xs = probe_inputs();
+        let scalar: Vec<f64> = xs.iter().map(|&x| fast_exp(x)).collect();
+
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
+            use std::arch::x86_64::*;
+            for (i, chunk) in xs.chunks(4).enumerate() {
+                let mut buf = [0.0f64; 4];
+                buf[..chunk.len()].copy_from_slice(chunk);
+                let mut got = [0.0f64; 4];
+                unsafe {
+                    let v = super::exp_pd(_mm256_loadu_pd(buf.as_ptr()));
+                    _mm256_storeu_pd(got.as_mut_ptr(), v);
+                }
+                for j in 0..chunk.len() {
+                    let want = scalar[i * 4 + j];
+                    assert_eq!(
+                        got[j].to_bits(), want.to_bits(),
+                        "AVX lane diverged at x={}: {} vs scalar {}", chunk[j], got[j], want
+                    );
+                }
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            use std::arch::aarch64::*;
+            for (i, chunk) in xs.chunks(2).enumerate() {
+                let mut buf = [0.0f64; 2];
+                buf[..chunk.len()].copy_from_slice(chunk);
+                let mut got = [0.0f64; 2];
+                unsafe {
+                    let v = super::exp_pd_neon(vld1q_f64(buf.as_ptr()));
+                    vst1q_f64(got.as_mut_ptr(), v);
+                }
+                for j in 0..chunk.len() {
+                    let want = scalar[i * 2 + j];
+                    assert_eq!(
+                        got[j].to_bits(), want.to_bits(),
+                        "NEON lane diverged at x={}: {} vs scalar {}", chunk[j], got[j], want
+                    );
+                }
+            }
         }
     }
 }

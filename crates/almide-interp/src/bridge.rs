@@ -360,6 +360,7 @@ fn prim_float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "fsqrt" => f64::sqrt,
         "fceil" => f64::ceil,
         "ffloor" => f64::floor,
+        "fnearest" => f64::round_ties_even,
         _ => return None,
     };
     Some(Flow::val(Value::Float(unary(as_float(args.first())?))))

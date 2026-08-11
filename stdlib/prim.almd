@@ -353,6 +353,13 @@ fn fsqrt(x: Float) -> Float = _
 @intrinsic("almide_rt_prim_ffloor")
 fn ffloor(x: Float) -> Float = _
 
+// Round to nearest, TIES TO EVEN — wasm's `f64.nearest` / Rust's
+// `round_ties_even`. Distinct from `float.round` (half AWAY from zero, matching
+// native's `f64::round`): this is the rounding the canonical fast-exp's range
+// reduction needs, and the one every SIMD lane of that algorithm uses (#1197).
+@intrinsic("almide_rt_prim_fnearest")
+fn fnearest(x: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fceil")
 fn fceil(x: Float) -> Float = _
 

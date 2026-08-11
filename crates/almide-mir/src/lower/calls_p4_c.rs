@@ -328,7 +328,7 @@ impl LowerCtx {
     fn prim_kind_float(func: &str) -> crate::PrimKind {
         if matches!(
             func,
-            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
+            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fnearest" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
                 | "fmin" | "fmax" | "fcopysign"
         ) {
             return Self::prim_kind_float_arith(func);
@@ -346,6 +346,7 @@ impl LowerCtx {
             "fabs" => PrimKind::FloatUn(crate::FUnOp::Abs),
             "fsqrt" => PrimKind::FloatUn(crate::FUnOp::Sqrt),
             "ffloor" => PrimKind::FloatUn(crate::FUnOp::Floor),
+            "fnearest" => PrimKind::FloatUn(crate::FUnOp::Nearest),
             "fceil" => PrimKind::FloatUn(crate::FUnOp::Ceil),
             "fneg" => PrimKind::FloatUn(crate::FUnOp::Neg),
             "fadd" => PrimKind::FloatBin(crate::FBinOp::Add),
@@ -458,7 +459,7 @@ impl LowerCtx {
         }
         if matches!(
             func,
-            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
+            "fabs" | "fsqrt" | "ffloor" | "fceil" | "fnearest" | "fneg" | "fadd" | "fsub" | "fmul" | "fdiv"
                 | "fmin" | "fmax" | "fcopysign" | "flt" | "fle" | "fgt" | "fge" | "feq" | "fne"
                 | "f2i" | "i2f" | "fbits" | "ffrombits" | "f2f32" | "f32_2f" | "bits_to_f32"
                 | "i2f32" | "f32bits"

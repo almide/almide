@@ -628,7 +628,14 @@ fn matrix_softmax_rows_byte_matches_scalar_libm_oracle() {
 }
 
 #[test]
-fn matrix_gelu_byte_matches_scalar_libm_oracle() {
+fn matrix_gelu_byte_matches_the_canonical_fast_exp() {
+    // ORACLE CHANGED (#1197): this pinned the retired promise "the wasm leg
+    // reproduces v0's scalar libm exp". The leg now runs the CANONICAL fast-exp
+    // — the same unfused algorithm, reduction order and scaling spelling the
+    // native SIMD kernel runs — so the pinned value is the one BOTH legs
+    // produce (verified by running this very program on native and wasm, and by
+    // spec/wasm_cross/matrix_softmax_fastexp.almd under C-223).
+
     // Phase D1: gelu (tanh approx) is element-wise scalar arithmetic + `rt.math_exp` (libm,
     // = self-hosted math.exp). The self-host transcribes the exact op order — inner = K*(x +
     // 0.044715*(x*x)*x), clamp ±20, e2 = exp(2*clamped), tanh = (e2-1)/(e2+1), 0.5*(1+tanh)*x
@@ -641,6 +648,6 @@ fn matrix_gelu_byte_matches_scalar_libm_oracle() {
     assert!(prog.functions.iter().any(|f| f.name == "matrix.gelu"), "gelu self-host must link");
     if let Some(out) = build_and_run("matrix_gelu", &render_wasm_program(&prog)) {
         assert_eq!(out.lines().count(), 10);
-        assert_eq!(out.lines().next().unwrap(), "-0.0036373920817729943");
+        assert_eq!(out.lines().next().unwrap(), "-0.0036373920680111693");
     }
 }

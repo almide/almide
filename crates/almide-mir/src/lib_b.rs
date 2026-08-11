@@ -369,6 +369,12 @@ pub enum FUnOp {
     Floor,
     Ceil,
     Neg,
+    /// Round to nearest, TIES TO EVEN — wasm's `f64.nearest`, Rust's
+    /// `f64::round_ties_even`. Distinct from `float.round`, which is
+    /// half-AWAY-from-zero (self-hosted in float_round.almd to match native).
+    /// Needed by the canonical fast-exp's range reduction (#1197), whose SIMD
+    /// lanes all round ties-to-even.
+    Nearest,
 }
 
 /// A binary f64 op.

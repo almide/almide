@@ -7,6 +7,40 @@
 // Row max: init from row[0], scan the rest with `>` (NaN-safe: a NaN element leaves max).
 import prim
 
+// ── The CANONICAL fast-exp (#1197) ────────────────────────────────────────
+// Transcribed op-for-op from `crates/almide-kernel/src/silu.rs::fast_exp`, the
+// scalar reference every native SIMD lane is a widening of. Both legs now run
+// THIS algorithm, so `matrix.softmax_rows` / `gelu` / `swiglu_gate` answer with
+// the same bits on native x86_64, native aarch64 and wasm — before this the
+// wasm leg used the vendored-libm exp while native used the fast-exp, which is
+// the divergence #1197 measured (~1e-12 relative on softmax, amplified through
+// the normalization sum).
+//
+// Deliberately UNFUSED (every step a separate `fmul` then `fadd`): wasm has no
+// FMA instruction, and relaxed-simd's fma is spec'd as "fused OR unfused,
+// implementation's choice", so a fused step anywhere re-opens the divergence.
+// `fnearest` is round-ties-to-even (wasm `f64.nearest`), NOT `float.round`
+// (half away from zero) — the SIMD lanes all round ties to even.
+//
+// exp(x) = 2^k · exp(r), k = round(x·log2e), r = x - k·ln2, exp(r) Taylor deg 6.
+// Clamped to ±708: `(k + 1023) << 52` needs the biased exponent inside
+// (0, 2046), and beyond it the shift wraps (the softmax -1e9 mask value used to
+// corrupt whole rows).
+fn __fast_exp(x0: Float) -> Float = {
+  let lo = prim.fmax(x0, -708.0)
+  let x = prim.fmin(lo, 708.0)
+  let kf = prim.fnearest(prim.fmul(x, 1.4426950408889634))
+  let r = prim.fsub(x, prim.fmul(kf, 0.6931471805599453))
+  let p1 = prim.fadd(prim.fmul(0.001388888888888889, r), 0.008333333333333333)
+  let p2 = prim.fadd(prim.fmul(p1, r), 0.041666666666666664)
+  let p3 = prim.fadd(prim.fmul(p2, r), 0.16666666666666666)
+  let p4 = prim.fadd(prim.fmul(p3, r), 0.5)
+  let p5 = prim.fadd(prim.fmul(p4, r), 1.0)
+  let p6 = prim.fadd(prim.fmul(p5, r), 1.0)
+  let biased = prim.f2i(kf) + 1023
+  prim.fmul(p6, prim.ffrombits(int.bshl(biased, 52)))
+}
+
 fn __sm_row_max(row: List[Float], n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
 else {
   let x = list.get(row, i) ?? acc
@@ -18,10 +52,17 @@ fn __softmax_row(row: List[Float]) -> List[Float] = {
   if n == 0 then row
   else {
     let mx = __sm_row_max(row, n, 1, list.get(row, 0) ?? 0.0)
-    let exps = row |> list.map((x) => math.exp(x - mx))
+    let exps = row |> list.map((x) => __fast_exp(x - mx))
     let s = exps |> list.fold(0.0, (acc, v) => acc + v)
     if s <= 0.0 or s != s then row |> list.map((_x) => 1.0 / int.to_float(n))
-    else exps |> list.map((v) => v / s)
+    else {
+      // RECIPROCAL-MULTIPLY, not divide (#1197): the native kernel scales by
+      // `inv = 1.0/sum` and multiplies, and `v * (1/s)` is not `v / s` — they
+      // differ by up to one ULP. After the exp and the reduction order were
+      // unified this was the last byte between the legs.
+      let inv = 1.0 / s
+      exps |> list.map((v) => v * inv)
+    }
   }
 }
 
@@ -36,9 +77,12 @@ fn matrix_softmax_rows(m: List[List[Float]]) -> List[List[Float]] = m |> list.ma
 
 fn __gelu_scalar(x: Float) -> Float = {
   let inner = 0.7978845608028654 * (x + 0.044715 * ((x * x) * x))
-  let clamped = float.max(float.min(inner, 20.0), -20.0)
-  let e2 = math.exp(2.0 * clamped)
-  let t = (e2 - 1.0) / (e2 + 1.0)
+  // The native lanes' identity, spelled the same way (#1197): `1 - 2/(e2+1)`,
+  // NOT the algebraically-equal `(e2-1)/(e2+1)`, which rounds differently. The
+  // ±20 pre-clamp is gone with it — `__fast_exp` already saturates at ±708,
+  // the same limit every SIMD lane has, and tanh is flat long before that.
+  let e2 = __fast_exp(2.0 * inner)
+  let t = 1.0 - 2.0 / (e2 + 1.0)
   0.5 * ((1.0 + t) * x)
 }
 
@@ -86,7 +130,7 @@ fn __sg_cell(xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], j: Int, 
   let g = __sg_dot(xrow_h, wgj, d_in, 0, 0.0)
   let u = __sg_dot(xrow_h, wuj, d_in, 0, 0.0)
   let negg = float.max(float.min(0.0 - g, 40.0), -40.0)
-  let sig = 1.0 / (1.0 + math.exp(negg))
+  let sig = 1.0 / (1.0 + __fast_exp(negg))
   (g * sig) * u
 }
 
@@ -148,7 +192,7 @@ else {
   let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
   let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
   let two_i_f = int.to_float(2 * i_pair)
-  let inv_freq = math.exp(0.0 - (two_i_f / head_dim_f) * log_theta)
+  let inv_freq = __fast_exp(0.0 - (two_i_f / head_dim_f) * log_theta)
   let angle = pos_f * inv_freq
   let s = math.sin(angle)
   let c = math.cos(angle)
@@ -222,7 +266,7 @@ else {
 fn __mha_exp(sch: Int, sk: Int, mx: Float, j: Int, sum: Float) -> Float = if j >= sk then sum
 else {
   let s = prim.ffrombits(prim.load64(sch + 12 + j * 8))
-  let e = math.exp(s - mx)
+  let e = __fast_exp(s - mx)
   prim.store64(sch + 12 + j * 8, prim.fbits(e))
   __mha_exp(sch, sk, mx, j + 1, sum + e)
 }

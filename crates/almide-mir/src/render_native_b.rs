@@ -468,6 +468,10 @@ pub(crate) fn render_float_un(
         FUnOp::Sqrt => format!("({a}).sqrt()"),
         FUnOp::Floor => format!("({a}).floor()"),
         FUnOp::Ceil => format!("({a}).ceil()"),
+        // TIES TO EVEN — the exact semantics of wasm's `f64.nearest`, so the
+        // two legs agree bit for bit (#1197's canonical fast-exp range
+        // reduction). NOT `.round()`, which is half-away-from-zero.
+        FUnOp::Nearest => format!("({a}).round_ties_even()"),
     };
     tys.insert(*d, NTy::F64);
     line!("let mut {}: f64 = {expr};", var(*d));
