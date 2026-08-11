@@ -23,7 +23,7 @@ spec/integration/modules/cross_module_cell_update_test.almd :: COMPILER_FRONTIER
 spec/integration/modules/cross_module_global_state_loop_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
 spec/lang/result_zip_test.almd :: COMPILER_FRONTIER :: result.zip_x unlinked (typed self-host twin missing)
 spec/stdlib/stdlib-test.almd :: COMPILER_FRONTIER :: list.sort_by_str_key_x unlinked (typed self-host twin missing)
-spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: testing.assert_err typed twin missing for the chunked payload class (assert_err_x; the #1191 ladder brick closed 2026-08-12)
+spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: fs.fold_lines_chunked non-msi accumulator twin missing (Int acc; the assert twins landed 2026-08-12 — selfhost-link-v2 family, same debt as fs_streaming_test)
 spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: non-msi accumulator twins + for_each_line (create_temp_dir now self-hosted)
 spec/stdlib/fs_if_exists_test.almd :: COMPILER_FRONTIER :: C-215 errno-carrying read prim not landed
 #
