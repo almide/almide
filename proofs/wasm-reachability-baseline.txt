@@ -28,9 +28,6 @@
 #
 # COMPILER_FRONTIER — the burn-down:
 env.set :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capabili
-matrix.select_rows_f32 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_f32 — rendering them would emit a 
-matrix.select_rows_q1_0 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q1_0 — rendering them would emit a
-matrix.select_rows_q8_0_dq :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q8_0_dq — rendering them would emi
 #
 # HOST_CAPABILITY (39) — out of scope by design:
 env.sleep_ms :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.sleep_ms needs a declared cap
