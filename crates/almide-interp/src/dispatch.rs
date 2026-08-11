@@ -642,6 +642,71 @@ impl<'a> Interpreter<'a> {
                         Err(_) => Value::Option(None),
                     });
                 }
+                // The sandboxed fs floor (#1218, vfs.rs): writes land in the
+                // per-interpreter overlay, reads fall back to the real fs
+                // read-only. Same tier as the argv/env floors — these prims
+                // read INTERPRETER state, which the stateless bridge cannot.
+                "read_text_file" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.read_text_file expects a String".into());
+                    };
+                    return Flow::val(match crate::vfs::read_text(&self.vfs, path) {
+                        Ok(s) => Value::Result(Ok(Box::new(Value::str(s)))),
+                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    });
+                }
+                "write_text_file" => {
+                    let (Some(Value::Str(path)), Some(Value::Str(content))) =
+                        (args.first(), args.get(1))
+                    else {
+                        return Flow::Abort(
+                            "internal: prim.write_text_file expects (String, String)".into(),
+                        );
+                    };
+                    let (path, content) = (path.to_string(), content.to_string());
+                    return Flow::val(match crate::vfs::write_text(&mut self.vfs, &path, &content) {
+                        Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
+                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    });
+                }
+                "make_dir" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.make_dir expects a String".into());
+                    };
+                    let path = path.to_string();
+                    return Flow::val(match crate::vfs::make_dir(&mut self.vfs, &path) {
+                        Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
+                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    });
+                }
+                "path_exists" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.path_exists expects a String".into());
+                    };
+                    return Flow::val(Value::Bool(crate::vfs::exists(&self.vfs, path)));
+                }
+                "remove_all" => {
+                    let Some(Value::Str(path)) = args.first() else {
+                        return Flow::Abort("internal: prim.remove_all expects a String".into());
+                    };
+                    let path = path.to_string();
+                    return match crate::vfs::remove_all(&mut self.vfs, &path) {
+                        crate::vfs::RemoveOutcome::Removed => {
+                            Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
+                        }
+                        // A host path the overlay never wrote: refusing to
+                        // delete real files is the sandbox's point, and
+                        // pretending to would be a wrong vote — abstain.
+                        crate::vfs::RemoveOutcome::HostOnly => Flow::Unsupported(
+                            "prim.remove_all on a host path (the overlay is read-only toward the real fs)".into(),
+                        ),
+                        crate::vfs::RemoveOutcome::Missing => {
+                            Flow::val(Value::Result(Err(Box::new(Value::str(
+                                "No such file or directory (os error 2)".to_string(),
+                            )))))
+                        }
+                    };
+                }
                 _ => {}
             }
         }
