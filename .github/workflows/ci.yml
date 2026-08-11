@@ -791,6 +791,9 @@ jobs:
       - name: Release evidence seals (every seal re-measured against its tag — the audit freeze)
         run: bash scripts/release-seal.sh check
 
+      - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
+        run: bash scripts/check-gate-verification.sh
+
       - name: Scalar-read audit (every raw-load arm classified, zero unguarded — the #1183 class stays extinct)
         run: scripts/check-scalar-read-audit.sh
 

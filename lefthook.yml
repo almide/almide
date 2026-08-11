@@ -15,6 +15,9 @@ pre-commit:
     release-seals:
       glob: "{proofs/releases/*.toml,scripts/release-seal.sh}"
       run: bash scripts/release-seal.sh check
+    gate-verification:
+      glob: "{proofs/gate-verification.toml,scripts/check-*.sh,proofs/*.sh}"
+      run: bash scripts/check-gate-verification.sh
     libm-determinism:
       glob: "{runtime/rs/src/*.rs,crates/almide-kernel/src/*.rs,proofs/libm-determinism-audit.toml,scripts/check-libm-determinism.sh,scripts/lib/libm-call-enumerate.py}"
       run: bash scripts/check-libm-determinism.sh

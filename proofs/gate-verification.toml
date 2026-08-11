@@ -1,0 +1,152 @@
+# GATE VERIFICATION LEDGER — who watches the watchmen (Stage 5:「検証ツール
+# 自身の検証」). Every verdict-bearing gate script carries a row classifying
+# HOW we know the gate itself can fail correctly, with a durable evidence
+# pointer. Enforced by scripts/check-gate-verification.sh: every enumerated
+# gate needs exactly one row, stale rows fail, a non-UNVERIFIED row needs
+# `evidence`, and the UNVERIFIED count may only SHRINK (ceiling below).
+#
+# Classes:
+#   KERNEL_PROVEN   — the verdict-bearing core is the Coq-extracted checker
+#                     (or the proof-check itself); the shell is plumbing.
+#   MUTATION_TESTED — a deliberate corruption of the gate's ledger/input was
+#                     demonstrated to FAIL the gate (recorded where).
+#   NEGATIVE_TESTED — a forged/violating input was demonstrated to FAIL.
+#   EXERCISED       — both verdict directions observed in real operation
+#                     (a genuine catch, or a recorded multi-mode exercise).
+#   UNVERIFIED      — no recorded evidence the gate can fail correctly.
+#                     Honest debt: the gate may be decorative and we would
+#                     not know. Burn-down tracked by the ceiling.
+#
+# unverified_ceiling = "18"
+
+[[gate]]
+path = "scripts/check-contracts.sh"
+class = "MUTATION_TESTED"
+evidence = "flight-evidence-gaps.md F1 progress-2 (2026-07-04): spec-resolution mutation test (nonexistent ALS section reference => FAIL)"
+
+[[gate]]
+path = "scripts/check-scalar-read-audit.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1185 (Stage 1 landing): unclassified/stale/UNGUARDED negative cases demonstrated to fail"
+
+[[gate]]
+path = "scripts/check-wat-prelude-audit.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1209 (Stage 1c landing): 5/5 negative tests (unclassified fn, stale row, digest drift, missing via, UNREACHED)"
+
+[[gate]]
+path = "scripts/check-ratchet-separation.sh"
+class = "NEGATIVE_TESTED"
+evidence = "flight-evidence-gaps.md F5 close (2026-07-03): mixed impl+baseline commit => exit 1, clean => exit 0"
+
+[[gate]]
+path = "scripts/release-seal.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1241 + #1243: forged derived count and unfilled [recorded] field each demonstrated to FAIL check"
+
+[[gate]]
+path = "scripts/fuzz-night-verdict.sh"
+class = "EXERCISED"
+evidence = "PR #1238: slow-only/mixed/legacy 3-mode local exercise; production class-split verdict on run 31515916427 (correctness=1 => red)"
+
+[[gate]]
+path = "proofs/check-wasm-fallback.sh"
+class = "EXERCISED"
+evidence = "2026-08-12: fail direction fired on a stale-binary measurement, pass direction on the #1240 prune (18->17)"
+
+[[gate]]
+path = "proofs/check.sh"
+class = "KERNEL_PROVEN"
+evidence = "the object under check IS the proof: coqchk De-Bruijn re-check + Print Assumptions closed + cross-version 9.1.1/9.2 (TRUSTED_BASE.md)"
+
+[[gate]]
+path = "proofs/gate.sh"
+class = "KERNEL_PROVEN"
+evidence = "verdict core = extracted checker (qualified-by-proof); toolchain stamp FATAL demonstrated live 2026-08-12 (PATH != workspace build)"
+
+[[gate]]
+path = "proofs/corpus-wall.sh"
+class = "KERNEL_PROVEN"
+evidence = "checker-phase ACCEPTs are kernel-proven; flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile (the fail direction caught a real bug)"
+
+[[gate]]
+path = "proofs/output-parity.sh"
+class = "EXERCISED"
+evidence = "flight-evidence-gaps.md F4 close: 5 consecutive full-run greens after the LC_ALL root-cause; regression direction fired throughout the parity war"
+
+[[gate]]
+path = "proofs/build-checker.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "proofs/coverage.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "proofs/diff-fuzz.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "proofs/receipt.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "proofs/check-stdlib-purity-registry.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "proofs/check-wasm-bytes.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "proofs/check-wasm-exec.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "proofs/check-wasm-reachability.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-abstain-classes.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-browser-determinism.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-embedded-size.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-forbidden-impurities.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-frees-churn.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-host-determinism.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-libm-determinism.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-perf-ratio.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-rt-oracle-registry.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-semantics-manifest.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-gate-verification.sh"
+class = "NEGATIVE_TESTED"
+evidence = "bootstrap run (PR that landed this ledger): a mis-pathed row failed as STALE and this script's own missing row failed as UNCLASSIFIED — both fail directions demonstrated before first green"
