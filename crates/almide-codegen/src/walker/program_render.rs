@@ -50,7 +50,9 @@ fn collect_repr_named_types(program: &IrProgram) -> std::collections::HashSet<al
 /// programs reference types defined in other modules), phantom-param
 /// structs, and function-local var storage classification.
 fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotations {
-    let mut ann = ctx.ann.clone();
+    // One deliberate deep clone, once per program render (the per-function
+    // sharing happens after this, via the Rc in RenderContext).
+    let mut ann = (*ctx.ann).clone();
     let all_type_decls: Vec<IrTypeDecl> = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
         .cloned()
@@ -93,8 +95,9 @@ fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
 /// `program.modules`).
 fn register_type_decl_ctors(ctx: &mut RenderContext, td: &IrTypeDecl) {
     if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+        let ann = std::rc::Rc::make_mut(&mut ctx.ann);
         for c in cases {
-            ctx.ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
+            ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
         }
     }
 }
@@ -219,24 +222,29 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         target: ctx.target,
         auto_unwrap: ctx.auto_unwrap,
         is_test: ctx.is_test,
-        ann,
-        type_aliases,
-        generic_types,
+        ann: std::rc::Rc::new(ann),
+        type_aliases: std::rc::Rc::new(type_aliases),
+        generic_types: std::rc::Rc::new(generic_types),
         minimal_generic_bounds: false,
         repr_c: ctx.repr_c,
         ref_params: std::collections::HashSet::new(),
         param_vars: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),
-        repr_named_types,
+        repr_named_types: std::rc::Rc::new(repr_named_types),
         fn_err_ty: None,
     };
     register_ctor_to_enum(&mut ctx, program);
 
-    // Build anonymous record maps (populated by target-specific pipeline)
-    ctx.ann.named_records = collect_named_records(program);
-    ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
-    ctx.ann.anon_records_with_fn = declarations::take_anon_fn_keys();
-    ctx.ann.record_field_counts = collect_record_field_counts(program);
+    // Build anonymous record maps (populated by target-specific pipeline).
+    // The Rc is still unshared here (setup, before any function render), so
+    // make_mut mutates in place without a clone.
+    {
+        let ann = std::rc::Rc::make_mut(&mut ctx.ann);
+        ann.named_records = collect_named_records(program);
+        ann.anon_records = collect_anon_records(program, &ann.named_records);
+        ann.anon_records_with_fn = declarations::take_anon_fn_keys();
+        ann.record_field_counts = collect_record_field_counts(program);
+    }
 
     let mut parts = Vec::new();
 

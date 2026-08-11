@@ -48,7 +48,17 @@ struct Verifier<'a> {
     in_loop: bool,
     errors: Vec<IrVerifyError>,
     known: &'a KnownNames,
-    /// VarIds that have been defined (by Bind, param, pattern, lambda, for-in)
+    /// Every VarId below this bound is pre-defined: the whole VarTable at
+    /// construction time is trusted as the source of truth, because some
+    /// vars are introduced implicitly (open record fields, monomorphization)
+    /// without explicit Bind stmts. Kept as a bound rather than a
+    /// materialized `HashSet` of `0..len` — after `UnifyVarTablesPass` the
+    /// table is program-wide, so building that set per function was
+    /// O(functions × table): the single dominant codegen cost on
+    /// many-function programs.
+    predefined: u32,
+    /// VarIds at or above `predefined` that have been defined during the
+    /// walk (by Bind, param, pattern, lambda, for-in).
     defined_vars: std::collections::HashSet<u32>,
 }
 
@@ -71,7 +81,9 @@ impl<'a> Verifier<'a> {
     }
 
     fn define_var(&mut self, id: VarId) {
-        self.defined_vars.insert(id.0);
+        if id.0 >= self.predefined {
+            self.defined_vars.insert(id.0);
+        }
     }
 
     fn check_var_defined(&mut self, id: VarId, span: Option<Span>) {
@@ -79,7 +91,7 @@ impl<'a> Verifier<'a> {
         if (id.0 as usize) >= self.var_table.len() {
             return;
         }
-        if !self.defined_vars.contains(&id.0) {
+        if id.0 >= self.predefined && !self.defined_vars.contains(&id.0) {
             self.err(
                 format!("VarId({}) used but never defined (no Bind/param/pattern)", id.0),
                 span,
@@ -377,7 +389,8 @@ fn verify_top_let(
         in_loop: false,
         errors: Vec::new(),
         known,
-        defined_vars: (0..var_table.len() as u32).collect(),
+        predefined: var_table.len() as u32,
+        defined_vars: std::collections::HashSet::new(),
     };
     v.check_var_id(tl.var, None);
     v.visit_expr(&tl.value);
@@ -400,7 +413,8 @@ fn verify_function(
         // Pre-populate defined_vars with all VarIds in VarTable.
         // Some vars are introduced implicitly (open record fields, monomorphization)
         // without explicit Bind stmts, so we trust the VarTable as the source of truth.
-        defined_vars: (0..var_table.len() as u32).collect(),
+        predefined: var_table.len() as u32,
+        defined_vars: std::collections::HashSet::new(),
     };
 
     // Check parameter VarIds are valid and unique

@@ -78,10 +78,16 @@ pub struct RenderContext<'a> {
     pub target: Target,
     pub auto_unwrap: bool,
     pub is_test: bool,
-    pub ann: CodegenAnnotations,
-    pub type_aliases: std::collections::HashMap<almide_base::intern::Sym, almide_lang::types::Ty>,
+    /// Shared, read-only during function rendering. `Rc` so the
+    /// per-function context in `render_function` clones a pointer, not the
+    /// program-wide annotation tables — the deep clone made codegen
+    /// quadratic in the number of functions. Mutate only during program
+    /// setup (`render_program`), via `Rc::make_mut` while the Rc is still
+    /// unshared.
+    pub ann: std::rc::Rc<CodegenAnnotations>,
+    pub type_aliases: std::rc::Rc<std::collections::HashMap<almide_base::intern::Sym, almide_lang::types::Ty>>,
     /// Type names that have generic parameters (for erasing to `_` when args are missing)
-    pub generic_types: std::collections::HashSet<almide_base::intern::Sym>,
+    pub generic_types: std::rc::Rc<std::collections::HashSet<almide_base::intern::Sym>>,
     /// Use minimal generic bounds (Clone only) for bundled .almd module functions.
     pub minimal_generic_bounds: bool,
     /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
@@ -106,7 +112,7 @@ pub struct RenderContext<'a> {
     /// interpolation part routes through `almide_repr` only when it is in this
     /// set, so a value with the impl renders to its literal form while opaque
     /// `Named` references (e.g. runtime newtypes) stay on the Display path.
-    pub repr_named_types: std::collections::HashSet<almide_base::intern::Sym>,
+    pub repr_named_types: std::rc::Rc<std::collections::HashSet<almide_base::intern::Sym>>,
     /// Error type `E` of the enclosing fn's declared return `Result[_, E]`,
     /// or `None` if the fn does not return a `Result`. The `!` (Unwrap)
     /// renderer compares a propagated source error against this: when they
@@ -117,7 +123,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new(), fn_err_ty: None }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -126,7 +132,7 @@ impl<'a> RenderContext<'a> {
     }
 
     pub fn with_annotations(mut self, ann: CodegenAnnotations) -> Self {
-        self.ann = ann;
+        self.ann = std::rc::Rc::new(ann);
         self
     }
 
