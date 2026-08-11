@@ -1,0 +1,500 @@
+# The hand-written WAT prelude audit (Stage 1c).
+#
+# Almide renders BOTH first-class targets from the same MIR, so the 3-way oracle
+# (native <-> wasm <-> interp) differs every corpus fixture's two legs against
+# each other. The prelude is the one place that escapes it: `$alloc`, `$rc_dec`,
+# the free-list, the WASI shims and the rest are hand-written wasm with NO native
+# counterpart to be differed against. Whatever assurance they carry has to be
+# stated, per function — that is this file.
+#
+# One row per `(func $NAME` in the renderer sources (scripts/lib/wat-prelude-enumerate.py,
+# shared with the gate so the two cannot drift — the #1176 one-instrument rule).
+#
+#   PROVEN         a machine-checked proof covers the algorithm, AND a fixture
+#                  reaches it. `proof` names the file, `via` the fixture.
+#   CORPUS         >=1 spec/wasm_cross fixture reaches it, so its observable
+#                  behavior is pinned by native<->wasm byte identity. `via` names
+#                  the fixture; the gate RE-RENDERS it and fails if it does not.
+#   FALLBACK_ONLY  reachable, but only from source constructs whose fixtures are
+#                  in proofs/wasm-fallback-baseline.txt — those run on the native
+#                  leg, so the byte oracle never renders this wasm. Debt that
+#                  shrinks with the fallback ratchet, not a steady state.
+#   PROBE_ONLY     emitted only under a compile-time flag (ALMIDE_FUEL_PROBE=1).
+#   MIR_ONLY       no frontend lowering constructs the op — only hand-built MIR
+#                  in the proof/validation layer reaches it. Emission is checked;
+#                  the BODY is not. `ref` names the issue to close it out.
+#   TEMPLATE       not a fixed name: a `{}`-interpolated rendering template whose
+#                  instances carry a user function's identity.
+#
+# UNREACHED is the failing verdict: hand-written wasm that NOTHING can reach —
+# DO-178C dead code. It must stay 0. `$__chk_div`/`$__chk_rem` were exactly that
+# (superseded by the #806 inline expansion, zero callers repo-wide) and were
+# deleted when this audit first ran; removing them is instruction-identical on
+# all 367 fixtures.
+#
+# The gate (scripts/check-wat-prelude-audit.sh) fails on: an unclassified name (a
+# prelude function added without a row), a stale row, a changed `digest` (the
+# hand-written wasm was edited — re-confirm its evidence rather than inherit it),
+# an unknown class, a CORPUS/PROVEN row whose `via` fixture does not actually
+# reach it, and any UNREACHED row.
+#
+# Counts at the first measurement (2026-08-11, 63 functions):
+#   PROVEN 5 / CORPUS 41 / FALLBACK_ONLY 6 / PROBE_ONLY 2 / MIR_ONLY 5 / TEMPLATE 4
+
+[[fn]]
+name = "__die"
+site = "crates/almide-mir/src/render_wasm_p3.rs:161"
+digest = "99fb3c2e69e7"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "__div_trap"
+site = "crates/almide-mir/src/render_wasm_p3.rs:124"
+digest = "4495e0fb3c83"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "__export_"
+site = "crates/almide-mir/src/render_wasm.rs:668"
+digest = "d1959ff9df04"
+class = "TEMPLATE"
+why = "`(func $__export_{internal}…)` — the export-wrapper TEMPLATE; each instance carries a user function's name."
+
+[[fn]]
+name = "__import_"
+site = "crates/almide-mir/src/render_wasm.rs:538"
+digest = "e7030093815d"
+class = "TEMPLATE"
+why = "`(import … (func $__import_{sym}…))` — the extern-import TEMPLATE, one instance per declared import."
+
+[[fn]]
+name = "__main_err"
+site = "crates/almide-mir/src/render_wasm_p3.rs:142"
+digest = "4f2cf058ce91"
+class = "CORPUS"
+via = "args_surface.almd"
+
+[[fn]]
+name = "__mg_take"
+site = "crates/almide-mir/src/render_wasm.rs:685"
+digest = "4185da3f48a0"
+class = "CORPUS"
+via = "mg_rebuild_two_phase.almd"
+
+[[fn]]
+name = "__probe_digits"
+site = "crates/almide-mir/src/render_wasm_p3.rs:38"
+digest = "c63c0b92bcb1"
+class = "PROBE_ONLY"
+why = "emitted only when ALMIDE_FUEL_PROBE=1 (charge_probe::probe_enabled). Measured: the flag makes it appear in any program's module."
+
+[[fn]]
+name = "__probe_print"
+site = "crates/almide-mir/src/render_wasm_p3.rs:38"
+digest = "ed1128607382"
+class = "PROBE_ONLY"
+why = "emitted only when ALMIDE_FUEL_PROBE=1 (charge_probe::probe_enabled). Measured: the flag makes it appear in any program's module."
+
+[[fn]]
+name = "__wall_hit"
+site = "crates/almide-mir/src/render_wasm_p3.rs:51"
+digest = "bddcd35c51ce"
+class = "CORPUS"
+via = "fuel_timeout_ends.almd"
+
+[[fn]]
+name = "__wall_now"
+site = "crates/almide-mir/src/render_wasm_p3.rs:51"
+digest = "57b85fd6d4de"
+class = "CORPUS"
+via = "fuel_timeout_ends.almd"
+
+[[fn]]
+name = "alloc"
+site = "crates/almide-mir/src/render_wasm_p3.rs:172"
+digest = "63591a64eb5c"
+class = "PROVEN"
+via = "alias_combinator_rc.almd"
+proof = "proofs/FreeList.v"
+
+[[fn]]
+name = "alloc8"
+site = "crates/almide-mir/src/render_wasm_p3.rs:237"
+digest = "04b05ec82dda"
+class = "PROVEN"
+via = "fan_settle_tuple.almd"
+proof = "proofs/FreeList.v"
+
+[[fn]]
+name = "args_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:65"
+digest = "b50cc5f342d7"
+class = "CORPUS"
+via = "args_surface.almd"
+
+[[fn]]
+name = "args_get_list"
+site = "crates/almide-mir/src/render_wasm_p3.rs:450"
+digest = "32c1abadb7b6"
+class = "CORPUS"
+via = "args_surface.almd"
+
+[[fn]]
+name = "args_sizes_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:63"
+digest = "715c73fdb520"
+class = "CORPUS"
+via = "args_surface.almd"
+
+[[fn]]
+name = "clock_time_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:89"
+digest = "c36972df37dc"
+class = "CORPUS"
+via = "fuel_timeout_ends.almd"
+
+[[fn]]
+name = "elem_addr"
+site = "crates/almide-mir/src/render_wasm_p3.rs:297"
+digest = "da906ab99826"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "elem_addr_chk"
+site = "crates/almide-mir/src/render_wasm_p3.rs:316"
+digest = "b557581e5fcf"
+class = "CORPUS"
+via = "call_closure_lambda_param.almd"
+
+[[fn]]
+name = "env_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:508"
+digest = "6d99767442b6"
+class = "CORPUS"
+via = "env_get.almd"
+
+[[fn]]
+name = "environ_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:69"
+digest = "09df9c7f2b50"
+class = "CORPUS"
+via = "env_get.almd"
+
+[[fn]]
+name = "environ_sizes_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:67"
+digest = "ff8cb2edc6b3"
+class = "CORPUS"
+via = "env_get.almd"
+
+[[fn]]
+name = "fd_close"
+site = "crates/almide-mir/src/render_wasm_p3.rs:75"
+digest = "fdce94b818bf"
+class = "CORPUS"
+via = "fan_settle_tuple.almd"
+
+[[fn]]
+name = "fd_filestat_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:77"
+digest = "a4be912262c9"
+class = "CORPUS"
+via = "fan_settle_tuple.almd"
+
+[[fn]]
+name = "fd_read"
+site = "crates/almide-mir/src/render_wasm_p3.rs:73"
+digest = "250a0bc852cb"
+class = "CORPUS"
+via = "fan_settle_tuple.almd"
+
+[[fn]]
+name = "fd_readdir"
+site = "crates/almide-mir/src/render_wasm_p3.rs:79"
+digest = "8138391eb8eb"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "fd_write"
+site = "crates/almide-mir/src/render_wasm_p3.rs:59"
+digest = "a898e4ffed9c"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "is_dot_entry"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:674"
+digest = "c3ca7c77e168"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "itoa_append"
+site = "crates/almide-mir/src/render_wasm_p3.rs:363"
+digest = "c6037df97b58"
+class = "MIR_ONLY"
+ref = "#1208"
+why = "called only by $print_int/$print_list is constructed only by hand-built MIR (certificate_p2.rs, translation_validation.rs) — no frontend lowering emits it, so no .almd program reaches this wasm. Emission is checked (translation_validation mutation test); the BODY is not."
+
+[[fn]]
+name = "list_copy"
+site = "crates/almide-mir/src/render_wasm_p3.rs:339"
+digest = "dd4b194ca2f0"
+class = "CORPUS"
+via = "alias_cow.almd"
+
+[[fn]]
+name = "list_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:327"
+digest = "47515830f246"
+class = "FALLBACK_ONLY"
+via = "fs.list_dir"
+why = "reached through dirent list build; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
+
+[[fn]]
+name = "list_len"
+site = "crates/almide-mir/src/render_wasm_p3.rs:330"
+digest = "a594d53bf87c"
+class = "MIR_ONLY"
+ref = "#1208"
+why = "called only by $print_list is constructed only by hand-built MIR (certificate_p2.rs, translation_validation.rs) — no frontend lowering emits it, so no .almd program reaches this wasm. Emission is checked (translation_validation mutation test); the BODY is not."
+
+[[fn]]
+name = "list_new"
+site = "crates/almide-mir/src/render_wasm_p3.rs:258"
+digest = "67c00ad80bac"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "list_push"
+site = "crates/almide-mir/src/render_wasm_p3.rs:354"
+digest = "376724cbb191"
+class = "MIR_ONLY"
+ref = "#1208"
+why = "RtFn::ListPush is constructed only by hand-built MIR (certificate_p2.rs, translation_validation.rs) — no frontend lowering emits it, so no .almd program reaches this wasm. Emission is checked (translation_validation mutation test); the BODY is not."
+
+[[fn]]
+name = "list_set"
+site = "crates/almide-mir/src/render_wasm_p3.rs:324"
+digest = "c691b3f13f11"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "main"
+site = "crates/almide-mir/src/pipeline_c.rs:347"
+digest = "f29bc94be267"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "make_dir"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:298"
+digest = "2f37d179fc39"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "name"
+site = "crates/almide-mir/src/render_wasm.rs:191"
+digest = "fa03a4a87d6a"
+class = "TEMPLATE"
+why = "`(func ${}` — the MirFunction rendering template (render_wasm_b.rs); every program function is an instance."
+
+[[fn]]
+name = "oom"
+site = "crates/almide-mir/src/render_wasm_p3.rs:137"
+digest = "bcb5d1388f9b"
+class = "PROVEN"
+via = "alias_combinator_rc.almd"
+proof = "proofs/FreeList.v"
+
+[[fn]]
+name = "path_create_directory"
+site = "crates/almide-mir/src/render_wasm_p3.rs:83"
+digest = "7811a3f30bb9"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "path_exists"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:368"
+digest = "89e689310bd8"
+class = "CORPUS"
+via = "fs_preopen_resolve.almd"
+
+[[fn]]
+name = "path_filestat_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:81"
+digest = "abb7f8098cc0"
+class = "CORPUS"
+via = "fs_preopen_resolve.almd"
+
+[[fn]]
+name = "path_filestat_q"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:346"
+digest = "87cd0805641b"
+class = "FALLBACK_ONLY"
+via = "fs.stat"
+why = "reached through prim.path_filestat; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
+
+[[fn]]
+name = "path_norm"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:38"
+digest = "54e7c0414c0a"
+class = "CORPUS"
+via = "fan_settle_tuple.almd"
+
+[[fn]]
+name = "path_open"
+site = "crates/almide-mir/src/render_wasm_p3.rs:71"
+digest = "1b54f5848d0e"
+class = "CORPUS"
+via = "fan_settle_tuple.almd"
+
+[[fn]]
+name = "path_remove_directory"
+site = "crates/almide-mir/src/render_wasm_p3.rs:85"
+digest = "483e5bc3243e"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "path_unlink_file"
+site = "crates/almide-mir/src/render_wasm_p3.rs:87"
+digest = "2fe62b017aff"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "print_int"
+site = "crates/almide-mir/src/render_wasm_p3.rs:428"
+digest = "5f544cd9d766"
+class = "MIR_ONLY"
+ref = "#1208"
+why = "RtFn::PrintInt is constructed only by hand-built MIR (certificate_p2.rs, translation_validation.rs) — no frontend lowering emits it, so no .almd program reaches this wasm. Emission is checked (translation_validation mutation test); the BODY is not."
+
+[[fn]]
+name = "print_list"
+site = "crates/almide-mir/src/render_wasm_p3.rs:388"
+digest = "c3b1a1fbb217"
+class = "MIR_ONLY"
+ref = "#1208"
+why = "RtFn::PrintList is constructed only by hand-built MIR (certificate_p2.rs, translation_validation.rs) — no frontend lowering emits it, so no .almd program reaches this wasm. Emission is checked (translation_validation mutation test); the BODY is not."
+
+[[fn]]
+name = "proc_exit"
+site = "crates/almide-mir/src/render_wasm_p3.rs:91"
+digest = "6e440ccb7814"
+class = "CORPUS"
+via = "alias_combinator_rc.almd"
+
+[[fn]]
+name = "random_get"
+site = "crates/almide-mir/src/render_wasm_p3.rs:61"
+digest = "82206e79c279"
+class = "CORPUS"
+via = "random_int_entropy.almd"
+
+[[fn]]
+name = "rc_dec"
+site = "crates/almide-mir/src/render_wasm_p3.rs:278"
+digest = "08a8b2207fd9"
+class = "PROVEN"
+via = "alias_combinator_rc.almd"
+proof = "proofs/FreeList.v"
+
+[[fn]]
+name = "rc_inc"
+site = "crates/almide-mir/src/render_wasm_p3.rs:291"
+digest = "95ffa64bdf13"
+class = "PROVEN"
+via = "alias_combinator_rc.almd"
+proof = "proofs/FreeList.v"
+
+[[fn]]
+name = "read_dir"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:585"
+digest = "db5c55e61af0"
+class = "FALLBACK_ONLY"
+via = "fs.list_dir"
+why = "reached through prim.read_dir; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
+
+[[fn]]
+name = "read_line"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:388"
+digest = "a2f59da171ed"
+class = "FALLBACK_ONLY"
+via = "io.read_line"
+why = "reached through prim.read_line; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
+
+[[fn]]
+name = "read_n_bytes"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:420"
+digest = "212672a20dec"
+class = "FALLBACK_ONLY"
+via = "io.read_all"
+why = "reached through prim.read_n_bytes; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
+
+[[fn]]
+name = "read_text_file"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:140"
+digest = "1350cfbd08cc"
+class = "CORPUS"
+via = "fan_settle_tuple.almd"
+
+[[fn]]
+name = "remove_all"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:537"
+digest = "02224ca5d6c9"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "remove_path"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:455"
+digest = "9c468a1b6f2e"
+class = "CORPUS"
+via = "fs_relative_path.almd"
+
+[[fn]]
+name = "rtf_result"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:232"
+digest = "28f779ae7f2d"
+class = "CORPUS"
+via = "fan_settle_tuple.almd"
+
+[[fn]]
+name = "rtf_str"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:215"
+digest = "c9fe904ab5dd"
+class = "CORPUS"
+via = "args_surface.almd"
+
+[[fn]]
+name = "str_lt"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:559"
+digest = "8a2c5967004c"
+class = "FALLBACK_ONLY"
+via = "fs.list_dir"
+why = "reached through dirent name ordering; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
+
+[[fn]]
+name = "sym"
+site = "crates/almide-mir/src/render_wasm_dce.rs:37"
+digest = "802752f63915"
+class = "TEMPLATE"
+why = "`(import … (func ${sym}…))` — the import-symbol template, and a doc mention in render_wasm_dce.rs."
+
+[[fn]]
+name = "write_text_file"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:251"
+digest = "23be9d847319"
+class = "CORPUS"
+via = "fs_preopen_resolve.almd"
+
