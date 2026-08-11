@@ -85,6 +85,8 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (func $path_remove_directory (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_unlink_file"
     (func $path_unlink_file (param i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_rename"
+    (func $path_rename (param i32 i32 i32 i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "clock_time_get"
     (func $clock_time_get (param i32 i64 i32) (result i32)))
   (import "wasi_snapshot_preview1" "proc_exit"
