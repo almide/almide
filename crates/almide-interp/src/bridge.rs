@@ -558,43 +558,65 @@ fn float_text_fn(func: &str, args: &[Value]) -> Option<Flow> {
 
 // ── math ────────────────────────────────────────────────────────
 
+/// The vendored-musl-libm transcendentals, by stdlib name. `None` = not a
+/// vendored transcendental (the caller then decides: honest abstain, or one of
+/// the platform-exact ops like sqrt/abs).
+fn math_vendored_libm(func: &str, args: &[Value]) -> Option<f64> {
+    use crate::vendored_libm as vl;
+    let x = as_float(args.first())?;
+    Some(match func {
+        "sin" => vl::almide_rt_libm_sin(x),
+        "cos" => vl::almide_rt_libm_cos(x),
+        "tan" => vl::almide_rt_libm_tan(x),
+        "atan" => vl::almide_rt_libm_atan(x),
+        "tanh" => vl::almide_rt_libm_tanh(x),
+        "exp" => vl::almide_rt_libm_exp(x),
+        "expm1" => vl::almide_rt_libm_expm1(x),
+        "ln" | "log" => vl::almide_rt_libm_log(x),
+        "log2" => vl::almide_rt_libm_log2(x),
+        "log10" => vl::almide_rt_libm_log10(x),
+        "fpow" | "powf" | "pow" => {
+            let y = as_float(args.get(1))?;
+            vl::almide_rt_libm_pow(x, y)
+        }
+        _ => return None,
+    })
+}
+
 fn math_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    // TRANSCENDENTALS DIVERGE FROM THE ORACLE. Both backends deliberately route
-    // `math.sin/cos/tan/exp/log*/pow` (and float `**`) through a VENDORED
-    // musl-libm (`runtime/rs/src/libm.rs`, mirrored by `emit_wasm/rt_libm.rs`)
-    // rather than the platform `f64::sin/…`, because the system libm's last-ULP
-    // result is platform-specific and provides no stable oracle (the StrictMath
-    // / fdlibm decision). Rust `std`'s `f64::sin` calls that same platform libm,
-    // so if the interp used it here it would diverge from the native==wasm
-    // consensus in the last ULP (e.g. `0.799441007199113` vs
-    // `0.7994410071991129`) and cast a WRONG third vote into the cross-target
-    // oracle. The interp does not vendor the libm (it would couple this lean
-    // crate to `almide_rt`'s heavyweight TLS deps and risk silent drift from the
-    // oracle), so it honestly reports `Unsupported` for the platform-libm
-    // transcendentals; the 3-way gate logs a reasoned skip.
+    // The transcendental floor is the VENDORED musl-libm both backends run
+    // (`crate::vendored_libm`, included from runtime/rs/src/libm.rs — see that
+    // module's header for why include! beats a copy or a crate dep). Before
+    // this the interp abstained here, because Rust `std`'s `f64::sin` calls the
+    // PLATFORM libm and would diverge from the native==wasm consensus in the
+    // last ULP (`0.799441007199113` vs `0.7994410071991129`), casting a WRONG
+    // third vote. Computing the consensus algorithm restores the third judge.
     //
-    // SAFE here: `sqrt` is IEEE-754 correctly-rounded (identical on every libm /
-    // platform), `abs` is exact, and `pi` / `e` are constants — all match the
-    // backends bit-for-bit.
+    // `sqrt` stays on `f64::sqrt` (IEEE-754 correctly rounded — identical on
+    // every platform and equal to the wasm `f64.sqrt` opcode), `abs` is exact,
+    // `pi`/`e` are constants.
     //
-    // The float `**` OPERATOR is the same class and abstains in the binop
-    // path (`eval_match.rs`, `BinOp::PowFloat`). It did NOT until #924: the
-    // module path skipped honestly while the operator voted with the platform
-    // libm, so the oracle's third vote was wrong and the nightly fuzzer
-    // reported the 1-ULP disagreement as a finding. Any future transcendental
-    // reachable through an OPERATOR (not just a module fn) has to abstain in
-    // both places.
+    // NOT bridged, and still honestly Unsupported: names the vendored file does
+    // not provide (`asin`/`acos`/`atan2`/`sinh`/`cosh`/`exp2`/`log1p`/`cbrt`/
+    // `hypot`). The runtime's own asin/acos/atan2 delegate to the PLATFORM
+    // libm, so they have no stable oracle either — they are unreachable from
+    // Almide today (no `@intrinsic` in stdlib/math.almd) and must not be
+    // bridged here on a guess.
+    //
+    // The float `**` OPERATOR is the same floor and routes to the same
+    // `pow` in the binop path (`eval_match.rs`, `BinOp::PowFloat`) — #924's
+    // rule stands: a transcendental reachable through an OPERATOR must agree
+    // in both places.
+    if let Some(v) = math_vendored_libm(func, args) {
+        return Some(Flow::val(Value::Float(v)));
+    }
     if matches!(
         func,
-        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2"
-            | "sinh" | "cosh" | "tanh"
-            | "exp" | "exp2" | "expm1"
-            | "ln" | "log" | "log2" | "log10" | "log1p"
-            | "pow" | "fpow" | "powf" | "cbrt" | "hypot"
+        "asin" | "acos" | "atan2" | "sinh" | "cosh"
+            | "exp2" | "log1p" | "cbrt" | "hypot"
     ) {
         return Some(Flow::Unsupported(format!(
-            "transcendental `math.{func}` (backends use vendored musl-libm; \
-             interp's platform libm diverges in the last ULP — no oracle match)"
+            "transcendental `math.{func}` (no vendored musl-libm implementation;              the runtime's own delegates to the platform libm — no oracle match)"
         )));
     }
     let f = match func {

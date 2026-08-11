@@ -43,7 +43,6 @@ fan_deterministic  out-of-interp-scope capability: fan.any
 fan_pure_thunks  out-of-interp-scope capability: fan.any
 fan_settle_tuple  out-of-interp-scope capability: prim.read_text_file
 fan_var_thunk_list  out-of-interp-scope capability: fan.any
-float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file
 fs_relative_path  out-of-interp-scope capability: prim.make_dir
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
@@ -51,8 +50,7 @@ heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
 hex_two_module_link  out-of-interp-scope capability: prim.handle
 host_floor_string_alloc  out-of-interp-scope capability: prim.make_dir
 int_from_hex  out-of-interp-scope capability: prim.handle
-int_pow_negative_exponent  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-int_pow_overflow_wraps  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+int_pow_negative_exponent  out-of-interp-scope capability: prim.handle
 int_rotate_nonpositive_width  out-of-interp-scope capability: prim.handle
 io_write_ordering  out-of-interp-scope capability: prim.handle
 json_gltf_walk  out-of-interp-scope capability: prim.handle
@@ -85,10 +83,6 @@ map_set_eq  out-of-interp-scope capability: prim.alloc_map
 map_set_ops  out-of-interp-scope capability: prim.alloc_map
 map_set_typechange  out-of-interp-scope capability: prim.alloc_map
 map_wide_int_key  out-of-interp-scope capability: prim.alloc_map
-math_atan_tanh  out-of-interp-scope capability: transcendental `math.atan` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-math_explog  out-of-interp-scope capability: transcendental `math.exp` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-math_log_gamma  out-of-interp-scope capability: transcendental `math.fpow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-math_pow  out-of-interp-scope capability: float `**` (backends use vendored musl-libm pow; interp's platform libm diverges in the last ULP — no oracle match)
 matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_rows  out-of-interp-scope capability: prim.alloc_list_str
@@ -133,7 +127,6 @@ string_rle  out-of-interp-scope capability: prim.handle
 string_split_rle_codepoint  out-of-interp-scope capability: prim.handle
 string_whitespace  out-of-interp-scope capability: prim.alloc_str
 tco_map_acc_seed  out-of-interp-scope capability: prim.alloc_map
-trig_libm  out-of-interp-scope capability: transcendental `math.sin` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 unwrap_or_operand  out-of-interp-scope capability: prim.handle
 value_array_leak_loop  out-of-interp-scope capability: prim.alloc_value
 value_array_tuple_tco  out-of-interp-scope capability: prim.alloc_value
