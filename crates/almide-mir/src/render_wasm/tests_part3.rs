@@ -565,6 +565,11 @@
         "$read_dir", "$str_lt", "$is_dot_entry",
         "$write_text_file", "$make_dir", "$remove_all", "$remove_path", "$read_line",
         "$read_n_bytes", "$path_exists", "$path_filestat_q", "$path_norm",
+        // fs.rename's floor (PrimKind::Rename → Capability::FsWrite; the
+        // normalized two-path path_rename call, C-228) and fs.is_symlink's
+        // no-follow stat twin (PrimKind::PathFilestatNoFollow →
+        // Capability::FsRead; lookupflags 0 exposes filetype 7, C-228).
+        "$rename", "$path_filestat_nf",
     ];
 
     // The §13 TERMINATION-CONVENTION floor: contract-mandated aborts (C-001/C-035
