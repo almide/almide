@@ -6,6 +6,9 @@
 #   - a baseline entry whose file now runs the wasm leg -> FAIL as STALE
 #     (prune it in the same change — the set only shrinks).
 set -euo pipefail
+# Pin the collation locale (#1031): the ratchet diff must not depend on the
+# machine's sort order.
+export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BASELINE="$ROOT/proofs/wasm-fallback-baseline.txt"
 BIN="${ALMIDE_BIN:-almide}"
