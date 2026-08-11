@@ -77,7 +77,7 @@ def surface(module_filter=None):
 def synth_args(params):
     """Literals for a parameter list, or None when a type is outside the table."""
     if not params.strip():
-        return ""
+        return []
     args = []
     depth, cur = 0, ""
     for ch in params + ",":          # split on top-level commas only
@@ -98,15 +98,34 @@ def synth_args(params):
         if ty not in LITERALS:
             return None
         lits.append(LITERALS[ty])
-    return ", ".join(lits)
+    return lits
 
 
-def program(f, args):
+def programs(f, args):
+    """Candidate probe shapes, tried in order until one builds NATIVELY.
+
+    A single fixed shape produces false GAPs: `let _ = <Unit-returning call>`
+    walls the wasm renderer on its own ("scalar binding outside the value
+    subset"), which reported all 40 of the bytes mutators — append_*, set_*,
+    fill, clear — as missing on wasm when the bare statement form lowers fine.
+    The verdict must describe the FUNCTION, not the wrapper, so the shape is
+    chosen by what the control leg accepts rather than assumed.
+    """
     imp = f"import {f['module']}\n\n" if f["module"] in NEEDS_IMPORT else ""
-    call = f"{f['module']}.{f['name']}({args})"
-    if f["effect"]:
-        return f"{imp}effect fn main() -> Unit = {{\n  let _ = {call}!\n}}\n"
-    return f"{imp}fn main() -> Unit = {{\n  let _ = {call}\n}}\n"
+    # Every argument is HOISTED to a local binding. Passing a literal inline
+    # made the in-place mutators (set_*/write_*) report as gaps: the wasm
+    # renderer requires a writable receiver to be a binding, so
+    # `bytes.set_u8(bytes.from_list([…]), 0, 7)` walls on the RECEIVER SHAPE
+    # while the hoisted form lowers. Hoisting is also how real code is written.
+    binds = "".join(f"  let a{i} = {a}\n" for i, a in enumerate(args))
+    names = ", ".join(f"a{i}" for i in range(len(args)))
+    call = f"{f['module']}.{f['name']}({names})"
+    bang = "!" if f["effect"] else ""
+    head = "effect fn" if f["effect"] else "fn"
+    bodies = [f"  let _ = {call}{bang}", f"  {call}{bang}"]
+    if f["ret"] == "Unit":                       # a Unit result binds to nothing useful
+        bodies.reverse()
+    return [f"{imp}{head} main() -> Unit = {{\n{binds}{b}\n}}\n" for b in bodies]
 
 
 def run(cmd):
@@ -121,26 +140,27 @@ def classify(f):
     args = synth_args(f["params"])
     if args is None:
         return "UNPROBEABLE", "parameter type outside the literal table"
-    src = program(f, args)
-    tf = tempfile.NamedTemporaryFile("w", suffix=".almd", delete=False, dir="/tmp")
-    tf.write(src); tf.close()
-    try:
-        rc, out = run([ALMIDE, "check", tf.name])
-        if rc != 0:
-            return "UNPROBEABLE", "synthesized call does not type"
-        rc, out = run([ALMIDE, "build", tf.name, "-o", tf.name + ".bin"])
-        if rc != 0:
-            return "UNPROBEABLE", "native build failed (no control)"
-        rc, out = run([ALMIDE, "build", tf.name, "--target", "wasm", "-o", tf.name + ".wasm"])
-        if rc == 0:
-            return "PARITY", ""
-        reason = "wasm renderer wall" if WALL_RX.search(out) else "wasm build failed"
-        m = re.search(r"wall: (.+)", out)
-        return "GAP", (m.group(1)[:160] if m else reason)
-    finally:
-        for ext in ("", ".bin", ".wasm"):
-            try: os.unlink(tf.name + ext)
-            except OSError: pass
+    for src in programs(f, args):
+        tf = tempfile.NamedTemporaryFile("w", suffix=".almd", delete=False, dir="/tmp")
+        tf.write(src); tf.close()
+        try:
+            # The CONTROL: this shape has to type and build natively, or it says
+            # nothing about the function and the next shape gets a turn.
+            if run([ALMIDE, "check", tf.name])[0] != 0:
+                continue
+            if run([ALMIDE, "build", tf.name, "-o", tf.name + ".bin"])[0] != 0:
+                continue
+            rc, out = run([ALMIDE, "build", tf.name, "--target", "wasm", "-o", tf.name + ".wasm"])
+            if rc == 0:
+                return "PARITY", ""
+            m = re.search(r"wall: (.+)", out)
+            return "GAP", (m.group(1)[:160] if m else
+                           "wasm renderer wall" if WALL_RX.search(out) else "wasm build failed")
+        finally:
+            for ext in ("", ".bin", ".wasm"):
+                try: os.unlink(tf.name + ext)
+                except OSError: pass
+    return "UNPROBEABLE", "no candidate shape builds natively"
 
 
 def main():
