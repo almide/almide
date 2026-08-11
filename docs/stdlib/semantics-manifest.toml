@@ -476,3 +476,191 @@ name = "read_f16_le"
 index_unit = "value"
 probe = 'bytes.read_f16_le(bytes.from_list([0, 62]), 0)'
 expect = "1.5"
+
+# The `_at` CURSOR family. The returned Int is the NEXT byte offset, not a
+# length — `read_i32_be_at(b, 0)` is `(4, some(…))`, and a caller who reads it
+# as "4 bytes consumed" happens to be right here and wrong for a
+# length-prefixed string, where the cursor jumps the prefix too (7, not 3).
+# The probe destructures instead of stringifying the whole tuple: `(Int, T?)`
+# in interpolation position walls the wasm renderer, and the destructured form
+# both lowers AND pins the decoded value alongside the cursor.
+
+[[bytes.fn]]
+name = "read_i16_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/258"
+
+[[bytes.fn]]
+name = "read_i16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/513"
+
+[[bytes.fn]]
+name = "read_u16_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/258"
+
+[[bytes.fn]]
+name = "read_u16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/513"
+
+[[bytes.fn]]
+name = "read_i32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/16909060"
+
+[[bytes.fn]]
+name = "read_i32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/67305985"
+
+[[bytes.fn]]
+name = "read_u32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/16909060"
+
+[[bytes.fn]]
+name = "read_u32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/67305985"
+
+[[bytes.fn]]
+name = "read_i64_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i64_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "8/72623859790382856"
+
+[[bytes.fn]]
+name = "read_i64_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_i64_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "8/578437695752307201"
+
+[[bytes.fn]]
+name = "read_u8_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_u8_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "1/1"
+
+[[bytes.fn]]
+name = "read_f32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f32_be_at(bytes.from_list([63, 192, 0, 0]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "4/1.5"
+
+[[bytes.fn]]
+name = "read_f32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f32_le_at(bytes.from_list([0, 0, 192, 63]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "4/1.5"
+
+[[bytes.fn]]
+name = "read_f64_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f64_be_at(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "8/1.5"
+
+[[bytes.fn]]
+name = "read_f64_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f64_le_at(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "8/1.5"
+
+[[bytes.fn]]
+name = "read_f16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_f16_le_at(bytes.from_list([0, 62]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "2/1.5"
+
+[[bytes.fn]]
+name = "read_bool_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_bool_at(bytes.from_list([1, 0]), 0)',
+  'let combined = "${cur}/${v ?? false}"',
+]
+probe = 'combined'
+expect = "1/true"
+
+[[bytes.fn]]
+name = "read_string_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.read_string_be_at(bytes.from_list([0, 0, 0, 3, 97, 98, 99]), 0)',
+  'let combined = "${cur}/${v ?? \"?\"}"',
+]
+probe = 'combined'
+expect = "7/abc"
