@@ -1,0 +1,9 @@
+// fs_rename — SELF-HOSTED `fs.rename(src, dst)` over the WASI path_rename floor
+// (prim.rename), the v1 trust-spine realization of the effectful `fs.rename`.
+// A straight pass-through, like fs_read_text: the prim packages the normalized
+// two-path path_rename call and the `Result[Unit, String]` construction (the
+// cap-as-tag block — Ok len@4=0 + tag@16=0, Err with the native std::io Display
+// text). Matching native `std::fs::rename` for the observable rename + err
+// class. Reaching prim.rename carries Capability::FsWrite (a rename IS a
+// filesystem write — the fs.write accounting).
+effect fn fs_rename(src: String, dst: String) -> Result[Unit, String] = prim.rename(src, dst)
