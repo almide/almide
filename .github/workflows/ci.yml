@@ -562,8 +562,29 @@ jobs:
         with:
           node-version: 20
 
+      - name: Cache wasm-pack tarball
+        uses: actions/cache@v6
+        with:
+          path: wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz
+          key: wasm-pack-v0.13.1-x86_64-linux
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        # Pinned + cached + retried (the wasmtime pattern, #1255). The old form
+        # was an unpinned installer script fetched WITHOUT `curl -f` and piped
+        # into `sh` — a rate-limit body would have been EXECUTED, and the flake
+        # class cost a manual rerun on PR #1254. On a cache hit this never
+        # downloads at all; `-f` turns a 429 body into a retry.
+        run: |
+          VERSION=v0.13.1
+          TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xzf "$TARBALL"
+          sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
+          wasm-pack --version
 
       - uses: actions/cache@v6
         with:
@@ -625,8 +646,29 @@ jobs:
         with:
           node-version: 20
 
+      - name: Cache wasm-pack tarball
+        uses: actions/cache@v6
+        with:
+          path: wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz
+          key: wasm-pack-v0.13.1-x86_64-linux
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        # Pinned + cached + retried (the wasmtime pattern, #1255). The old form
+        # was an unpinned installer script fetched WITHOUT `curl -f` and piped
+        # into `sh` — a rate-limit body would have been EXECUTED, and the flake
+        # class cost a manual rerun on PR #1254. On a cache hit this never
+        # downloads at all; `-f` turns a 429 body into a retry.
+        run: |
+          VERSION=v0.13.1
+          TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xzf "$TARBALL"
+          sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
+          wasm-pack --version
 
       - uses: actions/cache@v6
         with:
