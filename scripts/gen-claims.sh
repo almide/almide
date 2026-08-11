@@ -172,7 +172,8 @@ stage_block() {
   printf '> the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).\n'
   printf '>\n'
   printf '> **Stage 5 (auditability): %s release seal(s); %s verification gates classified\n' "$seals" "$gates"
-  printf '> (%s UNVERIFIED under a shrink-only ceiling); TOR with %s enforced rows.**\n' "$unverified" "$torrows"
+  printf '> (%s UNVERIFIED under a shrink-only ceiling); TOR with %s enforced rows;\n' "$unverified" "$torrows"
+  printf '> gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**\n'
 }
 if grep -qxF "$SSTART" "$STAGES"; then
   sblockfile="$(mktemp)"
