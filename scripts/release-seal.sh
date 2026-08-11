@@ -98,6 +98,7 @@ if [ "$cmd" = "gen" ]; then
     echo "[recorded]"
     echo "release_gate = \"FILL: the gate evidence (fuzz run id, shards, findings disposition)\""
     echo "assets = \"FILL: released asset inventory\""
+    echo "known_problems = \"FILL: the release's known-problem ledger (issue refs + dispositions), or 'none'\""
   } > "$out"
   echo "release-seal: wrote $out — fill the [recorded] fields, then commit"
   exit 0
@@ -139,7 +140,7 @@ for seal in "${seals[@]}"; do
   [ "${want[version]:-}" = "${tag#v}" ] || { echo "  $tag: version '${want[version]:-}' != '${tag#v}'" >&2; fail=1; }
   commit=$(git -C "$ROOT" rev-parse "$tag^{commit}")
   [ "${want[tag_commit]:-}" = "$commit" ] || { echo "  $tag: tag_commit '${want[tag_commit]:-}' != measured '$commit'" >&2; fail=1; }
-  for rk in release_gate assets; do
+  for rk in release_gate assets known_problems; do
     case "${want[$rk]:-}" in
       ""|FILL:*) echo "  $tag: [recorded] $rk is unfilled — a seal without its gate evidence is not a seal" >&2; fail=1 ;;
     esac

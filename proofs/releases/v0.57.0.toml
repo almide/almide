@@ -24,3 +24,4 @@ wasmtime = "v47.0.3"
 [recorded]
 release_gate = "manual fuzz dispatch, actions run 31486558420: 4/4 shards survived, ~4,000 programs, 0 correctness findings; the 1 finding (Hang__wasm_run_hung) was triaged to quadratic-slow perf debt (#1229) and recorded as a known limitation in the release notes"
 assets = "6: almide-linux-x86_64, almide-linux-aarch64, almide-macos-x86_64, almide-macos-aarch64, almide-windows-x86_64.exe, SHA256SUMS"
+known_problems = "#1229 quadratic wasm string-accumulator concat — byte-correct output, completes at ~4x the 30s budget on CI hardware; perf-class, disclosed in the release notes and tracked under the fuzz-perf discipline. The env.set wasm cell is HOST_CAPABILITY by design (C-228's ledger row: WASI preview1 has no environ-write)."
