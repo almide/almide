@@ -28,10 +28,6 @@
 #
 # COMPILER_FRONTIER — the burn-down:
 env.set :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capabili
-fs.read_bytes_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_bytes_if_exists needs a d
-fs.read_bytes_raw_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_bytes_raw_if_exists needs
-fs.read_lines_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_lines_if_exists needs a d
-fs.read_text_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_text_if_exists needs a de
 matrix.select_rows_f32 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_f32 — rendering them would emit a 
 matrix.select_rows_q1_0 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q1_0 — rendering them would emit a
 matrix.select_rows_q8_0_dq :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q8_0_dq — rendering them would emi
