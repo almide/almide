@@ -309,3 +309,32 @@ F7 (strtod)         ── 独立 brick、F1 の精度規範が先でも可
 小さく即効の F6-2 → 証拠の信頼性を回復する F4/F5 → 現状を直視する F2-1 → 構造的な
 F3/F1 の順。**F1 と F2 が閉じるまで、「航空品質」を名乗る主張は evidence ladder の
 rank を明示して限定的に行う**こと（無限定の "flight-grade" 表現の自粛）。
+
+---
+
+## 再測定 2026-08-12 — 所見の現在地(1 ヶ月の保証工事後)
+
+7 月の初回監査から 1 ヶ月、Stage 1〜4 の工事(scalar-read/WAT-prelude/libm 監査、
+3-way 投票ゲート、分類器修理、リリース封印、G-F4 アプリ)を経た**再測定**。
+台帳は追記のみ — 上の所見本文は当時の記録として不変。
+
+| # | 7 月時点 | 2026-08-12 実測 | 残余 |
+|---|---|---|---|
+| F1 | 部分(spec-keying 機構稼働、全契約展開が残) | **機構は全数化**: 230/230 契約が `spec =` keyed、check-contracts が両方向を強制(存在しない節参照 = FAIL、全 ALS 正規節が ≥1 契約に引用)。写経 self-host はヘッダを ALS 節参照に張替済み(json_parse → ALS-T3 等)。さらに **interp が実行可能仕様に昇格**: 3-way 投票 254/374 fixture(native==wasm==interp byte 一致)、棄権は分類台帳(HEAP_BOUNDARY 120 / BRIDGEABLE 0)+ shrink-only ラチェット、semantics-manifest 全 20 モジュール実測 | ALS 節の**執筆網羅**(構文要素側の完全性 = Stage 3 ゲートの残半分)と HEAP_BOUNDARY 120 の interp ヒープアーク(#1226) |
+| F2 | 部分(coverage 65.89% 計測、文言修正済) | 文言と検証内容の一致は**構造化**: proven-vs-trusted.md(境界図)が「各ゲートが主張すること/しないこと」を一枚化。coverage は **CI ラチェット化**(fuzz-nightly の coverage-ratchet job #566、baseline 減少のみ許容)。#1183 クラスは scalar-read 監査(63 arm 全分類、UNGUARDED 0、CI ゲート)で**族として絶滅**。同型監査を WAT prelude 63 fn / platform-libm 23 呼び出しへ水平展開済み | **MC/DC は依然ゼロ**(DAL-A の object-code MC/DC どころか branch coverage も未計測 — line のみ)。分岐カバレッジ導入が次の一手 |
+| F3 | 開存(境界図なし、整合ゲートなし) | item 1 **クローズ**: docs/contracts/proven-vs-trusted.md が監査人向け境界図として存在、CLAUDE.md から参照。item 2 部分: mir==ir caps ゲート・rollback lifted_mark 検査・released-merge backing 検査など「今回のバグ 5 クラス」対応ゲートは個別に存在(F8 の根治群)— ただし「追跡集合整合」の**単一の名前付きゲート**としては未統合 | 整合検査群の台帳化(どのバグクラスにどのゲートが対応するかの対応表)。per-function cert 化への合流は長期のまま |
+| F4-F8 | クローズ | **クローズ維持** + 強化: F5 の ratchet-separation は本日も全 PR で機能(baseline 変更は分離コミット)。F6 の刻印は本日 gate.sh が PATH/workspace 不一致を FATAL 捕捉(機能証明)。検証の決定性には **fuzz 分類器の Slow/Hang 分離**(#1235)が加勢 — 既知 perf 債務(#1229)が correctness メトリクスを汚染しない | — |
+
+### Stage 5 欠損成果物リスト(goal 指示の 3 点、実測)
+
+| 成果物 | 現状 | 評価 |
+|---|---|---|
+| ツール運用要求(TOR) | CLAUDE.md の Usage 節 + TRUSTED_BASE.md が断片的に相当。DO-330 の様式(想定運用環境・入力制約・既知制限の運用回避)としては**未編纂** | **MISSING** — G-F6 キット(flight-qualification §G-F6)の一章として編纂するのが自然 |
+| 検証ツール自身の検証 | checker = Coq 証明(qualified-by-proof、45 定理 + coqchk + cross-version)。**ゲートスクリプト群は負テスト文化が定着**(check-contracts は mutation テスト、監査ゲート 3 本は負テスト済み、release-seal も偽造/未記入の負テスト付き)。fuzz ハーネスに単体テスト(分類器の純関数化) | **PARTIAL** — 「どのゲートがどう自己検証されるか」の一覧表が未作成(各 PR に散在) |
+| 既知問題台帳の正式化 | GitHub issues + リリースノート既知制限(0.57.0 の #1229)+ `fuzz-perf` ラベル + flagged-for-revision 機構 + **リリース封印**(proofs/releases/ — v0.57.0 から、証拠のタグ束縛) | **PARTIAL** — 散在。リリース封印の `[recorded]` に known-problems 節を追加すれば形式が閉じる |
+
+**総評の更新**: 7 月の「哲学は DAL-A、証拠は DAL-D 相当」から、証拠体系は
+**「独立規範仕様 + 実行可能仕様 + 網羅監査 + 封印」の骨格が立った状態**へ。残る構造的
+距離は (a) MC/DC(F2 残余)、(b) ALS 執筆網羅(F1 残余 = Stage 3)、(c) TOR 編纂
+(Stage 5)、(d) 外部採用の実績 — (d) は工事でなく市場の時間。無限定の
+"flight-grade" 自粛は**継続**(evidence ladder の rank 明示は維持)。
