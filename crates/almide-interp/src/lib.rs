@@ -91,6 +91,10 @@ pub enum RunStatus {
 /// The interpreter over a fully-linked `IrProgram`.
 pub struct Interpreter<'a> {
     pub(crate) program: &'a IrProgram,
+    /// The run's argv tail (argv[1..] — what `prim.args_get_list` answers).
+    /// Defaults to empty: the oracle harness runs every fixture without
+    /// arguments on all three legs, so the empty vec IS the parity value.
+    pub(crate) args: Vec<String>,
     /// Top-level functions indexed by name for O(1) call dispatch. Holds
     /// user fns, monomorphized specializations, and any almide-bodied stdlib
     /// fns that were lowered into the program.
@@ -290,6 +294,7 @@ impl<'a> Interpreter<'a> {
 
         Interpreter {
             program,
+            args: Vec::new(),
             fns,
             module_fns,
             named_records,
@@ -369,6 +374,14 @@ impl<'a> Interpreter<'a> {
     /// Override the fuel budget (for tests / the fuzz oracle).
     pub fn with_fuel(mut self, fuel: u64) -> Self {
         self.fuel = Cell::new(fuel);
+        self
+    }
+
+    /// Supply the run's argv tail (argv[1..]). The oracle harness never sets
+    /// this — fixtures run argument-less on all three legs — but a caller
+    /// embedding the interp can inject real args.
+    pub fn with_args(mut self, args: Vec<String>) -> Self {
+        self.args = args;
         self
     }
 

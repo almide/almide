@@ -41,7 +41,7 @@ patterns = [
   "capability: list.min/max on non-comparable elements",
   "capability: prim.args_get_list_full",
   "capability: prim.args_get_list",
-  "capability: args.flag",
+  "capability: args.",
   "capability: prim.make_dir",
   "capability: prim.read_text_file",
   "capability: prim.write_text_file",
