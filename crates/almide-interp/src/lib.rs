@@ -26,6 +26,7 @@ mod eval;
 mod hofs;
 mod inplace;
 mod stdlib_pool;
+mod vfs;
 mod value;
 
 pub use value::{Closure, Value, VariantPayload};
@@ -104,6 +105,9 @@ pub struct Interpreter<'a> {
     /// Populated from `program.modules` (pre-`ir_link`) and from any function
     /// whose name encodes a module path. Used by tier-(i) dispatch.
     pub(crate) module_fns: HashMap<(Sym, Sym), &'a IrFunction>,
+    /// The sandboxed fs overlay (#1218) — writes land here, never on disk;
+    /// reads fall back to the real filesystem read-only. See `vfs.rs`.
+    pub(crate) vfs: vfs::Vfs,
     /// Named record types keyed by their SORTED field-name set, mapping to
     /// `(type name, declaration-order field names)`. Lets the repr recover the
     /// nominal name + declaration order for a record LITERAL whose inferred type
@@ -320,6 +324,7 @@ impl<'a> Interpreter<'a> {
         Interpreter {
             program,
             args: Vec::new(),
+            vfs: vfs::Vfs::new(),
             fns,
             module_fns,
             named_records,
