@@ -12,9 +12,7 @@
 
 alias_combinator_rc  out-of-interp-scope capability: prim.handle
 alias_cow  out-of-interp-scope capability: prim.alloc_map
-args_surface  out-of-interp-scope capability: args.positional
 base64_encode  out-of-interp-scope capability: prim.handle
-bundled_pure_modules  out-of-interp-scope capability: args.flag
 bytes_f16  out-of-interp-scope capability: prim.handle
 bytes_f16_offset_overflow  out-of-interp-scope capability: prim.handle
 bytes_push_inplace  out-of-interp-scope capability: prim.handle
@@ -33,6 +31,7 @@ empty_collection_annotated  out-of-interp-scope capability: prim.alloc_set
 empty_collection_fold  out-of-interp-scope capability: prim.alloc_map
 empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
+fs_read_lines  out-of-interp-scope capability: prim.alloc_bytes
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
 hex_two_module_link  out-of-interp-scope capability: prim.handle
@@ -80,6 +79,7 @@ memory_stress  out-of-interp-scope capability: prim.alloc_list
 module_global_const  out-of-interp-scope capability: prim.handle
 module_var_alias_cow  out-of-interp-scope capability: prim.alloc_list
 mut_map_param  out-of-interp-scope capability: prim.handle
+mut_param_call_chain  out-of-interp-scope capability: prim.handle
 mutable_global_bytes_arena  out-of-interp-scope capability: prim.handle
 mutable_global_bytes_copy_from  out-of-interp-scope capability: prim.handle
 mutable_global_repeat_writes  out-of-interp-scope capability: prim.handle
