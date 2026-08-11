@@ -43,6 +43,26 @@
 #                 duration and not a position. The probes pin the ORIGIN
 #                 (month of 2024-01-15 is 1, so months are 1-based)
 #
+# index_unit vocabulary — bytes (every value below verified by execution over
+# the fixed buffer [1,2,3,4,5,6,7,8], not read off the prose):
+#   byte-offset   — the Int is a position in BYTES from the start, 0-based.
+#                   `read_i32_be(b, 4)` starts at byte 4, NOT at the 4th i32
+#   byte-count    — the Int counts BYTES: a length, a chunk size, a pad target
+#   element-count — the Int counts ELEMENTS of the decoded type, NOT bytes.
+#                   The `_array` trap: `read_i32_be_array(b, 0, 2)` consumes 8
+#                   bytes, and nothing in the name or the prose says so
+#   cursor        — the RETURNED Int is the next byte offset after the read,
+#                   not a length. The `_at` family returns `(cursor, T?)`:
+#                   `read_i32_be_at(b, 0)` is `(4, some(…))`
+#   byte-value    — the Int is one byte's value, 0–255 (`read_u8`, `set_at`'s
+#                   val, `fill`'s val)
+#   value         — the Int is the number encoded/decoded at exactly the width
+#                   AND byte order the name declares. `_be` vs `_le` is the
+#                   whole point: 0x0102 reads 258 big-endian, 513 little-endian
+#   ordering      — the Int is a comparison sign (-1 / 0 / 1), not a magnitude
+#   address       — the Int is a raw address or an opaque heap token
+#                   (`data_ptr`, `heap_save`) — meaningless to arithmetic on
+#
 # OPTIONAL `note` key: prose recording what the probe does NOT prove, for the
 # rare entry whose declared dimension is not fully probe-reachable. It is never
 # a substitute for a probe — an entry still needs one — and it exists so a
