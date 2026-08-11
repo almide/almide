@@ -25,6 +25,22 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // ordinary ok()/err() ctor rails of the fan_any self-host — a
             // `match`/`??`/auto-unwrap over the bound result EXECUTES.
             | ("fan", "any_map")
+            // `fs.file_size` / `fs.modified_at` build their Result[Int, String]
+            // through the ordinary ok()/err() ctors over the path_filestat scratch
+            // (fs_file_size.almd / fs_modified_at.almd) — the int.parse scalar-Ok
+            // shape, so a `match`/`!` over the bound result EXECUTES.
+            | ("fs", "file_size")
+            | ("fs", "modified_at")
+            // `fs.copy` / `fs.append` — Result[Unit, String] built by the ok(())/err(m)
+            // CTORS (fs_copy.almd / fs_append.almd): a NON-heap Ok routes through
+            // `try_lower_result_scalar_ok_ctor` → `materialize_result_ok`, the flat
+            // LEN-AS-TAG block (@4 — NOT the prim pass-through's cap-as-tag @16 that
+            // fs.write's $write_text_file builds). Listing them in the str-result
+            // (@16) family instead made every err read back as ok — the caller read
+            // the len-0 block's untouched @16 field (a silent wrong-branch, caught
+            // by the missing-src copy probe).
+            | ("fs", "copy")
+            | ("fs", "append")
     )
 }
 
@@ -56,6 +72,12 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // `Result[String, String]` with the ordinary ok()/err() ctors = the same
             // cap-as-tag layout (payload @12, tag @16); a `match`/`!` over it reads tag @16.
             | ("fs", "create_temp_dir")
+            // `fs.create_temp_file` — the empty-file twin (fs_create_temp_file.almd),
+            // the identical Result[String, String] ok()/err() ctor shape.
+            | ("fs", "create_temp_file")
+            // `env.cwd` — Result[String, String] over the PWD read (env_cwd.almd),
+            // the same ok()-ctor cap-as-tag layout.
+            | ("env", "cwd")
             // `fs.read_bytes_raw` — the raw-bytes twin (same cap-as-tag Result block; the Ok
             // payload is Bytes instead of String).
             | ("fs", "read_bytes_raw")
