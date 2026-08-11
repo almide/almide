@@ -1,0 +1,49 @@
+// @contract: C-227
+// The fs metadata/composition family answers identically on both targets:
+// file_size and modified_at over the filestat floor, the is_dir/is_file
+// predicates (false on a missing path, matching Path::is_dir/is_file), append
+// (existing file and fresh-create), copy (content round-trip and the
+// missing-src err), create_temp_file (exists, empty), env.cwd (non-empty) and
+// env.get over a match. Paths from the temp-dir family are never printed (the
+// entropy suffix differs per run); every printed observable is derived.
+import fs
+import env
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("qw")!
+  let p = d + "/f.txt"
+  fs.write(p, "hello")!
+  let sz = fs.file_size(p)!
+  println("size=${sz}")
+  let m = fs.modified_at(p)!
+  println("mt_pos=${m > 1700000000}")
+  println("isd=${fs.is_dir(d)} isf=${fs.is_file(p)} isd_f=${fs.is_dir(p)} isf_d=${fs.is_file(d)} miss=${fs.is_file(d + "/nope")}")
+  fs.append(p, " world")!
+  fs.append(d + "/fresh.txt", "born")!
+  println("app=${fs.read_text(p)!} fresh=${fs.read_text(d + "/fresh.txt")!}")
+  fs.copy(p, d + "/copy.txt")!
+  println("copy=${fs.read_text(d + "/copy.txt")!}")
+  let bad = fs.copy(d + "/nope", d + "/x")
+  match bad {
+    ok(_) => println("badcopy=ok"),
+    err(_) => println("badcopy=err"),
+  }
+  let tf = fs.create_temp_file("qwf")!
+  println("tf_exists=${fs.exists(tf)} tf_size=${fs.file_size(tf)!}")
+  fs.remove_all(tf)!
+  let cw = env.cwd()
+  match cw {
+    ok(c) => println("cwd_nonempty=${string.len(c) > 0}"),
+    err(_) => println("cwd=err"),
+  }
+  match env.get("PATH") {
+    some(v) => println("path_some=${string.len(v) > 0}"),
+    none => println("path=none"),
+  }
+  let sz_miss = fs.file_size(d + "/nope")
+  match sz_miss {
+    ok(_) => println("miss=ok"),
+    err(_) => println("miss=err"),
+  }
+  fs.remove_all(d)!
+}
