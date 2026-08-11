@@ -74,8 +74,15 @@ pub enum FindingKind {
     NativeBuildFailure,
     /// WASM build failed or the module did not validate.
     WasmBuildFailure,
-    /// One side hung (timed out).
+    /// One side outran the budget AND a confirm re-run at
+    /// [`SLOW_CONFIRM_FACTOR`]× the budget still did not finish.
     Hang,
+    /// One side outran the budget but COMPLETED, byte-identical, within the
+    /// [`SLOW_CONFIRM_FACTOR`]× confirm re-run (#1235). Perf-class: the night
+    /// verdict routes it to the perf ledger instead of failing on it — the
+    /// 0.57.0 release gate classified a 21.7s quadratic-concat run (#1229)
+    /// as a Hang, a wrong CLASSIFIER verdict on a right detector.
+    Slow,
     /// Native and WASM produced different observable output.
     OutputDivergence,
     /// One side ran, the other failed to run though it built.
@@ -92,6 +99,9 @@ pub struct RunEvidence {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub timed_out: bool,
+    /// Measured wall clock of this execution — the load-bearing number on
+    /// a Slow finding (#1235), informational elsewhere.
+    pub duration_secs: f64,
 }
 
 impl RunEvidence {
@@ -101,9 +111,21 @@ impl RunEvidence {
             stderr: String::from_utf8_lossy(&p.stderr).into_owned(),
             exit_code: p.exit_code,
             timed_out: p.timed_out,
+            duration_secs: p.duration.as_secs_f64(),
         }
     }
 }
+
+/// The hang-vs-slow confirm multiplier (#1235): a leg that outruns the
+/// per-program budget is re-run ONCE at this multiple of it before being
+/// classified. Completing there is an order-of-magnitude perf regression
+/// ([`FindingKind::Slow`]) — a real finding, but not nontermination.
+/// Outrunning even that stays a [`FindingKind::Hang`]. The re-run only
+/// fires on legs that already blew the budget, so its cost lands on the
+/// rare suspect, not the campaign; genuinely non-terminating mutants are
+/// mostly absorbed EARLIER (double-hang skip, interp fuel skip) and never
+/// reach it.
+const SLOW_CONFIRM_FACTOR: u32 = 10;
 
 /// Run the full ladder against a program already written to `file`.
 /// `wasm_out` is a scratch path for the WASM build artifact. `reference`
@@ -115,9 +137,26 @@ pub fn run_ladder(
     wasm_out: &Path,
     reference: Option<&dyn ReferenceOracle>,
 ) -> Outcome {
+    let tc_confirm = tc.with_timeout(tc.timeout * SLOW_CONFIRM_FACTOR);
+
     // ── Rung (a): check ──
     let check = tc.check(file);
     if check.timed_out {
+        // Hung, or merely slow? One confirm re-run decides (#1235). A check
+        // that completes only at 10× the budget is a frontend perf finding,
+        // not nontermination — the ladder stops either way, because a
+        // program the frontend cannot process in budget yields no run legs.
+        let check2 = tc_confirm.check(file);
+        if !check2.timed_out && !check2.spawn_failed {
+            return Outcome::Finding(Finding {
+                rung: Rung::Check,
+                kind: FindingKind::Slow,
+                summary: "almide check outlived the budget but completed at 10x (slow, not hung)"
+                    .into(),
+                native: Some(RunEvidence::from(&check2)),
+                wasm: None,
+            });
+        }
         return Outcome::Finding(Finding {
             rung: Rung::Check,
             kind: FindingKind::Hang,
@@ -200,6 +239,26 @@ pub fn run_ladder(
         if wasm_build.success() {
             let wasm_run = tc.run_wasm(wasm_out);
             if native_hang_is_finding(true, wasm_run.timed_out, wasm_run.success()) {
+                // wasm cleanly succeeded — hung, or merely slow (#1235)? The
+                // confirm re-run decides; a completed re-run has real
+                // observables, so it flows through the SAME comparison as a
+                // normal run (inheriting every skip rule and divergence
+                // class), with agreement mapping to Slow instead of Clean.
+                let native2 = tc_confirm.run_native_bin(&native_bin);
+                if !native2.timed_out && !native2.spawn_failed {
+                    return match compare_runs(source, &native2, &wasm_run, reference) {
+                        Outcome::Clean { .. } => Outcome::Finding(Finding {
+                            rung: Rung::Run,
+                            kind: FindingKind::Slow,
+                            summary: "native run outlived the budget but completed at 10x, \
+                                      byte-identical to wasm (slow, not hung)"
+                                .into(),
+                            native: Some(RunEvidence::from(&native2)),
+                            wasm: Some(RunEvidence::from(&wasm_run)),
+                        }),
+                        other => other,
+                    };
+                }
                 return Outcome::Finding(Finding {
                     rung: Rung::Run,
                     kind: FindingKind::Hang,
@@ -300,6 +359,27 @@ pub fn run_ladder(
                     .into(),
             };
         }
+        // Native succeeded and the interp terminates it, so the program IS
+        // finite — hung, or merely slow (#1235)? This is the exact site of
+        // the 0.57.0 release-gate misclassification: a quadratic
+        // string-concat run (#1229) completed at 21.7s, byte-identical,
+        // and was minted a Hang. The fuel skip above runs FIRST so
+        // interp-provable non-terminators never pay the 10× re-run.
+        let wasm2 = tc_confirm.run_wasm(wasm_out);
+        if !wasm2.timed_out && !wasm2.spawn_failed {
+            return match compare_runs(source, &native, &wasm2, reference) {
+                Outcome::Clean { .. } => Outcome::Finding(Finding {
+                    rung: Rung::Run,
+                    kind: FindingKind::Slow,
+                    summary: "wasm run outlived the budget but completed at 10x, \
+                              byte-identical to native (slow, not hung)"
+                        .into(),
+                    native: Some(RunEvidence::from(&native)),
+                    wasm: Some(RunEvidence::from(&wasm2)),
+                }),
+                other => other,
+            };
+        }
         return Outcome::Finding(Finding {
             rung: Rung::Run,
             kind: FindingKind::Hang,
@@ -309,9 +389,25 @@ pub fn run_ladder(
         });
     }
 
+    compare_runs(source, &native, &wasm, reference)
+}
+
+/// The differential comparison of two COMPLETED runs — every rule between
+/// "both legs produced observables" and the verdict. Pure over the two
+/// [`ProcResult`]s and the reference oracle (no toolchain), so the confirm
+/// re-run (#1235) can reuse it verbatim: a suspect leg that completes at
+/// 10× flows through the same skip rules (C-196 stack, C-197 memory) and
+/// the same divergence classes as any other run, with `Clean` mapped to
+/// `Slow` at the call site.
+fn compare_runs(
+    source: &str,
+    native: &super::runner::ProcResult,
+    wasm: &super::runner::ProcResult,
+    reference: Option<&dyn ReferenceOracle>,
+) -> Outcome {
     // Compare observable behaviour: stdout, exit code, and run-success.
-    let nat_ev = RunEvidence::from(&native);
-    let wasm_ev = RunEvidence::from(&wasm);
+    let nat_ev = RunEvidence::from(native);
+    let wasm_ev = RunEvidence::from(wasm);
 
     // BOTH legs died of CALL-STACK exhaustion (a mutation-synthesized unbounded
     // recursion): native hits Rust's guard page ("fatal runtime error: stack
@@ -580,6 +676,50 @@ mod stack_exhaustion_classification_tests {
     #[test]
     fn both_ok_is_not_this_rule() {
         assert!(!one_sided_stack_exhaustion(true, true, false, false));
+    }
+}
+
+#[cfg(test)]
+mod compare_runs_tests {
+    use super::super::runner::ProcResult;
+    use super::{compare_runs, FindingKind, Outcome};
+
+    fn run(stdout: &str, stderr: &str, exit: i32) -> ProcResult {
+        ProcResult {
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+            exit_code: Some(exit),
+            timed_out: false,
+            spawn_failed: false,
+            duration: std::time::Duration::from_millis(5),
+        }
+    }
+
+    #[test]
+    fn identical_completed_runs_are_clean() {
+        // The confirm re-run's agreement case (#1235): the call site maps
+        // THIS outcome to a Slow finding, so Clean here is load-bearing.
+        let out = compare_runs("", &run("a\n", "", 0), &run("a\n", "", 0), None);
+        assert!(matches!(out, Outcome::Clean { .. }));
+    }
+
+    #[test]
+    fn differing_stdout_is_an_output_divergence() {
+        let out = compare_runs("", &run("a\n", "", 0), &run("b\n", "", 0), None);
+        let Outcome::Finding(f) = out else { panic!("expected a finding") };
+        assert_eq!(f.kind, FindingKind::OutputDivergence);
+    }
+
+    #[test]
+    fn wasm_oom_skip_survives_the_extraction() {
+        // C-197 must apply to a confirm re-run exactly as to a first run.
+        let out = compare_runs(
+            "",
+            &run("a\n", "", 0),
+            &run("", "Error: out of memory", 134),
+            None,
+        );
+        assert!(matches!(out, Outcome::Skipped { .. }));
     }
 }
 
