@@ -164,3 +164,8 @@ evidence = "bootstrap run (PR that landed this ledger): a mis-pathed row failed 
 path = "scripts/check-tor-refs.sh"
 class = "NEGATIVE_TESTED"
 evidence = "landing PR: a TOR row retargeted to a nonexistent instrument demonstrated to FAIL before first green"
+
+[[gate]]
+path = "scripts/check-als-element-coverage.sh"
+class = "NEGATIVE_TESTED"
+evidence = "landing PR: an unresolvable section (ALS-Z999) and a dropped row (UNCLASSIFIED) each demonstrated to FAIL before first green, with the below-ceiling ratchet demand firing in both"

@@ -21,6 +21,9 @@ pre-commit:
     tor-refs:
       glob: "{proofs/TOR.md,scripts/check-tor-refs.sh}"
       run: bash scripts/check-tor-refs.sh
+    als-element-coverage:
+      glob: "{proofs/als-element-coverage.toml,scripts/check-als-element-coverage.sh,scripts/lib/als-element-enumerate.py,crates/almide-syntax/src/ast.rs,docs/specs/als/*.md}"
+      run: bash scripts/check-als-element-coverage.sh
     libm-determinism:
       glob: "{runtime/rs/src/*.rs,crates/almide-kernel/src/*.rs,proofs/libm-determinism-audit.toml,scripts/check-libm-determinism.sh,scripts/lib/libm-call-enumerate.py}"
       run: bash scripts/check-libm-determinism.sh

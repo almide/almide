@@ -839,6 +839,9 @@ jobs:
       - name: TOR references (every operational requirement keeps its enforcing instrument)
         run: bash scripts/check-tor-refs.sh
 
+      - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
+        run: bash scripts/check-als-element-coverage.sh
+
       - name: Scalar-read audit (every raw-load arm classified, zero unguarded — the #1183 class stays extinct)
         run: scripts/check-scalar-read-audit.sh
 
