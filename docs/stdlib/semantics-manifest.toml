@@ -169,3 +169,169 @@ name = "run_length_encode"
 index_unit = "count"
 probe = 'string.run_length_encode("ééa")'
 expect = """[("é", 2), ("a", 1)]"""
+
+# ---------------------------------------------------------------------------
+# datetime — the second module on the ratchet. The #419 question here is the
+# TIMESTAMP SCALE (seconds, not milliseconds — a JS-shaped assumption is off by
+# 1000x and still type-checks) and the CIVIL-FIELD ORIGIN (month/day 1-based,
+# hour/minute/second 0-based). Every field probe reads the same fixed instant,
+# 1705322096 = 2024-01-15T12:34:56Z, as a LITERAL rather than through
+# from_parts, so a bug in from_parts cannot mask a bug in an extractor.
+# ---------------------------------------------------------------------------
+
+[datetime]
+default_index_unit = "second"
+
+[[datetime.fn]]
+name = "add_days"
+index_unit = "day"
+probe = 'datetime.add_days(0, 1)'
+expect = "86400"
+
+[[datetime.fn]]
+name = "add_hours"
+index_unit = "hour"
+probe = 'datetime.add_hours(0, 1)'
+expect = "3600"
+
+[[datetime.fn]]
+name = "add_minutes"
+index_unit = "minute"
+probe = 'datetime.add_minutes(0, 1)'
+expect = "60"
+
+[[datetime.fn]]
+name = "add_seconds"
+index_unit = "second"
+probe = 'datetime.add_seconds(0, 1)'
+expect = "1"
+
+[[datetime.fn]]
+name = "day"
+index_unit = "civil-field"
+probe = 'datetime.day(1705322096)'
+expect = "15"
+
+[[datetime.fn]]
+name = "diff_seconds"
+index_unit = "second"
+probe = 'datetime.diff_seconds(90, 30)'
+expect = "60"
+
+[[datetime.fn]]
+name = "format"
+index_unit = "second"
+probe = 'datetime.format(1705322096, "%Y-%m-%dT%H:%M:%SZ")'
+expect = "2024-01-15T12:34:56Z"
+
+[[datetime.fn]]
+name = "from_parts"
+index_unit = "civil-field"
+probe = 'datetime.from_parts(2024, 1, 15, 12, 34, 56)'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "from_unix"
+index_unit = "second"
+probe = 'datetime.from_unix(1705322096)'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "hour"
+index_unit = "civil-field"
+probe = 'datetime.hour(1705322096)'
+expect = "12"
+
+[[datetime.fn]]
+name = "is_after"
+index_unit = "second"
+probe = 'datetime.is_after(0, 1)'
+expect = "false"
+
+[[datetime.fn]]
+name = "is_before"
+index_unit = "second"
+probe = 'datetime.is_before(0, 1)'
+expect = "true"
+
+[[datetime.fn]]
+name = "minute"
+index_unit = "civil-field"
+probe = 'datetime.minute(1705322096)'
+expect = "34"
+
+[[datetime.fn]]
+name = "monotonic_ns"
+index_unit = "nanosecond"
+setup = [
+  "let a = datetime.monotonic_ns()",
+  "let b = datetime.monotonic_ns()",
+]
+probe = 'b >= a'
+expect = "true"
+note = """
+Proves the ORDER property the clock promises — never goes backwards. It does
+NOT prove the nanosecond SCALE, and it cannot pin a VALUE: the origin is an
+unspecified reference point that differs by target BY DESIGN (native counts
+from the first call, WASI from its own epoch), so only differences are
+meaningful. The only executable discriminator between ns/us/ms is a wall-clock
+lower bound over a timed workload, and a timing assertion inside a correctness
+gate is a flake source this repo does not accept. The scale is TRUSTED from the
+two implementations — Instant::elapsed().as_nanos() natively,
+prim.clock_time_get(1, …) undivided on WASI — not proven here.
+"""
+
+[[datetime.fn]]
+name = "month"
+index_unit = "civil-field"
+probe = 'datetime.month(1705322096)'
+expect = "1"
+
+[[datetime.fn]]
+name = "now"
+index_unit = "second"
+probe = 'if datetime.now() > 1700000000 and datetime.now() < 100000000000 then "second" else "other"'
+expect = "second"
+note = """
+Reads the host clock, so the probe cannot assert a value — it asserts the
+SCALE, which is the dimension that bites. The window is the discriminator: a
+seconds clock lands in it (1.7e9) and a millisecond clock does not (1.7e12
+exceeds the 1e11 ceiling), so a unit regression fails here rather than silently
+shipping a 1000x error.
+"""
+
+[[datetime.fn]]
+name = "parse_iso"
+index_unit = "second"
+probe = 'match datetime.parse_iso("2024-01-15T12:34:56Z") { ok(v) => v, err(_) => -1 }'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "second"
+index_unit = "civil-field"
+probe = 'datetime.second(1705322096)'
+expect = "56"
+
+[[datetime.fn]]
+name = "to_iso"
+index_unit = "second"
+probe = 'datetime.to_iso(1705322096)'
+expect = "2024-01-15T12:34:56Z"
+
+[[datetime.fn]]
+name = "to_unix"
+index_unit = "second"
+probe = 'datetime.to_unix(1705322096)'
+expect = "1705322096"
+
+[[datetime.fn]]
+name = "weekday"
+index_unit = "second"
+probe = 'datetime.weekday(1705322096)'
+expect = "Monday"
+
+[[datetime.fn]]
+name = "year"
+index_unit = "civil-field"
+probe = 'datetime.year(1705322096)'
+expect = "2024"
