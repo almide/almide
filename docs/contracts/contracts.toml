@@ -2855,3 +2855,14 @@ evidence  = [
   { path = "spec/wasm_cross/fs_composition_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-229"
+spec      = "ALS-R6"
+title     = "A selected row past the byte buffer is the all-zero row on both targets"
+statement = "The three `matrix.select_rows_*` byte-buffer selectors (f32 LE, Q1_0, Q8_0) answer an out-of-range row id with the ALL-ZERO row — the same defined OOB→zeros edge the full-matrix `from_bytes_*` loaders take, applied per selected row — and clamp a negative row id to row 0 and a negative offset to 0, identically on both targets. Found by the generative fuzzer (run 31515916427, a mutation of the C-228 fixture): native panicked on an unchecked slice (`range end index 33 out of range for slice of length 32`) while wasm read undefined heap bytes past the block — a raw-abort/silent-wrong divergence, closed by per-row bounds checks against the buffer length in both implementations."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_select_rows_oob.almd", class = "fixture" },
+]

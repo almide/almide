@@ -1,0 +1,53 @@
+// @contract: C-229
+// Row selectors on an OUT-OF-RANGE schedule: a selected row whose byte range
+// leaves the buffer is the ALL-ZERO row (the same defined OOB→zeros edge the
+// full-matrix from_bytes_* loaders take, per selected row), a negative rid
+// clamps to row 0, and a negative offset clamps to 0 — identically on both
+// targets. Found by the fuzzer (run 31515916427, a C-228-fixture mutation):
+// native panicked on an unchecked slice while wasm read undefined heap bytes.
+import matrix
+import bytes
+
+effect fn main() -> Unit = {
+  var f32d = bytes.new(32)
+  bytes.set_f32_le(f32d, 0, 1.5)
+  bytes.set_f32_le(f32d, 4, 2.5)
+  bytes.set_f32_le(f32d, 8, 0.0 - 3.0)
+  bytes.set_f32_le(f32d, 12, 4.0)
+  bytes.set_f32_le(f32d, 16, 5.0)
+  bytes.set_f32_le(f32d, 20, 6.5)
+  bytes.set_f32_le(f32d, 24, 7.0)
+  bytes.set_f32_le(f32d, 28, 8.0)
+  // offset 8 leaves 3 aligned rows of 8 bytes; rid 3 would read 32..40 — OOB → zeros.
+  let a = matrix.select_rows_f32(f32d, 8, 2, [3, 0, 1])
+  println("f32_shifted=${matrix.to_lists(a)}")
+  // rid 4 reads 32..40 — OOB → zeros; rid -1 clamps to row 0.
+  let b = matrix.select_rows_f32(f32d, 0, 2, [4, 0 - 1, 0])
+  println("f32_edge=${matrix.to_lists(b)}")
+  // a negative offset clamps to 0 (native's `offset.max(0)`).
+  let c = matrix.select_rows_f32(f32d, 0 - 8, 2, [0])
+  println("f32_negoff=${matrix.to_lists(c)}")
+  // Q8_0: 68 B = exactly 2 rows of one 34-byte block (32 cols); rid 2 is OOB.
+  var q8 = bytes.new(68)
+  bytes.set_at(q8, 0, 0)
+  bytes.set_at(q8, 1, 56)
+  bytes.set_at(q8, 2, 10)
+  bytes.set_at(q8, 3, 246)
+  let mq = matrix.select_rows_q8_0_dq(q8, 0, 32, [2, 0])
+  let qrows = matrix.to_lists(mq)
+  let qr0 = list.get(qrows, 0) ?? []
+  let qr1 = list.get(qrows, 1) ?? []
+  println("q8_oob=${list.get(qr0, 0) ?? 9.9},${list.get(qr0, 1) ?? 9.9} q8_row0=${list.get(qr1, 0) ?? 9.9},${list.get(qr1, 1) ?? 9.9}")
+  let mq2 = matrix.select_rows_q8_0_dq(q8, 0 - 34, 32, [0])
+  let q2r0 = list.get(matrix.to_lists(mq2), 0) ?? []
+  println("q8_negoff=${list.get(q2r0, 0) ?? 9.9}")
+  // Q1_0: 18 B = exactly 1 row of one 18-byte block (128 cols); rid 1 is OOB.
+  var q1 = bytes.new(18)
+  bytes.set_at(q1, 0, 0)
+  bytes.set_at(q1, 1, 56)
+  let m1 = matrix.select_rows_q1_0(q1, 0, 128, [1, 0])
+  let orows = matrix.to_lists(m1)
+  let or0 = list.get(orows, 0) ?? []
+  let or1 = list.get(orows, 1) ?? []
+  println("q1_oob=${list.get(or0, 0) ?? 9.9} q1_row0=${list.get(or1, 0) ?? 9.9}")
+}
