@@ -28,17 +28,12 @@
 #
 # COMPILER_FRONTIER — the burn-down:
 env.set :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capabili
-fs.glob :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.glob needs a declared capabili
 fs.is_symlink :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
 fs.read_bytes_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_bytes_if_exists needs a d
 fs.read_bytes_raw_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_bytes_raw_if_exists needs
 fs.read_lines_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_lines_if_exists needs a d
 fs.read_text_if_exists :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.read_text_if_exists needs a de
-fs.remove :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.remove needs a declared capabi
 fs.rename :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.rename needs a declared capabi
-fs.walk :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.walk needs a declared capabili
-fs.write_bytes :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.write_bytes needs a declared c
-fs.write_bytes_raw :: COMPILER_FRONTIER :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.write_bytes_raw needs a declar
 matrix.select_rows_f32 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_f32 — rendering them would emit a 
 matrix.select_rows_q1_0 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q1_0 — rendering them would emit a
 matrix.select_rows_q8_0_dq :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows_q8_0_dq — rendering them would emi
