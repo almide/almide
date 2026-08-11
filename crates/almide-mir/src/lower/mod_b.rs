@@ -538,6 +538,44 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_lang::intern::sym;
     struct S {
         changed: bool,
+        /// Fresh-VarId counter for the unwrap-operand hoist below (the
+        /// `max_var_id + 1` discipline the other MIR-side ANF hoists use).
+        next_var: u32,
+    }
+
+    /// Does `e` contain an effect unwrap (`f(x)!`) anywhere? The gate for the
+    /// operand hoist: an `Unwrap` inside the assert's `if` CONDITION has no
+    /// propagation route (the cond machinery can only materialize values), so
+    /// the whole enclosing fn walls (#1191 — `assert_eq(collect(p, cuts)!,
+    /// whole)`, the fold_lines test class).
+    fn contains_unwrap(e: &IrExpr) -> bool {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct C(bool);
+        impl IrVisitor for C {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if matches!(e.kind, IrExprKind::Unwrap { .. }) {
+                    self.0 = true;
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut c = C(false);
+        c.visit_expr(e);
+        c.0
+    }
+
+    /// The atom set of `desugar_heap_if_call_args` — operands that carry no
+    /// effects and need no hoist slot of their own.
+    fn is_atom(a: &IrExpr) -> bool {
+        matches!(
+            a.kind,
+            IrExprKind::Var { .. }
+                | IrExprKind::LitInt { .. }
+                | IrExprKind::LitFloat { .. }
+                | IrExprKind::LitBool { .. }
+                | IrExprKind::LitStr { .. }
+                | IrExprKind::Unit
+        )
     }
 /// `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0 wasm
 /// form: prefix + message, then halt). The message expr is evaluated only on
@@ -592,6 +630,70 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
                 self.changed = true;
                 return;
             }
+            // #1191: an operand that CONTAINS an unwrap hoists every non-atom
+            // operand to a fresh `let` IN ARGUMENT ORDER (effects keep their
+            // sequence — the `desugar_heap_if_call_args` discipline), so the
+            // `if` compares plain Vars and `desugar_let_unwrap` ladder-izes
+            // the unwrap bind exactly like a source-level `let x = f()!`.
+            // Gated to unwrap-bearing operands only: everything else keeps
+            // its existing inline lowering byte-for-byte. (The NON-test
+            // assert desugar, `desugar_assert_abort`, has always temp-bound
+            // its operands — this brings the test-mode twin in line for the
+            // one class where inlining is not merely churn but a wall.)
+            let is_assert_shape = matches!(
+                (name.as_str(), args.len()),
+                ("assert", 1 | 2) | ("assert_eq", 2) | ("assert_ne", 2)
+            );
+            if is_assert_shape && args.iter().any(contains_unwrap) {
+                use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
+                let mut binds: Vec<IrStmt> = Vec::new();
+                let mut new_args: Vec<IrExpr> = Vec::with_capacity(args.len());
+                for a in args {
+                    if is_atom(a) {
+                        new_args.push(a.clone());
+                        continue;
+                    }
+                    let tmp = VarId(self.next_var);
+                    self.next_var += 1;
+                    binds.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: tmp,
+                            mutability: Mutability::Let,
+                            ty: a.ty.clone(),
+                            value: a.clone(),
+                        },
+                        span: a.span.clone(),
+                    });
+                    new_args.push(IrExpr {
+                        kind: IrExprKind::Var { id: tmp },
+                        ty: a.ty.clone(),
+                        span: a.span.clone(),
+                        def_id: None,
+                    });
+                }
+                if let Some((cond, die)) = assert_die_expr(name.as_str(), &new_args) {
+                    let unit =
+                        IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+                    let iff = IrExpr {
+                        kind: IrExprKind::If {
+                            cond: Box::new(cond),
+                            then: Box::new(unit),
+                            else_: Box::new(die),
+                        },
+                        ty: Ty::Unit,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    };
+                    *e = IrExpr {
+                        kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(iff)) },
+                        ty: Ty::Unit,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    };
+                    self.changed = true;
+                    return;
+                }
+            }
             let Some((cond, die)) = assert_die_expr(name.as_str(), args) else { return };
             let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
             *e = IrExpr {
@@ -607,7 +709,7 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut s = S { changed: false };
+    let mut s = S { changed: false, next_var: crate::lower::max_var_id(body) + 1 };
     let mut out = body.clone();
     s.visit_expr_mut(&mut out);
     s.changed.then_some(out)
