@@ -509,6 +509,29 @@ impl<'a> Interpreter<'a> {
             return result;
         }
 
+        // The argv floor (Stage 2 BRIDGEABLE burn-down): value-clean prims the
+        // STATELESS bridge cannot serve — they read the run's argv, which is
+        // interpreter state (`with_args`, empty by default = exactly how the
+        // oracle harness runs every fixture on all three legs).
+        // `args_get_list` answers argv[1..]; `args_get_list_full` prepends an
+        // argv[0] whose only cross-target observable is NONEMPTINESS (the
+        // fixtures assert it, never print it — C-181's argv0 normalization).
+        if module.as_str() == "prim" {
+            match func.as_str() {
+                "args_get_list" => {
+                    let items: Vec<Value> =
+                        self.args.iter().map(|s| Value::str(s.clone())).collect();
+                    return Flow::val(Value::list(items));
+                }
+                "args_get_list_full" => {
+                    let mut items = vec![Value::str("interp")];
+                    items.extend(self.args.iter().map(|s| Value::str(s.clone())));
+                    return Flow::val(Value::list(items));
+                }
+                _ => {}
+            }
+        }
+
         // Scalar / string / math native bridge (intrinsic-symbol surface).
         if let Some(result) = crate::bridge::dispatch(module.as_str(), func.as_str(), &args) {
             return result;
