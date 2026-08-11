@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "10"
+# unverified_ceiling = "9"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -105,7 +105,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "proofs/check-wasm-reachability.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 4: a dropped baseline row (env.set) demonstrated to fail as WASM PARITY REGRESSION naming the fn; restored green (394 parity / 0 frontier)"
 
 [[gate]]
 path = "scripts/check-abstain-classes.sh"
