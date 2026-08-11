@@ -23,3 +23,20 @@ fn env_millis() -> Int = {
   let ns = prim.load64(p)
   ns / 1000000
 }
+
+// `datetime.monotonic_ns` — the same scratch/alignment template, but clock_id 1
+// = CLOCK_MONOTONIC and NO division: the return is raw NANOSECONDS. This was the
+// one datetime fn with no wasm body, so any file touching it fell off the wasm
+// leg entirely (the #1189 ratchet's COMPILER_FRONTIER class).
+// The ORIGIN differs by target and is allowed to: native counts from the first
+// call (OnceLock<Instant>), WASI from its own unspecified epoch. That is exactly
+// the documented contract — "nanoseconds since an unspecified reference point;
+// only DIFFERENCES are meaningful; never goes backwards" — so the promise both
+// targets keep is monotonicity and the ns unit, never the absolute value.
+// NON-DETERMINISTIC (reads a clock): no byte-match across runs or targets.
+fn datetime_monotonic_ns() -> Int = {
+  let buf = prim.alloc_bytes(16)
+  let p = int.band(prim.handle(buf) + 12 + 7, 0 - 8)
+  let _e = prim.clock_time_get(1, 0, p)
+  prim.load64(p)
+}

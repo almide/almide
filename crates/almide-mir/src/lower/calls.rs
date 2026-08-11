@@ -736,6 +736,10 @@ fn admit_module_call_purity(module: &str, func: &str, args: &[IrExpr]) -> Result
 /// - `env.unix_timestamp` / `env.millis` / `datetime.now` share the WASI
 ///   wall-clock floor (clock_now.almd → `prim.clock_time_get`,
 ///   `Capability::Clock`). All scalar returns.
+/// - `datetime.monotonic_ns` reaches the SAME prim with clock_id 1
+///   (CLOCK_MONOTONIC) instead of 0, so it carries the identical
+///   `Capability::Clock` and scalar-Int shape. It was the one datetime fn with
+///   no wasm body at all, which pushed every file touching it off the wasm leg.
 const ADMITTED_ENTROPY_ENV_CLOCK: &[(&str, &str)] = &[
     ("random", "int"),
     ("random", "choice"),
@@ -749,6 +753,7 @@ const ADMITTED_ENTROPY_ENV_CLOCK: &[(&str, &str)] = &[
     ("env", "unix_timestamp"),
     ("env", "millis"),
     ("datetime", "now"),
+    ("datetime", "monotonic_ns"),
 ];
 
 /// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up,
