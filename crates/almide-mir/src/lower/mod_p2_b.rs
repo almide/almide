@@ -343,6 +343,14 @@ pub(crate) struct LowerCtx {
     /// in-place mutation of one needs an explicit acquire (`Dup`) the body does
     /// not perform, so it is walled — never lowered to an unbacked cert event.
     param_values: HashSet<ValueId>,
+    /// Bound var → the Var-typed argument VarIds of the call its value wrapped
+    /// (`let t = f(a, b)` / `let t = f(a)!` records t → [a, b]). Read by the
+    /// unit-arm C-132 write-back admission (`buf = __mp_buf` after
+    /// `let __mp_buf = walk(buf, …)!`): the assign target must have FLOWED INTO
+    /// the call the assigned temp came from — the callee consumed the old
+    /// buffer, so skipping drop-old on the borrowed-param slot is exact, not a
+    /// leak. Structural (VarId-only), never keyed on synthetic names.
+    call_bind_arg_vars: HashMap<VarId, Vec<VarId>>,
     next_value: u32,
     /// recursive-eq brick (synth_eq.rs): the variant types whose synthesized eq
     /// helper exists / is being generated in THIS fn (a self-typed field inside
