@@ -556,6 +556,28 @@ else {
   __mx_f32_row(rh, hd, base, c, j + 1)
 }
 
+// select_rows_f32(data, offset, cols, row_ids) — the ROW-SUBSET twin of
+// from_bytes_f32_le: each selected row rid decodes cols f32 LE elements at
+// offset + rid·cols·4 (rid clamped to 0 like native's `rid.max(0)`), sharing
+// `__mx_f32_row` — one decoder, two schedules.
+fn __mx_f32_sel_rows(ho: Int, hd: Int, offset: Int, ids: List[Int], c: Int, i: Int) -> Int = if i >= list.len(ids) then 0
+else {
+  let rid0 = list.get(ids, i) ?? 0
+  let rid = if rid0 < 0 then 0 else rid0
+  let row = prim.alloc_list_f64(c)
+  let _f = __mx_f32_row(prim.handle(row), hd, offset + rid * c * 4, c, 0)
+  prim.store_str(ho + 12 + i * 8, row)
+  __mx_f32_sel_rows(ho, hd, offset, ids, c, i + 1)
+}
+
+fn matrix_select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
+  let hd = prim.handle(data)
+  let n = list.len(row_ids)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_f32_sel_rows(prim.handle(out), hd, offset, row_ids, cols, 0)
+  out
+}
+
 // v0 from_bytes_f16_le: the same OOB→zeros edge; per element IEEE-754 half → f64
 // (bit-exact — mirrors stdlib/bytes_f16.almd's __f16_decode, private copy so no
 // registered cross-reference).
