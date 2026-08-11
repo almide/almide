@@ -379,6 +379,28 @@ fn unit_tail_result_abi_ty(func: &IrFunction, body: &IrExpr) -> Option<Ty> {
     tail_is_unit(body).then_some(result_ty)
 }
 
+/// The FULL ABI-effective body — BOTH root retypes the lowering applies before its
+/// desugar ladder, in order: the `AUTO_WRAP_ABI_FNS` synthetic-Result retype
+/// ([`auto_wrap_abi_body`]) and the unit-tail Result-ABI ok-wrap
+/// (`unit_tail_result_abi_ty` + `wrap_unit_body_in_ok`). `pub` for the SAME
+/// #1176 reason `auto_wrap_abi_body` is: the classify count-side must apply the
+/// IDENTICAL retypes before `desugar_all`, or `desugar_loop_unwrap`'s
+/// `Result[T, String]` root gate declines on the count side while the lowering
+/// fires it — the rewrite's injected owned-copy concats then become MIR ops with
+/// no counted IR node (a false `mir > ir` breach). The second retype's
+/// registry-independent arm (a CAN-ERR declared-Unit effect fn ∉ NEVER_ERR) is
+/// what the first alone misses: a `effect_cont_synth_*` continuation is
+/// synthesized AFTER the registry fixpoint, so it sits in NEITHER set and the
+/// lowering wraps it through exactly that arm (the fs_streaming false breach).
+pub fn abi_effective_body(func: &IrFunction) -> Option<IrExpr> {
+    let auto = auto_wrap_abi_body(func);
+    let base: &IrExpr = auto.as_ref().unwrap_or(&func.body);
+    if let Some(result_ty) = unit_tail_result_abi_ty(func, base) {
+        return Some(wrap_unit_body_in_ok(base, result_ty));
+    }
+    auto
+}
+
 /// `{ stmts…; unit_tail }` → `{ stmts…; unit_tail; ok(()) }` — the old Unit tail becomes a
 /// statement (the standard stmt-position effect shape), and the fn returns the real ok-Unit
 /// Result block its ABI classification promises. Only the TOP-level Block is flattened; a

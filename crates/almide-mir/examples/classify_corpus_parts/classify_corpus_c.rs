@@ -83,13 +83,16 @@ fn classify_lower_one_fn(
             // BOTH the MIR and this counted IR — `mir == ir` by construction. A subset
             // (only guard + heap-branches) missed `desugar_tuple_unwrap_or`, so a
             // `let r = opt.unwrap_or((tuple)); f(r.0)` mir>ir-breached.
-            // The AUTO_WRAP synthetic-Result retype FIRST — the same root-ty adjustment
+            // BOTH ABI root retypes FIRST — the same root-ty adjustments
             // `lower_function_all_impl` makes before ITS desugar ladder, via the same
             // helper (single source of truth). `desugar_loop_unwrap`'s root gate keys on
             // the Result carrier ty; counting the bare-sugar-typed body instead declined
             // the loop-`!` flag rewrite the lowering applied, so its injected owned-copy
-            // concat was a MIR op with no counted IR node (#1176).
-            let abi_body = almide_mir::lower::auto_wrap_abi_body(func);
+            // concat was a MIR op with no counted IR node (#1176). The unit-tail ok-wrap
+            // half is registry-INDEPENDENT for a CAN-ERR declared-Unit effect fn — a
+            // post-registry `effect_cont_synth_*` continuation lowers through it, so the
+            // AUTO_WRAP retype alone re-opened the same false breach (fs_streaming).
+            let abi_body = almide_mir::lower::abi_effective_body(func);
             let eff_body = almide_mir::lower::desugar_all(
                 abi_body.as_ref().unwrap_or(&func.body),
                 func.name.as_str() == "main",
