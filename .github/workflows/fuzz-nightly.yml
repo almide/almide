@@ -231,7 +231,11 @@ jobs:
     # The verdict below already fails ONLY on findings and the coverage line
     # already reports how many shards reported, so running it unconditionally
     # keeps a kill honest — it costs recorded COVERAGE, not correctness.
-    if: always()
+    #
+    # (That `always()` lives in the job-top `if` above — #1201's first cut
+    # added it as a SECOND `if:` key here, which fails the whole workflow's
+    # parse: Actions never validates these files until a trigger fires, so
+    # the breakage surfaced as three instant "failure" runs, not in CI.)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
