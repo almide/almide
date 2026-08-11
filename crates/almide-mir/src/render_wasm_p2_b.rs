@@ -538,6 +538,16 @@ fn render_op_prim_mem_io_b(kind: &PrimKind, args: &[ValueId]) -> Option<String> 
                 PrimKind::MakeDir => {
                     format!("(call $make_dir (local.get {}))", local(args[0]))
                 }
+                // rename(src, dst) — the WASI path_rename floor; both path args are heap Ptr
+                // locals (i32 handles), passed DIRECTLY. dst is a heap Ptr (the Result block)
+                // — mirror WriteTextFile.
+                PrimKind::Rename => {
+                    format!(
+                        "(call $rename (local.get {}) (local.get {}))",
+                        local(args[0]),
+                        local(args[1])
+                    )
+                }
                 // remove_all(path) — the WASI recursive-remove floor; recursively unlinks files +
                 // removes directories under `path`, then builds a fresh owned `Result[Unit, String]`
                 // (Ok(()) / Err) in the preamble helper. The path arg is a heap Ptr local (i32
@@ -562,6 +572,15 @@ fn render_op_prim_mem_io_b(kind: &PrimKind, args: &[ValueId]) -> Option<String> 
                 PrimKind::PathFilestat => {
                     format!(
                         "(i64.extend_i32_u (call $path_filestat_q (i32.wrap_i64 (local.get {})) (local.get {})))",
+                        local(args[0]),
+                        local(args[1])
+                    )
+                }
+                // path_filestat_nofollow(bufaddr, path) — the NO-FOLLOW stat twin
+                // ($path_filestat_nf, lookupflags 0); identical arg/dst discipline.
+                PrimKind::PathFilestatNoFollow => {
+                    format!(
+                        "(i64.extend_i32_u (call $path_filestat_nf (i32.wrap_i64 (local.get {})) (local.get {})))",
                         local(args[0]),
                         local(args[1])
                     )
