@@ -107,6 +107,16 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // binds the @12 payload list handle, and the subject-seed routes its scope-end
             // drop to the recursive DropResultListStr via the same is_list_str_result_ty arm.
             | ("fs", "read_lines")
+            // `fs.read_text_if_exists` — Result[String?, String] built by the
+            // Result-Option ctor rails (try_lower_result_option_scalar_str_ctor —
+            // the materialize_result_str wrapper over an Option payload), so a
+            // `match`/`!` over it reads tag @16 like every ctor-built heap-Ok Result.
+            | ("fs", "read_text_if_exists")
+            // The heap-leaf `_if_exists` twins ride the same Result-Option ctor
+            // family (a heap Option payload in the cap-as-tag wrapper).
+            | ("fs", "read_lines_if_exists")
+            | ("fs", "read_bytes_if_exists")
+            | ("fs", "read_bytes_raw_if_exists")
             // `fs.fold_lines` / `fs.fold_lines_chunked` (the msi twins,
             // fs_fold_lines.almd) build their Results with the ordinary
             // ok()/err() ctors = the same cap-as-tag layout (payload @12,

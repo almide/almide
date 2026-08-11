@@ -818,6 +818,9 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // `fs.rename` WRITES the filesystem (the path_rename floor, fs_rename.almd) —
         // FsWrite. `fs.is_symlink` READS it (the no-follow stat, fs_is_symlink.almd) — FsRead.
         || (module == "fs" && matches!(func, "rename" | "is_symlink"))
+        // `fs.read_text_if_exists` READS the filesystem (path_filestat + the read floor,
+        // fs_read_text_if_exists.almd) — FsRead.
+        || (module == "fs" && matches!(func, "read_text_if_exists" | "read_lines_if_exists" | "read_bytes_if_exists" | "read_bytes_raw_if_exists"))
         // `fs.fold_lines` / `fs.fold_lines_chunked` READ the filesystem — REUSE
         // Capability::FsRead. Self-hosted typed twins over prim.read_text_file +
         // the byte-level read_line walk (fs_fold_lines.almd); the `Map[String,
