@@ -12,6 +12,9 @@ pre-commit:
     contracts:
       glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/gen-claims.sh,README.md}"
       run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+    libm-determinism:
+      glob: "{runtime/rs/src/*.rs,crates/almide-kernel/src/*.rs,proofs/libm-determinism-audit.toml,scripts/check-libm-determinism.sh,scripts/lib/libm-call-enumerate.py}"
+      run: bash scripts/check-libm-determinism.sh
     scalar-read-audit:
       glob: "{crates/almide-mir/src/lower/*.rs,proofs/scalar-read-audit.toml,scripts/check-scalar-read-audit.sh,scripts/lib/scalar-read-enumerate.py}"
       run: bash scripts/check-scalar-read-audit.sh

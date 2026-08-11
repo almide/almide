@@ -114,7 +114,7 @@ unsafe fn silu_mul_avx(a: &[f64], b: &[f64], out: &mut [f64]) {
     }
     for i in (chunks * 4)..n {
         let x = a[i];
-        let sig = 1.0 / (1.0 + (-x).exp());
+        let sig = 1.0 / (1.0 + fast_exp(-x));
         out[i] = x * sig * b[i];
     }
 }
@@ -164,7 +164,7 @@ fn silu_mul_wasm(a: &[f64], b: &[f64], out: &mut [f64]) {
         store_f64x2(ow, f64x2_mul(f64x2_mul(x, sig), bv));
     }
     for ((x, bi), o) in a_tail.iter().zip(b_tail).zip(o_tail) {
-        let sig = 1.0 / (1.0 + (-x).exp());
+        let sig = 1.0 / (1.0 + fast_exp(-x));
         *o = x * sig * bi;
     }
 }
@@ -220,7 +220,7 @@ unsafe fn silu_mul_neon(a: &[f64], b: &[f64], out: &mut [f64]) {
     }
     for i in (chunks * 2)..n {
         let x = a[i];
-        let sig = 1.0 / (1.0 + (-x).exp());
+        let sig = 1.0 / (1.0 + fast_exp(-x));
         out[i] = x * sig * b[i];
     }
 }
