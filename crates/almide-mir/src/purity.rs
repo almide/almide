@@ -348,6 +348,8 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
                 | "assert_ok"
                 | "assert_none"
                 | "assert_err"
+                | "assert_ok_sc"
+                | "assert_err_sc"
         ),
         // The WASM-target env CONSTANTS: v0's emit_wasm folds os() to "wasi" and
         // temp_dir() to "/tmp" (calls_env.rs) — on this target they reach NO host

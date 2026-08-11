@@ -288,20 +288,52 @@ pub fn desugar_offtype_testing_asserts(body: &IrExpr) -> Option<IrExpr> {
             if module.as_str() != "testing" {
                 return;
             }
-            let ok_sig = match func.as_str() {
-                // #1110: the negative polarities share their positive twin's
-                // typed sig — an off-type instantiation must wall, not misread.
-                "assert_some" | "assert_none" => matches!(args.first().map(|a| &a.ty),
-                    Some(Ty::Applied(TypeConstructorId::Option, a))
-                        if a.len() == 1 && matches!(a[0], Ty::String)),
-                "assert_ok" | "assert_err" => matches!(args.first().map(|a| &a.ty),
-                    Some(Ty::Applied(TypeConstructorId::Result, a))
-                        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String)),
+            // The payload-class matrix (#1233, the family rule): these asserts
+            // read ONLY the variant TAG (stdlib/testing_assert.almd — no
+            // payload access), so admissibility is a LAYOUT question, not a
+            // payload-type question.
+            //   Option twins: the 0-or-1-element-list layout's len@4 is the
+            //     tag for EVERY payload class — any Option is admissible.
+            //   Result twins: the LAYOUT follows the Ok side (the C-229
+            //     lesson) — a HEAP-Ok Result is cap-as-tag @16 (the plain
+            //     twin's read), a SCALAR-Ok Result is len-as-tag @4 (the
+            //     `_sc` twin's read). Both err classes ride along unread.
+            // Anything outside those cells (a shape with no layout, e.g. an
+            // unresolved generic) still routes `_x` and walls at render.
+            enum Route {
+                Plain,
+                Scalar,
+                Wall,
+            }
+            let route = match func.as_str() {
+                "assert_some" | "assert_none" => match args.first().map(|a| &a.ty) {
+                    Some(Ty::Applied(TypeConstructorId::Option, a)) if a.len() == 1 => {
+                        Route::Plain
+                    }
+                    _ => Route::Wall,
+                },
+                "assert_ok" | "assert_err" => match args.first().map(|a| &a.ty) {
+                    Some(Ty::Applied(TypeConstructorId::Result, a)) if a.len() == 2 => {
+                        if crate::lower::is_heap_ty(&a[0]) {
+                            Route::Plain
+                        } else {
+                            Route::Scalar
+                        }
+                    }
+                    _ => Route::Wall,
+                },
                 _ => return,
             };
-            if !ok_sig {
-                *func = sym(&format!("{}_x", func.as_str()));
-                self.changed = true;
+            match route {
+                Route::Plain => {}
+                Route::Scalar => {
+                    *func = sym(&format!("{}_sc", func.as_str()));
+                    self.changed = true;
+                }
+                Route::Wall => {
+                    *func = sym(&format!("{}_x", func.as_str()));
+                    self.changed = true;
+                }
             }
         }
     }
