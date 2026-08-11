@@ -23,7 +23,7 @@ spec/integration/modules/cross_module_cell_update_test.almd :: COMPILER_FRONTIER
 spec/integration/modules/cross_module_global_state_loop_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
 spec/lang/result_zip_test.almd :: COMPILER_FRONTIER :: result.zip_x unlinked (typed self-host twin missing)
 spec/stdlib/stdlib-test.almd :: COMPILER_FRONTIER :: list.sort_by_str_key_x unlinked (typed self-host twin missing)
-spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: bare named-fn callback (count_step passed as a value) declines the HOF lift — the #1108 fn-value class (ladder-subject router bypass closed 2026-08-12; the _i cell is executable-gated by fs_fold_lines_int_acc_test on the wasm leg)
+spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: un-twinned cell chunked x List[String] acc (router sees fully refined types — measured; partials Result[List[List[String]]] needs its recursive drop route before the _ls twin can land; named-fn callbacks probed FINE, the earlier lift attribution was wrong)
 spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: non-msi accumulator twins + for_each_line (create_temp_dir now self-hosted)
 spec/stdlib/fs_if_exists_test.almd :: COMPILER_FRONTIER :: C-215 errno-carrying read prim not landed
 #
