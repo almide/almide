@@ -1,0 +1,27 @@
+// fs_read_lines — SELF-HOSTED `fs.read_lines(path)` for the wasm leg: the WASI file-read
+// floor (prim.read_text_file) composed with the self-hosted `string.lines` splitter. The
+// native oracle (runtime/rs/src/fs.rs) is `read_to_string(path).map(|s| s.lines()...)` —
+// exactly this composition, so line semantics byte-match by construction (string_lines.almd
+// implements `str::lines()`: split on '\n', strip one trailing '\r' per line, no phantom
+// empty line after a trailing newline, a final unterminated line still yielded).
+//
+// The prim's `Result[String, String]` is consumed WITHOUT `!` — the tag is read at rh+16
+// and the payload borrowed from rh+12 (prim.load_handle), the exact composition idiom
+// fs_fold_lines.almd proved in production: a value-position `!` over a prim call is outside
+// the MIR-lowering subset, the manual tag read is on the verified rails. The prim result
+// block owns the payload String and is dropped at scope end (DropListStr); `text` is a
+// borrow that `string.lines` copies out of before the drop.
+//
+// Reaching prim.read_text_file, the transitive cap_witness carries Capability::FsRead — a
+// caller is caps-verified only if it declares FsRead (an `effect fn`).
+effect fn fs_read_lines(path: String) -> Result[List[String], String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    ok(string.lines(text))
+  }
+}
