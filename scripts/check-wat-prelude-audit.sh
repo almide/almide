@@ -36,7 +36,7 @@ mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 units = mod.enumerate_units(root)
 
-VOCAB = {"PROVEN", "CORPUS", "FALLBACK_ONLY", "PROBE_ONLY", "MIR_ONLY", "TEMPLATE"}
+VOCAB = {"PROVEN", "CORPUS", "FALLBACK_ONLY", "PROBE_ONLY", "MIR_ONLY", "TEST_PINNED", "TEMPLATE"}
 NEEDS_FIXTURE = {"PROVEN", "CORPUS"}
 
 rows, cur = [], {}
@@ -92,7 +92,10 @@ for r in rows:
     if cls == "MIR_ONLY" and not r.get("ref"):
         errs.append(f"{n}: MIR_ONLY needs `ref = \"#NNNN\"` — unreachable-from-source "
                     f"wasm is debt, and debt needs an issue")
-    if cls in {"FALLBACK_ONLY", "PROBE_ONLY", "TEMPLATE", "MIR_ONLY"} and not r.get("why"):
+    if cls == "TEST_PINNED" and not r.get("test"):
+        errs.append(f"{n}: TEST_PINNED needs `test = \"<cargo test path>\"` — the class's "
+                    f"whole claim is that a named test executes the body")
+    if cls in {"FALLBACK_ONLY", "PROBE_ONLY", "TEMPLATE", "MIR_ONLY", "TEST_PINNED"} and not r.get("why"):
         errs.append(f"{n}: {cls} needs `why = \"…\"`")
 
 for n in sorted(units):
