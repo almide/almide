@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "11"
+# unverified_ceiling = "10"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -128,7 +128,8 @@ evidence = "#1244 round 2: a std::time::Instant::now planted in almide-codegen d
 
 [[gate]]
 path = "scripts/check-frees-churn.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 3: corpus-floor direction (1 fixture => FAIL, the #976 vacuous-pass guard) and a REAL cross-leg divergence (an env-reading probe fixture: native sees the var, wasmtime passes no environ => output diverges => FAIL) both demonstrated; restored green"
 
 [[gate]]
 path = "scripts/check-host-determinism.sh"
