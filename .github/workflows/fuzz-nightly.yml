@@ -254,6 +254,14 @@ jobs:
       # finding after its kind + minimized summary, so two shards that trip the
       # same bug from different seeds produce the same name. Counting those
       # twice would inflate the night and file a duplicate issue.
+      #
+      # The name's KIND prefix also carries the class split (#1235): `Slow__*`
+      # findings are perf-class — one leg outran the budget but completed,
+      # byte-identical, at the fuzzer's 10x confirm re-run. They are recorded,
+      # uploaded, and issue-tracked under the perf label, but they do NOT fail
+      # the night: the correctness gate is for divergence and nontermination,
+      # and the 0.57.0 release gate showed a quadratic-slow run (#1229) going
+      # red as a phantom "Hang".
       - name: Aggregate findings
         id: agg
         run: |
@@ -265,7 +273,10 @@ jobs:
             done
           fi
           COUNT=$(find night-findings -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          SLOW=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' | wc -l | tr -d ' ')
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "slow=$SLOW" >> "$GITHUB_OUTPUT"
+          echo "correctness=$((COUNT - SLOW))" >> "$GITHUB_OUTPUT"
 
       - name: Campaign verdict
         run: |
@@ -273,6 +284,7 @@ jobs:
             "${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}" \
             "${{ env.FUZZ_SHARDS }}" \
             "${{ steps.agg.outputs.findings }}" \
+            "${{ steps.agg.outputs.slow }}" \
             >> "$GITHUB_STEP_SUMMARY" || true
           exit 0
 
@@ -285,13 +297,14 @@ jobs:
           retention-days: 30
 
       - name: Open / update tracking issue
-        if: steps.agg.outputs.findings != '0'
+        if: steps.agg.outputs.correctness != '0'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COUNT="${{ steps.agg.outputs.findings }}"
+          COUNT="${{ steps.agg.outputs.correctness }}"
           TITLE="Nightly fuzz: $COUNT cross-target finding(s)"
-          SUMMARY=$(find night-findings -name meta.txt -exec cat {} \; \
+          SUMMARY=$(find night-findings -mindepth 1 -maxdepth 1 -type d ! -name 'Slow__*' \
+            -exec cat {}/meta.txt \; \
             | grep -E '^(kind|summary|reproduce)' | head -60 || true)
           BODY=$(cat <<EOF
           The nightly generative differential fuzzer recorded **$COUNT** unique finding(s)
@@ -320,14 +333,56 @@ jobs:
             gh issue create --title "$TITLE" --body "$BODY" --label fuzz
           fi
 
-      # FINDINGS, and only findings, make the night red. Coverage lost to a
-      # reclaimed runner is reported by the verdict as `shards=k/N` and is NOT
-      # fatal — failing on it would put the infra noise the sharding exists to
-      # absorb straight back into the signal, which is how #924 got stuck.
-      - name: Fail the night on findings
-        if: steps.agg.outputs.findings != '0'
+      # Perf-class Slow findings route to their OWN issue under their own
+      # label (#1235): they are real findings — an order-of-magnitude budget
+      # overrun on one leg — but they are perf debt (the #1229 discipline),
+      # not correctness, and mixing them into the correctness issue would
+      # re-red the metric the class split exists to keep honest.
+      - name: Open / update perf (slow) tracking issue
+        if: steps.agg.outputs.slow != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::error::the campaign recorded ${{ steps.agg.outputs.findings }} finding(s) — see the uploaded artifacts and the tracking issue"
+          COUNT="${{ steps.agg.outputs.slow }}"
+          TITLE="Nightly fuzz: $COUNT slow finding(s) (perf-class)"
+          SUMMARY=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' \
+            -exec cat {}/meta.txt \; \
+            | grep -E '^(kind|summary|reproduce)' | head -60 || true)
+          BODY=$(cat <<EOF
+          The nightly fuzzer recorded **$COUNT** perf-class Slow finding(s): a leg
+          outran the per-program budget but completed byte-identical at the 10x
+          confirm re-run. Not correctness — the night stays green — but each is a
+          real order-of-magnitude perf gap (the #1229 class).
+
+          Artifacts are attached to
+          [run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          <details><summary>Finding summaries</summary>
+
+          \`\`\`
+          $SUMMARY
+          \`\`\`
+
+          </details>
+          EOF
+          )
+          EXISTING=$(gh issue list --label fuzz-perf --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh label create fuzz-perf --color D93F0B --description "Perf-class (Slow) findings from the nightly fuzzer" 2>/dev/null || true
+            gh issue create --title "$TITLE" --body "$BODY" --label fuzz-perf
+          fi
+
+      # CORRECTNESS findings, and only those, make the night red. Coverage lost
+      # to a reclaimed runner is reported by the verdict as `shards=k/N` and is
+      # NOT fatal — failing on it would put the infra noise the sharding exists
+      # to absorb straight back into the signal, which is how #924 got stuck.
+      # Slow findings are tracked above and do not fail the night (#1235).
+      - name: Fail the night on correctness findings
+        if: steps.agg.outputs.correctness != '0'
+        run: |
+          echo "::error::the campaign recorded ${{ steps.agg.outputs.correctness }} correctness finding(s) — see the uploaded artifacts and the tracking issue"
           exit 1
 
   coverage-ratchet:

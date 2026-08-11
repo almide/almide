@@ -28,9 +28,14 @@
 # ran. That absence is the signal, and it is reported as `shards=k/N` rather
 # than being confused with a finding.
 #
-# WHAT MAKES A NIGHT RED. Findings, and only findings. Coverage lost to a
-# reclaimed runner is reported, never fatal — otherwise the infra noise the
-# sharding exists to absorb would come straight back in through the verdict.
+# WHAT MAKES A NIGHT RED. Correctness findings, and only those. Coverage lost
+# to a reclaimed runner is reported, never fatal — otherwise the infra noise
+# the sharding exists to absorb would come straight back in through the
+# verdict. Perf-class `Slow` findings (#1235: a leg that outran the budget but
+# completed byte-identical at the fuzzer's 10x confirm re-run) are reported on
+# the record line and tracked under the perf label, but they do not fail the
+# night either — the 0.57.0 release gate showed a quadratic-slow run (#1229)
+# going red as a phantom "Hang".
 #
 # budget_completed per shard is read from the presence of the fuzzer's own
 # `=== campaign summary ===` block: print_summary (tools/xtarget-fuzz) only
@@ -41,10 +46,12 @@
 # Division of labour: scripts/fuzz-track-record.sh scores nights ACROSS runs
 # from job conclusions; this aggregates the shards WITHIN one night.
 #
-# Usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings>
+# Usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings> [<slow>]
 #   <shard-dir> holds one subdirectory per reporting shard, each containing
 #   fuzz-output.txt (the layout `actions/download-artifact` produces when
 #   several artifacts are downloaded without a `name:`).
+#   <slow> is the perf-class subset of <findings> (defaults to 0 so pre-#1235
+#   callers keep working); the record line splits the two.
 
 set -euo pipefail
 # Byte-order collation, pinned (#1031): the shard walk below is `find | sort`,
@@ -53,10 +60,12 @@ set -euo pipefail
 # docs/roadmap/README.md churn with no content change.
 export LC_ALL=C
 
-DIR="${1:?usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings>}"
+DIR="${1:?usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings> [<slow>]}"
 MINUTES="${2:?minutes-per-shard}"
 PLANNED="${3:?shards-planned}"
 FINDINGS="${4:?findings}"
+SLOW="${5:-0}"
+CORRECTNESS=$((FINDINGS - SLOW))
 
 echo "## Nightly fuzz verdict"
 echo ""
@@ -67,7 +76,7 @@ mapfile -t OUTS < <(find "$DIR" -name fuzz-output.txt -type f 2>/dev/null | sort
 REPORTING=${#OUTS[@]}
 
 if [ "$REPORTING" -eq 0 ]; then
-  LINE="fuzz-night: shards=0/$PLANNED minutes_planned=$((MINUTES * PLANNED)) minutes_delivered=0 generated=0 findings=$FINDINGS"
+  LINE="fuzz-night: shards=0/$PLANNED minutes_planned=$((MINUTES * PLANNED)) minutes_delivered=0 generated=0 findings=$FINDINGS correctness=$CORRECTNESS slow=$SLOW"
   echo "$LINE" >&2
   echo '```'; echo "$LINE"; echo '```'
   echo ""
@@ -104,7 +113,7 @@ done
 
 DELIVERED=$(awk -v e="$ELAPSED" 'BEGIN{printf "%.1f", e/60}')
 THROUGHPUT=$(awk -v g="$GENERATED" -v e="$ELAPSED" 'BEGIN{printf "%.1f", (e>0)? g*60/e : 0}')
-LINE="fuzz-night: shards=$COMPLETED/$PLANNED reporting=$REPORTING minutes_planned=$((MINUTES * PLANNED)) minutes_delivered=$DELIVERED generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS"
+LINE="fuzz-night: shards=$COMPLETED/$PLANNED reporting=$REPORTING minutes_planned=$((MINUTES * PLANNED)) minutes_delivered=$DELIVERED generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS correctness=$CORRECTNESS slow=$SLOW"
 
 echo "$LINE" >&2
 echo '```'
@@ -115,6 +124,11 @@ if [ "$COMPLETED" -lt "$PLANNED" ]; then
   echo "**$((PLANNED - COMPLETED))** of **$PLANNED** shard(s) did not finish their budget"
   echo "(runner reclaimed). The night still has a verdict — coverage is reduced,"
   echo "not absent. This is reported, never fatal: only findings fail the night."
+  echo ""
+fi
+if [ "$SLOW" -gt 0 ] && [ "$CORRECTNESS" -eq 0 ]; then
+  echo "**$SLOW** perf-class Slow finding(s) (#1235: over budget but completed"
+  echo "byte-identical at 10x) — tracked under the perf label, night stays green."
   echo ""
 fi
 echo "| seed | budget | programs | elapsed |"
