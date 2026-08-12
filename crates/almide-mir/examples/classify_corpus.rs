@@ -289,6 +289,19 @@ fn count_ir_calls(
             {
                 self.n += 1;
             }
+            // A HEAP `Range` BIND initializer (`let r = 0..<n`) materializes ONE
+            // synthetic `list.range` CallFn (#1272 — the deferred-Opaque bind made a
+            // later `for i in r` iterate zero times, so the bind now emits the real
+            // list, mirroring the call-ARG credit below in visit_expr). Credit the
+            // statement so the synthetic call has a matching ir_call and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION; a Range the bind cannot
+            // materialize WALLS (mir < ir only, honest taint). list.range is pure.
+            if matches!(&s.kind, almide_ir::IrStmtKind::Bind { value, .. }
+                if matches!(value.kind, almide_ir::IrExprKind::Range { .. })
+                    && almide_mir::lower::is_heap_ty(&value.ty))
+            {
+                self.n += 1;
+            }
             almide_ir::visit::walk_stmt(self, s);
         }
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
