@@ -2999,3 +2999,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/binding_stmts.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-242"
+spec      = "ALS-E13"
+title     = "Conditional expressions evaluate the taken arm only, identically on both targets"
+statement = "ALS-E13: `if cond then arm [else arm]` — statement position without else (Unit), brace arms after `then`, the else-if chain, and the value form all produce byte-identical observables native <-> wasm (fixture pins stmt-then/brace-arm/else-arm/mid/9). `then` is mandatory: the brace-language transcription `if c { }` is a parse error steering to `then` (tests/if_then_diag_test.rs) — the most likely LLM slip stops at check time with the fix named. Only the taken arm's effects fire; the v1 both-arms-linearization wall defends exactly this norm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/if_block_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-243"
+spec      = "ALS-E14"
+title     = "Block expressions yield their tail value identically on both targets"
+statement = "ALS-E14: `{ stmt* tail? }` is an expression whose value is the tail (Unit when absent), usable as a let initializer, an if arm, or a function body, with block-scoped bindings — fixture pins 11 (let-initializer block) and 9 (if-arm blocks) byte-identical native <-> wasm. Shares the fixture with C-242 (the conditional's brace arms ARE block expressions)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/if_block_forms.almd", class = "fixture" },
+]

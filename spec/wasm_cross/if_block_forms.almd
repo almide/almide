@@ -1,0 +1,25 @@
+// @contract: C-242, C-243
+// ALS-E13/E14 (docs/specs/als/expressions.md): the conditional expression —
+// `then` is MANDATORY (`if c {` is a parse error steering to `then`, pinned
+// by tests/if_then_diag_test.rs) — in statement position without else, with
+// brace arms, as an else-if chain, and as a value; and the block expression
+// whose value is its tail. Identical observables on both targets.
+effect fn main() -> Unit = {
+  let a = 5
+  if a > 3 then println("stmt-then") else ()
+  if a > 3 then { println("brace-arm") } else ()
+  if a > 9 then { println("no") } else { println("else-arm") }
+  let grade = if a < 3 then "low"
+  else if a < 8 then "mid" else "high"
+  println(grade)
+  let b = {
+    let t = a * 2
+    t + 1
+  }
+  println(int.to_string(b))
+  let n = if a > 0 then {
+    let d = a * 2
+    d - 1
+  } else { 0 }
+  println(int.to_string(n))
+}
