@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-252 contracts
+254 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -280,4 +280,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-250 | Pipe and composition evaluate as plain application in order, identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-251 | if let implicitly unwraps an Option scrutinee with a bare binder, identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-252 | Expression statements and comments: Unit calls execute, discards are explicit, comments are invisible | 0.57.1 | active | fixture | 1 |
+| C-253 | Place assignments and type ascription behave identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-254 | Type ascription supplies an expected type without changing the value on either target | 0.57.1 | active | fixture | 1 |
 

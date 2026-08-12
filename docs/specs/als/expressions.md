@@ -397,3 +397,25 @@ pin。
 宣言単位で担持)。
 
 テスト: `spec/wasm_cross/expr_stmt_comment.almd`(契約 C-252)。
+
+## ALS-S5 場所代入(`Stmt::IndexAssign` / `Stmt::FieldAssign`)
+
+**受理形**: リスト要素 `xs[i] = v`、レコードフィールド `p.x = v`、マップ
+キー `m[k] = v`(存在キーは上書き、不在キーは挿入 — upsert)。対象は
+`var` 束縛(`let` への場所代入は不変性違反、ALS-S1 の E009 系)。
+
+**値の規範**: 代入後の読みは新値を観測する(fixture: 21 / 12 / 6 / 100、
+両ターゲット同一)。値意味論 — 代入は共有を通じて漏れない(COW)。**範囲外
+インデックス書きは実行時中断**(統一メッセージ + exit 1、C-067 の裁定)。
+
+テスト: `spec/wasm_cross/place_assign_ascription.almd`(契約 C-253)、
+範囲外は `spec/wasm_cross/index_bounds_write_heap.almd`(C-067)。
+
+## ALS-E22 型注釈式(`ExprKind::TypeAscription`)
+
+**受理形**: `(e: T)` — 式位置の型注釈。
+
+**値の規範**: 値は `e` のまま、型検査の期待型として `T` を供給する
+(fixture: `(7: Int)` → 7)。実行時表現に影響しない。
+
+テスト: `spec/wasm_cross/place_assign_ascription.almd`(契約 C-253)。

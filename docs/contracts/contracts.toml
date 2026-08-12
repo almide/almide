@@ -3121,3 +3121,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/expr_stmt_comment.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-253"
+spec      = "ALS-S5"
+title     = "Place assignments and type ascription behave identically on both targets"
+statement = "ALS-S5/E22: list-element `xs[i] = v`, record-field `p.x = v`, and map-key `m[k] = v` (upsert: insert-if-absent, overwrite-if-present — 6 then 100 pinned) all observe the new value on the next read, byte-identical native <-> wasm (fixture pins 21/12/6/100/7); the OOB-write abort stays C-067's ruling. The type-ascription expression `(e: T)` supplies an expected type without changing the value or its runtime representation."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/place_assign_ascription.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-254"
+spec      = "ALS-E22"
+title     = "Type ascription supplies an expected type without changing the value on either target"
+statement = "ALS-E22: `(e: T)` — the value is `e` unchanged ((7: Int) -> 7 pinned byte-identical), the ascription only feeds the checker's expected type and leaves the runtime representation untouched. Shares the place-assignment fixture with C-253 (the S5/E22 pair landed together)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/place_assign_ascription.almd", class = "fixture" },
+]
