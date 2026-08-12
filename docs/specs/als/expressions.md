@@ -201,3 +201,23 @@ JSON/他言語からの転記ミスは検査時に止まる)。
 挿入順は決定的に保存される(AlmideMap の規範; 反復順は挿入順)。
 
 テスト: `spec/wasm_cross/collection_literals.almd`(契約 C-239)。
+
+## ALS-S1 束縛文(`Stmt::Let` / `Stmt::Var` / `Stmt::Assign`)
+
+**受理形**: 不変束縛 `let x = e`(型注釈 `let x: T = e` 任意)、可変束縛
+`var x = e`、再代入 `x = e`(`var` のみ)。
+
+**シャドーイングの裁定**: `let` の同名再束縛は**受理** — 新しい束縛の
+初期化子は古い束縛を見る(`let x = 1` の後の `let x = x + 10` で `x` は
+11)。これはエラーでも警告でもない(段階的な値の精製が idiom)。
+
+**不変性の裁定**: `let` への代入は**検査時 E009** — ヒントは `var` 宣言へ
+誘導する。`var` の再代入は宣言時の型に固定され、別の型での代入は
+**E001**(黙った拡大なし)。負例は `tests/binding_diag_test.rs` が pin。
+
+**値の規範**: `var` への代入は制御フロー(ループ本体・分岐)を貫いて
+観測可能に反映される(fixture: 逐次 2 代入 → 10、ループ内累積 → 6)。
+`let` の初期化子には条件式も取れる(`let y = if … then … else …`)。
+
+テスト: `spec/wasm_cross/binding_stmts.almd`(契約 C-241)、
+`tests/binding_diag_test.rs`(負例)。
