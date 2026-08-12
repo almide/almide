@@ -752,12 +752,12 @@ fn build_ir_with_drops(
     let repr_type_decls = all_type_decls.clone();
     all_type_decls.extend(generic_variant_synthetic_decls);
     let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
+    // Bound once: also consulted by the `list_str_drop` gate below — each
+    // `program_uses_*` call is a full-program walk.
+    let uses_closures = crate::lower::program_uses_closures(&ir);
     // First-class function values need the UNIFORM closure-block release
     // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
-    let closure_drop = gated(
-        crate::lower::program_uses_closures(&ir),
-        crate::lower::CLOSURE_DROP_SRC,
-    );
+    let closure_drop = gated(uses_closures, crate::lower::CLOSURE_DROP_SRC);
     // A `List[<Fn>]` LITERAL (`[(x)=>x+1, (x)=>x*2]`) routes its scope-end drop to the
     // generated `$__drop_list_closure` (per-element `$__drop_closure` — required, not a
     // blind rc_dec, since a captured heap slot would otherwise leak). Needs
@@ -806,7 +806,7 @@ fn build_ir_with_drops(
     let list_str_drop = gated(
         crate::lower::program_uses_list_str_drop_field(&all_type_decls)
             || crate::lower::program_uses_anon_list_str_record(&ir, &all_type_decls)
-            || crate::lower::program_uses_closures(&ir),
+            || uses_closures,
         crate::lower::LIST_STR_DROP_SRC,
     );
     // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
@@ -819,14 +819,11 @@ fn build_ir_with_drops(
     // (the fs.fold_lines msi twins) route their drops to the TAG-AWARE
     // `$__drop_res_msi` / `$__drop_res_lmsi` (Ok → the skv key sweep; Err → the
     // message). One gate injects both — `res_lmsi` shares `res_msi`'s key loop.
-    let res_msi_drop = gated(
-        crate::lower::program_uses_res_map_si(&ir),
-        crate::lower::RES_MSI_DROP_SRC,
-    );
-    let res_lmsi_drop = gated(
-        crate::lower::program_uses_res_map_si(&ir),
-        crate::lower::RES_LMSI_DROP_SRC,
-    );
+    // Bound once for the msi twins — the walk answered the same question
+    // twice back-to-back.
+    let uses_res_map_si = crate::lower::program_uses_res_map_si(&ir);
+    let res_msi_drop = gated(uses_res_map_si, crate::lower::RES_MSI_DROP_SRC);
+    let res_lmsi_drop = gated(uses_res_map_si, crate::lower::RES_LMSI_DROP_SRC);
     // An `Option[(String, <scalar>)]` (map.find's result, or a plain `some((s, n))` ctor)
     // routes its drop to the TAG-AWARE `$__drop_opt_str_int` (Some → recursive String-slot
     // free; None → nothing) — a blind flat `rc_dec` of the Option's payload slot would only
