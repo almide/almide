@@ -154,3 +154,23 @@ E001)、`ok(e)`、`err(e)`。すべて小文字綴り。
 
 テスト: `spec/wasm_cross/option_result_ctors.almd`(契約 C-237)、
 `tests/ctor_diag_test.rs`(負例)。
+
+## ALS-E10 レンジ式(`ExprKind::Range`)
+
+**受理形**: 終端排他 `start ..< end`、終端包含 `start ... end`。境界は Int の
+スカラー式(リテラル・変数・呼び出し)。
+
+**引退綴りの裁定**: `..` と `..=` は**引退済み** — 検査時 E031 で現行綴りへ
+誘導し、`almide fix` が機械的に移行する。歴史的に `..` は排他・`..=` は包含
+だったため、黙った読み替えはどちら向きでも off-by-one を生む — 拒否のみが
+安全(負例は `tests/range_spelling_diag_test.rs` が両綴りを pin)。
+
+**値の規範**: レンジは第一級の値 — `let r = 0..<3` と束縛してから
+`for i in r` で駆動でき、インライン頭 `for i in 0..<3` と同じ列を生む。
+束縛は実リスト(`list.range`)を実体化する(#1272 の回帰 pin: 遅延空値の
+束縛は wasm で 0 回反復だった)。排他 `0..<3` → 0,1,2、包含 `0...5` →
+0〜5、非零開始・呼び出し境界も両ターゲット同一(fixture は総和
+3 / 15 / 9 / 6 を pin)。
+
+テスト: `spec/wasm_cross/range_first_class.almd`(契約 C-238)、
+`tests/range_spelling_diag_test.rs`(負例)。

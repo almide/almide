@@ -1,0 +1,35 @@
+// @contract: C-238
+// ALS-E10 (docs/specs/als/expressions.md): the range expression as a
+// FIRST-CLASS value — bound by `let`, then driven through `for-in`. The
+// bind materializes the real list (list.range), so iteration observes the
+// true bounds: exclusive `..<`, inclusive `...`, a non-zero start, and a
+// call-typed bound all sum identically on both targets. (#1272 regression
+// pin: the deferred-empty bind made wasm iterate zero times.)
+fn upper() -> Int = 4
+
+effect fn main() -> Unit = {
+  let r = 0..<3
+  var s = 0
+  for i in r {
+    s = s + i
+  }
+  println(int.to_string(s))
+  let ri = 0...5
+  var t = 0
+  for i in ri {
+    t = t + i
+  }
+  println(int.to_string(t))
+  let ro = 2..<5
+  var u = 0
+  for i in ro {
+    u = u + i
+  }
+  println(int.to_string(u))
+  let rc = 1..<upper()
+  var v = 0
+  for i in rc {
+    v = v + i
+  }
+  println(int.to_string(v))
+}

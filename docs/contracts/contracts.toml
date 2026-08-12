@@ -2955,3 +2955,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/option_result_ctors.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-238"
+spec      = "ALS-E10"
+title     = "First-class range values iterate their true bounds on both targets"
+statement = "ALS-E10: a range is a first-class value — `let r = 0..<3` then `for i in r` iterates the same sequence as the inline head, for exclusive `..<`, inclusive `...`, non-zero starts, and call-typed bounds (fixture pins sums 3/15/9/6 byte-identical native <-> wasm). The bind materializes the real list via `list.range`; before this contract the deferred-empty bind made wasm silently iterate ZERO times while native printed the true sum (#1272 — the accept-and-wrong class this ledger exists to extinguish). The retirement half is check-time: `..` and `..=` are E031 with a mechanical `almide fix` steer (tests/range_spelling_diag_test.rs) — a silent re-reading would be an invisible off-by-one in either direction."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/range_first_class.almd", class = "fixture" },
+]
