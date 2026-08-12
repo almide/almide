@@ -3032,3 +3032,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/while_loops.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-245"
+spec      = "ALS-E16"
+title     = "String interpolation embeds each segment's canonical display identically on both targets"
+statement = "ALS-E16: `${expr}` segments (variable, arithmetic, multiple per literal), the `\\${` literal escape, and per-type display — String verbatim, Int decimal, Bool lowercase, Float canonical (1.5 pinned; the exhaustive float display norm waits on the ALS-E3/#1261 ruling) — byte-identical native <-> wasm (fixture pins hello world / sum=3 / n*7=42 / mix / escaped ${not_interp} / float=1.5 bool=false)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-246"
+spec      = "ALS-E17"
+title     = "Identifiers resolve to their nearest binding; unresolved names are check-time E003 naming the identifier"
+statement = "ALS-E17: an identifier expression resolves to the nearest binding (shadowing per ALS-S1) with identical observables on both targets; an unresolved name is check-time E003 whose diagnostic CONTAINS the failed name (tests/ident_diag_test.rs) — no runtime name-resolution failure exists (a checked name always resolves; NameTotality is the v1 proof obligation for this)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
+]
