@@ -72,3 +72,37 @@ lowering は **call-free なオペランド対に限り**この比較を定数 B
 > — #1261)。裁定が下り fmt が綴りを保存するまで、
 > proofs/als-element-coverage.toml の `ExprKind::Float` 行は UNWRITTEN の
 > まま据え置く(F1: fixture なき規範化はしない)。
+
+## ALS-E6 括弧式(`ExprKind::Paren`)
+
+**受理形**: `( expr )`。
+
+**値の規範**: 括弧式の値・型・効果は内側の式と同一 — 括弧は結合の優先順位を
+上書きする以外に意味を持たない。`(1 + 2) * 3` は `9`、`1 + 2 * 3` は `7`
+(両ターゲット実測)。fmt は冗長な括弧を**保存**する(勝手に剥がさない)。
+
+**1-tuple との弁別の裁定**: `(e)` は括弧式、`(e,)` は **1 要素タプル** —
+末尾カンマが意味を担う。fmt は 1 要素タプルの末尾カンマを往復保存する
+(#1265 で修正; 回帰テスト `fmt_one_tuple_keeps_trailing_comma`)。既知の
+制限: native backend は文字列補間と 1-tuple の同居で `.0` を落とせない
+(#1267、loud 拒否であり誤値は出ない)。
+
+テスト: `spec/wasm_cross/grouping_unary.almd`、`spec/wasm_cross/tuple_single.almd`
+(いずれも契約 C-234)。
+
+## ALS-E7 単項演算子(`ExprKind::Unary`)
+
+**受理形**: 論理否定はキーワード `not`(`not b`、重ねがけ `not not b` 可)。
+算術否定は前置 `-`(リテラル・変数・括弧式・浮動小数点に適用可)。
+
+**`!` の裁定**: 前置 `!` は**受理しない** — コンパイルエラーで
+`Use 'not' for boolean negation` へ誘導する(postfix `!` は unwrap、
+ADR-0008)。式文位置と補間 `${...}` 内は字句経路が異なるが同じ誘導を返す
+(両位置を `tests/unary_not_diag_test.rs` が pin)。
+
+**値の規範**: `not true` → `false`、`not not b` ≡ `b`。リテラル直前の `-` は
+符号込みで範囲検査に折り込まれる(ALS-E1 の裁定)。`-x`(変数)、
+`-(3 + 4)`(括弧式)→ `-7`、`-(1.5)` → `-1.5` — 全て両ターゲット同一。
+
+テスト: `spec/wasm_cross/grouping_unary.almd`(契約 C-235)、
+`tests/unary_not_diag_test.rs`(負例)。

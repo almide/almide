@@ -2910,3 +2910,26 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/literal_unit.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-234"
+spec      = "ALS-E6"
+title     = "Parenthesized grouping and the 1-tuple disambiguation behave identically on both targets"
+statement = "ALS-E6: parens override precedence and are otherwise semantically transparent ((1+2)*3 = 9 vs 1+2*3 = 7, byte-identical native <-> wasm), and fmt preserves redundant parens. The disambiguation is normative: (e) is grouping, (e,) is a 1-tuple whose trailing comma fmt round-trips (#1265 fixed in the same PR; regression test fmt_one_tuple_keeps_trailing_comma). The 1-tuple fixture is kept free of string interpolation while #1267 (native scalarization of the 1-tuple repr under interpolation, loud refusal) stands."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/grouping_unary.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_single.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-235"
+spec      = "ALS-E7"
+title     = "Unary operators: `not` negation and prefix minus evaluate identically on both targets"
+statement = "ALS-E7: boolean negation is the keyword `not` (not true -> false, not not b == b); prefix `!` is a compile-time rejection that steers to `not` in BOTH lexer paths (expression statement and interpolation segment — tests/unary_not_diag_test.rs pins the steer, since postfix `!` is unwrap per ADR-0008). Prefix minus applies to literals (folding into the ALS-E1 range check), variables, parenthesized expressions, and floats: -(3+4) = -7, -x, -(1.5) = -1.5 — byte-identical native <-> wasm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/grouping_unary.almd", class = "fixture" },
+]
