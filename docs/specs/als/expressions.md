@@ -221,3 +221,32 @@ JSON/他言語からの転記ミスは検査時に止まる)。
 
 テスト: `spec/wasm_cross/binding_stmts.almd`(契約 C-241)、
 `tests/binding_diag_test.rs`(負例)。
+
+## ALS-E13 条件式(`ExprKind::If`)
+
+**受理形**: `if cond then arm`(else 省略可、文位置)、`if cond then arm
+else arm`、アームは単一式または brace ブロック `then { … } else { … }`、
+連鎖 `else if`。条件は `Bool`。
+
+**`then` の裁定**: `then` は**必須** — brace 言語からの転記形
+`if cond { … }` は parse エラーで `if requires 'then'` と誘導する
+(負例は `tests/if_then_diag_test.rs` が pin)。
+
+**値の規範**: 条件式は値を持つ(`let g = if … then "low" else if … then
+"mid" else "high"`)。else 省略形は文位置でのみ許され、値は `Unit`。取られた
+アームだけが効果を発火する(取られないアームの効果が観測されたら不適合 —
+v1 lowering の both-arms 線形化 wall はこの規範の防衛)。
+
+テスト: `spec/wasm_cross/if_block_forms.almd`(契約 C-242)、
+`tests/if_then_diag_test.rs`(負例)。
+
+## ALS-E14 ブロック式(`ExprKind::Block`)
+
+**受理形**: `{ stmt* tail? }` — 文の列に任意の末尾式。
+
+**値の規範**: ブロックの値は**末尾式の値**(なければ `Unit`)。ブロックは
+式であり、`let` の初期化子・`if` のアーム・関数本体のいずれにも置ける。
+ブロック内の束縛はブロックスコープ(fixture: `let b = { let t = a * 2
+t + 1 }` → 11、if アーム内ブロック → 9、両ターゲット同一)。
+
+テスト: `spec/wasm_cross/if_block_forms.almd`(契約 C-243)。
