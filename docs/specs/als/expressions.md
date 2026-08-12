@@ -47,3 +47,28 @@ bin     := "0b" bindigit (bindigit | "_")*
 `true` / `false` の小文字綴りとする。
 
 テスト: `spec/wasm_cross/literal_int_forms.almd`(契約 C-231)。
+
+## ALS-E4 ユニットリテラル(`ExprKind::Unit`)
+
+**受理形**: `()`(空の括弧対)。
+
+**値の規範**: 型は `Unit`。`Unit` の値はちょうど一つであり、`()` はその唯一の
+リテラル表記。式位置・`let` 束縛位置・`-> Unit` 関数の本体として受理され、
+ブロックの末尾式として関数の返り値になる。
+
+**等値性の裁定**: `Unit` 上の `==` は**反射的に真**(`() == ()` → `true`、
+`!=` → `false`)。住人が一つの型に実行時の読み取りは存在しないため、v1
+lowering は **call-free なオペランド対に限り**この比較を定数 Bool に畳む。
+呼び出しを含むオペランド(`f() == ()`)は畳まない — 呼び出しの効果が消える
+のは miscompile であり、既存の wall に落ちて拒否される(正直な未対応 >
+黙った誤答)。この畳み込み以前は Eq-over-Unit が v1 で全位置 wall であり、
+等値性の証拠は native 単独だった — 現在は両ターゲットの実行 pin。
+
+テスト: `spec/wasm_cross/literal_unit.almd`(契約 C-233)、
+`spec/lang/unit_literal_test.almd`(assert 形、wasm 脚で実行)。
+
+> **ALS-E3(浮動小数点リテラル)は未執筆**: fixture が `almide fmt` の
+> spec ゲートを通過できない(fmt が指数・下線綴りを f64 値経由で正規化する
+> — #1261)。裁定が下り fmt が綴りを保存するまで、
+> proofs/als-element-coverage.toml の `ExprKind::Float` 行は UNWRITTEN の
+> まま据え置く(F1: fixture なき規範化はしない)。

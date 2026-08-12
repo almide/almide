@@ -2899,3 +2899,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/literal_int_forms.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-233"
+spec      = "ALS-E4"
+title     = "The unit literal, its positions, and its reflexive equality are identical on both targets"
+statement = "ALS-E4: `()` is the sole value of type Unit — accepted in expression position, let-binding position, and as the body of a Unit-returning function, with byte-identical observables native <-> wasm. Equality over Unit is reflexively constant (`() == ()` is true, `!=` false): one inhabitant means there is no runtime read, so the v1 lowering folds call-free Unit comparisons to the constant Bool (a call-bearing operand like `f() == ()` is NOT folded — eliding the call's effects would be a miscompile — and falls to the existing walls). This fold retired the Eq-over-Unit wall that previously kept unit equality native-only."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/literal_unit.almd", class = "fixture" },
+]
