@@ -216,7 +216,7 @@ enum WasmTestOutcome {
 /// early-return order exactly.
 fn wasm_test_preflight_outcome(
     test_file: &str,
-    program: &almide_lang::ast::Program,
+    _program: &almide_lang::ast::Program,
     source_text: &str,
     parse_errors: &[crate::diagnostic::Diagnostic],
 ) -> Option<WasmTestOutcome> {

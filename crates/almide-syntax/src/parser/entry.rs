@@ -71,7 +71,6 @@ impl Parser {
         // Import declarations (with recovery)
         while self.check(TokenType::Import) {
             program.comment_map.push(std::mem::take(&mut pending));
-            gap_blanks = 0;
             match self.parse_import_decl() {
                 Ok(import) => program.imports.push(import),
                 Err(msg) => {
@@ -95,7 +94,6 @@ impl Parser {
             program.doc_map.push(doc);
             program.blank_lines_map.push(gap_blanks);
             program.comment_map.push(std::mem::take(&mut pending));
-            gap_blanks = 0;
 
             let pre_err_len = self.errors.len();
             match self.parse_top_decl() {

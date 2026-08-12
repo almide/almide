@@ -260,7 +260,7 @@ impl Checker {
         name: &str,
         ret_ty: &Ty,
         body_ty: &Ty,
-        body: &ast::Expr,
+        _body: &ast::Expr,
         is_effect: bool,
     ) {
         let rr = resolve_ty(ret_ty, &self.uf);

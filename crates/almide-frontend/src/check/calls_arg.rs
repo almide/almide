@@ -13,7 +13,7 @@ impl Checker {
         structural_bounds: &HashMap<Sym, Ty>,
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
-        let ArgSite { fn_name, param_name } = site;
+        let ArgSite { fn_name: _, param_name: _ } = site;
         if let Ty::TypeVar(tv) = param_ty {
             self.unify_call_arg_typevar(site, *tv, arg_ty, structural_bounds, bindings)
         } else {

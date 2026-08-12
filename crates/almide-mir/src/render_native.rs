@@ -22,7 +22,7 @@
 //! full scalar-or-String control flow (if-as-value, loops).
 
 use crate::lower::LowerError;
-use crate::{CallArg, Init, IntOp, MirFunction, MirProgram, Op, Repr, ValueId};
+use crate::{CallArg, IntOp, MirFunction, MirProgram, Op, Repr, ValueId};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -117,12 +117,11 @@ pub(crate) fn as_f64_arg(code: &str, t: NTy) -> Result<String, LowerError> {
 /// addition needs a differential-corpus row in the same PR
 /// (tests/native_v1_differential_test.rs).
 use crate::render_native_op_families::{
-    render_native_float_op, render_native_meter_op, render_native_result_op,
+    render_native_meter_op, render_native_result_op,
     render_native_scalar_op, render_native_termination_op,
 };
 use crate::render_native_shims::{
-    shim, shim_rust_name, BUDGET_SHIM, CHARGE_DYN_SHIM, CHARGE_SHIM, COUNTER_SHIM, CUT_RET_MARKER,
-    FUEL_LT0_SHIM, TIMEOUT_SHIM,
+    shim, shim_rust_name, CHARGE_SHIM, COUNTER_SHIM, CUT_RET_MARKER,
 };
 
 /// The Perceus balance is machine-checked on the SAME ops this render erases

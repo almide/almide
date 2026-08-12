@@ -337,7 +337,7 @@ impl almide_ir::visit::IrVisitor for GenericVariantListInstantiationScan<'_> {
 /// `for` costs more cognitive complexity per level than a flat `.chain()`/
 /// `.flat_map()` pipeline, which this crate's Op-rendering code already prefers for
 /// exactly that reason). A plain iteration helper, no decision logic.
-fn for_each_program_expr(ir: &almide_ir::IrProgram, mut visit: impl FnMut(&almide_ir::IrExpr)) {
+fn for_each_program_expr(ir: &almide_ir::IrProgram, visit: impl FnMut(&almide_ir::IrExpr)) {
     let main = ir.functions.iter().map(|f| &f.body).chain(ir.top_lets.iter().map(|tl| &tl.value));
     let modules = ir.modules.iter().flat_map(|m| {
         m.functions.iter().map(|f| &f.body).chain(m.top_lets.iter().map(|tl| &tl.value))

@@ -182,7 +182,7 @@ pub(super) fn discover_in_stmt(
     program_functions: &[IrFunction],
     instances: &mut HashMap<MonoKey, HashMap<String, Ty>>,
 ) {
-    use almide_ir::visit::walk_stmt;
+    
     let mut visitor = DiscoverVisitor { bound_fns, program_functions, instances: HashMap::new() };
     visitor.visit_stmt(stmt);
     instances.extend(visitor.instances);

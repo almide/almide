@@ -87,7 +87,7 @@ fn constant_fold(program: &mut IrProgram) {
     // cross-module top-let read goes through a synthesized ref in the
     // READER's own region resolved by NAME later, never by a raw foreign id,
     // so per-region scoping loses no legitimate #809 chain.
-    let mut fold_top_let = |tl: &mut IrTopLet,
+    let fold_top_let = |tl: &mut IrTopLet,
                             env: &mut std::collections::HashMap<VarId, IrExprKind>| {
         subst_const_vars(&mut tl.value, env);
         fold_expr(&mut tl.value);

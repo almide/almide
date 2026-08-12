@@ -15,11 +15,9 @@ use crate::render_wasm::try_render_wasm_program;
 use crate::MirProgram;
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
-use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_optimize::{mono, optimize};
 use std::collections::HashMap;
 
 /// The mangled flat name a user-module function gets when resolved to a user `CallFn`

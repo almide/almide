@@ -86,7 +86,7 @@ fn fusable_float_prim(
     floats: &BTreeSet<ValueId>,
 ) -> Option<(ValueId, String, BTreeSet<ValueId>)> {
     let mut reads = BTreeSet::new();
-    let mut farg = |fuser: &mut Fuser, reads: &mut BTreeSet<ValueId>, i: usize| {
+    let farg = |fuser: &mut Fuser, reads: &mut BTreeSet<ValueId>, i: usize| {
         let raw = fuser.take(args[i], reads);
         if floats.contains(&args[i]) {
             raw

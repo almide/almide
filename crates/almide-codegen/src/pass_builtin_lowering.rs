@@ -56,7 +56,7 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
     // origin is the versioned `codeclib_v0_inner` — so every call site that
     // rebuilt the name from its own guess disagreed with the definition
     // (#1094). Storing what the definition emits means no consumer has to guess.
-    let mut add = |map: &mut HashMap<String, String>, name: &str, origin: &str| {
+    let add = |map: &mut HashMap<String, String>, name: &str, origin: &str| {
         if !name.contains('.') {
             return;
         }

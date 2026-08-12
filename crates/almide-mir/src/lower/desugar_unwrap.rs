@@ -18,7 +18,7 @@ pub fn desugar_effect_unwrap(
     body: &IrExpr,
     unit_main: bool,
     ret_is_result: bool,
-    layouts: &crate::lower::VariantLayouts,
+    _layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     let mut next_var = max_var_id(body) + 1;
     desugar_effect_unwrap_inner(body, &mut next_var, unit_main, ret_is_result)
@@ -45,7 +45,7 @@ fn desugar_effect_unwrap_inner(
     unit_main: bool,
     ret_is_result: bool,
 ) -> Option<IrExpr> {
-    use almide_ir::{IrMatchArm, IrPattern};
+    
     use almide_lang::types::Ty;
     // A `!` in a FOR-IN ITERABLE HEAD (`for row in list.get(XS, 0)! { … }` — #1168):
     // hoist it FIRST into `let $t = <head>!; for row in $t { … }` (exactly the manual

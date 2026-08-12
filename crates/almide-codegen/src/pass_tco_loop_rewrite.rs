@@ -333,7 +333,7 @@ struct TailFrame<'a> {
 /// - Block: recurse into trailing expr
 /// - Anything else (base case): assign to result var, break
 fn rewrite_tail_expr(expr: IrExpr, f: &TailFrame<'_>) -> IrExpr {
-    let TailFrame { fn_name, params, temps, result_var, is_effect, dec_params, owned_params } = *f;
+    let TailFrame { fn_name, params: _, temps: _, result_var, is_effect, dec_params, owned_params } = *f;
     match expr.kind {
         // Self-recursive call in tail position -> reassign params and continue
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {

@@ -84,7 +84,7 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
-        use almide_lang::types::constructor::TypeConstructorId;
+        
         let rec_ty = self.rec_int_ok_payload(result_ty)?;
         // A RECURSIVE-drop record routes through the generated `$__drop_tup_int_<R>`
         // wrapper; a FLAT (all-scalar-field) record's tuple frees exactly like the

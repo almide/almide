@@ -364,7 +364,7 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
     // the qualified key here instead would change the name LOWERING emits, and
     // the backend resolves a derived method by its bare name plus
     // `module_origin` (#1087).
-    let mut register = |env: &mut TypeEnv, method: &str, sig: FnSig| {
+    let register = |env: &mut TypeEnv, method: &str, sig: FnSig| {
         let key = format!("{}.{}", type_name, method);
         if !env.functions.contains_key(&sym(&key)) {
             env.functions.insert(sym(&key), sig);

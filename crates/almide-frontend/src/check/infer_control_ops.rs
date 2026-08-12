@@ -115,7 +115,7 @@ impl Checker {
 
             ExprKind::None => Ty::option(self.fresh_var()),
 
-            ExprKind::Ident { name, .. } => self.infer_expr_g2_ident(expr),
+            ExprKind::Ident { name: _, .. } => self.infer_expr_g2_ident(expr),
             _ => return None,
         })
     }
@@ -173,16 +173,16 @@ impl Checker {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 base_ty
             }
-            ExprKind::IndexAccess { object, index, .. } => self.infer_expr_g2_index_access(expr),
-            ExprKind::Binary { op, left, right, .. } => self.infer_expr_g2_binary(expr),
+            ExprKind::IndexAccess { object: _, index: _, .. } => self.infer_expr_g2_index_access(expr),
+            ExprKind::Binary { op: _, left: _, right: _, .. } => self.infer_expr_g2_binary(expr),
 
-            ExprKind::Unary { op, operand, .. } => self.infer_expr_g2_unary(expr),
+            ExprKind::Unary { op: _, operand: _, .. } => self.infer_expr_g2_unary(expr),
 
-            ExprKind::If { cond, then, else_, .. } => self.infer_expr_g2_if(expr),
+            ExprKind::If { cond: _, then: _, else_: _, .. } => self.infer_expr_g2_if(expr),
 
-            ExprKind::IfLet { name, scrutinee, then, else_ } => self.infer_expr_g2_if_let(expr),
+            ExprKind::IfLet { name: _, scrutinee: _, then: _, else_: _ } => self.infer_expr_g2_if_let(expr),
 
-            ExprKind::Match { subject, arms, .. } => self.infer_expr_g2_match(expr),
+            ExprKind::Match { subject: _, arms: _, .. } => self.infer_expr_g2_match(expr),
             _ => return None,
         })
     }

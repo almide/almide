@@ -535,7 +535,7 @@ fn die_on(lit: IrExpr) -> IrExpr {
 /// `desugar_heap_branches`), so every driver counts and lowers the SAME tree.
 fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
-    use almide_lang::intern::sym;
+    
     struct S {
         changed: bool,
         /// Fresh-VarId counter for the unwrap-operand hoist below (the

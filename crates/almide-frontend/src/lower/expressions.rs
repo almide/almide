@@ -64,8 +64,8 @@ fn lower_expr_literal(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         ast::ExprKind::Bool { value, .. } => ctx.mk(IrExprKind::LitBool { value: *value }, ty, span),
         ast::ExprKind::Unit => ctx.mk(IrExprKind::Unit, Ty::Unit, span),
         // ── Variables ──
-        ast::ExprKind::Ident { name, .. } => lower_expr_ident(ctx, expr, ty, span),
-        ast::ExprKind::TypeName { name, .. } => lower_expr_type_name(ctx, expr, ty, span),
+        ast::ExprKind::Ident { name: _, .. } => lower_expr_ident(ctx, expr, ty, span),
+        ast::ExprKind::TypeName { name: _, .. } => lower_expr_type_name(ctx, expr, ty, span),
         _ => return None,
     })
 }
@@ -106,7 +106,7 @@ fn lower_expr_collection(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Opt
             ctx.mk(IrExprKind::Tuple { elements: elems }, resolved_ty, span)
         }
         // ── Records ──
-        ast::ExprKind::Record { name, fields, .. } => lower_expr_record(ctx, expr, ty, span),
+        ast::ExprKind::Record { name: _, fields: _, .. } => lower_expr_record(ctx, expr, ty, span),
         ast::ExprKind::SpreadRecord { base, fields, .. } => {
             let ir_base = lower_expr(ctx, base);
             let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
@@ -126,8 +126,8 @@ fn lower_expr_collection(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Opt
 fn lower_expr_operator(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
     Some(match &expr.kind {
         // ── Operators ──
-        ast::ExprKind::Binary { op, left, right, .. } => lower_expr_binary(ctx, expr, ty, span),
-        ast::ExprKind::Unary { op, operand, .. } => lower_expr_unary(ctx, expr, ty, span),
+        ast::ExprKind::Binary { op: _, left: _, right: _, .. } => lower_expr_binary(ctx, expr, ty, span),
+        ast::ExprKind::Unary { op: _, operand: _, .. } => lower_expr_unary(ctx, expr, ty, span),
         _ => return None,
     })
 }
@@ -148,8 +148,8 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             let e = lower_expr(ctx, else_);
             ctx.mk(IrExprKind::If { cond: Box::new(c), then: Box::new(t), else_: Box::new(e) }, ty, span)
         }
-        ast::ExprKind::Match { subject, arms, .. } => lower_expr_match_arm(ctx, expr, ty, span),
-        ast::ExprKind::IfLet { name, scrutinee, then, else_ } => lower_expr_if_let(ctx, expr, ty, span),
+        ast::ExprKind::Match { subject: _, arms: _, .. } => lower_expr_match_arm(ctx, expr, ty, span),
+        ast::ExprKind::IfLet { name: _, scrutinee: _, then: _, else_: _ } => lower_expr_if_let(ctx, expr, ty, span),
         ast::ExprKind::Block { stmts, expr, .. } => {
             ctx.push_scope();
             let body = lower_block_body(ctx, stmts, expr.as_deref(), &ty, span);
@@ -326,7 +326,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             outline_ir_as_fn(ctx, full, "__almd_res", span)
         }
         // ── Loops ──
-        ast::ExprKind::ForIn { var, var_tuple, iterable, body, .. } => lower_expr_for_in(ctx, expr, ty, span),
+        ast::ExprKind::ForIn { var: _, var_tuple: _, iterable: _, body: _, .. } => lower_expr_for_in(ctx, expr, ty, span),
         ast::ExprKind::While { cond, body, .. } => {
             let ir_cond = lower_expr(ctx, cond);
             ctx.push_scope();

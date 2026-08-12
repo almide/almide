@@ -261,7 +261,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // the correctness completeness roadmap.
     pass_concretize_types::assert_types_concretized(program);
 
-    let et = almide_base::profile::ProfileTimer::start(prof);
+    let _et = almide_base::profile::ProfileTimer::start(prof);
 
     // Layer 3: Target-specific emit
     match target {

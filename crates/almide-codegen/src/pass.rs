@@ -8,7 +8,7 @@
 //! - MLIR dialect conversion patterns
 //! - NLLB-200 Mixture of Experts (shared + language-specific)
 
-use almide_ir::{IrProgram, IrExprKind, IrPattern, IrVisitor};
+use almide_ir::IrProgram;
 use almide_lang::types::Ty;
 
 // ── Pass Result ──
@@ -121,7 +121,7 @@ pub enum Postcondition {
 
 /// Verify postconditions for a pass. Returns list of violations.
 pub fn verify_postconditions(pass_name: &str, program: &IrProgram, postconditions: &[Postcondition]) -> Vec<String> {
-    use almide_lang::types::Ty;
+    
     let mut violations = Vec::new();
 
     for pc in postconditions {
@@ -202,7 +202,7 @@ fn count_typevars_in_functions(program: &IrProgram) -> usize {
 }
 
 fn count_incomplete_types(program: &IrProgram) -> (usize, usize) {
-    use almide_lang::types::Ty;
+    
     let mut unknowns = 0;
     let mut typevars = 0;
     for func in &program.functions {

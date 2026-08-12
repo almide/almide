@@ -47,7 +47,7 @@ pub fn validate_safety(wat: &str, mir: &crate::MirFunction) -> bool {
 /// REALIZES the abstract op (the runtime memory model) are the refinements — the
 /// latter is the once-built WasmCert-Coq library (G1.2, the deferred heavy track).
 pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
-    use crate::{Init, IntOp, Op, RtFn};
+    use crate::{Init, Op, RtFn};
     Some(match op {
         // Probe charge: the SITE-SPECIFIC trace update is the presence claim — a
         // renderer that drops THIS charge (not just any charge) fails the gate.

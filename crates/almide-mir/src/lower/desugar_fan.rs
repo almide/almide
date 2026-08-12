@@ -9,7 +9,7 @@
 /// […]; fan.race(ts)`) has no inlinable bodies → left for the call-site purity wall.
 pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
-    use almide_ir::{CallTarget, IrMatchArm, IrPattern};
+    use almide_ir::{CallTarget, IrPattern};
     // A LET-BOUND, never-reassigned thunk-list literal (`let lam: List[() -> R] = [() => …];
     // fan.race(lam)` — the #599 var-bound form): resolve the Var back to its literal elements
     // so the SAME inliners run as for the inline form. Sound: VarIds are shadowing-free
@@ -341,7 +341,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
             }
         }
         fn rewrite_settle_any(&mut self, e: &mut IrExpr) {
-            use almide_ir::{IrMatchArm, IrPattern};
+            
             // `fan.settle([…])` as a bind value / tail — the results list literal.
             // A PURE thunk's body is bare `T` while settle's checked type is
             // `List[Result[T, E]]` (FanLowering's phantom-Result convention) — wrap each

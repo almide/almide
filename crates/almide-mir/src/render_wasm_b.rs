@@ -334,7 +334,7 @@ fn render_op_range(
     // stateful reconstruction of the flat marker stream. A scalar `if` is an
     // expression `(local.set $dst (if (result i64) cond (then …val) (else …val)))`;
     // each arm leaves its value on the stack. Only the taken arm executes.
-    let arm_val = |v: &Option<ValueId>| {
+    let _arm_val = |v: &Option<ValueId>| {
         v.map(|v| format!("      (local.get {})\n", local(v))).unwrap_or_default()
     };
     let mut i = start;
@@ -778,16 +778,16 @@ fn wasm_ty(repr: Repr) -> &'static str {
     }
 }
 
-/// Every [`ValueId`] an op READS (operands only — never the defined dst),
-/// exhaustively and with multiplicity (`IntBinOp { a: v, b: v }` pushes `v`
-/// twice). The read half of the `op_values` split (#777 F3 item 2): together
-/// with [`defined_value`] and the `SetLocal` redefinition case it partitions
-/// every value an op touches, and `mir_wellformed::check_def_before_use`
-/// asserts that partition against `op_values` on every real op in every
-/// lowered function — corpus-wide, not on hand-built samples.
-///
-/// A `SetLocal`'s `local` is counted as a READ here: the op stores INTO an
-/// existing slot, and def-before-use demands the slot already exist. Its `src`
+// Every [`ValueId`] an op READS (operands only — never the defined dst),
+// exhaustively and with multiplicity (`IntBinOp { a: v, b: v }` pushes `v`
+// twice). The read half of the `op_values` split (#777 F3 item 2): together
+// with [`defined_value`] and the `SetLocal` redefinition case it partitions
+// every value an op touches, and `mir_wellformed::check_def_before_use`
+// asserts that partition against `op_values` on every real op in every
+// lowered function — corpus-wide, not on hand-built samples.
+//
+// A `SetLocal`'s `local` is counted as a READ here: the op stores INTO an
+// existing slot, and def-before-use demands the slot already exist. Its `src`
 
 include!("render_wasm_fuse.rs");
 

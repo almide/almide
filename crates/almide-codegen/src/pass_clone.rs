@@ -184,7 +184,7 @@ fn split_clone_ids(
         // list/string accumulators O(n²) on native (wasm ran O(n)).
         if tco_owned_params.contains(&id) { continue; }
 
-        let name = almide_base::intern::resolve(info.name);
+        let _name = almide_base::intern::resolve(info.name);
         if top_let_vars.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_))
             || always_clone_marks.contains(&id)
             || info.module_origin.is_some()
