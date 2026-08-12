@@ -315,3 +315,34 @@ ALS-S1)。
 
 テスト: `spec/wasm_cross/match_forms.almd`(契約 C-247)、
 `tests/match_diag_test.rs`(負例)。
+
+## ALS-E19 for-in 文(`ExprKind::ForIn`)
+
+**受理形**: `for pat in iterable { body }` — 反復対象はリスト・レンジ
+(ALS-E10)・マップ(ALS-E12 の `(k, v)` 反復)。`pat` は束縛子、または
+タプル要素リストに対する分解 `(i, v)`。
+
+**値の規範**: 文であり値は `Unit`。要素は先頭から順に一回ずつ束縛され、
+本体の可変状態への代入は反復を跨いで累積する(fixture: List[Int] 累積 →
+8、List[String] 要素出力、List[(Int, Int)] の分解ヘッド → 53)。反復対象は
+ループ開始前に一度だけ評価される。
+
+**既知の制限(loud、誤値なし)**: `break` / `continue` は while と同じく
+v1 の wall(#1277)。
+
+テスト: `spec/wasm_cross/for_in_forms.almd`(契約 C-248)、レンジ head は
+`range_first_class.almd`(C-238)、マップ反復は
+`collection_literals.almd`(C-240)。
+
+## ALS-S2 分解束縛(`Stmt::LetDestructure`)
+
+**受理形**: `let (a, b, …) = e` — 右辺はタプル。各成分が対応位置の値に
+不変束縛される。
+
+**値の規範**: 成分ごとの型は右辺タプルの位置型(fixture: `let (p, q) =
+(1, 2)` の後 `p + q` が加算に参加 — 実測 53 の内訳)。関数パラメータ位置の
+タプル分解(`((idx, case)) =>`)・for-in ヘッドの分解(ALS-E19)と同じ
+規範を共有する。
+
+テスト: `spec/wasm_cross/for_in_forms.almd`(契約 C-249)、
+`spec/wasm_cross/tuple_ops.almd`(C-236 の `let (x, y) = t`)。

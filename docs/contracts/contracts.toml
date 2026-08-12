@@ -3065,3 +3065,26 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/match_forms.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-248"
+spec      = "ALS-E19"
+title     = "for-in iterates list-family heads with optional tuple destructuring identically on both targets"
+statement = "ALS-E19: `for pat in iterable { body }` over List[Int] (accumulation 8), List[String] (per-element effect), and List[(Int, Int)] with HEAD DESTRUCTURING `for (i, v) in …` (53 including the S2 components) — byte-identical native <-> wasm. Elements bind in order exactly once; the iterable is evaluated once before the loop; body assignments accumulate across iterations. Range heads are C-238's evidence, map (k, v) iteration is C-240's; break/continue stay outside per #1277 (loud wall)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/for_in_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-249"
+spec      = "ALS-S2"
+title     = "Tuple let-destructuring binds each component positionally, identically on both targets"
+statement = "ALS-S2: `let (a, b) = e` binds each component to the corresponding positional value with the tuple's positional types — pinned in the for-in fixture (p + q participating in the 53 sum) and in tuple_ops.almd (C-236). One norm shared by three positions: let-destructure, fn-parameter tuple destructure, and the for-in head (ALS-E19)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/for_in_forms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_ops.almd", class = "fixture" },
+]
