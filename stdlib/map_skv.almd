@@ -3,13 +3,14 @@
 //
 // PHYSICAL LAYOUT (distinct from map_str's interleaved all-String form): a single block with TWO
 // regions — `entries` String-handle KEY slots followed by `entries` i64 VALUE slots:
-//   [rc][len@4 = entries][cap@8 = 2*entries][k0@12, k1@20, ..., k(e-1), v0, v1, ..., v(e-1)]
+//   [rc][len@4 = entries][cap@8 >= 2*entries][k0@12, k1@20, ..., k(e-1), v0, v1, ..., v(e-1)]
 //   key   i @  h + 12 +            i  * 8
 //   value i @  h + 12 + (entries + i) * 8
 // The `len` header (at +4) is the KEY count `entries`, so a scope-end DropListStr frees EXACTLY the
 // `entries` key handles (the keys are owned Strings) and never touches the scalar value region (the
-// values own no heap). `cap` (at +8) is the FULL slot count `2*entries`, so the $alloc free-list
-// reuse — which recomputes a freed block's size from `cap` — sees the true allocation. INSERTION-
+// values own no heap). `cap` (at +8) is the FULL allocated slot count (>= 2*entries — map_set may
+// leave geometric slack, #1219), so the $alloc free-list reuse — which recomputes a freed block's
+// size from `cap` — sees the true allocation; both regions are addressed from `len`. INSERTION-
 // ORDERED (v0's AlmideMap). Keys compared by byte equality. Source borrowed; constructed maps owned.
 fn __skv_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
 else {
@@ -110,7 +111,13 @@ fn map_set_skv(m: Map[String, Int], k: String, v: Int) -> Map[String, Int] = {
   let extra = if idx < 0 then 1 else 0
   let rentries = sentries + extra
   let rslots = rentries * 2
-  let r = prim.alloc_map_skv(rslots)
+  // GEOMETRIC capacity (#1219, see map_core.map_set): epoch-stable alloc sizes let the $alloc
+  // exact-size free-list reuse the block freed by the previous `m = map.set(m, k, v)` rebind.
+  // Slack past the len-derived regions is never read (filter's compacted results prove it).
+  let scap = prim.load32(sh + 8)
+  let slots = if rslots > scap then (if scap * 2 > rslots then scap * 2 else rslots)
+  else scap
+  let r = prim.alloc_map_skv(slots)
   let rh = prim.handle(r)
   let _c = __skv_set_copy(sh, rh, sentries, rentries, k, v, 0)
   let _a = __skv_set_append(rh, sentries, rentries, idx, k, v)

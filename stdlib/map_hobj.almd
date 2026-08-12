@@ -67,7 +67,13 @@ fn __hobj_set(m: Map[String, String], k: String, vh: Int) -> Map[String, String]
   let n = prim.load32(sh + 4)
   let idx = __hobj_find(sh, n, k, 0)
   let rn = if idx < 0 then n + 1 else n
-  let r = prim.alloc_map_kv(rn * 2)
+  // GEOMETRIC capacity (#1219, see map_core.map_set): epoch-stable alloc sizes let the $alloc
+  // exact-size free-list reuse the block freed by the previous set's rebind.
+  let need = rn * 2
+  let scap = prim.load32(sh + 8)
+  let slots = if need > scap then (if scap * 2 > need then scap * 2 else need)
+  else scap
+  let r = prim.alloc_map_kv(slots)
   let rh = prim.handle(r)
   let _c = __hobj_set_copy(sh, rh, n, rn, k, vh, 0)
   let _a = __hobj_set_append(rh, rn, idx, k, vh)

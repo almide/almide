@@ -191,10 +191,17 @@ fn __set_addone(rh: Int, slen: Int, x: Int) -> Int = {
   }
 }
 
+// GEOMETRIC capacity (#1219), same reasoning as map_core's map_set: a `s = set.insert(s, x)`
+// grow loop with exact-size allocs defeats the $alloc exact-size free-list (O(n^2) bytes, O(n)
+// dead-list walk per alloc); doubling epochs make the previously freed block an exact head
+// match. Slack past len is never read (len governs iteration/eq/repr).
 fn set_insert(s: Set[Int], x: Int) -> Set[Int] = {
   let sh = prim.handle(s)
   let slen = prim.load32(sh + 4)
-  let cap = slen + 1
+  let scap = prim.load32(sh + 8)
+  let need = slen + 1
+  let cap = if need > scap then (if scap * 2 > need then scap * 2 else need)
+  else scap
   let r = prim.alloc_set(cap)
   let rh = prim.handle(r)
   let _c = __set_copy(sh, rh, slen, 0)
@@ -256,7 +263,7 @@ fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
 // ── Higher-order Set[Int] (closures machinery) ── the predicate f is invoked via CallIndirect.
 // A pure predicate byte-matches v0 (single pass, no short-circuit). filter keeps a subset of an
 // already-unique set, so the result stays unique (no re-dedup).
-fn __set_filter_fill(dh: Int, sh: Int, f: fn(Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let keep = f(x)
@@ -268,7 +275,7 @@ else {
   }
 }
 
-fn set_filter(s: Set[Int], f: fn(Int) -> Bool) -> Set[Int] = {
+fn set_filter(s: Set[Int], f: (Int) -> Bool) -> Set[Int] = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
   let r = prim.alloc_set(n)
@@ -279,7 +286,7 @@ fn set_filter(s: Set[Int], f: fn(Int) -> Bool) -> Set[Int] = {
 }
 
 // Sum the predicate's 0/1 over all elements (a Bool is an i64 0/1) → the hit COUNT.
-fn __set_count_hits(sh: Int, f: fn(Int) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+fn __set_count_hits(sh: Int, f: (Int) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let h = f(x)
@@ -287,14 +294,14 @@ else {
   else __set_count_hits(sh, f, n, i + 1, acc)
 }
 
-fn set_all(s: Set[Int], f: fn(Int) -> Bool) -> Bool = {
+fn set_all(s: Set[Int], f: (Int) -> Bool) -> Bool = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
   let hits = __set_count_hits(sh, f, n, 0, 0)
   hits >= n
 }
 
-fn set_any(s: Set[Int], f: fn(Int) -> Bool) -> Bool = {
+fn set_any(s: Set[Int], f: (Int) -> Bool) -> Bool = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
   let hits = __set_count_hits(sh, f, n, 0, 0)
@@ -304,7 +311,7 @@ fn set_any(s: Set[Int], f: fn(Int) -> Bool) -> Bool = {
 // set.map — apply f to each element, collecting UNIQUE results (f may collapse distinct inputs
 // to the same output, so the mapped values MUST be re-deduped, exactly v0's `.map(f).collect()`
 // into an AlmideSet). Append f(x) iff not already present; first-seen order. Int->Int.
-fn __set_map_fill(dh: Int, sh: Int, f: fn(Int) -> Int, n: Int, i: Int, w: Int) -> Int = if i >= n then w
+fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int, w: Int) -> Int = if i >= n then w
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let y = f(x)
@@ -316,7 +323,7 @@ else {
   }
 }
 
-fn set_map(s: Set[Int], f: fn(Int) -> Int) -> Set[Int] = {
+fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
   let r = prim.alloc_set(n)
@@ -328,14 +335,14 @@ fn set_map(s: Set[Int], f: fn(Int) -> Int) -> Set[Int] = {
 
 // set.fold — left fold with a TWO-arity closure f : (Acc, Int) -> Acc (acc first, element
 // second — v0's fold(s, init, f)). Int accumulator. The set walk order = insertion order.
-fn __set_fold_loop(sh: Int, f: fn(Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let nacc = f(acc, x)
   __set_fold_loop(sh, f, n, i + 1, nacc)
 }
 
-fn set_fold(s: Set[Int], init: Int, f: fn(Int, Int) -> Int) -> Int = {
+fn set_fold(s: Set[Int], init: Int, f: (Int, Int) -> Int) -> Int = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
   __set_fold_loop(sh, f, n, 0, init)
