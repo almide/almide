@@ -5,6 +5,63 @@
         Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
     }
 
+    /// The observation channel for hand-built-MIR execution tests: `put_digit(n)`
+    /// writes "<digit>\n" (n in 0..=9) to stdout through the PRIM FLOOR
+    /// (store8 + fd_write) — the same path source-lowered programs print
+    /// through. #1208 deleted the bootstrap `$print_int`/`RtFn::PrintInt`
+    /// (dead-from-source wasm), so MIR-level tests observe results the way real
+    /// programs do instead of through a prelude fn nothing real could reach.
+    /// Append it LAST in `MirProgram::functions` so tests that pin table slots
+    /// by position keep their indices.
+    fn put_digit_fn() -> MirFunction {
+        let scalar = Repr::Scalar { width: ScalarWidth::Double };
+        let n = ValueId(0);
+        let (c48, byte) = (ValueId(1), ValueId(2));
+        let (buf, nl, buf1) = (ValueId(3), ValueId(4), ValueId(5));
+        let (iov, iovlen_addr, two) = (ValueId(6), ValueId(7), ValueId(8));
+        let (fd, one, zero, errno) = (ValueId(9), ValueId(10), ValueId(11), ValueId(12));
+        MirFunction {
+            name: "put_digit".into(),
+            params: vec![MirParam { value: n, repr: scalar }],
+            ops: vec![
+                Op::ConstInt { dst: c48, value: 48 },
+                Op::IntBinOp { dst: byte, op: IntOp::Add, a: n, b: c48 },
+                // buf[512] = '0' + n; buf[513] = '\n'
+                Op::ConstInt { dst: buf, value: 512 },
+                Op::Prim { kind: PrimKind::Store { width: 1 }, dst: None, args: vec![buf, byte] },
+                Op::ConstInt { dst: buf1, value: 513 },
+                Op::ConstInt { dst: nl, value: 10 },
+                Op::Prim { kind: PrimKind::Store { width: 1 }, dst: None, args: vec![buf1, nl] },
+                // iovec @8 = [buf: 512][len: 2]; fd_write(1, 8, 1, 0)
+                Op::ConstInt { dst: iov, value: 8 },
+                Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![iov, buf] },
+                Op::ConstInt { dst: iovlen_addr, value: 12 },
+                Op::ConstInt { dst: two, value: 2 },
+                Op::Prim {
+                    kind: PrimKind::Store { width: 4 },
+                    dst: None,
+                    args: vec![iovlen_addr, two],
+                },
+                Op::ConstInt { dst: fd, value: 1 },
+                Op::ConstInt { dst: one, value: 1 },
+                Op::ConstInt { dst: zero, value: 0 },
+                Op::Prim { kind: PrimKind::FdWrite, dst: Some(errno), args: vec![fd, iov, one, zero] },
+            ],
+            ret: None,
+            ..Default::default()
+        }
+    }
+
+    /// `put_digit(v)` as an op — the one-liner the ported tests print with.
+    fn call_put_digit(v: ValueId) -> Op {
+        Op::CallFn {
+            dst: None,
+            name: "put_digit".into(),
+            args: vec![CallArg::Scalar(v)],
+            result: None,
+        }
+    }
+
     /// Same program as the Rust-side test: `fn add(a,b)=a+b` + a `main` calling
     /// it. Both targets must print the same `5` — the dual-renderer thesis for
     /// USER FUNCTIONS (the mechanism that lets the runtime be self-hosted).
@@ -34,12 +91,12 @@
                     name: "add".into(),
                     args: vec![CallArg::Imm(2), CallArg::Imm(3)],
                 result: None },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
+                call_put_digit(ValueId(0)),
             ],
             ret: None,
             ..Default::default()
         };
-        MirProgram { functions: vec![add, main], exports: vec![], mutable_global_count: 0 }
+        MirProgram { functions: vec![add, main, put_digit_fn()], exports: vec![], mutable_global_count: 0 }
     }
 
     #[test]
@@ -68,12 +125,7 @@
                     args: vec![CallArg::Imm(5)],
                     result: Some(scalar),
                 },
-                Op::Call {
-                    dst: None,
-                    func: RtFn::PrintInt,
-                    args: vec![CallArg::Scalar(ValueId(1))],
-                    result: None,
-                },
+                call_put_digit(ValueId(1)),
             ],
             ret: None,
             ..Default::default()
@@ -88,8 +140,9 @@
             ret: Some(ValueId(2)),
             ..Default::default()
         };
-        // main at slot 0, add1 at slot 1 — FuncRef("add1") must resolve to 1.
-        let prog = MirProgram { functions: vec![main, add1], exports: vec![], mutable_global_count: 0 };
+        // main at slot 0, add1 at slot 1 — FuncRef("add1") must resolve to 1
+        // (put_digit appended LAST so those slots stay put).
+        let prog = MirProgram { functions: vec![main, add1, put_digit_fn()], exports: vec![], mutable_global_count: 0 };
         if let Some(out) = build_and_run("func_ref", &render_wasm_program(&prog)) {
             assert_eq!(out, "6");
         }
@@ -123,17 +176,13 @@
                     args: vec![CallArg::Imm(5)],
                     result: Some(scalar),
                 },
-                Op::Call {
-                    dst: None,
-                    func: RtFn::PrintInt,
-                    args: vec![CallArg::Scalar(ValueId(1))],
-                    result: None,
-                },
+                call_put_digit(ValueId(1)),
             ],
             ret: None,
             ..Default::default()
         };
-        let prog = MirProgram { functions: vec![add1, main], exports: vec![], mutable_global_count: 0 };
+        // add1 stays table index 0 — put_digit appended LAST.
+        let prog = MirProgram { functions: vec![add1, main, put_digit_fn()], exports: vec![], mutable_global_count: 0 };
         if let Some(out) = build_and_run("call_indirect", &render_wasm_program(&prog)) {
             assert_eq!(out, "6");
         }

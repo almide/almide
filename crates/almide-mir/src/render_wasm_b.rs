@@ -194,7 +194,6 @@ fn drop_scratch_locals(func: &MirFunction) -> Vec<String> {
 
 pub fn render_wasm_fn(
     func: &MirFunction,
-    label_off: &BTreeMap<String, (u32, u32)>,
     func_slots: &BTreeMap<String, u32>,
     param_counts: &BTreeMap<String, usize>,
 ) -> String {
@@ -256,7 +255,6 @@ pub fn render_wasm_fn(
     let ctx = RenderFnCtx {
         func,
         tail_calls: &tail_calls,
-        label_off,
         func_slots,
         param_counts,
         reprs: &reprs,
@@ -289,7 +287,6 @@ pub fn render_wasm_fn(
 struct RenderFnCtx<'a> {
     func: &'a MirFunction,
     tail_calls: &'a BTreeSet<usize>,
-    label_off: &'a BTreeMap<String, (u32, u32)>,
     func_slots: &'a BTreeMap<String, u32>,
     param_counts: &'a BTreeMap<String, usize>,
     reprs: &'a BTreeMap<ValueId, Repr>,
@@ -614,7 +611,6 @@ fn render_fused_or_plain_op(
                     return true;
                 }
                 body.push_str(&render_op(op, crate::render_wasm::OpTables {
-                    label_off: ctx.label_off,
                     func_slots: ctx.func_slots,
                     param_counts: ctx.param_counts,
                     masks: &ctx.func.heap_slot_masks,
@@ -634,7 +630,6 @@ fn render_fused_or_plain_op(
                     body.push_str(&render_list_access_unchecked(op, ctx.floats));
                 } else {
                     body.push_str(&render_op(op, crate::render_wasm::OpTables {
-                    label_off: ctx.label_off,
                     func_slots: ctx.func_slots,
                     param_counts: ctx.param_counts,
                     masks: &ctx.func.heap_slot_masks,

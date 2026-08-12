@@ -45,7 +45,11 @@
 # Counts at the first measurement (2026-08-11, 63 functions):
 #   PROVEN 5 / CORPUS 41 / FALLBACK_ONLY 6 / PROBE_ONLY 2 / TEST_PINNED 5 / TEMPLATE 4
 #   (MIR_ONLY 5 at first measurement — upgraded to TEST_PINNED when the
-#   execution pin landed and immediately caught the itoa sign defect)
+#   execution pin landed and immediately caught the itoa sign defect; then
+#   DELETED in #1208's endgame: $print_int/$print_list/$list_push/$itoa_append/
+#   $list_len went out with the RtFn::PrintInt/PrintList/ListPush vocabulary —
+#   the certificate layer now speaks print_str, and the surface SHRANK to 0
+#   TEST_PINNED rows. Shrink is the only direction this note may move.)
 
 [[fn]]
 name = "__die"
@@ -63,14 +67,14 @@ via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "__export_"
-site = "crates/almide-mir/src/render_wasm.rs:669"
+site = "crates/almide-mir/src/render_wasm.rs:617"
 digest = "d1959ff9df04"
 class = "TEMPLATE"
 why = "`(func $__export_{internal}…)` — the export-wrapper TEMPLATE; each instance carries a user function's name."
 
 [[fn]]
 name = "__import_"
-site = "crates/almide-mir/src/render_wasm.rs:539"
+site = "crates/almide-mir/src/render_wasm.rs:487"
 digest = "e7030093815d"
 class = "TEMPLATE"
 why = "`(import … (func $__import_{sym}…))` — the extern-import TEMPLATE, one instance per declared import."
@@ -84,7 +88,7 @@ via = "args_surface.almd"
 
 [[fn]]
 name = "__mg_take"
-site = "crates/almide-mir/src/render_wasm.rs:686"
+site = "crates/almide-mir/src/render_wasm.rs:634"
 digest = "4185da3f48a0"
 class = "CORPUS"
 via = "mg_rebuild_two_phase.almd"
@@ -142,7 +146,7 @@ via = "args_surface.almd"
 
 [[fn]]
 name = "args_get_list"
-site = "crates/almide-mir/src/render_wasm_p3.rs:461"
+site = "crates/almide-mir/src/render_wasm_p3.rs:370"
 digest = "32c1abadb7b6"
 class = "CORPUS"
 via = "args_surface.almd"
@@ -177,7 +181,7 @@ via = "call_closure_lambda_param.almd"
 
 [[fn]]
 name = "env_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:519"
+site = "crates/almide-mir/src/render_wasm_p3.rs:428"
 digest = "6d99767442b6"
 class = "CORPUS"
 via = "env_get.almd"
@@ -239,16 +243,8 @@ class = "CORPUS"
 via = "fs_relative_path.almd"
 
 [[fn]]
-name = "itoa_append"
-site = "crates/almide-mir/src/render_wasm_p3.rs:365"
-digest = "3d4ad99f57b0"
-class = "TEST_PINNED"
-test = "render_wasm::tests::mir_only_prelude_fns_execute_with_pinned_stdout"
-why = "reachable only from hand-built MIR (certificate layer, #1208) — the named cargo test RUNS the body on wasmtime and pins its stdout, incl. the negative/i64::MIN itoa path the first execution immediately found broken."
-
-[[fn]]
 name = "list_copy"
-site = "crates/almide-mir/src/render_wasm_p3.rs:341"
+site = "crates/almide-mir/src/render_wasm_p3.rs:338"
 digest = "dd4b194ca2f0"
 class = "CORPUS"
 via = "alias_cow.almd"
@@ -262,27 +258,11 @@ via = "fs.list_dir"
 why = "reached through dirent list build; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
 
 [[fn]]
-name = "list_len"
-site = "crates/almide-mir/src/render_wasm_p3.rs:332"
-digest = "a594d53bf87c"
-class = "TEST_PINNED"
-test = "render_wasm::tests::mir_only_prelude_fns_execute_with_pinned_stdout"
-why = "reachable only from hand-built MIR (certificate layer, #1208) — the named cargo test RUNS the body on wasmtime and pins its stdout, incl. the negative/i64::MIN itoa path the first execution immediately found broken."
-
-[[fn]]
 name = "list_new"
 site = "crates/almide-mir/src/render_wasm_p3.rs:260"
 digest = "67c00ad80bac"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
-
-[[fn]]
-name = "list_push"
-site = "crates/almide-mir/src/render_wasm_p3.rs:356"
-digest = "376724cbb191"
-class = "TEST_PINNED"
-test = "render_wasm::tests::mir_only_prelude_fns_execute_with_pinned_stdout"
-why = "reachable only from hand-built MIR (certificate layer, #1208) — the named cargo test RUNS the body on wasmtime and pins its stdout, incl. the negative/i64::MIN itoa path the first execution immediately found broken."
 
 [[fn]]
 name = "list_set"
@@ -307,7 +287,7 @@ via = "fs_relative_path.almd"
 
 [[fn]]
 name = "name"
-site = "crates/almide-mir/src/render_wasm.rs:192"
+site = "crates/almide-mir/src/render_wasm.rs:165"
 digest = "fa03a4a87d6a"
 class = "TEMPLATE"
 why = "`(func ${}` — the MirFunction rendering template (render_wasm_b.rs); every program function is an instance."
@@ -376,22 +356,6 @@ site = "crates/almide-mir/src/render_wasm_p3.rs:87"
 digest = "2fe62b017aff"
 class = "CORPUS"
 via = "fs_relative_path.almd"
-
-[[fn]]
-name = "print_int"
-site = "crates/almide-mir/src/render_wasm_p3.rs:439"
-digest = "5f544cd9d766"
-class = "TEST_PINNED"
-test = "render_wasm::tests::mir_only_prelude_fns_execute_with_pinned_stdout"
-why = "reachable only from hand-built MIR (certificate layer, #1208) — the named cargo test RUNS the body on wasmtime and pins its stdout, incl. the negative/i64::MIN itoa path the first execution immediately found broken."
-
-[[fn]]
-name = "print_list"
-site = "crates/almide-mir/src/render_wasm_p3.rs:399"
-digest = "c3b1a1fbb217"
-class = "TEST_PINNED"
-test = "render_wasm::tests::mir_only_prelude_fns_execute_with_pinned_stdout"
-why = "reachable only from hand-built MIR (certificate layer, #1208) — the named cargo test RUNS the body on wasmtime and pins its stdout, incl. the negative/i64::MIN itoa path the first execution immediately found broken."
 
 [[fn]]
 name = "proc_exit"

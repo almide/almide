@@ -1,11 +1,10 @@
 /// The read-only tables one wasm op is rendered against.
 ///
-/// Three are `BTreeMap<String, _>` and were adjacent parameters, so the label,
-/// slot and arity tables could be transposed silently — and a wrong slot table
-/// emits a call to the wrong function index, which the module still validates.
+/// Two are `BTreeMap<String, _>` and were adjacent parameters, so the slot and
+/// arity tables could be transposed silently — and a wrong slot table emits a
+/// call to the wrong function index, which the module still validates.
 #[derive(Copy, Clone)]
 pub(crate) struct OpTables<'a> {
-    pub label_off: &'a BTreeMap<String, (u32, u32)>,
     pub func_slots: &'a BTreeMap<String, u32>,
     pub param_counts: &'a BTreeMap<String, usize>,
     pub masks: &'a BTreeMap<ValueId, Vec<usize>>,
@@ -19,7 +18,7 @@ pub(crate) struct OpTables<'a> {
 }
 
 fn render_op(op: &Op, t: OpTables<'_>, fuser: &mut Fuser) -> String {
-    let OpTables { label_off, func_slots, param_counts, masks, reprs, floats, tail_call } = t;
+    let OpTables { func_slots, param_counts, masks, reprs, floats, tail_call } = t;
     // Router split out for codopsy cognitive-complexity (pure text-move, no behavior
     // change): the original single ~1100-line exhaustive match over every `Op` variant
     // is now 4 group helpers by variant family (alloc/list-literal, call/binop, the
@@ -39,7 +38,7 @@ fn render_op(op: &Op, t: OpTables<'_>, fuser: &mut Fuser) -> String {
         | Op::CallIndirect { .. }
         | Op::CallFn { .. }
         | Op::CallImport { .. } => {
-            render_op_call(op, &WasmEnv { label_off, param_counts, reprs, floats }, tail_call, fuser)
+            render_op_call(op, &WasmEnv { param_counts, reprs, floats }, tail_call, fuser)
         }
         Op::Drop { .. }
         | Op::DropListStr { .. }
