@@ -817,25 +817,12 @@ pub(crate) enum CtorKind {
 }
 
 impl<'a> Interpreter<'a> {
-    /// Look up a variant constructor by name in the program's type decls.
-    /// Returns `(type_name, ctor_kind)`.
+    /// Look up a variant constructor by name. Returns `(type_name,
+    /// ctor_kind)`. Backed by the `variant_ctors` registry built once in
+    /// `Interpreter::new` — this is on the hot path of every Named call,
+    /// where it used to linearly rescan all type decls.
     pub(crate) fn variant_ctor(&self, name: Sym) -> Option<(Sym, CtorKind)> {
-        use almide_ir::{IrTypeDeclKind, IrVariantKind};
-        for td in &self.program.type_decls {
-            if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                for case in cases {
-                    if case.name == name {
-                        let kind = match case.kind {
-                            IrVariantKind::Unit => CtorKind::Unit,
-                            IrVariantKind::Tuple { .. } => CtorKind::Tuple,
-                            IrVariantKind::Record { .. } => CtorKind::Record,
-                        };
-                        return Some((td.name, kind));
-                    }
-                }
-            }
-        }
-        None
+        self.variant_ctors.get(&name).copied()
     }
 }
 
