@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let n = 5
+  let a = n.0
+  println("${a}")
+}
