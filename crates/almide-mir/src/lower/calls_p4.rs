@@ -757,6 +757,9 @@ impl LowerCtx {
         left: &IrExpr,
         right: &IrExpr,
     ) -> Option<ValueId> {
+        if let Some(dst) = self.lower_scalar_binop_eq_unit(op, left, right) {
+            return Some(dst);
+        }
         if let Some(dst) = self.lower_scalar_binop_eq_string_value(op, left, right) {
             return Some(dst);
         }

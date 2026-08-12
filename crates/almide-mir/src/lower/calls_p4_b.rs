@@ -1,5 +1,33 @@
 impl LowerCtx {
 
+    /// `() == ()` / `!=` over Unit: the type has ONE inhabitant, so equality is a
+    /// compile-time constant (Eq → 1, Neq → 0) — there is no operand read to emit.
+    /// Restricted to CALL-FREE operands: folding `f() == ()` would elide f's
+    /// effects (record_elided_calls feeds the caps CLASSIFIER, not the render);
+    /// a call-bearing operand falls through to the existing walls, loud.
+    pub(crate) fn lower_scalar_binop_eq_unit(
+        &mut self,
+        op: &almide_ir::BinOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        if !matches!(op, BinOp::Eq | BinOp::Neq) {
+            return None;
+        }
+        if !matches!(left.ty, Ty::Unit) || !matches!(right.ty, Ty::Unit) {
+            return None;
+        }
+        if crate::lower::expr_contains_call(left) || crate::lower::expr_contains_call(right)
+        {
+            return None;
+        }
+        let dst = self.fresh_value();
+        let value = if matches!(op, BinOp::Eq) { 1 } else { 0 };
+        self.ops.push(Op::ConstInt { dst, value });
+        Some(dst)
+    }
+
     /// Extracted from `Self::lower_scalar_binop_eq_family` (eighth-round split, cog
     /// reduction): the String/Value deep-equality sub-chain, verbatim.
     fn lower_scalar_binop_eq_string_value(
