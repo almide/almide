@@ -3054,3 +3054,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-247"
+spec      = "ALS-E18"
+title     = "Match expressions select the first matching arm identically on both targets; non-exhaustive is check-time E010"
+statement = "ALS-E18: string-literal arms with wildcard, Int binder patterns with guards (first-match-wins pinned: 7 falls through both guards to `_`), Option some(x)/none, and Result ok(x)/err(e) with interpolated arm bodies — byte-identical native <-> wasm (fixture pins f64/odd/50/err:bad). Only the selected arm evaluates. The negative half: a non-exhaustive match is check-time E010 that NAMES the missing case (`missing none`) with an add-arms hint (tests/match_diag_test.rs) — no runtime match failure exists for a checked match."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/match_forms.almd", class = "fixture" },
+]
