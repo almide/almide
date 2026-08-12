@@ -184,6 +184,16 @@ fn classify_lowered_fn(
         // counterpart, so counting it would false-breach `mir <= ir`.
         .filter(|o| !matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
         .count();
+    // The full-op sibling of ALMIDE_DEBUG_CALL_OPS: dump EVERY MIR op with its
+    // index — the certificate-bisection instrument (#1287: attributing a bare
+    // `d` cert line to its op needs the whole op list, not just the calls).
+    if std::env::var_os("ALMIDE_DEBUG_MIR_OPS").is_some() {
+        for mir in &mirs {
+            for (i, o) in mir.ops.iter().enumerate() {
+                eprintln!("[mir-op] {}: {i:3} {o:?}", mir.name);
+            }
+        }
+    }
     if std::env::var_os("ALMIDE_DEBUG_CALL_OPS").is_some() {
         for mir in &mirs {
             for o in &mir.ops {

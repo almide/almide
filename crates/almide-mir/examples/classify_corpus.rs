@@ -35,7 +35,7 @@ use almide_ir::IrTypeDeclKind;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use almide_mir::certificate::{
-    name_witness_string, ownership_certificate, program_cap_graph_witness,
+    name_witness_string, program_cap_graph_witness,
     reachable_caps_or_tainted,
 };
 use almide_mir::{Capability, MirFunction, MirProgram, Op};
