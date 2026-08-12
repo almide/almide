@@ -18,28 +18,59 @@ use almide_base::intern::{sym, Sym};
 /// borrows the param at position `pos` (`&{name}`, `&*{name}`,
 /// `&mut {name}`, or `&mut *{name}`). Consumed ("owned") params have
 /// no sigil and render via `{name}` alone.
+///
+/// The per-position table is computed once per `(module, func)` and
+/// cached — the bundled source is process-constant, and the old
+/// per-query decl scan + 4×`format!` ran for every arg of every
+/// bundled call during inference.
 fn bundled_borrow_at(module: &str, func: &str, pos: usize) -> bool {
+    thread_local! {
+        static BORROW_TABLE: RefCell<HashMap<(Sym, Sym), std::rc::Rc<Vec<bool>>>> =
+            RefCell::new(HashMap::new());
+    }
+    let key = (sym(module), sym(func));
+    let flags = BORROW_TABLE.with(|c| {
+        if let Some(v) = c.borrow().get(&key) {
+            return v.clone();
+        }
+        let v = std::rc::Rc::new(bundled_borrow_table(module, func));
+        c.borrow_mut().insert(key, v.clone());
+        v
+    });
+    flags.get(pos).copied().unwrap_or(false)
+}
+
+/// Per-position borrow flags for a bundled `module.func`'s
+/// `@inline_rust` template — the single decl scan behind the
+/// `bundled_borrow_at` cache. Empty when the module is not bundled,
+/// the fn is absent, or it carries no `@inline_rust` template (all of
+/// which answered `false` for every position before).
+fn bundled_borrow_table(module: &str, func: &str) -> Vec<bool> {
     use almide_lang::ast::{AttrValue, Decl};
     let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
-        return false;
+        return Vec::new();
     };
-    let Some(program) = almide_lang::parse_cached(source) else { return false; };
+    let Some(program) = almide_lang::parse_cached(source) else { return Vec::new(); };
     for decl in &program.decls {
         let Decl::Fn { name, attrs, params, .. } = decl else { continue };
         if name.as_str() != func { continue; }
-        let Some(pname) = params.get(pos).map(|p| p.name) else { return false; };
         let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "inline_rust") else {
-            return false;
+            return Vec::new();
         };
-        let Some(first) = attr.args.first() else { return false; };
-        let AttrValue::String { value } = &first.value else { return false; };
-        let p = pname.as_str();
-        return value.contains(&format!("&{{{}}}", p))
-            || value.contains(&format!("&*{{{}}}", p))
-            || value.contains(&format!("&mut {{{}}}", p))
-            || value.contains(&format!("&mut *{{{}}}", p));
+        let Some(first) = attr.args.first() else { return Vec::new(); };
+        let AttrValue::String { value } = &first.value else { return Vec::new(); };
+        return params
+            .iter()
+            .map(|param| {
+                let p = param.name.as_str();
+                value.contains(&format!("&{{{}}}", p))
+                    || value.contains(&format!("&*{{{}}}", p))
+                    || value.contains(&format!("&mut {{{}}}", p))
+                    || value.contains(&format!("&mut *{{{}}}", p))
+            })
+            .collect();
     }
-    false
+    Vec::new()
 }
 
 // Thread-local snapshot of currently-known borrow signatures, used during
