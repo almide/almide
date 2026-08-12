@@ -2280,6 +2280,44 @@ note = """
 Declared, not probed (host-capability): the Int is a pid.
 """
 
+# index_unit vocabulary — testing:
+#   value — the Int is a compared MAGNITUDE, and the comparison is STRICT
+#           (measured 2026-08-13: assert_gt(1, 1) and assert_lt(1, 1) both
+#           fail — native "assert_gt failed: 1 is not > 1" exit 101, wasm
+#           "assert_gt failed" exit 1)
+[testing]
+default_index_unit = "value"
+
+[[testing.fn]]
+name = "assert_gt"
+index_unit = "value"
+setup = [
+  "testing.assert_gt(2, 1)",
+]
+probe = "true"
+expect = "true"
+note = """
+The passing call pins the ARGUMENT ORDER: assert_gt(a, b) passes iff a > b,
+so a reversed implementation would fail this file. Strictness is measured
+out-of-band (an in-file failing call would fail the harness itself, and the
+assert_throws route is HARNESS_LIMITATION on wasm): assert_gt(1, 1) rejects
+on BOTH legs — native panics "assert_gt failed: 1 is not > 1" (exit 101),
+wasm prints "assert_gt failed" (exit 1).
+"""
+
+[[testing.fn]]
+name = "assert_lt"
+index_unit = "value"
+setup = [
+  "testing.assert_lt(1, 2)",
+]
+probe = "true"
+expect = "true"
+note = """
+The mirror of assert_gt: passes iff a < b, strictly — measured out-of-band,
+assert_lt(1, 1) rejects on both legs ("1 is not < 1" natively).
+"""
+
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
 # regex and bool bear no Int in any swept signature today, so their entry
 # lists are empty — but COVERED_MODULES holds them, so the first Int-bearing
