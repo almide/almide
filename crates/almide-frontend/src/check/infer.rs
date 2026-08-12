@@ -610,6 +610,25 @@ impl Checker {
                 let concrete = resolve_ty(&obj_ty, &self.uf);
                 match &concrete {
                     Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(),
+                    // Out of range on a KNOWN tuple: a check-time error, never a
+                    // silent `Unknown` (#1266 — the Unknown sailed through check
+                    // and died at build as a [COMPILER BUG] banner that told the
+                    // user their own type error was ours).
+                    Ty::Tuple(elems) => {
+                        self.emit(
+                            super::err(
+                                format!(
+                                    "tuple index .{index} is out of range for {} (valid: .0 through .{})",
+                                    concrete.display(),
+                                    elems.len() - 1
+                                ),
+                                format!("the tuple has {} element(s)", elems.len()),
+                                "tuple index",
+                            )
+                            .with_code("E045"),
+                        );
+                        Ty::Unknown
+                    }
                     // Object's type is still an open inference var (e.g. a
                     // fresh lambda param yet to be bound by its call site).
                     // Park a fresh result var and resolve it once the
@@ -625,7 +644,22 @@ impl Checker {
                         self.deferred_tuple_indices.push((obj_ty, *index, result.clone()));
                         result
                     }
-                    _ => Ty::Unknown,
+                    // An object that already failed to type keeps its silence —
+                    // the upstream error owns the report, a second one is noise.
+                    Ty::Unknown => Ty::Unknown,
+                    // `.k` on a concrete NON-tuple (`n.0` over Int): the other
+                    // half of #1266, also a check-time error now.
+                    other => {
+                        self.emit(
+                            super::err(
+                                format!("tuple index .{index} on non-tuple type {}", other.display()),
+                                "only tuple values support positional .k access",
+                                "tuple index",
+                            )
+                            .with_code("E045"),
+                        );
+                        Ty::Unknown
+                    }
                 }
     }
 
