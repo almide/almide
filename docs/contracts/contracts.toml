@@ -2988,3 +2988,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-241"
+spec      = "ALS-S1"
+title     = "Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets"
+statement = "ALS-S1 (the first statement-direction section): immutable `let` with SHADOWING (the new binding's initializer sees the old one — let x = 1 then let x = x + 10 gives 11), mutable `var` with sequential and in-loop reassignment (10, 6), and a conditional-expression initializer, byte-identical native <-> wasm. The negative half is check-time and pinned by tests/binding_diag_test.rs: assigning a `let` is E009 whose hint steers to `var`; reassigning a `var` at a different type is E001 (the declared type never silently widens)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/binding_stmts.almd", class = "fixture" },
+]
