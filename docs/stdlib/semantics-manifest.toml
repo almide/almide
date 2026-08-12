@@ -2318,6 +2318,58 @@ The mirror of assert_gt: passes iff a < b, strictly — measured out-of-band,
 assert_lt(1, 1) rejects on both legs ("1 is not < 1" natively).
 """
 
+# index_unit vocabulary — args:
+#   element-index — the Int is a 0-based list position. For the __ scan
+#                   helpers it is the RAW argv position the scan STARTS at;
+#                   for positional_at it is a position in the FILTERED
+#                   positional list (flag arguments removed first)
+[args]
+
+[[args.fn]]
+name = "__flag_at"
+index_unit = "element-index"
+setup = [
+  'let hit = args.__flag_at(["x", "--verbose"], "--verbose", "-v", 0)',
+  'let skipped = args.__flag_at(["--verbose", "x"], "--verbose", "-v", 1)',
+]
+probe = "hit and not skipped"
+expect = "true"
+note = """
+i is the 0-based RAW-argv position the scan starts at: starting at 0 finds
+"--verbose" sitting at position 1 (hit = true), while starting at 1 can
+never see the flag at position 0 (skipped = false) — i is a start index,
+not a match position or a count.
+"""
+
+[[args.fn]]
+name = "__find_prefixed"
+index_unit = "element-index"
+setup = [
+  'let found = args.__find_prefixed(["a", "--out=x"], "--out=", 0) ?? "none"',
+  'let skipped = args.__find_prefixed(["--out=x", "b"], "--out=", 1) ?? "none"',
+]
+probe = 'found + " " + skipped'
+expect = "--out=x none"
+note = """
+The same start-index dimension as __flag_at, and the some() payload is the
+WHOLE matching element ("--out=x"), not the part after the prefix.
+"""
+
+[[args.fn]]
+name = "positional_at"
+index_unit = "element-index"
+probe = 'args.positional_at(0) ?? "none"'
+expect = "none"
+note = """
+The harness runs test files with an empty argv, so in-file the probe can only
+pin the empty case (index 0 of no positionals is none, not a trap). The
+FILTERED-list dimension is measured out-of-band on BOTH legs (2026-08-13,
+`almide run … -- alpha --flag beta`, native and wasm byte-identical):
+positional_at(0) = "alpha" and positional_at(1) = "beta" — the index counts
+POSITIONAL (non-flag) arguments with "--flag" filtered out, 0-based — and
+positional_at(2) is none.
+"""
+
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
 # regex and bool bear no Int in any swept signature today, so their entry
 # lists are empty — but COVERED_MODULES holds them, so the first Int-bearing
