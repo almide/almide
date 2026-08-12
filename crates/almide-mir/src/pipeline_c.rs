@@ -410,6 +410,32 @@ fn main() -> Unit = {
             "a string self-append loop must call the amortized append"
         );
 
+        // #1229: the TCO'd MULTI-concat accumulator (`acc + c0 + c1` — a
+        // left-spine chain through a fresh intermediate) must ALSO reach the
+        // amortized append. `match_str_window` alone never fired on it (the
+        // drop/rebind target is the chain HEAD's left operand, not the last
+        // call's), so both links stayed whole-copy `__str_concat`s: O(n²)
+        // bytes, which the 0.57.0 release-gate fuzz read as a hang at
+        // n = 65535 (21.7 s wasm vs instant native, run 31486558420). Two
+        // appends per iteration means TWO `$__str_append1` call sites in the
+        // loop body — pinned structurally, like the rest of this family.
+        let multi_concat_tco = r#"
+local fn build(n: Int, pos: Int, acc: String) -> String = if pos >= n then acc
+else {
+  let c0 = "a"
+  let c1 = "b"
+  build(n, pos + 1, acc + c0 + c1)
+}
+fn main() -> Unit = println(build(3, 0, ""))
+"#;
+        let wat = try_render_wasm_source(multi_concat_tco, &[], false)
+            .expect("the TCO multi-concat accumulator renders");
+        assert!(
+            wat.matches("(call $__str_append1").count() >= 2,
+            "a TCO'd multi-concat string accumulator must chain through the \
+             amortized append (both links), not the whole-copy concat:\n{wat}"
+        );
+
         let parser_loop = r#"
 import json
 fn main() -> Unit = {
