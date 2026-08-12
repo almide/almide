@@ -12,7 +12,7 @@
 # the existing ALS sections (T1-T7, R-series, ...) are STDLIB-semantics
 # normative text; the syntax-element direction starts honestly at zero.
 #
-# unwritten_ceiling = "49"
+# unwritten_ceiling = "48"
 
 [[element]]
 name = "ExprKind::Int"
@@ -96,7 +96,7 @@ section = "UNWRITTEN"
 
 [[element]]
 name = "ExprKind::Match"
-section = "UNWRITTEN"
+section = "ALS-E18"
 
 [[element]]
 name = "ExprKind::Block"
