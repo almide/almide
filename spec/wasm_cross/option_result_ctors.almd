@@ -1,0 +1,18 @@
+// @contract: C-237
+// ALS-E9 (docs/specs/als/expressions.md): the Option/Result constructor
+// literals — `some(e)` and the BARE value `none` (calling `none()` is a
+// check-time E001), `ok(e)` / `err(e)` under a Result-typed expectation
+// (an un-annotated binding is E041, ADR-0008 — pinned by
+// tests/ctor_diag_test.rs), and `??` elimination. Identical
+// observables on both targets. Nested `some(none)` is deliberately absent:
+// `??` with an Option-typed default walls in the v1 renderer (#1270, loud).
+effect fn main() -> Unit = {
+  let s = some(5)
+  let n: Int? = none
+  println(int.to_string(s ?? 0))
+  println(int.to_string(n ?? -1))
+  let o: Result[Int, String] = ok(3)
+  let e: Result[Int, String] = err("boom")
+  println(int.to_string(o ?? 0))
+  println(int.to_string(e ?? -9))
+}

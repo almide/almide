@@ -128,3 +128,29 @@ check 時型エラーであるべき)。native backend は文字列補間との�
 1-tuple の `.0` を落とせない(#1267)。
 
 テスト: `spec/wasm_cross/tuple_ops.almd`(契約 C-236)。
+
+## ALS-E9 Option/Result コンストラクタ(`ExprKind::Some` / `ExprKind::None` / `ExprKind::Ok` / `ExprKind::Err`)
+
+**受理形**: `some(e)`、`none`(**裸の値** — `none()` と呼ぶのは検査時
+E001)、`ok(e)`、`err(e)`。すべて小文字綴り。
+
+**値の規範**: `some(e)` は `Option[T]` を構築し、要素型は `e` から推論
+される。`none` の型は注釈(`let n: Int? = none`)または消費点
+(`n ?? 7`)から流れる。`ok(e)` / `err(e)` は Result 型の期待がある文脈
+(注釈付き束縛・返り値位置・直接の消費)で Result を構築する。
+
+**ok/err の文脈の裁定**: effect fn 内で `ok(e)` / `err(e)` を**無注釈の
+`let` に束縛するのは検査時拒否**(E041、ADR-0008 の明示伝搬則 — ヒントは
+`!`・`??`・`?`・match へ誘導する)。暗黙に Result が素通りする経路は
+存在しない。負例は `tests/ctor_diag_test.rs` が両裁定を pin する。
+
+**消費**: `??` は Ok/Some 側の値、Err/None 側でフォールバックを返す
+(`ok(3) ?? 0` → `3`、`err("boom") ?? -9` → `-9`、両ターゲット実測)。
+伝搬・分岐の全規範は R 系列(エラー面)を参照。
+
+**既知の制限(loud、誤値なし)**: 入れ子 `some(none)` は検査を通り native
+で正しく動くが、Option 型のデフォルトを持つ `??` は v1 renderer が wall
+する(#1270)。
+
+テスト: `spec/wasm_cross/option_result_ctors.almd`(契約 C-237)、
+`tests/ctor_diag_test.rs`(負例)。
