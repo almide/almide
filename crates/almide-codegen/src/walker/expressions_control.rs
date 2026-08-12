@@ -485,6 +485,31 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
         };
         return render_expr(ctx, inner_expr);
     }
+    // #1296: a NATIVE-runtime call returning `Result[Bytes/Matrix, String]`
+    // unwrapped in place (`bytes.len(zlib.compress_level(d, 9)!)`): the #617
+    // glue wraps the Ok side BEFORE `?` (`(call.map(|__e| RcCow::from(__e)))?`),
+    // so in call-ARGUMENT position rustc back-infers `?`'s source from the
+    // consuming `&Vec<u8>` parameter and E0308s on the RcCow. Emit the RAW
+    // call, unwrap FIRST, then glue the Ok value — `RcCow::from((raw)?)` is
+    // concretely typed end to end, and the arg-position `&` deref-coerces.
+    // Narrow by construction: String-err only (the template's map_err
+    // variants keep their path), non-test (tests use .unwrap()).
+    if !ctx.is_test {
+        if let IrExprKind::RuntimeCall { symbol, args } = &inner.kind {
+            if rc_cow_symbol_is_native_runtime(symbol.as_str()) {
+                if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, rargs) = &inner.ty {
+                    if rargs.len() == 2
+                        && rc_cow_needs_glue(&rargs[0])
+                        && matches!(rargs[1], Ty::String)
+                        && render_runtime_ctor_turbofish(ctx, symbol.as_str(), args, &inner.ty).is_none()
+                    {
+                        let raw = render_runtime_call(ctx, symbol, args);
+                        return rc_cow_result_glue(format!("({raw})?"), &rargs[0]);
+                    }
+                }
+            }
+        }
+    }
     let s = render_expr(ctx, inner);
     // In test functions, ? cannot be used (return type is ()).
     // Use .unwrap() instead.
