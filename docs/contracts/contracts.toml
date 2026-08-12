@@ -3021,3 +3021,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/if_block_forms.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-244"
+spec      = "ALS-E15"
+title     = "While loops iterate their condition-tested body identically on both targets"
+statement = "ALS-E15: `while cond { body }` — pre-tested, condition re-evaluated each iteration, Unit-valued, mutable state accumulating across iterations. Fixture pins a counter accumulation (10, terminal 5) and a DATA-DEPENDENT iteration count (Collatz from 16 -> 4 steps) byte-identical native <-> wasm. break/continue are outside this contract: the v1 renderer walls them loudly (#1277) and the Break/Continue coverage rows stay UNWRITTEN until that brick lands — no native-only semantics are normalized."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/while_loops.almd", class = "fixture" },
+]
