@@ -3088,3 +3088,25 @@ evidence  = [
   { path = "spec/wasm_cross/for_in_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/tuple_ops.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-250"
+spec      = "ALS-E20"
+title     = "Pipe and composition evaluate as plain application in order, identically on both targets"
+statement = "ALS-E20: `x |> f` is observationally `f(x)` — single (10), chained (11), and through a HOF with a lambda (3); `f >> g` builds a callable applying left-to-right ((double >> inc)(4) = 9) — byte-identical native <-> wasm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/pipe_compose_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-251"
+spec      = "ALS-E21"
+title     = "if let implicitly unwraps an Option scrutinee with a bare binder, identically on both targets"
+statement = "ALS-E21: `if let x = o { .. } else { .. }` — the some path binds the INNER value (some(5) -> 10), the none path takes else (\"empty\"), byte-identical native <-> wasm. The binder is BARE by design: `if let some(x) = o` is a parse error (Swift-style implicit unwrap, not pattern matching — patterns belong to `match`, ALS-E18)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/if_let_forms.almd", class = "fixture" },
+]

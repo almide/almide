@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-249 contracts
+251 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -277,4 +277,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-247 | Match expressions select the first matching arm identically on both targets; non-exhaustive is check-time E010 | 0.57.1 | active | fixture | 1 |
 | C-248 | for-in iterates list-family heads with optional tuple destructuring identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-249 | Tuple let-destructuring binds each component positionally, identically on both targets | 0.57.1 | active | fixture | 2 |
+| C-250 | Pipe and composition evaluate as plain application in order, identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-251 | if let implicitly unwraps an Option scrutinee with a bare binder, identically on both targets | 0.57.1 | active | fixture | 1 |
 

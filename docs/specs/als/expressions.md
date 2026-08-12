@@ -347,3 +347,27 @@ v1 の wall(#1277)。
 
 テスト: `spec/wasm_cross/for_in_forms.almd`(契約 C-249)、
 `spec/wasm_cross/tuple_ops.almd`(C-236 の `let (x, y) = t`)。
+
+## ALS-E20 パイプと合成(`ExprKind::Pipe` / `ExprKind::Compose`)
+
+**受理形**: `x |> f`(単段・連鎖 `x |> f |> g`・HOF への流し込み
+`xs |> list.map((x) => …) |> list.len`)。合成は `f >> g` — 呼び出し可能な
+値を返し、`(f >> g)(x)` は `g(f(x))`。
+
+**値の規範**: `x |> f` ≡ `f(x)`(観測等価; fixture: `5 |> double` → 10、
+`5 |> double |> inc` → 11、HOF 連鎖 → 3)。`>>` は左から右への適用順
+(`double >> inc` に 4 → `inc(double(4))` = 9、両ターゲット同一)。
+
+テスト: `spec/wasm_cross/pipe_compose_forms.almd`(契約 C-250)。
+
+## ALS-E21 if let(`ExprKind::IfLet`)
+
+**受理形**: `if let x = o { … } else { … }` — 束縛子は**裸の識別子**。
+`if let some(x) = o` は parse エラー(束縛子位置にパターンは書けない —
+Swift 型の暗黙 unwrap が設計)。
+
+**値の規範**: 審査対象は Option。some なら内側の値が `x` に束縛され
+then アームが、none なら else アームが走る(fixture: some(5) → 10、
+none → "empty"、両ターゲット同一)。
+
+テスト: `spec/wasm_cross/if_let_forms.almd`(契約 C-251)。
