@@ -48,6 +48,11 @@ use std::collections::BTreeMap;
 /// `Drop t` is searched separately (it may trail by straight-line ops).
 const WINDOW_HEAD: usize = 4;
 
+/// How many straight-line ops past a window a trailing `Drop` may lag (drops
+/// batch after e.g. the loop counter increment — see `match_window`'s doc).
+/// Shared by the scalar-list window and the string-chain window.
+const DROP_SCAN: usize = 8;
+
 /// `Some((e, d, x, drop_at))` when `ops[i..i+WINDOW_HEAD]` is exactly the
 /// self-append head described in the module doc and `ops[drop_at]` is the
 /// temp's trailing `Drop` in the same straight-line region. `occ` counts
@@ -97,7 +102,6 @@ fn match_window(
     // nothing in between references the temp, so DELETING the trailing drop
     // is position-independent; the scan stops at any control marker (the
     // drop must live in the same straight-line region as the window).
-    const DROP_SCAN: usize = 8;
     let mut drop_at = None;
     for (k, op) in ops.iter().enumerate().skip(i + WINDOW_HEAD).take(DROP_SCAN) {
         match op {
@@ -242,6 +246,150 @@ fn match_str_window(ops: &[Op], i: usize, occ: &BTreeMap<ValueId, usize>) -> boo
     occ.get(d).copied() == Some(2)
 }
 
+/// The CHAINED string self-append window (#1229): `x = x + s1 + s2 (+ …)` —
+/// the TCO'd multi-concat accumulator (`build(n, pos + 1, acc + c0 + c1)`,
+/// base64's `enc(.., acc + c0 + c1 + c2 + c3)`) lowers as a LEFT-SPINE chain
+/// of `__str_concat` calls through fresh intermediates:
+///
+/// ```text
+/// d1 ← __str_concat(x, t1)
+/// d2 ← __str_concat(d1, t2)      ; …up to dk
+/// Drop x
+/// SetLocal x ← dk
+/// …straight-line ops…
+/// Drop d1 … Drop d(k-1)          ; the intermediates' trailing drops
+/// ```
+///
+/// `match_str_window` never fires on it (the drop/rebind target `x` is not the
+/// LAST call's left operand), so every iteration whole-copied the accumulator
+/// once per `+`: O(n²) bytes for the loop — the 0.57.0 release-gate fuzz
+/// "hang" (run 31486558420: `build(65535, 0, "")` took 21.7 s on wasm, native
+/// instant; the exact-size free-list never reuses a monotonically growing
+/// block, so every step also bump-allocated fresh).
+///
+/// The rewrite renames every call in the chain to `__str_append1` and moves
+/// each consumed owner's `Drop` to DIRECTLY AFTER the call that consumed it:
+///
+/// ```text
+/// d1 ← __str_append1(x, t1)      ; rc(x)==1 → in-place, ret Dups (rc 2)
+/// Drop x                          ; rc 2 → 1: d1 is now the sole owner
+/// d2 ← __str_append1(d1, t2)     ; rc(d1)==1 → in-place again
+/// Drop d1                         ; …
+/// SetLocal x ← dk                 ; the loop-carried slot, rc 1
+/// ```
+///
+/// Moving the drops is what makes the chain amortized: without it the first
+/// append's value-semantics return leaves rc == 2, forcing every later link
+/// down the whole-copy slow path. Each moved `Drop` still sits AFTER its
+/// value's last use (the very call that consumed it), so def-before-use and
+/// the one-`rc_dec`-per-drop release accounting are unchanged — the op
+/// multiset is identical, only the order shifts. In-place mutation stays
+/// unobservable for the same dynamic reason as the single window: it fires
+/// only at `rc == 1`, when the about-to-be-dropped handle is the sole owner.
+/// Suffixes must be DISTINCT ValueIds from `x` and the intermediates
+/// (`match_str_chain_window` rejects `acc + acc + c`): an in-place first
+/// append would mutate the block a later suffix read still expects original
+/// bytes from. Aliases via `Dup` (a distinct ValueId over the same block) are
+/// safe dynamically — the extra owner holds rc > 1, which forces the copying
+/// slow path.
+struct StrChain {
+    /// `(dst, left, suffix)` of each `__str_concat` in chain order. The first
+    /// link's `left` is the loop-carried slot `x` (the `Drop`/`SetLocal`
+    /// target — the emitter clones the window's own rebind op, so it is not
+    /// carried separately).
+    calls: Vec<(ValueId, ValueId, ValueId)>,
+    /// Op index of each intermediate's trailing `Drop`, chain order (all past
+    /// the rebind).
+    inter_drop_at: Vec<usize>,
+}
+
+/// `Some((dst, left, suffix))` when `op` is `dst ← __str_concat(left, suffix)`.
+fn as_str_concat(op: &Op) -> Option<(ValueId, ValueId, ValueId)> {
+    let Op::CallFn { dst: Some(d), name, args, .. } = op else {
+        return None;
+    };
+    if name != "__str_concat" {
+        return None;
+    }
+    let [CallArg::Handle(l), CallArg::Handle(t)] = args.as_slice() else {
+        return None;
+    };
+    Some((*d, *l, *t))
+}
+
+/// Match the chained window at `ops[i..]` (k >= 2 calls; k == 1 is
+/// `match_str_window`'s). See [`StrChain`] for the shape and the safety
+/// argument each check enforces.
+fn match_str_chain_window(
+    ops: &[Op],
+    i: usize,
+    occ: &BTreeMap<ValueId, usize>,
+) -> Option<StrChain> {
+    let (d1, x, t1) = as_str_concat(&ops[i])?;
+    let mut calls = vec![(d1, x, t1)];
+    while let Some((d, l, t)) = ops.get(i + calls.len()).and_then(as_str_concat) {
+        if l != calls.last().expect("chain is non-empty").0 {
+            break;
+        }
+        calls.push((d, l, t));
+    }
+    let k = calls.len();
+    if k < 2 {
+        return None;
+    }
+    let Some(Op::Drop { v: x2 }) = ops.get(i + k) else {
+        return None;
+    };
+    let Some(Op::SetLocal { local: x3, src: dk }) = ops.get(i + k + 1) else {
+        return None;
+    };
+    if *x2 != x || *x3 != x || *dk != calls[k - 1].0 {
+        return None;
+    }
+    // Mention counts: the final result is used only by the rebind (dst +
+    // SetLocal src = 2); each intermediate only by its def, the next link's
+    // left arg, and its trailing drop (3). Any extra reference (including an
+    // intermediate reused as a later SUFFIX) means the shape is not the pure
+    // chain and the copying concat must stay.
+    if occ.get(&calls[k - 1].0).copied() != Some(2) {
+        return None;
+    }
+    if calls[..k - 1].iter().any(|(d, _, _)| occ.get(d).copied() != Some(3)) {
+        return None;
+    }
+    // Alias guard: a suffix that IS `x` (or an intermediate) would read the
+    // accumulator's block AFTER an in-place append mutated it. Distinct
+    // ValueIds only — Dup-aliases are dynamically safe (rc > 1 → slow path).
+    if calls.iter().any(|(_, _, t)| *t == x || calls.iter().any(|(d, _, _)| d == t)) {
+        return None;
+    }
+    if calls.iter().any(|(d, _, _)| *d == x) {
+        return None;
+    }
+    // Each intermediate's trailing Drop must live in the same straight-line
+    // region after the rebind (same scan discipline as `match_window`).
+    let mut inter_drop_at = Vec::with_capacity(k - 1);
+    'inters: for (d, _, _) in &calls[..k - 1] {
+        for (m, op) in ops.iter().enumerate().skip(i + k + 2).take(DROP_SCAN) {
+            match op {
+                Op::Drop { v } if v == d => {
+                    inter_drop_at.push(m);
+                    continue 'inters;
+                }
+                Op::IfThen { .. }
+                | Op::Else { .. }
+                | Op::EndIf { .. }
+                | Op::LoopStart
+                | Op::LoopBreakUnless { .. }
+                | Op::LoopEnd => return None,
+                _ => {}
+            }
+        }
+        return None;
+    }
+    Some(StrChain { calls, inter_drop_at })
+}
+
 /// Rewrite every self-append concat window in `functions` to the amortized
 /// O(1) append form: the scalar `__list_concat` window is REPLACED (temp
 /// eliminated — see `match_window`) and the heap-element `__list_concat_rc`
@@ -298,6 +446,10 @@ fn rewrite_ops(
             i = next;
             continue;
         }
+        if let Some(next) = push_str_chain_window(ops, i, occ, &mut out) {
+            i = next;
+            continue;
+        }
         if let Some(next) = push_renamed_window(ops, i, occ, def_at, &mut out) {
             i = next;
             continue;
@@ -306,6 +458,45 @@ fn rewrite_ops(
         i += 1;
     }
     out
+}
+
+/// The chained string window: every link renamed to `__str_append1` with the
+/// consumed owner's `Drop` moved to directly after the call that consumed it
+/// (see [`StrChain`] for why the move is what unlocks the rc == 1 fast path),
+/// then the rebind, then the straight-line ops up to the last intermediate
+/// drop verbatim — minus those drops, which were emitted early. Same op
+/// multiset, new order. Returns the next index when it fired.
+fn push_str_chain_window(
+    ops: &[Op],
+    i: usize,
+    occ: &BTreeMap<ValueId, usize>,
+    out: &mut Vec<Op>,
+) -> Option<usize> {
+    let ch = match_str_chain_window(ops, i, occ)?;
+    let k = ch.calls.len();
+    for (j, (d, l, t)) in ch.calls.iter().enumerate() {
+        let Op::CallFn { result, .. } = &ops[i + j] else {
+            unreachable!("a matched chain link is always a CallFn")
+        };
+        out.push(Op::CallFn {
+            dst: Some(*d),
+            name: "__str_append1".to_string(),
+            args: vec![CallArg::Handle(*l), CallArg::Handle(*t)],
+            result: result.clone(),
+        });
+        // The consumed owner's drop: `Drop x` (the window's own, op i+k) for
+        // the first link, the intermediate's trailing drop for the rest.
+        out.push(Op::Drop { v: *l });
+    }
+    out.push(ops[i + k + 1].clone()); // SetLocal x ← dk
+    let last = *ch.inter_drop_at.iter().max().expect("k >= 2 has intermediates");
+    for m in i + k + 2..=last {
+        if ch.inter_drop_at.contains(&m) {
+            continue;
+        }
+        out.push(ops[m].clone());
+    }
+    Some(last + 1)
 }
 
 /// The 4-op list-concat window: emit `__list_append1`, free the old list, rebind
