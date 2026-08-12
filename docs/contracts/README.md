@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-238 contracts
+240 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -266,4 +266,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-236 | Tuple construction, destructuring, indexing, and structural equality are identical on both targets | 0.57.1 | active | fixture | 1 |
 | C-237 | Option/Result constructor literals build and eliminate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 1 |
+| C-239 | Collection literals, indexing, and the empty spellings behave identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-240 | Map literals and empty-map reads behave identically on both targets | 0.57.1 | active | fixture | 1 |
 
