@@ -36,19 +36,19 @@
                 list_int(),
             )
         };
-        // var r = helper()..other()  — a Range bind lowers to ONE Opaque `Alloc`,
-        // ELIDING its operand calls. `record_elided_calls` surfaces each as a bare
-        // EFFECT MARKER `CallFn{dst:None, args:[], result:None}` so the caps fold
-        // can see them, while the value content stays deferred. (The original
-        // vehicle — a scalar list literal with call elements — now WALLS instead of
-        // deferring (C-144: never a silent `[]`), so the Range shape carries the
-        // marker contract.)
-        let range = IrExprKind::Range {
-            start: Box::new(named("helper", vec![])),
-            end: Box::new(named("other", vec![])),
-            inclusive: false,
+        // var r = __rt(helper(), other())  — a RUNTIME-CALL bind lowers to ONE
+        // Opaque `Alloc`, ELIDING the named calls inside it. `record_elided_calls`
+        // surfaces each as a bare EFFECT MARKER `CallFn{dst:None, args:[], result:
+        // None}` so the caps fold can see them, while the value content stays
+        // deferred. (Earlier vehicles graduated out of the deferring arm as their
+        // shapes got real lowerings: the scalar list literal walls per C-144, and
+        // the Range bind now MATERIALIZES via `list.range` (#1272) — so the
+        // RuntimeCall shape carries the marker contract.)
+        let rt = IrExprKind::RuntimeCall {
+            symbol: sym("__rt"),
+            args: vec![named("helper", vec![]), named("other", vec![])],
         };
-        let b = body(vec![bind(0, list_int(), ir_expr(range, list_int()))]);
+        let b = body(vec![bind(0, list_int(), ir_expr(rt, list_int()))]);
         let mir = lower_body(&b, "main").expect("lowers");
 
         let markers: Vec<&str> = mir
@@ -79,13 +79,12 @@
             1,
             list_int(),
             ir_expr(
-                IrExprKind::Range {
-                    start: Box::new(named(
+                IrExprKind::RuntimeCall {
+                    symbol: sym("__rt"),
+                    args: vec![named(
                         "apply",
                         vec![ir_expr(IrExprKind::Var { id: VarId(2) }, fn_ty)],
-                    )),
-                    end: Box::new(ir_expr(IrExprKind::Var { id: VarId(3) }, Ty::Int)),
-                    inclusive: false,
+                    )],
                 },
                 list_int(),
             ),
@@ -95,6 +94,58 @@
             !mir2.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, .. })),
             "a higher-order call is not recorded as a marker"
         );
+    }
+
+    #[test]
+    fn range_bind_materializes_list_range() {
+        // let r = 0..<3 — the bind emits the REAL `list.range` call (#1272: the
+        // deferred Opaque here made a later `for i in r` iterate ZERO times on
+        // wasm while native printed the true sum — the silent-empty class).
+        let range = IrExprKind::Range {
+            start: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+            end: Box::new(ir_expr(IrExprKind::LitInt { value: 3 }, Ty::Int)),
+            inclusive: false,
+        };
+        let b = body(vec![bind(0, list_int(), ir_expr(range, list_int()))]);
+        let mir = lower_body(&b, "main").expect("lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "list.range")),
+            "a scalar-bound Range bind must materialize via list.range"
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn range_bind_with_call_bounds_executes_them() {
+        use almide_lang::intern::sym;
+        // let r = f()..<g() — scalar CALL bounds are lowered as REAL calls (not
+        // elided): the bind emits f, g, then list.range over their results.
+        // (Bounds outside the scalar subset hit the wall arm — the honest
+        // backstop against the #1272 silent zero-iteration.)
+        let named = |n: &str| {
+            ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(n) },
+                    args: vec![],
+                    type_args: vec![],
+                },
+                Ty::Int,
+            )
+        };
+        let range = IrExprKind::Range {
+            start: Box::new(named("f")),
+            end: Box::new(named("g")),
+            inclusive: false,
+        };
+        let b = body(vec![bind(0, list_int(), ir_expr(range, list_int()))]);
+        let mir = lower_body(&b, "main").expect("lowers");
+        for callee in ["f", "g", "list.range"] {
+            assert!(
+                mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == callee)),
+                "expected a real {callee} call in the materialized range bind"
+            );
+        }
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
 
     fn bool_var() -> IrExpr {
