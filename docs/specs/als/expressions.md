@@ -250,3 +250,20 @@ v1 lowering の both-arms 線形化 wall はこの規範の防衛)。
 t + 1 }` → 11、if アーム内ブロック → 9、両ターゲット同一)。
 
 テスト: `spec/wasm_cross/if_block_forms.almd`(契約 C-243)。
+
+## ALS-E15 while 文(`ExprKind::While`)
+
+**受理形**: `while cond { body }` — 条件は `Bool`、本体は brace ブロック。
+前判定(条件が最初から偽なら本体は 0 回)。
+
+**値の規範**: 文であり値は `Unit`。可変状態(`var`)への代入が反復を跨いで
+観測可能に累積する(fixture: カウンタ和 10 / 終端値 5、データ依存の反復数
+— Collatz(16) → 4 ステップ — 両ターゲット同一)。条件は各反復の先頭で
+再評価される。
+
+**既知の制限(loud、誤値なし)**: `break` / `continue` は v1 renderer が
+wall する(#1277 — ループ機構に early-exit 分岐がない)。両行
+(`ExprKind::Break` / `ExprKind::Continue`)の節化はこの brick 待ちで
+UNWRITTEN 維持(native 単独の意味論を規範化しない — F1)。
+
+テスト: `spec/wasm_cross/while_loops.almd`(契約 C-244)。
