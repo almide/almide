@@ -80,10 +80,17 @@ pub fn module_fn_names(module: &str) -> Vec<&'static str> {
 }
 
 /// Lazily populate the per-module cache and apply a read-only
-/// projection.
+/// projection. On a cache hit the projection runs under the read
+/// guard — the old path cloned the module's whole `HashMap<Sym,
+/// FnSig>` per lookup to shorten the critical section, which cost a
+/// full map deep-copy on every stdlib signature query during
+/// checking. `f` never re-enters this cache, so holding the read
+/// lock across it is deadlock-free.
 fn with_module<T>(module: &str, f: impl FnOnce(&HashMap<Sym, FnSig>) -> T) -> Option<T> {
-    if let Some(map) = cached_module(module) {
-        return Some(f(&map));
+    if let Ok(guard) = cache().read() {
+        if let Some(map) = guard.get(module) {
+            return Some(f(map));
+        }
     }
     let sigs = build_module_sigs(module)?;
     let result = f(&sigs);
@@ -106,13 +113,6 @@ fn intern_static(s: &str) -> &'static str {
     let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
     guard.insert(leaked);
     leaked
-}
-
-/// Read-locked cache hit. Returned map is cloned to keep the read
-/// lock critical section short.
-fn cached_module(module: &str) -> Option<HashMap<Sym, FnSig>> {
-    let guard = cache().read().ok()?;
-    guard.get(module).cloned()
 }
 
 fn store_module(module: &str, sigs: HashMap<Sym, FnSig>) {
