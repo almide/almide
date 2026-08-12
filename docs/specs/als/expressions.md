@@ -148,9 +148,10 @@ E001)、`ok(e)`、`err(e)`。すべて小文字綴り。
 (`ok(3) ?? 0` → `3`、`err("boom") ?? -9` → `-9`、両ターゲット実測)。
 伝搬・分岐の全規範は R 系列(エラー面)を参照。
 
-**既知の制限(loud、誤値なし)**: 入れ子 `some(none)` は検査を通り native
-で正しく動くが、Option 型のデフォルトを持つ `??` は v1 renderer が wall
-する(#1270)。
+**入れ子の規範**: `some(none)` / `some(some(v))` は通常の Option 値であり、
+Option 型のデフォルトを持つ `??` で一段ずつ剥がせる(`sn ?? none` →
+内側 Option、実測: none 側 → 9、some 側 → 5、両ターゲット同一 —
+#1270 で v1 の wall を閉鎖)。
 
 テスト: `spec/wasm_cross/option_result_ctors.almd`(契約 C-237)、
 `tests/ctor_diag_test.rs`(負例)。

@@ -3,9 +3,10 @@
 // literals — `some(e)` and the BARE value `none` (calling `none()` is a
 // check-time E001), `ok(e)` / `err(e)` under a Result-typed expectation
 // (an un-annotated binding is E041, ADR-0008 — pinned by
-// tests/ctor_diag_test.rs), and `??` elimination. Identical
-// observables on both targets. Nested `some(none)` is deliberately absent:
-// `??` with an Option-typed default walls in the v1 renderer (#1270, loud).
+// tests/ctor_diag_test.rs), `??` elimination, and the
+// NESTED case: `some(none)` / `some(some(5))` eliminated through an
+// Option-typed default (#1270 — the v1 renderer now rewrites the bind to
+// `match e { some(p) => p, none => d }`). Identical on both targets.
 effect fn main() -> Unit = {
   let s = some(5)
   let n: Int? = none
@@ -15,4 +16,10 @@ effect fn main() -> Unit = {
   let e: Result[Int, String] = err("boom")
   println(int.to_string(o ?? 0))
   println(int.to_string(e ?? -9))
+  let sn = some(none)
+  let inner: Int? = sn ?? none
+  println(int.to_string(inner ?? 9))
+  let sv = some(some(5))
+  let iv: Int? = sv ?? none
+  println(int.to_string(iv ?? 9))
 }

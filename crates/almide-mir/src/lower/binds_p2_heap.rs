@@ -58,6 +58,29 @@ impl LowerCtx {
                 self.live_heap_handles.truncate(lhh_mark);
                 self.lifted.truncate(lifted_mark);
             }
+            // The OPTION-polarity mirror (#1270): a heap `??` whose operand is
+            // Option-typed and whose PAYLOAD is itself Option (`sn ?? none`
+            // over Option[Option[Int]] — the nested-Option elimination)
+            // declined the direct route above. Rewrite to `match expr {
+            // some(p) => p, none => fallback }` through the same speculative
+            // bind-position heap-match machinery; a decline ROLLS BACK to the
+            // honest wall below. GATED to Option payloads: an Option[record]
+            // subject through THIS synthesized route mis-reads the record's
+            // String fields on wasm (measured: "x" printed as blanks) even
+            // though a user-written match over the same source is correct —
+            // the record case stays on the wall until the bind-position
+            // synthesized-match route is fixed (#1270 follow-up).
+            if expr.ty.is_option() && ty.is_option() {
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let rewritten = Self::unwrap_or_as_option_match(value, expr, fallback);
+                if self.lower_bind(var, ty, &rewritten).is_ok() {
+                    return Ok(true);
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                self.lifted.truncate(lifted_mark);
+            }
             // A HEAP-result `??` over an Option/Result operand that `try_lower_option_unwrap_or`
             // declined (e.g. `Option[record]` — no faithful record-payload unwrap-or yet) must
             // NOT fall to the `Alloc{Opaque}` below: that binds an EMPTY heap value the caller
@@ -99,6 +122,42 @@ impl LowerCtx {
                     },
                     IrMatchArm {
                         pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: fallback.clone(),
+                    },
+                ],
+            },
+            ty: value.ty.clone(),
+            span: value.span.clone(),
+            def_id: value.def_id,
+        }
+    }
+
+    /// The Option-polarity mirror of [`Self::unwrap_or_as_result_match`] (#1270):
+    /// `e ?? d` → `match e { some(p) => p, none => d }`, same speculative
+    /// discipline (the caller gates on `is_option` and rolls back on decline).
+    fn unwrap_or_as_option_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
+        use almide_ir::{IrMatchArm, IrPattern};
+        let payload_ty = value.ty.clone();
+        let p = VarId(crate::lower::max_var_id(value) + 1);
+        let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
+        let payload = IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty: payload_ty,
+            span: value.span.clone(),
+            def_id: None,
+        };
+        IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(expr.clone()),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Some { inner: Box::new(bind) },
+                        guard: None,
+                        body: payload,
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::None,
                         guard: None,
                         body: fallback.clone(),
                     },
