@@ -174,3 +174,30 @@ E001)、`ok(e)`、`err(e)`。すべて小文字綴り。
 
 テスト: `spec/wasm_cross/range_first_class.almd`(契約 C-238)、
 `tests/range_spelling_diag_test.rs`(負例)。
+
+## ALS-E11 リストリテラルと索引(`ExprKind::List` / `ExprKind::IndexAccess`)
+
+**受理形**: リテラル `[e1, e2, …]`、空リスト `[]`(要素型は注釈または文脈から)、
+入れ子可。読み出しは `xs[i]`(0 起点)。連結は `+`(ALS 全域の演算子多重定義:
+文字列とリストの `+` は連結)。
+
+**値の規範**: `xs[i]` は要素型の値を直接返す(Option ではない)。**範囲外は
+実行時中断** — 統一メッセージ `Error: index out of bounds` + exit 1 を
+両ターゲットが 3 点(stdout・stderr・終了コード)一致で出す(書き込み側の
+既存契約 C-067 と同じ裁定; 黙った 0 埋めや無視は不適合)。`+` は左右の
+要素を順に並べた新リストを返す。
+
+テスト: `spec/wasm_cross/collection_literals.almd`(契約 C-239)、
+範囲外中断は `spec/wasm_cross/index_bounds_write_heap.almd`(C-067)。
+
+## ALS-E12 マップリテラル(`ExprKind::MapLiteral` / `ExprKind::EmptyMap`)
+
+**受理形**: `["k1": v1, "k2": v2]` — **角括弧+コロン**。空マップは `[:]`
+(型は注釈から)。波括弧 `{"k": v}` は**受理しない**(parse エラー —
+JSON/他言語からの転記ミスは検査時に止まる)。
+
+**値の規範**: `m[k]` は `Option[V]` を返し(リストの直接読みと対照的)、
+`??` で既定値に落とす。欠損キーは `none`(実測: `m["zz"] ?? -1` → `-1`)。
+挿入順は決定的に保存される(AlmideMap の規範; 反復順は挿入順)。
+
+テスト: `spec/wasm_cross/collection_literals.almd`(契約 C-239)。

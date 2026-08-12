@@ -2966,3 +2966,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/range_first_class.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-239"
+spec      = "ALS-E11"
+title     = "Collection literals, indexing, and the empty spellings behave identically on both targets"
+statement = "ALS-E11/E12: list literals (with nesting and `+` concat), direct `xs[i]` element reads (Int and String elements), the square-bracket-colon map literal `[\"k\": v]`, the empty spellings `[]` / `[:]`, and Option-returning `m[k]` reads eliminated by `??` (missing key -> none) produce byte-identical observables native <-> wasm (fixture pins 40/y/2/3/0/3/0/-1). The asymmetry is normative: a list read returns the element DIRECTLY and aborts out-of-bounds with the unified message + exit 1 (C-067's ruling, read side), while a map read returns Option. The curly `{\"k\": v}` spelling is a parse error — a JSON transcription mistake stops at check time."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-240"
+spec      = "ALS-E12"
+title     = "Map literals and empty-map reads behave identically on both targets"
+statement = "ALS-E12: the square-bracket-colon map literal, `[:]` empty map, `m[k]` Option reads with `??` fallback, and deterministic insertion-order preservation (the fixture iterates [\"z\": 1, \"a\": 2, \"m\": 3] and pins z=1 a=2 m=3 — insertion order, not key order) — shares the collection fixture with C-239 (the E11/E12 pair landed together, like the E1/E2 template pair)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
+]
