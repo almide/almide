@@ -820,6 +820,9 @@ jobs:
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
 
+      - name: Workflow files parse strictly (a schedule-only workflow that cannot parse fails silently, #1234)
+        run: bash scripts/check-workflows.sh
+
       - name: rt-oracle registry (RETIRED with v0, #782 — prints the tombstone; v1 is gated by spec/wasm_cross + the interp oracle)
         # The step name previously claimed "every compile_* registered +
         # verified tests exist" while the script short-circuits on the deleted
