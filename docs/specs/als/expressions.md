@@ -267,3 +267,32 @@ wall する(#1277 — ループ機構に early-exit 分岐がない)。両行
 UNWRITTEN 維持(native 単独の意味論を規範化しない — F1)。
 
 テスト: `spec/wasm_cross/while_loops.almd`(契約 C-244)。
+
+## ALS-E16 文字列補間(`ExprKind::InterpolatedString`)
+
+**受理形**: `"text ${expr} text"` — セグメントは任意個、`expr` は式
+(変数参照・算術式を実測 pin)。リテラルの `${` は `\${` でエスケープする
+(実測: `"escaped \${not_interp}"` → `escaped ${not_interp}`)。
+
+**値の規範**: 各セグメントの値をその型の**正準表示形**で埋め込む — String
+はそのまま、Int は 10 進(ALS-E1)、Bool は小文字(ALS-E2)、Float は正準
+形(`1.5` を実測 pin; 網羅的な浮動小数点表示規範は ALS-E3/T2 の裁定後)。
+補間全体の型は `String`。
+
+**`!` の裁定**: 補間内の前置 `!` は式文位置と同じ `not` 誘導で拒否される
+(ALS-E7、`tests/unary_not_diag_test.rs` の補間側ケース)。
+
+テスト: `spec/wasm_cross/string_interpolation.almd`(契約 C-245)。
+
+## ALS-E17 識別子(`ExprKind::Ident`)
+
+**受理形**: 束縛済みの名前。解決は**最も近い束縛**(シャドーイングの規範は
+ALS-S1)。
+
+**裁定**: 未解決の名前は**検査時 E003** — 診断は解決に失敗した名前そのもの
+を含む(どの識別子が誤りかを診断単体で特定できる;
+`tests/ident_diag_test.rs` が pin)。実行時の名前解決失敗は存在しない
+(検査を通った名前は必ず束縛に解決される — v1 は NameTotality の証明対象)。
+
+テスト: `spec/wasm_cross/string_interpolation.almd`(契約 C-246)、
+`tests/ident_diag_test.rs`(負例)。
