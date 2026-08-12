@@ -297,8 +297,10 @@ fn check_needs_ownership_call_bundled_module(target: &CallTarget, args: &[IrExpr
     let CallTarget::Module { module, func, .. } = target else { return false; };
     if !almide_lang::stdlib_info::is_bundled_module(module.as_str()) { return false; }
     for (i, arg) in args.iter().enumerate() {
-        let borrowed = bundled_borrow_at(module.as_str(), func.as_str(), i)
-            && matches!(arg.ty, Ty::Bytes);
+        // Free type test first — the parsed-decl table lookup only runs
+        // for Bytes args (the only type this branch can borrow).
+        let borrowed = matches!(arg.ty, Ty::Bytes)
+            && bundled_borrow_at(module.as_str(), func.as_str(), i);
         if !borrowed && is_var(arg, var) {
             *needs = true;
             return true;
