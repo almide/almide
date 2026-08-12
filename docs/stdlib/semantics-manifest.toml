@@ -2405,6 +2405,44 @@ token a save RETURNED, not a byte count. Measured on the native leg
 fresh allocation intact ([5, 6]) — the native no-op pair is safe to call.
 """
 
+# index_unit vocabulary — zlib:
+#   value — the Int is the COMPRESSION LEVEL knob, 0–9 (0 = stored, 9 = max
+#           effort; out of range CLAMPS, never errors) — not a size and not
+#           a byte count
+[zlib]
+default_index_unit = "value"
+
+[[zlib.fn]]
+name = "compress_level"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed in-file: zlib is HOST_CAPABILITY on the wasm leg
+(measured wall: "zlib.compress_level needs a declared capability not in this
+brick"; spec/stdlib/zlib_test.almd sits in the fallback baseline), so a
+calling probe would push this generated file off the wasm leg. Measured on
+the native leg (2026-08-13, input [1,2,3] repeated 4x = 12 bytes): the level
+is an EFFORT knob, not a size — level 0 STORES (23-byte output, larger than
+the input), level 9 compresses to 13; out of range CLAMPS instead of
+erroring (level -1 produces level 0's 23 bytes, level 10 produces level 9's
+13 — runtime clamp(0, 9)); decompress roundtrips the input byte-identically
+at levels 0, 9 and 10.
+"""
+
+[[zlib.fn]]
+name = "deflate_level"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+The same level dimension and clamp on the RAW deflate stream — measured on
+the native leg (2026-08-13, same 12-byte input): level 0 gives 17 bytes
+where compress_level gives 23 (the 6-byte difference is the zlib
+header + adler32 wrapper deflate omits), level 9 gives 7, level 10 clamps
+to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
+"""
+
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
 # regex and bool bear no Int in any swept signature today, so their entry
 # lists are empty — but COVERED_MODULES holds them, so the first Int-bearing

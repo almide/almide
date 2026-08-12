@@ -17,7 +17,7 @@ import os, re, subprocess, sys, tempfile, tomllib
 # ratchet: append modules, never remove. Each module generates its OWN
 # spec/stdlib/<module>_semantics_manifest_test.almd, so adding one leaves
 # every already-covered module's committed file byte-identical.
-COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "error", "regex", "bool", "testing", "args", "mem"]
+COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "error", "regex", "bool", "testing", "args", "mem", "zlib"]
 
 with open("docs/stdlib/semantics-manifest.toml", "rb") as f:
     manifest = tomllib.load(f)
