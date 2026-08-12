@@ -3110,3 +3110,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/if_let_forms.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-252"
+spec      = "ALS-S3"
+title     = "Expression statements and comments: Unit calls execute, discards are explicit, comments are invisible"
+statement = "ALS-S3/S4: a Unit-returning call in statement position executes in order; a pure value is discarded only through `let _ = e`; and every comment form (leading line, trailing, multi-line block, before a declaration) is semantically invisible — the fixture threads all forms between two prints and both targets emit exactly first/second. The negative half is check-time E042 (ADR-0008 must-use): a bare statement-position Result is rejected with BOTH escapes spelled in the hint (`expr!` propagates, `let _ = expr` discards without propagating — C-217's pinned semantics), tested by tests/expr_stmt_diag_test.rs."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/expr_stmt_comment.almd", class = "fixture" },
+]

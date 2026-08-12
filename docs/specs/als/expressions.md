@@ -371,3 +371,29 @@ then アームが、none なら else アームが走る(fixture: some(5) → 10�
 none → "empty"、両ターゲット同一)。
 
 テスト: `spec/wasm_cross/if_let_forms.almd`(契約 C-251)。
+
+## ALS-S3 式文(`Stmt::Expr`)
+
+**受理形**: 文位置の式。`Unit` を返す呼び出し(`println(…)` 等)はそのまま
+文になる。値を持つ純粋式の意図的破棄は `let _ = e`。
+
+**must-use の裁定**: Result を返す呼び出しを文位置で裸のまま置くのは
+**検査時 E042**(ADR-0008)— エラーの黙った握り潰しは存在しない。逃げ道は
+二つだけで、ヒントが両方を綴る: `expr!`(伝搬)と `let _ = expr`(明示
+破棄; err は伝搬しない — C-217)。負例は `tests/expr_stmt_diag_test.rs` が
+pin。
+
+テスト: `spec/wasm_cross/expr_stmt_comment.almd`(契約 C-252)、
+`tests/expr_stmt_diag_test.rs`(負例)。
+
+## ALS-S4 コメント(`Stmt::Comment`)
+
+**受理形**: 行コメント `// …`(行頭・行末尾)、ブロックコメント
+`/* … */`(複数行可、宣言前・文間)。
+
+**値の規範**: コメントは**意味論的に不可視** — どの位置のどの形も観測可能
+挙動に一切寄与しない(fixture: 全形を挟んだ出力が両ターゲットで
+コメント無しと同一)。fmt はコメントを保存する(comment_map / doc_map が
+宣言単位で担持)。
+
+テスト: `spec/wasm_cross/expr_stmt_comment.almd`(契約 C-252)。
