@@ -1,8 +1,7 @@
-/// The per-function naming environment the call renderers read — the label
-/// offsets, callee param counts and value repr/float classes travel as one
-/// value (a caller could otherwise pair maps from different functions).
+/// The per-function naming environment the call renderers read — the callee
+/// param counts and value repr/float classes travel as one value (a caller
+/// could otherwise pair maps from different functions).
 pub(crate) struct WasmEnv<'a> {
-    pub label_off: &'a BTreeMap<String, (u32, u32)>,
     pub param_counts: &'a BTreeMap<String, usize>,
     pub reprs: &'a BTreeMap<ValueId, Repr>,
     pub floats: &'a BTreeSet<ValueId>,
@@ -156,7 +155,7 @@ match dst {
 }
 
 fn render_op_call_light(op: &Op, env: &WasmEnv<'_>, tail_call: bool) -> String {
-    let WasmEnv { label_off, param_counts: _, reprs, floats } = *env;
+    let WasmEnv { param_counts: _, reprs, floats } = *env;
     match op {
         // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
         // src become two handles to the SAME block, rc += 1 — matching the cert's
@@ -168,7 +167,7 @@ fn render_op_call_light(op: &Op, env: &WasmEnv<'_>, tail_call: bool) -> String {
             s = local(*src)
         ),
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
-        Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off, floats),
+        Op::Call { dst, func, args, .. } => render_call(*dst, func, args),
         // An indirect (closure) call: push the args, then the table index, and dispatch
         // through the module function table with the closure signature OF THIS ARITY
         // (`$closure_fnN`, N = arg count). The table + every `(type $closure_fnN)` are

@@ -25,14 +25,14 @@
 //! `eager_copy_refines_safety` safety regime is fully preserved.
 //!
 //! ⚠ BOOTSTRAP SHORTCUT — DO NOT GROW (see §4.1 of the architecture doc). The
-//! hand-written WAT runtime below (`$list_copy`/`$itoa_append`/`$print_list`)
-//! and the computation baked into the `Push`/`IndexSet`/`Print` MIR ops are the
-//! EXACT trap that made v0's wasm emitter a nightmare (a large hand-written wasm
-//! surface dual-maintained with native). They exist only to prove the
-//! dual-renderer path RUNS. The ideal form shrinks the hand-written wasm to a
-//! tiny, total, decision-free, spec-provable MIR-PRIMITIVE mapping, and moves
-//! all of list/string/format/RC into Almide compiled through this same path
-//! (`Push`/`IndexSet`/`Print` become `Call`s to self-hosted runtime functions).
+//! hand-written WAT runtime below (`$list_copy` and kin) is the EXACT trap that
+//! made v0's wasm emitter a nightmare (a large hand-written wasm surface
+//! dual-maintained with native). It exists only to prove the dual-renderer path
+//! RUNS — the `$print_int`/`$print_list`/`$list_push`/`$itoa_append`/`$list_len`
+//! bootstrap cluster was deleted once real programs printed through the
+//! self-hosted runtime instead (#1208). The ideal form shrinks the hand-written
+//! wasm to a tiny, total, decision-free, spec-provable MIR-PRIMITIVE mapping,
+//! with all of list/string/format in Almide compiled through this same path.
 //! Convergence rule: never add another hand-written WAT runtime routine — with
 //! ONE principled exception, the proven MEMORY-MODEL primitives (`RC_PRIMITIVE_FNS`,
 //! the realization of `RuntimeModel.v`'s `rt_inc`/`rt_dec`). They are a CLOSED set
@@ -49,11 +49,8 @@ use std::collections::{BTreeMap, BTreeSet};
 // Fixed low-memory addresses (named — no raw literals in the emitted WAT logic).
 const NWRITTEN_ADDR: u32 = 0; // i32 scratch for fd_write's bytes-written out-param
 const IOVEC_ADDR: u32 = 8; // [buf: i32][len: i32]
-const ITOA_TMP_ADDR: u32 = 32; // reversed-digit scratch (≤ 20 bytes)
-                               // The fs.read_text path_open error message — a CONST byte run in the data section
-                               // (the `$read_text_file` Err arm copies it into a canonical String). Reserved BELOW the
-                               // dynamic print labels so the per-function label writer (which starts at `LABELS_ADDR`)
-                               // never overlaps it.
+                           // The fs.read_text path_open error message — a CONST byte run in the data section
+                           // (the `$read_text_file` Err arm copies it into a canonical String).
 const RTF_NOTFOUND_ADDR: u32 = 64; // "file not found" message bytes
 const RTF_NOTFOUND_LEN: u32 = 14; // len of "file not found"
 const RDIR_ERR_ADDR: u32 = 80; // "directory not found" message bytes (fs.list_dir Err)
@@ -72,11 +69,9 @@ const MAIN_ERR_NL_ADDR: u32 = DIVZERO_MSG_ADDR + 23; // the div-zero line's "\n"
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
 const OOM_MSG_ADDR: u32 = 376; // "Error: out of memory\n" — 376..397 ($oom, C-197)
-const LABELS_ADDR: u32 = 400; // print labels (the data section) — after ALL fixed messages (incl. fs errno + oom)
-                              // fs errno → native std::io Display strings (240..376, FIXED — placed BEFORE the
-                              // variable-length labels region so labels can never overwrite them): path_open errors
-                              // map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
-                              // text (C-042 kin).
+                               // fs errno → native std::io Display strings (240..376, FIXED): path_open errors
+                               // map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
+                               // text (C-042 kin).
 const FS_ERR_NOENT_ADDR: u32 = 240; // "No such file or directory (os error 2)" — WASI NOENT(44)
 const FS_ERR_NOENT_LEN: u32 = 38;
 const FS_ERR_ACCES_ADDR: u32 = 280; // "Permission denied (os error 13)" — WASI ACCES(2)
@@ -85,11 +80,10 @@ const FS_ERR_NOTDIR_ADDR: u32 = 312; // "Not a directory (os error 20)" — WASI
 const FS_ERR_NOTDIR_LEN: u32 = 29;
 const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
 const FS_ERR_ISDIR_LEN: u32 = 28;
-const SCRATCH_ADDR: u32 = 768; // the line build buffer
-                               // The bump allocator's DEFAULT start — also the mutable-global slot region's base
-                               // (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
-                               // module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
-                               // are never allocated over (N = 0 keeps every existing module byte-identical).
+// The bump allocator's DEFAULT start — also the mutable-global slot region's base
+// (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
+// module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
+// are never allocated over (N = 0 keeps every existing module byte-identical).
 const HEAP_BASE: u32 = crate::MG_SLOT_BASE;
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
 // the 1-slot block's element (@16) — the `materialize_result_str` layout `$read_text_file`
@@ -110,33 +104,14 @@ const RC_INITIAL: i32 = 1;
 const PUSH_HEADROOM: u32 = 8; // spare cap so demo pushes never realloc
 const IOVEC_LEN_OFFSET: u32 = I32_SIZE; // iovec = [buf:i32 @0][len:i32 @4]
 
-// WASI fd_write parameters / numeric base.
-const STDOUT_FD: u32 = 1;
-const IOVS_COUNT: u32 = 1; // one iovec per write
-const DECIMAL_BASE: i64 = 10;
-
-/// ASCII bytes the formatter writes.
-const ASCII_ZERO: u32 = 48;
-const ASCII_EQUALS: u32 = 61;
-const ASCII_COMMA: u32 = 44;
-const ASCII_NEWLINE: u32 = 10;
+/// ASCII bytes the fs path logic writes. (The itoa/print-list formatter bytes
+/// — zero/equals/comma/newline/minus, the digit scratch, and the line-buffer
+/// bound — went out with the #1208 prelude deletion: printing is self-hosted.)
 const ASCII_SLASH: u32 = 47; // '/' — stripped from an absolute fs.read_text path
-const ASCII_MINUS: u32 = 45; // '-' — the itoa sign byte
-
-/// The line buffer for printing lives in `[SCRATCH_ADDR, HEAP_BASE)`; one element
-/// appends at most a separator comma plus the digits of a u64 (≤ 20). The print
-/// loop traps if appending the next element would cross `HEAP_BASE` (the buffer
-/// end), so a very long list cannot overflow the line buffer into the heap.
-const MAX_I64_DIGITS: u32 = 20; // a u64 is at most 20 decimal digits
-const MAX_ELEM_PRINT_BYTES: u32 = 1 + MAX_I64_DIGITS; // comma + digits
 
 /// Render a MIR function to a runnable WAT module string.
 pub fn render_wasm(func: &MirFunction) -> String {
     let heap_locals = heap_handle_locals(&func.ops);
-    let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-    let mut data = String::new();
-    collect_label_data(&func.ops, LABELS_ADDR, &mut label_off, &mut data);
-
     let locals_decl = heap_locals
         .iter()
         .map(|v| format!("(local {} i32)", local(*v)))
@@ -159,7 +134,6 @@ pub fn render_wasm(func: &MirFunction) -> String {
         body.push_str(&render_op(
             op,
             crate::render_wasm::OpTables {
-                label_off: &label_off,
                 func_slots: &no_slots,
                 param_counts: &no_param_counts,
                 masks: &func.heap_slot_masks,
@@ -172,9 +146,8 @@ pub fn render_wasm(func: &MirFunction) -> String {
     }
 
     format!(
-        "{preamble}{data}  (func $main {locals}\n{body}  )\n  (func (export \"_start\") (call $main))\n)\n",
+        "{preamble}  (func $main {locals}\n{body}  )\n  (func (export \"_start\") (call $main))\n)\n",
         preamble = preamble(),
-        data = data,
         locals = locals_decl,
         body = body,
     )
@@ -417,29 +390,8 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         "render_wasm_program fed an unlinked call (use try_render_wasm_program to wall it): {:?}",
         unlinked_call_names(prog)
     );
-    // Labels (the data section) are module-level — collect across all functions.
-    let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-    let mut data = String::new();
-    let mut cursor = LABELS_ADDR;
-    for func in &prog.functions {
-        for op in &func.ops {
-            let Op::Call { args, .. } = op else {
-                continue;
-            };
-            for a in args {
-                let CallArg::Label(label) = a else {
-                    continue;
-                };
-                if label_off.contains_key(label) {
-                    continue;
-                }
-                let len = label.len() as u32;
-                label_off.insert(label.clone(), (cursor, len));
-                data.push_str(&format!("  (data (i32.const {cursor}) {:?})\n", label));
-                cursor += len;
-            }
-        }
-    }
+    // (The module-level print-label data section died with `RtFn::PrintList`,
+    // #1208 — no op carries a `CallArg::Label` any more.)
     // Function-table slots by NAME (position in the module) — a FuncRef resolves its
     // referenced function to this index, the same index the `(elem)` table uses.
     let func_slots: BTreeMap<String, u32> = prog
@@ -469,12 +421,8 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .functions
         .iter()
         .map(|f| {
-            let body = fold_const_wrap_roundtrips(&render_wasm_fn(
-                f,
-                &label_off,
-                &func_slots,
-                &param_counts,
-            ));
+            let body =
+                fold_const_wrap_roundtrips(&render_wasm_fn(f, &func_slots, &param_counts));
             strip_region_clone_rc_incs(&f.name, body)
         })
         .collect::<String>();
@@ -694,7 +642,7 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // in this program's own rendered code — or a kept helper's own body —
     // transitively reaches. `println`-only programs no longer link
     // `path_open`/`fd_readdir`/`clock_time_get`/etc.
-    let used_text = format!("{data}{closure_table}{funcs}{mg_helpers}{start}{pub_exports}");
+    let used_text = format!("{closure_table}{funcs}{mg_helpers}{start}{pub_exports}");
     let preamble = filter_unreachable_preamble(&preamble, &used_text);
     format!(
         "{preamble}{used_text})

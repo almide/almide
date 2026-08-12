@@ -685,46 +685,16 @@ fn imm_import_arg(n: i64, ty: crate::WasmAbi) -> String {
     }
 }
 
-fn render_call(
-    dst: Option<ValueId>,
-    func: &RtFn,
-    args: &[CallArg],
-    label_off: &BTreeMap<String, (u32, u32)>,
-    floats: &BTreeSet<ValueId>,
-) -> String {
+fn render_call(dst: Option<ValueId>, func: &RtFn, args: &[CallArg]) -> String {
+    // `dst` died with `RtFn::ListPush` (the rebind-on-realloc arm, #1208); it
+    // stays in the signature so a future dst-carrying runtime fn cannot land
+    // without deciding what its rebind means — but today it must be absent.
+    assert!(dst.is_none(), "runtime call {func:?} with a dst — no RtFn returns a value");
     match (func, args) {
         (RtFn::ListSet, [CallArg::Handle(t), CallArg::Imm(idx), CallArg::Imm(val)]) => format!(
             "    (call $list_set (local.get {t}) (i32.const {idx}) (i64.const {val}))\n",
             t = local(*t)
         ),
-        (RtFn::ListPush, [CallArg::Handle(t), CallArg::Imm(val)]) => {
-            // push may move the buffer → rebind the handle local (dst == target).
-            let target = dst.unwrap_or(*t);
-            format!(
-                "    (local.set {d} (call $list_push (local.get {t}) (i64.const {val})))\n",
-                d = local(target),
-                t = local(*t)
-            )
-        }
-        (RtFn::PrintList, [CallArg::Handle(v), CallArg::Label(label)]) => {
-            let (off, len) = label_off[label];
-            format!(
-                "    (call $print_list (local.get {v}) (i32.const {off}) (i32.const {len}))\n",
-                v = local(*v)
-            )
-        }
-        (RtFn::PrintInt, [CallArg::Scalar(v)]) => {
-            // An f64-classified value never legally reaches print_int, but the
-            // flexible-scalar-arg rule still owes the i64 BITS at the boundary.
-            if floats.contains(v) {
-                format!(
-                    "    (call $print_int (i64.reinterpret_f64 (local.get {})))\n",
-                    local(*v)
-                )
-            } else {
-                format!("    (call $print_int (local.get {}))\n", local(*v))
-            }
-        }
         (RtFn::PrintStr, [CallArg::Handle(v)]) => {
             format!("    (call $print_str (local.get {}))\n", local(*v))
         }

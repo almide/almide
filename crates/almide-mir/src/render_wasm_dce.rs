@@ -295,22 +295,6 @@ pub(crate) fn filter_unreachable_preamble(pre: &str, used_text: &str) -> String 
 /// a fixpoint (a dead function referenced only by another dead function
 /// prunes in a later round).
 pub(crate) fn prune_unreachable_functions(prog: &MirProgram) -> MirProgram {
-    let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-    let mut cursor = LABELS_ADDR;
-    for func in &prog.functions {
-        for op in &func.ops {
-            let Op::Call { args, .. } = op else { continue };
-            for a in args {
-                let CallArg::Label(label) = a else { continue };
-                if label_off.contains_key(label) {
-                    continue;
-                }
-                let len = label.len() as u32;
-                label_off.insert(label.clone(), (cursor, len));
-                cursor += len;
-            }
-        }
-    }
     let func_slots: BTreeMap<String, u32> =
         prog.functions.iter().enumerate().map(|(i, f)| (f.name.clone(), i as u32)).collect();
     let param_counts: BTreeMap<String, usize> =
@@ -318,7 +302,7 @@ pub(crate) fn prune_unreachable_functions(prog: &MirProgram) -> MirProgram {
     let bodies: BTreeMap<String, String> = prog
         .functions
         .iter()
-        .map(|f| (f.name.clone(), render_wasm_fn(f, &label_off, &func_slots, &param_counts)))
+        .map(|f| (f.name.clone(), render_wasm_fn(f, &func_slots, &param_counts)))
         .collect();
     // `Op::FuncRef { name, .. }` — "the function-table slot of the lifted
     // function `name`" — renders to a bare `(i64.const {slot})`, NOT a `$name`

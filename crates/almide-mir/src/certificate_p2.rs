@@ -20,11 +20,12 @@
     #[test]
     fn cap_witness_derives_used_from_runtime_calls() {
         // The 4th property: used capabilities come from the body's runtime calls
-        // (PrintInt reaches Stdout); pure heap ops reach none. The witness checks
+        // (PrintStr reaches Stdout); pure heap ops reach none. The witness checks
         // them against the declared bound.
         let print = func(vec![
-            Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(ValueId(0))] , result: None },
+            Op::Drop { v: ValueId(0) },
         ]);
         assert_eq!(cap_witness(&print).used, vec![Capability::Stdout]);
 
@@ -33,9 +34,9 @@
             Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Opaque },
             Op::MakeUnique { v: ValueId(0) },
             Op::Call {
-                dst: Some(ValueId(0)),
-                func: RtFn::ListPush,
-                args: vec![CallArg::Handle(ValueId(0)), CallArg::Imm(1)],
+                dst: None,
+                func: RtFn::ListSet,
+                args: vec![CallArg::Handle(ValueId(0)), CallArg::Imm(0), CallArg::Imm(1)],
             result: None },
             Op::Drop { v: ValueId(0) },
         ]);
@@ -99,13 +100,14 @@
         // its Stdout (no accept-but-unsafe) — the fold follows the same edge cap_witness
         // dropped the taint for, so a printing lambda's effect always reaches the caller.
         let mut printing_lambda = func(vec![
-            Op::Const { dst: ValueId(0) },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
             Op::Call {
                 dst: None,
-                func: RtFn::PrintInt,
-                args: vec![CallArg::Scalar(ValueId(0))],
+                func: RtFn::PrintStr,
+                args: vec![CallArg::Handle(ValueId(0))],
                 result: None,
             },
+            Op::Drop { v: ValueId(0) },
         ]);
         printing_lambda.name = "printing_lambda".into();
         let mut main = func(vec![
@@ -137,13 +139,14 @@
         // deferred/operand call path or passed elsewhere, so accounting at CREATION means
         // incremental lambda-lifting cannot lose a closure's effect however the call lowers.
         let mut printing = func(vec![
-            Op::Const { dst: ValueId(0) },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
             Op::Call {
                 dst: None,
-                func: RtFn::PrintInt,
-                args: vec![CallArg::Scalar(ValueId(0))],
+                func: RtFn::PrintStr,
+                args: vec![CallArg::Handle(ValueId(0))],
                 result: None,
             },
+            Op::Drop { v: ValueId(0) },
         ]);
         printing.name = "printing".into();
         // main only CREATES the closure (FuncRef) — it does NOT CallIndirect it.
@@ -164,8 +167,9 @@
     fn cap_witness_string_matches_the_coq_parser_format() {
         // declares Stdout, prints → `0|0`  (allowed ⊇ used → checker accepts).
         let mut declared = func(vec![
-            Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(ValueId(0))] , result: None },
+            Op::Drop { v: ValueId(0) },
         ]);
         declared.declared_caps = vec![Capability::Stdout];
         assert_eq!(cap_witness_string(&declared), "0|0");
@@ -183,8 +187,9 @@
         // helper prints (Stdout=0); main calls helper; both declare Stdout. Sorted by name:
         // 0=helper, 1=main, 2=UNIVERSE. helper `0|0|`, main `0||0` (callee 0), UNIVERSE sentinel.
         let mut helper = func(vec![
-            Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))], result: None },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(ValueId(0))], result: None },
+            Op::Drop { v: ValueId(0) },
         ]);
         helper.name = "helper".into();
         helper.declared_caps = vec![Capability::Stdout];
@@ -211,8 +216,9 @@
         use std::collections::{BTreeMap, BTreeSet};
         // main → beep (prints, reaches Stdout). main has NO direct effect.
         let mut beep = func(vec![
-            Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(ValueId(0))] , result: None },
+            Op::Drop { v: ValueId(0) },
         ]);
         beep.name = "beep".into();
         let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![] , result: None }]);
@@ -313,11 +319,12 @@
     #[test]
     fn transitive_capability_through_callfn_is_caught() {
         use std::collections::{BTreeMap, BTreeSet};
-        // main → beep; beep prints (PrintInt → Stdout). main has NO direct cap but
+        // main → beep; beep prints (PrintStr → Stdout). main has NO direct cap but
         // reaches one transitively — the fold MUST flag it (the direct witness wouldn't).
         let mut beep = func(vec![
-            Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))], result: None },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(ValueId(0))], result: None },
+            Op::Drop { v: ValueId(0) },
         ]);
         beep.name = "beep".into();
         let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![], result: None }]);
@@ -398,8 +405,9 @@
         let not_elided = |_: &str| false;
         // main → beep (prints Stdout): reachable = {Stdout}, FULLY known.
         let mut beep = func(vec![
-            Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))], result: None },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(ValueId(0))], result: None },
+            Op::Drop { v: ValueId(0) },
         ]);
         beep.name = "beep".into();
         let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![], result: None }]);
@@ -439,13 +447,14 @@
         // ADVERSARIAL: the lifted lambda prints. main = `FuncRef(printing_lambda)` only —
         // no CallIndirect — so coverage-free folding (at creation) must still surface Stdout.
         let mut printing_lambda = func(vec![
-            Op::Const { dst: ValueId(0) },
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
             Op::Call {
                 dst: None,
-                func: RtFn::PrintInt,
-                args: vec![CallArg::Scalar(ValueId(0))],
+                func: RtFn::PrintStr,
+                args: vec![CallArg::Handle(ValueId(0))],
                 result: None,
             },
+            Op::Drop { v: ValueId(0) },
         ]);
         printing_lambda.name = "printing_lambda".into();
         let mut main = func(vec![Op::FuncRef { dst: ValueId(0), name: "printing_lambda".into() }]);

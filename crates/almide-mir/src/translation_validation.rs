@@ -60,10 +60,11 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::ListLit { .. } => "call $alloc".into(),
         Op::ListGetScalar { .. } | Op::ListSetScalar { .. } => "call $elem_addr_chk".into(),
         Op::Dup { .. } => "call $rc_inc".into(),
-        Op::Call { func: RtFn::PrintInt, .. } => "call $print_int".into(),
-        Op::Call { func: RtFn::PrintList, .. } => "call $print_list".into(),
+        // The ONE print op (#1208 retired the PrintInt/PrintList bootstrap): a
+        // `println(s)` lowers to PrintStr and must realize as a call of the
+        // auto-linked self-hosted `$print_str`.
+        Op::Call { func: RtFn::PrintStr, .. } => "call $print_str".into(),
         Op::Call { func: RtFn::ListSet, .. } => "call $list_set".into(),
-        Op::Call { func: RtFn::ListPush, .. } => "call $list_push".into(),
         Op::CallFn { name, .. } => format!("call ${name}"),
         // A host wasm IMPORT renders to `(call $<import>)`; the import name is the
         // mangled `__import_<module>_<name>` the render declares (see `import_symbol`).
@@ -108,8 +109,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         // per-op pattern claim here (like the if-markers), and no lowering emits it yet.
         // FuncRef (a closure's table-slot value) is likewise structural, no token claim.
         | Op::CallIndirect { .. }
-        | Op::FuncRef { .. }
-        | Op::Call { func: RtFn::PrintStr, .. } => return None,
+        | Op::FuncRef { .. } => return None,
     })
 }
 
@@ -284,8 +284,10 @@ mod tests {
     #[test]
     fn translation_validation_requires_each_op_realized() {
         use crate::{CallArg, RtFn};
-        // A real value-semantics program: build a list, print an int, drop.
-        let (a, n) = (ValueId(0), ValueId(1));
+        // A real value-semantics program: build a list, print a string (#1208
+        // ported this test from the retired PrintInt to the print_str-based
+        // expectation — the print real programs actually lower to), drop both.
+        let (a, s) = (ValueId(0), ValueId(1));
         let mir = MirFunction {
             name: "main".into(),
             ops: vec![
@@ -294,28 +296,33 @@ mod tests {
                     repr: heap(),
                     init: Init::IntList(vec![1, 2, 3]),
                 },
-                Op::Const { dst: n },
+                Op::Alloc {
+                    dst: s,
+                    repr: heap(),
+                    init: Init::Str("hi".into()),
+                },
                 Op::Call {
                     dst: None,
-                    func: RtFn::PrintInt,
-                    args: vec![CallArg::Scalar(n)],
+                    func: RtFn::PrintStr,
+                    args: vec![CallArg::Handle(s)],
                     result: None,
                 },
+                Op::Drop { v: s },
                 Op::Drop { v: a },
             ],
             ..Default::default()
         };
         let wat = render_wasm(&mir);
-        // Each op's table pattern is present (incl. `call $rc_dec` for the drop).
+        // Each op's table pattern is present (incl. `call $rc_dec` for the drops).
         assert!(validate_translation(&wat, &mir));
-        assert!(wat.contains("call $list_new") && wat.contains("call $print_int"));
+        assert!(wat.contains("call $list_new") && wat.contains("call $print_str"));
         assert!(
             wat.contains("call $rc_dec"),
             "the drop is realized as a release"
         );
         // Non-vacuous: a renderer that DROPPED the print fails V (the table catches
         // an unrealized op).
-        let stripped = wat.replace("call $print_int", "nop");
+        let stripped = wat.replace("call $print_str", "nop");
         assert!(
             !validate_translation(&stripped, &mir),
             "an unrealized op must fail V"

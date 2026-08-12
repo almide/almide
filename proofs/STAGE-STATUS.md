@@ -12,7 +12,7 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 
 <!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
 > **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —
-> scalar-read 63 arms / 0 UNGUARDED; WAT prelude 66 fns classified;
+> scalar-read 63 arms / 0 UNGUARDED; WAT prelude 61 fns classified;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
 > **Stage 2 (translation validation): 268/388 fixtures cast a real 3-way vote (69%)** —

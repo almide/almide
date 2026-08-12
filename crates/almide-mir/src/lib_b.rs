@@ -461,34 +461,26 @@ pub enum IntOp {
 pub enum RtFn {
     /// `list[index] = value` in place (after a [`Op::MakeUnique`]).
     ListSet,
-    /// push a value onto a list in place (after a [`Op::MakeUnique`]); the
-    /// result is rebound to `dst` (the buffer may move).
-    ListPush,
-    /// `println` a list as `label=e0,e1,…`.
-    PrintList,
-    /// `println` a scalar integer.
-    PrintInt,
-    /// `println` a heap string (the value-semantics subset's string print). A
-    /// WITNESS-LEVEL primitive today: it carries the ownership (borrows the
-    /// string handle) and capability ([`Capability::Stdout`]) facts the proven
-    /// checker re-verifies, but the renderers do NOT lower it yet — strings are
-    /// `Init::Opaque` skeletons in this subset (no content bytes), so a faithful
-    /// `print_str` render awaits the string-content lowering brick. Until then a
-    /// renderer asked to emit it refuses LOUDLY (the catch-all panic), never
-    /// silently — the flight-grade totality rule.
+    /// `println` a heap string — the ONE print primitive: `println(s)` lowers to
+    /// it, and every other print (`int.to_string`, list formatting) reaches
+    /// stdout THROUGH it via the self-hosted stdlib. It borrows the string
+    /// handle (no ownership event) and carries [`Capability::Stdout`] — the
+    /// facts the proven checker re-verifies. (`PrintInt`/`PrintList`/`ListPush`
+    /// were retired in #1208: no frontend lowering constructed them, so their
+    /// hand-written wasm bodies were dead-from-source — DO-178C dead code.)
     PrintStr,
 }
 
 impl RtFn {
     /// The host [`Capability`] this runtime function reaches, if any. Pure heap
-    /// ops touch no host effect; the print ops reach [`Capability::Stdout`]. This
+    /// ops touch no host effect; the print op reaches [`Capability::Stdout`]. This
     /// is the SINGLE mapping the capability witness derives "used capabilities"
     /// from — exhaustive, so a new effectful runtime fn cannot silently escape
     /// the sandbox accounting.
     pub const fn capability(self) -> Option<Capability> {
         match self {
-            RtFn::ListSet | RtFn::ListPush => None,
-            RtFn::PrintList | RtFn::PrintInt | RtFn::PrintStr => Some(Capability::Stdout),
+            RtFn::ListSet => None,
+            RtFn::PrintStr => Some(Capability::Stdout),
         }
     }
 }
@@ -503,7 +495,7 @@ impl RtFn {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
 pub enum Capability {
     /// Writing to standard output (the only host effect the current MIR subset
-    /// reaches, via [`RtFn::PrintInt`] / [`RtFn::PrintList`]).
+    /// reaches, via [`RtFn::PrintStr`] / [`PrimKind::FdWrite`]).
     Stdout,
     /// Reading host ENTROPY — the WASI `random_get` floor ([`PrimKind::RandomGet`]),
     /// reached by the self-hosted `random.int`. The second sandbox exit. A pure `fn`
