@@ -2949,7 +2949,7 @@ evidence  = [
 id        = "C-237"
 spec      = "ALS-E9"
 title     = "Option/Result constructor literals build and eliminate identically on both targets"
-statement = "ALS-E9: `some(e)` / bare `none` / `ok(e)` / `err(e)` under a Result-typed expectation construct the same values on both targets, and `??` eliminates them identically (ok(3) ?? 0 -> 3, err ?? -9 -> -9, some(5) ?? 0 -> 5, none ?? -1 -> -1 — byte-identical native <-> wasm). The negative half is check-time and pinned by tests/ctor_diag_test.rs: `none()` is E001 (none is a value, not a function), and an un-annotated `let o = ok(3)` in an effect fn is the ADR-0008 explicit-propagation rejection. Nested `some(none)` elimination is deliberately outside this contract while #1270 (v1 wall on ?? with an Option-typed default, loud) stands."
+statement = "ALS-E9: `some(e)` / bare `none` / `ok(e)` / `err(e)` under a Result-typed expectation construct the same values on both targets, and `??` eliminates them identically (ok(3) ?? 0 -> 3, err ?? -9 -> -9, some(5) ?? 0 -> 5, none ?? -1 -> -1 — byte-identical native <-> wasm). The negative half is check-time and pinned by tests/ctor_diag_test.rs: `none()` is E001 (none is a value, not a function), and an un-annotated `let o = ok(3)` in an effect fn is the ADR-0008 explicit-propagation rejection. Nested elimination is IN contract since #1270 closed: some(none) ?? none -> inner none -> 9, some(some(5)) ?? none -> some(5) -> 5, byte-identical (the bind rewrites to `match e { some(p) => p, none => d }`, the Option-polarity mirror of the Result rewrite)."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
