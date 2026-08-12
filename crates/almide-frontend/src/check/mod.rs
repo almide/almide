@@ -34,7 +34,7 @@ use almide_base::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
 use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeEnv};
-use types::{TyVarId, Constraint, FixHint, UnionFind, resolve_ty};
+use types::{Constraint, FixHint, UnionFind, resolve_ty};
 
 /// Print a compiler trace line when the named debug channel is switched on.
 ///
@@ -576,23 +576,6 @@ impl Checker {
     pub(crate) fn fresh_var(&mut self) -> Ty {
         let id = self.uf.fresh();
         Ty::TypeVar(sym(&format!("?{}", id)))
-    }
-
-    /// Let-polymorphism: instantiate で TypeVar("?N") を fresh var に置換
-    /// 同じ let binding を2回参照する時、各参照で独立した型変数を使う
-    pub(crate) fn instantiate_ty(&mut self, ty: &Ty) -> Ty {
-        let mut mapping: std::collections::HashMap<u32, TyVarId> = std::collections::HashMap::new();
-        self.instantiate_inner(ty, &mut mapping)
-    }
-
-    fn instantiate_inner(&mut self, ty: &Ty, mapping: &mut std::collections::HashMap<u32, TyVarId>) -> Ty {
-        // Inference variables (?N) must NOT be freshened — they need to stay
-        // linked to the original constraint.
-        if matches!(ty, Ty::TypeVar(name) if name.starts_with('?')) {
-            return ty.clone();
-        }
-        // Recursively instantiate all children
-        ty.map_children_mut(&mut |child| self.instantiate_inner(child, mapping))
     }
 
     pub(crate) fn constrain(&mut self, expected: Ty, actual: Ty, context: impl Into<String>) {
