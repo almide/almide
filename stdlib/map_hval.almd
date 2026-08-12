@@ -65,7 +65,13 @@ fn map_set_hval(m: Map[String, List[Int]], k: String, v: List[Int]) -> Map[Strin
   let n = prim.load32(sh + 4)
   let idx = __hvl_find(sh, n, k, 0)
   let rn = if idx < 0 then n + 1 else n
-  let r = prim.alloc_map_kv(rn * 2)
+  // GEOMETRIC capacity (#1219, see map_core.map_set): epoch-stable alloc sizes let the $alloc
+  // exact-size free-list reuse the block freed by the previous `m = map.set(m, k, v)` rebind.
+  let need = rn * 2
+  let scap = prim.load32(sh + 8)
+  let slots = if need > scap then (if scap * 2 > need then scap * 2 else need)
+  else scap
+  let r = prim.alloc_map_kv(slots)
   let rh = prim.handle(r)
   let vh = prim.handle(v)
   let _c = __hvl_set_copy(sh, rh, n, rn, k, vh, 0)
@@ -252,7 +258,7 @@ fn __gby_add(m: Map[String, List[Int]], k: String, x: Int) -> Map[String, List[I
   map_set_hval(m, k, nl)
 }
 
-fn __gby_step(xs: List[Int], f: fn(Int) -> String, n: Int, i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] = if i >= n then m
+fn __gby_step(xs: List[Int], f: (Int) -> String, n: Int, i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] = if i >= n then m
 else {
   let x = prim.load64(prim.handle(xs) + 12 + i * 8)
   let k = f(x)
@@ -262,7 +268,7 @@ else {
   else __gby_step(xs, f, n, i + 1, __gby_add(m, k, x))
 }
 
-fn list_group_by(xs: List[Int], f: fn(Int) -> String) -> Map[String, List[Int]] = {
+fn list_group_by(xs: List[Int], f: (Int) -> String) -> Map[String, List[Int]] = {
   let n = prim.load32(prim.handle(xs) + 4)
   __gby_step(xs, f, n, 0, map_new_hval())
 }

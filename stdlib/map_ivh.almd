@@ -49,7 +49,13 @@ fn map_set_ivh(m: Map[Int, String], k: Int, v: String) -> Map[Int, String] = {
   let n = prim.load32(sh + 4)
   let idx = __ivh_find(sh, n, k, 0)
   let rn = if idx < 0 then n + 1 else n
-  let r = prim.alloc_map_kv(rn * 2)
+  // GEOMETRIC capacity (#1219, see map_core.map_set): epoch-stable alloc sizes let the $alloc
+  // exact-size free-list reuse the block freed by the previous `m = map.set(m, k, v)` rebind.
+  let need = rn * 2
+  let scap = prim.load32(sh + 8)
+  let slots = if need > scap then (if scap * 2 > need then scap * 2 else need)
+  else scap
+  let r = prim.alloc_map_kv(slots)
   let rh = prim.handle(r)
   let _c = __ivh_set_copy(sh, rh, n, rn, k, v, 0)
   let _a = __ivh_set_append(rh, rn, idx, k, v)

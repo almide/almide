@@ -53,10 +53,20 @@ fn __map_put(rh: Int, len: Int, idx: Int, k: Int, v: Int) -> Int = if idx < 0 th
   len
 }
 
+// GEOMETRIC capacity (#1219): grow the copy's slot count by doubling epochs instead of the
+// exact (len+1)*2. The $alloc free-list reuses only EXACT-size blocks, so an exact-size grow
+// loop (`m = map.set(m, k, v)`, the lowered form of `m[k] = v` / `map.insert`) frees a
+// never-reusable block every call — O(n^2) bytes and an O(n) dead-list walk per alloc. With a
+// stable epoch size the block freed by the PREVIOUS rebind is an exact head match: O(1) reuse,
+// O(n) total memory. Slack slots past 2*len are never read (len governs iteration/eq/repr —
+// filter/remove results already carry cap slack), so observable behavior is unchanged.
 fn map_set(m: Map[Int, Int], k: Int, v: Int) -> Map[Int, Int] = {
   let sh = prim.handle(m)
   let len = prim.load32(sh + 4)
-  let slots = (len + 1) * 2
+  let cap = prim.load32(sh + 8)
+  let need = (len + 1) * 2
+  let slots = if need > cap then (if cap * 2 > need then cap * 2 else need)
+  else cap
   let r = prim.alloc_map(slots)
   let rh = prim.handle(r)
   let _c = __map_copy(sh, rh, len, 0)
@@ -168,7 +178,7 @@ fn map_merge(a: Map[Int, Int], b: Map[Int, Int]) -> Map[Int, Int] = {
 
 // map.update — if k is present, replace its value with f(old); else the map is unchanged. f is a
 // one-arity closure (Int)->Int invoked via CallIndirect. update never changes the entry count.
-fn __map_update_at(rh: Int, idx: Int, f: fn(Int) -> Int) -> Int = if idx < 0 then 0
+fn __map_update_at(rh: Int, idx: Int, f: (Int) -> Int) -> Int = if idx < 0 then 0
 else {
   let old = prim.load64(rh + 12 + idx * 16 + 8)
   let nv = f(old)
@@ -176,7 +186,7 @@ else {
   0
 }
 
-fn map_update(m: Map[Int, Int], k: Int, f: fn(Int) -> Int) -> Map[Int, Int] = {
+fn map_update(m: Map[Int, Int], k: Int, f: (Int) -> Int) -> Map[Int, Int] = {
   let sh = prim.handle(m)
   let len = prim.load32(sh + 4)
   let slots = len * 2
@@ -192,7 +202,7 @@ fn map_update(m: Map[Int, Int], k: Int, f: fn(Int) -> Int) -> Map[Int, Int] = {
 // ── Higher-order Map[Int,Int] (closures machinery) ── the predicate f is a TWO-arity closure
 // f : (Key, Value) -> Bool invoked via CallIndirect $closure_fn2. A pure predicate byte-matches
 // v0 (single pass, insertion order). filter keeps a subset of entries (still unique keys).
-fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: fn(Int, Int) -> Bool, i: Int, w: Int) -> Int = if i >= len then w
+fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int = if i >= len then w
 else {
   let k = prim.load64(sh + 12 + i * 16)
   let v = prim.load64(sh + 12 + i * 16 + 8)
@@ -206,7 +216,7 @@ else {
   }
 }
 
-fn map_filter(m: Map[Int, Int], f: fn(Int, Int) -> Bool) -> Map[Int, Int] = {
+fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
   let sh = prim.handle(m)
   let len = prim.load32(sh + 4)
   let slots = len * 2
@@ -218,7 +228,7 @@ fn map_filter(m: Map[Int, Int], f: fn(Int, Int) -> Bool) -> Map[Int, Int] = {
 }
 
 // Sum the predicate's 0/1 over all entries → the hit COUNT (a Bool is an i64 0/1).
-fn __map_count_hits(sh: Int, len: Int, f: fn(Int, Int) -> Bool, i: Int, acc: Int) -> Int = if i >= len then acc
+fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int = if i >= len then acc
 else {
   let k = prim.load64(sh + 12 + i * 16)
   let v = prim.load64(sh + 12 + i * 16 + 8)
@@ -227,21 +237,21 @@ else {
   else __map_count_hits(sh, len, f, i + 1, acc)
 }
 
-fn map_all(m: Map[Int, Int], f: fn(Int, Int) -> Bool) -> Bool = {
+fn map_all(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let len = prim.load32(sh + 4)
   let hits = __map_count_hits(sh, len, f, 0, 0)
   hits >= len
 }
 
-fn map_any(m: Map[Int, Int], f: fn(Int, Int) -> Bool) -> Bool = {
+fn map_any(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let len = prim.load32(sh + 4)
   let hits = __map_count_hits(sh, len, f, 0, 0)
   hits > 0
 }
 
-fn map_count(m: Map[Int, Int], f: fn(Int, Int) -> Bool) -> Int = {
+fn map_count(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Int = {
   let sh = prim.handle(m)
   let len = prim.load32(sh + 4)
   __map_count_hits(sh, len, f, 0, 0)
@@ -250,7 +260,7 @@ fn map_count(m: Map[Int, Int], f: fn(Int, Int) -> Bool) -> Int = {
 // map.fold — left fold with a THREE-arity closure f : (Acc, Key, Value) -> Acc (v0's
 // fold(m, init, f), acc first). Int accumulator. The closure dispatches via $closure_fn3 (the
 // render generates one closure type per arity that appears — 3-arity needs no new machinery).
-fn __map_fold_loop(sh: Int, f: fn(Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int = if i >= len then acc
+fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int = if i >= len then acc
 else {
   let k = prim.load64(sh + 12 + i * 16)
   let v = prim.load64(sh + 12 + i * 16 + 8)
@@ -258,7 +268,7 @@ else {
   __map_fold_loop(sh, f, len, i + 1, nacc)
 }
 
-fn map_fold(m: Map[Int, Int], init: Int, f: fn(Int, Int, Int) -> Int) -> Int = {
+fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
   let sh = prim.handle(m)
   let len = prim.load32(sh + 4)
   __map_fold_loop(sh, f, len, 0, init)

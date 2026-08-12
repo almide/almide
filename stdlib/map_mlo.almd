@@ -66,7 +66,13 @@ fn map_set_mlo(m: Map[String, List[Int?]], k: String, v: List[Int?]) -> Map[Stri
   let n = prim.load32(sh + 4)
   let idx = __mlo_find(sh, n, k, 0)
   let rn = if idx < 0 then n + 1 else n
-  let r = prim.alloc_map_kv(rn * 2)
+  // GEOMETRIC capacity (#1219, see map_core.map_set): epoch-stable alloc sizes let the $alloc
+  // exact-size free-list reuse the block freed by the previous `m = map.set(m, k, v)` rebind.
+  let need = rn * 2
+  let scap = prim.load32(sh + 8)
+  let slots = if need > scap then (if scap * 2 > need then scap * 2 else need)
+  else scap
+  let r = prim.alloc_map_kv(slots)
   let rh = prim.handle(r)
   let vh = prim.handle(v)
   let _c = __mlo_set_copy(sh, rh, n, rn, k, vh, 0)
