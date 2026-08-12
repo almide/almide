@@ -85,7 +85,7 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: 
         IrPattern::Tuple { elements } => {
             let shapes: Vec<String> =
                 elements.iter().map(|p| guard_shape(ctx, p, counter, subs)).collect();
-            format!("({})", shapes.join(", "))
+            format!("({})", super::helpers::tuple_elems_join(&shapes))
         }
         IrPattern::Constructor { name, args } => {
             let qualified = qualify_ctor(ctx, name.as_str(), None);
@@ -407,7 +407,9 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Op
         }
         IrPattern::Constructor { name, args } => render_pattern_constructor(ctx, name, args, enum_hint),
         IrPattern::Tuple { elements } => {
-            let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
+            let elems = super::helpers::tuple_elems_join(
+                &elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>(),
+            );
             ctx.templates.render_with("tuple_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
         }

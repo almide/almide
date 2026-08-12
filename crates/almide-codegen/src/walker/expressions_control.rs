@@ -167,9 +167,9 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
     let var_name = if let Some(tuple_vars) = var_tuple {
         let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
-        let vars_s = names.join(", ");
+        let vars_s = super::helpers::tuple_elems_join(&names);
         ctx.templates.render_with("for_tuple_destructure", None, &[], &[("vars", vars_s.as_str())])
-            .unwrap_or_else(|| format!("({})", names.join(", ")))
+            .unwrap_or_else(|| format!("({})", vars_s))
     } else {
         ctx.var_name(*var).to_string()
     };

@@ -196,7 +196,9 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         // renders every (possibly nested) Fn as `Rc<dyn Fn>`.
         Ty::Fn { .. } => super::helpers::render_type_field_fn(ctx, ty),
         Ty::Tuple(elems) => {
-            let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
+            let parts = super::helpers::tuple_elems_join(
+                &elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>(),
+            );
             ctx.templates.render_with("type_tuple", None, &[], &[("elements", parts.as_str())])
                 .unwrap_or_else(|| "tuple".into())
         }
