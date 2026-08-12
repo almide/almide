@@ -282,7 +282,9 @@ fn render_expr_range(ctx: &RenderContext, start: &IrExpr, end: &IrExpr, inclusiv
 
 /// `Tuple { elements }` case of `render_expr`.
 fn render_expr_tuple(ctx: &RenderContext, elements: &[IrExpr]) -> String {
-    let parts = elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>().join(", ");
+    let parts = super::helpers::tuple_elems_join(
+        &elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>(),
+    );
     ctx.templates.render_with("tuple_literal", None, &[], &[("elements", parts.as_str())])
         .unwrap_or_else(|| "tuple(...)".into())
 }

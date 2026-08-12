@@ -579,7 +579,11 @@ pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
                 .zip(&names)
                 .map(|(t, n)| rc_cow_result_glue(n.clone(), t))
                 .collect();
-            format!("{{ let ({}) = {expr_str}; ({}) }}", names.join(", "), parts.join(", "))
+            format!(
+                "{{ let ({}) = {expr_str}; ({}) }}",
+                super::helpers::tuple_elems_join(&names),
+                super::helpers::tuple_elems_join(&parts)
+            )
         }
         _ => expr_str,
     }
@@ -633,7 +637,11 @@ pub(super) fn rc_cow_unglue(expr_str: String, ty: &Ty) -> String {
                 .zip(&names)
                 .map(|(t, n)| rc_cow_unglue(n.clone(), t))
                 .collect();
-            format!("{{ let ({}) = {expr_str}; ({}) }}", names.join(", "), parts.join(", "))
+            format!(
+                "{{ let ({}) = {expr_str}; ({}) }}",
+                super::helpers::tuple_elems_join(&names),
+                super::helpers::tuple_elems_join(&parts)
+            )
         }
         _ => expr_str,
     }
