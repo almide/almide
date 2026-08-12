@@ -59,19 +59,18 @@ impl LowerCtx {
                 self.lifted.truncate(lifted_mark);
             }
             // The OPTION-polarity mirror (#1270): a heap `??` whose operand is
-            // Option-typed (`sn ?? none` over Option[Option[Int]], `list.get(xs,
-            // i) ?? {…}` over Option[record]) declined the direct route above.
-            // Rewrite to `match expr { some(p) => p, none => fallback }` through
-            // the same speculative bind-position heap-match machinery; a decline
-            // ROLLS BACK to the honest wall below. The record-payload case was
-            // gated off until #1287: the merge bind did not seed the record's
-            // read shape, so a String-field read of the bound var fell to the
-            // container-grain Dup (the record HEADER printed as blanks on wasm).
-            // `lower_bind_heap_match` now seeds materialized_aggregates +
-            // record_masks + the recursive drop route for a record/tuple-valued
-            // merge (measured byte-identical to the user-written match), so the
-            // gate covers every Option payload.
-            if expr.ty.is_option() {
+            // Option-typed and whose PAYLOAD is itself Option (`sn ?? none`
+            // over Option[Option[Int]] — the nested-Option elimination)
+            // declined the direct route above. Rewrite to `match expr {
+            // some(p) => p, none => fallback }` through the same speculative
+            // bind-position heap-match machinery; a decline ROLLS BACK to the
+            // honest wall below. GATED to Option payloads: an Option[record]
+            // subject through THIS synthesized route mis-reads the record's
+            // String fields on wasm (measured: "x" printed as blanks) even
+            // though a user-written match over the same source is correct —
+            // the record case stays on the wall until the bind-position
+            // synthesized-match route is fixed (#1270 follow-up).
+            if expr.ty.is_option() && ty.is_option() {
                 let ops_mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
                 let rewritten = Self::unwrap_or_as_option_match(value, expr, fallback);

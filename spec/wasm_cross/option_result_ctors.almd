@@ -6,13 +6,7 @@
 // tests/ctor_diag_test.rs), `??` elimination, and the
 // NESTED case: `some(none)` / `some(some(5))` eliminated through an
 // Option-typed default (#1270 — the v1 renderer now rewrites the bind to
-// `match e { some(p) => p, none => d }`), and the RECORD-payload case:
-// `list.get(xs, i) ?? { … }` over Option[record] (#1287 — the synthesized
-// match's merge now seeds the record's read shape, so a String field read
-// is the precise slot borrow, not the container-grain header read that
-// printed blanks on wasm). Identical on both targets.
-type P = { name: String, n: Int }
-
+// `match e { some(p) => p, none => d }`). Identical on both targets.
 effect fn main() -> Unit = {
   let s = some(5)
   let n: Int? = none
@@ -28,14 +22,4 @@ effect fn main() -> Unit = {
   let sv = some(some(5))
   let iv: Int? = sv ?? none
   println(int.to_string(iv ?? 9))
-  let xs: List[P] = [
-    { name: "x", n: 7 }
-  ]
-  let hit = list.get(xs, 0) ?? { name: "d", n: -1 }
-  println(hit.name)
-  println(int.to_string(hit.n))
-  let ys: List[P] = []
-  let miss = list.get(ys, 0) ?? { name: "d", n: -1 }
-  println(miss.name)
-  println(int.to_string(miss.n))
 }

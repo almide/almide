@@ -497,24 +497,6 @@ impl LowerCtx {
                     // A List-valued merge binds as a REAL populated block —
                     // register it so later element reads take the executing path.
                     self.materialized_lists.insert(obj);
-                } else if let Some((_, tys)) = self.aggregate_field_tys(ty) {
-                    // A RECORD/TUPLE-valued merge is likewise a REAL same-layout
-                    // block: every arm materializes + Consumes its value (a
-                    // some/ok-arm payload is the variant's real payload block, a
-                    // fallback arm a constructed literal). Seed its READ shape +
-                    // heap-slot MASK + recursive drop route exactly like the
-                    // Named-call bind (`seed_call_named_heap_read_shape`): without
-                    // materialized_aggregates a heap FIELD read of the bound var
-                    // fell to the container-grain Dup — the record HEADER printed
-                    // as the String (the #1287 wasm blanks) — and the bare flat
-                    // scope-end Drop leaked the record's heap fields.
-                    let heap_slots: Vec<usize> =
-                        (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
-                    self.materialized_aggregates.insert(obj);
-                    self.record_masks.insert(obj, heap_slots);
-                    if let Some(name) = self.record_or_anon_drop_type_name(ty) {
-                        self.variant_drop_handles.insert(obj, name);
-                    }
                 }
                 return Ok(());
             }
