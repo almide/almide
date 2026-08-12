@@ -121,6 +121,12 @@ pub struct Interpreter<'a> {
     /// ambiguous and intentionally NOT indexed (the structural type is then
     /// treated as a true anonymous record).
     pub(crate) named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)>,
+    /// Variant constructor registry: case name → `(type name, ctor kind)`,
+    /// built once from `program.type_decls`. The old per-call linear scan of
+    /// every type decl ran for EVERY Named call (user fn calls included)
+    /// before the fn-table lookup. First declaration wins on a shared case
+    /// name, exactly like the scan it replaces.
+    pub(crate) variant_ctors: HashMap<Sym, (Sym, dispatch::CtorKind)>,
     /// The global scope holding evaluated top-level lets. Every top-level fn
     /// call and `FnRef` closure parents off this so globals are visible from
     /// nested calls (not just from `main`'s body). Seeded once, lazily.
@@ -265,6 +271,27 @@ fn index_named_records(program: &IrProgram) -> HashMap<Vec<Sym>, (Sym, Vec<Sym>)
     named_records
 }
 
+/// Variant constructor registry: case name → `(type name, ctor kind)`.
+/// Mirrors the linear scan `variant_ctor` used to run per Named call:
+/// `program.type_decls` only (module decls were never scanned), in decl
+/// order, first declaration of a shared case name wins (`or_insert`).
+fn index_variant_ctors(program: &IrProgram) -> HashMap<Sym, (Sym, dispatch::CtorKind)> {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    let mut out: HashMap<Sym, (Sym, dispatch::CtorKind)> = HashMap::new();
+    for td in &program.type_decls {
+        let IrTypeDeclKind::Variant { cases, .. } = &td.kind else { continue };
+        for case in cases {
+            let kind = match case.kind {
+                IrVariantKind::Unit => dispatch::CtorKind::Unit,
+                IrVariantKind::Tuple { .. } => dispatch::CtorKind::Tuple,
+                IrVariantKind::Record { .. } => dispatch::CtorKind::Record,
+            };
+            out.entry(case.name).or_insert((td.name, kind));
+        }
+    }
+    out
+}
+
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a IrProgram) -> Self {
         let mut fns = HashMap::new();
@@ -320,6 +347,7 @@ impl<'a> Interpreter<'a> {
             }
         }
         let named_records = index_named_records(program);
+        let variant_ctors = index_variant_ctors(program);
 
         Interpreter {
             program,
@@ -328,6 +356,7 @@ impl<'a> Interpreter<'a> {
             fns,
             module_fns,
             named_records,
+            variant_ctors,
             globals: env::Scope::root(),
             globals_ready: Cell::new(false),
             stdout: String::new(),
