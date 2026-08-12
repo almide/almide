@@ -114,6 +114,11 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 burn-down PR: the first probe EXPOSED a real hole (a bogus class name sailed through green) — fixed with a pinned vocabulary, then both directions demonstrated (bogus class, unclassified entry)"
 
 [[gate]]
+path = "scripts/check-workflows.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1234 landing PR: forged a workflow with a duplicate `if:` key (the exact 0.57.0 fuzz-nightly incident shape) — the strict loader rejected it with the key named and exit 1; the empty-glob path also fails loud (no find-nothing-exit-0)"
+
+[[gate]]
 path = "scripts/check-browser-determinism.sh"
 class = "UNVERIFIED"
 

@@ -38,6 +38,12 @@ pre-commit:
       run: bash scripts/check-wat-prelude-audit.sh
     ratchet-separation:
       run: scripts/check-ratchet-separation.sh
+    workflow-parse:
+      # A schedule-only workflow that cannot parse fails SILENTLY at trigger
+      # time (#1234, the 0.57.0 fuzz-nightly dup-key incident) — strict-parse
+      # every workflow file whenever one changes.
+      glob: "{.github/workflows/*.yml,.github/workflows/*.yaml,scripts/check-workflows.sh}"
+      run: bash scripts/check-workflows.sh
     semantics-manifest:
       # Globbed by PATTERN, not by covered module: the hook named
       # stdlib/string.almd literally, so the next module onto the ratchet
