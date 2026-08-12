@@ -1,7 +1,6 @@
 // ALS-E4 evidence: reflexive equality of the unit value. Unit has one
 // inhabitant, so Eq is constant true — the v1 lowering folds it (call-free
 // operands only), so this file runs the wasm leg too.
-
 test "unit literal is reflexively equal" {
   let u = ()
   assert_eq(u == (), true)
