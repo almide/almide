@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-233 contracts
+235 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -261,4 +261,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-231 | Integer and boolean literal forms evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-232 | Boolean literals and their display form are identical on both targets | 0.57.1 | active | fixture | 1 |
 | C-233 | The unit literal, its positions, and its reflexive equality are identical on both targets | 0.57.1 | active | fixture | 1 |
+| C-234 | Parenthesized grouping and the 1-tuple disambiguation behave identically on both targets | 0.57.1 | active | fixture | 2 |
+| C-235 | Unary operators: `not` negation and prefix minus evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 
