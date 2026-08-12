@@ -2933,3 +2933,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/grouping_unary.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-236"
+spec      = "ALS-E8"
+title     = "Tuple construction, destructuring, indexing, and structural equality are identical on both targets"
+statement = "ALS-E8: heterogeneous tuple literals, let-destructure, positional `.k` reads, tuple-typed parameters and returns, nesting, and structural `==` produce byte-identical observables native <-> wasm. The chained-index ruling is normative: `n.0.1` is REJECTED (the lexer reads `0.1` as a float literal — 'Expected a name'), nested reads are written `(n.0).1`. Known loud limitations recorded in the section: `.k` bounds/subject-type not validated at check time (#1266), native 1-tuple x interpolation refusal (#1267) — neither produces a wrong value."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/tuple_ops.almd", class = "fixture" },
+]
