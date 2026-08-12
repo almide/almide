@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-246 contracts
+247 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -274,4 +274,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-244 | While loops iterate their condition-tested body identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-245 | String interpolation embeds each segment's canonical display identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-246 | Identifiers resolve to their nearest binding; unresolved names are check-time E003 naming the identifier | 0.57.1 | active | fixture | 1 |
+| C-247 | Match expressions select the first matching arm identically on both targets; non-exhaustive is check-time E010 | 0.57.1 | active | fixture | 1 |
 

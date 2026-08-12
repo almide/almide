@@ -296,3 +296,22 @@ ALS-S1)。
 
 テスト: `spec/wasm_cross/string_interpolation.almd`(契約 C-246)、
 `tests/ident_diag_test.rs`(負例)。
+
+## ALS-E18 match 式(`ExprKind::Match`)
+
+**受理形**: `match subject { pattern [if guard] => expr, … }` — パターンは
+リテラル(文字列・整数)、ワイルドカード `_`、束縛子 `x`、ガード付き束縛子
+`x if cond`、Option の `some(x)` / `none`、Result の `ok(x)` / `err(e)`。
+アーム本体は式(補間を含む)。
+
+**選択の裁定**: アームは**先頭から順に最初に一致したもの**が取られる
+(fixture: `n = 7` は `x if x < 0` と `x if x % 2 == 0` を通過して `_` に
+落ちる — first-match-wins を実測 pin)。取られたアームだけが評価される。
+
+**網羅性の裁定**: 非網羅の match は**検査時 E010** — 診断は欠落ケースを
+**名指し**し(`missing none`)、arm 追加のヒントを添える
+(`tests/match_diag_test.rs` が pin)。実行時の「どのアームにも一致しない」
+は型検査を通った match には存在しない。
+
+テスト: `spec/wasm_cross/match_forms.almd`(契約 C-247)、
+`tests/match_diag_test.rs`(負例)。
