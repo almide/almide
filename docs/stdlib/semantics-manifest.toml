@@ -2370,6 +2370,41 @@ POSITIONAL (non-flag) arguments with "--flag" filtered out, 0-based — and
 positional_at(2) is none.
 """
 
+# index_unit vocabulary — mem (the bytes address discipline, module-sized):
+#   address — the Int is an opaque allocator CHECKPOINT token, produced by
+#             save and consumed by restore — never a byte count, meaningless
+#             to arithmetic on
+[mem]
+
+[[mem.fn]]
+name = "save"
+index_unit = "address"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed in-file: mem.save WALLS the verified wasm renderer today
+("scalar binding outside the value subset" brick), so a calling probe would
+push this generated file off the wasm leg. Measured on the native leg
+(2026-08-13): save() returns 0 and the save/spacer/save monotonicity and
+restore-then-allocate sequences run without corruption — native pins both
+calls as no-ops (runtime/rs/src/mem.rs: RC already reclaims what a restore
+would). The checkpoint is only a live bump-allocator token on the wasm leg,
+where the same discipline is probe-pinned by the bytes.heap_save /
+bytes.heap_restore rows.
+"""
+
+[[mem.fn]]
+name = "restore"
+index_unit = "address"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed in-file (the same wasm wall as save). mark is an opaque
+token a save RETURNED, not a byte count. Measured on the native leg
+(2026-08-13): save / allocate 64 bytes / restore / allocate again returns the
+fresh allocation intact ([5, 6]) — the native no-op pair is safe to call.
+"""
+
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
 # regex and bool bear no Int in any swept signature today, so their entry
 # lists are empty — but COVERED_MODULES holds them, so the first Int-bearing
