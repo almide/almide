@@ -650,7 +650,15 @@ pub fn merge_dst_i_credits(func: &MirFunction) -> usize {
             Op::IfThen { dst: Some(d), .. } => {
                 merge_dsts.insert(*d);
             }
-            Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
+            Op::Consume { v }
+            | Op::Drop { v }
+            | Op::DropListStr { v }
+            // A RECORD/VARIANT-typed merge dst releases through the TYPED
+            // recursive drop (the #1287 record-merge seeding emits DropVariant,
+            // not Drop) — without this arm the dst never enters the released
+            // set, its IfThen `i` credit is skipped, and the DropVariant certs
+            // as a bare `d` the kernel checker rejects (unowned Dec).
+            | Op::DropVariant { v, .. } => {
                 if merge_dsts.contains(v) {
                     released.insert(*v);
                 }
@@ -704,7 +712,15 @@ fn ownership_certificate_released_merge_dsts(
             Op::IfThen { dst: Some(d), .. } => {
                 merge_dsts.insert(*d);
             }
-            Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
+            Op::Consume { v }
+            | Op::Drop { v }
+            | Op::DropListStr { v }
+            // A RECORD/VARIANT-typed merge dst releases through the TYPED
+            // recursive drop (the #1287 record-merge seeding emits DropVariant,
+            // not Drop) — without this arm the dst never enters the released
+            // set, its IfThen `i` credit is skipped, and the DropVariant certs
+            // as a bare `d` the kernel checker rejects (unowned Dec).
+            | Op::DropVariant { v, .. } => {
                 if merge_dsts.contains(v) {
                     released_merge_dsts.insert(*v);
                 }
