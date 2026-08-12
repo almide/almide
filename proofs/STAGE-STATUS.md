@@ -15,11 +15,11 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 > scalar-read 63 arms / 0 UNGUARDED; WAT prelude 66 fns classified;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
-> **Stage 2 (translation validation): 268/388 fixtures cast a real 3-way vote (69%)** —
+> **Stage 2 (translation validation): 270/390 fixtures cast a real 3-way vote (69%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
-> **Stage 3 (semantics freeze): 249/249 contracts spec-keyed; syntax-element coverage
-> 27/73 sectioned (46 UNWRITTEN, shrink-only — the freeze precondition is 0).**
+> **Stage 3 (semantics freeze): 251/251 contracts spec-keyed; syntax-element coverage
+> 30/73 sectioned (43 UNWRITTEN, shrink-only — the freeze precondition is 0).**
 >
 > **Stage 4 (durability): fuzz true-green streak = 0 day(s)** (dated meter;
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
