@@ -876,8 +876,11 @@ impl Checker {
     fn infer_expr_g2_ident(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Ident { name, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_ident called on the wrong ExprKind") };
                 self.env.used_vars.insert(sym(name));
-                if let Some(ty) = self.env.lookup_var(name).cloned() { self.instantiate_ty(&ty) }
-                else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { self.instantiate_ty(&ty) }
+                // NOTE: no let-polymorphism here — the old `instantiate_ty`
+                // never freshened anything (its mapping was never written), so
+                // it was an identity deep copy of the already-cloned type.
+                if let Some(ty) = self.env.lookup_var(name).cloned() { ty }
+                else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 // Const param: `N: Int` in generic params resolves to its underlying type
                 else if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     *ty
