@@ -521,11 +521,15 @@
 
     #[test]
     fn heap_option_record_unwrap_or_walls_not_miscompiles() {
-        // `let t = list.get(xs, i) ?? { … }` over a `List[record]` (Option[record] `??`) has NO
-        // faithful lowering — the Value-shaped option.value_unwrap_or corrupted the record field
-        // block (both arms printed garbage/empty vs v0; the mir>ir gate flagged it on porta
-        // parse_manifest). It must WALL, not fall to the empty-record Opaque. Modeled minimally:
-        // an UnwrapOr whose operand is an Option[record]-typed var and fallback a record literal.
+        // `let t = list.get(xs, i) ?? { … }` over a `List[record]` (Option[record] `??`).
+        // HISTORY: the Value-shaped option.value_unwrap_or corrupted the record field block, so
+        // this WALLED; then the #1270 synthesized-match rewrite stayed GATED off record payloads
+        // because the merge bind seeded no record read shape — a String field read of the bound
+        // var fell to the container-grain Dup (the record HEADER printed as wasm blanks, #1287).
+        // NOW (#1287): the bind-position synthesized `match { some(p) => p, none => d }` EXECUTES
+        // it — the merge is seeded like a record-returning call bind, so (a) the String field
+        // read is the PRECISE slot borrow (no Dup of the merged record), and (b) the scope-end
+        // drop routes through the record's RECURSIVE drop (a flat Drop leaked the String field).
         let rec_ty = Ty::Record {
             fields: vec![(almide_lang::intern::sym("name"), Ty::String)],
         };
@@ -546,17 +550,52 @@
                                     ir_expr(IrExprKind::LitStr { value: "d".into() }, Ty::String),
                                 )],
                             },
-                            rec_ty,
+                            rec_ty.clone(),
                         )),
                     },
-                    Ty::Record {
-                        fields: vec![(almide_lang::intern::sym("name"), Ty::String)],
+                    rec_ty.clone(),
+                ),
+            ),
+            // let s = t.name — the field read whose mis-lowering WAS the #1287 corruption.
+            bind(
+                2,
+                Ty::String,
+                ir_expr(
+                    IrExprKind::Member {
+                        object: Box::new(ir_expr(IrExprKind::Var { id: VarId(1) }, rec_ty)),
+                        field: almide_lang::intern::sym("name"),
                     },
+                    Ty::String,
                 ),
             ),
         ]);
-        match lower_body(&b, "f") {
-            Err(LowerError::Unsupported(_)) => {}
-            other => panic!("expected an Option[record] ?? wall, got {other:?}"),
-        }
+        let mir = lower_body(&b, "f").expect("Option[record] ?? now lowers (#1287)");
+        // (a) The merged record's ValueId (the IfThen merge dst) must never be the source
+        // of a Dup: the field read is a precise slot LoadHandle borrow, not the
+        // container-grain alias that printed the record header as the string.
+        let merge_dst = mir
+            .ops
+            .iter()
+            .find_map(|o| match o {
+                Op::IfThen { dst: Some(d), .. } => Some(*d),
+                _ => None,
+            })
+            .expect("the synthesized match lowers to an IfThen merge");
+        assert!(
+            !mir.ops
+                .iter()
+                .any(|o| matches!(o, Op::Dup { src, .. } if *src == merge_dst)),
+            "the String field read must not container-grain-Dup the merged record: {:?}",
+            mir.ops
+        );
+        // (b) The bound record's scope-end drop is the RECURSIVE anonrec route — a flat
+        // Drop would leak the String field.
+        assert!(
+            mir.ops.iter().any(
+                |o| matches!(o, Op::DropVariant { v, ty } if *v == merge_dst && ty.starts_with("anonrec"))
+            ),
+            "the merged record must drop through its recursive $__drop_anonrec route: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
