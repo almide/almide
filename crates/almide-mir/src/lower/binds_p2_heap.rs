@@ -171,12 +171,18 @@ impl LowerCtx {
             // (A NON-CAPTURING `Lambda` is intercepted ABOVE and LIFTED to a FuncRef; only
             // a capturing one — a real environment — reaches this deferred Opaque arm.)
             | IrExprKind::ClosureCreate { .. }
-            | IrExprKind::Range { .. }
             // A RUNTIME CALL result is a fresh value (its call is elided ⇒ the gate
             // taints the function honestly, like Method/Computed).
             | IrExprKind::RuntimeCall { .. } => {
                 self.lower_bind_heap_fresh(var, ty, value)
             }
+            // `let r = 0..<n` — a RANGE initializer. This sat in the deferred-Opaque
+            // arm above, which is exactly the "deferred EMPTY value observed by a
+            // later read" miscompile this file rejects everywhere else: a `for i in r`
+            // borrowed the empty Opaque and iterated ZERO times (#1272, wasm printed 0
+            // where native printed 3). Materialize the REAL list via the self-hosted
+            // `list.range`, mirroring the call-arg path (`lower_call_arg_range_list`).
+            IrExprKind::Range { .. } => self.lower_bind_heap_range(var, ty, value),
             // `var v = r.x` / `xs[i]` — a HEAP extraction: alias the container
             // (`Op::Dup`), bound here and dropped at scope end (cert `a` + `d`). When
             // the container is NOT a tracked var (`f().x`, nested `a.b.c`), there is no
@@ -393,5 +399,46 @@ impl LowerCtx {
             return Ok(());
         }
         self.lower_bind_heap_fresh_opaque(var, ty, value)
+    }
+
+    /// `let r = start..<end` / `start...end` — materialize the REAL `list.range`
+    /// list (the call-arg path's `lower_call_arg_range_list`, in bind position) and
+    /// seed it exactly like a `let r = list.range(s, e)` module-call bind, so a
+    /// later `for i in r` / `r[i]` reads a populated block. A non-scalar bound
+    /// walls (a deferred Opaque here was the #1272 silent zero-iteration).
+    fn lower_bind_heap_range(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        let IrExprKind::Range { start, end, inclusive } = &value.kind else { unreachable!() };
+        let range_mark = self.ops.len();
+        let (s_v, e_v0) = match (self.lower_scalar_value(start), self.lower_scalar_value(end)) {
+            (Some(sv), Some(ev)) => (sv, ev),
+            _ => {
+                self.ops.truncate(range_mark);
+                return Err(LowerError::Unsupported(
+                    "a Range initializer with a non-scalar bound cannot be materialized \
+                     in this brick (a deferred empty value would iterate zero times)"
+                        .into(),
+                ));
+            }
+        };
+        let mut e_v = e_v0;
+        if *inclusive {
+            let one = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: one, value: 1 });
+            let e2 = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: e2, op: crate::IntOp::Add, a: e_v, b: one });
+            e_v = e2;
+        }
+        let repr = repr_of(ty)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: "list.range".to_string(),
+            args: vec![CallArg::Scalar(s_v), CallArg::Scalar(e_v)],
+            result: Some(repr),
+        });
+        self.value_of.insert(var, dst);
+        self.seed_call_module_heap_read_shape(dst, ty, "list", "range", true);
+        self.seed_call_module_heap_drop_route(dst, ty);
+        Ok(())
     }
 }
