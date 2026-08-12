@@ -282,9 +282,11 @@ impl IrVisitor for BranchPrecounter<'_> {
                 }
                 return; // children fully visited above
             }
-            _ => {}
+            // Every other node kind delegates to the exhaustive primitive —
+            // the traversal-totality lint forbids a silent `_ => {}` (DIV2:
+            // a dropped-children catch-all is the native↔wasm divergence class).
+            _ => walk_expr(self, expr),
         }
-        walk_expr(self, expr);
     }
 
     fn visit_stmt(&mut self, stmt: &IrStmt) {
