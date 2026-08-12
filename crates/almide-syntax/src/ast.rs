@@ -659,3 +659,197 @@ fn visit_block_mut(
         visit_expr_mut(e, f);
     }
 }
+
+// ── Read-only AST visitor (#1231) ──
+//
+// Mirror of `visit_expr_mut` for callers that only OBSERVE the tree (counting
+// uses, scanning for a node kind) — before this existed, every such caller had
+// to clone the subtree just to run the mutable walker. Identical traversal
+// order and identical shallow-visit contracts; keep the two families in
+// lockstep. Exhaustive with no wildcard, so a new `ExprKind` fails to compile
+// here until its shape is declared.
+
+fn visit_stmt_exprs(stmt: &Stmt, f: &mut impl FnMut(&Expr)) {
+    match stmt {
+        Stmt::Let { value, .. } | Stmt::Var { value, .. } | Stmt::Assign { value, .. } => visit_expr(value, f),
+        Stmt::LetDestructure { pattern, value, .. } => {
+            visit_pattern_exprs(pattern, f);
+            visit_expr(value, f);
+        }
+        Stmt::IndexAssign { index, value, .. } => { visit_expr(index, f); visit_expr(value, f); }
+        Stmt::FieldAssign { value, .. } => visit_expr(value, f),
+        Stmt::Guard { cond, else_, .. } => { visit_expr(cond, f); visit_expr(else_, f); }
+        Stmt::GuardLet { scrutinee, else_, .. } => { visit_expr(scrutinee, f); visit_expr(else_, f); }
+        Stmt::Expr { expr, .. } => visit_expr(expr, f),
+        Stmt::Comment { .. } | Stmt::Error { .. } => {}
+    }
+}
+
+fn visit_pattern_exprs(pat: &Pattern, f: &mut impl FnMut(&Expr)) {
+    match pat {
+        Pattern::Literal { value } => visit_expr(value, f),
+        Pattern::Constructor { args, .. } => { for a in args.iter() { visit_pattern_exprs(a, f); } }
+        Pattern::RecordPattern { fields, .. } => {
+            for fp in fields.iter() { if let Some(ref p) = fp.pattern { visit_pattern_exprs(p, f); } }
+        }
+        Pattern::Tuple { elements } | Pattern::List { elements } => { for e in elements.iter() { visit_pattern_exprs(e, f); } }
+        Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs(inner, f),
+        Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
+    }
+}
+
+/// Visits each element of an expression slice (List/Tuple/Fan payloads).
+fn visit_exprs_slice(exprs: &[Expr], f: &mut impl FnMut(&Expr)) {
+    for e in exprs.iter() { visit_expr(e, f); }
+}
+
+/// Visits each key/value pair of a map literal.
+fn visit_map_entries(entries: &[(Expr, Expr)], f: &mut impl FnMut(&Expr)) {
+    for (k, v) in entries.iter() { visit_expr(k, f); visit_expr(v, f); }
+}
+
+/// Visits each field value of a record literal (Record/SpreadRecord payloads).
+fn visit_field_inits(fields: &[FieldInit], f: &mut impl FnMut(&Expr)) {
+    for fi in fields.iter() { visit_expr(&fi.value, f); }
+}
+
+/// Visits pattern/guard/body of each match arm.
+fn visit_match_arms(arms: &[MatchArm], f: &mut impl FnMut(&Expr)) {
+    for arm in arms.iter() {
+        visit_pattern_exprs(&arm.pattern, f);
+        if let Some(ref g) = arm.guard { visit_expr(g, f); }
+        visit_expr(&arm.body, f);
+    }
+}
+
+/// Visits a statement list (Block/ForIn/While bodies).
+fn visit_stmts(stmts: &[Stmt], f: &mut impl FnMut(&Expr)) {
+    for s in stmts.iter() { visit_stmt_exprs(s, f); }
+}
+
+/// Visits the embedded expressions of an interpolated string.
+fn visit_string_parts(parts: &[StringPart], f: &mut impl FnMut(&Expr)) {
+    for part in parts.iter() {
+        if let StringPart::Expr { expr: e } = part { visit_expr(e, f); }
+    }
+}
+
+/// Apply `f` to `expr` and then to every child expression — the read-only
+/// mirror of `visit_expr_mut`, same order, same fan-family shallow contract.
+pub fn visit_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
+    f(expr);
+    match &expr.kind {
+        // ── One child ──
+        ExprKind::Member { object: e, .. } | ExprKind::TupleIndex { object: e, .. }
+        | ExprKind::Unary { operand: e, .. } | ExprKind::Lambda { body: e, .. }
+        | ExprKind::Try { expr: e } | ExprKind::Unwrap { expr: e }
+        | ExprKind::ToOption { expr: e } | ExprKind::Paren { expr: e }
+        | ExprKind::Some { expr: e } | ExprKind::Ok { expr: e } | ExprKind::Err { expr: e }
+        | ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::TypeAscription { expr: e, .. } => visit_expr(e, f),
+
+        // ── Two children, left to right ──
+        ExprKind::Binary { left: a, right: b, .. } | ExprKind::Pipe { left: a, right: b }
+        | ExprKind::Compose { left: a, right: b }
+        | ExprKind::UnwrapOr { expr: a, fallback: b }
+        | ExprKind::IndexAccess { object: a, index: b }
+        | ExprKind::Range { start: a, end: b, .. } => {
+            visit_expr(a, f);
+            visit_expr(b, f);
+        }
+
+        // ── Three children ──
+        ExprKind::If { cond: a, then: b, else_: c }
+        | ExprKind::IfLet { scrutinee: a, then: b, else_: c, .. } => {
+            visit_expr(a, f);
+            visit_expr(b, f);
+            visit_expr(c, f);
+        }
+
+        // ── A flat sequence of children ──
+        ExprKind::List { elements: xs } | ExprKind::Tuple { elements: xs }
+        | ExprKind::Fan { exprs: xs } | ExprKind::FanSettle { arms: xs } => {
+            visit_exprs_slice(xs, f)
+        }
+
+        // ── Name-tagged children ──
+        ExprKind::MapLiteral { entries } => visit_map_entries(entries, f),
+        ExprKind::Record { fields, .. } => visit_field_inits(fields, f),
+        ExprKind::SpreadRecord { base, fields } => {
+            visit_expr(base, f);
+            visit_field_inits(fields, f);
+        }
+
+        // ── The fan family: `f` is applied SHALLOWLY to the budget and the
+        //    body/arms (no recursion into their subtrees) — the pre-existing
+        //    contract, kept verbatim.
+        ExprKind::FanBounded { budget, body } => {
+            f(budget);
+            f(body);
+        }
+        ExprKind::FanRace { budget, arms } => {
+            visit_opt_shallow(budget, f);
+            visit_exprs_slice(arms, f);
+        }
+        ExprKind::FanRaceMap { budget, list, mapper } => {
+            visit_opt_shallow(budget, f);
+            f(list);
+            f(mapper);
+        }
+        ExprKind::FanTimeout { deadline, body } => {
+            f(deadline);
+            f(body);
+        }
+
+        // ── Shapes with their own traversal order ──
+        ExprKind::Call { callee, args, named_args, .. } => {
+            visit_expr(callee, f);
+            visit_exprs_slice(args, f);
+            visit_named_args(named_args, f);
+        }
+        ExprKind::Match { subject, arms } => {
+            visit_expr(subject, f);
+            visit_match_arms(arms, f);
+        }
+        ExprKind::Block { stmts, expr: tail } => visit_block(stmts, tail, f),
+        ExprKind::ForIn { iterable: lead, body, .. }
+        | ExprKind::While { cond: lead, body } => {
+            visit_expr(lead, f);
+            visit_stmts(body, f);
+        }
+        ExprKind::InterpolatedString { parts } => visit_string_parts(parts, f),
+
+        // ── No children ──
+        ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
+        ExprKind::Bool { .. } | ExprKind::Ident { .. } | ExprKind::TypeName { .. } |
+        ExprKind::EmptyMap | ExprKind::Hole | ExprKind::Todo { .. } |
+        ExprKind::Break | ExprKind::Continue | ExprKind::Placeholder |
+        ExprKind::Unit | ExprKind::None | ExprKind::Error => {}
+    }
+}
+
+/// An optional child the fan family applies `f` to WITHOUT recursing.
+fn visit_opt_shallow(e: &Option<Box<Expr>>, f: &mut impl FnMut(&Expr)) {
+    if let Some(b) = e {
+        f(b);
+    }
+}
+
+/// A call's named arguments — the name plays no part in the walk.
+fn visit_named_args(args: &[(Sym, Expr)], f: &mut impl FnMut(&Expr)) {
+    for (_, a) in args.iter() {
+        visit_expr(a, f);
+    }
+}
+
+/// A block: every statement, then the tail expression if there is one.
+fn visit_block(
+    stmts: &[Stmt],
+    tail: &Option<Box<Expr>>,
+    f: &mut impl FnMut(&Expr),
+) {
+    visit_stmts(stmts, f);
+    if let Some(e) = tail {
+        visit_expr(e, f);
+    }
+}

@@ -32,8 +32,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use almide_base::intern::{sym, Sym};
-use almide_base::span::Span;
-use almide_lang::ast::{self, Decl, Expr, ExprId, ExprKind, GenericParam, Param, TypeExpr, Visibility};
+use almide_lang::ast::{self, Decl, Expr, ExprId, ExprKind, TypeExpr, Visibility};
 
 /// The twin's name for a user HOF. Double separator so a user fn named
 /// `fallible_x` can never collide with the twin of a fn named `x`.
@@ -41,17 +40,14 @@ fn twin_name(hof: Sym) -> Sym {
     sym(&format!("__fallible__{}", hof.as_str()))
 }
 
-/// A Cell-1-admissible HOF: the slot to retype plus everything twin synthesis
-/// needs, cloned up front so the later mutable passes hold no immutable borrow.
+/// A Cell-1-admissible HOF: the slot to retype plus WHERE its decl lives.
+/// Copy-only on purpose (#1231): the check/detect phases borrow the decl in
+/// place, and twin synthesis re-reads `program.decls[decl_idx]` so a body is
+/// cloned exactly once, and only for a HOF that turned out to be needed.
 struct HofCandidate {
     param_idx: usize,
     cb_name: Sym,
-    effect: Option<bool>,
-    generics: Option<Vec<GenericParam>>,
-    params: Vec<Param>,
-    return_type: TypeExpr,
-    body: Expr,
-    span: Option<Span>,
+    decl_idx: usize,
 }
 
 /// Returns the number of twin decls appended to `program.decls` (all at the
@@ -65,11 +61,11 @@ pub fn normalize_fallible_user_hofs(
         return 0;
     }
     // Detection: which candidate HOFs are called with a fallible callback in
-    // the bare slot (outside test blocks)?
+    // the bare slot (outside test blocks)? Pure observation — read-only walk.
     let mut needed: BTreeSet<Sym> = BTreeSet::new();
-    for decl in program.decls.iter_mut() {
+    for decl in program.decls.iter() {
         let Decl::Fn { body: Some(body), .. } = decl else { continue };
-        ast::visit_expr_mut(body, &mut |e| {
+        ast::visit_expr(body, &mut |e| {
             if let Some(name) = fallible_slot_call(e, &candidates, fallible_marker_fns) {
                 needed.insert(name);
             }
@@ -80,12 +76,18 @@ pub fn normalize_fallible_user_hofs(
     }
     // Synthesis: one twin per needed HOF, with fresh ExprIds above the
     // program's maximum — a cloned body sharing ids would alias the checker's
-    // ExprId-keyed type map between original and twin.
+    // ExprId-keyed type map between original and twin. This is the ONE place a
+    // HOF body is cloned (#1231), and only for the `needed` subset.
     let mut next_id = max_expr_id(program) + 1;
     let mut twins: Vec<Decl> = Vec::new();
     for hof in &needed {
         let c = &candidates[hof];
-        let mut twin_params = c.params.clone();
+        let Decl::Fn { effect, generics, params, return_type, body: Some(body), span, .. } =
+            &program.decls[c.decl_idx]
+        else {
+            continue;
+        };
+        let mut twin_params = params.clone();
         let TypeExpr::Fn { params: fp, ret, is_effect } = twin_params[c.param_idx].ty.clone() else {
             continue;
         };
@@ -94,21 +96,21 @@ pub fn normalize_fallible_user_hofs(
             ret: Box::new(TypeExpr::Generic { name: sym("!"), args: vec![*ret] }),
             is_effect,
         };
-        let mut twin_body = c.body.clone();
+        let mut twin_body = body.clone();
         renumber_expr_ids(&mut twin_body, &mut next_id);
         unwrap_direct_cb_calls(&mut twin_body, c.cb_name, &mut next_id);
         twins.push(Decl::Fn {
             name: twin_name(*hof),
-            effect: c.effect,
+            effect: *effect,
             visibility: Visibility::Local,
             extern_attrs: vec![],
             export_attrs: vec![],
             attrs: vec![],
-            generics: c.generics.clone(),
+            generics: generics.clone(),
             params: twin_params,
-            return_type: TypeExpr::Generic { name: sym("!"), args: vec![c.return_type.clone()] },
+            return_type: TypeExpr::Generic { name: sym("!"), args: vec![return_type.clone()] },
             body: Some(twin_body),
-            span: c.span.clone(),
+            span: span.clone(),
         });
     }
     // Rewrite: rename each fallible-callback call site to its twin (test
@@ -132,13 +134,13 @@ pub fn normalize_fallible_user_hofs(
     n
 }
 
-/// Every Cell-1-admissible HOF in the program, keyed by name.
+/// Every Cell-1-admissible HOF in the program, keyed by name. Admission is
+/// checked by borrowing the decl in place — nothing is cloned here (#1231).
 fn collect_candidates(program: &ast::Program) -> BTreeMap<Sym, HofCandidate> {
     let mut out = BTreeMap::new();
-    for decl in &program.decls {
-        let Decl::Fn {
-            name, effect, extern_attrs, generics, params, return_type, body: Some(body), span, ..
-        } = decl
+    for (decl_idx, decl) in program.decls.iter().enumerate() {
+        let Decl::Fn { name, effect, extern_attrs, params, return_type, body: Some(body), .. } =
+            decl
         else {
             continue;
         };
@@ -175,19 +177,7 @@ fn collect_candidates(program: &ast::Program) -> BTreeMap<Sym, HofCandidate> {
         if cb_called_inside_loop(body, cb_name) {
             continue;
         }
-        out.insert(
-            *name,
-            HofCandidate {
-                param_idx,
-                cb_name,
-                effect: *effect,
-                generics: generics.clone(),
-                params: params.clone(),
-                return_type: return_type.clone(),
-                body: body.clone(),
-                span: span.clone(),
-            },
-        );
+        out.insert(*name, HofCandidate { param_idx, cb_name, decl_idx });
     }
     out
 }
@@ -209,20 +199,26 @@ fn fallible_slot_call(
     arg_is_fallible(arg, fallible_marker_fns).then_some(*name)
 }
 
+/// Is `e` a direct call whose callee is the bare identifier `cb`?
+fn is_direct_cb_call(e: &Expr, cb: Sym) -> bool {
+    matches!(
+        &e.kind,
+        ExprKind::Call { callee, .. }
+            if matches!(&callee.kind, ExprKind::Ident { name } if *name == cb)
+    )
+}
+
 /// True when every occurrence of `cb` in the body is the callee of a direct
 /// call — the shape whose twin rewrite (`cb(..)` → `cb(..)!`) is total.
 fn cb_used_only_as_callee(body: &Expr, cb: Sym) -> bool {
     let mut ident_uses = 0usize;
     let mut callee_uses = 0usize;
-    let mut owned = body.clone();
-    ast::visit_expr_mut(&mut owned, &mut |e| {
+    ast::visit_expr(body, &mut |e| {
         if matches!(&e.kind, ExprKind::Ident { name } if *name == cb) {
             ident_uses += 1;
         }
-        if let ExprKind::Call { callee, .. } = &e.kind {
-            if matches!(&callee.kind, ExprKind::Ident { name } if *name == cb) {
-                callee_uses += 1;
-            }
+        if is_direct_cb_call(e, cb) {
+            callee_uses += 1;
         }
     });
     ident_uses == callee_uses
@@ -232,25 +228,22 @@ fn cb_used_only_as_callee(body: &Expr, cb: Sym) -> bool {
 /// the #1183 exclusion. Over-conservative on purpose: the walk covers the
 /// loop's whole subtree including the head (a head-position `!` is actually
 /// the proven #1168 hoist class), because conservatism here only keeps
-/// today's honest E005.
+/// today's honest E005. One borrowed walk; each loop node scans its own
+/// subtree in place (#1231 — no clone, no subtree accumulation).
 fn cb_called_inside_loop(body: &Expr, cb: Sym) -> bool {
     let mut found = false;
-    let mut owned = body.clone();
-    let mut in_loop_subtrees: Vec<Expr> = Vec::new();
-    ast::visit_expr_mut(&mut owned, &mut |e| {
-        if matches!(&e.kind, ExprKind::ForIn { .. } | ExprKind::While { .. }) {
-            in_loop_subtrees.push(e.clone());
+    ast::visit_expr(body, &mut |e| {
+        if found {
+            return;
         }
-    });
-    for mut lp in in_loop_subtrees {
-        ast::visit_expr_mut(&mut lp, &mut |c| {
-            if let ExprKind::Call { callee, .. } = &c.kind {
-                if matches!(&callee.kind, ExprKind::Ident { name } if *name == cb) {
+        if matches!(&e.kind, ExprKind::ForIn { .. } | ExprKind::While { .. }) {
+            ast::visit_expr(e, &mut |c| {
+                if is_direct_cb_call(c, cb) {
                     found = true;
                 }
-            }
-        });
-    }
+            });
+        }
+    });
     found
 }
 
@@ -261,8 +254,7 @@ fn arg_is_fallible(arg: &Expr, fallible_marker_fns: &HashSet<Sym>) -> bool {
     match &arg.kind {
         ExprKind::Lambda { body, .. } => {
             let mut found = false;
-            let mut owned = (**body).clone();
-            ast::visit_expr_mut(&mut owned, &mut |e| {
+            ast::visit_expr(body, &mut |e| {
                 if matches!(e.kind, ExprKind::Unwrap { .. }) {
                     found = true;
                 }
@@ -286,12 +278,7 @@ fn unwrap_direct_cb_calls(body: &mut Expr, cb: Sym, next_id: &mut u32) {
         if done.contains(&e.id) {
             return;
         }
-        let is_cb_call = matches!(
-            &e.kind,
-            ExprKind::Call { callee, .. }
-                if matches!(&callee.kind, ExprKind::Ident { name } if *name == cb)
-        );
-        if !is_cb_call {
+        if !is_direct_cb_call(e, cb) {
             return;
         }
         done.insert(e.id);
@@ -319,15 +306,15 @@ fn renumber_expr_ids(body: &mut Expr, next_id: &mut u32) {
 }
 
 /// The program's maximum ExprId, so twin ids allocate above every parsed id.
-fn max_expr_id(program: &mut ast::Program) -> u32 {
+fn max_expr_id(program: &ast::Program) -> u32 {
     let mut max = 0u32;
-    for decl in program.decls.iter_mut() {
+    for decl in program.decls.iter() {
         let (Decl::Fn { body: Some(b), .. } | Decl::Test { body: b, .. } | Decl::TopLet { value: b, .. }) =
             decl
         else {
             continue;
         };
-        ast::visit_expr_mut(b, &mut |e| {
+        ast::visit_expr(b, &mut |e| {
             if e.id.0 > max {
                 max = e.id.0;
             }
