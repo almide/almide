@@ -1,0 +1,18 @@
+// @contract: C-250
+// ALS-E20 (docs/specs/als/expressions.md): the pipe operator `x |> f`
+// (single, chained, and into a HOF with a lambda) and function composition
+// `f >> g` producing a callable value. Identical observables on both targets.
+fn double(x: Int) -> Int = x * 2
+
+fn inc(x: Int) -> Int = x + 1
+
+effect fn main() -> Unit = {
+  let a = 5 |> double
+  println(int.to_string(a))
+  let b = 5 |> double |> inc
+  println(int.to_string(b))
+  let c = [1, 2, 3] |> list.map((x) => x * 10) |> list.len
+  println(int.to_string(c))
+  let f = double >> inc
+  println(int.to_string(f(4)))
+}
