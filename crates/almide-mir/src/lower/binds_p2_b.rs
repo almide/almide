@@ -661,14 +661,14 @@ impl LowerCtx {
             self.variant_drop_handles.insert(dst, "map_mlo".to_string());
             return;
         }
-        if let Some(rname) = (match ty {
+        if let Some(rname) = match ty {
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                 if a.len() == 1 =>
             {
                 self.record_or_anon_drop_type_name(&a[0])
             }
             _ => None,
-        }) {
+        }  {
             // A `List[<recursive-drop record>]` result (`list.unique` over a
             // String-field record via the `__krec_*` twins): route to the generated
             // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the

@@ -156,7 +156,7 @@ match dst {
 }
 
 fn render_op_call_light(op: &Op, env: &WasmEnv<'_>, tail_call: bool) -> String {
-    let WasmEnv { label_off, param_counts, reprs, floats } = *env;
+    let WasmEnv { label_off, param_counts: _, reprs, floats } = *env;
     match op {
         // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
         // src become two handles to the SAME block, rc += 1 — matching the cert's

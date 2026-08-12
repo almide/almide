@@ -15,7 +15,7 @@ use almide_lang::types::Ty;
 /// auto-`Dup`s in `lower_heap_result_arm`; a consuming re-use `Dup`s in
 /// `lower_owned_heap_field` — so the borrow is never released at rc 0. A `Wildcard` arm is the
 /// unconditional catch-all.
-enum VariantArmKind {
+pub(in crate::lower) enum VariantArmKind {
     Ctor { tag: i64, binds: Vec<(usize, VarId, bool, Ty)> },
     Wildcard,
     /// A BINDER catch-all (`e => err(e)` — the regrouped compute fall-through): matches any

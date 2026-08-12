@@ -495,11 +495,11 @@ fn generate_anon_and_tuple_interp_reprs(
     out: &mut String,
     type_decls: &[almide_ir::IrTypeDecl],
     interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
-    interp_containers: &InterpReprContainers,
+    _interp_containers: &InterpReprContainers,
     gates: &ReprGates,
 ) {
     use almide_ir::IrTypeDeclKind;
-    let ReprGates { names, emittable, .. } = gates;
+    let ReprGates { names, emittable: _, .. } = gates;
     let _ = (type_decls, names);
     // ── ANONYMOUS-record reprs (`__repr_anonrec_<hash>`) ──
     // v0 renders an anon record `{ apple: 2, mango: 3, zebra: 1 }` with fields SORTED BY

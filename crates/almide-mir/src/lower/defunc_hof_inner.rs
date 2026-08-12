@@ -461,7 +461,7 @@ impl LowerCtx {
         xs: &IrExpr,
         st: &DefuncLoopSt,
     ) {
-        use crate::PrimKind;
+        
         let elem_param = if func == "fold" { params[1].0 } else { params[0].0 };
         self.value_of.insert(elem_param, st.elem);
         self.bind_defunc_second_elem(st);

@@ -66,7 +66,6 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 /// `ListSwap { target, a, b }` arm of [`render_stmt`].
 fn render_stmt_list_swap(ctx: &RenderContext, target: VarId, a: &IrExpr, b: &IrExpr) -> String {
     let t = ctx.var_name(target).to_string();
-    let upper = ctx.global_static_name(target);
     let a_s = render_expr(ctx, a);
     let b_s = render_expr(ctx, b);
     if let Some(info) = ctx.ann.global(target) {
@@ -86,7 +85,6 @@ fn render_stmt_list_swap(ctx: &RenderContext, target: VarId, a: &IrExpr, b: &IrE
 /// `ListReverse { target, end }` arm of [`render_stmt`].
 fn render_stmt_list_reverse(ctx: &RenderContext, target: VarId, end: &IrExpr) -> String {
     let t = ctx.var_name(target).to_string();
-    let upper = ctx.global_static_name(target);
     let e = render_expr(ctx, end);
     if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
@@ -105,7 +103,6 @@ fn render_stmt_list_reverse(ctx: &RenderContext, target: VarId, end: &IrExpr) ->
 /// `ListRotateLeft { target, end }` arm of [`render_stmt`].
 fn render_stmt_list_rotate_left(ctx: &RenderContext, target: VarId, end: &IrExpr) -> String {
     let t = ctx.var_name(target).to_string();
-    let upper = ctx.global_static_name(target);
     let e = render_expr(ctx, end);
     if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
@@ -125,7 +122,6 @@ fn render_stmt_list_rotate_left(ctx: &RenderContext, target: VarId, end: &IrExpr
 fn render_stmt_list_copy_slice(ctx: &RenderContext, dst: VarId, src: VarId, len: &IrExpr) -> String {
     let d = ctx.var_name(dst).to_string();
     let s = ctx.var_name(src).to_string();
-    let upper_d = ctx.global_static_name(dst);
     let n = render_expr(ctx, len);
     // §4 Stage 2: both the dst write AND the src re-read dispatch on
     // the attribute (the src probe was the 9th hand-rolled copy of
@@ -499,7 +495,6 @@ fn render_stmt_guard(ctx: &RenderContext, stmt: &IrStmt) -> String {
 fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::IndexAssign { target, index, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
-    let upper = ctx.global_static_name(*target);
     let idx_str = render_expr(ctx, index);
     let val_str = render_expr(ctx, value);
     let var_ty = &ctx.var_table.get(*target).ty;
@@ -535,7 +530,6 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
 fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::MapInsert { target, key, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
-    let upper = ctx.global_static_name(*target);
     let key_str = render_expr(ctx, key);
     let val_str = render_expr(ctx, value);
     // Shared-mut non-Copy var (`SharedMut`, P6): insert through the cell.
@@ -562,7 +556,6 @@ fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
 fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::FieldAssign { target, field, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
-    let upper = ctx.global_static_name(*target);
     let val_str = render_expr(ctx, value);
     // Shared-mut non-Copy var (`SharedMut`, P6): assign the field through the cell.
     if ctx.ann.is_shared_mut(target) {

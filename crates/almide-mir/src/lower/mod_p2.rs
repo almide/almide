@@ -528,7 +528,7 @@ pub fn rewrap_never_err_into_result_targets(
     use almide_lang::types::constructor::TypeConstructorId;
     // Pass 1: vars DECLARED with a Result type (Bind.ty).
     fn collect_result_vars(e: &IrExpr, out: &mut std::collections::HashSet<u32>) {
-        use almide_ir::visit::{walk_expr, IrVisitor};
+        use almide_ir::visit::IrVisitor;
         struct C<'a>(&'a mut std::collections::HashSet<u32>);
         impl IrVisitor for C<'_> {
             fn visit_stmt(&mut self, s: &IrStmt) {

@@ -7,7 +7,7 @@
 /// is an ordinary read. An `IfThen`'s `dst` is the definition, not a read; the
 /// `Else`/`EndIf` `val`s are reads (they feed the enclosing if-result).
 pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
-    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
+    let _args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
         for a in args {
             match a {
                 CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
@@ -126,7 +126,7 @@ fn op_reads_flow(op: &Op, out: &mut Vec<ValueId>) {
 /// generic occurrence walk the render-level peepholes (#806 step 3b) use to
 /// prove a value is single-use before fusing its def into its use site.
 pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
-    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
+    let _args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
         for a in args {
             match a {
                 CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),

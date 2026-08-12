@@ -51,7 +51,7 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<ValueId> {
         use crate::PrimKind;
-        use almide_lang::types::constructor::TypeConstructorId;
+        
         let elem_ty = defunc_find_elem_ty(xs, params, result_ty)?;
         let elem_heap = is_heap_ty(&elem_ty);
         // Borrow the source list (evaluated once).

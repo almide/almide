@@ -922,7 +922,7 @@ fn resolve_via_tuple_index(expr: &IrExpr, params: &[(VarId, Ty)]) -> Option<Ty> 
 /// without a SymbolTable. Used by LTR to propagate concrete types
 /// into downstream Var bindings before ConcretizeTypes runs.
 fn compute_stdlib_call_ret(target: &CallTarget, args: &[IrExpr], vt: &VarTable) -> Option<Ty> {
-    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    
     let (module, func): (&str, &str) = match target {
         CallTarget::Module { module, func, .. } => (module.as_str(), func.as_str()),
         CallTarget::Named { name } => {

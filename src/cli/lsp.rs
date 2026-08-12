@@ -464,6 +464,10 @@ fn lsp_server_capabilities() -> ServerCapabilities {
 
 /// `run_lsp`'s workspace-root derivation from `initialize`'s `root_uri`,
 /// falling back to CWD. Extracted verbatim.
+/// `root_uri` is deprecated upstream in favor of `workspace_folders`, but VS
+/// Code still sends it and the single-root fallback is exactly this field —
+/// keep reading it deliberately until multi-root support is a real need.
+#[allow(deprecated)]
 fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> {
     init.root_uri.as_ref()
         .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))

@@ -38,7 +38,7 @@ pub(crate) fn desugar_stmt_value_nested_unwrap(
 /// Depth-first search for a statement list containing a qualifying stmt;
 /// rewrites in place and returns true on the first hit.
 fn nested_unwrap_rewrite_expr(e: &mut IrExpr, next_var: &mut u32) -> bool {
-    use almide_ir::{IrExprKind, IrStmt, IrStmtKind};
+    use almide_ir::IrExprKind;
     match &mut e.kind {
         IrExprKind::Block { stmts, expr } => {
             if nested_unwrap_rewrite_stmts(stmts, next_var) {

@@ -406,7 +406,7 @@ fn if_arm_unit_leak(exp_str: &str, fix_hint: Option<&FixHint>) -> Option<String>
     // the Unit arm — turns the generic template into a rewrite that
     // names the real variable so the LLM can copy-paste the structure.
     if let Some(FixHint::IfArmAssign { arm, var_name }) = fix_hint {
-        let (unit_arm, good_arm) = match arm {
+        let (unit_arm, _good_arm) = match arm {
             IfArm::Then => ("then", "else"),
             IfArm::Else => ("else", "then"),
         };

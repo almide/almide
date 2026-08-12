@@ -387,7 +387,7 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
             let r_try = matches!(right.kind, IrExprKind::Try { .. });
             if l_try || r_try {
                 let mut stmts = Vec::new();
-                let mut hoist = |e: IrExpr, name: &str, stmts: &mut Vec<IrStmt>, ctx: &mut TryCtx| -> IrExpr {
+                let hoist = |e: IrExpr, name: &str, stmts: &mut Vec<IrStmt>, ctx: &mut TryCtx| -> IrExpr {
                     let ty = e.ty.clone();
                     let span = e.span;
                     let var = ctx.var_table.alloc(sym(name), ty.clone(), Mutability::Let, span);

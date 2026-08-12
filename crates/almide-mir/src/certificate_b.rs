@@ -773,7 +773,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
     // own named functions. `CertScan::step` (protected, unchanged) and the rest of the
     // emission pipeline below are untouched.
     let (feeder_to_slot, slots, line_slots) = loop_carried_slots(func);
-    let mut depth: u32 = 0;
+    let depth: u32 = 0;
     let mut s = Streams::new();
 
     let released_merge_dsts = ownership_certificate_released_merge_dsts(func);

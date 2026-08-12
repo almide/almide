@@ -89,8 +89,8 @@ impl LowerCtx {
         elem_ty: &Ty,
         kind: ListElemDrop,
     ) -> Option<Option<ValueId>> {
-        use crate::{IntOp, PrimKind};
-        use almide_lang::types::constructor::TypeConstructorId;
+        
+        
         // When the element type is forced (a structural record LITERAL in a `List[Named]` context),
         // materialize the element AS the Named type so `try_lower_record_construct` lays it out by
         // the DECLARED field order (matching the `$__drop_list_<Named>` teardown). Field-by-name

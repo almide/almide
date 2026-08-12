@@ -610,7 +610,7 @@ fn detect_enum_map_fusion<'a>(
     params: &[(VarId, Ty)],
     body: &IrExpr,
 ) -> Option<(&'a IrExpr, VarId, VarId, Ty, IrExpr)> {
-    use almide_ir::{IrPattern, IrStmtKind};
+    
     // xs = list.enumerate(real)
     let real = match &xs.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }

@@ -233,7 +233,7 @@ fn build_native_sig_table(
 // `Repr::Ptr` as `&str` vs `&[i64]` per the declaration.
 let mut sigs: crate::render_native::NativeSigs = Default::default();
 {
-    use almide_lang::types::constructor::TypeConstructorId;
+    
     use almide_lang::types::Ty;
     use crate::render_native::NativeSigKind;
     for func in &ir.functions {

@@ -60,7 +60,7 @@ pub fn canonicalize_program<'a>(
     }
 
     // 2. Register user modules (with prefix)
-    let mut collect_dep_roots = |env: &mut TypeEnv, prog: &ast::Program| {
+    let collect_dep_roots = |env: &mut TypeEnv, prog: &ast::Program| {
         for imp in &prog.imports {
             if let ast::Decl::Import { path, .. } = imp {
                 if let Some(root) = path.first() {
