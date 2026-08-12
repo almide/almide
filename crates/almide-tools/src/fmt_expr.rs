@@ -139,6 +139,11 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Tuple { elements, .. } => {
             out.push('(');
             comma_sep(out, elements, |out, e| fmt_expr(out, e, depth));
+            // A 1-tuple's trailing comma is load-bearing: `(e,)` is a tuple,
+            // `(e)` is grouping — dropping it changes the program (#1265).
+            if elements.len() == 1 {
+                out.push(',');
+            }
             out.push(')');
         }
         ExprKind::List { elements, .. } => fmt_list(out, elements, depth),

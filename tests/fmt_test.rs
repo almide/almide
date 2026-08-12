@@ -31,6 +31,14 @@ fn fmt_tuple_type() {
 }
 
 #[test]
+fn fmt_one_tuple_keeps_trailing_comma() {
+    // `(e,)` is a 1-tuple, `(e)` is grouping — the comma is load-bearing
+    // (#1265: dropping it changed the program's meaning).
+    let out = roundtrip("module app\nfn one() -> Int = {\n  let t = (5,)\n  t.0\n}");
+    assert!(out.contains("(5,)"), "1-tuple lost its trailing comma:\n{out}");
+}
+
+#[test]
 fn fmt_if_expr() {
     let out = roundtrip("module app\nfn f(x: Int) -> Int = if x > 0 then x else 0 - x");
     assert!(out.contains("if x > 0 then"));
