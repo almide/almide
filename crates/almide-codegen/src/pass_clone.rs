@@ -6,6 +6,7 @@
 //! At branches (if/match), remaining counts are merged conservatively (min).
 
 use std::collections::{HashSet, HashMap};
+use std::rc::Rc;
 use almide_ir::*;
 use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
@@ -44,6 +45,11 @@ impl NanoPass for CloneInsertionPass {
         let (always_plain, eligible_plain) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &no_exempt);
         let mut remaining = build_remaining(&eligible, &syntactic);
         let mut remaining_plain = build_remaining(&eligible_plain, &syntactic);
+        // #1230: any id the branch walk can deduct lives in `remaining` or
+        // `remaining_plain`, whose key sets are exactly the two eligible sets —
+        // so the branch-count memo only needs to track their union. Counts for
+        // ids outside every `remaining` are deduct no-ops either way.
+        let tracked: HashSet<VarId> = eligible.union(&eligible_plain).copied().collect();
 
         for func in &mut program.functions {
             // Reset remaining for each function (vars are function-scoped)
@@ -54,11 +60,13 @@ impl NanoPass for CloneInsertionPass {
                 (&always_plain, &eligible_plain, &mut remaining_plain)
             };
             reset_remaining(r, e, &syntactic);
-            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false });
+            let memo = BranchCounts::compute(&func.body, &tracked);
+            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo });
         }
         for tl in &mut program.top_lets {
             reset_remaining(&mut remaining, &eligible, &syntactic);
-            tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false });
+            let memo = BranchCounts::compute(&tl.value, &tracked);
+            tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false, memo: &memo });
         }
 
         let IrProgram { modules, var_table, .. } = &mut program;
@@ -69,6 +77,7 @@ impl NanoPass for CloneInsertionPass {
             let (m_always_plain, m_eligible_plain) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &no_exempt);
             let mut m_remaining = build_remaining(&m_eligible, &module_syntactic);
             let mut m_remaining_plain = build_remaining(&m_eligible_plain, &module_syntactic);
+            let m_tracked: HashSet<VarId> = m_eligible.union(&m_eligible_plain).copied().collect();
 
             for func in module.functions.iter_mut() {
                 let (a, e, r) = if tco_fns.contains(&func.name) {
@@ -77,11 +86,13 @@ impl NanoPass for CloneInsertionPass {
                     (&m_always_plain, &m_eligible_plain, &mut m_remaining_plain)
                 };
                 reset_remaining(r, e, &module_syntactic);
-                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false });
+                let memo = BranchCounts::compute(&func.body, &m_tracked);
+                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo });
             }
             for tl in module.top_lets.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
-                tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false });
+                let memo = BranchCounts::compute(&tl.value, &m_tracked);
+                tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false, memo: &memo });
             }
         }
         PassResult { program, changed: true }
@@ -151,6 +162,141 @@ impl IrVisitor for SyntacticCounter<'_> {
 
 fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
     SyntacticCounter { counts }.visit_expr(expr);
+}
+
+// ── Branch-count memo (#1230) ──────────────────────────────────────
+//
+// `insert_clones_if` / `insert_clones_match` need the syntactic use-counts of
+// every sibling branch BEFORE walking a branch (see `deduct_sibling_uses`).
+// Counting them with a fresh `count_syntactic` at every If/Match node re-walks
+// the full remaining subtree per level — O(k²) on a k-arm else-if ladder. This
+// prepass computes all of those maps in ONE bottom-up walk of the body and the
+// walk looks them up instead.
+//
+// Keying: branch subtrees are memoized by their node's heap address — an If's
+// `then`/`else_` are `Box<IrExpr>` targets, a match arm's `body` is an element
+// of the `Vec<IrMatchArm>` buffer. Both stay at fixed addresses while their
+// owner structs move by value (`std::mem::take` of the body, `*then` box
+// derefs, the `arms` Vec moving out of the parent kind), and the rewrite walk
+// looks a node up top-down at the moment it reaches it — always a still-alive
+// original subtree, never a rebuilt output node — so a key can neither dangle
+// nor collide with a reused allocation. A miss is still CORRECT, not just
+// slow: `BranchCounts::branch`/`arm` fall back to the fresh count the code
+// always did, so behavior never depends on a hit.
+//
+// Counts are restricted to `tracked` (union of the eligible sets): deduction
+// only ever touches ids present in `remaining`, whose key set is an eligible
+// set, so dropping untracked ids is behavior-neutral and keeps the per-branch
+// maps (and the absorb cost of merging them upward) small.
+struct BranchCounts {
+    map: HashMap<*const IrExpr, Rc<HashMap<VarId, u32>>>,
+}
+
+impl BranchCounts {
+    fn compute(body: &IrExpr, tracked: &HashSet<VarId>) -> BranchCounts {
+        let mut pc = BranchPrecounter { tracked, memo: HashMap::new(), acc: HashMap::new() };
+        pc.visit_expr(body);
+        BranchCounts { map: pc.memo }
+    }
+
+    /// Counts for one If branch subtree (`then` or `else_`).
+    fn branch(&self, node: &IrExpr) -> Rc<HashMap<VarId, u32>> {
+        if let Some(c) = self.map.get(&std::ptr::from_ref(node)) {
+            return Rc::clone(c);
+        }
+        let mut c = HashMap::new();
+        count_syntactic(node, &mut c);
+        Rc::new(c)
+    }
+
+    /// Combined guard+body counts for one match arm (keyed by the body node),
+    /// mirroring what `insert_clones_match` used to count per arm.
+    fn arm(&self, arm: &IrMatchArm) -> Rc<HashMap<VarId, u32>> {
+        if let Some(c) = self.map.get(&std::ptr::from_ref(&arm.body)) {
+            return Rc::clone(c);
+        }
+        let mut c = HashMap::new();
+        if let Some(g) = &arm.guard {
+            count_syntactic(g, &mut c);
+        }
+        count_syntactic(&arm.body, &mut c);
+        Rc::new(c)
+    }
+}
+
+/// The bottom-up counting visitor behind [`BranchCounts::compute`]. Rides the
+/// same exhaustive `IrVisitor` walk as `SyntacticCounter` (same +1 per `Var`
+/// node, same in-place-mutation target bump), except at If/Match: their branch
+/// children are counted into a fresh accumulator via [`Self::count_branch`],
+/// memoized, then absorbed into the enclosing accumulator — each node is
+/// visited exactly once for the whole body.
+struct BranchPrecounter<'a> {
+    tracked: &'a HashSet<VarId>,
+    memo: HashMap<*const IrExpr, Rc<HashMap<VarId, u32>>>,
+    acc: HashMap<VarId, u32>,
+}
+
+impl BranchPrecounter<'_> {
+    fn bump(&mut self, id: VarId) {
+        if self.tracked.contains(&id) {
+            *self.acc.entry(id).or_insert(0) += 1;
+        }
+    }
+
+    /// Run `count` against a fresh accumulator, memoize the result under
+    /// `key`, and add it back into the surrounding accumulator so the parent
+    /// subtree's total still includes this branch.
+    fn count_branch(&mut self, key: *const IrExpr, count: impl FnOnce(&mut Self)) {
+        let outer = std::mem::take(&mut self.acc);
+        count(self);
+        let counts = std::mem::replace(&mut self.acc, outer);
+        for (id, n) in &counts {
+            *self.acc.entry(*id).or_insert(0) += n;
+        }
+        self.memo.insert(key, Rc::new(counts));
+    }
+}
+
+impl IrVisitor for BranchPrecounter<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Var { id } => self.bump(*id),
+            IrExprKind::If { cond, then, else_ } => {
+                self.visit_expr(cond);
+                self.count_branch(std::ptr::from_ref(&**then), |s| s.visit_expr(then));
+                self.count_branch(std::ptr::from_ref(&**else_), |s| s.visit_expr(else_));
+                return; // children fully visited above — walk_expr would double-count
+            }
+            IrExprKind::Match { subject, arms } => {
+                self.visit_expr(subject);
+                for arm in arms {
+                    // Pattern counts belong to the ENCLOSING accumulator, not
+                    // the arm map: `insert_clones_match` counts guard+body only.
+                    self.visit_pattern(&arm.pattern);
+                    self.count_branch(std::ptr::from_ref(&arm.body), |s| {
+                        if let Some(g) = &arm.guard {
+                            s.visit_expr(g);
+                        }
+                        s.visit_expr(&arm.body);
+                    });
+                }
+                return; // children fully visited above
+            }
+            _ => {}
+        }
+        walk_expr(self, expr);
+    }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        // Same in-place-mutation target accounting as `SyntacticCounter`.
+        match &stmt.kind {
+            IrStmtKind::IndexAssign { target, .. }
+            | IrStmtKind::MapInsert { target, .. }
+            | IrStmtKind::FieldAssign { target, .. } => self.bump(*target),
+            _ => {}
+        }
+        walk_stmt(self, stmt);
+    }
 }
 
 // ── Clone ID classification ────────────────────────────────────────
@@ -235,6 +381,8 @@ struct CloneCtx<'a> {
     eligible: &'a HashSet<VarId>,
     remaining: &'a mut HashMap<VarId, u32>,
     in_loop: bool,
+    /// Per-body branch-count memo (#1230) — see [`BranchCounts`].
+    memo: &'a BranchCounts,
 }
 
 fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
@@ -296,18 +444,18 @@ fn deduct_sibling_uses(remaining: &mut HashMap<VarId, u32>, sibling: &HashMap<Va
 /// for branches (the branch that consumed more `remaining` wins — conservative),
 /// with the sibling branch's uses deducted on entry so a path's genuine last
 /// use can move.
-fn insert_clones_if(cond: IrExpr, then: IrExpr, else_: IrExpr, ctx: &mut CloneCtx) -> IrExprKind {
-    let new_cond = insert_clones_live(cond, ctx);
-    let mut then_counts = HashMap::new();
-    count_syntactic(&then, &mut then_counts);
-    let mut else_counts = HashMap::new();
-    count_syntactic(&else_, &mut else_counts);
+fn insert_clones_if(cond: Box<IrExpr>, then: Box<IrExpr>, else_: Box<IrExpr>, ctx: &mut CloneCtx) -> IrExprKind {
+    // Memo lookups must happen while `then`/`else_` are still behind their
+    // original Boxes — the box target address is the memo key (#1230).
+    let then_counts = ctx.memo.branch(&then);
+    let else_counts = ctx.memo.branch(&else_);
+    let new_cond = insert_clones_live(*cond, ctx);
     let saved = ctx.remaining.clone();
     deduct_sibling_uses(ctx.remaining, &else_counts);
-    let new_then = insert_clones_live(then, ctx);
+    let new_then = insert_clones_live(*then, ctx);
     let then_remaining = std::mem::replace(ctx.remaining, saved);
     deduct_sibling_uses(ctx.remaining, &then_counts);
-    let new_else = insert_clones_live(else_, ctx);
+    let new_else = insert_clones_live(*else_, ctx);
     for &id in ctx.eligible.iter() {
         let t = then_remaining.get(&id).copied().unwrap_or(0);
         let e = ctx.remaining.get(&id).copied().unwrap_or(0);
@@ -325,20 +473,13 @@ fn insert_clones_if(cond: IrExpr, then: IrExpr, else_: IrExpr, ctx: &mut CloneCt
 /// sibling arm's uses deducted on entry (see [`deduct_sibling_uses`]).
 fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCtx) -> IrExprKind {
     let new_subject = insert_clones_live(subject, ctx);
-    let arm_counts: Vec<HashMap<VarId, u32>> = arms
-        .iter()
-        .map(|arm| {
-            let mut c = HashMap::new();
-            if let Some(g) = &arm.guard {
-                count_syntactic(g, &mut c);
-            }
-            count_syntactic(&arm.body, &mut c);
-            c
-        })
-        .collect();
+    // Memo lookups must happen before `arms.into_iter()` moves the arms out of
+    // the Vec buffer — the body's buffer address is the memo key (#1230).
+    let arm_counts: Vec<Rc<HashMap<VarId, u32>>> =
+        arms.iter().map(|arm| ctx.memo.arm(arm)).collect();
     let mut total_counts: HashMap<VarId, u32> = HashMap::new();
     for c in &arm_counts {
-        for (id, n) in c {
+        for (id, n) in c.iter() {
             *total_counts.entry(*id).or_insert(0) += n;
         }
     }
@@ -351,7 +492,7 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
         // siblings = total - own, computed elementwise BEFORE the saturating
         // deduction so saturation can't distort the difference.
         let mut siblings = total_counts.clone();
-        for (id, n) in &arm_counts[i] {
+        for (id, n) in arm_counts[i].iter() {
             if let Some(t) = siblings.get_mut(id) {
                 *t -= n;
             }
@@ -379,7 +520,7 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
 /// the iterable is NOT in the loop, the body IS.
 fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, iterable: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
     let new_iterable = insert_clones_live(iterable, ctx);
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true };
+    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo };
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     IrExprKind::ForIn { var, var_tuple, iterable: Box::new(new_iterable), body: new_body }
 }
@@ -387,7 +528,7 @@ fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, iterable: IrE
 /// `While { cond, body }` arm of [`insert_clones_live`]: cond and body are
 /// both in the loop.
 fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true };
+    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo };
     let new_cond = insert_clones_live(cond, &mut loop_ctx);
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     IrExprKind::While { cond: Box::new(new_cond), body: new_body }
@@ -434,6 +575,7 @@ fn insert_clones_runtime_call(args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrEx
         eligible: ctx.eligible,
         remaining: ctx.remaining,
         in_loop: ctx.in_loop,
+        memo: ctx.memo,
     };
     args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect()
 }
@@ -454,6 +596,7 @@ fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>,
             eligible: ctx.eligible,
             remaining: ctx.remaining,
             in_loop: ctx.in_loop,
+            memo: ctx.memo,
         };
         let args = args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect();
         let target = match target {
@@ -560,7 +703,7 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
             expr: expr.map(|e| Box::new(insert_clones_live(*e, ctx))),
         },
 
-        IrExprKind::If { cond, then, else_ } => insert_clones_if(*cond, *then, *else_, ctx),
+        IrExprKind::If { cond, then, else_ } => insert_clones_if(cond, then, else_, ctx),
         IrExprKind::Match { subject, arms } => insert_clones_match(*subject, arms, ctx),
         IrExprKind::ForIn { var, var_tuple, iterable, body } => insert_clones_for_in(var, var_tuple, *iterable, body, ctx),
         IrExprKind::While { cond, body } => insert_clones_while(*cond, body, ctx),
