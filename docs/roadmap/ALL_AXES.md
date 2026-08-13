@@ -58,13 +58,28 @@ cold wasm 299.1ms。ただし**測定対象が小さい** — これは規模非
 **現在値**（`docs/project/BENCHMARKS.md`、CI ラチェット下）: n-body 1.135s / spectral-norm 0.685s で
 **対 handwritten Rust 1.00×**、FFT のみ 1.27×。wasm レッグは native の約 1.13–1.16×。
 
-これは既に「Rust と同着」であり、**スカラー codegen での正面勝負はここが天井**。LLVM に純粋な
-命令選択で勝てた処理系は存在せず、Zig ですら release は LLVM に任せている。だから B は 3 段構えにする。
+**2026-08-13 の実測が、この軸の見立てを一つ更新した。** FFT 2^22 を段階分解したところ
+（起動 / 入力生成 / カーネル、インターリーブ中央値 11 回、出力は 17 桁まで一致）:
 
-### B1（守り）: ratchet 維持 — 全 referenced suite で ≤1.0×
+| 生成の形 | 生成 | **カーネル** | 総 wall | カーネル対 Rust |
+|---|---:|---:|---:|---:|
+| 事前確保（`list.repeat` + 添字代入） | 66.4ms | **82ms** | 154.3ms | **0.872×** |
+| `list.range \|> flat_map` | 116.0ms | 92ms | 213.9ms | 0.979× |
+| Rust 参照（handwritten） | 39.3ms | 94ms | 138.9ms | 1.000× |
+| 現行ベンチ（append ループ） | 69.1ms | 101ms | 175.9ms | 1.074× |
 
-既存の `scripts/check-perf-ratio.sh` 文化を維持し、RcCow（0.55–0.56）で allocation-heavy の 1.7× ギャップを畳む。
-これは**負けない**ための軸であって、勝つための軸ではない。
+**カーネルは既に handwritten Rust を 13% 上回っている**（プロセス起動は 5.9ms 対 5.6ms で差なし
+＝ hello-world で個別実測済み）。つまり「スカラー codegen が天井」という当初の見立ては**測定で覆った** —
+実際の律速は codegen ではなく**リスト materialize（最良の形でも対 Vec 1.69×）**である。
+LLVM に命令選択で挑まないという方針は維持するが、B の敗因は一点に集約された: [#1004](https://github.com/almide/almide/issues/1004)。
+
+### B1（守り）: ratchet 維持 + materialize コストの返済 — **この軸の最優先**
+
+既存の `scripts/check-perf-ratio.sh` 文化を維持し、RcCow（0.55–0.56 / [#1004](https://github.com/almide/almide/issues/1004)）で
+materialize ギャップを畳む。上の実測が示す通り、これは「負けないため」ではなく**勝つための前提**になった —
+カーネルが 0.872× でも総 wall が 1.111× に留まる原因が全てここにあるため。関連:
+[#1337](https://github.com/almide/almide/issues/1337)（推奨イディオムが最遅という矛盾）、
+[#1338](https://github.com/almide/almide/issues/1338)（公開ベンチ自身が最遅の形を使っている）。
 
 ### B2（攻め）: 意味論が許す最適化で handwritten Rust を抜く ← [#1330](https://github.com/almide/almide/issues/1330)
 

@@ -247,6 +247,17 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | [#1330](https://github.com/almide/almide/issues/1330) | B 性能 | 意味論最適化で handwritten Rust を抜く勝利宣言(≥2 ワークロード、ラチェット付き) | **0.6x** | RcCow(0.55–0.56)で表現が確定してから。数字が動く土台の上で主張しない |
 | [#1331](https://github.com/almide/almide/issues/1331) | B 性能 | fan → WGSL で CPU/GPU 同一出力デモ(オラクル 4 レッグ目) | 0.6x | バックエンドは既存。契約台帳に GPU 等価性の行を足す作業とセット |
 
+### FFT 段階分解(2026-08-13)発の 2 件
+
+カーネル単体が **対 handwritten Rust 0.872×** と判明した一方、総 wall の律速が list materialize に
+集約されることが実測で確定した([ALL_AXES 軸 B](ALL_AXES.md#軸-b-実行時性能--土俵をずらして勝つ))。
+その場で出た 2 件を割り付ける。#1004 は既存行(0.55–0.56)のまま、実測をコメントで追記済み。
+
+| Issue | 内容 | Decade | 割付の根拠 |
+|---|---|---|---|
+| [#1337](https://github.com/almide/almide/issues/1337) | **BUG**: 推奨イディオム `list.range \|> flat_map` が materialize で最遅(append ループの 1.68 倍、対 Rust 2.95 倍) | **0.5x** | CLAUDE.md/CHEATSHEET が in-context の教材である以上、「推奨」と「速い」が一致しないのは perf だけでなく MSR の欠陥。#1004 より先に判定できる |
+| [#1338](https://github.com/almide/almide/issues/1338) | 公開 FFT ベンチが最遅の生成形を使っており、自分の wall の 12% を codegen ではなく list append の計測に使っている | 0.5x | 公開値を動かす判断なので ○× 必要。推奨は(b)= 行を足して両方可視化 |
+
 dojo 側: [almide-dojo#2](https://github.com/almide/almide-dojo/issues/2)(effect 宣言有無の MSR A/B — 文献に存在しない最初の数字)は repo 境界ルールにより Dojo 管轄。0.59 と #585(ポジションペーパー)に給餌する。
 
 リサーチ本体の教訓で台帳の読み替えに関わるもの: **0.47–0.48(クエリ基盤)は「salsa 級細粒度」ではなく「モジュール単位の粗粒度 + resilient parse」が 2026 年の答え**(matklad 2026-02, Pyrefly, rust-analyzer salsa 移行税)。0.46 の実測が出た時点の設計判断でこの読み替えを ○× にかける。
