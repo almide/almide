@@ -552,17 +552,20 @@ impl Checker {
     ) {
         if !args.iter().any(|a| matches!(a.kind, ExprKind::Placeholder)) { return; }
         let name = callee_display_name(callee);
+        // One snippet for the whole call: with two `_`s, a per-argument snippet
+        // that rewrote only "its own" would still carry the other `_` and so
+        // would not compile.
+        let snippet = self.placeholder_lambda_snippet(call_span, args)
+            .unwrap_or_else(|| match &name {
+                Some(n) => format!("(x) => {}(x, /* the other arguments */)", n),
+                None => "(x) => f(x, 10)".to_string(),
+            });
         for (idx, arg) in args.iter().enumerate() {
             if !matches!(arg.kind, ExprKind::Placeholder) { continue; }
             let position = match &name {
                 Some(n) => format!("argument {} of {}()", idx + 1, n),
                 None => format!("argument {}", idx + 1),
             };
-            let snippet = self.placeholder_lambda_snippet(call_span, arg.span)
-                .unwrap_or_else(|| match &name {
-                    Some(n) => format!("(x) => {}(x, /* the other arguments */)", n),
-                    None => "(x) => f(x, 10)".to_string(),
-                });
             let mut diag = super::err(
                 format!("placeholder `_` is not valid in a call argument ({position})"),
                 "`_` here is a hole with no value — it does NOT partially apply the call. \
@@ -570,7 +573,7 @@ impl Checker {
                 "call argument",
             )
             .with_code("E046")
-            .with_try(snippet);
+            .with_try(snippet.clone());
             // Point at the `_` itself, not at whatever expression `emit`'s
             // `current_span` happens to hold when the call is inferred.
             if let (Some(file), Some(span)) = (self.source_file.clone(), arg.span) {
@@ -581,28 +584,50 @@ impl Checker {
     }
 
     /// Build the `try:` snippet for E046 by lifting the call's own source text
-    /// and rewriting the offending `_` to a lambda parameter — so the steer
-    /// reads `(x) => add(x, 10)` for the user's actual call, not a generic
-    /// template. `None` when the source text is unavailable (IDE / playground),
-    /// the call spans multiple lines (`Span` is single-line), or the char at
-    /// the placeholder's column is not the `_` we expect.
+    /// and rewriting EVERY `_` argument to a lambda parameter — so the steer
+    /// reads `(x) => add(x, 10)` for the user's actual call, and
+    /// `(x1, x2) => mk(x1, x2)` when the call holds two of them (rewriting one
+    /// at a time would leave the other `_` in a snippet that cannot compile).
+    /// `None` when the source text is unavailable (IDE / playground), the call
+    /// spans multiple lines (`Span` is single-line), or any placeholder column
+    /// does not actually hold the `_` we expect.
     fn placeholder_lambda_snippet(
         &self,
         call_span: Option<ast::Span>,
-        ph_span: Option<ast::Span>,
+        args: &[ast::Expr],
     ) -> Option<String> {
-        let (call, ph) = (call_span?, ph_span?);
-        if call.line != ph.line || call.end_col <= call.col { return None; }
-        if ph.col < call.col || ph.col >= call.end_col { return None; }
+        let call = call_span?;
+        if call.end_col <= call.col { return None; }
+        let mut offsets: Vec<usize> = Vec::new();
+        for arg in args {
+            if !matches!(arg.kind, ExprKind::Placeholder) { continue; }
+            let ph = arg.span?;
+            if ph.line != call.line || ph.col < call.col || ph.col >= call.end_col {
+                return None;
+            }
+            offsets.push(ph.col - call.col);
+        }
+        if offsets.is_empty() { return None; }
+        offsets.sort_unstable();
+        let names: Vec<String> = if offsets.len() == 1 {
+            vec!["x".to_string()]
+        } else {
+            (1..=offsets.len()).map(|i| format!("x{i}")).collect()
+        };
         let text = self.source_slice(call)?;
-        let offset = ph.col - call.col;
-        if text.chars().nth(offset)? != '_' { return None; }
-        let rewritten: String = text
-            .chars()
-            .enumerate()
-            .map(|(i, c)| if i == offset { 'x' } else { c })
-            .collect();
-        Some(format!("(x) => {rewritten}"))
+        let mut out = String::new();
+        let mut next = 0usize;
+        for (i, c) in text.chars().enumerate() {
+            if next < offsets.len() && i == offsets[next] {
+                if c != '_' { return None; }
+                out.push_str(&names[next]);
+                next += 1;
+            } else {
+                out.push(c);
+            }
+        }
+        if next != offsets.len() { return None; }
+        Some(format!("({}) => {}", names.join(", "), out))
     }
 
     /// `ExprKind::Lambda` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
@@ -1107,8 +1132,14 @@ impl Checker {
         // rejection on this path. Measured: without it `5 |> add3(_, 10)`
         // (arity 3, so the extra piped arg does NOT trip E004) checked clean
         // and died at build as "codegen produced invalid Rust".
+        //
+        // `None` for the call span deliberately suppresses the source-derived
+        // `try:` snippet here: the pipe already occupies argument 1, so
+        // `(x) => add3(x, 10)` — what lifting `add3(_, 10)` verbatim would
+        // produce — has the wrong arity and would be a plausible-looking wrong
+        // fix. The generic shape steer is the honest one on this path.
         if let ExprKind::Call { callee, args, .. } = &right.kind {
-            self.reject_arg_placeholders(&**callee, args.as_slice(), right.span);
+            self.reject_arg_placeholders(&**callee, args.as_slice(), None);
         }
         let left_ty = self.infer_expr(left);
         // Resolve TypeVars eagerly via UnionFind — earlier pipes in the chain
