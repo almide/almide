@@ -19,6 +19,15 @@
 //
 // SELF-CONTAINED: its own temp dir (never printed — the suffix differs per
 // run), removed at the end.
+//
+// The reference interpreter ABSTAINS on this fixture (ledgered), and the
+// abstention is not respellable — it was checked, not assumed. TWO independent
+// blockers, both shared with fixtures already in the ledger: `fs.fold_lines`
+// has no interp arm at all (crates/almide-interp has no fs-walker glue), and
+// the `Map[String, Int]` accumulator reaches `prim.alloc_map`, which 14 other
+// ledgered fixtures also sit behind. The Map is not a free choice either — it
+// is the ONE accumulator with a fallible wasm twin, so it is what makes this a
+// cross-target fixture at all. Both cross-target gates do vote on it.
 import fs
 
 effect fn step(log: String, acc: Map[String, Int], line: String) -> Map[String, Int] = {
