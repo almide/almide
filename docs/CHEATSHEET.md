@@ -141,6 +141,19 @@ fn parse_opt(s: String) -> Int?!               // Result[Option[Int], String]
 fn parse(text: String) -> Ast = _                     // hole (type-checked stub)
 fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 ```
+Both take whatever type the context demands, so the rest of the program keeps
+type-checking, and both PANIC if execution reaches them (native: exit 101 —
+`not yet implemented: hole at line N` / `not yet implemented: <your message>`).
+This is a NATIVE-ONLY workflow: the wasm MIR has no arm for either node, so a
+program that still contains one walls (`almide run --target wasm` exits 1,
+"this program shape is not yet supported by the verified wasm renderer").
+Fill the hole before you build for wasm.
+
+`_` in a **call argument** is a different thing and is rejected (E046):
+```
+let v = add(_, 10)          // ✗ E046 — not partial application, no `_` sections
+let add10 = (x) => add(x, 10)   // ✓ name the missing value with a lambda
+```
 
 ### Mutable parameters
 ```
