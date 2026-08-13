@@ -1,5 +1,135 @@
 // ── Tests ────────────────────────────────────────────────────────────
 
+/// #1261 + #1263 — `fmt` reprints a literal's SOURCE SPELLING.
+///
+/// The formatter used to render literals from the parsed VALUE, which is a
+/// lossy direction: `1e10` came back `10000000000.0`, `1_000.25` lost its
+/// separator, `"\u{3042}"` came back as a bare `あ`, a heredoc collapsed into
+/// one quoted line — and `1e999` came back `inf.0`, which does not parse, so
+/// `fmt` turned a valid file into an invalid one.
+///
+/// The table below is the CONTRACT: every spelling in it must survive a
+/// format pass byte-for-byte. Adding a literal FORM to the language means
+/// adding its row here — a form that is not listed is a form nobody promised
+/// to preserve.
+#[cfg(test)]
+mod literal_spelling_tests {
+    use super::*;
+    use almide_lang::lexer::Lexer;
+    use almide_lang::parser::Parser;
+
+    /// Every literal spelling `fmt` must print back verbatim.
+    const PRESERVED: &[&str] = &[
+        // ── Float: exponent, separator, precision, overflow (#1261) ──
+        "1e10",
+        "1.5e-3",
+        "1_000.25",
+        "1E7",
+        "2.5e+4",
+        "0.5",
+        "1.0",
+        "100.0",
+        // `1e999` parses to `inf`; printing the VALUE gave `inf.0`, which
+        // re-lexes as an ident + tuple index. fmt(valid) must stay valid.
+        "1e999",
+        // ── Int: radix prefixes and separators (already preserved) ──
+        "0xFF",
+        "0b1010",
+        "0o755",
+        "1_000_000",
+        // ── String: escape spelling, quote style, form (#1263) ──
+        "\"\\u{3042}\"",
+        "\"\\x41\"",
+        "\"tab\\there\"",
+        // The quote delimiter is the author's choice, not fmt's: it used to
+        // switch sides to minimize escapes.
+        "'single'",
+        "\"he said \\\"hi\\\"\"",
+        // A raw string has no escape layer — reprinting it as a cooked string
+        // meant doubling every backslash.
+        "r\"raw\\nnot\"",
+        // Interpolation: the hole and the escapes around it both survive.
+        "\"a\\u{3042}${x}b\"",
+        "\"\\${literal}\"",
+    ];
+
+    fn format_expr_source(literal: &str) -> String {
+        let src = format!("fn f(x: Int) -> Unit = {{\n  let v = {literal}\n  println(\"${{v}}\")\n}}\n");
+        let tokens = Lexer::tokenize(&src);
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse succeeds");
+        assert!(
+            parser.errors.is_empty(),
+            "unexpected parse errors for {literal}: {:?}",
+            parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>()
+        );
+        format_program(&program)
+    }
+
+    #[test]
+    fn every_listed_literal_form_reprints_verbatim() {
+        for literal in PRESERVED {
+            let out = format_expr_source(literal);
+            assert!(
+                out.contains(&format!("let v = {literal}\n")),
+                "fmt rewrote the literal `{literal}`; output was:\n{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_listed_literal_form_is_idempotent() {
+        for literal in PRESERVED {
+            let once = format_expr_source(literal);
+            let tokens = Lexer::tokenize(&once);
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse().expect("reformat parses");
+            let twice = format_program(&program);
+            assert_eq!(once, twice, "fmt is not idempotent on `{literal}`");
+        }
+    }
+
+    /// A heredoc stays a heredoc — body, indentation and delimiters intact.
+    /// It used to collapse into a single-line double-quoted string.
+    #[test]
+    fn heredoc_survives_as_heredoc() {
+        let src = "fn f() -> String = {\n  let s = \"\"\"\n    line one\n    line two\n    \"\"\"\n  s\n}\n";
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse succeeds");
+        let out = format_program(&program);
+        assert!(out.contains("\"\"\"\n    line one\n    line two\n    \"\"\""), "heredoc collapsed:\n{out}");
+        assert_eq!(out, src, "a formatted heredoc file is already at fmt's fixed point");
+    }
+
+    /// The whole point of #1261: `fmt` of a VALID file must stay valid. The
+    /// post-format verifier is what caught `inf.0`, so assert it clean.
+    #[test]
+    fn overflowing_float_round_trips_through_the_verifier() {
+        let src = "fn f() -> Float = {\n  let v = 1e999\n  v\n}\n";
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse succeeds");
+        let out = format_program(&program);
+        assert!(out.contains("let v = 1e999"), "spelling lost:\n{out}");
+        crate::fmt::verify_format(src, &program, &out)
+            .expect("formatted output still parses to the same program");
+    }
+
+    /// Dropping the spelling cache falls back to value rendering — the escape
+    /// hatch every AST-rewriting tool takes before it re-renders.
+    #[test]
+    fn strip_literal_raw_falls_back_to_value_rendering() {
+        let src = "fn f() -> Float = {\n  let v = 1e10\n  v\n}\n";
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let mut program = parser.parse().expect("parse succeeds");
+        almide_lang::ast::strip_literal_raw(&mut program);
+        let out = format_program(&program);
+        assert!(out.contains("let v = 10000000000.0"), "expected value rendering:\n{out}");
+    }
+}
+
 #[cfg(test)]
 mod attr_tests {
     use super::*;

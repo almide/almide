@@ -243,6 +243,13 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         // from Go-ish / Java-ish training data. Mechanically substituting to
         // `a > b` etc. turns the error case into working code.
         let operator_count = rewrite_comparison_calls(&mut program);
+        // The rewrite can land INSIDE a `${…}` interpolation hole, and a string
+        // literal reprints its own source text verbatim (#1263) — which would
+        // reprint the pre-rewrite hole and silently drop the fix. Dropping the
+        // cached spellings makes fmt render those literals from their values.
+        if operator_count > 0 {
+            ast::strip_literal_raw(&mut program);
+        }
         (import_messages, operator_count)
     } else {
         (Vec::new(), 0)

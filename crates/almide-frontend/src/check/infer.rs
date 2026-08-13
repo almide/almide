@@ -39,7 +39,7 @@ impl Checker {
         // emitted `<lit>f32` would be rustc's "literal out of range for f32".
         // Only such literals are queued (cheap pre-filter); magnitude is
         // sign-symmetric so a negated parent needs no flag.
-        if let ExprKind::Float { value } = &expr.kind {
+        if let ExprKind::Float { value, .. } = &expr.kind {
             if value.is_finite() && (*value as f32).is_infinite() {
                 self.deferred_float_overflow_checks.push(super::FloatOverflowSite {
                     expr_id: expr.id, value: *value, context_ty: None, span: expr.span,

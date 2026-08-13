@@ -275,6 +275,11 @@ pub fn mutate_one(
         return None;
     }
 
+    // Literals reprint their own SOURCE spelling unless that cache is dropped
+    // (#1263). A mutation landing inside a `${…}` hole — or any literal
+    // rewrite — would otherwise be reprinted as the pre-mutation text, so the
+    // fuzzer would explore the same program forever.
+    almide::ast::strip_literal_raw(&mut program);
     let source = format_program(&program);
     Some(Generated {
         source,
@@ -347,8 +352,10 @@ fn apply_literal(kind: &mut ExprKind, i: i64, f: f64, s: &str, b: bool) {
             *value = serde_json::Value::from(i);
             *raw = i.to_string();
         }
-        ExprKind::Float { value } => *value = f,
-        ExprKind::String { value } => *value = s.to_string(),
+        // `raw` is the pre-mutation SOURCE spelling; clearing it makes fmt
+        // print the new value (#1261/#1263).
+        ExprKind::Float { value, raw } => { *value = f; *raw = None; }
+        ExprKind::String { value, raw } => { *value = s.to_string(); *raw = None; }
         ExprKind::Bool { value } => *value = b,
         _ => {}
     }
