@@ -186,10 +186,58 @@ fn reproduces(
     // interpreter`): without that rung a native==wasm candidate yields no
     // finding at all, so no shrink is ever accepted and the artifact keeps
     // the full unshrunk mutant.
-    match run_ladder(tc, src, &file, &wasm, reference) {
+    // The by-construction oracle travels IN the source (`// @expect` lines),
+    // so a shrink candidate carries its own expected output — no separate
+    // bookkeeping, and a hand-edited repro is judged the same way.
+    let expected = crate::generator::identity::expected_from_source(src);
+    match run_ladder(tc, src, &file, &wasm, reference, expected.as_deref()) {
         Outcome::Finding(f) if f.kind == target_kind => Some(f),
         _ => None,
     }
+}
+
+/// Minimize an IDENTITY-family finding (#1332) by shrinking its **plan**,
+/// not its text.
+///
+/// Text-level delta debugging is unsound here: almost every line of an
+/// identity program is one half of an inverse pair, so deleting a line
+/// changes the value the program is supposed to print. The candidate would
+/// then "still reproduce" for a reason that has nothing to do with the
+/// bug, and the minimizer would happily shrink a real miscompile into a
+/// generator artifact. Shrinking the plan instead means every candidate is
+/// re-rendered by the same construction as the original and re-derives its
+/// own expected output, so the oracle survives minimization.
+pub fn minimize_plan(
+    tc: &Toolchain,
+    plan: &crate::generator::identity::Plan,
+    target_kind: FindingKind,
+    work_dir: &Path,
+    reference: Option<&dyn ReferenceOracle>,
+) -> Minimized {
+    use crate::generator::identity;
+
+    let mut current = plan.clone();
+    let mut best = identity::render(&current).0;
+    let mut best_finding = None;
+
+    for _ in 0..MAX_ROUNDS {
+        let mut shrank = false;
+        for candidate in identity::shrink(&current) {
+            let (src, _) = identity::render(&candidate);
+            if let Some(f) = reproduces(tc, &src, target_kind, work_dir, reference) {
+                current = candidate;
+                best = src;
+                best_finding = Some(f);
+                shrank = true;
+                break;
+            }
+        }
+        if !shrank {
+            break;
+        }
+    }
+
+    Minimized { source: best, finding: best_finding }
 }
 
 // ── AST surgery helpers ──
