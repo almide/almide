@@ -882,7 +882,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
 ///
 /// Reads `$errno`, writes `$maddr`/`$mlen`. `def_addr`/`def_len` is the SITE's own
 /// fallback text, kept for an errno outside the mapped set — a BOUNDED divergence,
-/// not a silent one (C-272).
+/// not a silent one (C-273).
 ///
 /// The mapped set is exactly the errnos whose native `std::io` Display is the SAME
 /// on every Unix host: ENOENT 2, EACCES 13, ENOTDIR 20, EISDIR 21 carry those numbers
