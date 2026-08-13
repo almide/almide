@@ -289,8 +289,10 @@ impl Gen<'_> {
         self.blocks(depth + 1, n)
     }
 
-    /// A body guaranteed non-empty (for shapes whose braces must not be
-    /// empty). Falls back to a single free block at the depth cap.
+    /// A body worth generating a braced shape for. `if c then {} else {}`
+    /// is accepted and runs on both legs (checked), so this is a coverage
+    /// choice rather than a validity one: an empty-armed branch tests
+    /// nothing, while the shrinker may still empty one on its way down.
     fn body_nonempty(&mut self, depth: usize, acc: usize) -> Vec<Block> {
         let b = self.body(depth);
         if b.is_empty() {
@@ -939,13 +941,6 @@ fn unwrap_nth(blocks: &mut Vec<Block>, target: usize, seen: &mut usize) -> bool 
 fn clear_nth(blocks: &mut [Block], target: usize, seen: &mut usize) -> bool {
     for b in blocks.iter_mut() {
         if *seen == target {
-            // `BranchNest` renders its body into BOTH arms; emptying it
-            // would produce `if c then { } else { }`, which is not a shape
-            // the language accepts. The wrapper is dropped instead by the
-            // remove/unwrap passes.
-            if matches!(b, Block::BranchNest { .. }) {
-                return false;
-            }
             return match b.body_mut() {
                 Some(body) if !body.is_empty() => {
                     body.clear();
