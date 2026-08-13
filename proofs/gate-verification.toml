@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "8"
+# unverified_ceiling = "7"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -97,7 +97,8 @@ evidence = "#1244 round 2: effectful module 'fs' forged into PURE_MODULES demons
 
 [[gate]]
 path = "proofs/check-wasm-bytes.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: the forge was in the SHIPPING RENDERER, not the proof — rc_inc's `(i32.const 1)` bumped to 2 in render_wasm_p3.rs gave 'FAIL rc_inc: the RENDERER'S bytes do not match WasmEncode.rc_inc_bytes', and deleting rc_dec's double-free sentinel line gave 'FAIL rc_dec: ... do not match WasmExec.rc_dec_bytes — drift'; restored green"
 
 [[gate]]
 path = "proofs/check-wasm-exec.sh"
