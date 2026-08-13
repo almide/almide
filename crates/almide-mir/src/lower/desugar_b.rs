@@ -624,6 +624,112 @@ pub fn desugar_tuple_unwrap_or(body: &IrExpr) -> Option<IrExpr> {
     changed.then_some(out)
 }
 
+/// `carrier ?? f(..)!` over a HEAP (handle-carrying) payload — the `??` whose FALLBACK is an
+/// INLINE propagating unwrap (#1375). The fallback arm lands in the heap arm lowering as a bare
+/// `Unwrap`, whose `e! ≡ e` pass-through is the identity ONLY in a Result-typed arm; here the arm
+/// is PAYLOAD-typed, so the pass-through yielded the fallback's whole `Result` BLOCK where the
+/// merge expects the handle — `json.parse("hi") ?? json.parse("[1,2]")!` printed `true` (the
+/// ok-discriminant read through the Json tag slot) instead of `[1,2]`.
+///
+/// Rewrite to the exact identity, which keeps the fallback CONDITIONAL (hoisting `f(..)!` into a
+/// preceding `let` would evaluate — and propagate — it on the ok path too):
+///
+///   `a ?? f(..)!`  ≡  `(match a { ok($p) => ok($p), err(_) => f(..) })!`
+///   `o ?? f(..)!`  ≡  `(match o { some($p) => ok($p), none => f(..) })!`
+///
+/// Both sides evaluate `a`/`o` once and `f(..)` only on the miss path; the `!` moved OUT of the
+/// arm now sits in the proven `let x = e!` / call-arg-hoist position, and the match itself is the
+/// Result-typed shape the arm pass-through is actually valid for. CALL-COUNT-INVARIANT (the two
+/// operand calls appear exactly once before and after), so `mir == ir` holds without re-counting.
+/// SCALAR payloads keep their own proven `??` route untouched — they never reach the heap arm.
+pub fn desugar_unwrap_or_unwrap_fallback(body: &IrExpr) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    /// The carrier's HIT/MISS pattern pair for a payload bound to `p`, or `None` when the
+    /// operand is neither an `Option[<payload>]` nor a `Result[<payload>, _]`.
+    fn carrier_patterns(
+        carrier: &Ty,
+        payload: &Ty,
+        p: almide_ir::VarId,
+    ) -> Option<(almide_ir::IrPattern, almide_ir::IrPattern)> {
+        use almide_ir::IrPattern;
+        let bind = IrPattern::Bind { var: p, ty: payload.clone() };
+        match carrier {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && a[0] == *payload => Some((
+                IrPattern::Ok { inner: Box::new(bind) },
+                IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+            )),
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && a[0] == *payload => {
+                Some((IrPattern::Some { inner: Box::new(bind) }, IrPattern::None))
+            }
+            _ => None,
+        }
+    }
+    fn rewrite(e: IrExpr, changed: &mut bool, next: &mut u32) -> IrExpr {
+        let e = e.map_children(&mut |c| rewrite(c, changed, next));
+        let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return e };
+        // `Try` is the frontend auto-`?`; both spellings propagate the same way.
+        let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) = &fallback.kind
+        else {
+            return e;
+        };
+        // HEAP payloads only — the scalar `??` never reaches the miscompiling arm.
+        if !is_heap_ty(&e.ty) {
+            return e;
+        }
+        // The fallback's `!` must yield EXACTLY the `??`'s own payload type, so `ok($p)` in the
+        // hit arm and `f(..)` in the miss arm are the same `Result[payload, _]`.
+        if !matches!(&inner.ty,
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && a[0] == e.ty)
+        {
+            return e;
+        }
+        let p = almide_ir::VarId(*next);
+        let Some((hit, miss)) = carrier_patterns(&expr.ty, &e.ty, p) else { return e };
+        *next += 1;
+        *changed = true;
+        let payload = IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty: e.ty.clone(),
+            span: e.span.clone(),
+            def_id: None,
+        };
+        // The hit arm RE-WRAPS the payload at the fallback's Result type — the carrier's own
+        // err type never has to join with the fallback's.
+        let rewrapped = IrExpr {
+            kind: IrExprKind::ResultOk { expr: Box::new(payload) },
+            ty: inner.ty.clone(),
+            span: e.span.clone(),
+            def_id: None,
+        };
+        let merged = IrExpr {
+            kind: IrExprKind::Match {
+                subject: expr.clone(),
+                arms: vec![
+                    almide_ir::IrMatchArm { pattern: hit, guard: None, body: rewrapped },
+                    almide_ir::IrMatchArm {
+                        pattern: miss,
+                        guard: None,
+                        body: (**inner).clone(),
+                    },
+                ],
+            },
+            ty: inner.ty.clone(),
+            span: e.span.clone(),
+            def_id: e.def_id,
+        };
+        IrExpr {
+            kind: IrExprKind::Unwrap { expr: Box::new(merged) },
+            ty: e.ty.clone(),
+            span: e.span.clone(),
+            def_id: e.def_id,
+        }
+    }
+    let mut changed = false;
+    let mut next = crate::lower::max_var_id(body) + 1;
+    let out = rewrite(body.clone(), &mut changed, &mut next);
+    changed.then_some(out)
+}
+
 /// `option.unwrap_or(option.map(list.find(xs, λ1), λ2), 32)` — the C-127 PIPED
 /// generic chain. The lambda lift is statement-position-sensitive: the SAME chain
 /// written as source `let`s lowers, while the nested-call form walls its HOF

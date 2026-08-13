@@ -337,6 +337,46 @@ fn find_let_unwrap_target(stmts: &[IrStmt]) -> Option<(usize, LetUnwrapTarget, I
     })
 }
 
+/// ANF the operand of `{ …; let v = (<match …>)!; rest }` into its own bind:
+/// `{ …; let $u = <match …>; let v = $u!; rest }` (#1375). [`desugar_let_unwrap`] builds a
+/// propagation `match` over the operand, and a MATCH in that subject position walls — a `Var`
+/// there is the proven shape. `None` when the operand is not a match (every other operand kept
+/// its existing route) or the statement is not one of the two unwrap-bind spellings.
+fn anf_let_unwrap_match_operand(body: &IrExpr, i: usize, inner: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else { return None };
+    if !matches!(inner.kind, IrExprKind::Match { .. }) {
+        return None;
+    }
+    let u = VarId(max_var_id(body) + 1);
+    let mut anf_stmt = stmts.get(i)?.clone();
+    let value = match &mut anf_stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => value,
+        _ => return None,
+    };
+    // Only the SPELLED unwrap forms — `find_let_unwrap_target` also admits a bare Result-typed
+    // destructure value, which has no `!` to re-point at the lifted bind.
+    match &mut value.kind {
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
+            *expr = Box::new(mk_at(body, IrExprKind::Var { id: u }, inner.ty.clone()));
+        }
+        _ => return None,
+    }
+    let lift = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: u,
+            mutability: almide_ir::Mutability::Let,
+            ty: inner.ty.clone(),
+            value: inner.clone(),
+        },
+        span: stmts[i].span.clone(),
+    };
+    let mut out: Vec<IrStmt> = stmts[..i].to_vec();
+    out.push(lift);
+    out.push(anf_stmt);
+    out.extend(stmts[i + 1..].iter().cloned());
+    Some(mk_at(body, IrExprKind::Block { stmts: out, expr: tail.clone() }, body.ty.clone()))
+}
+
 /// Build an `IrExpr` carrying `body`'s span and def_id — every node
 /// [`desugar_let_unwrap`] and its helpers synthesize.
 fn mk_at(body: &IrExpr, kind: IrExprKind, ty: Ty) -> IrExpr {
@@ -541,6 +581,16 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
         return None;
     };
     let (i, target, inner) = find_let_unwrap_target(stmts)?;
+    // A MATCH operand (`let v = (match a { ok($p) => ok($p), err(_) => f(..) })!` — what
+    // `desugar_unwrap_or_unwrap_fallback` rewrites `a ?? f(..)!` into, #1375) is NOT a
+    // materializable match SUBJECT: the propagation match built below would carry a match
+    // in its subject position, which the subject lowering walls. ANF it into its own bind
+    // first, so the propagation match dispatches on a `Var` — the proven subject shape.
+    // ONE extra statement, the SAME single evaluation of the operand, so the rewrite is
+    // call-count-invariant (`mir == ir`) and the fixpoint re-enters on `let v = $u!`.
+    if let Some(anf) = anf_let_unwrap_match_operand(body, i, &inner) {
+        return Some(anf);
+    }
     // The unwrapped expr must be a `Result[T, E]` — `!` early-returns its `Err(E)`, binds `Ok(T)`.
     let (ok_ty, err_ty) = match &inner.ty {
         Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => (a[0].clone(), a[1].clone()),
