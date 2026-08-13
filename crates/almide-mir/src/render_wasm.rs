@@ -112,7 +112,8 @@ const IOVEC_LEN_OFFSET: u32 = I32_SIZE; // iovec = [buf:i32 @0][len:i32 @4]
 /// ASCII bytes the fs path logic writes. (The itoa/print-list formatter bytes
 /// — zero/equals/comma/newline/minus, the digit scratch, and the line-buffer
 /// bound — went out with the #1208 prelude deletion: printing is self-hosted.)
-const ASCII_SLASH: u32 = 47; // '/' — stripped from an absolute fs.read_text path
+const ASCII_SLASH: u32 = 47; // '/' — the guest path separator / preopen boundary
+const ASCII_DOT: u32 = 46; // '.' — wasmtime's `--dir=.` launcher-cwd preopen name (#1394)
 
 /// Render a MIR function to a runnable WAT module string.
 pub fn render_wasm(func: &MirFunction) -> String {

@@ -69,6 +69,15 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (func $environ_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_open"
     (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  ;; The PREOPEN-TABLE discovery pair (#1394). WASI has no "root" fd: the host
+  ;; hands the guest a contiguous run of preopened directory fds from 3 up, and
+  ;; only these two calls say what each one actually IS. Without them every path
+  ;; call had to ASSUME fd 3 — right under `wasmtime --dir=/` (one preopen, and
+  ;; it is `/`), silently wrong under any host that preopens more.
+  (import "wasi_snapshot_preview1" "fd_prestat_get"
+    (func $fd_prestat_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_prestat_dir_name"
+    (func $fd_prestat_dir_name (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_read"
     (func $fd_read (param i32 i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_close"
@@ -121,6 +130,15 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; envp/envbuf each call — the env.get leak-loop OOM).
   (global $env_envp (mut i32) (i32.const 0))
   (global $env_cnt (mut i32) (i32.const 0))
+  ;; $path_norm's ONE-TIME WASI preopen-dir table (#1394), cached on exactly the
+  ;; same principle as the environ snapshot above: the set of preopens is fixed
+  ;; for the guest's lifetime, and the name buffers come from immortal $alloc8 —
+  ;; a per-call rescan would leak one allocation per fs op (the env.get leak-loop
+  ;; OOM, again). $preopen_tab is ALSO the built flag (0 = not yet scanned), so
+  ;; it is published only after $preopen_cnt beside it is final. Records are
+  ;; `[fd@0][nameptr@4][namelen@8]`, 12 bytes each.
+  (global $preopen_tab (mut i32) (i32.const 0))
+  (global $preopen_cnt (mut i32) (i32.const 0))
   ;; __div_trap(msg,len): write the interned abort line to STDERR and proc_exit(1)
   ;; — the render-path twin of v0-wasm's __div_trap (§13 termination convention).
   ;; Uses the fd_write iovec scratch; never returns.
@@ -496,3 +514,4 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
 }
 
 include!("render_wasm_fs_wat.rs");
+include!("render_wasm_fs_preopen.rs");
