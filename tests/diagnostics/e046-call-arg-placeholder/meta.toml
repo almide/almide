@@ -1,0 +1,3 @@
+expects_code = "E046"
+expects_error = "placeholder `_` is not valid in a call argument"
+hint_substring = "does NOT partially apply the call"
