@@ -603,3 +603,25 @@ match が受け取る(fixture: `checked(-3)` の err を match が拾って
 
 テスト: `spec/wasm_cross/guard_statement.almd`(契約 C-265)、
 `spec/lang/guard_test.almd`(wasm レグ)。
+
+## ALS-S7 guard let 文(`Stmt::GuardLet`)
+
+**受理形**: `guard let x = scrut else raise-expr` — 文位置。`scrut` は
+Result / Option、`x` は Ok / Some のペイロードに束縛され、後続文の全域で
+可視。else アームは raise(`err(e)` / `err(e)!`)。
+
+**値の規範**: 成功極性なら束縛して素通り(fixture: `int.parse("21")` →
+v=21 → 42)。失敗極性なら else の err が呼び出し元へ伝搬する(fixture:
+`doubled("x")` の err を match が拾って "not a number")。両ターゲット
+同一。連鎖した guard let は単一の carrier 束縛に畳まれる(#1340)。
+
+**ブロック入れ子の裁定(#1340 の発見)**: guard let はフロントエンドで
+**ブロックに入れ子の variant match** へ脱糖される。裸の tail match は
+以前から両レグ live だったが、ブロック 1 段の入れ子で wall していた —
+`auto_wrap_abi_body` が本体の**ルートのみ**を Result キャリアに retype
+するため。したがって壁の原因は極性でも wildcard アームでもなく**位置**で
+あり、修正は「証明済みの bind 形へ正規化する認識器」に variant match を
+教えることだった(ALS-S6 と同じ機構の別の顔)。
+
+テスト: `spec/wasm_cross/guard_let_statement.almd`(契約 C-266)、
+`spec/lang/guard_let_test.almd`(wasm レグ)。
