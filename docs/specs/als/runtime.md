@@ -86,3 +86,33 @@ wasm の fs ランタイムは起動時に WASI preopen ディレクトリ表を
 システムの readdir 順は観測できない。読み取り失敗は短いリストではなく err。
 テスト: `spec/wasm_cross/fs_list_dir_multipass.almd`
 Contracts: C-042, C-272。
+
+## ALS-R7 ストリーミング行走査の可謬コールバック
+
+ADR-0006 の 1 ビット可謬性多相は fs のストリーミング行走査にも適用される。
+`fs.fold_lines` / `fs.for_each_line` のコールバック本体が `!` を使うとき、
+検査器は呼び先を内部キャリア `fs.__fallible_fold_lines` /
+`fs.__fallible_for_each_line` に書き換え、呼び出し全体が可謬になる
+（`list.map` → `list.__fallible_map` と同型）。キャリアは綴りではない —
+ソースが直接名指しすると E043。
+
+規範となる観測量は **コールバック呼び出し列** である。最初の err を返した
+行までコールバックが呼ばれ、それ以降の行では**一度も呼ばれない**
+(first-err 打ち切り)。err メッセージはコールバックのものがそのまま
+呼び出し側の err チャネルに乗る。この 2 つは native ⇄ wasm でバイト同一。
+
+native レッグは加えて**読み取り自体**を失敗行で止める
+(`almide_rt_fs_fold_lines_effect` が BufReader ループから return する)。
+wasm 自己ホストは C-220 と同じくファイル全体を先に読むため、
+「リーダがどこで止まったか」は wasm の観測量ではない — RSS と同じく
+native 限定の性質であり、観測可能な約束には含まれない。
+
+区画走査 (`fold_lines_range` / `fold_lines_chunked`) には可謬形が**ない**。
+分割走査の「最初の err」はスレッド実行順の観測量になるため、
+定義できる打ち切り点が存在しない — 意図的省略として
+`tests/fs_streaming_family_gate_test.rs` の行列が固定する。
+
+テスト: `spec/wasm_cross/fs_fallible_stream_callback.almd`（両レッグ）,
+`spec/stdlib/fs_streaming_test.almd`（for_each_line セル — native 限定）,
+`tests/fs_streaming_family_gate_test.rs`（行列ゲート）。
+Contracts: C-274。

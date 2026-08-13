@@ -240,7 +240,7 @@ fn list_heap_call_name_special_cases(
     // `_ls` (fold_lines_range, the collect_partition shape). Any other
     // accumulator type routes to an unregistered `_x` name and walls cleanly
     // at render — never a wrong-typed link.
-    // #1144 (C-269): the ADR-0006 fallible carrier the checker rewrites
+    // #1144 (C-274): the ADR-0006 fallible carrier the checker rewrites
     // `fs.fold_lines(p, z, (a, l) => g(a, l)!)` into. It routes on the SAME
     // accumulator key as the total form — `Map[String, Int]` to the `_msi`
     // fallible walker (fs_fold_lines.almd), every other accumulator to an

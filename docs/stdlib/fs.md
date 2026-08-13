@@ -92,6 +92,16 @@ a large file.
 let total = fs.fold_lines("data.csv", 0, (acc, line) => acc + parse_row(line))!
 ```
 
+A **fallible callback** makes the whole walk fallible (ADR-0006, contract
+C-274): a callback body that propagates with `!` selects the first-err
+short-circuit form — the callback is never invoked for a line after the one
+that failed, and the native reader stops there too. Same name, one extra `!`.
+
+```almd
+// first err wins; later lines are never visited
+let stats = fs.fold_lines(path, map.new(), (acc, line) => add_row(acc, line)!)!
+```
+
 ### `fs.for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String]`
 
 Visit each line of a file in order without materializing the list. The
@@ -101,6 +111,17 @@ callback may mutate captured `var`s.
 var count = 0
 fs.for_each_line("data.csv", (line) => { count = count + 1 })!
 ```
+
+It takes the same fallible callback form as `fold_lines`:
+
+```almd
+fs.for_each_line(path, (line) => emit(line)!)!
+```
+
+The two **partitioned** cells below (`fold_lines_range` / `fold_lines_chunked`)
+deliberately have **no** fallible form: a partitioned walk has no defined
+"first" err (which chunk fails first is a thread-schedule observable), so an
+erring chunk body handles its own error.
 
 ### `fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String]`
 

@@ -444,8 +444,17 @@ let stats = fs.fold_lines(path, map.new(), (acc, line) =>
 var count = 0
 fs.for_each_line(path, (line) => { count = count + 1 })!
 
+// ✓ FALLIBLE body: the callback's `!` instantiates the fallible form here too
+//   (first-err short-circuit, ADR-0006) — the callback is never called again
+//   after the failing line. Same name, one extra `!`.
+let totals = fs.fold_lines(path, map.new(), (acc, line) => add_row(acc, line)!)!
+
 // ✗ avoid for large files: fs.read_lines(path)! |> list.fold(...)
 ```
+
+The partitioned walkers (`fs.fold_lines_range` / `fs.fold_lines_chunked`) have
+NO fallible form — a partitioned walk has no defined first err — so an erring
+chunk body handles its own error.
 
 `result.collect` / `collect_map` are REMOVED (ADR-0007 — the name promised Rust's first-err short-circuit and did the opposite). Collect every error with partition:
 
