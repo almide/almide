@@ -293,45 +293,12 @@ impl LowerCtx {
         depth: u32,
     ) -> Option<ValueId> {
         use almide_lang::types::constructor::TypeConstructorId as TC;
-        // A `List[<record>]` — the synthesized loop-helper route (#1134 Shape 1, the
-        // codec `many: List[Inner]` cell): per-element record eq via the record
-        // helper, the identical branchless loop as List[variant] (Tier 2 already
-        // passed — a record is never in `variant_layouts`, so this is the first
-        // tier that can serve it). Gated to a NON-GENERIC Named record with a
-        // resolvable field layout; a field outside the engine fails the ensure and
-        // the site walls (None — honest, never wrong bytes).
-        if let Ty::Applied(TC::List, es) = ty {
-            if es.len() == 1 {
-                if let Ty::Named(n, args) = &es[0] {
-                    if args.is_empty() {
-                        if let Some((_names, ftys)) = self.aggregate_field_tys(&es[0]) {
-                            let key = n.as_str().to_string();
-                            if self.ensure_list_record_eq_helper(&key, &ftys) {
-                                let name = self.list_record_eq_helper_name(&key);
-                                return Some(self.emit_eq_helper_call(name, lv, rv));
-                            }
-                            return None;
-                        }
-                    }
-                }
-                // `List[Option[<record>]]` (the codec `lc: List[Inner?]` eq cell,
-                // #1134): the synthesized loop over the option-element helper —
-                // tag eq per element, the record compare guarded to both-Some.
-                if let Ty::Applied(TC::Option, oa) = &es[0] {
-                    if let [Ty::Named(n, args)] = &oa[..] {
-                        if args.is_empty() && self.custom_variant_type_name(&oa[0]).is_none() {
-                            if let Some((_names, ftys)) = self.aggregate_field_tys(&oa[0]) {
-                                let key = n.as_str().to_string();
-                                if self.ensure_list_opt_record_eq_helper(&key, &ftys) {
-                                    let name = self.list_opt_record_eq_helper_name(&key);
-                                    return Some(self.emit_eq_helper_call(name, lv, rv));
-                                }
-                                return None;
-                            }
-                        }
-                    }
-                }
-            }
+        // The two `List[...]` synthesized-loop routes come first and carry all of
+        // this tier's nesting, so they live in their own helper (same
+        // `Option<Option<_>>` convention the tiers above use: outer None = "not my
+        // shape, keep going", inner None = "mine, and it WALLS").
+        if let Some(done) = self.list_element_eq_helper(lv, rv, ty) {
+            return done;
         }
         if let Ty::Applied(TC::Option, oa) = ty {
             if oa.len() == 1 {
@@ -354,6 +321,61 @@ impl LowerCtx {
             return self.aggregate_eq_from_handles(lv, rv, &ftys, depth);
         }
         None
+    }
+
+    /// The `List[<record>]` and `List[Option[<record>]]` routes of
+    /// [`Self::container_slot_eq`] — per-element eq through a SYNTHESIZED loop
+    /// helper (#1134 Shape 1: the codec `many: List[Inner]` and `lc: List[Inner?]`
+    /// cells). The same branchless loop `List[variant]` uses; Tier 2 has already
+    /// passed by here because a record is never in `variant_layouts`, so this is
+    /// the first tier that can serve it.
+    ///
+    /// Both routes are gated to a NON-GENERIC `Named` record with a resolvable
+    /// field layout. A field the engine cannot compare fails the `ensure` and the
+    /// SITE WALLS — honest refusal, never wrong bytes.
+    ///
+    /// Returns `None` for "not one of these shapes, keep walking the tier";
+    /// `Some(Some(v))` for the emitted call; `Some(None)` for the wall. Split out
+    /// of `container_slot_eq` because these two routes carried all of its nesting
+    /// (depth 7) and most of its cognitive complexity — the Option/Result/aggregate
+    /// arms that remain there are flat.
+    fn list_element_eq_helper(
+        &mut self,
+        lv: ValueId,
+        rv: ValueId,
+        ty: &Ty,
+    ) -> Option<Option<ValueId>> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let Ty::Applied(TC::List, es) = ty else { return None };
+        let [elem] = &es[..] else { return None };
+
+        if let Ty::Named(n, args) = elem {
+            if args.is_empty() {
+                if let Some((_names, ftys)) = self.aggregate_field_tys(elem) {
+                    let key = n.as_str().to_string();
+                    if !self.ensure_list_record_eq_helper(&key, &ftys) {
+                        return Some(None);
+                    }
+                    let name = self.list_record_eq_helper_name(&key);
+                    return Some(Some(self.emit_eq_helper_call(name, lv, rv)));
+                }
+            }
+        }
+
+        // `List[Option[<record>]]`: the loop runs over the option-element helper —
+        // tag eq per element, with the record compare guarded to both-Some.
+        let Ty::Applied(TC::Option, oa) = elem else { return None };
+        let [Ty::Named(n, args)] = &oa[..] else { return None };
+        if !args.is_empty() || self.custom_variant_type_name(&oa[0]).is_some() {
+            return None;
+        }
+        let (_names, ftys) = self.aggregate_field_tys(&oa[0])?;
+        let key = n.as_str().to_string();
+        if !self.ensure_list_opt_record_eq_helper(&key, &ftys) {
+            return Some(None);
+        }
+        let name = self.list_opt_record_eq_helper_name(&key);
+        Some(Some(self.emit_eq_helper_call(name, lv, rv)))
     }
 
     /// Tuple/record `==` over two materialized block HANDLES: load each declaration-order
