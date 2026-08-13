@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "9"
+# unverified_ceiling = "8"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -101,7 +101,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "proofs/check-wasm-exec.sh"
-class = "UNVERIFIED"
+class = "MUTATION_TESTED"
+evidence = "#1244 round 5: wabt installed locally, so the gate RAN (not skipped). Two mutations of the module under test each failed it — the cell seed 4->7 gave 'FAIL exec: rc_inc cell 4 -> 5 — wasmtime got 8 want 5', and deleting rc_dec's `(if (i32.eqz $rc) (unreachable))` sentinel gave 'FAIL exec: rc_dec on rc=0 did NOT trap'; restored green"
 
 [[gate]]
 path = "proofs/check-wasm-reachability.sh"
