@@ -1,0 +1,33 @@
+// @contract: C-258, C-259
+// ALS-E26/E27 (docs/specs/als/expressions.md): named calls with positional
+// args, lambdas (typed param, zero-param, inline as a HOF argument), and
+// variant-constructor references (payload ctor call Rgb(1,2,3), bare
+// nullary Green) eliminated by match. Identical observables on both targets.
+type Color = | Red | Green | Rgb(Int, Int, Int)
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn apply(f: (Int) -> Int, v: Int) -> Int = f(v)
+
+effect fn main() -> Unit = {
+  println(int.to_string(add(2, 3)))
+  let inc = (x: Int) => x + 1
+  println(int.to_string(inc(9)))
+  let z = () => 42
+  println(int.to_string(z()))
+  println(int.to_string(apply((x) => x * 3, 4)))
+  let c = Rgb(1, 2, 3)
+  let v = match c {
+    Red => 0,
+    Green => 1,
+    Rgb(r, _, b) => r + b,
+  }
+  println(int.to_string(v))
+  let d = Green
+  let w = match d {
+    Red => 10,
+    Green => 20,
+    Rgb(_, _, _) => 30,
+  }
+  println(int.to_string(w))
+}

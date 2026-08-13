@@ -472,3 +472,28 @@ ALS-R1 の abort 形へ)。`err(_)?` → `none`、`ok(4)?` → `some(4)`(fixture
 match wall(loud)に当たるため、行は UNWRITTEN 維持。
 
 テスト: `spec/wasm_cross/error_operators.almd`(契約 C-257)。
+
+## ALS-E26 呼び出しとラムダ(`ExprKind::Call` / `ExprKind::Lambda`)
+
+**受理形**: 名前呼び出し `f(a, b)`(位置引数)、ラムダ `(x: Int) => e`
+(型注釈任意)・`(x) => e`・零引数 `() => e`、HOF 引数位置のインライン
+ラムダ。effect 呼び出しの消費規範は ALS-S3/E25(E041/E042)。
+
+**値の規範**: 引数は先頭から順に一度ずつ評価され、値渡し(値意味論)。
+ラムダは関数値 — 束縛して呼ぶ・引数に渡すの両経路が同一観測
+(fixture: 5 / 10 / 42 / 12、両ターゲット同一)。アリティ不一致は検査時
+E004。
+
+テスト: `spec/wasm_cross/call_lambda_ctor.almd`(契約 C-258)。
+
+## ALS-E27 コンストラクタ参照(`ExprKind::TypeName`)
+
+**受理形**: 型宣言 `type Color = Red | Green | Rgb(Int, Int, Int)` の
+ケース名 — ペイロード付きは呼び出し形 `Rgb(1, 2, 3)`、無引数ケースは裸の
+参照 `Green`。
+
+**値の規範**: 構築した variant 値は match のケースパターンで消費される
+(fixture: `Rgb(r, _, b) => r + b` → 4、`Green` → 20、両ターゲット同一)。
+match の網羅性は ALS-E18(E010)。
+
+テスト: `spec/wasm_cross/call_lambda_ctor.almd`(契約 C-259)。
