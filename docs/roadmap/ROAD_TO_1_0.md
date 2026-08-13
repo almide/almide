@@ -211,6 +211,26 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 - **数字**: build-speed / runtime-perf / safety の三点が README で実測公開
 - **指標**: MSR が第三者再現可能 — dojo ハーネスが公開され、他言語でも同条件で測れる（0.59）
 
+## リサーチ発 issue 割付(2026-08-13)
+
+「2026年に0から作るなら」外部リサーチ(4方面・約120ソース)から後入れ可能と判定した9件 + playground dogfooding 発のバグ1件を登録し、ここで decade に割付ける。ルール「載らない issue を作らない」に従う同時追記。
+
+| Issue | 内容 | Decade | 根拠・接続先 |
+|---|---|---|---|
+| [#1308](https://github.com/almide/almide/issues/1308) | **BUG**: 未知の非ASCII文字が EOF トークン化し、以降のファイルを黙って切り捨てる(check/test/run 全部緑のまま) | **0.5x** | silent-wrong-code 最悪クラス。fuzz(#924)文化の負債。decade 内最優先で返す |
+| [#1309](https://github.com/almide/almide/issues/1309) | fmt の Black 式 AST 等価検証 + 冪等性/コメント保存 CI | 0.5x | fmt リテラル正規化ファミリ(#1261/#1263/#1264)の構造的検出器 |
+| [#1310](https://github.com/almide/almide/issues/1310) | 文法の Lark/EBNF 成果物化(制約デコード用) | 0.5x | 0.59(MSR 公開ハーネス)と 0.92(ALS 文法章)の前駆物 |
+| [#1312](https://github.com/almide/almide/issues/1312) | span+applicability 付き fix-it、almide fix の診断駆動化 | 0.5x | 0.59 の dojo リトライループを直接強化(FeedbackEval 実証) |
+| [#1313](https://github.com/almide/almide/issues/1313) | almide test 失敗出力の構造化(expected/found diff + --json) | 0.5x | 同上 — テスト失敗はコンパイラエラーより修復率が高い実証 |
+| [#1315](https://github.com/almide/almide/issues/1315) | WAT レンダラから DWARF 行テーブル | 0.5x | wasm leg 対等性のデバッグ面。0.65(cranelift DWARF)から独立に前倒し可 |
+| [#1311](https://github.com/almide/almide/issues/1311) | フロントエンド lex/parse/check の行/秒予算ラチェット | 0.6x | 0.69(編集ループ総仕上げ)の計測基盤。Carbon の規律 |
+| [#1314](https://github.com/almide/almide/issues/1314) | snapshot/expect テスト内蔵(--update-snapshots) | 0.6x | 内蔵例のない差別化空白。仕様凍結(0.96)より前に。inline vs .snap は ○× |
+| [#1316](https://github.com/almide/almide/issues/1316) | 新設データ構造の flat index-based レイアウト規律(方針) | 0.6x | 0.61(CLIF spike)の前提規律。0.49 キャッシュ形式実装も拘束する |
+
+dojo 側: [almide-dojo#2](https://github.com/almide/almide-dojo/issues/2)(effect 宣言有無の MSR A/B — 文献に存在しない最初の数字)は repo 境界ルールにより Dojo 管轄。0.59 と #585(ポジションペーパー)に給餌する。
+
+リサーチ本体の教訓で台帳の読み替えに関わるもの: **0.47–0.48(クエリ基盤)は「salsa 級細粒度」ではなく「モジュール単位の粗粒度 + resilient parse」が 2026 年の答え**(matklad 2026-02, Pyrefly, rust-analyzer salsa 移行税)。0.46 の実測が出た時点の設計判断でこの読み替えを ○× にかける。
+
 ## 台帳の完全性
 
 - **バージョン行 59 / 59** — 0.41–0.99 の全 minor に行がある（大機能 54 + ゲートリリース 5）
