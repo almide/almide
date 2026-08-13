@@ -25,6 +25,19 @@ Contracts: C-008, C-009, C-010, C-011。
 
 ## ALS-R3 fan 並行コンビネータの決定性
 
+**受理形**(構文要素方向: `ExprKind::Fan` / `FanBounded` / `FanRace` /
+`FanRaceMap` / `FanSettle` / `FanTimeout`): リスト形 `fan.map(xs, (x) =>
+…)`・`fan.bounded(n, xs, f)`、ブロック形 `fan.any { a(); b() }` /
+`fan.settle { … }`。全形が **effect fn 文脈必須**。`fan.map` の mapper は
+**Result を返す契約**(裸の値は検査時拒否、`(x) => ok(…)` へ誘導 —
+any/settle の thunk は auto-wrap、map の mapper はしない)。
+`fan.settle { a; b }` の返りは **Result のタプル**(要素数 = thunk 数)。
+`fan.race`(0.42.0 で削除 — 決定モデル下では `thunks[0]()` と同値で、名前
+だけが壁時計レースを騙っていた)と `fan.timeout`(0.29.0 で削除)は
+**存在しない** — どちらも検査時 E027 tombstone(C-004 の裁定)。AST 上の
+`FanRace` / `FanRaceMap` / `FanTimeout` ノードはこの tombstone 診断の
+担い手としてのみ残る。
+
 `fan.race`・`fan.any`・`fan.map`・`fan.settle` の結果は**リスト順で決定的**
 （最初に完了したものではなく、引数リストの先頭から評価した最初の該当）。
 エラーは ALS-R1 の統一 abort 形で表面化する。`fan.timeout` は言語に**存在

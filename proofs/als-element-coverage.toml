@@ -12,7 +12,7 @@
 # the existing ALS sections (T1-T7, R-series, ...) are STDLIB-semantics
 # normative text; the syntax-element direction starts honestly at zero.
 #
-# unwritten_ceiling = "33"
+# unwritten_ceiling = "27"
 
 [[element]]
 name = "ExprKind::Int"
@@ -104,27 +104,27 @@ section = "ALS-E14"
 
 [[element]]
 name = "ExprKind::Fan"
-section = "UNWRITTEN"
+section = "ALS-R3"
 
 [[element]]
 name = "ExprKind::FanBounded"
-section = "UNWRITTEN"
+section = "ALS-R3"
 
 [[element]]
 name = "ExprKind::FanRace"
-section = "UNWRITTEN"
+section = "ALS-R3"
 
 [[element]]
 name = "ExprKind::FanRaceMap"
-section = "UNWRITTEN"
+section = "ALS-R3"
 
 [[element]]
 name = "ExprKind::FanTimeout"
-section = "UNWRITTEN"
+section = "ALS-R3"
 
 [[element]]
 name = "ExprKind::FanSettle"
-section = "UNWRITTEN"
+section = "ALS-R3"
 
 [[element]]
 name = "ExprKind::ForIn"
