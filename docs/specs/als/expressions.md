@@ -583,3 +583,23 @@ AST に回復ノードが**ゼロ**であること、(2) 壊れたファイル�
 
 テスト: `spec/wasm_cross/optional_chain_scalar.almd`(契約 C-264)、
 `spec/lang/optional_chain_test.almd`(wasm レグ 4 ケース)。
+
+## ALS-S6 guard 文(`Stmt::Guard`)
+
+**受理形**: `guard cond else raise-expr` — 文位置。`raise-expr` は
+`err(e)` または `err(e)!`(両綴りが同一に正規化される、#1336)。
+`if` の else 無し版ではなく**早期脱出**であり、続く文は cond が真の
+経路にのみ属する。
+
+**値の規範**: cond が真なら素通りして後続が走る(fixture: `checked(5)!`
+→ 10)。偽なら else の err が呼び出し元へ伝搬する — 呼び出し側の `!` や
+match が受け取る(fixture: `checked(-3)` の err を match が拾って
+"must be positive")。両ターゲット同一。
+
+**scalar/heap の境界**: スカラー値のガードは #1336 で両レグ live。
+`guard let x = e else …`(`Stmt::GuardLet`)は**別クラス** — フロント
+エンドで variant match へ脱糖され、tail 位置の variant match ブリックに
+当たるため wasm では wall(loud)。当該ブリック待ちで UNWRITTEN 維持。
+
+テスト: `spec/wasm_cross/guard_statement.almd`(契約 C-265)、
+`spec/lang/guard_test.almd`(wasm レグ)。

@@ -3253,3 +3253,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/optional_chain_scalar.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-265"
+spec      = "ALS-S6"
+title     = "The guard statement's pass and raise paths behave identically on both targets"
+statement = "ALS-S6: `guard cond else err(e)` is an EARLY EXIT — on the true path the following statements run and the tail value flows out (10 pinned); on the false path the else's err propagates to the caller, where a `!` or match receives it (\"must be positive\" pinned) — byte-identical native <-> wasm. Both raise spellings (`err(e)` and `err(e)!`) normalize identically since #1336, which found the recognizer accepted only the Unwrap-wrapped leaf: the class was wider than guard (a hand-written `{ let m = ..; if m > 0 then m * 2 else err(e) }` walled the same way). `guard let` is a separate class (frontend-desugared to a tail-position variant match, still walled) and is outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/guard_statement.almd", class = "fixture" },
+]
