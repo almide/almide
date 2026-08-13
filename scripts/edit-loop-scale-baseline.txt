@@ -1,0 +1,44 @@
+# EDIT-LOOP SCALE-INVARIANCE ANCHORS (#1334) — see scripts/check-edit-loop-scale.sh.
+#
+# Both anchors are DIMENSIONLESS same-run ratios, not milliseconds. The
+# milliseconds on this ladder are not anchorable: same commit, same corpus, same
+# M4 Pro, one hour apart on 2026-08-13, the 10,151-line rung read p95 52.9ms at
+# load average 6.0 and p95 332.4ms at load average 42.4. The observations are
+# recorded at the bottom of this file for the record; the two lines the gate
+# reads are `slope` and `ratio`.
+#
+# slope — log-log least-squares slope of MARGINAL `almide check` time against
+#   project lines across the ladder (2k / 5k / 10k / 20k / 30k lines of real
+#   stdlib source), from the MIN of 40 interleaved runs per rung. 1.0 = linear,
+#   2.0 = quadratic. Anchored 2026-08-13 at the MEDIAN of eight 40-run
+#   measurements taken across a 12x load swing on one M4 Pro (load average 3.4
+#   to 42.4):
+#     1.113  1.126  1.130  1.132  1.137  1.142  1.154  1.159   median 1.132
+#   a 4.1% total spread, while p95 on the same ladder moved 6x over the same
+#   swing. The highest reading sits 12% under the +15% ceiling. Budget +15%.
+slope 1.132
+# ratio — min(10,151-line rung) / min(4-line floor rung): what a 10k-line project
+#   costs in units of what an empty one costs. Catches a uniform slowdown of the
+#   per-line work, which `slope` by construction cannot see. Median of the same
+#   eight runs:
+#     4.298 4.351 4.362 4.403 4.424 4.435 4.454 4.690 (the 4.690 is load 42.4)
+#   an 8.9% total spread. Budget +25%.
+ratio 4.403
+#
+# ── RECORDED OBSERVATIONS (not gated) ────────────────────────────────────────
+# almide 0.57.0, arm64 Darwin (M4 Pro, 14 cores), 2026-08-13, corpus = 303
+# stdlib modules / 30,624 lines in the top rung, 40 interleaved runs per rung.
+# Median of the three load-6.0-7.6 runs:
+#
+#   modules   lines     min     p50     p95   us/line
+#         0       4    11.4    12.0    12.6      —
+#         9    2047    17.2    18.4    19.5     2.87
+#        51    5456    29.3    31.2    32.3     3.29
+#       134   10151    49.6    52.1    53.3     3.78
+#       213   20378    94.1    97.4    99.5     4.06
+#       303   30624   135.7   141.5   145.1     4.06
+#
+# Against the roadmap's axis A targets (docs/roadmap/ALL_AXES.md): `check` p95 at
+# 10k lines is 53.3ms on an unloaded box, inside the < 100ms target — and 332ms
+# on the same box under load 42.4, outside it. Which is exactly why the target is
+# published as an observation and the ratchet holds the two ratios instead.
