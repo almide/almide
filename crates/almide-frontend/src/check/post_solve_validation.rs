@@ -441,8 +441,15 @@ impl Checker {
             // compound RHS (pipe chains etc.) has a span that ends inside
             // the expression, and a blind append corrupts the source
             // (`x |>! f` — caught by the harness's try-apply gate).
+            // Tagged as a SUGGESTION, not machine-applicable (#1312):
+            // `!` is one of several legal consumptions of a Result
+            // (`??`, `?`, match on ok/err, `let _ =`), and picking
+            // propagation is a semantic decision about how this program
+            // handles failure. The span is exact, so the fix-it is
+            // offered and IDE/model-appliable — `almide fix` just won't
+            // choose for the author.
             if mechanical && s.end_col > s.col {
-                d = d.with_try_replace(s.line, s.end_col, s.end_col, "!");
+                d = d.with_suggested_fix(s.line, s.end_col, s.end_col, "!");
             }
             self.diagnostics.push(d);
         }

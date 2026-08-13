@@ -225,7 +225,10 @@ impl Parser {
                     "run `almide fix` on this file to migrate every range mechanically",
                     "range expression",
                 ).with_code("E031")
-                 .with_try_replace(op_line, op_col, op_end_col, new_spelling);
+                 // Machine-applicable: the retired spelling had exactly one
+                 // meaning and the new one denotes the same range, so the
+                 // rewrite is a re-spelling — nothing is decided for the author.
+                 .with_machine_fix(op_line, op_col, op_end_col, new_spelling);
                 if let Some(f) = &self.file { d.file = Some(f.clone()); }
                 d.line = Some(op_line);
                 d.col = Some(op_col);
