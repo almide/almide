@@ -20,7 +20,7 @@ Carbon は世界最高クラスの人員と Google の支援を得て、announce
 | 軸 | 現在値（実測） | 勝利条件（測定可能な出口） | 勝ち筋 | 主戦場 |
 |---|---|---|---|---|
 | **A. 編集ループ速度** | check 22.7ms / warm build 266ms / cold 644ms | 10k 行で規模非依存、debug パスに rustc とリンカなし | **正面から殴る**（既知の工学） | 0.4x, 0.6x |
-| **B. 実行時性能** | 対 handwritten Rust **1.00×**（n-body, spectral-norm）〜1.27×（FFT） | ①ratchet 維持 ②**意味論最適化で 1.0× を割る** ③GPU で別階級 | **スカラー codegen で LLVM に挑まない** | 0.5x, 0.6x |
+| **B. 実行時性能** | 対 handwritten Rust **1.00×**（n-body, spectral-norm）〜1.18×（FFT）、materialize 主体の workload は約 1.6× | ①ratchet 維持 ②**意味論最適化で 1.0× を割る** ③GPU で別階級 | **スカラー codegen で LLVM に挑まない** | 0.5x, 0.6x |
 | **C. 正しさ・信頼** | 契約 260 / 3-way オラクル / Lean ベルト / PCC checker 1,400 行 | qualification dossier を第三者に渡せる、全ビルドに TV 証明書 | **現路線 + 生成型ファジング** | 0.7x, 0.8x |
 | **D. LLM writability** | MSR 100%(30/30) / MiniGit 20/20・233 LOC（5 言語中最小） | **MSR が土俵になる**（第三者再現・他言語も同条件） | **ホームグラウンド。定義者になる** | 0.5x |
 | **E. ツールチェーン DX** | 単一バイナリ + LSP 内蔵 + playground | agent 向け surface の完備（JSON 診断 + fix-it + MCP） | **ほぼ手中。残りは agent 面** | 0.5x |
@@ -56,7 +56,8 @@ cold wasm 299.1ms。ただし**測定対象が小さい** — これは規模非
 ## 軸 B: 実行時性能 — 土俵をずらして勝つ
 
 **現在値**（`docs/project/BENCHMARKS.md`、CI ラチェット下）: n-body 1.135s / spectral-norm 0.685s で
-**対 handwritten Rust 1.00×**、FFT のみ 1.27×。wasm レッグは native の約 1.13–1.16×。
+**対 handwritten Rust 1.00×**、FFT のみ 1.18×（2026-08-13 に入力生成の形を修正、#1338）。
+wasm レッグは native の約 1.13–1.16×。
 
 **2026-08-13 の実測が、この軸の見立てを一つ更新した。** FFT 2^22 を段階分解したところ
 （起動 / 入力生成 / カーネル、インターリーブ中央値 11 回、出力は 17 桁まで一致）:
@@ -67,6 +68,12 @@ cold wasm 299.1ms。ただし**測定対象が小さい** — これは規模非
 | `list.range \|> flat_map` | 116.0ms | 92ms | 213.9ms | 0.979× |
 | Rust 参照（handwritten） | 39.3ms | 94ms | 138.9ms | 1.000× |
 | 現行ベンチ（append ループ） | 69.1ms | 101ms | 175.9ms | 1.074× |
+
+この表の 2 行は解消済み（2026-08-13、同日中）。`list.range |> flat_map` の生成が突出していたのは
+**flat_map のラムダが中間リストを要素ごとにヒープ確保していた**ためで、末尾が固定長リテラルなら
+Rust の配列を返すよう下ろすことで append ループと同着になった（[#1337](https://github.com/almide/almide/issues/1337)、
+`listbuild` 3 行として perf suite に常設 + ratchet 化）。ベンチ自身の生成も事前確保に変更し、
+FFT 行は 1.27× → 1.18×（[#1338](https://github.com/almide/almide/issues/1338)）。**残るのは materialize そのもの**。
 
 **カーネルは既に handwritten Rust を 13% 上回っている**（プロセス起動は 5.9ms 対 5.6ms で差なし
 ＝ hello-world で個別実測済み）。つまり「スカラー codegen が天井」という当初の見立ては**測定で覆った** —

@@ -1,7 +1,11 @@
 # almide-native / handwritten-rust runtime ratio per benchmark
 # (bench.py --quick medians; see scripts/check-perf-ratio.sh)
 fasta 1.152
-fft 1.272
+# fft re-anchored 2026-08-13 (was 1.272): the row's input generation moved from
+# an 8.4M-iteration append loop to one sized allocation + indexed writes, so the
+# row stopped spending ~8% of its wall clock building its own input (#1338).
+# Transform output is bit-identical across the change.
+fft 1.176
 # listbuild: the same 2^23-element materializing build written three ways
 # (#1337). All three now sit on the same ~1.6x, which is the materialization
 # cost #1004 tracks and NOT a property of the shape — the shape spread was the
