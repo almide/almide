@@ -38,6 +38,7 @@ Use `almide explain <code>` to read these from the CLI.
 | [E045](E045.md) | Tuple index `.k` on a non-tuple, or out of range |
 | [E046](E046.md) | `_` in a call argument — not a value, not partial application (the typed hole `_` is expression-position only) |
 | [E047](E047.md) | Invalid escape in a string literal — an undefined escape, or `\u{…}` outside the Unicode scalar range |
+| [E048](E048.md) | Variant pattern from the wrong family — `ok`/`err` on an Option, `some`/`none` on a Result |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
