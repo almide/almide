@@ -1114,7 +1114,7 @@ mod tests {
     // Malformed numeric escapes fall through to literal passthrough so existing
     // text (e.g. `\users`, `\xyz`, a surrogate) is preserved unchanged.
     // DECODING is unchanged by #1264 — the escapes below are rejected by the
-    // validator (E046), not re-decoded.
+    // validator (E047), not re-decoded.
     #[test]
     fn malformed_numeric_escapes_pass_through() {
         assert_eq!(lex_string_value("let x = \"\\users\"\n"), "\\users");
