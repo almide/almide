@@ -3325,3 +3325,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/matrix_q_fp16_scale_domain.almd", class = "fixture" },
 ]
+
+# ── `??` WITH AN INLINE-`!` FALLBACK OVER A HANDLE PAYLOAD ─────────────
+[[contract]]
+id        = "C-271"
+spec      = "ALS-E25"
+title     = "`carrier ?? call!` yields the fallback's PAYLOAD, never its Result block, for a handle-carrying payload on both targets"
+statement = "A `??` whose FALLBACK is an inline propagating unwrap (`a ?? f(..)!`) produces byte-identical observables native <-> wasm when the FALLBACK ARM RUNS and the payload is heap/handle-carrying (a json `Value`, `String`, `List[Int]`, `Bytes`). Thirteen cells: the three reported json payloads (array, object, number), the ok path (the carrier holds a value, so a fallback that would itself fail is never evaluated — `??` stays lazy in its fallback), the `match { ok(p) => p, err(_) => f(..)! }` spelling that reaches the same arm, an Option carrier, `?`-to-Option followed by `??`, a nested `??` supplying the outer fallback, the String / List / Bytes carriers, the BOTH-fail path (the fallback's own error is the enclosing fn's error), and the scalar (Int) control that never took the handle path. Found by `tools/xtarget-fuzz` (--family all --seed 13322026081302 --index 297) as #1375, a SILENT WRONG VALUE on wasm: `json.parse(\"hi\") ?? json.parse(\"[1,2]\")!` printed `true`, which is `stringify` reading the ok DISCRIMINANT `1` out of the fallback's Result block. The heap-arm lowering applied the `e! = e` pass-through — the identity in a RESULT-typed arm, which propagates the Result verbatim — to a PAYLOAD-typed arm, so the whole Result block landed where the merge expects the payload handle. The `match` spelling detonated a second way, via `branch_lift` hoisting a `!`-bearing arm into a non-effect payload-returning helper: rustc E0277 on native, an always-wrapped body read as the bare payload on wasm. `spec/wasm_cross/declaration_forms.almd` carried the shape only on the OK path, where the fallback arm never runs — the fixture that tests what someone already thought of."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_or_unwrap_fallback.almd", class = "fixture" },
+]
