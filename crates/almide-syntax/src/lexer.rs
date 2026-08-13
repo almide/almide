@@ -73,8 +73,11 @@ pub struct Token {
     /// `"""…"""`). `None` everywhere else, where `value` already is the source
     /// text (identifiers, numbers, operators).
     ///
-    /// `almide fmt` needs the spelling, not the value: it must reprint
-    /// `"\u{3042}"` as written instead of collapsing it to `あ` (#1263).
+    /// Two consumers need the spelling, not the value: `almide fmt`, which must
+    /// reprint `"\u{3042}"` as written instead of collapsing it to `あ` (#1263),
+    /// and the escape validator below, which cannot tell an escape that the
+    /// decoder rejected from text that was never an escape once the value has
+    /// been built (#1264).
     pub raw: Option<std::string::String>,
 }
 
@@ -415,6 +418,200 @@ fn lex_escape(chars: &[char], pos: usize, buf: &mut String, pair_starts: &mut Ve
         '$' => { pair_starts.push(buf.len()); buf.push('\\'); buf.push('$'); pos + 2 }
         other => { buf.push('\\'); buf.push(other); pos + 2 }
     }
+}
+
+// ── Escape validation (#1264) ───────────────────────────────────
+//
+// The decoders above are TOTAL by construction: every byte that is not a
+// recognized escape is copied through verbatim, so `"bad:\q"` produced the
+// two characters `\` `q` and `"\u{110000}"` produced the ten characters of
+// its own spelling — silently, with no diagnostic, in a language whose
+// integer literals refuse to silently wrap (E024). This module re-walks a
+// literal's RAW source text and names every escape the decoders declined,
+// so the parser can reject it instead. Decoding is unchanged: this is a
+// pure observer, and it shares `lex_numeric_escape` with the decoder so the
+// two can never disagree about what "well-formed" means.
+
+/// Why an escape was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EscapeIssueKind {
+    /// The character after `\` starts no escape this literal form defines.
+    Unknown,
+    /// `\u{...}` parsed, but the codepoint is not a Unicode scalar value
+    /// (above U+10FFFF, or in the UTF-16 surrogate range D800..DFFF).
+    OutOfRange,
+}
+
+/// One rejected escape, located relative to the literal's opening delimiter.
+#[derive(Debug, Clone)]
+pub struct EscapeIssue {
+    pub kind: EscapeIssueKind,
+    /// The offending source text, e.g. `\q` or `\u{110000}`.
+    pub text: std::string::String,
+    /// Newlines between the literal's first character and the escape.
+    pub line_offset: usize,
+    /// Characters since the last newline (from the literal's first character
+    /// when `line_offset == 0`).
+    pub col_offset: usize,
+}
+
+/// The escapes each literal form's decoder defines. `\$` is double-quote-only
+/// (a single-quoted string has no interpolation, so `$` is already literal);
+/// `\'` is single-quote-only for the mirror-image reason.
+const DQUOTE_ESCAPES: &[char] = &['n', 't', 'r', '\\', '"', '$'];
+const SQUOTE_ESCAPES: &[char] = &['n', 't', 'r', '\\', '\''];
+
+/// Every escape in `raw` (a string token's VERBATIM source text, delimiters
+/// included) that the decoder declined. Raw strings (`r"…"`, `r"""…"""`) have
+/// no escape layer at all and yield nothing.
+pub fn validate_literal_escapes(raw: &str) -> Vec<EscapeIssue> {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut issues = Vec::new();
+    scan_literal_escapes(&chars, &mut issues, 0, 0);
+    issues
+}
+
+/// Walk one literal's characters, appending issues. `base_line`/`base_col`
+/// offset the reported position so a literal nested inside an interpolation
+/// hole still points at its own source position.
+fn scan_literal_escapes(chars: &[char], issues: &mut Vec<EscapeIssue>, base_line: usize, base_col: usize) {
+    // Raw strings carry no escape layer — `r"\q"` IS backslash-q.
+    if chars.first() == Some(&'r') {
+        return;
+    }
+    let (body_start, valid, interpolating) = match chars.first() {
+        Some('"') if chars.len() >= 3 && chars[1] == '"' && chars[2] == '"' => (3, DQUOTE_ESCAPES, true),
+        Some('"') => (1, DQUOTE_ESCAPES, true),
+        Some('\'') => (1, SQUOTE_ESCAPES, false),
+        _ => return,
+    };
+    let mut pos = body_start;
+    let mut line = base_line;
+    let mut col = base_col + body_start;
+    while pos < chars.len() {
+        let ch = chars[pos];
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+            pos += 1;
+            continue;
+        }
+        // An interpolation hole is Almide code, not literal text. Skip it the
+        // way the lexer's own scan does (brace depth, nested literals captured
+        // atomically) — and validate the nested literals, since the sub-parser
+        // that re-lexes them drops its own diagnostics on the floor.
+        if interpolating && ch == '$' && chars.get(pos + 1) == Some(&'{') {
+            let (new_pos, new_line, new_col) = skip_interpolation_for_validation(chars, pos, line, col, issues);
+            pos = new_pos;
+            line = new_line;
+            col = new_col;
+            continue;
+        }
+        if ch != '\\' || pos + 1 >= chars.len() {
+            pos += 1;
+            col += 1;
+            continue;
+        }
+        let (end, issue) = classify_escape(chars, pos, valid);
+        if let Some(kind) = issue {
+            issues.push(EscapeIssue {
+                kind,
+                text: chars[pos..end.min(chars.len())].iter().collect(),
+                line_offset: line,
+                col_offset: col,
+            });
+        }
+        col += end.min(chars.len()) - pos;
+        pos = end;
+    }
+}
+
+/// Classify the escape starting at `chars[pos] == '\\'`. Returns the position
+/// just past it and `None` when the decoder accepts it.
+fn classify_escape(chars: &[char], pos: usize, valid: &[char]) -> (usize, Option<EscapeIssueKind>) {
+    let next = chars[pos + 1];
+    if next == 'x' || next == 'u' {
+        if let Some((_, new_pos)) = lex_numeric_escape(chars, pos) {
+            return (new_pos, None);
+        }
+        let (end, out_of_range) = numeric_escape_extent(chars, pos);
+        let kind = if out_of_range { EscapeIssueKind::OutOfRange } else { EscapeIssueKind::Unknown };
+        return (end, Some(kind));
+    }
+    if valid.contains(&next) {
+        return (pos + 2, None);
+    }
+    (pos + 2, Some(EscapeIssueKind::Unknown))
+}
+
+/// How far a MALFORMED `\x`/`\u{…}` escape reaches, and whether it failed
+/// only because its codepoint is outside the Unicode scalar range. Used to
+/// quote the whole offending spelling instead of just its first two chars.
+fn numeric_escape_extent(chars: &[char], pos: usize) -> (usize, bool) {
+    if chars[pos + 1] == 'x' {
+        return ((pos + 4).min(chars.len()), false);
+    }
+    if chars.get(pos + 2) != Some(&'{') {
+        return (pos + 2, false);
+    }
+    let mut i = pos + 3;
+    let mut code: u32 = 0;
+    let mut digits = 0usize;
+    let mut hex_only = true;
+    while let Some(&c) = chars.get(i) {
+        if c == '}' { break; }
+        match c.to_digit(16) {
+            Some(d) => code = code.saturating_mul(16).saturating_add(d),
+            None => hex_only = false,
+        }
+        digits += 1;
+        i += 1;
+        if digits > 8 { break; }
+    }
+    let closed = chars.get(i) == Some(&'}');
+    let end = if closed { i + 1 } else { i };
+    let out_of_range = closed && hex_only && digits > 0 && digits <= 6;
+    (end, out_of_range)
+}
+
+/// Skip a `${…}` hole during validation, recursing into nested string
+/// literals. Returns the position/line/col just past the closing `}`.
+fn skip_interpolation_for_validation(
+    chars: &[char],
+    start: usize,
+    mut line: usize,
+    mut col: usize,
+    issues: &mut Vec<EscapeIssue>,
+) -> (usize, usize, usize) {
+    let mut pos = start + 2;
+    col += 2;
+    let mut depth = 1usize;
+    while pos < chars.len() && depth > 0 {
+        let c = chars[pos];
+        // `\"`-delimited nested literal (the outer-string escape habit the
+        // lexer normalizes) — step over the pair so the scan below does not
+        // start a literal in the middle of the delimiter.
+        if c == '\\' && pos + 1 < chars.len() {
+            col += 2;
+            pos += 2;
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            let mut sink = String::new();
+            let end = scan_nested_string_literal(chars, pos, &mut sink);
+            scan_literal_escapes(&chars[pos..end], issues, line, col);
+            for &ch in &chars[pos..end] {
+                if ch == '\n' { line += 1; col = 0; } else { col += 1; }
+            }
+            pos = end;
+            continue;
+        }
+        if c == '{' { depth += 1; }
+        if c == '}' { depth -= 1; }
+        if c == '\n' { line += 1; col = 0; } else { col += 1; }
+        pos += 1;
+    }
+    (pos, line, col)
 }
 
 /// Remove the recorded escape-pair backslashes from a non-interpolated
@@ -916,6 +1113,8 @@ mod tests {
 
     // Malformed numeric escapes fall through to literal passthrough so existing
     // text (e.g. `\users`, `\xyz`, a surrogate) is preserved unchanged.
+    // DECODING is unchanged by #1264 — the escapes below are rejected by the
+    // validator (E046), not re-decoded.
     #[test]
     fn malformed_numeric_escapes_pass_through() {
         assert_eq!(lex_string_value("let x = \"\\users\"\n"), "\\users");
@@ -923,5 +1122,94 @@ mod tests {
         assert_eq!(lex_string_value("let x = \"\\u{}\"\n"), "\\u{}");
         // U+D800 is a surrogate — not a valid scalar, so it stays literal.
         assert_eq!(lex_string_value("let x = \"\\u{d800}\"\n"), "\\u{d800}");
+    }
+
+    // ── #1264: escape validation ────────────────────────────────
+
+    fn issues(raw: &str) -> Vec<(EscapeIssueKind, String)> {
+        validate_literal_escapes(raw)
+            .into_iter()
+            .map(|i| (i.kind, i.text))
+            .collect()
+    }
+
+    #[test]
+    fn every_defined_escape_validates_clean() {
+        for raw in [
+            r#""a\nb\tc\rd""#,
+            r#""back\\slash""#,
+            r#""quote\"inside""#,
+            r#""dollar\${notahole}""#,
+            r#""\x00 \x1b \xFF""#,
+            r#""\u{0} \u{3042} \u{10FFFF}""#,
+            r#"'sq \n \t \r \\ \' \x41 \u{1F600}'"#,
+            "\"\"\"\n  heredoc \\t body\n  \"\"\"",
+        ] {
+            assert!(issues(raw).is_empty(), "unexpected issue in {raw:?}: {:?}", issues(raw));
+        }
+    }
+
+    #[test]
+    fn unknown_escapes_are_reported_with_their_spelling() {
+        assert_eq!(issues(r#""bad:\q""#), vec![(EscapeIssueKind::Unknown, "\\q".to_string())]);
+        // `\d`/`\w`/`\s` — the regex habit. A regex pattern is an ordinary
+        // string, so it must double its backslashes (or be a raw string).
+        assert_eq!(issues(r#""\d+""#), vec![(EscapeIssueKind::Unknown, "\\d".to_string())]);
+        assert!(issues(r#""\\d+""#).is_empty(), "a doubled backslash is one literal backslash");
+        // `\0` is C's NUL spelling, not Almide's — it silently produced two
+        // characters (found live in tools/stdlib-crawler/main.almd).
+        assert_eq!(issues(r#""\0""#), vec![(EscapeIssueKind::Unknown, "\\0".to_string())]);
+        // Quote-form asymmetry: `\$` is double-quote-only, `\'` single-only.
+        assert_eq!(issues(r#"'\$'"#), vec![(EscapeIssueKind::Unknown, "\\$".to_string())]);
+        assert_eq!(issues(r#""\'""#), vec![(EscapeIssueKind::Unknown, "\\'".to_string())]);
+    }
+
+    #[test]
+    fn out_of_range_codepoints_are_their_own_class() {
+        assert_eq!(
+            issues(r#""\u{110000}""#),
+            vec![(EscapeIssueKind::OutOfRange, "\\u{110000}".to_string())]
+        );
+        assert_eq!(
+            issues(r#""\u{D800}""#),
+            vec![(EscapeIssueKind::OutOfRange, "\\u{D800}".to_string())]
+        );
+        // Malformed SHAPE (no digits, no brace, non-hex) is "unknown", not
+        // "out of range" — there is no codepoint to name.
+        assert_eq!(issues(r#""\u{}""#), vec![(EscapeIssueKind::Unknown, "\\u{}".to_string())]);
+        assert_eq!(issues(r#""\uABCD""#), vec![(EscapeIssueKind::Unknown, "\\u".to_string())]);
+        assert_eq!(issues(r#""\xZZ""#)[0].0, EscapeIssueKind::Unknown);
+    }
+
+    #[test]
+    fn raw_strings_have_no_escape_layer() {
+        assert!(issues(r#"r"\q \d \u{110000}""#).is_empty());
+        assert!(issues("r\"\"\"\\q\"\"\"").is_empty());
+    }
+
+    #[test]
+    fn interpolation_holes_are_code_and_their_nested_literals_are_checked() {
+        // `x + 1` is not literal text — no escape rules apply inside a hole.
+        assert!(issues(r#""a${x + 1}b""#).is_empty());
+        // A nested literal inside a hole IS a literal: the sub-parser that
+        // re-lexes it throws its own diagnostics away, so this pass owns it.
+        assert_eq!(
+            issues(r#""${ f("bad\q") }""#),
+            vec![(EscapeIssueKind::Unknown, "\\q".to_string())]
+        );
+    }
+
+    #[test]
+    fn issue_position_is_relative_to_the_literal() {
+        let found = validate_literal_escapes(r#""ab\q""#);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line_offset, 0);
+        // 1 for the opening quote + 2 for `ab`.
+        assert_eq!(found[0].col_offset, 3);
+
+        let found = validate_literal_escapes("\"\"\"\nok\nbad \\q\n\"\"\"");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line_offset, 2);
+        assert_eq!(found[0].col_offset, 4);
     }
 }

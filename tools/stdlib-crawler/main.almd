@@ -138,7 +138,10 @@ effect fn crawl_all(lang: String, dir: String, force: Bool) -> Unit = {
     print()
     print(f"Done: {crawled} crawled, {skipped} cached, {errors} errors")
   """
-  let cmd_str = string.join(introspect_cmd, "\0")
+  // NUL separator — the receiving script above splits on `"\x00"`. Written
+  // `"\0"` it was not an escape Almide defines, so it silently produced the
+  // TWO characters `\` `0` and the split never matched (found by E046).
+  let cmd_str = string.join(introspect_cmd, "\u{0}")
   let output = process.exec("python3", ["-c", script, dir, force_flag, cmd_str, introspect_script, list_script])
   println(string.trim(output))
 }
