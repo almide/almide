@@ -39,7 +39,7 @@ source: scripts/release-seal.sh
 | C-WCET (counted-loop keystone あ) | PENDING in the receipt design | flight-reference-app Slice 2 |
 | C-FAITHFUL + Ferrocene leg (keystone い) | PENDING; no qualified native toolchain in the chain | flight-reference-app Slice 3, needs Ferrocene access |
 | wasmtime qualification pedigree | unqualified COTS, procedural TOR-9 | #865 |
-| ALS syntax-element authoring | 0/73 sectioned, shrink-only | proofs/als-element-coverage.toml (freeze precondition) |
+| ALS syntax-element authoring | shrink-only ratchet; live count in the ledger's `unwritten_ceiling` and proofs/STAGE-STATUS.md | proofs/als-element-coverage.toml (freeze precondition) |
 | Durability evidence | streak meter live, day 0 | research/benchmark/fuzz-green/ (90-day milestone) |
 | Process independence | ratchet-separation gate exists; human/organizational review split is org-level work | flight-evidence-gaps F5 close note |
 | PSAC / certification planning | no plan document yet | flight-qualification §G-F6 (dossier template) |
