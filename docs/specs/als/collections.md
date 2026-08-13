@@ -65,7 +65,9 @@ Contracts: C-038。
 `list.min/max/sort/sort_by/unique_by` は**要素型指向**で全域: Int/String は
 全順序、**Float は IEEE-754 totalOrder**（NaN は最大側に整列、-0 < +0）で
 比較し、NaN 混入でも決定的に完走する（パニック・未定義順は不適合）。
-Contracts: C-053, C-055。
+String キーの `sort_by` は要素が heap でも安定順序で全域（結果は各要素を
+co-own する）。
+Contracts: C-053, C-055, C-271。
 
 ## ALS-C10 空コレクションの型要件（静的規範）
 
