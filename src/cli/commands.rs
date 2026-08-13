@@ -127,9 +127,13 @@ fn compile_test_files_parallel(test_files: &[String], no_check: bool) -> Vec<(St
     results
 }
 
+use super::test_report::{report_test_failure, test_harness_args, TestRun};
+
 /// `cmd_test`'s Phase 2: execute every compiled test binary in parallel
-/// (bounded by CPU count). Extracted verbatim.
-fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, String>)>, program_args: &std::sync::Arc<Vec<String>>) -> Vec<(String, i32)> {
+/// (bounded by CPU count). Output is CAPTURED, not inherited: it feeds
+/// [`report_test_failure`], and printing each file's output whole in sorted
+/// order makes a parallel run's transcript deterministic.
+fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, String>)>, program_args: &std::sync::Arc<Vec<String>>) -> Vec<TestRun> {
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -144,19 +148,16 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
         let sem_tx = sem_tx.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
-            let code = match compile_result {
-                Ok(bin) => super::run::run_binary(&bin, &args),
-                Err(e) => {
-                    err(&format!("Compile error for {}:\n{}", file, e));
-                    1
-                }
+            let (code, out) = match compile_result {
+                Ok(bin) => super::run::run_binary_captured(&bin, &args),
+                Err(e) => (1, format!("Compile error for {}:\n{}", file, e)),
             };
             let _ = sem_tx.send(());
-            let _ = tx.send((file, code));
+            let _ = tx.send((file, code, out));
         }));
     }
     drop(tx);
-    let mut results: Vec<(String, i32)> = rx.iter().collect();
+    let mut results: Vec<TestRun> = rx.iter().collect();
     for h in handles { let _ = h.join(); }
     results.sort_by(|a, b| a.0.cmp(&b.0));
     results
@@ -165,11 +166,7 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
-    let mut program_args: Vec<String> = Vec::new();
-    if let Some(filter) = run_filter {
-        program_args.push(filter.to_string());
-    }
-    let program_args = std::sync::Arc::new(program_args);
+    let program_args = test_harness_args(run_filter);
 
     // Phase 1: Compile all test files in parallel (bounded by CPU count)
     let compiled = compile_test_files_parallel(&test_files, no_check);
@@ -178,9 +175,9 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let results = run_test_binaries_parallel(compiled, &program_args);
 
     let mut failed = 0;
-    for (file, code) in &results {
+    for (file, code, output) in &results {
         if *code != 0 {
-            err(&format!("FAILED: {}", file));
+            report_test_failure(file, output);
             failed += 1;
         }
     }
@@ -613,8 +610,8 @@ fn run_wasm_test_phase(test_files: &[String], tmp_dir: &std::sync::Arc<std::path
 
 /// `cmd_test_fast`'s Phase 2: native rustc fallback (authoritative) for
 /// everything the WASM path didn't pass, parallel with per-file scratch
-/// dirs. Extracted verbatim.
-fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize) -> Vec<(String, i32)> {
+/// dirs. Output is captured — see [`run_test_binaries_parallel`].
+fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize) -> Vec<TestRun> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -631,16 +628,16 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
             let worker_dir = std::env::temp_dir()
                 .join("almide-test")
                 .join(tf.replace('/', "_").replace('.', "_"));
-            let code = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => super::run::run_binary(&bin, &args),
-                Err(e) => { err(&format!("Compile error for {}:\n{}", tf, e)); 1 }
+            let (code, out) = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
+                Ok(bin) => super::run::run_binary_captured(&bin, &args),
+                Err(e) => (1, format!("Compile error for {}:\n{}", tf, e)),
             };
             let _ = st.send(());
-            let _ = tx.send((tf, code));
+            let _ = tx.send((tf, code, out));
         }));
     }
     drop(tx);
-    let mut v: Vec<(String, i32)> = rx.iter().collect();
+    let mut v: Vec<TestRun> = rx.iter().collect();
     for h in handles { let _ = h.join(); }
     v.sort_by(|a, b| a.0.cmp(&b.0));
     v
@@ -690,15 +687,13 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
 
     // Phase 2: native rustc fallback (authoritative) for everything the WASM
     // path didn't pass, parallel with per-file scratch dirs.
-    let mut program_args: Vec<String> = Vec::new();
-    if let Some(f) = run_filter { program_args.push(f.to_string()); }
-    let program_args = std::sync::Arc::new(program_args);
+    let program_args = test_harness_args(run_filter);
 
     let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus);
 
     let mut failed = 0;
-    for (file, code) in &native_results {
-        if *code != 0 { err(&format!("FAILED: {}", file)); failed += 1; }
+    for (file, code, output) in &native_results {
+        if *code != 0 { report_test_failure(file, output); failed += 1; }
     }
     // The #1166 divergence class: the wasm leg compiled the file and failed at
     // runtime, but the AUTHORITATIVE native re-run passed — a wasm-only
@@ -707,7 +702,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     // is native's). A trap whose native re-run ALSO failed is a plain FAILED
     // test — no wasm-specific noise for those.
     let native_code: std::collections::HashMap<&String, i32> =
-        native_results.iter().map(|(f, c)| (f, *c)).collect();
+        native_results.iter().map(|(f, c, _)| (f, *c)).collect();
     let diverged: Vec<&(String, String)> = trapped
         .iter()
         .filter(|(f, _)| native_code.get(f).copied() == Some(0))
@@ -766,18 +761,27 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
         files
     };
 
-    let mut program_args: Vec<String> = Vec::new();
-    if let Some(filter) = run_filter {
-        program_args.push(filter.to_string());
-    }
+    let program_args = test_harness_args(run_filter);
 
+    // JSONL, one line per file, in sorted file order — a run is diffable
+    // against the next one. Each failing file also emits its per-assertion
+    // records ({name, file, line, expected, found, diff}); that is the shape
+    // the dojo harness reads, and the reason `--json` captures the child's
+    // output instead of letting it stream to the terminal (#1313).
     for test_file in &test_files {
-        let code = super::cmd_run_inner(test_file, &program_args, false, true, false, false);
-        // Emit JSON per file
+        let (code, output) = match super::run::compile_to_binary(test_file, false, true, false, None) {
+            Ok(bin) => super::run::run_binary_captured(&bin, &program_args),
+            Err(e) => (1, e),
+        };
+        let source = std::fs::read_to_string(test_file).unwrap_or_default();
+        let failures = super::test_report::parse(test_file, &source, &output);
         let status = if code == 0 { "pass" } else { "fail" };
         out(&format!(
-            r#"{{"file":"{}","status":"{}","exit_code":{}}}"#,
-            test_file.replace('"', r#"\""#), status, code
+            r#"{{"file":{},"status":"{}","exit_code":{},"failures":[{}]}}"#,
+            serde_json::Value::from(test_file.as_str()),
+            status,
+            code,
+            failures.iter().map(|f| f.to_json()).collect::<Vec<_>>().join(","),
         ));
     }
 }
