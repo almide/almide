@@ -196,27 +196,47 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local.set $errno
       (call $path_open (local.get $dirfd) (i32.const 0) (local.get $pdata) (local.get $plen)
                        (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (local.get $fd_out)))
-    ;; On a path_open error build Err(<native std::io Display>) — the WASI errno maps to
-    ;; the EXACT text native std::fs emits ($fs_errno_msg), so `err(e)` byte-matches.
-    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+    ;; The READ half runs only when path_open succeeded; it may set $errno itself.
+    ;; #1233/#1368 — fd_read's errno used to be DROPPED, and `path_open` SUCCEEDS on a
+    ;; DIRECTORY (the failure surfaces at fd_read as ISDIR). Dropping it fell through to
+    ;; the Ok arm and built `ok("")` from a zero-length read where native
+    ;; (std::fs::read_to_string) returns Err("Is a directory (os error 21)") — a SILENT
+    ;; wrong Result branch across the whole read family (read_text / read_lines /
+    ;; read_bytes[_raw] and their _if_exists twins, which share this one floor).
+    ;; Carrying it into the SHARED mapping below is the errno-carrying read prim C-215
+    ;; named. Note the ORDER: fd_close must not clobber the read errno.
+    (if (i32.eqz (local.get $errno))
       (then
-{rtf_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
-        (call $rtf_result (local.get $msg) (i32.const 1)))
-      (else
         (local.set $fd (i32.load (local.get $fd_out)))
         ;; fd_filestat_get → file size (i64 @ stat+32; take the low 32 bits). The stat buffer
         ;; MUST be 8-aligned (the host writes an i64 there) — `$alloc8` guarantees it.
         (local.set $stat (call $alloc8 (i32.const 64)))
         (drop (call $fd_filestat_get (local.get $fd) (local.get $stat)))
-        (local.set $fsize (i32.load (i32.add (local.get $stat) (i32.const 32))))
-        ;; fd_read into a fresh buffer; iov = [buf_ptr, buf_len].
-        (local.set $data (call $alloc8 (i32.add (local.get $fsize) (i32.const 8))))
-        (local.set $iov (call $alloc8 (i32.const 8)))
-        (i32.store (local.get $iov) (local.get $data))
-        (i32.store (i32.add (local.get $iov) (i32.const 4)) (local.get $fsize))
-        (local.set $nread (call $alloc8 (i32.const 4)))
-        (drop (call $fd_read (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nread)))
-        (drop (call $fd_close (local.get $fd)))
+        ;; filetype@16 == 3 is a DIRECTORY. Classify it from the STAT, not from
+        ;; fd_read's errno: the errno a host reports for reading a directory fd is
+        ;; host-specific (wasmtime says BADF, not ISDIR), while the filetype byte is
+        ;; the SAME one fs.is_dir already reads. errno 31 (ISDIR) then renders
+        ;; native's exact "Is a directory (os error 21)" through the mapping below.
+        (if (i32.eq (i32.load8_u (i32.add (local.get $stat) (i32.const 16))) (i32.const 3))
+          (then (local.set $errno (i32.const 31)))
+          (else
+            (local.set $fsize (i32.load (i32.add (local.get $stat) (i32.const 32))))
+            ;; fd_read into a fresh buffer; iov = [buf_ptr, buf_len].
+            (local.set $data (call $alloc8 (i32.add (local.get $fsize) (i32.const 8))))
+            (local.set $iov (call $alloc8 (i32.const 8)))
+            (i32.store (local.get $iov) (local.get $data))
+            (i32.store (i32.add (local.get $iov) (i32.const 4)) (local.get $fsize))
+            (local.set $nread (call $alloc8 (i32.const 4)))
+            (local.set $errno
+              (call $fd_read (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nread)))))
+        (drop (call $fd_close (local.get $fd)))))
+    ;; On a path_open OR fd_read error build Err(<native std::io Display>) — the WASI errno
+    ;; maps to the EXACT text native std::fs emits ($fs_errno_msg), so `err(e)` byte-matches.
+    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+      (then
+{rtf_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+        (call $rtf_result (local.get $msg) (i32.const 1)))
+      (else
         ;; the actual byte count read (may be < the stat size) is the String length.
         (local.set $fsize (i32.load (local.get $nread)))
         ;; build the canonical String + copy the bytes, then wrap it Ok.

@@ -53,42 +53,42 @@
 
 [[fn]]
 name = "__die"
-site = "crates/almide-mir/src/render_wasm_p3.rs:182"
+site = "crates/almide-mir/src/render_wasm_p3.rs:163"
 digest = "99fb3c2e69e7"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "__div_trap"
-site = "crates/almide-mir/src/render_wasm_p3.rs:145"
+site = "crates/almide-mir/src/render_wasm_p3.rs:126"
 digest = "4495e0fb3c83"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "__export_"
-site = "crates/almide-mir/src/render_wasm.rs:623"
+site = "crates/almide-mir/src/render_wasm.rs:617"
 digest = "d1959ff9df04"
 class = "TEMPLATE"
 why = "`(func $__export_{internal}…)` — the export-wrapper TEMPLATE; each instance carries a user function's name."
 
 [[fn]]
 name = "__import_"
-site = "crates/almide-mir/src/render_wasm.rs:493"
+site = "crates/almide-mir/src/render_wasm.rs:487"
 digest = "e7030093815d"
 class = "TEMPLATE"
 why = "`(import … (func $__import_{sym}…))` — the extern-import TEMPLATE, one instance per declared import."
 
 [[fn]]
 name = "__main_err"
-site = "crates/almide-mir/src/render_wasm_p3.rs:163"
+site = "crates/almide-mir/src/render_wasm_p3.rs:144"
 digest = "4f2cf058ce91"
 class = "CORPUS"
 via = "args_surface.almd"
 
 [[fn]]
 name = "__mg_take"
-site = "crates/almide-mir/src/render_wasm.rs:640"
+site = "crates/almide-mir/src/render_wasm.rs:634"
 digest = "4185da3f48a0"
 class = "CORPUS"
 via = "mg_rebuild_two_phase.almd"
@@ -123,15 +123,15 @@ via = "fuel_timeout_ends.almd"
 
 [[fn]]
 name = "alloc"
-site = "crates/almide-mir/src/render_wasm_p3.rs:193"
+site = "crates/almide-mir/src/render_wasm_p3.rs:174"
 digest = "63591a64eb5c"
 class = "PROVEN"
 via = "alias_combinator_rc.almd"
-proof = "proofs/FreeList.v + proofs/FreeListRc.v"
+proof = "proofs/FreeList.v"
 
 [[fn]]
 name = "alloc8"
-site = "crates/almide-mir/src/render_wasm_p3.rs:258"
+site = "crates/almide-mir/src/render_wasm_p3.rs:239"
 digest = "04b05ec82dda"
 class = "PROVEN"
 via = "fan_settle_tuple.almd"
@@ -146,7 +146,7 @@ via = "args_surface.almd"
 
 [[fn]]
 name = "args_get_list"
-site = "crates/almide-mir/src/render_wasm_p3.rs:389"
+site = "crates/almide-mir/src/render_wasm_p3.rs:370"
 digest = "32c1abadb7b6"
 class = "CORPUS"
 via = "args_surface.almd"
@@ -160,28 +160,28 @@ via = "args_surface.almd"
 
 [[fn]]
 name = "clock_time_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:100"
+site = "crates/almide-mir/src/render_wasm_p3.rs:91"
 digest = "c36972df37dc"
 class = "CORPUS"
 via = "fuel_timeout_ends.almd"
 
 [[fn]]
 name = "elem_addr"
-site = "crates/almide-mir/src/render_wasm_p3.rs:318"
+site = "crates/almide-mir/src/render_wasm_p3.rs:299"
 digest = "da906ab99826"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "elem_addr_chk"
-site = "crates/almide-mir/src/render_wasm_p3.rs:337"
+site = "crates/almide-mir/src/render_wasm_p3.rs:318"
 digest = "b557581e5fcf"
 class = "CORPUS"
 via = "call_closure_lambda_param.almd"
 
 [[fn]]
 name = "env_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:447"
+site = "crates/almide-mir/src/render_wasm_p3.rs:428"
 digest = "6d99767442b6"
 class = "CORPUS"
 via = "env_get.almd"
@@ -202,28 +202,28 @@ via = "env_get.almd"
 
 [[fn]]
 name = "fd_close"
-site = "crates/almide-mir/src/render_wasm_p3.rs:84"
+site = "crates/almide-mir/src/render_wasm_p3.rs:75"
 digest = "fdce94b818bf"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "fd_filestat_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:86"
+site = "crates/almide-mir/src/render_wasm_p3.rs:77"
 digest = "a4be912262c9"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "fd_read"
-site = "crates/almide-mir/src/render_wasm_p3.rs:82"
+site = "crates/almide-mir/src/render_wasm_p3.rs:73"
 digest = "250a0bc852cb"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "fd_readdir"
-site = "crates/almide-mir/src/render_wasm_p3.rs:88"
+site = "crates/almide-mir/src/render_wasm_p3.rs:79"
 digest = "8138391eb8eb"
 class = "CORPUS"
 via = "fs_relative_path.almd"
@@ -237,21 +237,21 @@ via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "is_dot_entry"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:912"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:750"
 digest = "c3ca7c77e168"
 class = "CORPUS"
 via = "fs_relative_path.almd"
 
 [[fn]]
 name = "list_copy"
-site = "crates/almide-mir/src/render_wasm_p3.rs:357"
+site = "crates/almide-mir/src/render_wasm_p3.rs:338"
 digest = "dd4b194ca2f0"
 class = "CORPUS"
 via = "alias_cow.almd"
 
 [[fn]]
 name = "list_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:348"
+site = "crates/almide-mir/src/render_wasm_p3.rs:329"
 digest = "47515830f246"
 class = "FALLBACK_ONLY"
 via = "fs.list_dir"
@@ -259,42 +259,42 @@ why = "reached through dirent list build; every fixture that would exercise it i
 
 [[fn]]
 name = "list_new"
-site = "crates/almide-mir/src/render_wasm_p3.rs:279"
+site = "crates/almide-mir/src/render_wasm_p3.rs:260"
 digest = "67c00ad80bac"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "list_set"
-site = "crates/almide-mir/src/render_wasm_p3.rs:345"
+site = "crates/almide-mir/src/render_wasm_p3.rs:326"
 digest = "c691b3f13f11"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "main"
-site = "crates/almide-mir/src/pipeline_c.rs:364"
+site = "crates/almide-mir/src/pipeline_c.rs:347"
 digest = "f29bc94be267"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "make_dir"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:360"
-digest = "757026ff7c68"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:318"
+digest = "2f37d179fc39"
 class = "CORPUS"
-via = "fs_write_errno.almd"
+via = "fs_relative_path.almd"
 
 [[fn]]
 name = "name"
-site = "crates/almide-mir/src/render_wasm.rs:171"
+site = "crates/almide-mir/src/render_wasm.rs:165"
 digest = "fa03a4a87d6a"
 class = "TEMPLATE"
 why = "`(func ${}` — the MirFunction rendering template (render_wasm_b.rs); every program function is an instance."
 
 [[fn]]
 name = "oom"
-site = "crates/almide-mir/src/render_wasm_p3.rs:158"
+site = "crates/almide-mir/src/render_wasm_p3.rs:139"
 digest = "bcb5d1388f9b"
 class = "PROVEN"
 via = "alias_combinator_rc.almd"
@@ -302,59 +302,37 @@ proof = "proofs/FreeList.v"
 
 [[fn]]
 name = "path_create_directory"
-site = "crates/almide-mir/src/render_wasm_p3.rs:92"
+site = "crates/almide-mir/src/render_wasm_p3.rs:83"
 digest = "7811a3f30bb9"
 class = "CORPUS"
 via = "fs_relative_path.almd"
 
 [[fn]]
 name = "path_exists"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:493"
-digest = "af4eadc9189b"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:444"
+digest = "89e689310bd8"
 class = "CORPUS"
 via = "fs_preopen_resolve.almd"
 
 [[fn]]
 name = "path_filestat_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:90"
+site = "crates/almide-mir/src/render_wasm_p3.rs:81"
 digest = "abb7f8098cc0"
 class = "CORPUS"
 via = "fs_preopen_resolve.almd"
 
 [[fn]]
 name = "path_filestat_q"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:411"
-digest = "7e0c267a9b1a"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:366"
+digest = "87cd0805641b"
 class = "FALLBACK_ONLY"
 via = "fs.stat"
 why = "reached through prim.path_filestat; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
 
 [[fn]]
 name = "path_norm"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:68"
-digest = "ed5919335786"
-class = "CORPUS"
-via = "fan_settle_tuple.almd"
-
-# The preopen-table discovery pair (#1394) — $path_norm's dirfd resolution calls
-# both on its first path op, so every fs fixture reaches them. Under the gate
-# harness (`wasmtime --dir=/`, one preopen named "/") the resolution returns the
-# same (fd 3, path-minus-leading-slash) the hard-coded literal did, which is what
-# makes these CORPUS rows honest: the fixtures execute the scan, they just cannot
-# vary the number of preopens. The MULTI-preopen behavior — the actual bug — is
-# pinned by tests/wasm_runtime_test_parts/p3.rs::wasm_multi_preopen_* instead,
-# which drives wasmtime with two `--dir=` flags directly.
-[[fn]]
-name = "fd_prestat_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:78"
-digest = "14901187f8c4"
-class = "CORPUS"
-via = "fan_settle_tuple.almd"
-
-[[fn]]
-name = "fd_prestat_dir_name"
-site = "crates/almide-mir/src/render_wasm_p3.rs:80"
-digest = "7c8847bbb2bb"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:38"
+digest = "54e7c0414c0a"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
@@ -367,21 +345,21 @@ via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "path_remove_directory"
-site = "crates/almide-mir/src/render_wasm_p3.rs:94"
+site = "crates/almide-mir/src/render_wasm_p3.rs:85"
 digest = "483e5bc3243e"
 class = "CORPUS"
 via = "fs_relative_path.almd"
 
 [[fn]]
 name = "path_unlink_file"
-site = "crates/almide-mir/src/render_wasm_p3.rs:96"
+site = "crates/almide-mir/src/render_wasm_p3.rs:87"
 digest = "2fe62b017aff"
 class = "CORPUS"
 via = "fs_relative_path.almd"
 
 [[fn]]
 name = "proc_exit"
-site = "crates/almide-mir/src/render_wasm_p3.rs:102"
+site = "crates/almide-mir/src/render_wasm_p3.rs:93"
 digest = "6e440ccb7814"
 class = "CORPUS"
 via = "alias_combinator_rc.almd"
@@ -395,15 +373,15 @@ via = "random_int_entropy.almd"
 
 [[fn]]
 name = "rc_dec"
-site = "crates/almide-mir/src/render_wasm_p3.rs:299"
+site = "crates/almide-mir/src/render_wasm_p3.rs:280"
 digest = "08a8b2207fd9"
 class = "PROVEN"
 via = "alias_combinator_rc.almd"
-proof = "proofs/FreeListRc.v + proofs/WasmRcDec.v"
+proof = "proofs/FreeList.v"
 
 [[fn]]
 name = "rc_inc"
-site = "crates/almide-mir/src/render_wasm_p3.rs:312"
+site = "crates/almide-mir/src/render_wasm_p3.rs:293"
 digest = "95ffa64bdf13"
 class = "PROVEN"
 via = "alias_combinator_rc.almd"
@@ -411,14 +389,15 @@ proof = "proofs/FreeList.v"
 
 [[fn]]
 name = "read_dir"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:741"
-digest = "c2858bd349d7"
-class = "CORPUS"
-via = "fs_list_dir_multipass.almd"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:661"
+digest = "db5c55e61af0"
+class = "FALLBACK_ONLY"
+via = "fs.list_dir"
+why = "reached through prim.read_dir; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
 
 [[fn]]
 name = "read_line"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:514"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:464"
 digest = "a2f59da171ed"
 class = "FALLBACK_ONLY"
 via = "io.read_line"
@@ -426,7 +405,7 @@ why = "reached through prim.read_line; every fixture that would exercise it is i
 
 [[fn]]
 name = "read_n_bytes"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:546"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:496"
 digest = "212672a20dec"
 class = "FALLBACK_ONLY"
 via = "io.read_all"
@@ -434,42 +413,42 @@ why = "reached through prim.read_n_bytes; every fixture that would exercise it i
 
 [[fn]]
 name = "read_text_file"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:182"
-digest = "615a1788815b"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:140"
+digest = "c4a3d681fc2b"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "remove_all"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:669"
-digest = "2778c655d41e"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:613"
+digest = "02224ca5d6c9"
 class = "CORPUS"
-via = "fs_write_errno.almd"
+via = "fs_relative_path.almd"
 
 [[fn]]
 name = "remove_path"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:584"
-digest = "6bed8fbd3dde"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:531"
+digest = "9c468a1b6f2e"
 class = "CORPUS"
 via = "fs_relative_path.almd"
 
 [[fn]]
 name = "rtf_result"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:264"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:252"
 digest = "28f779ae7f2d"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "rtf_str"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:247"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:235"
 digest = "c9fe904ab5dd"
 class = "CORPUS"
 via = "args_surface.almd"
 
 [[fn]]
 name = "str_lt"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:695"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:635"
 digest = "8a2c5967004c"
 class = "FALLBACK_ONLY"
 via = "fs.list_dir"
@@ -484,28 +463,28 @@ why = "`(import … (func ${sym}…))` — the import-symbol template, and a doc
 
 [[fn]]
 name = "write_text_file"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:288"
-digest = "8f7304036c8a"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:271"
+digest = "23be9d847319"
 class = "CORPUS"
-via = "fs_write_errno.almd"
+via = "fs_preopen_resolve.almd"
 
 [[fn]]
 name = "path_rename"
-site = "crates/almide-mir/src/render_wasm_p3.rs:98"
+site = "crates/almide-mir/src/render_wasm_p3.rs:89"
 digest = "ca145e7ec6d1"
 class = "CORPUS"
 via = "fs_composition_family.almd"
 
 [[fn]]
 name = "rename"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:466"
-digest = "d2899e45dd1a"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:416"
+digest = "251f1e7a0872"
 class = "CORPUS"
-via = "fs_write_errno.almd"
+via = "fs_composition_family.almd"
 
 [[fn]]
 name = "path_filestat_nf"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:438"
-digest = "71bbbab37fc0"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:391"
+digest = "0302fe65eb16"
 class = "CORPUS"
 via = "fs_composition_family.almd"
