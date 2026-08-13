@@ -2965,11 +2965,12 @@ evidence  = [
 id        = "C-238"
 spec      = "ALS-E10"
 title     = "First-class range values iterate their true bounds on both targets"
-statement = "ALS-E10: a range is a first-class value — `let r = 0..<3` then `for i in r` iterates the same sequence as the inline head, for exclusive `..<`, inclusive `...`, non-zero starts, and call-typed bounds (fixture pins sums 3/15/9/6 byte-identical native <-> wasm). The bind materializes the real list via `list.range`; before this contract the deferred-empty bind made wasm silently iterate ZERO times while native printed the true sum (#1272 — the accept-and-wrong class this ledger exists to extinguish). The retirement half is check-time: `..` and `..=` are E031 with a mechanical `almide fix` steer (tests/range_spelling_diag_test.rs) — a silent re-reading would be an invisible off-by-one in either direction."
+statement = "ALS-E10: a range is a first-class value — `let r = 0..<3` then `for i in r` iterates the same sequence as the inline head, for exclusive `..<`, inclusive `...`, non-zero starts, and call-typed bounds (fixture pins sums 3/15/9/6 byte-identical native <-> wasm). The bind materializes the real list via `list.range`; before this contract the deferred-empty bind made wasm silently iterate ZERO times while native printed the true sum (#1272 — the accept-and-wrong class this ledger exists to extinguish). The retirement half is check-time: `..` and `..=` are E031 with a mechanical `almide fix` steer (tests/range_spelling_diag_test.rs) — a silent re-reading would be an invisible off-by-one in either direction. A range bound by `let` and used ONLY as a `for-in` head is NOT materialized: it takes the same counting loop the inline head takes, so the two legs agree on COST as well as sequence. Before #1400 the wasm leg materialized `list.range` at the bind (the #1272 fix) while native iterated lazily, so `let r = 0..<4294967295` printed the correct sum natively and died `Error: out of memory` on wasm — the same program, one leg. A var read anywhere ELSE (indexed, measured, passed) still materializes, unchanged."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/range_first_class.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_bind_no_materialize.almd", class = "fixture" },
 ]
 
 [[contract]]

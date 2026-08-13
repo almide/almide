@@ -1,0 +1,92 @@
+// @contract: C-238
+// #1400: a `let`-bound range whose ONLY use is a `for-in` head is NOT materialized
+// — it takes the same counting loop the inline `for i in 0..<n` spelling takes.
+//
+// The bind used to emit the real `list.range` block on the wasm leg (#1272's fix for
+// a deferred-empty bind that iterated ZERO times). Native never materialized: it
+// iterates lazily. So a range longer than memory printed the right answer natively
+// and died with `Error: out of memory` on wasm — the fuzzer found it (2026-08-13
+// nightly, run 31667874852 seed 506685997633 index 522, mutating range_first_class).
+//
+// The FIRST cell is the one that could only pass by not materializing: 4294967294
+// iterations. A materializing leg needs ~32 GB for the block; a counting leg needs
+// two locals. It is the load-bearing case — the rest of this file is the guard rail
+// that the deferral did not break the shapes range_first_class.almd already pins.
+//
+// The cells after it are the DISQUALIFYING shapes, which must still materialize and
+// still be correct: a var that is also indexed or measured, and a var read by two
+// separate heads. And the #1272 shape itself — an EMPTY bound range must iterate
+// zero times, not once, on both legs.
+fn upper() -> Int = 4
+
+effect fn main() -> Unit = {
+  // The load-bearing cell: 0 + 1 + … + 4294967293 = 9223372030412324865, which is
+  // representable in i64 (it is < 2^63-1 by 942). Both legs must print it.
+  let huge = 0..<4294967295
+  var hs = 0
+  for i in huge {
+    hs = hs + i
+  }
+  println("huge=" + int.to_string(hs))
+  // Exclusive, inclusive, non-zero start, call-typed bound — head-only, so all four
+  // take the counting path now.
+  let a = 0..<4
+  var sa = 0
+  for i in a {
+    sa = sa + i
+  }
+  let b = 1...3
+  var sb = 0
+  for i in b {
+    sb = sb + i
+  }
+  let c = 2..<5
+  var sc = 0
+  for i in c {
+    sc = sc + i
+  }
+  let d = 0..<upper()
+  var sd = 0
+  for i in d {
+    sd = sd + i
+  }
+  println("heads=" + int.to_string(sa) + "," + int.to_string(sb) + "," + int.to_string(sc) + "," + int.to_string(sd))
+  // DISQUALIFIED, so still materialized: the var is indexed and measured as well as
+  // iterated. All three readings must agree with the materializing behaviour.
+  let idx = 0..<5
+  var si = 0
+  for i in idx {
+    si = si + i
+  }
+  println("indexed=" + int.to_string(si) + " at2=" + int.to_string(idx[2]) + " len=" + int.to_string(list.len(idx)))
+  // TWO heads over one var: both reads are heads, so the var stays on the counting
+  // path and BOTH loops must run. (A deferral that consumed the range once would
+  // print the second sum as 0.)
+  let twice = 0..<3
+  var t1 = 0
+  var t2 = 0
+  for i in twice {
+    t1 = t1 + i
+  }
+  for i in twice {
+    t2 = t2 + i
+  }
+  println("twice=" + int.to_string(t1) + "," + int.to_string(t2))
+  // The #1272 shape: an EMPTY bound range iterates ZERO times. The sentinel stays
+  // untouched — a leg that iterated once would print 100.
+  let empty = 0..<0
+  var e = 99
+  for _i in empty {
+    e = e + 1
+  }
+  println("empty=" + int.to_string(e))
+  // Nested loops over the SAME bound range.
+  let n = 0..<3
+  var sn = 0
+  for _i in n {
+    for _j in n {
+      sn = sn + 1
+    }
+  }
+  println("nested=" + int.to_string(sn))
+}
