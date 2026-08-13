@@ -2444,8 +2444,8 @@ to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
 """
 
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
-# regex, bool, path, base64 and hex bear no Int in any swept signature today,
-# so their entry lists are empty — but COVERED_MODULES holds them, so the first
+# regex, bool, path, base64, hex and html bear no Int in any swept signature
+# today, so their entry lists are empty — but COVERED_MODULES holds them, so the first
 # Int-bearing fn to land in any of them cannot merge without declaring its unit
 # here.
 #
@@ -2461,6 +2461,12 @@ to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
 # the String itself, so no Int crosses the boundary. The unit that WOULD appear
 # the moment one does is byte-count — a `decoded_len(s)`, an offset-taking
 # streaming variant — and it must be declared here first.
+#
+# html is the SafeHtml newtype algebra (escape / raw / to_string / concat /
+# empty) — a String-in, String-out XSS boundary with no numeric surface at
+# all. Ratcheted so an Int-bearing truncation helper (`html.truncate(h, n)` —
+# codepoints or bytes?) cannot land silently: cutting escaped markup at the
+# wrong unit is exactly the #419 class with a security edge.
 [map]
 default_index_unit = "value"
 fn = []
@@ -2498,5 +2504,9 @@ default_index_unit = "value"
 fn = []
 
 [hex]
+default_index_unit = "value"
+fn = []
+
+[html]
 default_index_unit = "value"
 fn = []
