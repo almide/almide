@@ -224,22 +224,33 @@ fn classify_lowered_fn(
         }
         eprintln!("[call-count] ir={ir_calls}");
     }
-    if ir_calls > mir_calls {
+    // SOUNDNESS: the caps de-taint below is trustworthy ONLY when the MIR call
+    // count MATCHES the IR's — any imbalance, in EITHER direction, means the
+    // static counts can compensate for each other and mask a real elision:
+    //   - ir > mir: a call was ELIDED somewhere in the cluster (the original
+    //     taint case — Opaque lowering dropped a list-element/ctor-payload call).
+    //   - mir > ir: a call-bearing subtree was DUPLICATED. This is a LEGAL
+    //     lowering, not a marker bug: `let s = <heap branch>; rest` lowers via
+    //     TAIL DUPLICATION (`desugar_heap_branches` — the let-bound merged-dst
+    //     join is blocked by the checker's scope-end drop attribution, see
+    //     `lower_bind_heap_match`'s comment and the pinned
+    //     `let_bound_heap_result_match_lowers_via_tail_duplication` test), so a
+    //     call-bearing continuation legitimately appears once per leaf arm. The
+    //     C-271 `a ?? f(..)!` ANF (`desugar_unwrap_or_unwrap_fallback` +
+    //     `anf_let_unwrap_match_operand`) was the first corpus shape to put
+    //     CALLS in such a tail. A surplus could still numerically hide an
+    //     elision elsewhere in the cluster, so it must not de-taint either.
+    // Both directions take the SAME conservative exit: taint every function of
+    // the cluster (`is_elided` refuses the caps-safe claim downstream). This
+    // was previously a hard breach on the mir > ir side, on the assumption that
+    // only a double-counting elided-call marker could raise the MIR count —
+    // tail duplication broke that assumption while remaining sound; a genuine
+    // marker double-count now surfaces as a tainted (never caps-verified)
+    // function instead of a gate stop, which is the conservative failure mode.
+    if ir_calls != mir_calls {
         for mir in &mirs {
             elided_call_fns.insert(mir.name.clone());
         }
-    }
-    // SOUNDNESS BACKSTOP for the elided-call effect markers: a marker
-    // (`record_elided_calls`) may only surface a genuinely ELIDED
-    // call, so the MIR call count can rise at most TO the IR's. If it
-    // EXCEEDS, a marker double-counted a lowered call — which could
-    // mask another elision and falsely de-taint. A wall breach.
-    if mir_calls > ir_calls {
-        t.call_count_breaches.push(format!(
-            "{}::{} (mir {mir_calls} > ir {ir_calls})",
-            ctx.file.display(),
-            func.name.as_str()
-        ));
     }
     for mir in mirs {
         file_mirs.push((mir.name.clone(), mir));
@@ -695,10 +706,6 @@ fn print_wall_report(t: &Tally) {
         t.cert_backing_breaches.len()
     );
     eprintln!(
-        "  mir>ir calls (BUG)   : {}  <- elided-call marker double-count gate",
-        t.call_count_breaches.len()
-    );
-    eprintln!(
         "  caps-verified        : {}  <- provably reach no Stdout (transitive); witness emitted",
         t.caps_verified
     );
@@ -739,16 +746,12 @@ fn print_wall_report(t: &Tally) {
     for p in &t.cert_backing_breaches {
         eprintln!("      UNBACKED {p}");
     }
-    for p in &t.call_count_breaches {
-        eprintln!("      MIR>IR {p}");
-    }
     for p in &t.forbidden_unwalled {
         eprintln!("      FORBIDDEN {p}");
     }
 
     let total_breaches = t.lower_panics.len()
         + t.cert_backing_breaches.len()
-        + t.call_count_breaches.len()
         + t.forbidden_unwalled.len();
     if total_breaches == 0 {
         eprintln!(
@@ -774,14 +777,6 @@ fn print_wall_report(t: &Tally) {
                  a param or op injected ownership no runtime op performs \
                  (the gate-blind use-after-free class).",
                 t.cert_backing_breaches.len()
-            );
-        }
-        if !t.call_count_breaches.is_empty() {
-            eprintln!(
-                "WALL BREACH: {} function(s) have MORE MIR call-ops than IR call-nodes — \
-                 an elided-call effect marker double-counted a lowered call, which could \
-                 mask a real elision and falsely de-taint a Stdout-reaching function.",
-                t.call_count_breaches.len()
             );
         }
         if !t.forbidden_unwalled.is_empty() {
