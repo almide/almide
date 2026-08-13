@@ -534,6 +534,10 @@ enum RowTrigger {
     /// `IrExprKind::StringInterp` present
     /// (`desugar_interp_literal_aggregate_hoist` hoists interp parts).
     StringInterp,
+    /// Any `Unwrap`/`Try` present (`desugar_stmt_value_nested_unwrap` cannot
+    /// fire without one, so `Always` made every function pay its
+    /// clone-before-detect for nothing — #1183's row, #1232's item).
+    AnyUnwrap,
 }
 
 /// The trigger evidence found in one owned region.
@@ -544,6 +548,7 @@ struct RegionTriggers {
     any_match: bool,
     tuple_match: bool,
     string_interp: bool,
+    any_unwrap: bool,
 }
 
 impl RegionTriggers {
@@ -555,10 +560,16 @@ impl RegionTriggers {
             RowTrigger::AnyMatch => self.any_match,
             RowTrigger::TupleMatch => self.tuple_match,
             RowTrigger::StringInterp => self.string_interp,
+            RowTrigger::AnyUnwrap => self.any_unwrap,
         }
     }
     fn saturated(&self) -> bool {
-        self.map_literal && self.fan_call && self.any_match && self.tuple_match && self.string_interp
+        self.map_literal
+            && self.fan_call
+            && self.any_match
+            && self.tuple_match
+            && self.string_interp
+            && self.any_unwrap
     }
 }
 
@@ -580,6 +591,7 @@ fn region_triggers(root: &IrExpr) -> RegionTriggers {
                     self.0.fan_call = true;
                 }
                 IrExprKind::StringInterp { .. } => self.0.string_interp = true,
+                IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => self.0.any_unwrap = true,
                 IrExprKind::Match { subject, arms } => {
                     self.0.any_match = true;
                     let tuple_subject = matches!(subject.ty, almide_lang::types::Ty::Tuple(_))
@@ -676,7 +688,7 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // bind-position stmt (`out = out + [conv(s)!]` → `let $t = conv(s)!; out = out + [$t]`),
     // so the proven bind-position machinery — including the loop flag rewrite right below —
     // handles it instead of the tag-blind scalar-operand payload read.
-    (RowTrigger::Always, |src, next_var, _| desugar_stmt_value_nested_unwrap(src, next_var)),
+    (RowTrigger::AnyUnwrap, |src, next_var, _| desugar_stmt_value_nested_unwrap(src, next_var)),
     // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
     // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
     (RowTrigger::Always, |src, next_var, _| desugar_loop_unwrap(src, next_var)),
