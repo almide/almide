@@ -1,4 +1,4 @@
-> Last updated: 2026-08-06
+> Last updated: 2026-08-13
 
 # Almide Language Specification
 
@@ -426,14 +426,6 @@ test "addition works" {
 The body is a brace-delimited block expression.
 
 テスト: All `spec/lang/*_test.almd` files contain `test` blocks.
-
-### 4.8 Strict Mode
-
-```
-strict warnings
-```
-
-Enables stricter compiler diagnostics.
 
 ---
 
