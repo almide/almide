@@ -124,6 +124,7 @@ string_split_rle_codepoint  out-of-interp-scope capability: prim.handle
 string_whitespace  out-of-interp-scope capability: prim.alloc_str
 tco_map_acc_seed  out-of-interp-scope capability: prim.alloc_map
 unwrap_or_operand  out-of-interp-scope capability: prim.handle
+unwrap_or_unwrap_fallback  out-of-interp-scope capability: prim.handle
 value_array_leak_loop  out-of-interp-scope capability: prim.alloc_value
 value_array_tuple_tco  out-of-interp-scope capability: prim.alloc_value
 value_as_array_leak_loop  out-of-interp-scope capability: prim.alloc_value

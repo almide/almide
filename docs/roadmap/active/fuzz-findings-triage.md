@@ -733,3 +733,29 @@ divergence was a sign bit. A fixture for a bit-pattern claim has to observe the 
 the zeros are now spelled through `float.to_string`, which prints `-0.0`. The new C-269 fixture
 pins the whole fp16 scale domain through BOTH q1_0 entry points, so the twin decoders cannot
 drift apart again. Verified A/B: on the pre-fix binary both fixtures are red.
+
+## #1375 — one source shape, TWO independent wrong-value mechanisms (2026-08-13)
+
+`json.parse("hi") ?? json.parse("[1,2]")!` printed `true` on wasm and `[1,2]` on native. The
+emitted WAT settled the mechanism in one read: the `??` lowered to the right skeleton (tag at
+`+16`, payload at `+12`, `tag != 0` picks the fallback), but the fallback arm ended
+`(local.set $v13 (call $json.parse …)) (local.get $v13)` — the whole `Result` block handed to
+the merge, with no tag read and no propagation. The heap-arm lowering applies `e! == e`, which
+is the identity in a RESULT-typed arm and NOT in a payload-typed one.
+
+The rule this entry adds: **narrow to the mechanism, then re-run the whole neighbourhood, because
+one surface shape can have more than one.** Rewriting `a ?? f(..)!` to `(match a { ok($p) =>
+ok($p), err(_) => f(..) })!` fixed eleven cells; the twelfth — the same arm spelled as a
+literal `match` — still printed `true`, and the emitted code showed why: that spelling reaches
+`branch_lift`, which hoists the branch into a synthesized NON-effect `fn … -> <payload>`. A `!`
+inside a lifted helper has no channel out, so native emitted `?` in a non-`Result` fn (rustc
+E0277 — loud) while wasm always-wrapped the helper body and the call site bound the wrapper as
+the bare payload (silent). Two mechanisms, one shape, and the second was only visible because
+the neighbourhood was re-measured after the first fix rather than at the start.
+
+Also worth keeping: the ANF that made the fix executable. `(match a { … })!` walls, because
+`desugar_let_unwrap` builds a propagation match whose SUBJECT would then be a match. Binding it
+first (`let $u = match a { … }; let v = $u!`) puts a `Var` in the subject position, which is the
+proven shape — one extra statement, the same single evaluation, call-count invariant. Hoisting
+the fallback itself would have been the wrong ANF: `??` must not evaluate its fallback on the ok
+path, and the fixture pins that with a cell whose unused fallback would fail.

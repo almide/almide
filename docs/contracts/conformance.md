@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-96 normative sections; 424 distinct executable fixtures.
+96 normative sections; 425 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -56,7 +56,7 @@
 | ALS-E22 | C-254 | `spec/wasm_cross/place_assign_ascription.almd` (byte-compare) |
 | ALS-E23 | C-255 | `spec/wasm_cross/record_forms.almd` (byte-compare) |
 | ALS-E24 | C-256 | `spec/wasm_cross/loop_break_continue.almd` (byte-compare) |
-| ALS-E25 | C-257 | `spec/wasm_cross/error_operators.almd` (byte-compare) |
+| ALS-E25 | C-257, C-271 | `spec/wasm_cross/error_operators.almd` (byte-compare)<br>`spec/wasm_cross/unwrap_or_unwrap_fallback.almd` (byte-compare) |
 | ALS-E26 | C-258 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare) |
 | ALS-E27 | C-259 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare) |
 | ALS-E28 | C-264 | `spec/wasm_cross/optional_chain_scalar.almd` (byte-compare) |
