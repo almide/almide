@@ -93,20 +93,12 @@ impl AnalyzedDoc {
 enum Located {
     Keyword { info: &'static str },
     FnDecl { name: String, params: String, ret: String },
-    TypeDecl { name: String, display: String },
+    TypeDecl { display: String },
     TopLet { name: String, ty: String },
     VariantConstructor { name: String, type_name: String, fields: Vec<String> },
     StdlibCall { module: String, func: String, params: String, ret: String },
     UserIdent { name: String, ty: String },
     Param { name: String, ty: String },
-    Expr { ty: String },
-}
-
-fn span_contains(span: &crate::ast::Span, line: u32, col: u32) -> bool {
-    let sl = span.line as u32;
-    let sc = span.col.saturating_sub(1) as u32;
-    let ec = span.end_col as u32;
-    sl == line + 1 && col >= sc && col < ec
 }
 
 /// Step 1 of `find_node`: language keyword hover info. Extracted verbatim,
@@ -239,7 +231,7 @@ fn find_type_decl(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
                     }
                     _ => format!("type {} = {}", word, format_type_expr(ty)),
                 };
-                return Some(Located::TypeDecl { name: word.to_string(), display: detail });
+                return Some(Located::TypeDecl { display: detail });
             }
         }
     }
