@@ -9,6 +9,8 @@ mod commands;
 mod install;
 mod selfupdate;
 pub mod lsp;
+pub mod mcp;
+mod mcp_tools;
 pub mod repl;
 mod ide;
 mod fix;
