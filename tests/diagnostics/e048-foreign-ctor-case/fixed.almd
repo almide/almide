@@ -1,0 +1,12 @@
+// Match a variant with its OWN cases.
+type Shape = Circle(Int) | Square(Int)
+type Color = Red(Int) | Blue(Int)
+
+fn area(s: Shape) -> Int = match s {
+  Circle(r) => r * 2,
+  _ => 0,
+}
+
+effect fn main() -> Unit = {
+  println("${area(Circle(3))}")
+}

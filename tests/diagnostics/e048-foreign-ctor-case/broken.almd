@@ -1,0 +1,14 @@
+// `Red` is a case of Color, not of Shape. Before #1341 this bound `r` as
+// Unknown and reached codegen, which emitted INVALID RUST on the native leg
+// ("codegen produced invalid Rust — this is an Almide bug") and walled on wasm.
+type Shape = Circle(Int) | Square(Int)
+type Color = Red(Int) | Blue(Int)
+
+fn area(s: Shape) -> Int = match s {
+  Red(r) => r * 2,
+  _ => 0,
+}
+
+effect fn main() -> Unit = {
+  println("${area(Circle(3))}")
+}
