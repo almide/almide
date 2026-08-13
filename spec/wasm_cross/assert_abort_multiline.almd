@@ -1,0 +1,11 @@
+// @contract: C-153
+// ALS-T18: the structured failure block survives a MULTI-LINE operand
+// byte-identically on both targets. The embedded newlines are the case the
+// field order exists for — `found` is last, so its continuation lines have no
+// terminator to collide with (#1313).
+fn main() -> Unit = {
+  let got: String = "line one\nline two\nline three"
+  println("before")
+  assert_eq(got, "line one\nline TWO\nline three")
+  println("unreachable")
+}
