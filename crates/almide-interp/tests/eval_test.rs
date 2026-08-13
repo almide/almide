@@ -1196,3 +1196,28 @@ fn matching_a_fallible_lambda_call_already_sees_the_carrier() {
     );
     assert_eq!((exit, out.as_str()), (0, "ok 42\n"), "stderr: {err}");
 }
+
+/// The carrier must not disturb the OTHER sanctioned ways to consume an effect
+/// call's Result. Wrapping the success value changes what every consumption
+/// site sees, so each is exercised rather than read: `!` propagation, `??`
+/// fallback, `?` to Option, the value in an interpolation, and passing the
+/// unwrapped payload as an argument.
+#[test]
+fn every_consumption_site_still_sees_the_payload() {
+    let (exit, out, err) = run(
+        "effect fn half(n: Int) -> Int = if n < 0 then err(\"neg\") else ok(n / 2)\n\
+         fn twice(n: Int) -> Int = n * 2\n\
+         effect fn main() -> Unit = {\n\
+         \x20 println(int.to_string(half(10)!))\n\
+         \x20 println(int.to_string(half(-1) ?? 99))\n\
+         \x20 println(int.to_string(half(8) ?? 99))\n\
+         \x20 println(\"interp \" + int.to_string(half(6)!))\n\
+         \x20 println(int.to_string(twice(half(4)!)))\n\
+         }\n",
+    );
+    assert_eq!(
+        (exit, out.as_str()),
+        (0, "5\n99\n4\ninterp 3\n4\n"),
+        "stderr: {err}"
+    );
+}
