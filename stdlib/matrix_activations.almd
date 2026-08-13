@@ -350,13 +350,39 @@ fn matrix_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: Li
 // handle(data)+12+offset. scale recomputed per element (block = k>>7 → identical value).
 fn matrix_masked_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(q, k, v, n_heads, true)
 
-fn __q10_scale(base: Int, block_start: Int) -> Float = {
-  let raw = prim.bor(prim.load8(base + block_start), prim.bshl(prim.load8(base + block_start + 1), 8))
-  let sign = prim.band(prim.bshr_u(raw, 15), 1)
+// The dequantization-zero ruling (#1358, C-229): a dequantized element whose
+// MAGNITUDE is zero is +0.0. A quantized element is magnitude (the block's fp16
+// scale) x direction (the Q1_0 sign bit / Q8_0 int8 quant); at zero magnitude the
+// bytes encode no direction, so the sign IEEE-754 hands back is an artifact of how
+// the arithmetic was spelled, not of the data. Mirrors `dq_zero` in
+// runtime/rs/src/matrix_p2.rs. -0.0 == 0.0, so this maps -0.0 to +0.0 and leaves
+// every other value (NaN included) alone.
+fn __dq_zero(v: Float) -> Float = if v == 0.0 then 0.0 else v
+
+// Normalize an fp16 SUBNORMAL mantissa: shift left until bit 10 is set, dropping
+// one from the exponent per shift — native's `while m & 0x400 == 0` loop in
+// `fp16_bits_to_f32`, as a recursion. `e` enters at 1 - 15 = -14.
+fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int =
+  if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(signbits, prim.bshl(m, 1), e - 1)
+  else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
+
+// fp16 bit pattern -> f32 bit pattern, the exact mirror of native's
+// `fp16_bits_to_f32` (runtime/rs/src/matrix_p2.rs) over the WHOLE fp16 domain:
+// subnormals are normalized rather than flushed to zero, exp==31 decodes to
+// Inf/NaN rather than a finite 2^16-scaled value, and a zero magnitude drops its
+// sign bit per the ruling above.
+fn __fp16_bits(raw: Int) -> Int = {
+  let signbits = prim.bshl(prim.band(prim.bshr_u(raw, 15), 1), 31)
   let expv = prim.band(prim.bshr_u(raw, 10), 31)
   let mant = prim.band(raw, 1023)
-  let f32bits = if expv == 0 then prim.bshl(sign, 31) else prim.bor(prim.bor(prim.bshl(sign, 31), prim.bshl(expv + 112, 23)), prim.bshl(mant, 13))
-  prim.bits_to_f32(f32bits)
+  if expv == 0 then (if mant == 0 then 0 else __fp16_subnormal_bits(signbits, mant, 0 - 14))
+  else if expv == 31 then prim.bor(prim.bor(signbits, prim.bshl(255, 23)), prim.bshl(mant, 13))
+  else prim.bor(prim.bor(signbits, prim.bshl(expv + 112, 23)), prim.bshl(mant, 13))
+}
+
+fn __q10_scale(base: Int, block_start: Int) -> Float = {
+  let raw = prim.bor(prim.load8(base + block_start), prim.bshl(prim.load8(base + block_start + 1), 8))
+  prim.bits_to_f32(__fp16_bits(raw))
 }
 
 fn __q10_val(base: Int, k: Int) -> Float = {
@@ -365,7 +391,9 @@ fn __q10_val(base: Int, k: Int) -> Float = {
   let bits_start = block_start + 2
   let byte_idx = bits_start + prim.band(prim.bshr_u(k, 3), 15)
   let bit = prim.band(prim.bshr_u(prim.load8(base + byte_idx), prim.band(k, 7)), 1)
-  if bit == 1 then scale else 0.0 - scale
+  // Every element is +scale or -scale, so the ruling is settled by canonicalizing
+  // the two branch values — per block, not per weight.
+  if bit == 1 then __dq_zero(scale) else __dq_zero(0.0 - scale)
 }
 
 fn __q10_row(dh: Int, base: Int, row_k0: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
@@ -437,7 +465,10 @@ else {
   let block_start = row_off + blk * 34
   let scale = __q10_scale(base, block_start)
   let q = __q8_i8(base, block_start + 2 + prim.band(c, 31))
-  prim.store64(dh + 12 + c * 8, prim.fbits(scale * int.to_float(q)))
+  // Q8_0 needs the ruling per ELEMENT, not per block: the product is zero when
+  // EITHER factor is (a zero scale, or a zero quant under a negative scale),
+  // and `a * b` signs by xor.
+  prim.store64(dh + 12 + c * 8, prim.fbits(__dq_zero(scale * int.to_float(q))))
   __q8_row(dh, base, row_off, cols, c + 1)
 }
 

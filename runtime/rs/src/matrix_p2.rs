@@ -131,6 +131,35 @@ fn fp16_bits_to_f32(raw: u16) -> f32 {
     f32::from_bits(bits)
 }
 
+// ── The dequantization-zero ruling (#1358, C-229) ──
+//
+// A quantized element is `magnitude × direction`: the block's fp16 scale
+// carries the magnitude, the Q1_0 sign bit / Q8_0 int8 quant the direction.
+// When the element's magnitude is zero the bytes encode NO direction, so the
+// sign IEEE-754 hands back is an artifact of how the arithmetic was SPELLED,
+// not of the data — `-scale` yields -0.0 exactly where `0.0 - scale` yields
+// +0.0, and that is how this file and the self-hosted wasm decoder in
+// stdlib/matrix_activations.almd drifted apart on an all-zero block.
+//
+// RULING: a dequantized element of zero magnitude is `+0.0` — the same zero the
+// rest of the surface already produces (the OOB→zeros row, the
+// non-multiple-cols guard, `vec![0.0; _]`). Non-zero elements are untouched:
+// this only ever rewrites the sign of a zero.
+//
+// This is NOT the question `from_bytes_f16_le`/`_f32_le`/`_f64_le` answer: there
+// a -0.0 is the STORED DATUM and its sign is information, so it survives on both
+// targets. The ruling covers dequantization PRODUCTS only.
+#[inline]
+fn dq_zero(v: f64) -> f64 {
+    // -0.0 == 0.0, so this maps -0.0 → +0.0 and leaves every other value
+    // (including NaN, which compares unequal to 0.0) bit-for-bit alone.
+    if v == 0.0 {
+        0.0
+    } else {
+        v
+    }
+}
+
 pub fn almide_rt_matrix_from_q1_0_bytes(
     data: &Vec<u8>,
     offset: i64,
@@ -149,8 +178,11 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     for b in 0..num_blocks {
         let block_start = off + b * 18;
         let scale_raw = (data[block_start] as u16) | ((data[block_start + 1] as u16) << 8);
-        let scale = fp16_bits_to_f32(scale_raw) as f64;
-        let neg_scale = -scale;
+        // Every element of this block is one of these two values, so applying
+        // the dequantization-zero ruling to the pair settles the whole block —
+        // per block, not per weight.
+        let scale = dq_zero(fp16_bits_to_f32(scale_raw) as f64);
+        let neg_scale = dq_zero(-scale);
         let bits_start = block_start + 2;
         for i in 0..128usize {
             let byte = data[bits_start + (i >> 3)];
@@ -414,8 +446,10 @@ pub fn almide_rt_matrix_select_rows_q1_0(
             let block_start = row_off + b * 18;
             let scale_raw = (data[block_start] as u16)
                 | ((data[block_start + 1] as u16) << 8);
-            let scale = fp16_bits_to_f32(scale_raw) as f64;
-            let neg_scale = -scale;
+            // The dequantization-zero ruling, settled per block: every element
+            // is one of these two values.
+            let scale = dq_zero(fp16_bits_to_f32(scale_raw) as f64);
+            let neg_scale = dq_zero(-scale);
             let bits_start = block_start + 2;
             for local_k in 0..128 {
                 let byte = data[bits_start + (local_k >> 3)];
@@ -949,7 +983,10 @@ pub fn almide_rt_matrix_select_rows_q8_0_dq(
         for blk in data[base..base + row_bytes].chunks_exact(Q8_BLOCK_BYTES) {
             let d = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]])) as f64;
             for k in 0..Q8_BLOCK {
-                out.push(d * (blk[2 + k] as i8) as f64);
+                // Q8_0 needs the ruling per ELEMENT, not per block: the product
+                // is zero when EITHER factor is (a zero scale, or a zero quant
+                // under a negative scale), and `a * b` signs by xor.
+                out.push(dq_zero(d * (blk[2 + k] as i8) as f64));
             }
         }
     }
