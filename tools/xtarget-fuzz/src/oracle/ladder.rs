@@ -16,6 +16,9 @@ pub enum Rung {
     NativeBuild,
     WasmBuild,
     Run,
+    /// The by-construction oracle (#1332): the program's own source
+    /// declares the stdout it must produce, so a leg is judged ALONE.
+    SelfCheck,
 }
 
 /// The classified result of running the full ladder on one program.
@@ -90,6 +93,12 @@ pub enum FindingKind {
     /// A binding-shape rewrite (let⟺var⟺assign) changed acceptance or
     /// observable behavior (#515, completeness §3).
     MetamorphicDivergence,
+    /// A leg's observable output did not match the output the program is
+    /// KNOWN by construction to produce (#1332). Unlike every other kind
+    /// here this needs no second execution to be a verdict, so it fires
+    /// even when native and wasm agree — the shared-lowering blind spot
+    /// the 2-way vote cannot see.
+    SelfCheckFailure,
 }
 
 /// Captured observable behaviour of one execution.
@@ -129,13 +138,19 @@ const SLOW_CONFIRM_FACTOR: u32 = 10;
 
 /// Run the full ladder against a program already written to `file`.
 /// `wasm_out` is a scratch path for the WASM build artifact. `reference`
-/// is an optional future interpreter oracle (currently always `None`).
+/// is the interpreter oracle (the third judge, which abstains freely).
+///
+/// `expected` is the BY-CONSTRUCTION oracle (#1332): when the generator
+/// knows what the program must print, every leg is judged against it
+/// individually. That is the only rung here that can convict two legs at
+/// once, so it runs before the differential comparison.
 pub fn run_ladder(
     tc: &Toolchain,
     source: &str,
     file: &Path,
     wasm_out: &Path,
     reference: Option<&dyn ReferenceOracle>,
+    expected: Option<&str>,
 ) -> Outcome {
     let tc_confirm = tc.with_timeout(tc.timeout * SLOW_CONFIRM_FACTOR);
 
@@ -246,7 +261,7 @@ pub fn run_ladder(
                 // class), with agreement mapping to Slow instead of Clean.
                 let native2 = tc_confirm.run_native_bin(&native_bin);
                 if !native2.timed_out && !native2.spawn_failed {
-                    return match compare_runs(source, &native2, &wasm_run, reference) {
+                    return match compare_runs(source, &native2, &wasm_run, reference, expected) {
                         Outcome::Clean { .. } => Outcome::Finding(Finding {
                             rung: Rung::Run,
                             kind: FindingKind::Slow,
@@ -367,7 +382,7 @@ pub fn run_ladder(
         // interp-provable non-terminators never pay the 10× re-run.
         let wasm2 = tc_confirm.run_wasm(wasm_out);
         if !wasm2.timed_out && !wasm2.spawn_failed {
-            return match compare_runs(source, &native, &wasm2, reference) {
+            return match compare_runs(source, &native, &wasm2, reference, expected) {
                 Outcome::Clean { .. } => Outcome::Finding(Finding {
                     rung: Rung::Run,
                     kind: FindingKind::Slow,
@@ -389,7 +404,7 @@ pub fn run_ladder(
         });
     }
 
-    compare_runs(source, &native, &wasm, reference)
+    compare_runs(source, &native, &wasm, reference, expected)
 }
 
 /// The differential comparison of two COMPLETED runs — every rule between
@@ -404,6 +419,7 @@ fn compare_runs(
     native: &super::runner::ProcResult,
     wasm: &super::runner::ProcResult,
     reference: Option<&dyn ReferenceOracle>,
+    expected: Option<&str>,
 ) -> Outcome {
     // Compare observable behaviour: stdout, exit code, and run-success.
     let nat_ev = RunEvidence::from(native);
@@ -461,6 +477,46 @@ fn compare_runs(
                 .into(),
         };
     }
+    // ── The BY-CONSTRUCTION oracle (#1332) ──
+    //
+    // This runs BEFORE the differential comparison for one reason: it is
+    // the only judge here that can convict both legs at once. The
+    // native↔wasm vote is structurally blind to a bug in anything the two
+    // legs share (the frontend, almide-mir, the linked IR), because a
+    // shared miscompile makes both legs identically wrong and the vote
+    // comes back unanimous — the #1322 failure mode. An identity-family
+    // program's expected stdout is a literal in its own source, so a leg
+    // is judged ALONE and agreement proves nothing.
+    //
+    // Placed after the resource-limit skips above (C-196 stack, C-197
+    // memory) so a wasm32 OOM is still a skip, not a bogus self-check
+    // failure.
+    if let Some(exp) = expected {
+        let nat_ok = native.success() && nat_ev.stdout == exp;
+        let wasm_ok = wasm.success() && wasm_ev.stdout == exp;
+        if !nat_ok || !wasm_ok {
+            let which = match (nat_ok, wasm_ok) {
+                // The blind spot, caught: both backends agree on the WRONG
+                // answer. No differential oracle can see this.
+                (false, false) => "both legs",
+                (false, true) => "native",
+                (true, false) => "wasm",
+                (true, true) => unreachable!("guarded by the branch above"),
+            };
+            let summary = format!(
+                "self-check failed on {which}: {}",
+                self_check_diff(exp, if nat_ok { &wasm_ev } else { &nat_ev })
+            );
+            return Outcome::Finding(Finding {
+                rung: Rung::SelfCheck,
+                kind: FindingKind::SelfCheckFailure,
+                summary,
+                native: Some(nat_ev),
+                wasm: Some(wasm_ev),
+            });
+        }
+    }
+
     if native.success() != wasm.success() {
         // One leg ran cleanly and the other did not — a run-failure
         // divergence in either direction (native can non-zero-exit BY DESIGN
@@ -568,6 +624,33 @@ fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
 /// at wasm's 4GB ceiling long before native's; both are non-terminating).
 fn native_hang_is_finding(wasm_built: bool, wasm_timed_out: bool, wasm_succeeded: bool) -> bool {
     wasm_built && !wasm_timed_out && wasm_succeeded
+}
+
+/// Render a self-check failure (#1332) for the finding summary: the first
+/// line where the leg's output departs from the output the program is
+/// known by construction to produce, or the failure mode when the leg
+/// did not produce clean output at all.
+fn self_check_diff(expected: &str, actual: &RunEvidence) -> String {
+    if actual.timed_out {
+        return "the leg outran the budget without producing its known output".to_string();
+    }
+    if actual.exit_code != Some(0) {
+        let last = actual.stderr.lines().last().unwrap_or("").trim();
+        return format!(
+            "the leg exited {:?} (expected a clean run): {last:?}",
+            actual.exit_code
+        );
+    }
+    for (i, (e, a)) in expected.lines().zip(actual.stdout.lines()).enumerate() {
+        if e != a {
+            return format!("line {}: expected {e:?} got {a:?}", i + 1);
+        }
+    }
+    format!(
+        "line counts differ: expected {} got {}",
+        expected.lines().count(),
+        actual.stdout.lines().count()
+    )
 }
 
 /// The first line where the interp's expected stdout and the targets' agreed stdout
@@ -699,13 +782,13 @@ mod compare_runs_tests {
     fn identical_completed_runs_are_clean() {
         // The confirm re-run's agreement case (#1235): the call site maps
         // THIS outcome to a Slow finding, so Clean here is load-bearing.
-        let out = compare_runs("", &run("a\n", "", 0), &run("a\n", "", 0), None);
+        let out = compare_runs("", &run("a\n", "", 0), &run("a\n", "", 0), None, None);
         assert!(matches!(out, Outcome::Clean { .. }));
     }
 
     #[test]
     fn differing_stdout_is_an_output_divergence() {
-        let out = compare_runs("", &run("a\n", "", 0), &run("b\n", "", 0), None);
+        let out = compare_runs("", &run("a\n", "", 0), &run("b\n", "", 0), None, None);
         let Outcome::Finding(f) = out else { panic!("expected a finding") };
         assert_eq!(f.kind, FindingKind::OutputDivergence);
     }
@@ -718,8 +801,108 @@ mod compare_runs_tests {
             &run("a\n", "", 0),
             &run("", "Error: out of memory", 134),
             None,
+            None,
         );
         assert!(matches!(out, Outcome::Skipped { .. }));
+    }
+
+    /// THE point of #1332: both legs agree, and both are wrong. Every
+    /// differential rule in this function returns `Clean` here — only the
+    /// by-construction oracle convicts.
+    #[test]
+    fn agreeing_legs_that_are_both_wrong_are_convicted() {
+        let both = run("a0=99\n", "", 0);
+        // Without the oracle: unanimous, therefore clean.
+        assert!(matches!(
+            compare_runs("", &both, &both, None, None),
+            Outcome::Clean { .. }
+        ));
+        // With it: a self-check failure naming BOTH legs.
+        let out = compare_runs("", &both, &both, None, Some("a0=41\n"));
+        let Outcome::Finding(f) = out else { panic!("expected a finding") };
+        assert_eq!(f.kind, FindingKind::SelfCheckFailure);
+        assert!(f.summary.contains("both legs"), "summary: {}", f.summary);
+        assert!(f.summary.contains("a0=41"), "summary: {}", f.summary);
+    }
+
+    /// A one-sided self-check failure names the guilty leg — that is the
+    /// information the 2-way vote never had.
+    #[test]
+    fn one_sided_self_check_names_the_leg() {
+        let out = compare_runs(
+            "",
+            &run("a0=41\n", "", 0),
+            &run("a0=42\n", "", 0),
+            None,
+            Some("a0=41\n"),
+        );
+        let Outcome::Finding(f) = out else { panic!("expected a finding") };
+        assert_eq!(f.kind, FindingKind::SelfCheckFailure);
+        assert!(f.summary.contains("wasm"), "summary: {}", f.summary);
+    }
+
+    /// Matching the oracle keeps the program clean — the oracle must not
+    /// manufacture findings out of correct runs.
+    #[test]
+    fn legs_matching_the_oracle_stay_clean() {
+        let ok = run("a0=41\n", "", 0);
+        assert!(matches!(
+            compare_runs("", &ok, &ok, None, Some("a0=41\n")),
+            Outcome::Clean { .. }
+        ));
+    }
+
+    /// The C-197 resource skip still wins over the oracle: wasm32 running
+    /// out of linear memory is not a miscompile, and the skip rule runs
+    /// first by construction.
+    #[test]
+    fn resource_skips_still_precede_the_oracle() {
+        let out = compare_runs(
+            "",
+            &run("a0=41\n", "", 0),
+            &run("", "Error: out of memory", 134),
+            None,
+            Some("a0=41\n"),
+        );
+        assert!(matches!(out, Outcome::Skipped { .. }));
+    }
+}
+
+#[cfg(test)]
+mod self_check_diff_tests {
+    use super::{self_check_diff, RunEvidence};
+
+    fn ev(stdout: &str, stderr: &str, exit: i32) -> RunEvidence {
+        RunEvidence {
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+            exit_code: Some(exit),
+            timed_out: false,
+            duration_secs: 0.01,
+        }
+    }
+
+    #[test]
+    fn names_the_first_wrong_line() {
+        assert_eq!(
+            self_check_diff("a0=41\na1=-7\n", &ev("a0=41\na1=13\n", "", 0)),
+            "line 2: expected \"a1=-7\" got \"a1=13\""
+        );
+    }
+
+    #[test]
+    fn a_nonzero_exit_is_reported_as_such() {
+        let s = self_check_diff("a0=41\n", &ev("", "Error: division by zero", 1));
+        assert!(s.contains("exited Some(1)"), "{s}");
+        assert!(s.contains("division by zero"), "{s}");
+    }
+
+    #[test]
+    fn a_truncated_run_reports_line_counts() {
+        assert_eq!(
+            self_check_diff("a0=41\na1=-7\n", &ev("a0=41\n", "", 0)),
+            "line counts differ: expected 2 got 1"
+        );
     }
 }
 
