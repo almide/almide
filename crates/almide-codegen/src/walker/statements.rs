@@ -57,7 +57,14 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::ListReverse { target, end } => render_stmt_list_reverse(ctx, *target, end),
         IrStmtKind::ListRotateLeft { target, end } => render_stmt_list_rotate_left(ctx, *target, end),
         IrStmtKind::ListCopySlice { dst, src, len } => render_stmt_list_copy_slice(ctx, *dst, *src, len),
-        IrStmtKind::Comment { text } => format!("// {}", text),
+        // Prefix EVERY line: since #1318 a comment's text can be a multi-line
+        // block comment, and a single `// ` on the first line left the rest as
+        // bare (unparseable) Rust in the emitted source.
+        IrStmtKind::Comment { text } => text
+            .lines()
+            .map(|l| format!("// {}", l))
+            .collect::<Vec<_>>()
+            .join("\n"),
         // Perceus RC ops are WASM-only; Rust handles ownership natively.
         IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => String::new(),
     }
