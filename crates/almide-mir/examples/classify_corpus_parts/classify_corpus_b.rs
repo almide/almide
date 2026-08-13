@@ -223,7 +223,7 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
 /// split, not an aliasing risk.
 fn for_each_program_expr_mut(
     ir: &mut almide_ir::IrProgram,
-    mut visit: impl FnMut(&mut almide_ir::IrExpr),
+    visit: impl FnMut(&mut almide_ir::IrExpr),
 ) {
     let main =
         ir.functions.iter_mut().map(|f| &mut f.body).chain(ir.top_lets.iter_mut().map(|tl| &mut tl.value));

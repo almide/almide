@@ -349,10 +349,9 @@
         let _strict = crate::lower::StrictValuesGuard::set(true);
         use almide_frontend::check::Checker;
         use almide_frontend::lower::lower_program;
-        use almide_frontend::{canonicalize, ir_link};
+        use almide_frontend::canonicalize;
         use almide_lang::lexer::Lexer;
         use almide_lang::parser::Parser;
-        use almide_optimize::{mono, optimize};
         let to_ir = |s: &str| {
             let tokens = Lexer::tokenize(s);
             let mut prog = Parser::new(tokens).parse().expect("parse");

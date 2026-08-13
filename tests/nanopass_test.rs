@@ -186,7 +186,7 @@ mod result_propagation {
 
     #[test]
     fn effect_fn_gets_result_return_type() {
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitInt { value: 42 }, Ty::Int);
         let func = mk_fn("do_io", vec![], Ty::Int, body, true); // is_effect = true
 
@@ -201,7 +201,7 @@ mod result_propagation {
 
     #[test]
     fn non_effect_fn_unchanged() {
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitInt { value: 42 }, Ty::Int);
         let func = mk_fn("pure_fn", vec![], Ty::Int, body, false);
 
@@ -214,7 +214,7 @@ mod result_propagation {
 
     #[test]
     fn effect_fn_body_wrapped_in_ok() {
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitStr { value: "hello".into() }, Ty::String);
         let func = mk_fn("greet", vec![], Ty::String, body, true);
 
@@ -237,7 +237,7 @@ mod effect_inference {
     #[test]
     fn module_call_detected() {
         // fn read() -> String = fs.read_text("file.txt")
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::Call {
             target: CallTarget::Module { module: sym("fs"), func: sym("read_text"), def_id: None },
             args: vec![mk_expr(IrExprKind::LitStr { value: "file.txt".into() }, Ty::String)],
@@ -263,7 +263,7 @@ mod fan_lowering {
     #[test]
     fn try_inside_fan_stripped() {
         // fan { try_expr? }
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let inner = mk_expr(IrExprKind::LitInt { value: 1 }, Ty::Int);
         let try_expr = mk_expr(IrExprKind::Try {
             expr: Box::new(inner),
@@ -306,7 +306,7 @@ mod peephole {
     #[test]
     fn simple_function_unchanged() {
         // A function with no peephole patterns should pass through unchanged
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitInt { value: 42 }, Ty::Int);
         let func = mk_fn("simple", vec![], Ty::Int, body, false);
 
@@ -494,6 +494,8 @@ mod clone_insertion {
         // CloneInsertion should have processed this program (changed = true)
         // and the String var used twice should be cloned somewhere in the output
         assert!(changed, "CloneInsertion should report changes for multi-use String var");
+        assert!(contains_clone(&result.functions[0].body),
+            "multi-use String var should be wrapped in a Clone node, got {:?}", result.functions[0].body.kind);
     }
 
     #[test]
@@ -625,7 +627,7 @@ mod builtin_lowering {
     #[test]
     fn assert_eq_becomes_macro() {
         // assert_eq(1, 1)
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::Call {
             target: CallTarget::Named { name: sym("assert_eq") },
             args: vec![
@@ -646,7 +648,7 @@ mod builtin_lowering {
     #[test]
     fn println_becomes_macro() {
         // println("hello")
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::Call {
             target: CallTarget::Named { name: sym("println") },
             args: vec![mk_expr(IrExprKind::LitStr { value: "hello".into() }, Ty::String)],
@@ -681,7 +683,7 @@ mod licm {
 
     #[test]
     fn no_loops_unchanged() {
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitInt { value: 42 }, Ty::Int);
         let func = mk_fn("no_loop", vec![], Ty::Int, body, false);
 
@@ -752,7 +754,7 @@ mod box_deref {
 
     #[test]
     fn no_recursive_types_unchanged() {
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitInt { value: 1 }, Ty::Int);
         let func = mk_fn("simple", vec![], Ty::Int, body, false);
 

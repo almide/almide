@@ -226,7 +226,6 @@ fn metered_clones_keep_nonregion_paths_charge_free() {
 /// placement flips a verdict. Compared against the native leg (which the
 /// dynamic layer already pins against wasm).
 fn interp_third_vote_on_metered_fixtures() {
-    let dir = fixtures_dir();
     for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip", "divergence_cut", "trap_cut", "dyn_charge"] {
         let source = std::fs::read_to_string(fixture_path(name)).unwrap();
         let ir = lower_for_interp(&source);
@@ -318,7 +317,6 @@ fn time_ctor_guard_cross_target() {
         eprintln!("skip: wasmtime not on PATH");
         return;
     }
-    let dir = fixtures_dir();
     let run = |name: &str, wasm: bool| {
         let mut cmd = Command::new(almide_bin());
         cmd.arg("run").arg(fixture_path(name));
@@ -506,7 +504,6 @@ fn race_deterministic_across_targets() {
         eprintln!("skip: wasmtime not on PATH");
         return;
     }
-    let dir = fixtures_dir();
     for name in ["race", "race_boundary"] {
         let fixture = fixture_path(name);
         let plain = |wasm: bool| {
@@ -550,7 +547,6 @@ fn bounded_deterministic_across_targets() {
         eprintln!("skip: wasmtime not on PATH");
         return;
     }
-    let dir = fixtures_dir();
     for name in ["bounded", "boundary"] {
         let fixture = fixture_path(name);
         // Plain runs (no probe env): the user-facing semantics.
@@ -591,7 +587,6 @@ fn dynamic_three_point_comparison() {
         eprintln!("skip: wasmtime not on PATH");
         return;
     }
-    let dir = fixtures_dir();
     for name in COMPARABLE {
         let fixture = fixture_path(name);
         let (n_ok, n_out, n_probe) = probed_run(&fixture, false);
@@ -609,7 +604,6 @@ fn dynamic_three_point_comparison() {
 }
 
 fn native_wall_fails_loudly_under_probe() {
-    let dir = fixtures_dir();
     for name in NATIVE_WALLED {
         let fixture = fixture_path(name);
         let (ok, _out, probe) = probed_run(&fixture, false);
@@ -623,7 +617,6 @@ fn native_wall_fails_loudly_under_probe() {
 }
 
 fn static_certificate_first_occurrence_equality() {
-    let dir = fixtures_dir();
     for name in COMPARABLE {
         let source = std::fs::read_to_string(fixture_path(name)).unwrap();
         let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
