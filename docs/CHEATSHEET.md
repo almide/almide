@@ -528,6 +528,9 @@ All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in
 let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: first Err (list order) propagates
 let winner  = fan.any(mirrors, (m) => fetch(m)) ?? fb     // Result[B, String]: first Ok in LIST order; an Err skips that element
 let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, String]]: EVERY element's Result, Errs captured
+// The callback may be an EFFECT fn, in either spelling — an inline lambda that
+// calls one, or a bare effect-fn value. Same rule as the block heads' arms.
+let checked = fan.map(paths, read_meta)                   // read_meta: an `effect fn`, passed by name
 
 // Block heads — arms are parallel siblings separated by `,` or newline
 // (`;` between arms is an error: it means sequencing, and stays legal only
