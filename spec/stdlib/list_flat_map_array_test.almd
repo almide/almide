@@ -50,6 +50,22 @@ test "flat_map tail literal of heap elements" {
   assert_eq(nested |> list.map((g) => show(g)) |> list.join("/"), "1/1,1/2/2,2")
 }
 
+test "flat_map array elements that look like template placeholders" {
+  // The array form is emitted as an InlineRust template whose placeholders are
+  // `{e0}`, `{e1}`, … A STRING LITERAL spelling one of those names is ordinary
+  // source, and it must survive as data: substituting one argument must never
+  // make the next argument's pass reinterpret the text it just inserted. This
+  // printed "s,A,s,B" before the substitution became single-pass.
+  let out = ["A", "B"] |> list.flat_map((s) => ["{e1}", s])
+  assert_eq(list.join(out, ","), "{e1},A,{e1},B")
+  // Same hazard from the other side: a literal naming the FIRST placeholder,
+  // and one naming a placeholder that does not exist.
+  let mixed = ["x"] |> list.flat_map((s) => [s, "{e0}", "{zz}"])
+  assert_eq(list.join(mixed, ","), "x,{e0},{zz}")
+  // An unbalanced brace is data too.
+  assert_eq(list.join(["y"] |> list.flat_map((s) => [s, "{e1"]), ","), "y,{e1")
+}
+
 test "flat_map shapes the rewrite declines — same answers" {
   // Tail is a CALL, not a literal: stays on the Vec-returning form.
   assert_eq(show([1, 2, 3] |> list.flat_map(pair)), "1,10,2,20,3,30")
