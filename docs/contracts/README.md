@@ -40,8 +40,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-011 | Bare-float interpolation Display drops .0; float.to_string keeps it | 0.24.0 | active | fixture | 5 |
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
-| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 3 |
-| C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 1 |
+| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 4 |
+| C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 2 |
 | C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 3 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 1 |
