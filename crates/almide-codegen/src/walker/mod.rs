@@ -560,26 +560,5 @@ fn prepend_doc_comment(doc: Option<&str>, code: String) -> String {
     format!("{}\n{}", doc_lines, code)
 }
 
-/// Whether an expression contains an integer `/` or `%` anywhere — the ops that
-/// render as the aborting totality macros (`Error: <msg>` + exit 1). Uses the
-/// exhaustive `IrVisitor` walk so new IR nodes are traversed automatically.
-fn contains_aborting_int_div(expr: &IrExpr) -> bool {
-    use almide_ir::visit::{IrVisitor, walk_expr};
-    struct Finder { found: bool }
-    impl IrVisitor for Finder {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if self.found { return; }
-            if matches!(&e.kind, IrExprKind::BinOp { op: BinOp::DivInt | BinOp::ModInt, .. }) {
-                self.found = true;
-                return;
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut f = Finder { found: false };
-    f.visit_expr(expr);
-    f.found
-}
-
 include!("program_render.rs");
 include!("extern_c.rs");
