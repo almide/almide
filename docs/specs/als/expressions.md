@@ -451,3 +451,24 @@ iteration Drop を飛ばすため引き続き wall(loud)。
 
 テスト: `spec/wasm_cross/loop_break_continue.almd`(契約 C-256)、
 `spec/lang/loop_break_continue_test.almd`(wasm レグ)。
+
+## ALS-E25 エラー演算子(`ExprKind::Unwrap` / `ExprKind::ToOption` / `ExprKind::UnwrapOr` / `ExprKind::Try`)
+
+**受理形**: 後置 `e!`(unwrap-伝搬 — effect fn 内のみ、ADR-0008)、後置
+`e?`(Result → Option 変換)、`e ?? d`(Ok/Some の値、Err/None で `d`)。
+改行を跨ぐ後置 `?` / `?.` は受理しない(行頭の `?` は別の式)。
+
+**値の規範**: `half(10)!` → 5(Ok 経路; Err なら呼び出し元へ伝搬 —
+ALS-R1 の abort 形へ)。`err(_)?` → `none`、`ok(4)?` → `some(4)`(fixture:
+-1 / 4)。`??` の消費は ALS-E9 と共通。詳細な伝搬規範は ADR-0006/0008 の
+契約群(C-216・C-217・C-222)が pin する。
+
+**Try の裁定**: `ExprKind::Try` は**パーサから生成されない死語彙** —
+表層の後置 `?` は `ToOption` を構築する。ノードは AST に残るが構文に
+対応物を持たない(削除は語彙掃除の followup、#1300 の CallArg::Label と
+同類)。
+
+**`?.` は未節化**: OptionalChain の record 主体は wasm の untracked-subject
+match wall(loud)に当たるため、行は UNWRITTEN 維持。
+
+テスト: `spec/wasm_cross/error_operators.almd`(契約 C-257)。

@@ -3165,3 +3165,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_break_continue.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-257"
+spec      = "ALS-E25"
+title     = "The scalar error operators evaluate identically on both targets"
+statement = "ALS-E25: postfix `!` (unwrap-propagate, effect-fn only), postfix `?` (Result -> Option: err -> none, ok(4) -> some(4)), and `??` fallback, through both polarities of an effect call — byte-identical native <-> wasm (fixture pins 5/-1/4). The deep propagation norms stay with the ADR-0006/0008 contracts (C-216/C-217/C-222). ExprKind::Try is parser-unreachable dead vocabulary (the surface `?` builds ToOption); OptionalChain stays outside this contract behind the untracked-subject wall."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/error_operators.almd", class = "fixture" },
+]
