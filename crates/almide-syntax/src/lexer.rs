@@ -746,7 +746,7 @@ fn scan_habit_quoted_literal(chars: &[char], pos: usize, buf: &mut String) -> us
 /// the parser's `${...}` splitter (`parse_interpolation_expr_part`) — the
 /// two scans MUST agree on where a nested literal ends, or the splitter
 /// re-introduces the brace-blindness the lexer just fixed (#1073).
-pub(crate) fn scan_nested_string_literal(chars: &[char], pos: usize, buf: &mut String) -> usize {
+pub fn scan_nested_string_literal(chars: &[char], pos: usize, buf: &mut String) -> usize {
     let quote = chars[pos];
     buf.push(quote);
     let mut pos = pos + 1;

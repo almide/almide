@@ -6,7 +6,7 @@
 import json
 
 test "json.get_int unit=value" {
-  let v = json.parse('{"a": 42}')!
+  let v = json.parse("{\"a\": 42}")!
   assert_eq("${json.get_int(v, "a") ?? (0 - 1)}", "42")
 }
 

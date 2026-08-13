@@ -116,6 +116,49 @@ mod literal_spelling_tests {
             .expect("formatted output still parses to the same program");
     }
 
+    /// A `${…}` hole is CODE, not a literal run. Preserving the spelling of
+    /// the literal must not turn the formatter off inside its holes — that
+    /// would leave a blind spot exactly where interpolation-heavy Almide is
+    /// written. The escape AROUND the hole still survives.
+    #[test]
+    fn interpolation_holes_are_reformatted_but_literal_runs_are_not() {
+        let out = format_expr_source("\"\\u{3042}${ x   +   1 }b\"");
+        assert!(
+            out.contains("let v = \"\\u{3042}${x + 1}b\"\n"),
+            "hole not reformatted (or escape lost):\n{out}"
+        );
+    }
+
+    /// The hole scan walks the RAW, the parser walks the DECODED template, so
+    /// a nested literal reaches the two in different spellings. `\"?\"` used
+    /// to open a nested-string scan that ran past the hole and swallowed the
+    /// literal's own closing quote, emitting an unterminated string.
+    #[test]
+    fn an_escaped_nested_quote_inside_a_hole_keeps_the_literal_closed() {
+        let src = "fn f(v: String?) -> String = {\n  let s = \"a/${v ?? \\\"?\\\"}\"\n  s\n}\n";
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse succeeds");
+        let out = format_program(&program);
+        crate::fmt::verify_format(src, &program, &out)
+            .expect("formatted output still parses to the same program");
+    }
+
+    /// A heredoc's value is its lines minus their COMMON leading indent, so a
+    /// hole that re-renders across lines can change the strip amount — i.e.
+    /// change the string. Holes there stay verbatim: losing a re-format is
+    /// cosmetic, changing a value is a miscompile.
+    #[test]
+    fn heredoc_holes_are_left_verbatim() {
+        let src = "fn f(x: Int) -> String = {\n  let s = \"\"\"\n    a ${ x  +  1 } b\n    \"\"\"\n  s\n}\n";
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse succeeds");
+        let out = format_program(&program);
+        assert!(out.contains("a ${ x  +  1 } b"), "heredoc hole was re-rendered:\n{out}");
+        assert_eq!(out, src, "a formatted heredoc file is already at fmt's fixed point");
+    }
+
     /// Dropping the spelling cache falls back to value rendering — the escape
     /// hatch every AST-rewriting tool takes before it re-renders.
     #[test]

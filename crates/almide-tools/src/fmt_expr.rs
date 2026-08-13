@@ -154,7 +154,7 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         // must call `ast::strip_literal_raw` first — otherwise the verbatim
         // reprint would drop the rewrite.
         ExprKind::InterpolatedString { parts, raw } => match raw {
-            Some(r) => out.push_str(r),
+            Some(r) => fmt_istring_raw(out, r, parts, depth),
             None => fmt_istring_parts(out, parts, depth),
         },
         ExprKind::Tuple { elements, .. } => {
@@ -509,6 +509,99 @@ fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
             c => out.push(c),
         }
     }
+}
+
+/// Reprint an interpolated literal from its verbatim source spelling, but
+/// RE-FORMAT the code inside each `${…}` hole.
+///
+/// The literal runs must survive byte-for-byte — that is the whole point of
+/// `raw` (quote style, heredoc form, `\u{3042}` escapes: #1261/#1263). A hole
+/// is not a literal run though, it is CODE, and a formatter that stops
+/// normalizing code the moment it sits inside a string has a blind spot
+/// exactly where interpolation-heavy Almide lives (`"${ a  +  b }"` would
+/// stay crooked forever). So the raw is copied verbatim everywhere except at
+/// the holes, which are re-rendered through `fmt_expr`.
+///
+/// **Heredoc and raw-string forms are copied whole.** A heredoc's value is
+/// computed by stripping the COMMON leading indent of its lines, so a hole
+/// that re-renders across lines can change the strip amount — i.e. change the
+/// string's value. Not re-formatting is a cosmetic loss; changing a value is a
+/// miscompile, so the conservative direction wins for those two forms.
+///
+/// The hole scan mirrors `parse_interpolation_parts` exactly: `\\` and `\$`
+/// arrive as undecoded pairs and never open a hole, and a nested string
+/// literal inside a hole is consumed atomically by the lexer's own scanner
+/// (shared, so the two walks can never disagree on where a literal ends). If
+/// the counts still disagree — the parse-error recovery path turns a bad hole
+/// into a `Lit` — the whole raw is copied verbatim: losing a re-format is
+/// safe, splicing an expression into the wrong hole is not.
+fn fmt_istring_raw(out: &mut String, raw: &str, parts: &[StringPart], depth: usize) {
+    if raw.starts_with("\"\"\"") || raw.starts_with('r') {
+        out.push_str(raw);
+        return;
+    }
+    let exprs: Vec<&Expr> = parts
+        .iter()
+        .filter_map(|p| match p {
+            StringPart::Expr { expr } => Some(&**expr),
+            StringPart::Lit { .. } => None,
+        })
+        .collect();
+    let chars: Vec<char> = raw.chars().collect();
+    let mut buf = String::new();
+    let mut i = 0usize;
+    let mut next = 0usize;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && (chars[i + 1] == '\\' || chars[i + 1] == '$') {
+            buf.push(chars[i]);
+            buf.push(chars[i + 1]);
+            i += 2;
+        } else if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+            let Some(expr) = exprs.get(next) else { out.push_str(raw); return };
+            next += 1;
+            i = skip_interpolation_hole(&chars, i);
+            buf.push_str("${");
+            fmt_expr(&mut buf, expr, depth);
+            buf.push('}');
+        } else {
+            buf.push(chars[i]);
+            i += 1;
+        }
+    }
+    if next == exprs.len() { out.push_str(&buf); } else { out.push_str(raw); }
+}
+
+/// Advance past one `${…}` hole, `start` sitting on the `$`. Brace-depth scan
+/// with nested string literals consumed atomically — the same walk the parser
+/// runs in `parse_interpolation_expr_part`.
+///
+/// One difference the parser does not have to care about: it walks the DECODED
+/// template, this walks the RAW, so a nested literal may arrive either bare
+/// (`"${f("ab")}"`) or backslash-escaped (`"${v ?? \"?\"}"`). An escape pair is
+/// therefore skipped WHOLE before the quote test — otherwise the `"` of a `\"`
+/// opens a nested-literal scan that runs off the end of the hole and swallows
+/// the literal's own closing delimiter.
+fn skip_interpolation_hole(chars: &[char], start: usize) -> usize {
+    let mut i = start + 2;
+    let mut depth = 1usize;
+    let mut scratch = String::new();
+    while i < chars.len() && depth > 0 {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if chars[i] == '"' || chars[i] == '\'' {
+            i = almide_lang::lexer::scan_nested_string_literal(chars, i, &mut scratch);
+            continue;
+        }
+        if chars[i] == '{' { depth += 1; }
+        if chars[i] == '}' {
+            depth -= 1;
+            if depth == 0 { break; }
+        }
+        i += 1;
+    }
+    i + 1
 }
 
 fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
