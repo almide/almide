@@ -12,7 +12,7 @@
 # the existing ALS sections (T1-T7, R-series, ...) are STDLIB-semantics
 # normative text; the syntax-element direction starts honestly at zero.
 #
-# unwritten_ceiling = "20"
+# unwritten_ceiling = "12"
 
 [[element]]
 name = "ExprKind::Int"
@@ -272,27 +272,27 @@ section = "UNWRITTEN"
 
 [[element]]
 name = "Decl::Module"
-section = "UNWRITTEN"
+section = "ALS-D1"
 
 [[element]]
 name = "Decl::Import"
-section = "UNWRITTEN"
+section = "ALS-D1"
 
 [[element]]
 name = "Decl::Type"
-section = "UNWRITTEN"
+section = "ALS-D1"
 
 [[element]]
 name = "Decl::Fn"
-section = "UNWRITTEN"
+section = "ALS-D1"
 
 [[element]]
 name = "Decl::TopLet"
-section = "UNWRITTEN"
+section = "ALS-D1"
 
 [[element]]
 name = "Decl::Protocol"
-section = "UNWRITTEN"
+section = "ALS-D1"
 
 [[element]]
 name = "Decl::Strict"
@@ -300,8 +300,8 @@ section = "UNWRITTEN"
 
 [[element]]
 name = "Decl::Test"
-section = "UNWRITTEN"
+section = "ALS-D1"
 
 [[element]]
 name = "Decl::TestWhereDef"
-section = "UNWRITTEN"
+section = "ALS-D1"
