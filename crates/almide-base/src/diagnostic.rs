@@ -46,6 +46,54 @@ pub enum Level {
     Warning,
 }
 
+/// How safe a fix-it is to apply **without a human or a model in the loop**.
+/// Same shape as rustc's `Applicability` — the reference model for this
+/// design (#1312).
+///
+/// This tag is the load-bearing half of a fix-it. A span+replacement pair
+/// with no applicability is exactly how an auto-fixer corrupts a file: it
+/// applies a suggestion that was only ever meant to be *read*. So the
+/// builders never let an author attach a replacement span without naming
+/// one — see `with_machine_fix` / `with_suggested_fix`.
+///
+/// The single consumer rule: **`almide fix` applies `MachineApplicable` and
+/// nothing else.** Everything else is reported for a human or a model to
+/// choose from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applicability {
+    /// Drop-in replacement. Applying it unattended yields source that still
+    /// compiles and means the same thing — the fix is a *re-spelling*, not a
+    /// decision. Reserve this for cases where the language admits exactly
+    /// one reading of the author's intent.
+    MachineApplicable,
+    /// The replacement is well-formed but picks one reading among several,
+    /// or changes the expression's type. A rename from a "did you mean?"
+    /// edit distance lands here: it compiles, and it may be the wrong name.
+    MaybeIncorrect,
+    /// The snippet contains placeholders (`xs`, `...`, a leading `//`
+    /// comment) and is not valid source as written. Display only.
+    HasPlaceholders,
+    /// No applicability was stated. Treated exactly like "never apply".
+    Unspecified,
+}
+
+impl Applicability {
+    /// Stable wire spelling for `--json` consumers (dojo retry loop, IDEs).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Applicability::MachineApplicable => "machine-applicable",
+            Applicability::MaybeIncorrect => "maybe-incorrect",
+            Applicability::HasPlaceholders => "has-placeholders",
+            Applicability::Unspecified => "unspecified",
+        }
+    }
+
+    /// The one predicate `almide fix` is allowed to branch on.
+    pub fn is_machine_applicable(self) -> bool {
+        matches!(self, Applicability::MachineApplicable)
+    }
+}
+
 /// A secondary source location with a label (e.g. "declared as Int here").
 #[derive(Debug, Clone)]
 pub struct SecondarySpan {
@@ -100,6 +148,10 @@ pub struct Diagnostic {
     /// mechanically-applicable fix — `tests/diagnostic_harness_test.rs`
     /// will auto-apply and verify against `fixed.almd`.
     pub try_replace_span: Option<(usize, usize, usize)>,
+    /// How safe the `(try_replace_span, try_snippet)` pair is to apply
+    /// unattended (#1312). `Unspecified` whenever no span is attached — a
+    /// display-only `try:` is never applied by anything.
+    pub try_applicability: Applicability,
 }
 
 impl Diagnostic {
@@ -109,6 +161,7 @@ impl Diagnostic {
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
+            try_applicability: Applicability::Unspecified,
         }
     }
 
@@ -118,6 +171,7 @@ impl Diagnostic {
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
+            try_applicability: Applicability::Unspecified,
         }
     }
 
@@ -126,31 +180,85 @@ impl Diagnostic {
         self
     }
 
-    /// Attach a copy-pasteable fix snippet.
+    /// Attach a copy-pasteable fix snippet with **no span** — display only.
+    /// Applicability stays `Unspecified`: nothing applies a snippet that
+    /// does not say which bytes it replaces.
     pub fn with_try(mut self, snippet: impl Into<String>) -> Self {
         self.try_snippet = Some(snippet.into());
         self
     }
 
-    /// Attach a mechanically-applicable fix: `snippet` replaces the
-    /// source range `[line:col..line:end_col]` verbatim (1-indexed,
-    /// `end_col` exclusive, same convention as `at_span`).
+    /// Attach a **machine-applicable** fix: `snippet` replaces the source
+    /// range `[line:col..line:end_col]` verbatim (1-indexed, `end_col`
+    /// exclusive, same convention as `at_span`), and `almide fix` will
+    /// apply it unattended.
     ///
-    /// Sets both `try_snippet` (for display) and `try_replace_span`
-    /// (for machine apply). When both are present, `apply_try_to`
-    /// performs the substitution and the result is guaranteed by the
-    /// diagnostic author to compile cleanly.
-    pub fn with_try_replace(
-        mut self,
+    /// Only use this when the replacement is a *re-spelling*: same value,
+    /// same type, same evaluation — the language admits exactly one reading
+    /// of what the author meant. If applying it could pick one of several
+    /// readings, or change the expression's type, use `with_suggested_fix`.
+    pub fn with_machine_fix(
+        self,
         line: usize,
         col: usize,
         end_col: usize,
         snippet: impl Into<String>,
     ) -> Self {
+        self.with_fix_at(line, col, end_col, snippet, Applicability::MachineApplicable)
+    }
+
+    /// Attach a fix-it that is **not** safe to apply unattended: it is
+    /// well-formed and span-exact, but it decides something for the author
+    /// (a rename from an edit distance, a `T` → `Option[T]` rewrite, a
+    /// placement heuristic). Rendered and reported; never auto-applied.
+    pub fn with_suggested_fix(
+        self,
+        line: usize,
+        col: usize,
+        end_col: usize,
+        snippet: impl Into<String>,
+    ) -> Self {
+        self.with_fix_at(line, col, end_col, snippet, Applicability::MaybeIncorrect)
+    }
+
+    /// Shared tail of the two tagged builders. Sets `try_snippet` (display)
+    /// and `try_replace_span` (machine apply) together.
+    ///
+    /// **Span discipline**: a range that cannot name real source — line or
+    /// column 0 (both are 1-indexed), or `end_col < col` — is a guessed
+    /// span, and a guessed span silently rewrites the wrong text. Such a
+    /// range is refused: the snippet degrades to display-only
+    /// (`Unspecified`), so the worst case is a missing fix-it rather than a
+    /// corrupted file.
+    fn with_fix_at(
+        mut self,
+        line: usize,
+        col: usize,
+        end_col: usize,
+        snippet: impl Into<String>,
+        applicability: Applicability,
+    ) -> Self {
         let s = snippet.into();
+        if line == 0 || col == 0 || end_col < col {
+            self.try_snippet = Some(s);
+            self.try_replace_span = None;
+            self.try_applicability = Applicability::Unspecified;
+            return self;
+        }
         self.try_replace_span = Some((line, col, end_col));
         self.try_snippet = Some(s);
+        self.try_applicability = applicability;
         self
+    }
+
+    /// The span + replacement `almide fix` is allowed to apply unattended,
+    /// or `None`. The single read path for the fix engine — it never looks
+    /// at `try_replace_span` directly, so an untagged fix-it cannot leak
+    /// into an unattended rewrite.
+    pub fn machine_fix(&self) -> Option<(usize, usize, usize, &str)> {
+        if !self.try_applicability.is_machine_applicable() { return None; }
+        let (line, col, end_col) = self.try_replace_span?;
+        Some((line, col, end_col, self.try_snippet.as_deref()?))
     }
 
     /// Apply `try_snippet` to `source` at `try_replace_span`, returning
@@ -277,10 +385,24 @@ impl Diagnostic {
             out.push_str(&format!("\n  hint: {}", self.hint));
         }
         if let Some(snippet) = &self.try_snippet {
-            out.push_str("\n  try:");
+            out.push_str(&format!("\n  try:{}", self.try_label_suffix()));
             for line in snippet.lines() {
                 out.push_str(&format!("\n      {}", line));
             }
+        }
+    }
+
+    /// Suffix for the `try:` label so a reader — human or model — can tell
+    /// a fix the toolchain will apply from a suggestion they have to weigh.
+    /// Empty for everything but a machine-applicable fix, so the rendering
+    /// of every other diagnostic is byte-identical to before #1312.
+    pub fn try_label_suffix(&self) -> &'static str {
+        match self.machine_fix() {
+            // An empty replacement is a deletion — there is no body to
+            // print, so the label has to carry the whole instruction.
+            Some((_, _, _, "")) => " delete the highlighted text (machine-applicable — `almide fix` applies it)",
+            Some(_) => " (machine-applicable — `almide fix` applies it)",
+            None => "",
         }
     }
 
@@ -318,7 +440,7 @@ mod apply_try_tests {
         //         123456789012345...
         //            ^            col 4 is `!`, col 5..15 is `user_admin`.
         // Replace just `!` (col 4..5) with `not `.
-        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 4, 5, "not ");
+        let d = Diagnostic::error("e", "h", "c").with_machine_fix(1, 4, 5, "not ");
         assert_eq!(d.apply_try_to("if !user_admin then x").as_deref(), Some("if not user_admin then x"));
     }
 
@@ -326,7 +448,7 @@ mod apply_try_tests {
     fn replace_whole_token_round_trip() {
         // Rename `parseInt` → `int.parse`. `parseInt` starts at col 7 and
         // ends at col 15 (exclusive) in "let x=parseInt(s)".
-        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 7, 15, "int.parse");
+        let d = Diagnostic::error("e", "h", "c").with_machine_fix(1, 7, 15, "int.parse");
         assert_eq!(d.apply_try_to("let x=parseInt(s)").as_deref(), Some("let x=int.parse(s)"));
     }
 
@@ -334,7 +456,7 @@ mod apply_try_tests {
     fn replace_on_second_line() {
         let src = "fn main() -> Int =\n    parseInt(s)\n";
         // Line 2: `    parseInt(s)`. `parseInt` at cols 5..13 exclusive.
-        let d = Diagnostic::error("e", "h", "c").with_try_replace(2, 5, 13, "int.parse");
+        let d = Diagnostic::error("e", "h", "c").with_machine_fix(2, 5, 13, "int.parse");
         assert_eq!(d.apply_try_to(src).as_deref(), Some("fn main() -> Int =\n    int.parse(s)\n"));
     }
 
@@ -342,19 +464,62 @@ mod apply_try_tests {
     fn replace_zero_width_inserts() {
         // `end_col == col` — insert `snippet` at that column without
         // deleting anything. Useful for "missing import" style fixes.
-        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 1, 1, "import json\n");
+        let d = Diagnostic::error("e", "h", "c").with_machine_fix(1, 1, 1, "import json\n");
         assert_eq!(d.apply_try_to("effect fn main() = ...").as_deref(), Some("import json\neffect fn main() = ..."));
     }
 
     #[test]
     fn out_of_bounds_line_returns_none() {
-        let d = Diagnostic::error("e", "h", "c").with_try_replace(5, 1, 2, "x");
+        let d = Diagnostic::error("e", "h", "c").with_machine_fix(5, 1, 2, "x");
         assert!(d.apply_try_to("only one line").is_none());
     }
 
     #[test]
     fn out_of_bounds_col_returns_none() {
-        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 100, 110, "x");
+        let d = Diagnostic::error("e", "h", "c").with_machine_fix(1, 100, 110, "x");
         assert!(d.apply_try_to("short").is_none());
+    }
+
+    // ── #1312: applicability tagging ──────────────────────────────
+
+    #[test]
+    fn machine_fix_is_the_only_unattended_read_path() {
+        let machine = Diagnostic::error("e", "h", "c").with_machine_fix(1, 4, 5, "not ");
+        assert_eq!(machine.try_applicability, Applicability::MachineApplicable);
+        assert_eq!(machine.machine_fix(), Some((1, 4, 5, "not ")));
+
+        // A suggestion carries the same exact span but is never applied.
+        let suggested = Diagnostic::error("e", "h", "c").with_suggested_fix(1, 4, 5, "not ");
+        assert_eq!(suggested.try_applicability, Applicability::MaybeIncorrect);
+        assert_eq!(suggested.try_replace_span, Some((1, 4, 5)));
+        assert!(suggested.machine_fix().is_none());
+
+        // Display-only stays untagged, so nothing can apply it.
+        let display_only = Diagnostic::error("e", "h", "c").with_try("// x -> y\ny");
+        assert_eq!(display_only.try_applicability, Applicability::Unspecified);
+        assert!(display_only.machine_fix().is_none());
+    }
+
+    #[test]
+    fn a_guessed_span_is_refused_not_applied() {
+        // 1-indexed: line 0 / col 0 cannot name real source, and an
+        // inverted range is nonsense. Each degrades to display-only
+        // instead of rewriting whatever happens to sit at that offset.
+        for (line, col, end_col) in [(0usize, 3usize, 5usize), (2, 0, 5), (2, 9, 4)] {
+            let d = Diagnostic::error("e", "h", "c").with_machine_fix(line, col, end_col, "boom");
+            assert!(d.try_replace_span.is_none(), "guessed span {:?} kept", (line, col, end_col));
+            assert_eq!(d.try_applicability, Applicability::Unspecified);
+            assert!(d.machine_fix().is_none());
+            assert_eq!(d.try_snippet.as_deref(), Some("boom"), "snippet must survive for display");
+        }
+    }
+
+    #[test]
+    fn only_machine_applicable_fixes_are_labelled_in_the_rendering() {
+        let machine = Diagnostic::error("e", "h", "c").with_machine_fix(1, 4, 5, "not ");
+        assert!(machine.display().contains("try: (machine-applicable"), "{}", machine.display());
+        let suggested = Diagnostic::error("e", "h", "c").with_suggested_fix(1, 4, 5, "not ");
+        assert!(suggested.display().contains("\n  try:\n"), "{}", suggested.display());
+        assert!(!suggested.display().contains("machine-applicable"));
     }
 }

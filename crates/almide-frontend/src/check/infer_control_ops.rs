@@ -945,14 +945,22 @@ impl Checker {
                         // new `import <module>\n` line is prepended.
                         // `apply_try_to` handles `end_col == col` as
                         // an insertion point.
-                        diag = diag.with_try_replace(
+                        //
+                        // SUGGESTION, not machine-applicable (#1312):
+                        // 1:1 is a PLACEMENT HEURISTIC, not this
+                        // diagnostic's own span — the import block's real
+                        // position depends on what is already there.
+                        // `almide fix` routes import insertion through
+                        // `auto_imports`, which owns that block.
+                        diag = diag.with_suggested_fix(
                             1, 1, 1,
                             format!("import {}\n", stripped),
                         );
                     } else if let Some(span) = self.current_span {
                         // Typo fuzzy suggestion: replace the
                         // offending identifier with the suggested name.
-                        diag = diag.with_try_replace(
+                        // SUGGESTION: an edit distance picked the name.
+                        diag = diag.with_suggested_fix(
                             span.line, span.col, span.end_col,
                             fix,
                         );

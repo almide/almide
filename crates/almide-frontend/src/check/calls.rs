@@ -690,7 +690,8 @@ impl Checker {
             diag = diag.with_try(rich.to_string());
         } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
             // Almide `Span::end_col` is the column one past the last char (same convention as lexer emit — `end_col = col + token_len`). `apply_try_to` wants the exclusive upper bound, so use `end_col` directly.
-            diag = diag.with_try_replace(span.line, span.col, span.end_col, fix.clone());
+            // SUGGESTION, not machine-applicable (#1312): the replacement comes from an edit distance over the visible names. It compiles, and it may well call the wrong function — that is a choice only the author can make.
+            diag = diag.with_suggested_fix(span.line, span.col, span.end_col, fix.clone());
         } else if let Some(fix) = &fix_name {
             // Fallback: no span available — fall back to the comment-headed display form.
             diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
