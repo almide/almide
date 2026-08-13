@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-275 contracts
+276 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -302,5 +302,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-272 | `fs.list_dir` returns EVERY entry on both targets, whatever the directory's size, sorted by bytes | 0.57.1 | active | fixture | 1 |
 | C-273 | The fs write-side floors answer with native's std::io Display text, and fd_write's errno is not dropped | 0.57.1 | active | fixture | 1 |
 | C-274 | A fallible callback makes an fs streaming walk fallible, stopping at the first err | 0.57.1 | active | fixture | 1 |
-| C-275 | The http response-header surface answers identically on both targets, with case-insensitive field names | 0.57.1 | active | fixture | 1 |
+| C-275 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 1 |
+| C-276 | A String-key `list.sort_by` over HEAP elements orders and co-owns identically on both targets | 0.57.1 | active | fixture | 1 |
 

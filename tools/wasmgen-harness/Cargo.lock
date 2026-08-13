@@ -29,6 +29,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-driver"
+version = "0.12.2"
+dependencies = [
+ "almide-base",
+ "almide-frontend",
+ "almide-ir",
+ "almide-lang",
+ "almide-optimize",
+]
+
+[[package]]
 name = "almide-frontend"
 version = "0.12.2"
 dependencies = [
@@ -64,6 +75,7 @@ dependencies = [
 name = "almide-mir"
 version = "0.1.0"
 dependencies = [
+ "almide-driver",
  "almide-frontend",
  "almide-ir",
  "almide-lang",
