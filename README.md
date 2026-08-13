@@ -236,7 +236,7 @@ publishing, and a figure measured with `time -p` on a sub-10ms program is noise.
 LLM-writability row above and the artifact sizes below are the claims this README currently
 stands behind.
 
-| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), 1.16–1.18× on fasta and FFT; ~1.6× where the workload is list materialization rather than arithmetic (#1004) — CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)) |
+| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), 1.16–1.18× on fasta and FFT — these carry a CI ratio ratchet. The allocation-heavy rows are reported, not anchored (the ratio compares allocators): 1.12× on the string workload against same-semantics Rust, ~1.6× on `listbuild` which is the deterministic software libm rather than codegen ([why](./research/benchmark/perf/string-gap-1004.md)). [Scoreboard](./docs/project/BENCHMARKS.md) |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
 reachability DCE prunes unreached runtime helpers inside the renderer itself, but

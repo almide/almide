@@ -103,11 +103,44 @@ intermediate list on every element — 44 ms of a 79 ms build, the whole of the
 gap. It now returns a fixed-size array instead, and the recommended idiom went
 from **1.67× the append loop it replaces to 1.02×**.
 
-The ~1.6× all three shapes share against handwritten Rust is the
-materialization cost tracked in #1004 — closing the shape spread showed that
-what remains is not about the shape. `check-perf-ratio.sh` gates each row's
-ratio and, separately, the relation between the rows, so the idiom cannot
-silently become the slow path again.
+The ~1.6× all three shapes share against handwritten Rust was long attributed
+to materialization (#1004). It is **not** (measured 2026-08-13): swapping only
+`almide_rt_libm_sin`/`_cos` — the deterministic software libm the cross-target
+byte-identity contract requires — for the platform ones in the emitted Rust
+takes the row from 194.5 ms to 105.5 ms against a 123.9 ms reference. The
+whole 1.6× is transcendental determinism, and without it the emitted code
+*beats* the handwritten reference by 1.17×. The build shape is innocent:
+`list.repeat` + bounds-checked indexed writes measure 75.5 ms against
+`Vec::with_capacity` + push at 90.6 ms. Evidence and method:
+[string-gap-1004.md](../../research/benchmark/perf/string-gap-1004.md).
+`check-perf-ratio.sh` reports these rows and gates the relation between them,
+so the idiom cannot silently become the slow path again.
+
+### Strings: what the stdlib's contract costs (2026-08-13)
+
+`strchurn` is the allocation-heavy string workload from #1004:
+`int.to_string` → `string.join` → `string.split` → `string.len` → `list.sum`.
+It carries two references, and which one you compare against is the whole
+story (`bench.py --quick`, 2M, median of 3, M4 Pro):
+
+| strchurn (2M) | Time | Ratio |
+|---|---:|---:|
+| Almide native | **0.123s** | — |
+| Rust, same shape + same semantics (owned `String`s from `split`, `chars().count()`) | 0.109s | **1.12×** |
+| Rust, idiomatic (borrowed `&str`, byte `len()`) | 0.059s | 2.08× |
+
+The second reference does what a Rust programmer writes; the first does what
+Almide's stdlib obliges the program to do. Almide is within **1.12×** of
+same-work Rust, and the remaining spread to idiomatic Rust is **the API
+contract, not codegen** — 75% of it is `string.split` returning owned
+`String`s (`List[String]` has no borrowed element type) and 11% is `string.len`
+being a character count. The `RcCow` representation the issue title blamed is
+not on this path at all: Almide's `String` lowers to Rust's `String`, and
+`RcCow` is used only for `Bytes` and `Matrix`. Full ladder, the refuted
+rlib-boundary hypothesis, and the resulting work list:
+[string-gap-1004.md](../../research/benchmark/perf/string-gap-1004.md).
+Like the listbuild rows, this one is reported rather than anchored — an
+allocation-dominated ratio is an allocator comparison first.
 
 The wasm leg is measured in the same dated results file: within 1.1–1.2× of
 native on the compute kernels (n-body 1.278s, spectral-norm 0.764s,
