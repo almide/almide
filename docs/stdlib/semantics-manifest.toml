@@ -2443,6 +2443,108 @@ header + adler32 wrapper deflate omits), level 9 gives 7, level 10 clamps
 to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
 """
 
+# index_unit vocabulary — fs (every value below verified by executing the probe
+# on BOTH legs, native and wasm, 2026-08-13 — byte-identical):
+#   byte-value — the Int is ONE byte of file content, 0–255. `List[Int]` file
+#                content is a BYTE list, never a codepoint list: the 2-codepoint
+#                text "aé" reads back as 3 elements [97, 195, 169] (raw UTF-8),
+#                and 0 / 255 survive a write_bytes round trip unchanged
+#   byte-count — the Int counts BYTES of file content (file_size: "aé" is 3,
+#                not 2 characters and not a block count)
+#   second     — the Int is a Unix-epoch timestamp in SECONDS (modified_at —
+#                the same scale as env.unix_timestamp, NOT millis)
+[fs]
+default_index_unit = "byte-value"
+
+[[fs.fn]]
+name = "read_bytes"
+index_unit = "byte-value"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_read_bytes_")!',
+  'fs.write(p, "aé")!',
+  "let bs = fs.read_bytes(p)!",
+  "fs.remove(p)!",
+]
+probe = "bs"
+expect = "[97, 195, 169]"
+note = """
+The #419 dimension itself, one module over: "aé" is 2 codepoints and reads
+back as 3 elements — the list counts UTF-8 BYTES, and each element is one
+byte's value (195, 169 are the two bytes of é), not a scalar value.
+"""
+
+[[fs.fn]]
+name = "write_bytes"
+index_unit = "byte-value"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_write_bytes_")!',
+  "fs.write_bytes(p, [0, 65, 255])!",
+  "let bs = fs.read_bytes(p)!",
+  "fs.remove(p)!",
+]
+probe = "bs"
+expect = "[0, 65, 255]"
+note = """
+Each element is written as ONE raw byte over the full 0–255 range: a 0 does
+not terminate the file (the round trip keeps all three), and 255 is a byte
+value, not a sentinel.
+"""
+
+[[fs.fn]]
+name = "read_bytes_if_exists"
+index_unit = "byte-value"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_read_bytes_if_exists_")!',
+  "fs.write_bytes(p, [1, 2])!",
+  "let hit = fs.read_bytes_if_exists(p)!",
+  "fs.remove(p)!",
+  "let miss = fs.read_bytes_if_exists(p)!",
+]
+probe = "(hit ?? []) + (miss ?? [])"
+expect = "[1, 2]"
+note = """
+One expression pins both halves of the Option: the existing file yields
+some([1, 2]) with the same byte-value elements as read_bytes, and the same
+path AFTER removal yields none (which contributes nothing to the concat) —
+a missing file is none, not an empty list and not an Err.
+"""
+
+[[fs.fn]]
+name = "file_size"
+index_unit = "byte-count"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_file_size_")!',
+  'fs.write(p, "aé")!',
+  "let n = fs.file_size(p)!",
+  "fs.remove(p)!",
+]
+probe = "n"
+expect = "3"
+note = """
+BYTES on disk, not characters: the 2-codepoint "aé" is 3. The same unit
+read_bytes returns elements of, so file_size(p) == list.len(read_bytes(p)).
+"""
+
+[[fs.fn]]
+name = "modified_at"
+index_unit = "second"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_modified_at_")!',
+  "let now = env.unix_timestamp()",
+  "let mt = fs.modified_at(p)!",
+  "fs.remove(p)!",
+]
+probe = "mt > now - 300 and mt < now + 300"
+expect = "true"
+note = """
+SECONDS since the Unix epoch, on the same scale as env.unix_timestamp: the
+±300s window around a just-created file's mtime is unreachable for a
+milliseconds value (~1.7e12 against a ~1.7e9 bound), so the probe separates
+the two scales the way the env second/millisecond rows do — and it is
+tighter, because it also pins the ORIGIN as the epoch rather than some
+platform-specific zero.
+"""
+
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
 # regex, bool, path, base64, hex and html bear no Int in any swept signature
 # today, so their entry lists are empty — but COVERED_MODULES holds them, so the first
