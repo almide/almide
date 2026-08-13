@@ -196,3 +196,8 @@ evidence = "#1310 landing PR: 5 fail directions demonstrated before first green 
 path = "scripts/check-rustc-warnings.sh"
 class = "NEGATIVE_TESTED"
 evidence = "#1228 landing PR: all four fail directions demonstrated before first green — an injected unused import (1 > 0), a raised baseline (0 < 5, ratchet-down demand), a failing cargo invocation, and an empty message stream (0 units < the 40 floor, #976 blindness class)"
+
+[[gate]]
+path = "scripts/check-edit-loop-scale.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1334 (landing PR): two forged inputs demonstrated to FAIL before first green, both restored and re-confirmed green (slope 1.113, ratio 4.424, exit 0). (1) A GENUINELY SUPERLINEAR COMPILER — a shim run via ALMIDE_BIN that performs the real `almide check` and then burns a delay proportional to (project lines)^2 — moved the anchored slope from 1.11-1.15 to 1.486 / 1.567 / 1.643 across three runs, over the 1.302 ceiling, exit 1. This is the fail direction the gate exists for, and the hook that makes it reproducible is documented in the script. The shim's own ~27ms spawn cost also pushed `ratio` UNDER its 3.302 floor, so the two-sided band on the second anchor fired in the same run. (2) A COLLAPSED CORPUS — the ladder's source glob forged down to 39 modules / 3,926 lines — fired all four blindness floors at once (corpus modules under 250, top rung under 25,000 lines, no rung in the 9k-12k headline band, top-rung min 24.8ms under the 40ms spawn-noise floor), exit 1: the #976 'gate went blind and read green forever' direction. NOT demonstrated: a real compiler regression caught in production (the gate is new)."
