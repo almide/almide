@@ -35,10 +35,36 @@ Beyond that:
     the slope computed from p50 read 1.53 against 1.13 from min. The tail tracks
     the machine, the slope from `min` does not. See scripts/check-edit-loop-scale.sh.
 
+PER-PHASE RESOLUTION (#1311). Each rung is checked with `--timings`, so the same
+interleaved samples that give the wall clock above also give the front end split
+into lex / parse / check (plus a named `other` residual: file I/O, import
+resolution, canonicalization, the lowering behind the unused-var warnings). One
+aggregate number cannot see a checker regression hidden behind a fast lexer; the
+split can. It buys three more slopes — one per phase, so superlinearity is
+LOCALIZED rather than merely detected — and the phase SHARES, which are what
+catches a phase that got uniformly more expensive while the ladder's shape held.
+
+  Cost of asking: the instrumentation is off unless `--timings` is passed, and
+  when passed it is 2 clock reads plus a newline scan per source. That matters
+  because the SAME run feeds the wall-clock anchors, which were baselined without
+  it. Measured A/B, 2026-08-14, M4 Pro, four 40-run ladders each way, alternated
+  (timings, plain, timings, plain, ...) so drift lands on both arms, load 1.6-2.1:
+
+      top rung min   124.37ms with --timings   124.89ms without   (-0.4%)
+      top rung p50   126.41ms                  127.00ms           (-0.5%)
+      slope           1.150                     1.151
+      ratio           4.313                     4.311
+
+  The instrumented arm read marginally FASTER, i.e. the overhead is below this
+  ladder's own run-to-run spread and the two anchors are unmoved in the third
+  decimal. So the ladder is run ONCE, with `--timings`, and the wall-clock
+  anchors keep reading the same quantity they were baselined on.
+
 Usage:
   python3 scale.py                       # default ladder, 40 interleaved runs
   python3 scale.py --runs 60 --out r.json
   python3 scale.py --targets 0,2000,10000  # custom cumulative-line rungs
+  python3 scale.py --no-timings          # wall clock only (the A/B control)
 """
 
 import argparse
@@ -111,6 +137,25 @@ def pct(values, p):
     return v[lo] + (v[hi] - v[lo]) * (k - lo)
 
 
+# The phases `almide check --timings` accounts, in the order the CLI emits them.
+# `other` is the named residual (total minus the three) — an accounting whose
+# remainder is anonymous can absorb an arbitrary regression unnoticed.
+PHASES = ["lex", "parse", "check"]
+
+
+def parse_timings(stderr_bytes):
+    """Pull the `almide-timings {...}` line out of a check's stderr.
+
+    Returns None when the flag was not passed (or the line is absent), so the
+    caller can tell "not measured" from "measured zero" — those must never be
+    conflated: a zero would silently satisfy a share band.
+    """
+    for line in stderr_bytes.decode("utf-8", "replace").splitlines():
+        if line.startswith("almide-timings "):
+            return json.loads(line[len("almide-timings "):])
+    return None
+
+
 def loglog_slope(points):
     """Least-squares slope of log(marginal ms) against log(lines).
 
@@ -136,6 +181,8 @@ def main():
     ap.add_argument("--almide", default=os.path.join(ROOT, "target/release/almide"))
     ap.add_argument("--out", default=None, help="write JSON results here")
     ap.add_argument("--keep", action="store_true", help="keep the scratch corpus")
+    ap.add_argument("--no-timings", dest="timings", action="store_false",
+                    help="skip --timings (the A/B control for the instrumentation's own cost)")
     args = ap.parse_args()
 
     if not os.path.exists(args.almide):
@@ -144,6 +191,8 @@ def main():
     targets = DEFAULT_TARGETS
     if args.targets:
         targets = [int(t) for t in args.targets.split(",")]
+
+    cmd_flags = ["--timings"] if args.timings else []
 
     files = corpus_files()
     workdir = tempfile.mkdtemp(prefix="almide-editloop-")
@@ -155,21 +204,42 @@ def main():
                 acc += files[idx][1]
                 idx += 1
             entry, lines = build_rung(files[:idx], os.path.join(workdir, "r%03d" % idx))
-            probe = subprocess.run([args.almide, "check", entry], capture_output=True, text=True)
+            probe = subprocess.run([args.almide, "check"] + cmd_flags + [entry],
+                                   capture_output=True)
             if probe.returncode != 0:
-                sys.stderr.write(probe.stdout[-4000:] + probe.stderr[-2000:])
+                sys.stderr.write(probe.stdout[-4000:].decode("utf-8", "replace")
+                                 + probe.stderr[-2000:].decode("utf-8", "replace"))
                 sys.exit("::error::editloop-scale: rung of %d modules / %d lines does NOT check "
                          "clean. The ladder measures a clean check; a corpus that errors measures "
                          "the diagnostic renderer. Fix the corpus (see SKIP in scale.py) rather "
                          "than timing a red build." % (idx, lines))
-            rungs.append({"modules": idx, "lines": lines, "entry": entry, "samples": []})
+            probed = parse_timings(probe.stderr) if args.timings else None
+            if args.timings and probed is None:
+                sys.exit("::error::editloop-scale: `almide check --timings` printed no "
+                         "`almide-timings` line. The per-phase ratchet would then be reading "
+                         "nothing at all — fix the binary or drop --timings deliberately.")
+            rungs.append({"modules": idx, "lines": lines, "entry": entry, "samples": [],
+                          "phase_samples": [],
+                          # Lines/sources the FRONT END actually handled: the rung's
+                          # own modules plus the auto-imported bundled stdlib every
+                          # check pays. That is the honest denominator of a lines/sec
+                          # number, and it is a property of the input, so the gate can
+                          # floor it without asking the compiler anything.
+                          "fe_lines": (probed or {}).get("lines"),
+                          "fe_sources": (probed or {}).get("sources")})
 
         started = time.time()
         for _ in range(args.runs):
             for r in rungs:
                 t0 = time.perf_counter()
-                subprocess.run([args.almide, "check", r["entry"]], capture_output=True)
+                proc = subprocess.run([args.almide, "check"] + cmd_flags + [r["entry"]],
+                                      capture_output=True)
+                # Stop the external clock BEFORE any parsing work.
                 r["samples"].append((time.perf_counter() - t0) * 1000.0)
+                if args.timings:
+                    t = parse_timings(proc.stderr)
+                    if t is not None:
+                        r["phase_samples"].append(t)
         wall = time.time() - started
     finally:
         if not args.keep:
@@ -184,6 +254,48 @@ def main():
         r["marginal_p50"] = r["p50"] - floor["p50"]
         r["us_per_line"] = (r["marginal_min"] * 1000.0 / r["lines"]) if r["lines"] else 0.0
 
+    # ── per-phase statistics (#1311) ────────────────────────────────────────
+    # Same samples, finer resolution. Each phase gets its own `min` across the
+    # interleaved runs (least-contaminated, matching the wall-clock treatment),
+    # its own marginal-against-the-floor series, and therefore its own slope.
+    phase_slopes, shares = {}, {}
+    if args.timings and all(r["phase_samples"] for r in rungs):
+        for r in rungs:
+            ps = r["phase_samples"]
+            r["phase"] = {}
+            for name in PHASES + ["other"]:
+                if name == "other":
+                    vals = [(t["total_ns"] - t["lex_ns"] - t["parse_ns"] - t["check_ns"]) / 1e6
+                            for t in ps]
+                else:
+                    vals = [t[name + "_ns"] / 1e6 for t in ps]
+                r["phase"][name] = {"min": min(vals), "p50": pct(vals, 50), "p95": pct(vals, 95)}
+            r.pop("phase_samples", None)
+        floor = rungs[0]
+        for r in rungs:
+            for name in PHASES + ["other"]:
+                r["phase"][name]["marginal_min"] = (
+                    r["phase"][name]["min"] - floor["phase"][name]["min"])
+            # Reported, never anchored: lines/sec is a machine speed, and #1334
+            # measured a 6x swing in this ladder's wall clock across one box's
+            # load range with the compiler untouched.
+            r["k_lines_per_sec"] = {
+                name: (r["fe_lines"] / (r["phase"][name]["min"] / 1000.0) / 1000.0
+                       if r["phase"][name]["min"] > 0 else 0.0)
+                for name in PHASES}
+        for name in PHASES:
+            pts = [(r["lines"], r["phase"][name]["marginal_min"])
+                   for r in rungs[1:] if r["phase"][name]["marginal_min"] > 0]
+            phase_slopes[name] = loglog_slope(pts) if len(pts) >= 2 else None
+        # Shares are taken at the TOP rung — the one where the constant floor
+        # (bundled stdlib) is the smallest fraction of the work, so the split
+        # describes the PROJECT rather than the compiler's startup. Denominator
+        # is the three accounted phases, not the process total: `other` includes
+        # file I/O, whose cost is the filesystem's and not the front end's.
+        top = rungs[-1]
+        denom = sum(top["phase"][n]["min"] for n in PHASES)
+        shares = {n: top["phase"][n]["min"] / denom for n in PHASES} if denom > 0 else {}
+
     scaling = [(r["lines"], r["marginal_min"]) for r in rungs[1:] if r["marginal_min"] > 0]
     result = {
         "date": datetime.date.today().isoformat(),
@@ -193,11 +305,15 @@ def main():
         "wall_seconds": round(wall, 1),
         "corpus": {"source": "stdlib/*.almd", "files": len(files),
                    "lines": sum(n for _, n in files), "skipped": sorted(SKIP)},
-        "rungs": [{k: v for k, v in r.items() if k not in ("entry", "samples")} for r in rungs],
+        "rungs": [{k: v for k, v in r.items() if k not in ("entry", "samples", "phase_samples")}
+                  for r in rungs],
         "slope_min": loglog_slope(scaling) if len(scaling) >= 2 else None,
         "slope_p95": loglog_slope([(r["lines"], r["p95"] - floor["p95"])
                                    for r in rungs[1:] if r["p95"] - floor["p95"] > 0])
         if len(rungs) > 2 else None,
+        "timings": args.timings,
+        "phase_slopes": phase_slopes,
+        "phase_shares": shares,
     }
 
     print("editloop-scale: corpus %s — %d files, %d lines (%d used, %s skipped)"
@@ -211,6 +327,27 @@ def main():
               % (r["modules"], r["lines"], r["min"], r["p50"], r["p95"], r["max"], r["us_per_line"]))
     print("editloop-scale: log-log slope over the ladder — min %.3f, p95 %.3f (1.0 = linear)"
           % (result["slope_min"], result["slope_p95"]))
+
+    if shares:
+        top = rungs[-1]
+        print("editloop-phase: per-phase min ms by rung (front-end lines include the "
+              "auto-imported bundled stdlib)")
+        print("%9s %8s %9s %9s %9s %9s %9s"
+              % ("lines", "fe_lines", "lex", "parse", "check", "other", "sum"))
+        for r in rungs:
+            p = r["phase"]
+            print("%9d %8d %9.2f %9.2f %9.2f %9.2f %9.2f"
+                  % (r["lines"], r["fe_lines"], p["lex"]["min"], p["parse"]["min"],
+                     p["check"]["min"], p["other"]["min"],
+                     sum(p[n]["min"] for n in PHASES)))
+        print("editloop-phase: top-rung share of accounted front-end time — "
+              + "  ".join("%s %.4f" % (n, shares[n]) for n in PHASES))
+        print("editloop-phase: per-phase log-log slope — "
+              + "  ".join("%s %s" % (n, "n/a" if phase_slopes[n] is None
+                                     else "%.3f" % phase_slopes[n]) for n in PHASES))
+        print("editloop-phase: top-rung throughput (REPORTED, not anchored — this is a "
+              "machine speed) — "
+              + "  ".join("%s %.0fk lines/s" % (n, top["k_lines_per_sec"][n]) for n in PHASES))
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
