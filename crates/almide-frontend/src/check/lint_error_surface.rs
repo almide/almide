@@ -134,7 +134,7 @@ impl ErrorSurfaceLint {
     fn walk_children_nested(&mut self, expr: &ast::Expr, err_binds: &[Sym]) {
         use ast::ExprKind as EK;
         match &expr.kind {
-            EK::InterpolatedString { parts } => self.walk_interpolation(parts, err_binds),
+            EK::InterpolatedString { parts, .. } => self.walk_interpolation(parts, err_binds),
             EK::MapLiteral { entries } => {
                 for (k, v) in entries {
                     self.walk_expr(k, err_binds);
@@ -399,7 +399,7 @@ fn expr_uses_ident_nested(expr: &ast::Expr, name: Sym) -> bool {
     use ast::ExprKind as EK;
     let uses = |e: &ast::Expr| expr_uses_ident(e, name);
     match &expr.kind {
-        EK::InterpolatedString { parts } => parts.iter().any(|p| match p {
+        EK::InterpolatedString { parts, .. } => parts.iter().any(|p| match p {
             ast::StringPart::Expr { expr } => uses(expr),
             _ => false,
         }),

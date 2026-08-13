@@ -60,6 +60,12 @@ pub fn minimize(
         return Minimized { source: source.to_string(), finding: None };
     };
 
+    // Every shrink below mutates the tree and re-renders it. A literal that
+    // still carries its source spelling reprints verbatim (#1263), so a shrink
+    // reaching inside a `${…}` hole would be silently undone — the minimizer
+    // would loop believing it made progress. Render from values instead.
+    almide::ast::strip_literal_raw(&mut program);
+
     let mut best = format_program(&program);
     let mut best_finding = None;
 

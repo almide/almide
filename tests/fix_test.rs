@@ -353,3 +353,25 @@ fn main() -> Unit = {
     // the deprecated call is intentionally NOT migrated while the parse is broken
     assert!(after.contains("json.null()"), "AST rewrite ran on a broken parse:\n{}", after);
 }
+
+/// #1263 guard: a string literal reprints its own SOURCE text, and an
+/// interpolated string's cached text spans its `${…}` holes. A rewrite that
+/// lands inside a hole must still reach the file — measured: without
+/// `strip_literal_raw`, `fix` reported "Rewrote 1 comparison" and wrote back
+/// `int.gt(a, b)` unchanged.
+#[test]
+fn fix_rewrite_inside_an_interpolation_hole_reaches_the_file() {
+    let src = r#"
+fn main() -> Unit = {
+  let a = 3
+  let b = 4
+  println("cmp=${int.gt(a, b)}")
+}
+"#;
+    let path = write_tmp("fix_interp_hole.almd", src);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "fix failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("${a > b}"), "hole not rewritten:\n{}", after);
+    assert!(!after.contains("int.gt"), "int.gt residue inside the hole:\n{}", after);
+}

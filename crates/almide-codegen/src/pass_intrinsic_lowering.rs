@@ -321,7 +321,7 @@ fn ast_literal_to_ir_expr(expr: &ast::Expr) -> IrExpr {
             });
             (IrExprKind::LitInt { value: n }, Ty::Int)
         }
-        ExprKind::Float { value } => (
+        ExprKind::Float { value, .. } => (
             IrExprKind::LitFloat { value: *value },
             Ty::Float,
         ),
@@ -329,7 +329,7 @@ fn ast_literal_to_ir_expr(expr: &ast::Expr) -> IrExpr {
             IrExprKind::LitBool { value: *value },
             Ty::Bool,
         ),
-        ExprKind::String { value } => (
+        ExprKind::String { value, .. } => (
             IrExprKind::LitStr { value: value.clone() },
             Ty::String,
         ),

@@ -154,9 +154,21 @@ impl Expr {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExprKind {
     Int { value: serde_json::Value, raw: String },
-    Float { value: f64 },
-    String { value: String },
-    InterpolatedString { parts: Vec<StringPart> },
+    /// `raw` is the literal's VERBATIM source spelling (`1e10`, `1_000.25`,
+    /// `1e999`) when the node came from a parse. `fmt` prints it instead of
+    /// reprinting `value`, which normalized `1e10` to `10000000000.0` and
+    /// `1e999` to the UNPARSEABLE `inf.0` (#1261). `None` on synthesized
+    /// nodes (and after `strip_literal_raw`), where `fmt` falls back to
+    /// rendering the value. NOT serialized: two ASTs are the same program
+    /// when their VALUES match, which is exactly what fmt's post-format
+    /// verifier compares.
+    Float { value: f64, #[serde(skip)] raw: Option<String> },
+    /// `raw` is the whole literal INCLUDING its delimiters, so the quote
+    /// style (`'…'` vs `"…"`), the heredoc form (`"""…"""`), the raw-string
+    /// form (`r"…"`) and every escape spelling (`\u{3042}`, `\x41`) survive
+    /// `fmt` (#1263). Same `None`/serde contract as `Float::raw`.
+    String { value: String, #[serde(skip)] raw: Option<String> },
+    InterpolatedString { parts: Vec<StringPart>, #[serde(skip)] raw: Option<String> },
     Bool { value: bool },
     Ident { name: Sym },
     TypeName { name: Sym },
@@ -444,6 +456,24 @@ pub fn visit_exprs_mut(program: &mut Program, f: &mut impl FnMut(&mut Expr)) {
     for decl in program.decls.iter_mut() { visit_decl_exprs_mut(decl, f); }
 }
 
+/// Drop every literal's cached source spelling, so `fmt` renders the tree from
+/// its VALUES again.
+///
+/// Mandatory for any tool that MUTATES a parsed AST and then re-renders it
+/// (`almide fix`'s rewrites, the differential fuzzer's mutators): an
+/// `InterpolatedString`'s `raw` spans its `${…}` holes, so a rewrite landing
+/// inside a hole would be silently dropped by a verbatim reprint. Stripping is
+/// the conservative direction — the worst case is that literals come back
+/// normalized, never that an edit disappears.
+pub fn strip_literal_raw(program: &mut Program) {
+    visit_exprs_mut(program, &mut |e: &mut Expr| match &mut e.kind {
+        ExprKind::Float { raw, .. }
+        | ExprKind::String { raw, .. }
+        | ExprKind::InterpolatedString { raw, .. } => *raw = None,
+        _ => {}
+    });
+}
+
 pub fn visit_decl_exprs_mut(decl: &mut Decl, f: &mut impl FnMut(&mut Expr)) {
     match decl {
         Decl::Fn { params, body, .. } => {
@@ -623,7 +653,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
             visit_expr_mut(lead, f);
             visit_stmts_mut(body, f);
         }
-        ExprKind::InterpolatedString { parts } => visit_string_parts_mut(parts, f),
+        ExprKind::InterpolatedString { parts, .. } => visit_string_parts_mut(parts, f),
 
         // ── No children ──
         ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
@@ -817,7 +847,7 @@ pub fn visit_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
             visit_expr(lead, f);
             visit_stmts(body, f);
         }
-        ExprKind::InterpolatedString { parts } => visit_string_parts(parts, f),
+        ExprKind::InterpolatedString { parts, .. } => visit_string_parts(parts, f),
 
         // ── No children ──
         ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
