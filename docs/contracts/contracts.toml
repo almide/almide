@@ -3176,3 +3176,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/error_operators.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-258"
+spec      = "ALS-E26"
+title     = "Named calls and lambdas evaluate identically on both targets"
+statement = "ALS-E26: positional named calls, typed/untyped/zero-param lambdas, and inline lambdas in HOF argument position — arguments evaluate left-to-right exactly once, by value; a lambda is a function value behaving identically whether bound-then-called or passed (fixture pins 5/10/42/12 byte-identical native <-> wasm). Arity mismatch is check-time E004."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-259"
+spec      = "ALS-E27"
+title     = "Variant constructor references build values eliminated identically by match on both targets"
+statement = "ALS-E27: a payload constructor call Rgb(1, 2, 3) and a bare nullary reference Green build variant values whose match elimination is byte-identical native <-> wasm (fixture pins 4/20). Exhaustiveness is ALS-E18's E010."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
+]
