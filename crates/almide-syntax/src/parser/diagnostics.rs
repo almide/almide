@@ -62,6 +62,54 @@ impl Parser {
         d
     }
 
+    /// E046 (#1264): reject every escape the string decoders declined instead
+    /// of letting it through as literal text.
+    ///
+    /// `"bad:\q"` used to evaluate to the two characters `\` `q` and
+    /// `"\u{110000}"` to its own ten-character spelling — no diagnostic, no
+    /// trace, the exact silent-reinterpretation shape E024 exists to forbid for
+    /// integer literals. Runs ONCE over the whole token stream rather than at
+    /// each literal's parse site, so string tokens the grammar consumes outside
+    /// expression position (test names, `@extern` symbols, import aliases) are
+    /// covered by the same pass.
+    pub(crate) fn report_invalid_escapes(&mut self) {
+        use crate::lexer::{EscapeIssueKind, TokenType};
+        let mut diags = Vec::new();
+        for tok in &self.tokens {
+            if !matches!(tok.token_type, TokenType::String | TokenType::InterpolatedString) {
+                continue;
+            }
+            let Some(raw) = &tok.raw else { continue };
+            for issue in crate::lexer::validate_literal_escapes(raw) {
+                let line = tok.line + issue.line_offset;
+                let col = if issue.line_offset == 0 { tok.col + issue.col_offset } else { issue.col_offset + 1 };
+                let (message, hint) = match issue.kind {
+                    EscapeIssueKind::Unknown => (
+                        format!("unknown escape sequence `{}` in a string literal", issue.text),
+                        "valid escapes are \\n \\t \\r \\\\ \\\" \\$ \\xNN \\u{...} \
+                         (and \\' inside '...'); write `\\\\` for a literal backslash"
+                            .to_string(),
+                    ),
+                    EscapeIssueKind::OutOfRange => (
+                        format!("`{}` is not a Unicode scalar value", issue.text),
+                        "a \\u{...} escape names a codepoint in U+0000..U+D7FF or \
+                         U+E000..U+10FFFF — surrogates and anything above U+10FFFF \
+                         have no character to denote"
+                            .to_string(),
+                    ),
+                };
+                let mut d = Diagnostic::error(message, hint, "string literal")
+                    .with_code("E046");
+                if let Some(f) = &self.file { d.file = Some(f.clone()); }
+                d.line = Some(line);
+                d.col = Some(col);
+                d.end_col = Some(col + issue.text.chars().count());
+                diags.push(d);
+            }
+        }
+        self.errors.extend(diags);
+    }
+
     pub(crate) fn string_to_diagnostic(&self, msg: &str) -> Diagnostic {
         let (line, col) = if let Some(idx) = msg.find("at line ") {
             let rest = &msg[idx + 8..];

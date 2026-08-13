@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let pattern = "\d+"
+  println(pattern)
+}
