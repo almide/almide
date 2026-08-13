@@ -778,7 +778,8 @@ impl Checker {
         object_id: almide_lang::ast::ExprId,
         object_span: Option<almide_lang::ast::Span>,
     ) {
-        if mod_name.as_str() != "list" || self.hof_rewritten_calls.contains(&object_id) {
+        let module = mod_name.as_str();
+        if !matches!(module, "list" | "fs") || self.hof_rewritten_calls.contains(&object_id) {
             return;
         }
         let name = field.as_str();
@@ -789,33 +790,52 @@ impl Checker {
                 None => return,
             },
         };
-        if !matches!(
-            core,
-            "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each"
-        ) {
+        // #1144: the fs streaming walkers carry the same carriers, so they need
+        // the same "not a spelling" guard — `fs.__fallible_fold_lines` must be
+        // as unwritable as `list.__fallible_map`.
+        let known = match module {
+            "list" => matches!(
+                core,
+                "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each"
+            ),
+            _ => matches!(core, "fold_lines" | "for_each_line"),
+        };
+        if !known {
             return;
         }
-        let rewrite = if core == "fold" {
-            "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string()
-        } else {
-            format!("list.{}(xs, (x) => f(x)!)!", core)
+        let rewrite = match (module, core) {
+            ("list", "fold") => "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string(),
+            ("list", _) => format!("list.{}(xs, (x) => f(x)!)!", core),
+            (_, "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
+            _ => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
         };
         let (msg, hint) = if internal {
             (
                 format!(
-                    "list.{name} is an internal carrier, not a spelling — source may not name it (ADR-0006)"
+                    "{module}.{name} is an internal carrier, not a spelling — source may not name it (ADR-0006)"
                 ),
-                format!(
-                    "{rewrite}\n        \
-                     `__fallible_{core}` is what the checker instantiates FOR you when the callback \
-                     propagates; writing it by hand is the second spelling `try_{core}`'s \
-                     removal was meant to end."
-                ),
+                // The `list` carriers are what `try_*` left behind, so their
+                // hint names that history; the fs carriers (#1144) never had a
+                // public `try_` name and only ever existed as a desugar target.
+                if module == "list" {
+                    format!(
+                        "{rewrite}\n        \
+                         `__fallible_{core}` is what the checker instantiates FOR you when the callback \
+                         propagates; writing it by hand is the second spelling `try_{core}`'s \
+                         removal was meant to end."
+                    )
+                } else {
+                    format!(
+                        "{rewrite}\n        \
+                         `__fallible_{core}` is the desugar TARGET the checker instantiates FOR you \
+                         when the callback propagates — one blessed spelling per combinator, never two."
+                    )
+                },
             )
         } else {
             (
                 format!(
-                    "list.{name} was removed — the core HOF is fallibility-polymorphic (ADR-0006)"
+                    "{module}.{name} was removed — the core HOF is fallibility-polymorphic (ADR-0006)"
                 ),
                 format!(
                     "{rewrite}\n        \
@@ -824,7 +844,7 @@ impl Checker {
                 ),
             )
         };
-        let mut d = crate::diagnostic::Diagnostic::error(msg, hint, format!("call to list.{name}"))
+        let mut d = crate::diagnostic::Diagnostic::error(msg, hint, format!("call to {module}.{name}"))
             .with_code("E043");
         d.file = self.source_file.clone();
         if let Some(sp) = object_span {

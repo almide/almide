@@ -41,16 +41,35 @@ effect fn read_lines(path: String) -> Result[List[String], String] = _
 // Streaming line readers: walk the file line-by-line without materializing a
 // List[String] — peak memory is O(longest line), not O(file). Line semantics
 // byte-match read_lines. The family is exactly {fold_lines, for_each_line,
-// fold_lines_range} (tests/fs_streaming_family_gate): map/filter over lines
-// are intentional omissions (a transforming pipeline belongs on fold_lines;
-// an eager List belongs to read_lines), for_each has no range cell (chunk
-// workers accumulate — fold is their shape), and the ADR-0006 fallible
-// callback forms are the tracked follow-up cell, not yet grown.
+// fold_lines_range, fold_lines_chunked} (tests/fs_streaming_family_gate):
+// map/filter over lines are intentional omissions (a transforming pipeline
+// belongs on fold_lines; an eager List belongs to read_lines), and for_each
+// has no range/chunked cell (chunk workers accumulate — fold is their shape).
+//
+// ADR-0006 fallible callback forms (#1144): the two CALLBACK-DRIVEN cells
+// carry them — `fs.fold_lines(p, z, (a, l) => g(a, l)!)!` and
+// `fs.for_each_line(p, (l) => g(l)!)!` route to the `__fallible_*` carriers
+// below, which stop the reader at the first err (the callback is not invoked
+// again and the rest of the file is never read). The range/chunked cells do
+// NOT have fallible forms: a chunk worker's err has no defined stop point
+// across a parallel partition (which chunk's err wins is a thread-schedule
+// observable), so an erring chunk body handles its own error — an intentional
+// omission the family gate pins.
 @intrinsic("almide_rt_fs_fold_lines")
 effect fn fold_lines[A](path: String, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
 
 @intrinsic("almide_rt_fs_for_each_line")
 effect fn for_each_line(path: String, f: fn(String) -> Unit) -> Result[Unit, String] = _
+
+// The ADR-0006 fallible carriers. NOT spellings: the checker rewrites
+// `fs.fold_lines`/`fs.for_each_line` to these when the callback is fallible
+// (`infer_calls_closures.rs::normalize_fallible_hof_callback`), exactly as
+// `list.map` becomes `list.__fallible_map`; naming one in source is E043.
+@intrinsic("almide_rt_fs_fold_lines_effect")
+effect fn __fallible_fold_lines[A, E](path: String, init: A, f: fn(A, String) -> Result[A, E]) -> Result[A, E] = _
+
+@intrinsic("almide_rt_fs_for_each_line_effect")
+effect fn __fallible_for_each_line[E](path: String, f: fn(String) -> Result[Unit, E]) -> Result[Unit, E] = _
 
 // The chunk worker's walker: fold exactly the lines owned by the byte range
 // [start, end) — a line belongs to the chunk containing the byte before its

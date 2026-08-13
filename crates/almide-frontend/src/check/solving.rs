@@ -300,7 +300,8 @@ fn fallible_callback_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
     Some(
         "The callback is FALLIBLE, so its Result stayed INSIDE the container \
          instead of the traversal itself becoming fallible. Only the core list \
-         HOFs (map / filter / flat_map / filter_map / fold / find / each) accept \
+         HOFs (map / filter / flat_map / filter_map / fold / find / each) and \
+         the fs streaming walkers (fs.fold_lines / fs.for_each_line) accept \
          a fallible callback natively today. Either traverse via `list.*` — \
          convert with `set.to_list` first — or handle the error inside the \
          callback (`?? fallback`, or match on ok/err). Transparency for the \
