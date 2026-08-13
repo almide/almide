@@ -3154,3 +3154,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/record_forms.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-256"
+spec      = "ALS-E24"
+title     = "break and continue take effect at their statement position, identically on both targets and the interp"
+statement = "ALS-E24 (#1277/#1306): guarded `continue` skips the rest of the iteration (the for-range STEP still runs — the lowering restructures into the guarded rest, structurally excluding the skipped-step infinite loop), guarded `break` exits immediately AT ITS POSITION — the mid-body shape pins 3, not the deferred-flag 4 that BOTH v1 legs previously agreed on while v0 and the interp said 3. That divergence class is invisible to the 2-way native==wasm gate by construction, which is why this fixture lives in the 3-way-voted spec/wasm_cross set. A break over a heap frame stays a loud wall (an early exit must not skip a per-iteration Drop)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/loop_break_continue.almd", class = "fixture" },
+]
