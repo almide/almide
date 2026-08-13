@@ -242,6 +242,10 @@ else:
                          f"{phase_min_floor:.1f}ms floor — a phase that reports ~0 is an "
                          "instrumentation hole (a deleted phase_scope), and it would poison "
                          "every share it appears in rather than fail one band")
+    if d["phase_slopes"].get("check") is None:
+        fatal.append("slope_check could not be computed — fewer than two rungs showed the "
+                     "check phase growing with project size at all. That is a broken ladder, "
+                     "not a linear compiler, and it must not skip the anchor silently")
     if top["phase"]["other"]["min"] < 0:
         fatal.append(f"the residual `other` phase measured {top['phase']['other']['min']:.3f}ms "
                      "— negative means the accounted phases outran the process total, so the "
