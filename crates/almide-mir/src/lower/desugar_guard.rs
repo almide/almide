@@ -94,9 +94,10 @@ pub fn desugar_fn_body_guards(program: &mut almide_ir::IrProgram) {
 
 /// TAIL ERR-RAISE IF → BIND-POSITION UNWRAP (a pre-lowering program pass, shared
 /// chain like [`desugar_fn_body_guards`], which feeds it: a fn-body guard whose
-/// else is `err(x)!` restructures into exactly this shape). A SCALAR-tail `if`
-/// whose one arm RAISES (`if c then a / b else err("…")!` — the `Unwrap` of an
-/// always-Err Result) cannot lower on the scalar tail path (no early return).
+/// else is `err(x)` / `err(x)!` restructures into exactly this shape). A
+/// SCALAR-tail `if` whose one arm RAISES (`if c then a / b else err("…")[!]` —
+/// an always-Err Result, with or without the explicit `!`; see
+/// `err_raise_inner`) cannot lower on the scalar tail path (no early return).
 /// But the SAME semantics in bind position is the machinery the `!` desugars
 /// already prove end-to-end (the lifted-Result materialization):
 ///
@@ -118,11 +119,27 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
         // (`let $g: String = $r!` is the fs.read_text class), so both normalize.
         matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::String)
     }
-    /// The raising arm's inner Result expr (`err(e)` out of `err(e)!`), if this
-    /// arm IS an err-raise: an `Unwrap` whose inner is a `ResultErr` ctor.
+    /// The raising arm's inner Result expr, if this arm IS an err-raise. Two
+    /// spellings, ONE meaning at a fn tail — "this function returns Err(e)":
+    ///
+    /// - `err(e)!` — an `Unwrap` over a `ResultErr` ctor (an explicit raise);
+    /// - `err(e)` — the BARE ctor. In the tail of a scalar-returning `effect
+    ///   fn` (whose compiled carrier is the synthetic `Result[T, String]`) the
+    ///   frontend accepts an `err(…)` arm against a scalar sibling arm — that
+    ///   heterogeneous `if` IS the auto-wrap ABI's carrier. This is the arm
+    ///   `guard c else err(e)` (no `!`) leaves after the guard restructure.
+    ///
+    /// The bare spelling only typechecks in that auto-wrap position (a declared
+    /// `-> Result[…]` fn rejects `if c then 1 else err("x")` with E001), so
+    /// admitting it here cannot capture a declared-Result tail.
     fn err_raise_inner(e: &IrExpr) -> Option<&IrExpr> {
-        let IrExprKind::Unwrap { expr } = &e.kind else { return None };
-        matches!(expr.kind, IrExprKind::ResultErr { .. }).then_some(expr.as_ref())
+        match &e.kind {
+            IrExprKind::Unwrap { expr } => {
+                matches!(expr.kind, IrExprKind::ResultErr { .. }).then_some(expr.as_ref())
+            }
+            IrExprKind::ResultErr { .. } => Some(e),
+            _ => None,
+        }
     }
 
     fn rewrite_tail(e: &mut IrExpr, vt: &mut VarTable) {
