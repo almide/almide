@@ -854,6 +854,9 @@ jobs:
       - name: libm determinism (every platform-libm call classified; a reachable undeclared one is the #1197 class)
         run: scripts/check-libm-determinism.sh
 
+      - name: Keyed-container lookup-cost matrix (#1219 — every map/set repr rowed indexed or linear)
+        run: bash scripts/check-keyed-container-index.sh
+
       - name: Embedded payload size ratchet (#878 — the stdlib every embedder downloads)
         run: scripts/check-embedded-size.sh
 
