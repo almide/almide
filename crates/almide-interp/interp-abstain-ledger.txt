@@ -67,6 +67,7 @@ map_filter  out-of-interp-scope capability: prim.alloc_map
 map_fold  out-of-interp-scope capability: prim.alloc_map
 map_fold_heap_acc  out-of-interp-scope capability: prim.handle
 map_fold_heap_acc_skv  out-of-interp-scope capability: prim.handle
+map_index_order  out-of-interp-scope capability: prim.alloc_map
 map_insertion_order  out-of-interp-scope capability: prim.handle
 map_set_eq  out-of-interp-scope capability: prim.alloc_map
 map_set_ops  out-of-interp-scope capability: prim.alloc_map
@@ -104,6 +105,7 @@ result_list_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
 result_match_rewrap_modcall  out-of-interp-scope capability: prim.handle
 result_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
 scalar_if_arm_effects  out-of-interp-scope capability: prim.handle
+set_index_order  out-of-interp-scope capability: prim.handle
 set_insertion_order  out-of-interp-scope capability: prim.handle
 spread_record_share  out-of-interp-scope capability: prim.handle
 str_result_heap_bind  out-of-interp-scope capability: prim.alloc_value
