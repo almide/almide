@@ -3299,3 +3299,16 @@ evidence  = [
   { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
   { path = "tests/typed_hole_diag_test.rs", name = "typed_hole_panics_naming_the_almide_source_line", class = "by-construction" },
 ]
+
+# ── NESTED VARIANT MATCH IN BIND POSITION, AND THE CROSS-FAMILY REFUSAL ─
+[[contract]]
+id        = "C-269"
+spec      = "ALS-M1"
+title     = "A nested variant match bound to a let executes identically on both targets; a cross-family pattern is a check-time E048 on both"
+statement = "ALS-M1, positive half: a variant `match` whose arm BODY is itself a variant match, bound to a `let` under an explicit `Result[T, E]` carrier and unwrapped with `!`, binds every payload at both nesting levels and produces byte-identical observables native <-> wasm — on the value path and on BOTH failure depths, for a scalar (Int) and a heap (String) payload. The bind is heap-typed, so branch_lift hoists it into a synthesized tail helper; the arm binders must survive that lift carrying their concrete types. NEGATIVE half, the same rule read from the other side: `some`/`none` destructure an Option and `ok`/`err` a Result, and a pattern aimed at the OTHER family is rejected at CHECK time as E048 — identically on both targets, since type check precedes the target split. That refusal is the substance of #1341, whose own diagnosis was wrong: the reported repro spelled the arms `ok(..)` over a `list.get` subject (an `Int?`), so branch_lift was innocent and the program was simply ill-typed. The checker rejected constructor patterns aimed at plain SCALARS only, so the payload bound as `Ty::Unknown`, survived to codegen, and detonated there — a `[COMPILER BUG] internal type resolution failed` banner naming `branch_lift_synth_0` on native, an executable-subset wall on wasm. Two different compiler-blaming failures for one plain type error (the #1266 misattribution class); E048 replaces both with one named error carrying the one-word fix."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_variant_match_bind.almd", class = "fixture" },
+  { path = "tests/diagnostic_harness_test.rs", class = "by-construction", name = "broken_files_produce_expected_diagnostics" },
+]

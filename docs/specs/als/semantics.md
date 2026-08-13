@@ -1,6 +1,6 @@
 # ALS — 言語意味論（Semantics）
 
-> Last updated: 2026-07-26
+> Last updated: 2026-08-13
 
 パターン・レコード・変種・effect-fn・ジェネリクス・ループ蓄積の観測規範。
 各節は契約台帳（`spec` キー）から参照され、検証テストは各契約の evidence
@@ -12,7 +12,19 @@ Option/Result の構築とマッチ、ネストしたコンストラクタパタ
 コンストラクタを試すタプルパターン、let 分解のネスト部分パターンは、
 **全ての葉を宣言通りに束縛**し、マッチは上から最初の一致アームを実行する。
 heap payload（String 等）の束縛は所有を移さず借用として読める。
-Contracts: C-044, C-070, C-073, C-091, C-113, C-114。
+アーム本体が更に variant match であるネスト形も、`let` 束縛（heap のため
+branch_lift がヘルパ fn へ持ち上げる位置）で全レベルの payload を束縛する。
+
+**族は交差しない（静的規範）**: `some`/`none` は Option を、`ok`/`err` は
+Result を分解する。他方の族の subject に向けたパターンは**チェック時 E048**
+で拒否される — 両ターゲット同一（型検査はターゲット分岐より前）。#1341 以前は
+スカラ subject だけを拒否していたため、`match list.get(xs, 0) { ok(a) => … }`
+（`list.get` は `T?`）は payload を `Ty::Unknown` で束縛したまま codegen まで
+生き延び、native では `[COMPILER BUG]` バナー、wasm では実行可能部分集合の
+wall になっていた。
+テスト: `spec/wasm_cross/nested_variant_match_bind.almd`,
+`tests/diagnostics/e048-cross-family-variant-pattern/`。
+Contracts: C-044, C-070, C-073, C-091, C-113, C-114, C-269。
 
 ## ALS-M2 レコード意味論
 
