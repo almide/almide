@@ -271,6 +271,18 @@ Single source of truth for Almide syntax — keywords, operators, precedence, an
 
 - **VS Code** — [vscode-almide](https://github.com/almide/vscode-almide) — Syntax highlighting, bracket matching, comment toggling, code folding
 - **Tree-sitter** — [tree-sitter-almide](https://github.com/almide/tree-sitter-almide) — Tree-sitter grammar for editors that support it (Neovim, Helix, Zed)
+- **LSP** — built into the binary: `almide lsp` (hover, completion, documentSymbol, formatting, definition, signatureHelp, codeAction)
+
+### Agent Support — MCP
+
+Agents are a user class here, and for this language they are *the* user class. `almide mcp` serves the compiler over the Model Context Protocol, so a model calls `check` / `test` / API-outline / `explain` / `fmt --check` as typed tools and reads JSON instead of parsing rendered text — the step where accuracy leaks.
+
+```bash
+/plugin marketplace add almide/almide     # Claude Code: MCP tools + the .almd LSP
+/plugin install almide@almide
+```
+
+See [docs/mcp.md](./docs/mcp.md) for the tool list, the JSON shapes, and what is deliberately not structured yet.
 
 ### Playground — [playground](https://github.com/almide/playground)
 
@@ -282,6 +294,7 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/SPEC.md](./docs/SPEC.md) — Full language specification
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
+- [docs/mcp.md](./docs/mcp.md) — MCP server + Claude Code plugin: the agent-facing compiler surface
 - [docs/design/DESIGN.md](./docs/design/DESIGN.md) — Design philosophy and trade-offs
 - [docs/design/EQUIVALENCE.md](./docs/design/EQUIVALENCE.md) — The byte-identity claim: scope, ledger mechanics, evidence layers
 - [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1 proof-carrying compilation architecture

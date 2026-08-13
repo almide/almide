@@ -69,7 +69,16 @@ almide ide outline @stdlib/string         # stdlib API listing
 almide ide doc string.to_upper            # signature + doc for a symbol
 almide ide stdlib-snapshot [--json]       # concatenated stdlib outlines for
                                           # SYSTEM_PROMPT injection (~3.5K tokens)
+almide mcp                   # MCP server on stdio: check / test / api / explain /
+                             # fmt-check as typed tools with JSON results
 ```
+
+Machine-readable output (prefer these when a program, not a person, reads it):
+`check --json` (one diagnostic per line: `{level, code, message, hint, try,
+try_replace, file, line, col}`), `test --json`, `fmt --check --json`,
+`compile --json`, `ide outline --json`, `ide stdlib-snapshot --json`.
+An MCP client (Claude Code, …) gets the same answers as tool calls via
+`almide mcp` — see [docs/mcp.md](docs/mcp.md).
 
 ## Core idioms
 

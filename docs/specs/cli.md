@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-07-25
+> Last updated: 2026-08-13
 
 ## Overview
 
@@ -120,9 +120,22 @@ almide check --effects                  # 各関数のエフェクト分析を�
 | オプション | 説明 |
 |---|---|
 | `--deny-warnings` | 警告をエラー扱い |
-| `--json` | 診断を JSON で出力（エディタ統合用） |
+| `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
 | `--explain <code>` | エラーコード (E001〜E030, E420) の説明 |
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析 |
+
+`--json` の 1 行は
+`{level, code, message, hint, here, try, try_replace, context, file, line, col, end_col, secondary}`。
+`try` は貼り付け可能な修正スニペット、`try_replace` はそれが置換するスパン。
+
+**構文エラーも JSON で出る**: トップレベル宣言が 1 つも成立しないファイルは
+`Parser::parse` が `Err` を返し、共有の `parse_file` は人間向けテキストを stderr に出して
+終了する。`--json` はパーサから診断を直接取り出してこの経路でも JSON を出す
+（LLM が最も多く出すエラー種別が唯一テキストのままだった）。終了コードは従来通り
+`1`（パースできなかったファイル）— 既存ゲートが黙って成功に反転しないため。
+型エラーのみの場合は従来通り終了コード `0` で、判定は JSON の `level` を読む。
+
+テスト: `tests/mcp_test.rs`（`json_check_reports_a_total_parse_failure_as_json`）
 
 エラーコード:
 
@@ -151,9 +164,27 @@ E001〜E030 + E420 の全コード解説は [../diagnostics/](../diagnostics/) �
 almide fmt                              # src/**/*.almd を整形
 almide fmt app.almd                     # 指定ファイルを整形
 almide fmt --check                      # 差分があれば非ゼロで終了（CI 用）
+almide fmt --check --json               # 同じゲートを JSON 1 オブジェクトで（機械可読）
 almide fmt --dry-run                    # 書き込みせず差分表示
 almide fmt --no-import-edit stdlib/     # import 行を一切触らず整形(splice-context ソース用)
 ```
+
+| オプション | 説明 |
+|---|---|
+| `--check` | 比較のみ。未整形ファイルを stderr に列挙し、あれば終了コード 1 |
+| `--json` | `--check` の機械可読版（`--check` を含意）。stdout に 1 オブジェクト、終了コードは同じ |
+| `--dry-run` | 整形結果を stdout に出すだけ。書き込まない |
+| `--no-import-edit` | import 行を一切編集しない |
+
+`--json` の出力:
+
+```json
+{"checked":2,"unformatted":["src/a.almd"],"unreadable":[],"verify_failed":false,"ok":false}
+```
+
+`--json` も `--check` も書き込みは一切しない。整形の適用は `almide fmt <path>`。
+
+テスト: `tests/mcp_test.rs`（`fmt_check_json_reports_drift_and_keeps_the_gate_exit_code`）
 
 ---
 
@@ -191,6 +222,48 @@ JSON 出力の構造:
 ```
 
 `abi` フィールドは具象型（ジェネリックでない）にのみ付与。C ABI のレイアウト（size, align, field offset）。
+
+---
+
+### `almide mcp`
+
+Model Context Protocol サーバを stdio で起動する。エージェント（Claude Code 等）が
+コンパイラを **型付きツール呼び出し** として使うための口。人間向け出力を
+モデルに読み解かせる工程を挟まないことが目的で、この工程こそが精度の漏れ口。
+
+```bash
+almide mcp                              # stdio で JSON-RPC 2.0（改行区切り）を待つ
+```
+
+対応メソッド: `initialize` / `tools/list` / `tools/call` / `ping`。
+それ以外は JSON-RPC `-32601`（`capabilities` は `tools` のみを宣言する）。
+
+ツール（5 つ。すべて CLI の既存の機械可読出力を経由する）:
+
+| ツール | 実体 | 返すもの |
+|---|---|---|
+| `almide_check` | `almide check --json` | 構造化診断の配列（`try`/`try_replace` 込み） |
+| `almide_test` | `almide test --json` | ファイル単位の pass/fail + ランナー生出力 |
+| `almide_api` | `almide ide outline --json` / `stdlib-snapshot --json` | 公開宣言のシグネチャ一覧 |
+| `almide_explain` | `almide explain <CODE>` | 診断コードの解説（markdown） |
+| `almide_fmt_check` | `almide fmt --check --json` | 未整形ファイル一覧（書き込みなし） |
+
+設計上の制約:
+
+- **コンパイラへの入口は 1 本**。各ツールは `current_exe()`（= 自分自身）を
+  サブプロセスとして起動し、CLI が既に出している JSON を読む。MCP 専用の
+  出力経路を作らない（作れば必ず CLI とドリフトし、しかも誰も目で読まないので
+  ドリフトが見えない）
+- **人間向けテキストは決してパースしない**。機械可読な形が無い箇所
+  （テストの個別失敗詳細 = #1313）は `*_unstructured` という名前のフィールドに
+  そのまま入れて返す
+- **書き込みツールは無い**。`fmt` は `--check` 形のみ。適用は CLI（`almide fmt` /
+  `almide fix`）で行う — エージェント自身のトランスクリプトに編集が残る
+
+Claude Code プラグイン定義（MCP + LSP）: `tools/claude-plugin/`、
+マーケットプレイス: `.claude-plugin/marketplace.json`、導入手順: [../mcp.md](../mcp.md)
+
+テスト: `tests/mcp_test.rs`
 
 ---
 

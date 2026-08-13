@@ -184,8 +184,11 @@ definition / signatureHelp / codeAction）。playground、VS Code 拡張、tree-
 **残っている行（agent 向け surface）**:
 - #1312 applicability タグ付き fix-it → `almide fix` の診断駆動化
 - #1313 `almide test` 失敗出力の構造化（expected/found diff + `--json`）
-- [#1333](https://github.com/almide/almide/issues/1333) **MCP サーバ / Claude Code plugin 定義** —
-  2026 年のエージェント流通経路であり、LSP がある以上コストは数日
+- ~~[#1333](https://github.com/almide/almide/issues/1333) **MCP サーバ / Claude Code plugin 定義**~~
+  — **着地済み**: `almide mcp`（stdio MCP、ツール 5 本）と `tools/claude-plugin/`（MCP + LSP）、
+  `.claude-plugin/marketplace.json`。各ツールは CLI の既存 JSON 出力をサブプロセス経由で
+  読むだけで、MCP 専用の出力経路は作らない（[docs/mcp.md](../mcp.md)）。
+  未構造化のまま残るのは #1313 のテスト失敗詳細と #1312 の applicability タグ
 - #1314 snapshot テスト内蔵（主流言語に内蔵例がない差別化空白）
 
 ---
