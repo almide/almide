@@ -1,0 +1,138 @@
+// The Map[Int,Int] bucket index (#1219) only engages past 16 entries, so every case
+// here is deliberately larger than the threshold. The index is a sidecar over the
+// authoritative entry array; these tests pin the two places an index rots — UPSERT
+// (a present key must keep its slot, not append a shadow) and REMOVAL (a dropped key
+// must stop being findable, and re-adding it must find the NEW entry).
+fn build(n: Int, stride: Int) -> Map[Int, Int] = {
+  var m: Map[Int, Int] = map.new()
+  for i in 0..<n {
+    m[i * stride] = i
+  }
+  m
+}
+
+test "indexed map finds every key it was built from" {
+  let m = build(40, 7)
+  assert_eq(map.len(m), 40)
+  for i in 0..<40 {
+    assert_eq(map.get(m, i * 7), some(i))
+  }
+}
+
+test "indexed map misses every key it was not built from" {
+  let m = build(40, 7)
+  for i in 0..<40 {
+    assert(not map.contains(m, i * 7 + 1))
+  }
+  assert_eq(map.get(m, 99991), none)
+}
+
+test "upsert past the threshold keeps position and entry count" {
+  var m = build(40, 7)
+  for i in 0..<20 {
+    m[i * 2 * 7] = 100 + i
+  }
+  assert_eq(map.len(m), 40)
+  assert_eq(map.keys(m), map.keys(build(40, 7)))
+  for i in 0..<20 {
+    assert_eq(map.get(m, i * 2 * 7), some(100 + i))
+    assert_eq(map.get(m, (i * 2 + 1) * 7), some(i * 2 + 1))
+  }
+}
+
+test "remove past the threshold drops the key from lookups" {
+  var m = build(40, 7)
+  for i in 0..<15 {
+    m = map.remove(m, i * 2 * 7)
+  }
+  assert_eq(map.len(m), 25)
+  for i in 0..<15 {
+    assert_eq(map.get(m, i * 2 * 7), none)
+    assert(not map.contains(m, i * 2 * 7))
+  }
+  for i in 0..<40 {
+    let dropped = i % 2 == 0 and i < 30
+    let want = if dropped then none else some(i)
+    assert_eq(map.get(m, i * 7), want)
+  }
+}
+
+test "remove then re-insert resolves to the new entry" {
+  var m = build(40, 7)
+  for i in 0..<15 {
+    m = map.remove(m, i * 2 * 7)
+  }
+  for i in 0..<15 {
+    m[i * 2 * 7] = 500 + i
+  }
+  assert_eq(map.len(m), 40)
+  for i in 0..<15 {
+    assert_eq(map.get(m, i * 2 * 7), some(500 + i))
+  }
+  // the re-added keys move to the END: removal is not a tombstone
+  assert_eq(list.get(map.keys(m), 25), some(0))
+}
+
+test "merge past the threshold overrides in place and appends the rest" {
+  var b: Map[Int, Int] = map.new()
+  for i in 10..<30 {
+    b[i * 7] = 900 + i
+  }
+  let m = map.merge(build(20, 7), b)
+  assert_eq(map.len(m), 30)
+  for i in 0..<10 {
+    assert_eq(map.get(m, i * 7), some(i))
+  }
+  for i in 10..<30 {
+    assert_eq(map.get(m, i * 7), some(900 + i))
+  }
+  assert_eq(list.get(map.keys(m), 0), some(0))
+  assert_eq(list.get(map.keys(m), 29), some(29 * 7))
+}
+
+test "filter and update past the threshold stay lookup-consistent" {
+  let m = build(40, 7)
+  let f = map.filter(m, (k, v) => v % 3 == 0)
+  assert_eq(map.len(f), 14)
+  for i in 0..<40 {
+    let want = if i % 3 == 0 then some(i) else none
+    assert_eq(map.get(f, i * 7), want)
+  }
+  let u = map.update(m, 20 * 7, (v) => v + 1000)
+  assert_eq(map.len(u), 40)
+  assert_eq(map.get(u, 20 * 7), some(1020))
+  assert_eq(map.get(u, 21 * 7), some(21))
+}
+
+test "keys with identical low bits do not collide away" {
+  // a power-of-two stride puts every key in one bucket under a mask-only hash
+  let m = build(32, 1024)
+  for i in 0..<32 {
+    assert_eq(map.get(m, i * 1024), some(i))
+  }
+  var neg: Map[Int, Int] = map.new()
+  for i in 0..<32 {
+    neg[0 - (i * 3)] = i
+  }
+  assert_eq(map.len(neg), 32)
+  for i in 0..<32 {
+    assert_eq(map.get(neg, 0 - (i * 3)), some(i))
+  }
+}
+
+test "threshold crossing keeps every entry reachable" {
+  for n in [
+    15,
+    16,
+    17,
+    31,
+    32,
+    33
+  ] {
+    let m = build(n, 7)
+    assert_eq(map.len(m), n)
+    for i in 0..<n {
+      assert_eq(map.get(m, i * 7), some(i))
+    }
+  }
+}
