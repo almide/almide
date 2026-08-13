@@ -685,6 +685,20 @@ impl<'a> Interpreter<'a> {
                     Flow::val(xs[i as usize].clone())
                 }
             }
+            // A Range indexes like the list it stands for: `(0..<5)[2] == 2`. Both
+            // backends materialize a `let`-bound range that is indexed (only the
+            // head-ONLY case skips materialization, #1400), so the interp must
+            // agree rather than dissent — it just computes the element instead of
+            // building the block. Bounds match `Value::List` above: the codegen OOB
+            // contract is abort + exit 1.
+            Value::Range { start, end, inclusive } => {
+                let len = if inclusive { end - start + 1 } else { end - start };
+                if i < 0 || len <= 0 || i >= len {
+                    Flow::Abort("index out of bounds".into())
+                } else {
+                    Flow::val(Value::Int(start + i))
+                }
+            }
             Value::Str(s) => {
                 // String indexing returns the byte? Almide indexes strings via
                 // string.* fns; a bare index on a String is unusual. Treat as

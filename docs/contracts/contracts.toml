@@ -2971,6 +2971,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/range_first_class.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_bind_no_materialize.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_bind_huge.almd", class = "fixture" },
 ]
 
 [[contract]]
