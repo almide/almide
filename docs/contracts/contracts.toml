@@ -3209,3 +3209,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-261"
+spec      = "ALS-E3"
+title     = "Canonical float values including the negative-zero sign display identically on both targets"
+statement = "ALS-E3 (partial — the fmt-stable half): decimal float literals with digits on both sides of the dot, and float.to_string's canonical display — 1.5, 0.5, the SIGN-PRESERVED -0.0, and the arithmetic result 1.75 — byte-identical native <-> wasm. The FORM half (exponents, underscores, out-of-range literals) is accepted by the parser but OPEN pending #1261's fmt-preservation ruling and is deliberately outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_float_stable.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-262"
+spec      = "ALS-E5"
+title     = "The fmt-stable string escapes and the empty string evaluate identically on both targets"
+statement = "ALS-E5 (partial — the fmt-stable half): `\\t` -> tab, `\\n` -> newline, `\\\\` -> one backslash (spellings AND values fmt-stable, pinned in visible brackets), and the empty string — byte-identical native <-> wasm. The FORM half (unicode escapes, heredocs, delimiter choice) and the silent-pass-through of unknown escapes are OPEN pending #1263/#1264 and deliberately outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_float_stable.almd", class = "fixture" },
+]
