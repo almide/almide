@@ -172,6 +172,11 @@ enum Commands {
     },
     /// Start the Language Server Protocol server (for editor integration)
     Lsp,
+    /// Start the Model Context Protocol server on stdio (for agent/LLM clients).
+    /// Exposes check / test / API-outline / explain / fmt-check as typed tools
+    /// with JSON results — the same answers as the CLI, minus the step where a
+    /// model has to parse human-formatted text.
+    Mcp,
     /// Explain a diagnostic code (e.g., almide explain E001)
     Explain {
         /// Diagnostic code such as E001
@@ -734,6 +739,9 @@ fn dispatch_rest(command: Commands) {
     match command {
         Commands::Lsp => {
             cli::lsp::run_lsp();
+        }
+        Commands::Mcp => {
+            cli::mcp::run_mcp();
         }
         Commands::Explain { code } => {
             print_error_explanation(&code);
