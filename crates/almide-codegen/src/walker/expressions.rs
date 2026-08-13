@@ -7,7 +7,7 @@ use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::types::render_type;
 use super::statements::{render_stmt, render_match_arm};
-use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_content, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
+use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_content, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name, escape_rust_str};
 
 /// Render a statement list. Peephole patterns are detected at IR level
 /// by PeepholePass; this just renders the resulting IR nodes.
@@ -649,9 +649,24 @@ fn render_expr_wrappers(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::ToVec { expr: inner } => render_expr_to_vec(ctx, inner),
 
         // ── Hole / Todo ──
-        IrExprKind::Hole => template_or(ctx, "hole", &[], "todo!()"),
+        // Typed holes are a SANCTIONED workflow (#1325): `_` in expression
+        // position and `todo("msg")` type-check against whatever the context
+        // demands and panic if execution ever reaches them. The panic text is
+        // the only thing the author gets back, so it names the ALMIDE source
+        // line rather than only the generated `.rs` line rustc prints.
+        IrExprKind::Hole => match expr.span {
+            Some(span) => template_or(
+                ctx, "hole", &[],
+                &format!("todo!(\"hole at line {}\")", span.line),
+            ),
+            None => template_or(ctx, "hole", &[], "todo!()"),
+        },
+        // The message is user text: escape it before it becomes a Rust string
+        // literal. `todo("say \"hi\"")` used to emit `todo!("say "hi"")` and
+        // die at build behind the "codegen produced invalid Rust — this is an
+        // Almide bug" banner (#1325).
         IrExprKind::Todo { message } => {
-            template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", message))
+            template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", escape_rust_str(message)))
         }
 
         // ── Fan (concurrency) — fully template-driven ──
