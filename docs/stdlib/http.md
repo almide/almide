@@ -40,7 +40,7 @@ http.json(200, json.stringify(data))
 
 Create a response with EXACTLY the given headers, in map order. Unlike
 `response` / `json` it seeds nothing — pass `"Content-Type"` yourself when you
-want one (ALS-R7, contract C-269).
+want one (ALS-R7, contract C-275).
 
 ```almd
 http.with_headers(200, body, ["Content-Type": "text/html"])
