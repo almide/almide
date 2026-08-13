@@ -51,6 +51,12 @@ pre-commit:
       # in the check script is the one place the module list lives.
       glob: "{docs/stdlib/semantics-manifest.toml,stdlib/*.almd,spec/stdlib/*_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
       run: scripts/check-semantics-manifest.sh
+    layout-discipline:
+      # Globbed over ALL compiler/CLI Rust, not over the ledger: #1316 exists
+      # because the discipline has to bite at the moment a NEW long-lived
+      # structure is written, without anyone remembering to ask. 0.2s scan.
+      glob: "{crates/**/*.rs,crates/*/src/*.rs,src/**/*.rs,src/*.rs,proofs/layout-ledger.toml,scripts/check-layout-discipline.sh,scripts/lib/layout-enumerate.py}"
+      run: bash scripts/check-layout-discipline.sh
 
 commit-msg:
   scripts:

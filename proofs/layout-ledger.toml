@@ -1,0 +1,149 @@
+# LAYOUT DISCIPLINE LEDGER (#1316).
+#
+# Every NEW long-lived data structure in the compile pipeline is flat arrays +
+# u32 ids + interned atoms — or it carries a written deviation note here. The
+# rule, and the measurements that justify each clause, live in
+# crates/CLAUDE.md § "Layout discipline (new long-lived structures)".
+# Enforced by scripts/check-layout-discipline.sh.
+#
+# WHAT IS IN SCOPE — decided mechanically, not by intention:
+#   1. every type declared in a file matching a `[scope] globs` pattern below
+#      (the module names we can predict: caches, the MIR->CLIF structures);
+#   2. every type that derives Serialize/Deserialize outside a [[frozen]] file.
+#      A serde derive is this repo's mechanical signal that a value crosses a
+#      process boundary — a cache, an on-disk artifact, a JSON payload — i.e.
+#      that it is LONG-LIVED in the sense of #1316;
+#   3. anything registered below, whatever file it lives in.
+#
+# WHAT IS OUT: the pre-existing AST/IR trees. #1316 is a zero-retrofit policy,
+# so every file that already held a serde-deriving type when this ledger landed
+# is [[frozen]] at its MEASURED count. Frozen is not "exempt forever": the count
+# is re-measured on every run, so a new long-lived type cannot be parked in an
+# old file without saying so.
+#
+# CLASSES
+#   FLAT      — no banned field construct. Re-derived from source on every run,
+#               so a FLAT row cannot lie about what it holds.
+#   DEVIATION — has at least one. `why` is the one-paragraph deviation note the
+#               issue requires: what deviates, what it costs (measured), and
+#               what would have to happen to remove it.
+#
+# The registered rows below are pre-existing EXHIBITS, not new debt: they are
+# the flat id-tables the discipline generalises from (VarId/VarTable,
+# DefId/DefTable) plus the two rows that already break it. They are registered
+# so this gate has a live population from day one — a gate whose population is
+# empty is decorative, and the whole point of #1316 is that good intentions did
+# not survive.
+#
+# deviation_ceiling = "2"
+
+[scope]
+globs = [
+  "crates/*cache*.rs",
+  "src/*cache*.rs",
+  "crates/*clif*.rs",
+  "src/*clif*.rs",
+]
+
+# ── pre-existing persistent surface, out of scope per #1316 (zero retrofit) ──
+
+[[frozen]]
+path = "crates/almide-syntax/src/ast.rs"
+serde_types = 26
+why = "the parser's AST — the tree #1316 explicitly leaves alone"
+
+[[frozen]]
+path = "crates/almide-ir/src/lib.rs"
+serde_types = 20
+why = "the typed IR node set — the tree #1316 explicitly leaves alone"
+
+[[frozen]]
+path = "crates/almide-ir/src/node_meta.rs"
+serde_types = 17
+why = "IrProgram/IrFunction and their metadata — same pre-existing IR surface"
+
+[[frozen]]
+path = "crates/almide-tools/src/interface.rs"
+serde_types = 15
+why = "the `almide compile --json` module interface — a pre-existing wire format"
+
+[[frozen]]
+path = "crates/almide-types/src/types/mod.rs"
+serde_types = 3
+why = "Ty and friends — the pre-existing type tree"
+
+[[frozen]]
+path = "crates/almide-types/src/types/constructor.rs"
+serde_types = 1
+why = "TypeConstructorId — pre-existing; see the DefInfo deviation note for its cost"
+
+[[frozen]]
+path = "crates/almide-base/src/span.rs"
+serde_types = 1
+why = "Span — three usizes, already flat"
+
+[[frozen]]
+path = "src/cli/ide.rs"
+serde_types = 5
+why = "IDE outline DTOs — serialized straight to stdout and dropped, not long-lived"
+
+[[frozen]]
+path = "src/cli/fix.rs"
+serde_types = 3
+why = "`almide fix` report DTOs — serialized straight to stdout and dropped. Third type `FixItJson` arrived with #1373 (span-anchored, applicability-tagged fix-its): same shape as the other two, a `--json` view built at print time, never loaded back."
+
+# ── registered types ──
+
+[[type]]
+name = "VarId"
+path = "crates/almide-ir/src/lib.rs"
+class = "FLAT"
+
+[[type]]
+name = "VarTable"
+path = "crates/almide-ir/src/lib.rs"
+class = "FLAT"
+
+[[type]]
+name = "DefId"
+path = "crates/almide-ir/src/lib.rs"
+class = "FLAT"
+
+[[type]]
+name = "DefTable"
+path = "crates/almide-ir/src/lib.rs"
+class = "FLAT"
+
+[[type]]
+name = "VarInfo"
+path = "crates/almide-ir/src/lib.rs"
+class = "DEVIATION"
+why = """
+VarInfo predates the discipline and is registered as an exhibit, not as new \
+debt. Two fields deviate. `ty: Ty` embeds the pointer-rich type tree, so a \
+VarTable can never be loaded as bytes. `module_origin: Option<String>` owns a \
+module NAME that is already a Sym everywhere else in the IR — it is the exact \
+shape the interning rule exists to prevent, and it got in because nothing \
+asked. Measured on this tree (2026-08-13, release, best-of-5): Option<String> \
+is 24 B against 4 B for a niche-packed Option<Sym>, which is all of VarInfo's \
+120 B -> 96 B (-20%); cloning a 100k-row table costs 1.95 ms owned against \
+0.57 ms interned (3.4x). Removing it is a field-type change plus an as_str() \
+at the two emit-time prefix sites — unfunded, not blocked, which is why the \
+ceiling is shrink-only.
+"""
+
+[[type]]
+name = "DefInfo"
+path = "crates/almide-ir/src/lib.rs"
+class = "DEVIATION"
+why = """
+Four of DefInfo's five fields are already the discipline's ideal (Sym, Sym, \
+Sym, a unit enum); the fifth, `ty: Ty`, embeds the pointer-rich type tree and \
+that alone stops DefTable from being a memcpy-loadable array. Removing it \
+means interning types, which turns type equality into an integer compare: \
+measured (2026-08-13, release, best-of-5) Ty equality is 4.33 ns/cmp for \
+`Applied(UserDefined(String), [Int])` and 7.28 ns/cmp for a 3-level nested Ty, \
+against 0.57 ns for a u32 — 7.6x and 13x. That is the InternPool the issue \
+points at; it is a compiler change, not a policy change, so it stays out of \
+this PR and stays visible here.
+"""
