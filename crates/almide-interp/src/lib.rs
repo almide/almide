@@ -670,7 +670,8 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         base: &env::Scope,
     ) -> (Flow, env::Scope) {
-        self.run_callable(TailCallee::Fn(func), args, base)
+        let (flow, frame) = self.run_callable(TailCallee::Fn(func), args, base);
+        (lift_effect_abi_carrier(func, flow), frame)
     }
 
     /// The tail-call trampoline: the shared engine under every function and
@@ -817,6 +818,36 @@ impl<'a> Interpreter<'a> {
 /// reusable for the next hop. The returned `Rc<Closure>` is not decoration: it
 /// keeps a closure hop's body alive for the duration of the spine walk, since
 /// `callee` is overwritten the moment a transfer happens.
+/// Put an `effect fn`'s success value into the Result carrier its ABI promises.
+///
+/// An `effect fn f() -> T` has ABI return type `Result[T, String]` and BOTH
+/// backends materialize that carrier. The interpreter returned the success
+/// value BARE while modelling the failure channel as `Result(Err(..))` — so the
+/// subject of `match <effect call> { ok(v) => .., err(e) => .. }` was a plain
+/// `Int`, no arm could match, and the run aborted with "non-exhaustive match".
+/// Since ADR-0008 removed implicit propagation that spelling is one of the
+/// SANCTIONED ways to consume a Result (E042's own hint says so), so the
+/// interpreter was casting a WRONG third vote against two agreeing backends on
+/// a whole idiom — worse than an honest skip, which is the crate's rule (#1366).
+///
+/// Two shapes are deliberately NOT wrapped:
+/// - a **declared-Result return** (`effect fn f() -> Result[T, E]`) is not
+///   double-lifted — the spec's own table says it emits `Result<T, E>`, not a
+///   nested one;
+/// - a value that is ALREADY a `Result` is the failure propagated out of the
+///   body by `!`, which the trampoline hands back as a plain value; wrapping it
+///   would bury the `Err` inside an `Ok`.
+fn lift_effect_abi_carrier(func: &IrFunction, flow: Flow) -> Flow {
+    if !func.is_effect || func.ret_ty.is_result() {
+        return flow;
+    }
+    match flow {
+        Flow::Value(Value::Result(r)) => Flow::Value(Value::Result(r)),
+        Flow::Value(v) => Flow::Value(Value::Result(Ok(Box::new(v)))),
+        other => other,
+    }
+}
+
 fn bind_hop_frame<'a>(
     callee: &TailCallee<'a>,
     args: &mut Vec<Value>,

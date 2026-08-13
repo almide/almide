@@ -1110,3 +1110,89 @@ fn try_each_ok_and_first_err() {
         PARSE_ERR,
     );
 }
+
+// ── The effect-fn Result carrier (#1366) ─────────────────────────────────────
+//
+// An `effect fn f() -> T` has ABI return type `Result[T, String]`, and BOTH
+// backends materialize that carrier. The interpreter used to hand the success
+// value back BARE while modelling the failure channel as `Result(Err(..))`, so
+// the subject of `match <effect call> { ok(v) => .., err(e) => .. }` was a
+// plain scalar, no arm matched, and the run aborted with "non-exhaustive
+// match" — a WRONG third vote against two agreeing backends on one of
+// ADR-0008's sanctioned consumption spellings, which is worse than an honest
+// skip. Found by the 3-way oracle while building #1341's fixture.
+
+#[test]
+fn matching_an_effect_call_sees_the_ok_carrier() {
+    let (exit, out, err) = run(
+        "effect fn pick(xs: List[Int]) -> Int = {\n\
+         \x20 let r: Result[Int, String] = match list.get(xs, 0) {\n\
+         \x20   some(a) => ok(a + 1),\n\
+         \x20   none => err(\"no first\"),\n\
+         \x20 }\n\
+         \x20 r!\n\
+         }\n\
+         effect fn main() -> Unit = {\n\
+         \x20 match pick([10]) {\n\
+         \x20   ok(v) => println(\"sum \" + int.to_string(v)),\n\
+         \x20   err(e) => println(\"fail \" + e),\n\
+         \x20 }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "sum 11\n"), "stderr: {err}");
+}
+
+#[test]
+fn matching_an_effect_call_sees_the_err_carrier() {
+    let (exit, out, err) = run(
+        "effect fn pick(xs: List[Int]) -> Int = {\n\
+         \x20 let r: Result[Int, String] = match list.get(xs, 0) {\n\
+         \x20   some(a) => ok(a + 1),\n\
+         \x20   none => err(\"no first\"),\n\
+         \x20 }\n\
+         \x20 r!\n\
+         }\n\
+         effect fn main() -> Unit = {\n\
+         \x20 match pick([]) {\n\
+         \x20   ok(v) => println(\"sum \" + int.to_string(v)),\n\
+         \x20   err(e) => println(\"fail \" + e),\n\
+         \x20 }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "fail no first\n"), "stderr: {err}");
+}
+
+/// The carrier must NOT be applied twice. A declared-Result effect fn emits
+/// `Result<T, E>` (spec §3: no double wrap), so `!` on its call still yields
+/// the payload rather than a nested `Ok(Ok(..))`.
+#[test]
+fn a_declared_result_effect_fn_is_not_double_wrapped() {
+    let (exit, out, err) = run(
+        "effect fn twice(n: Int) -> Result[Int, String] =\n\
+         \x20 if n < 0 then err(\"neg\") else ok(n * 2)\n\
+         effect fn main() -> Unit = {\n\
+         \x20 println(int.to_string(twice(21)!))\n\
+         \x20 match twice(3) { ok(v) => println(\"ok \" + int.to_string(v)), err(e) => println(e) }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "42\nok 6\n"), "stderr: {err}");
+}
+/// The NEIGHBOUR of the effect-fn gap, measured rather than assumed: a fallible
+/// LAMBDA (ADR-0009 — its `!` falls into the lambda's own `Result[T, String]`
+/// channel) already hands the carrier back, so `match` over its call was never
+/// broken. `Closure` carries no return type, so the fix above could not have
+/// covered this path even if it had needed covering — pinning it here records
+/// that it does not.
+#[test]
+fn matching_a_fallible_lambda_call_already_sees_the_carrier() {
+    let (exit, out, err) = run(
+        "effect fn main() -> Unit = {\n\
+         \x20 let g = (s: String) => int.parse(s)! * 2\n\
+         \x20 match g(\"21\") {\n\
+         \x20   ok(v) => println(\"ok \" + int.to_string(v)),\n\
+         \x20   err(e) => println(\"err \" + e),\n\
+         \x20 }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "ok 42\n"), "stderr: {err}");
+}
