@@ -511,12 +511,15 @@ pub fn format_program(program: &Program) -> String {
 
 /// Verify that formatting preserved the program: the output must (1) still
 /// parse, (2) carry the same AST (`Program`'s `Serialize` skips comments and
-/// positions, so the comparison is pure structure), and (3) keep every line
-/// comment. `program` is the exact value `format_program` rendered — after
-/// any `auto_imports` mutation — so intentional import edits verify clean.
+/// positions, so the comparison is pure structure), and (3) keep every
+/// comment — `//` and `/* */` both lex as Comment tokens since #1318.
+/// `program` is the exact value `format_program` rendered — after any
+/// `auto_imports` mutation — so intentional import edits verify clean.
 ///
-/// Block comments are OUTSIDE the guarantee: the lexer skips them without
-/// tokenizing, so fmt cannot reprint what it never saw (#1318).
+/// Comments sitting INLINE mid-expression (`f(1 /* x */, 2)`, a `// why`
+/// trailing an operator before a continuation line) are legal to parse but
+/// not yet attachable by fmt — this check makes fmt REFUSE such files
+/// loudly instead of deleting the comment (#1326 tracks attachment).
 pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> Result<(), String> {
     use almide_lang::lexer::{Lexer, TokenType};
     use almide_lang::parser::Parser;
@@ -544,16 +547,16 @@ pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> 
         ));
     }
 
-    let count_line_comments = |s: &str| {
+    let count_comments = |s: &str| {
         Lexer::tokenize(s)
             .iter()
             .filter(|t| t.token_type == TokenType::Comment)
             .count()
     };
-    let b = count_line_comments(original_src);
-    let a = count_line_comments(formatted);
+    let b = count_comments(original_src);
+    let a = count_comments(formatted);
     if a < b {
-        return Err(format!("{} line comment(s) would be lost ({b} → {a})", b - a));
+        return Err(format!("{} comment(s) would be lost ({b} → {a})", b - a));
     }
     Ok(())
 }

@@ -12,6 +12,9 @@ test "raw strings" {
 }
 
 test "block comments" {
+  /* an own-line block comment — fmt must preserve it (#1318) */
   let x = 1 + 3
+  /* a multi-line block comment
+     with a second line, still preserved */
   assert_eq(x, 4)
 }

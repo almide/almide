@@ -129,9 +129,24 @@ fn lex_trivia(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool
         tokens.push(tok);
         return true;
     }
-    // Block comment /* ... */ — nestable, fully skipped (not a token)
+    // Block comment /* ... */ — nestable, lexed VERBATIM into a Comment token
+    // (#1318: it used to be fully skipped, so fmt could never reprint it and
+    // silently deleted every block comment). The parser drops the ones sitting
+    // inline mid-expression (Parser::new's trivia filter), keeping the grammar
+    // unchanged; own-line and end-of-line block comments ride the same
+    // comment_map rails as `//` comments.
     if ch == '/' && peek(chars, cur.pos + 1) == Some('*') {
+        let start = cur.pos;
+        let (start_line, start_col) = (cur.line, cur.col);
         let (p, l, c) = skip_block_comment(chars, cur.pos, cur.line, cur.col);
+        let text: String = chars[start..p].iter().collect();
+        tokens.push(Token {
+            token_type: TokenType::Comment,
+            value: text,
+            line: start_line,
+            col: start_col,
+            end_col: c,
+        });
         cur.pos = p; cur.line = l; cur.col = c;
         return true;
     }

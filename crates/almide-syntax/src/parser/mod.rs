@@ -23,7 +23,7 @@ mod test_attributes;
 mod test_expr_precedence;
 mod types;
 
-use crate::lexer::Token;
+use crate::lexer::{Token, TokenType};
 use crate::diagnostic::Diagnostic;
 use crate::ast::ExprId;
 
@@ -49,7 +49,37 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
+        let tokens = Self::drop_inline_comments(tokens);
         Parser { tokens, pos: 0, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0 }
+    }
+
+    /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the
+    /// grammar never sees them — exactly the positions the old lexer-level skip made
+    /// legal (#1318). Kept: own-line comments (preceded by a Newline or file start,
+    /// or by another kept comment) and end-of-line comments (followed by Newline/EOF)
+    /// — the two positions the comment_map machinery can collect and fmt can reprint.
+    /// A dropped comment is still COUNTED by fmt's conservation verifier (it counts
+    /// lexer tokens), so an inline comment makes fmt refuse loudly instead of
+    /// deleting it silently.
+    fn drop_inline_comments(tokens: Vec<Token>) -> Vec<Token> {
+        let mut kept: Vec<Token> = Vec::with_capacity(tokens.len());
+        for (i, tok) in tokens.iter().enumerate() {
+            if tok.token_type == TokenType::Comment {
+                let own_line = matches!(
+                    kept.last().map(|t| &t.token_type),
+                    None | Some(TokenType::Newline) | Some(TokenType::Comment)
+                );
+                let end_of_line = matches!(
+                    tokens.get(i + 1).map(|t| &t.token_type),
+                    None | Some(TokenType::Newline) | Some(TokenType::EOF)
+                );
+                if !own_line && !end_of_line {
+                    continue;
+                }
+            }
+            kept.push(tok.clone());
+        }
+        kept
     }
 
     pub(crate) fn next_id(&mut self) -> ExprId {

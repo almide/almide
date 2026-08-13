@@ -131,3 +131,34 @@ fn verifier_catches_a_lost_line_comment() {
         "must report the lost comment, got: {why}"
     );
 }
+
+// ── Block comments (#1318): preserved where attachable, refused inline ───
+
+#[test]
+fn own_line_block_comments_survive_fmt() {
+    let src = "/* file-level block comment\n   spanning two lines */\nfn main() -> Unit = {\n  /* own-line body comment */\n  println(\"ok\")\n}\n";
+    let program = parse(src).expect("fixture parses");
+    let formatted = format_program(&program);
+    verify_format(src, &program, &formatted).expect("block comments must be conserved");
+    assert!(
+        formatted.contains("/* file-level block comment"),
+        "file-level block comment must be reprinted, got:\n{formatted}"
+    );
+    assert!(
+        formatted.contains("/* own-line body comment */"),
+        "body block comment must be reprinted, got:\n{formatted}"
+    );
+    // And the result must be idempotent like everything else.
+    let second = parse(&formatted).expect("formatted parses");
+    assert_eq!(format_program(&second), formatted, "fmt must be idempotent");
+}
+
+#[test]
+fn inline_block_comment_makes_the_verifier_refuse_not_delete() {
+    let src = "fn f(a: Int, b: Int) -> Int = a + b\n\nfn main() -> Unit = {\n  let x = f(1 /* inline */, 2)\n  println(\"ok\")\n}\n";
+    let program = parse(src).expect("inline block comments stay legal to parse");
+    let formatted = format_program(&program);
+    let why = verify_format(src, &program, &formatted)
+        .expect_err("an unattachable inline comment must refuse, never silently drop");
+    assert!(why.contains("comment"), "got: {why}");
+}
