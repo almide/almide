@@ -540,6 +540,45 @@ effect fn main() -> Unit = {
     assert!(stdout.is_empty(), "no output should precede the abort, got <{}>", stdout);
 }
 
+/// #1341: a NESTED variant match bound to a `let` under an explicit Result
+/// carrier, then unwrapped with `!`. The bind is heap-typed, so `branch_lift`
+/// hoists the whole match into a synthesized helper fn before the interpreter's
+/// cut point — the arm binders of BOTH levels have to survive that hoist and
+/// still be readable by the arm bodies. This is C-269's third vote, kept here
+/// as a fast standalone check (the fixture leg needs two full backend builds).
+#[test]
+fn nested_variant_match_in_bind_position() {
+    let src = r#"
+fn pair_sum(xs: List[Int]) -> Result[Int, String] = {
+  let r: Result[Int, String] = match list.get(xs, 0) {
+    some(a) => match list.get(xs, 1) {
+      some(b) => ok(a + b),
+      none => err("need a second element"),
+    },
+    none => err("need a first element"),
+  }
+  let total = r!
+  ok(total)
+}
+
+effect fn show(xs: List[Int]) -> Unit = {
+  match pair_sum(xs) {
+    ok(v) => println("sum ${v}"),
+    err(e) => println("sum failed: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show([10, 32])!
+  show([10])!
+  show([])!
+}"#;
+    expect_out(
+        src,
+        "sum 42\nsum failed: need a second element\nsum failed: need a first element\n",
+    );
+}
+
 // ── Fuel ────────────────────────────────────────────────────────
 
 #[test]
