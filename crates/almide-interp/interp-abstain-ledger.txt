@@ -78,6 +78,7 @@ matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_rows  out-of-interp-scope capability: prim.alloc_list_str
 matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
 matrix_pow_libm  out-of-interp-scope capability: prim.handle
+matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.handle
 matrix_select_rows  out-of-interp-scope capability: prim.handle
 matrix_select_rows_oob  out-of-interp-scope capability: prim.handle
 matrix_softmax_fastexp  out-of-interp-scope capability: prim.handle
