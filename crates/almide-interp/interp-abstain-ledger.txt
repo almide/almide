@@ -34,6 +34,7 @@ empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
 fs_composition_family  out-of-interp-scope capability: prim.alloc_bytes
 fs_metadata_family  out-of-interp-scope capability: prim.alloc_bytes
+fs_read_directory_errno  out-of-interp-scope capability: prim.alloc_bytes
 fs_read_lines  out-of-interp-scope capability: prim.alloc_bytes
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
