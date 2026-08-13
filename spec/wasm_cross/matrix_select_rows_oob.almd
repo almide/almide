@@ -5,8 +5,20 @@
 // clamps to row 0, and a negative offset clamps to 0 — identically on both
 // targets. Found by the fuzzer (run 31515916427, a C-228-fixture mutation):
 // native panicked on an unchecked slice while wasm read undefined heap bytes.
+//
+// "The ALL-ZERO row, identically on both targets" is a claim about BIT PATTERNS,
+// so the zeros are observed through `float.to_string`, which spells the sign
+// (`0.0` vs `-0.0`) that `==` cannot see. A magnitude-only assertion let #1358
+// hide here for a release: native's q1_0 dequantizer spelled its negative branch
+// `-scale` and produced -0.0 on an all-zero block where wasm's `0.0 - scale`
+// produced +0.0, and every `-0.0 == 0.0` downstream agreed with both.
 import matrix
 import bytes
+
+// Spell the SIGN of a float. `${x}` renders -0.0 as `-0` and 0.0 as `0`, but
+// float.to_string is the explicit spelling, so a sign regression reads as a
+// diff rather than as a missing character.
+fn sgn(x: Float) -> String = float.to_string(x)
 
 effect fn main() -> Unit = {
   var f32d = bytes.new(32)
@@ -38,6 +50,7 @@ effect fn main() -> Unit = {
   let qr0 = list.get(qrows, 0) ?? []
   let qr1 = list.get(qrows, 1) ?? []
   println("q8_oob=${list.get(qr0, 0) ?? 9.9},${list.get(qr0, 1) ?? 9.9} q8_row0=${list.get(qr1, 0) ?? 9.9},${list.get(qr1, 1) ?? 9.9}")
+  println("q8_oob_sign=${sgn(list.get(qr0, 0) ?? 9.9)},${sgn(list.get(qr0, 1) ?? 9.9)}")
   let mq2 = matrix.select_rows_q8_0_dq(q8, 0 - 34, 32, [0])
   let q2r0 = list.get(matrix.to_lists(mq2), 0) ?? []
   println("q8_negoff=${list.get(q2r0, 0) ?? 9.9}")
@@ -50,4 +63,24 @@ effect fn main() -> Unit = {
   let or0 = list.get(orows, 0) ?? []
   let or1 = list.get(orows, 1) ?? []
   println("q1_oob=${list.get(or0, 0) ?? 9.9} q1_row0=${list.get(or1, 0) ?? 9.9}")
+  println("q1_oob_sign=${sgn(list.get(or0, 0) ?? 9.9)},${sgn(list.get(or0, 1) ?? 9.9)}")
+  // The #1358 shape itself: an ALL-ZERO 18-byte block is in range, so this is
+  // not the OOB row — it is a real decode whose fp16 scale happens to be zero.
+  // Both sign-bit branches (+scale and -scale) must land on +0.0.
+  var z1 = bytes.new(18)
+  let mz = matrix.select_rows_q1_0(z1, 0, 128, [0])
+  let zr = list.get(matrix.to_lists(mz), 0) ?? []
+  println("q1_zeroblk_sign=${sgn(list.get(zr, 0) ?? 9.9)},${sgn(list.get(zr, 1) ?? 9.9)}")
+  // Same block through the FULL-matrix loader — the twin decoder, same ruling.
+  let mzf = matrix.from_q1_0_bytes(z1, 0, 1, 128)
+  let zrf = list.get(matrix.to_lists(mzf), 0) ?? []
+  println("q1_zeroblk_full_sign=${sgn(list.get(zrf, 0) ?? 9.9)},${sgn(list.get(zrf, 1) ?? 9.9)}")
+  // Q8_0's zero is reached from EITHER factor: a zero scale over a negative
+  // quant (246 = -10 as i8), and a real scale over a zero quant.
+  var z8 = bytes.new(34)
+  bytes.set_at(z8, 2, 10)
+  bytes.set_at(z8, 3, 246)
+  let m8z = matrix.select_rows_q8_0_dq(z8, 0, 32, [0])
+  let z8r = list.get(matrix.to_lists(m8z), 0) ?? []
+  println("q8_zeroscale_sign=${sgn(list.get(z8r, 0) ?? 9.9)},${sgn(list.get(z8r, 1) ?? 9.9)}")
 }

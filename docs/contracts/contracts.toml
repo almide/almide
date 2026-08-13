@@ -2860,7 +2860,7 @@ evidence  = [
 id        = "C-229"
 spec      = "ALS-R6"
 title     = "A selected row past the byte buffer is the all-zero row on both targets"
-statement = "The three `matrix.select_rows_*` byte-buffer selectors (f32 LE, Q1_0, Q8_0) answer an out-of-range row id with the ALL-ZERO row — the same defined OOB→zeros edge the full-matrix `from_bytes_*` loaders take, applied per selected row — and clamp a negative row id to row 0 and a negative offset to 0, identically on both targets. Found by the generative fuzzer (run 31515916427, a mutation of the C-228 fixture): native panicked on an unchecked slice (`range end index 33 out of range for slice of length 32`) while wasm read undefined heap bytes past the block — a raw-abort/silent-wrong divergence, closed by per-row bounds checks against the buffer length in both implementations."
+statement = "The three `matrix.select_rows_*` byte-buffer selectors (f32 LE, Q1_0, Q8_0) answer an out-of-range row id with the ALL-ZERO row — the same defined OOB→zeros edge the full-matrix `from_bytes_*` loaders take, applied per selected row — and clamp a negative row id to row 0 and a negative offset to 0, identically on both targets. Found by the generative fuzzer (run 31515916427, a mutation of the C-228 fixture): native panicked on an unchecked slice (`range end index 33 out of range for slice of length 32`) while wasm read undefined heap bytes past the block — a raw-abort/silent-wrong divergence, closed by per-row bounds checks against the buffer length in both implementations. `ALL-ZERO` is a claim about BIT PATTERNS: the zeros are observed through `float.to_string`, which spells the sign that `==` cannot see, and it holds for the IN-RANGE zeros too — the DEQUANTIZATION-ZERO RULING (#1358, fuzz run 31667874852) is that a Q1_0/Q8_0 element of zero magnitude is `+0.0` on both targets. A quantized element is magnitude (the block's fp16 scale) × direction (the sign bit / int8 quant); at zero magnitude the bytes encode no direction, so the sign IEEE-754 returns is an artifact of how the arithmetic was spelled — native's `-scale` produced -0.0 on an all-zero block exactly where wasm's `0.0 - scale` produced +0.0, and every `-0.0 == 0.0` downstream agreed with both. Both entry points are pinned (`select_rows_q1_0` and its full-matrix twin `from_q1_0_bytes`), for Q1_0 per block (every element is ±scale) and for Q8_0 per element (the product is zero from EITHER factor, and `a·b` signs by xor). Non-zero weights keep their exact sign; the float DECODERS `from_bytes_f16_le`/`_f32_le`/`_f64_le` are deliberately excluded, since there a stored -0.0 is the datum — see C-270."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
@@ -3313,4 +3313,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_variant_match_bind.almd", class = "fixture" },
   { path = "tests/diagnostic_harness_test.rs", class = "by-construction", name = "broken_files_produce_expected_diagnostics" },
+]
+
+[[contract]]
+id        = "C-270"
+spec      = "ALS-R6"
+title     = "The shared fp16 block scale decodes the whole fp16 domain identically on both targets"
+statement = "Q1_0 and Q8_0 read the same 2-byte fp16 block scale, and native's `fp16_bits_to_f32` (runtime/rs/src/matrix_p2.rs) and wasm's `__fp16_bits`/`__q10_scale` (stdlib/matrix_activations.almd) were THREE separate answers apart on it — all three closed here, pinned across ten raw scales through both q1_0 entry points (`select_rows_q1_0` and `from_q1_0_bytes`). (1) SUBNORMALS: wasm returned the sign bit alone for every exp==0 pattern, flushing 2^-24 … 6.0975e-5 to zero — a silent MAGNITUDE error on real weights, not just a sign one; wasm now normalizes the mantissa the way native's `while m & 0x400 == 0` loop does. (2) exp==31: wasm had no Inf/NaN branch and fell into the normal-number formula, decoding +Inf as the finite 65536 and a NaN pattern as 65600; it now emits the 0xFF exponent, and `float.to_string` already renders inf/-inf/NaN identically on both legs. (3) The SIGN OF ZERO (#1358) — the dequantization-zero ruling recorded on C-229. Non-zero scales are bit-for-bit untouched (1.0, 65504, both smallest-normal and largest-subnormal boundaries pinned with their negated twins). The CONTRAST is pinned in the same fixture: `from_bytes_f16_le`/`_f32_le` are float DECODERS, so a stored -0.0 is the datum and its sign is information — it survives on both targets, and the ruling governs dequantization PRODUCTS only."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_q_fp16_scale_domain.almd", class = "fixture" },
 ]
