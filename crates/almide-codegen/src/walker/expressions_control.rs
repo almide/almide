@@ -252,14 +252,57 @@ fn rewrite_legacy_almd_rec_names(ctx: &RenderContext, out: &mut String) {
     }
 }
 
+/// Substitute an `InlineRust` template's `{name}` placeholders in ONE PASS over
+/// the template.
+///
+/// The obvious loop — `out = out.replace("{a}", rendered_a)` per arg — re-scans
+/// text it has already inserted, so an ARGUMENT whose rendered form contains a
+/// later placeholder gets rewritten by the next iteration. That is reachable
+/// from ordinary source: `list.flat_map(xs, (s) => ["{e1}", s])` lowers to the
+/// array template `[{e0}, {e1}]`, and substituting `{e0}` first inserts the
+/// user's string literal `"{e1}"`, which the `{e1}` pass then overwrote with
+/// `s` — the program printed `s,A,s,B` instead of `{e1},A,{e1},B`. Silent wrong
+/// code, no diagnostic.
+///
+/// Scanning once and emitting fixes the class rather than the instance: inserted
+/// text is never examined again, so no argument can be interpreted as template
+/// syntax whatever a string literal happens to contain. A `{...}` with no
+/// matching arg is emitted verbatim, as before (templates carry unfilled
+/// defaults). Each arg is rendered at most once even when its placeholder
+/// appears twice, which the per-arg loop also guaranteed and which matters here
+/// — re-rendering nested expressions is how a concat chain once went
+/// exponential.
 fn render_expr_inline_rust(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::InlineRust { template, args } = &expr.kind else { unreachable!() };
-    let mut out = template.clone();
-    for (name, arg) in args {
-        let rendered = render_expr(ctx, arg);
-        let placeholder = format!("{{{}}}", name.as_str());
-        out = out.replace(&placeholder, &rendered);
+    let rendered: Vec<(&str, String)> = args.iter()
+        .map(|(name, arg)| (name.as_str(), render_expr(ctx, arg)))
+        .collect();
+
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template.as_str();
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after.find('}').and_then(|close| {
+            let name = &after[..close];
+            rendered.iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, text)| (text.as_str(), close))
+        }) {
+            Some((text, close)) => {
+                out.push_str(text);
+                rest = &after[close + 1..];
+            }
+            // Not a placeholder we can fill (no `}`, or an unknown name):
+            // emit the brace and carry on from just after it.
+            None => {
+                out.push('{');
+                rest = after;
+            }
+        }
     }
+    out.push_str(rest);
+
     rewrite_legacy_almd_rec_names(ctx, &mut out);
     out
 }
