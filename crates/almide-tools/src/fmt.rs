@@ -480,13 +480,31 @@ pub fn format_program(program: &Program) -> String {
         }
         *idx += 1;
     };
+    // #1323: a legacy `module` header parses into `decls[0]`, but the grammar
+    // requires it to PRECEDE every import — so emitting `decls` after `imports`
+    // sank it below them and the output no longer parsed. It also owns
+    // comment_map slot 0 (the parser's positional order is module?, imports…,
+    // decls…), so the module must consume that slot here; otherwise the first
+    // import reprints the file header and the module is left bare.
+    let module_header = match program.decls.first() {
+        Some(d @ Decl::Module { .. }) => Some(d),
+        _ => None,
+    };
+    let header = usize::from(module_header.is_some());
+    if let Some(module) = module_header {
+        emit_comments(&mut out, &mut ci);
+        fmt_decl(&mut out, module, 0);
+        out.push('\n');
+    }
     for imp in &program.imports {
-        if !out.is_empty() && ci == 0 { out.push('\n'); }
+        // Blank line before the FIRST import only — separating it from the
+        // module header above it, when there is one.
+        if !out.is_empty() && ci == header { out.push('\n'); }
         emit_comments(&mut out, &mut ci);
         fmt_decl(&mut out, imp, 0);
         out.push('\n');
     }
-    for decl in &program.decls {
+    for decl in program.decls.iter().skip(header) {
         // The blank line SEPARATES declarations — so it belongs before every one except the
         // first thing in the file. Emitting it unconditionally opened every import-less file
         // with a blank line (#919: the leading-blank diff on every such spec fixture), which
