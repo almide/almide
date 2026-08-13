@@ -481,3 +481,222 @@ fn dead_local_native_only_intrinsic_does_not_break_wasm_build() {
         String::from_utf8_lossy(&r.stderr)
     );
 }
+
+// ── #1394: the WASI dirfd is DISCOVERED, not assumed ────────────────────────
+//
+// The v1 fs floor used to pass `(i32.const 3)` as the dirfd at all 13 WASI
+// path-call sites and make a guest-absolute path "fd-3-relative" by stripping
+// its leading '/'. That is right only under a host that preopens EXACTLY ONE
+// directory and that directory is `/` — which is what every other gate in this
+// repo runs (`wasmtime --dir=/`), so nothing here could see the bug. These
+// tests are the ONE place that varies the preopen set, because they drive
+// wasmtime themselves with two `--dir=` flags. A `spec/wasm_cross` fixture
+// cannot reach it: that harness's wasmtime invocation is fixed at one preopen,
+// and the native oracle it differs against has no preopen concept at all.
+//
+// `$path_norm` now scans `fd_prestat_get`/`fd_prestat_dir_name` from fd 3 up
+// (once, cached) and returns the LONGEST-PREFIX preopen fd plus the remainder.
+
+/// The probe: write / exists / read-back the ABSOLUTE path given as argv[0].
+/// Each line it prints goes through a different WASI path call, so a
+/// mis-resolved dirfd shows up whichever syscall drops it.
+const PREOPEN_PROBE_SRC: &str = "import fs\n\
+     import env\n\
+     \n\
+     effect fn main() -> Unit = {\n\
+     \x20 let p = env.args()[0]\n\
+     \x20 match fs.write(p, \"PREOPEN-MULTI\") {\n\
+     \x20   ok(_) => println(\"write=OK\"),\n\
+     \x20   err(e) => println(\"write=ERR[\" + e + \"]\"),\n\
+     \x20 }\n\
+     \x20 println(if fs.exists(p) then \"exists=yes\" else \"exists=no\")\n\
+     \x20 match fs.read_text(p) {\n\
+     \x20   ok(s) => println(\"read=\" + s),\n\
+     \x20   err(e) => println(\"read=ERR[\" + e + \"]\"),\n\
+     \x20 }\n\
+     }\n";
+
+/// Build `PREOPEN_PROBE_SRC` to wasm in `dir`, or `None` when the toolchain is
+/// unavailable (the same skip discipline as the rest of this file).
+fn build_preopen_probe(dir: &Path) -> Option<std::path::PathBuf> {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return None;
+    }
+    if Command::new("wasmtime").arg("--version").output().is_err() {
+        return None;
+    }
+    let src_path = dir.join("preopen_probe.almd");
+    let wasm_path = dir.join("preopen_probe.wasm");
+    std::fs::write(&src_path, PREOPEN_PROBE_SRC).unwrap();
+    let build = Command::new(almide_bin())
+        .args([
+            "build",
+            src_path.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "-o",
+            wasm_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to build the preopen probe");
+    assert!(
+        build.status.success(),
+        "preopen probe wasm build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    Some(wasm_path)
+}
+
+/// Run `wasm` on wasmtime with the given preopens (IN ORDER — the first is fd 3)
+/// and one guest path argument. Returns trimmed stdout.
+fn run_with_preopens(wasm: &Path, dirs: &[String], guest_path: &str) -> String {
+    let mut cmd = Command::new("wasmtime");
+    for d in dirs {
+        cmd.arg(format!("--dir={d}"));
+    }
+    let out = cmd
+        .arg(wasm.to_str().unwrap())
+        .arg(guest_path)
+        .output()
+        .expect("failed to run wasmtime");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[test]
+fn wasm_multi_preopen_resolves_to_the_right_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(wasm) = build_preopen_probe(dir.path()) else { return };
+    // `tempdir()` can hand back a symlinked path (macOS `/var` -> `/private/var`);
+    // canonicalize so the guest's absolute path is the one wasmtime resolves
+    // through the `/` preopen, and so the decoy below is built from the same
+    // spelling the guest will send.
+    let sandbox = std::fs::canonicalize(dir.path()).unwrap();
+    let first = sandbox.join("first");
+    let second = sandbox.join("second");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+
+    // ── Cell B: two preopens, `/` SECOND, and the stripped path does not exist
+    // under the first. Pre-#1394 this was a loud `write=ERR[No such file or
+    // directory (os error 2)]` — fd 3 was `first/`, which has no `<sandbox>`
+    // subtree inside it.
+    let target_b = second.join("b.txt");
+    let out = run_with_preopens(
+        &wasm,
+        &[first.to_str().unwrap().to_string(), "/".to_string()],
+        target_b.to_str().unwrap(),
+    );
+    assert_eq!(
+        out, "write=OK\nexists=yes\nread=PREOPEN-MULTI",
+        "with two preopens the guest must resolve an absolute path against the \
+         `/` preopen (fd 4 here), not against whichever directory happens to be fd 3"
+    );
+    assert!(
+        target_b.exists(),
+        "the bytes must land at the host path the guest asked for ({})",
+        target_b.display()
+    );
+
+    // ── Cell C: the SILENT one. Same two preopens, but the stripped path DOES
+    // exist under `first/`, so the pre-#1394 floor answered `ok(())` and put the
+    // bytes in a completely different host file — no error anywhere. Build that
+    // decoy explicitly: `first/` + the guest path minus its leading '/'.
+    let target_c = second.join("c.txt");
+    let stripped = target_c.to_str().unwrap().trim_start_matches('/');
+    let decoy = first.join(stripped);
+    std::fs::create_dir_all(decoy.parent().unwrap()).unwrap();
+    let out = run_with_preopens(
+        &wasm,
+        &[first.to_str().unwrap().to_string(), "/".to_string()],
+        target_c.to_str().unwrap(),
+    );
+    assert_eq!(out, "write=OK\nexists=yes\nread=PREOPEN-MULTI");
+    assert!(
+        target_c.exists(),
+        "the bytes must land at {} — the path the guest actually named",
+        target_c.display()
+    );
+    assert!(
+        !decoy.exists(),
+        "SILENT WRONG FILE: the write landed at {} instead of the requested {}",
+        decoy.display(),
+        target_c.display()
+    );
+
+    // ── Control: ONE preopen, `/` — the configuration every other gate runs.
+    // This arm must behave exactly as it did pre-#1394; if the fix changed
+    // anything here it broke the whole suite, and this says so directly.
+    let target_a = second.join("a.txt");
+    let out = run_with_preopens(&wasm, &["/".to_string()], target_a.to_str().unwrap());
+    assert_eq!(out, "write=OK\nexists=yes\nread=PREOPEN-MULTI");
+    assert!(target_a.exists());
+}
+
+#[test]
+fn wasm_mapped_preopen_matches_the_guest_prefix() {
+    // The exact preopen shape `src/cli/run.rs::wasmtime_fs_args` builds on
+    // Windows: `--dir=.`-style launcher cwd (fd 3) plus the host temp dir MAPPED
+    // at the guest path `/tmp` (fd 4), with `TMPDIR=/tmp` steering `fs.temp_dir`
+    // to produce `/tmp/...` paths. Pre-#1394 such a path stripped to `tmp/...`
+    // and resolved against fd 3 — the mapping set up for it was never consulted.
+    // Reproduced here on Unix, where the same two-preopen shape is expressible;
+    // the Windows CI job never writes through `fs.temp_dir`, which is why this
+    // went unreached.
+    let dir = tempfile::tempdir().unwrap();
+    let Some(wasm) = build_preopen_probe(dir.path()) else { return };
+    let sandbox = std::fs::canonicalize(dir.path()).unwrap();
+    let cwd = sandbox.join("cwd");
+    let tmpmap = sandbox.join("tmpmap");
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::create_dir_all(&tmpmap).unwrap();
+
+    let out = run_with_preopens(
+        &wasm,
+        &[
+            cwd.to_str().unwrap().to_string(),
+            format!("{}::/tmp", tmpmap.to_str().unwrap()),
+        ],
+        "/tmp/mapped.txt",
+    );
+    assert_eq!(
+        out, "write=OK\nexists=yes\nread=PREOPEN-MULTI",
+        "`/tmp/...` must resolve against the preopen NAMED `/tmp`, whatever fd it got"
+    );
+    assert!(
+        tmpmap.join("mapped.txt").exists(),
+        "the bytes must land inside the directory mapped at /tmp"
+    );
+    assert!(
+        !cwd.join("tmp").exists(),
+        "nothing may be created under the fd-3 preopen: the path named /tmp, not ./tmp"
+    );
+}
+
+#[test]
+fn wasm_preopen_prefix_match_stops_at_a_component_boundary() {
+    // The longest-prefix rule matches on '/'-separated COMPONENTS, so a preopen
+    // named `<sandbox>/pre` must not claim `<sandbox>/prefix/...`. Both dirs
+    // exist and `/` is preopened too, so a naive byte-prefix rule would silently
+    // write into `pre/` — the same silent-wrong-file class as cell C, one layer
+    // down, and the reason the match tests `path[len(name)] == '/'`.
+    let dir = tempfile::tempdir().unwrap();
+    let Some(wasm) = build_preopen_probe(dir.path()) else { return };
+    let sandbox = std::fs::canonicalize(dir.path()).unwrap();
+    let pre = sandbox.join("pre");
+    let prefix = sandbox.join("prefix");
+    std::fs::create_dir_all(&pre).unwrap();
+    std::fs::create_dir_all(&prefix).unwrap();
+
+    let target = prefix.join("f.txt");
+    let out = run_with_preopens(
+        &wasm,
+        &[pre.to_str().unwrap().to_string(), "/".to_string()],
+        target.to_str().unwrap(),
+    );
+    assert_eq!(out, "write=OK\nexists=yes\nread=PREOPEN-MULTI");
+    assert!(target.exists(), "the bytes must land at {}", target.display());
+    assert!(
+        std::fs::read_dir(&pre).unwrap().next().is_none(),
+        "the `<sandbox>/pre` preopen must not claim `<sandbox>/prefix/...`"
+    );
+}
