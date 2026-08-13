@@ -3264,3 +3264,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_statement.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-266"
+spec      = "ALS-S7"
+title     = "guard let binds the success payload and raises on the failing polarity, identically on both targets"
+statement = "ALS-S7: `guard let x = scrut else err(e)` binds the Ok/Some payload for the rest of the block on the success polarity (int.parse(\"21\") -> 42 pinned) and propagates the else's err to the caller on the failing one (\"not a number\" pinned) — byte-identical native <-> wasm; chained guard lets fold into a single carrier bind (#1340). The wall that stood here was POSITIONAL, not polarity- or pattern-shaped: guard let desugars in the frontend to a BLOCK-NESTED variant match, and auto_wrap_abi_body retypes only the body ROOT to the Result carrier, so the nested match kept its scalar type and fell off the carrier-typed tail path. The fix taught the proven bind-shape normalizer about variant matches — the same machinery ALS-S6 uses."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
+]

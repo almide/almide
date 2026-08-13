@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-93 normative sections; 417 distinct executable fixtures.
+94 normative sections; 418 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -90,6 +90,7 @@
 | ALS-S4 | C-022 | `spec/wasm_cross/string_from_bytes.almd` (byte-compare) |
 | ALS-S5 | C-050, C-253 | `spec/wasm_cross/string_split_rle_codepoint.almd` (byte-compare)<br>`spec/wasm_cross/place_assign_ascription.almd` (byte-compare) |
 | ALS-S6 | C-074, C-265 | `spec/wasm_cross/r5_wasm_split_replace_iterative.almd` (byte-compare)<br>`spec/wasm_cross/guard_statement.almd` (byte-compare) |
+| ALS-S7 | C-266 | `spec/wasm_cross/guard_let_statement.almd` (byte-compare) |
 | ALS-T1 | C-021 | `spec/wasm_cross/string_whitespace.almd` (byte-compare) |
 | ALS-T2 | C-024, C-210 | `spec/wasm_cross/float_parse.almd` (byte-compare)<br>`spec/wasm_cross/nan_canonical_observation.almd` (byte-compare)<br>`spec/wasm_cross/nan_canonical_bytes_write.almd` (byte-compare) |
 | ALS-T3 | C-087 | `spec/wasm_cross/json_number_unicode.almd` (byte-compare)<br>`spec/wasm_cross/json_string_span.almd` (byte-compare) |
