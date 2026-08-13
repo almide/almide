@@ -27,7 +27,7 @@ impl Parser {
                         | TokenType::Type | TokenType::Test | TokenType::Pub
                         | TokenType::Protocol
                         | TokenType::Local | TokenType::Mod
-                        | TokenType::Strict | TokenType::At
+                        | TokenType::At
                     ) {
                         break;
                     }
@@ -45,7 +45,7 @@ impl Parser {
                 TokenType::Fn | TokenType::Effect
                 | TokenType::Pub | TokenType::Local | TokenType::Mod
                 | TokenType::Type | TokenType::Protocol
-                | TokenType::Test | TokenType::Strict | TokenType::At => {
+                | TokenType::Test | TokenType::At => {
                     break;
                 }
                 TokenType::Newline => {
@@ -54,7 +54,7 @@ impl Parser {
                         TokenType::Fn | TokenType::Effect
                         | TokenType::Pub | TokenType::Local | TokenType::Mod
                         | TokenType::Type | TokenType::Protocol
-                        | TokenType::Test | TokenType::Strict | TokenType::At
+                        | TokenType::Test | TokenType::At
                         | TokenType::EOF
                     ) {
                         break;

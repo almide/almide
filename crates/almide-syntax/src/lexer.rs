@@ -22,7 +22,7 @@ pub enum TokenType {
     Module, Import, Type, Protocol, For, In, Fn, Let, Var, Mut,
     If, Then, Else, Match, Ok, Err, Some, None, Todo,
     True, False, Not, And, Or,
-    Strict, Pub, Effect, Test,
+    Pub, Effect, Test,
     Guard, Break, Continue, While, Local, Mod, Fan,
     // Delimiters
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
@@ -742,7 +742,7 @@ const KEYWORDS: &[(&str, TokenType)] = &[
     ("todo", TokenType::Todo),
     ("true", TokenType::True), ("false", TokenType::False),
     ("not", TokenType::Not), ("and", TokenType::And),
-    ("or", TokenType::Or), ("strict", TokenType::Strict),
+    ("or", TokenType::Or),
     ("pub", TokenType::Pub), ("effect", TokenType::Effect),
     ("test", TokenType::Test),
     ("guard", TokenType::Guard), ("break", TokenType::Break),

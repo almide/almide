@@ -392,7 +392,6 @@ pub enum Decl {
     },
     TopLet { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] mutable: bool, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
     Protocol { name: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<ProtocolMethod>, #[serde(skip)] span: Option<Span> },
-    Strict { mode: String, #[serde(skip)] span: Option<Span> },
     Test { name: String, body: Expr, #[serde(default)] where_clauses: Vec<TestWhere>, #[serde(skip)] span: Option<Span> },
     /// `local test where { ... }` — file-scoped test environment
     TestWhereDef { scope: TestWhereScope, clauses: Vec<TestWhere>, #[serde(skip)] span: Option<Span> },
@@ -461,7 +460,7 @@ pub fn visit_decl_exprs_mut(decl: &mut Decl, f: &mut impl FnMut(&mut Expr)) {
             for wc in clauses.iter_mut() { visit_test_where_exprs_mut(wc, f); }
         }
         Decl::Module { .. } | Decl::Import { .. } | Decl::Type { .. } |
-        Decl::Protocol { .. } | Decl::Strict { .. } => {}
+        Decl::Protocol { .. } => {}
     }
 }
 
