@@ -28,8 +28,21 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
 fn fmt_expr_leaf(out: &mut String, expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Int { raw, .. } => out.push_str(raw),
-        ExprKind::Float { value, .. } => fmt_expr_float(out, *value),
-        ExprKind::String { value, .. } => fmt_expr_string(out, value),
+        // A literal that CAME FROM SOURCE reprints its own spelling (#1261,
+        // #1263). Reprinting from the value normalized `1e10` to
+        // `10000000000.0`, dropped the `_` from `1_000.25`, turned
+        // `"\u{3042}"` into a bare `あ`, collapsed heredocs to one quoted
+        // line — and rendered `1e999` as `inf.0`, which does not parse, so
+        // fmt turned a valid file into an invalid one. The value is
+        // untouched: this is a printing change only.
+        ExprKind::Float { value, raw } => match raw {
+            Some(r) => out.push_str(r),
+            None => fmt_expr_float(out, *value),
+        },
+        ExprKind::String { value, raw } => match raw {
+            Some(r) => out.push_str(r),
+            None => fmt_expr_string(out, value),
+        },
         ExprKind::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         ExprKind::Unit => out.push_str("()"),
         ExprKind::None => out.push_str("none"),
@@ -135,7 +148,15 @@ fn fmt_expr_infix(out: &mut String, expr: &Expr, depth: usize) -> bool {
 /// shape-axis as leaf/wrapper/infix.)
 fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
     match &expr.kind {
-        ExprKind::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
+        // Same source-spelling rule as the plain String leaf. An interpolated
+        // heredoc reprints as a heredoc, and `"\u{3042}${x}"` keeps its
+        // escape. Any tool that REWRITES an expression inside a `${…}` hole
+        // must call `ast::strip_literal_raw` first — otherwise the verbatim
+        // reprint would drop the rewrite.
+        ExprKind::InterpolatedString { parts, raw } => match raw {
+            Some(r) => out.push_str(r),
+            None => fmt_istring_parts(out, parts, depth),
+        },
         ExprKind::Tuple { elements, .. } => {
             out.push('(');
             comma_sep(out, elements, |out, e| fmt_expr(out, e, depth));

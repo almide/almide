@@ -23,6 +23,7 @@ impl Parser {
                 line: 0,
                 col: 0,
                 end_col: 0,
+                raw: None,
             };
             &EOF_TOKEN
         }

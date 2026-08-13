@@ -52,7 +52,7 @@ mod tests {
             }
             ExprKind::Ident { name } => name.to_string(),
             ExprKind::Int { raw, .. } => raw.clone(),
-            ExprKind::String { value } => format!("\"{}\"", value),
+            ExprKind::String { value, .. } => format!("\"{}\"", value),
             ExprKind::Bool { value } => value.to_string(),
             ExprKind::Lambda { params, body } => {
                 let ps: Vec<String> = params.iter().map(|p| p.name.to_string()).collect();

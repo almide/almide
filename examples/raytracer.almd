@@ -190,11 +190,11 @@ fn render_row(py: Int, w: Int, h: Int) -> String = {
   for px in 0..<w {
     let top = pixel(px, py, w, h)
     let bot = pixel(px, py + 1, w, h)
-    let fg = "[38;2;${int.to_string(channel(top.x))};${int.to_string(channel(top.y))};${int.to_string(channel(top.z))}m"
-    let bg = "[48;2;${int.to_string(channel(bot.x))};${int.to_string(channel(bot.y))};${int.to_string(channel(bot.z))}m"
+    let fg = "\x1b[38;2;${int.to_string(channel(top.x))};${int.to_string(channel(top.y))};${int.to_string(channel(top.z))}m"
+    let bg = "\x1b[48;2;${int.to_string(channel(bot.x))};${int.to_string(channel(bot.y))};${int.to_string(channel(bot.z))}m"
     line = line + fg + bg + "▀"
   }
-  line + "[0m"
+  line + "\x1b[0m"
 }
 
 fn main() -> Unit = {

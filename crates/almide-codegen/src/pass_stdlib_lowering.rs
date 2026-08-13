@@ -208,12 +208,12 @@ fn ast_expr_to_ir_literal(expr: &almide_lang::ast::Expr) -> Option<IrExpr> {
                 span: None, def_id: None,
             })
         }
-        ExprKind::Float { value } => Some(IrExpr {
+        ExprKind::Float { value, .. } => Some(IrExpr {
             kind: IrExprKind::LitFloat { value: *value },
             ty: Ty::Float,
             span: None, def_id: None,
         }),
-        ExprKind::String { value } => Some(IrExpr {
+        ExprKind::String { value, .. } => Some(IrExpr {
             kind: IrExprKind::LitStr { value: value.clone() },
             ty: Ty::String,
             span: None, def_id: None,

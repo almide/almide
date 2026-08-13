@@ -375,7 +375,7 @@ pub(crate) fn float_literal_chain(value: &crate::ast::Expr) -> Option<(crate::as
     let mut cur = value;
     loop {
         match &cur.kind {
-            ExprKind::Float { value: v } => return Some((cur.id, *v)),
+            ExprKind::Float { value: v, .. } => return Some((cur.id, *v)),
             ExprKind::Paren { expr } => cur = expr,
             ExprKind::Unary { op, operand, .. } if op.as_str() == "-" => cur = operand,
             _ => return None,
