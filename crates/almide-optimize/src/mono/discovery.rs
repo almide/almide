@@ -59,18 +59,6 @@ pub(super) fn discover_instances_in_frontier(
     visitor.instances
 }
 
-/// Also used by monomorphize_module_fns (which supplies its own expr).
-pub(super) fn discover_in_expr(
-    expr: &IrExpr,
-    bound_fns: &HashMap<String, Vec<BoundedParam>>,
-    program_functions: &[IrFunction],
-    instances: &mut HashMap<MonoKey, HashMap<String, Ty>>,
-) {
-    let mut visitor = DiscoverVisitor { bound_fns, program_functions, instances: HashMap::new() };
-    visitor.visit_expr(expr);
-    instances.extend(visitor.instances);
-}
-
 // ── Visitor implementation ────────────────────────────────────────
 
 struct DiscoverVisitor<'a> {
@@ -172,20 +160,6 @@ fn bind_explicit_type_args(orig_fn: Option<&IrFunction>, type_args: &[Ty], bindi
             bindings.insert(g.name.to_string(), ta.clone());
         }
     }
-}
-
-// ── Statement discovery (delegated to visitor via walk) ──────────
-
-pub(super) fn discover_in_stmt(
-    stmt: &IrStmt,
-    bound_fns: &HashMap<String, Vec<BoundedParam>>,
-    program_functions: &[IrFunction],
-    instances: &mut HashMap<MonoKey, HashMap<String, Ty>>,
-) {
-    
-    let mut visitor = DiscoverVisitor { bound_fns, program_functions, instances: HashMap::new() };
-    visitor.visit_stmt(stmt);
-    instances.extend(visitor.instances);
 }
 
 /// Extract the concrete type for a TypeVar by matching parameter type structure against argument type.
