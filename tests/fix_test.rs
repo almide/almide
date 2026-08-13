@@ -103,6 +103,88 @@ effect fn main() -> Unit = {
     assert_eq!(v["operator_rewrites"], 1);
     assert_eq!(v["changed"], true);
     assert_eq!(v["dry_run"], true);
+    // #1312 (additive, no schema bump): the structured-suggestion view.
+    assert!(v["applied"].is_array(), "missing `applied` array");
+    assert!(v["suggestions"].is_array(), "missing `suggestions` array");
+}
+
+// ---- #1312: the diagnostic-driven engine ----
+
+#[test]
+fn fix_applies_a_machine_applicable_fixit_it_was_never_taught() {
+    // `items.length` is not in any rewrite table in `fix.rs` — E013 states
+    // the span and the replacement, and the engine applies it because the
+    // diagnostic tagged it machine-applicable. This is the whole point of
+    // the migration: a fix the fixer never had to learn.
+    let src = "fn count(items: List[Int]) -> Int = items.length\n";
+    let path = write_tmp("fix_engine_e013.almd", src);
+    let out = Command::new(almide())
+        .args(["fix", &path, "--json", "--dry-run"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let applied = v["applied"].as_array().expect("applied array");
+    assert_eq!(applied.len(), 1, "expected exactly one applied fix-it: {}", v);
+    assert_eq!(applied[0]["code"], "E013");
+    assert_eq!(applied[0]["applicability"], "machine-applicable");
+    assert_eq!(applied[0]["replacement"], "list.len(items)");
+
+    // And it really lands.
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("list.len(items)"), "fix not applied:\n{}", after);
+}
+
+#[test]
+fn fix_never_applies_a_suggestion_that_decides_for_the_author() {
+    // A "did you mean?" rename is span-exact and would compile — and is
+    // exactly the fix an unattended fixer must NOT make, because the edit
+    // distance picked the name, not the author. It is reported as a
+    // suggestion and the file is left alone.
+    let src = "fn f(s: String) -> Int = string.lenn(s)\n";
+    let path = write_tmp("fix_engine_suggestion.almd", src);
+    let out = Command::new(almide())
+        .args(["fix", &path, "--json", "--dry-run"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    assert_eq!(v["applied"].as_array().map(|a| a.len()), Some(0),
+        "a maybe-incorrect fix was applied unattended: {}", v);
+    let suggestions = v["suggestions"].as_array().expect("suggestions array");
+    assert!(!suggestions.is_empty(), "the rename should be offered as a suggestion: {}", v);
+    assert!(suggestions.iter().all(|s| s["applicability"] != "machine-applicable"),
+        "suggestions must not be machine-applicable: {}", v);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "file changed");
+}
+
+#[test]
+fn fix_is_idempotent() {
+    // Two runs, one result: the second pass must find nothing left to do.
+    // A fixer that keeps rewriting its own output is a fixer that will
+    // eventually rewrite something it shouldn't.
+    let src = r#"
+fn main() -> Unit = {
+  var s = 0
+  for i in 0 .. 4 { s = s + i }
+  for j in 1 ..= 3 { s = s + j }
+  println(int.to_string(s))
+}
+"#;
+    let path = write_tmp("fix_idempotent.almd", src);
+    let first = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(first.status.success(), "stderr:\n{}", String::from_utf8_lossy(&first.stderr));
+    let after_first = std::fs::read_to_string(&path).unwrap();
+    assert!(after_first.contains("0 ..< 4") && after_first.contains("1 ... 3"),
+        "ranges not migrated:\n{}", after_first);
+
+    let second = Command::new(almide())
+        .args(["fix", &path, "--json"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&second.stdout).expect("valid json");
+    assert_eq!(v["changed"], false, "second run changed the file again: {}", v);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), after_first);
 }
 
 #[test]
