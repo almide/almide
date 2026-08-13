@@ -520,3 +520,32 @@ C-094/C-126(`protocol_ufcs_inferred_lambda.almd`)が pin。test ブロックは
 (#1321 — accept-and-ignored)。裁定が下るまで UNWRITTEN 維持。
 
 テスト: `spec/wasm_cross/declaration_forms.almd`(契約 C-260)。
+
+## ALS-E3 浮動小数点リテラル(`ExprKind::Float`)— 部分節
+
+**受理形(確定分)**: 10 進小数 `1.5`・`0.5`(小数点の両側に数字必須 —
+`.5`/`1.` は parse エラー、実測)・負零 `-0.0`。指数形(`1e10`/`1E10`/
+`1.5e-3`)と下線区切り(`1_000.25`)は**受理される**が、fmt が値経由で
+綴りを再印字するため fixture で pin できない — **形の規範化は OPEN
+(#1261 の裁定待ち)**。範囲外リテラル(`1e999`)の扱いも同 issue の
+フォーク(現状 inf 飽和、fmt が unparseable `inf.0` を出す)。
+
+**値の規範(確定分)**: 型は binary64(ALS-T2)。正準表示は
+`float.to_string` — `1.5` / `0.5` / **`-0.0`(符号保存)** / 演算結果
+`1.75` を fixture が両ターゲット同一で pin。
+
+テスト: `spec/wasm_cross/string_float_stable.almd`(契約 C-261)。
+
+## ALS-E5 文字列リテラル(`ExprKind::String`)— 部分節
+
+**受理形(確定分)**: 二重引用符リテラル、空文字列 `""`、エスケープ
+`\t`・`\n`・`\\`(綴りとも fmt 安定、値を fixture が pin)。
+`\u{…}`(値置換される)・heredoc `"""…"""`(単一行へ潰される)・引用符
+選択(自動切替)は受理されるが fmt が形を保存しないため**形の規範化は
+OPEN(#1263)**。未知エスケープ(`\q`)と範囲外 `\u{…}` の黙過は
+**OPEN(#1264)** — 現状は素通りであり、これを規範とは認めない。
+
+**値の規範(確定分)**: `\t` → タブ、`\n` → 改行、`\\` → バックスラッシュ
+1 字(fixture が可視括りで pin)。空文字列は長さ 0 の値。
+
+テスト: `spec/wasm_cross/string_float_stable.almd`(契約 C-262)。
