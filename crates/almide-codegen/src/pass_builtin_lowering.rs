@@ -245,16 +245,37 @@ fn rewrite_call_named(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, 
     rewrite_call_rename(name, args, type_args, ty, span)
 }
 
+/// A `LitStr` macro argument.
+fn macro_lit(value: &str) -> IrExpr {
+    IrExpr { kind: IrExprKind::LitStr { value: value.into() }, ty: Ty::String, span: None, def_id: None }
+}
+
+/// `at line <N>` — the assertion's own `.almd` source line, threaded into the
+/// Rust assertion macro's message so a TEST-block failure names the line in the
+/// source instead of only the generated `main.rs` one (which is what libtest's
+/// panic banner reports, and which no agent can act on). `almide test` reads it
+/// back out of the panic payload; see `src/cli/test_report.rs`.
+///
+/// Non-test asserts never reach here — the frontend desugars them to the T18
+/// abort form (C-153), which carries its own `at:` line.
+fn assert_site(span: &Option<Span>) -> Option<String> {
+    span.as_ref().map(|s| format!("at line {}", s.line))
+}
+
 /// The builtins with no Rust fn behind them: they lower to a macro invocation.
 fn rewrite_call_as_macro(name: Sym, args: Vec<IrExpr>, ty: Ty, span: Option<Span>) -> IrExpr {
     // assert / assert_eq / assert_ne → RustMacro
     if name == "assert" || name == "assert_eq" || name == "assert_ne" {
+        let site = assert_site(&span);
         // assert(cond, msg) → assert!(cond, "{}", msg)
         // Rust's assert! macro requires a format string literal as second arg
         if name == "assert" && args.len() == 2 {
             let cond = args[0].clone();
             let msg = args[1].clone();
-            let fmt = IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None, def_id: None };
+            let fmt = match &site {
+                Some(at) => macro_lit(&format!("{{}} ({at})")),
+                None => macro_lit("{}"),
+            };
             return IrExpr { kind: IrExprKind::RustMacro { name, args: vec![cond, fmt, msg] }, ty, span, def_id: None };
         }
         // Sized Numeric Types (Stage 1c): `assert_eq(x,
@@ -270,6 +291,13 @@ fn rewrite_call_as_macro(name: Sym, args: Vec<IrExpr>, ty: Ty, span: Option<Span
             let r_ty = args[1].ty.clone();
             coerce_macro_arg(&mut args[1], &l_ty);
             coerce_macro_arg(&mut args[0], &r_ty);
+        }
+        // Append the source site as the macro's message — `assert_eq!(l, r,
+        // "{}", "at line 12")` prints `assertion `left == right` failed: at
+        // line 12` above libtest's `left:`/`right:` pair.
+        if let Some(at) = site {
+            args.push(macro_lit("{}"));
+            args.push(macro_lit(&at));
         }
         return IrExpr { kind: IrExprKind::RustMacro { name, args }, ty, span, def_id: None };
     }
