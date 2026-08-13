@@ -89,13 +89,14 @@ pub struct InterpReprContainers {
     /// `${List[<generic-variant instantiation>]}` / `${Option[<instantiation>]}`
     /// parts (`forest=${forest}` over `List[Tree[Int]]`) — the generator emits the
     /// instantiation-keyed walkers (`__repr_list_<key>` / `__repr_opt_<key>`).
+    /// ONE entry per INSTANTIATION, not per interp SITE ([`dedup_push_inst`]).
     pub var_inst_lists: Vec<(String, Vec<Ty>)>,
     pub var_inst_opts: Vec<(String, Vec<Ty>)>,
     pub rec_maps: std::collections::BTreeSet<String>,
     pub var_maps: std::collections::BTreeSet<String>,
     /// GENERIC-variant interp instantiations (`${l}` over `ReprEither[Int, String]`)
     /// — the (name, args) pairs the generator emits an instantiation-keyed
-    /// `__repr_<key>` for (deduped + sorted at generation).
+    /// `__repr_<key>` for (deduped at push, sorted at generation).
     pub var_insts: Vec<(String, Vec<Ty>)>,
     /// SCALAR-component tuple CONTAINER interp shapes (`${list.sort(tups)}` over
     /// `List[(Int, String)]`, `${list.min(tups)}` over `Option[(Bool, Bool)]`) —
@@ -124,6 +125,23 @@ pub(crate) fn tuple_repr_ident(tys: &[Ty]) -> Option<String> {
     };
     Some(tys.iter().map(tag).collect::<Option<Vec<_>>>()?.join("_"))
 }
+
+/// Queue a generic-variant INSTANTIATION into one of the instantiation lanes,
+/// keyed by [`repr_inst_ident`] — the SAME key the generator emits the helper
+/// under. Every lane is per-INSTANTIATION, never per interp SITE: a second
+/// `"${forest}"` over the same `List[Tree[Int]]` must not queue a second copy,
+/// because each queued entry emits one `fn __repr_list_<key>` (+ `_go`) into
+/// the generated source, and a generated fn reaches the wasm module as a
+/// `pub` export — two copies means a DUPLICATE EXPORT NAME, which is an
+/// invalid module that fails at wasmtime's parse step (#1357, C-010).
+fn dedup_push_inst(lane: &mut Vec<(String, Vec<Ty>)>, name: &str, args: &[Ty]) {
+    let key = repr_inst_ident(name, args);
+    if lane.iter().any(|(n, a)| repr_inst_ident(n, a) == key) {
+        return;
+    }
+    lane.push((name.to_string(), args.to_vec()));
+}
+
 pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpReprContainers {
     use almide_ir::visit::{walk_expr, IrVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
@@ -168,7 +186,7 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                 Ty::Named(n, args)
                     if !args.is_empty() && self.var_names.contains(n.as_str()) =>
                 {
-                    self.out.var_insts.push((n.as_str().to_string(), args.clone()));
+                    dedup_push_inst(&mut self.out.var_insts, n.as_str(), args);
                 }
                 // A bare `${obj}` over a `Value` — the generator emits the
                 // `__repr_Value` wrapper (value_core's JSON serializer, C-060).
@@ -226,8 +244,8 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
             }
             // A generic-variant INSTANTIATION element (`${forest}` over List[Tree[Int]]): the
             // walker needs the element's instantiation-keyed repr too.
-            self.out.var_inst_lists.push((n.as_str().to_string(), args.to_vec()));
-            self.out.var_insts.push((n.as_str().to_string(), args.to_vec()));
+            dedup_push_inst(&mut self.out.var_inst_lists, n.as_str(), args);
+            dedup_push_inst(&mut self.out.var_insts, n.as_str(), args);
         }
 
         /// The `Option[<Named>]` sibling of [`Self::track_list_named`]. Verbatim extraction,
@@ -244,8 +262,8 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                 self.out.var_opts.insert(n.as_str().to_string());
                 return;
             }
-            self.out.var_inst_opts.push((n.as_str().to_string(), args.to_vec()));
-            self.out.var_insts.push((n.as_str().to_string(), args.to_vec()));
+            dedup_push_inst(&mut self.out.var_inst_opts, n.as_str(), args);
+            dedup_push_inst(&mut self.out.var_insts, n.as_str(), args);
         }
 
         /// `${List[(scalar…)]}` — dedup-push the tuple-component shape into `tup_lists`.
