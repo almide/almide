@@ -1818,13 +1818,14 @@ evidence  = [
 id        = "C-153"
 spec      = "ALS-T18"
 title     = "Non-test assert failures abort in the T6 form on both targets"
-statement = "A failing `assert` / `assert_eq` / `assert_ne` OUTSIDE a test block aborts with ONE stderr line + exit code 1, byte-identical across targets: `Error: assertion failed: left = <l>, right = <r>` (eq), `Error: assertion failed: both = <l>` (ne), `Error: assertion failed[: <msg>]` (assert), operand display per ALS-R2, operands evaluated exactly once (the failure line re-references bound temps). Implemented as ONE frontend-lowering desugar (if + eprintln + process.exit(1)) that native, v0-wasm, v1-wasm, and the interp all inherit. Previously native leaked the raw Rust panic (exit 101 + the panic banner) while wasm printed a value-less line with exit 1 for assert_eq and a BARE TRAP (exit 134) for assert/assert_ne (differential-fuzz seed 20260718 index 10). In passing: the bare `eprintln` builtin — which the desugar rides — was UNLINKED on the v1 leg and ICE'd the v0 emitter; it is now a registered self-host (fd-2 print_str twin) and a shared parametrized v0 runtime fn."
+statement = "A failing `assert` / `assert_eq` / `assert_ne` OUTSIDE a test block aborts with a STRUCTURED stderr block + exit code 1, byte-identical across targets: `Error: assertion failed` followed by one `  key: value` line each — `  at: line <N>`, `  expected: <r>` (`!= <l>` for ne), `  found: <l>`; `assert(c, msg)` puts the message on the header (`Error: assertion failed: <msg>`) and carries only `at:`. Operand display per ALS-R2, operands evaluated exactly once (the failure block re-references bound temps). FIELD ORDER IS PART OF THE PROMISE: `expected` precedes `found` so the one field with no terminator is LAST, which is what lets `almide test` parse a multi-line value back out and render a diff (#1313, FeedbackEval arXiv 2504.06939 — structured expected/found is the feedback shape that repairs). The `at:` line is dropped when the call has no span, a property of the shared frontend lowering and never of the target. Implemented as ONE frontend-lowering desugar (if + eprintln + process.exit(1)) that native, v0-wasm, v1-wasm, and the interp all inherit. It was previously ONE line (`left = <l>, right = <r>`) with no source site; before that native leaked the raw Rust panic (exit 101 + the panic banner) while wasm printed a value-less line with exit 1 for assert_eq and a BARE TRAP (exit 134) for assert/assert_ne (differential-fuzz seed 20260718 index 10). In passing: the bare `eprintln` builtin — which the desugar rides — was UNLINKED on the v1 leg and ICE'd the v0 emitter; it is now a registered self-host (fd-2 print_str twin) and a shared parametrized v0 runtime fn."
 since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/assert_abort_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/assert_abort_ne.almd", class = "fixture" },
   { path = "spec/wasm_cross/assert_abort_msg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assert_abort_multiline.almd", class = "fixture" },
 ]
 
 [[contract]]

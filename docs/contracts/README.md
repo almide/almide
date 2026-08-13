@@ -180,7 +180,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-150 | Ctors over a heap var are value copies — the var stays live | 0.31.0 | active | fixture | 1 |
 | C-151 | Result combinators with a heap-Ok RESULT never link the scalar impl | 0.31.0 | active | fixture | 1 |
 | C-152 | An un-admitted heap call payload in a ctor walls, never zeroes | 0.31.0 | active | fixture | 1 |
-| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 3 |
+| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 4 |
 | C-154 | clamp with an invalid range aborts in the T6 form | 0.31.0 | active | fixture | 2 |
 | C-155 | to_fixed with out-of-domain decimals aborts in the T6 form | 0.31.0 | active | fixture | 3 |
 | C-156 | An if-merged some((String, String)) ctor is a real tracked Option | 0.32.0 | active | fixture | 1 |
