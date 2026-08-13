@@ -247,7 +247,10 @@ fn list_heap_call_name_special_cases(
         let int_acc = matches!(arg_tys.get(init_idx), Some(Ty::Int));
         return Some(if msi_acc && func != "fold_lines_range" {
             format!("fs.{func}_msi")
-        } else if ls_acc && func == "fold_lines_range" {
+        } else if ls_acc && func != "fold_lines" {
+            // `fold_lines_range` (the original cell) and `fold_lines_chunked`
+            // (#1233) share the `_ls` twin shape; `fold_lines`'s own List[String]
+            // cell has no twin yet and stays `_x`-walled.
             format!("fs.{func}_ls")
         } else if int_acc && func == "fold_lines_chunked" {
             format!("fs.{func}_i")
