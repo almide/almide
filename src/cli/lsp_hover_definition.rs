@@ -249,6 +249,11 @@ fn compute_document_symbols(doc: &AnalyzedDoc, uri: &Uri) -> Vec<SymbolInformati
 fn compute_formatting(doc: &AnalyzedDoc) -> Vec<TextEdit> {
     let formatted = crate::fmt::format_program(&doc.program);
     if formatted == doc.source { return vec![]; }
+    // #1309: the editor path must obey the same safety verifier as the CLI —
+    // a corrupting format becomes "no edits", never a silent rewrite.
+    if crate::fmt::verify_format(&doc.source, &doc.program, &formatted).is_err() {
+        return vec![];
+    }
     let line_count = doc.source.lines().count().max(1);
     vec![TextEdit {
         range: Range { start: Position { line: 0, character: 0 }, end: Position { line: line_count as u32, character: 0 } },

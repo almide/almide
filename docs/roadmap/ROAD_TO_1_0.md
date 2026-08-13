@@ -226,6 +226,7 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | [#1311](https://github.com/almide/almide/issues/1311) | フロントエンド lex/parse/check の行/秒予算ラチェット | 0.6x | 0.69(編集ループ総仕上げ)の計測基盤。Carbon の規律 |
 | [#1314](https://github.com/almide/almide/issues/1314) | snapshot/expect テスト内蔵(--update-snapshots) | 0.6x | 内蔵例のない差別化空白。仕様凍結(0.96)より前に。inline vs .snap は ○× |
 | [#1316](https://github.com/almide/almide/issues/1316) | 新設データ構造の flat index-based レイアウト規律(方針) | 0.6x | 0.61(CLIF spike)の前提規律。0.49 キャッシュ形式実装も拘束する |
+| [#1318](https://github.com/almide/almide/issues/1318) | **BUG**: fmt がブロックコメントを黙って削除(lexer が `/* */` を無トークン化) | 0.5x | #1309 の verifier 構築中に発見。fmt 破壊ファミリの残党 — conservation ゲートの適用範囲拡大とセット |
 
 dojo 側: [almide-dojo#2](https://github.com/almide/almide-dojo/issues/2)(effect 宣言有無の MSR A/B — 文献に存在しない最初の数字)は repo 境界ルールにより Dojo 管轄。0.59 と #585(ポジションペーパー)に給餌する。
 

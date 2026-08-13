@@ -869,6 +869,7 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
     // both make the run fail. Under the other modes a parse error stays a skip.
     let mut unformatted: Vec<String> = Vec::new();
     let mut unreadable = false;
+    let mut verify_failed = false;
 
     for file in files {
         let (mut program, source_text, parse_errors) = parse_file(file);
@@ -893,6 +894,18 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
             }
         }
         let formatted = fmt::format_program(&program);
+        // #1309 safety verifier (Black's --safe model): if formatting would
+        // change the file, the output must re-parse, carry the same AST, and
+        // keep every line comment — otherwise the file is left untouched and
+        // the run fails. A formatter that corrupts is worse than none.
+        if formatted != source_text {
+            if let Err(why) = fmt::verify_format(&source_text, &program, &formatted) {
+                err(&format!("{}: fmt verification failed — {}", file, why));
+                err(&format!("{}: file left untouched (formatter bug — please report)", file));
+                verify_failed = true;
+                continue;
+            }
+        }
         match mode {
             FmtMode::Write => {
                 std::fs::write(file, &formatted)
@@ -908,10 +921,13 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
         }
     }
 
+    if verify_failed && mode != FmtMode::Check {
+        std::process::exit(1);
+    }
     if mode != FmtMode::Check {
         return;
     }
-    if unformatted.is_empty() && !unreadable {
+    if unformatted.is_empty() && !unreadable && !verify_failed {
         err(&format!("fmt: {} file(s) already formatted", files.len()));
         return;
     }

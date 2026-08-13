@@ -507,6 +507,100 @@ pub fn format_program(program: &Program) -> String {
     out
 }
 
+// ── Post-format safety verifier (#1309, Black's `--safe` model) ──────────
+
+/// Verify that formatting preserved the program: the output must (1) still
+/// parse, (2) carry the same AST (`Program`'s `Serialize` skips comments and
+/// positions, so the comparison is pure structure), and (3) keep every line
+/// comment. `program` is the exact value `format_program` rendered — after
+/// any `auto_imports` mutation — so intentional import edits verify clean.
+///
+/// Block comments are OUTSIDE the guarantee: the lexer skips them without
+/// tokenizing, so fmt cannot reprint what it never saw (#1318).
+pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> Result<(), String> {
+    use almide_lang::lexer::{Lexer, TokenType};
+    use almide_lang::parser::Parser;
+
+    let tokens = Lexer::tokenize(formatted);
+    let mut parser = Parser::new(tokens);
+    let reparsed = match parser.parse() {
+        Ok(p) if parser.errors.is_empty() => p,
+        Ok(_) => {
+            return Err(format!(
+                "formatted output has {} parse error(s), first: {}",
+                parser.errors.len(),
+                parser.errors[0].display()
+            ))
+        }
+        Err(e) => return Err(format!("formatted output no longer parses: {e}")),
+    };
+
+    let before = serde_json::to_value(program).map_err(|e| e.to_string())?;
+    let after = serde_json::to_value(&reparsed).map_err(|e| e.to_string())?;
+    if before != after {
+        return Err(format!(
+            "AST changed by formatting at {}",
+            first_divergence(&before, &after, String::from("$"))
+        ));
+    }
+
+    let count_line_comments = |s: &str| {
+        Lexer::tokenize(s)
+            .iter()
+            .filter(|t| t.token_type == TokenType::Comment)
+            .count()
+    };
+    let b = count_line_comments(original_src);
+    let a = count_line_comments(formatted);
+    if a < b {
+        return Err(format!("{} line comment(s) would be lost ({b} → {a})", b - a));
+    }
+    Ok(())
+}
+
+/// The first JSON path where the two ASTs diverge — makes a verifier failure
+/// report point at the construct instead of dumping two trees.
+fn first_divergence(a: &serde_json::Value, b: &serde_json::Value, path: String) -> String {
+    use serde_json::Value::{Array, Object};
+    let show = |v: &serde_json::Value| {
+        let s = v.to_string();
+        if s.chars().count() > 80 {
+            format!("{}…", s.chars().take(80).collect::<String>())
+        } else {
+            s
+        }
+    };
+    match (a, b) {
+        (Object(ma), Object(mb)) => {
+            for (k, va) in ma {
+                match mb.get(k) {
+                    Some(vb) if va != vb => return first_divergence(va, vb, format!("{path}.{k}")),
+                    Option::None => return format!("{path}.{k} (removed)"),
+                    _ => {}
+                }
+            }
+            for k in mb.keys() {
+                if !ma.contains_key(k) {
+                    return format!("{path}.{k} (added)");
+                }
+            }
+            path
+        }
+        (Array(va), Array(vb)) => {
+            for (i, (x, y)) in va.iter().zip(vb).enumerate() {
+                if x != y {
+                    return first_divergence(x, y, format!("{path}[{i}]"));
+                }
+            }
+            if va.len() != vb.len() {
+                return format!("{path} (length {} → {})", va.len(), vb.len());
+            }
+            path
+        }
+        _ => format!("{path}: {} → {}", show(a), show(b)),
+    }
+}
+
 /// Render a generic `@name(args)` attribute back to source. Mirrors
 /// the parser's accepted shapes: bare `@name`, positional args, and
 /// `name=value` named args. String values are re-quoted with `"`;
