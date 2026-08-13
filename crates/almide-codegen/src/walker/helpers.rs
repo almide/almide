@@ -11,6 +11,19 @@ pub fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallbac
         .unwrap_or_else(|| fallback.to_string())
 }
 
+/// Escape user text so it can be spliced verbatim into a Rust `"…"` literal.
+/// Backslash FIRST (escaping it after the quotes would double-escape the
+/// backslashes this function itself introduced), then the characters that
+/// terminate or re-open a literal.
+pub fn escape_rust_str(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
+        .replace('\r', "\\r")
+}
+
 /// Add statement terminator (`;` in Rust, `;` in TS) if the rendered string doesn't already end with one
 pub fn terminate_stmt(ctx: &RenderContext, rendered: String) -> String {
     let term = template_or(ctx, "stmt_terminator", &[], ";");
