@@ -380,8 +380,3 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     };
     Ok((code, ir_program))
 }
-
-fn compile_with_ir(file: &str, no_check: bool) -> (String, Option<almide::ir::IrProgram>) {
-    try_compile_with_ir(file, no_check, &codegen::CodegenOptions::default())
-        .unwrap_or_else(|_| std::process::exit(1))
-}

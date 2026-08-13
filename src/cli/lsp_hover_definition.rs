@@ -20,14 +20,12 @@ fn compute_hover(doc: &AnalyzedDoc, pos: Position) -> Option<Hover> {
                 format!("```almide\n{}({}) (variant of {})\n```", name, fields.join(", "), type_name)
             }
         }
-        Located::TypeDecl { display, .. } =>
+        Located::TypeDecl { display } =>
             format!("```almide\n{}\n```", display),
         Located::UserIdent { name, ty } =>
             format!("```almide\n{}: {}\n```", name, ty),
         Located::Param { name, ty } =>
             format!("```almide\n{}: {} (parameter)\n```", name, ty),
-        Located::Expr { ty } =>
-            format!("```almide\n{}\n```", ty),
     };
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: md }),

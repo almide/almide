@@ -519,12 +519,6 @@ fn wrap_codegen_leak(stderr: String) -> String {
     )
 }
 
-/// Build generated Rust code using cargo for test mode (--test harness).
-/// Returns the path to the built test binary on success.
-fn cargo_build_test(rs_code: &str, project_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    cargo_build_test_with_native(rs_code, project_dir, &[], None)
-}
-
 /// Path to the precompiled `almide_rt` runtime rlib, built once per process.
 ///
 /// The runtime (string/list/map/... ops, RcCow, AlmideConcat, the equality
