@@ -17,7 +17,7 @@ import os, re, subprocess, sys, tempfile, tomllib
 # ratchet: append modules, never remove. Each module generates its OWN
 # spec/stdlib/<module>_semantics_manifest_test.almd, so adding one leaves
 # every already-covered module's committed file byte-identical.
-COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "error", "regex", "bool", "testing", "args", "mem", "zlib", "path", "base64", "hex", "html", "fs", "http"]
+COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "error", "regex", "bool", "testing", "args", "mem", "zlib", "path", "base64", "hex", "html", "fs", "http", "net"]
 
 with open("docs/stdlib/semantics-manifest.toml", "rb") as f:
     manifest = tomllib.load(f)
@@ -30,9 +30,9 @@ with open("docs/stdlib/semantics-manifest.toml", "rb") as f:
 UNIT_VOCAB = {
     "address", "bit-pattern", "byte", "byte-count", "byte-offset",
     "byte-value", "civil-field", "codepoint", "count", "cursor", "day",
-    "element-count", "element-index", "hour", "millisecond", "minute",
-    "nanosecond", "ordering", "port", "scalar", "second", "status-code",
-    "value",
+    "element-count", "element-index", "handle", "hour", "millisecond",
+    "minute", "nanosecond", "ordering", "port", "scalar", "second",
+    "status-code", "value",
 }
 DEFAULT_UNIT_VOCAB = {"byte-offset", "byte-value", "codepoint", "second", "value"}
 REQUIRED_ENTRY_FIELDS = ("name", "index_unit", "probe", "expect")
