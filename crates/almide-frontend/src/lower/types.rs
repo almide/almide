@@ -83,8 +83,3 @@ fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str
 pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
     crate::canonicalize::resolve::resolve_type_expr(te, None)
 }
-
-/// Resolve with TypeEnv lookup — expands type aliases like TcpStream → Int.
-pub(super) fn resolve_type_expr_with_env(te: &ast::TypeExpr, env: &crate::types::TypeEnv) -> Ty {
-    crate::canonicalize::resolve::resolve_type_expr(te, Some(&env.types))
-}
