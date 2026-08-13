@@ -204,6 +204,42 @@ else {
   __ffl_range_walk_ls(sh, slen, e + 1, endp, nacc, f)
 }
 
+// `fs.fold_lines_chunked` List[String]-accumulator twin (`_ls` — the same
+// collect_partition shape, chunked). Identical byte partition to the msi twin,
+// with each partial stored as a HEAP handle (`store_str`) into the partials
+// block: `Result[List[List[String]], String]` is the msi payload class with a
+// List[String] element instead of a Map — both are heap blocks whose slots the
+// partials list owns, so the recursive drop route is the same one msi rides.
+fn __ffl_chunks_ls(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: List[String], f: (List[String], String) -> List[String]) -> Int = if i >= n then 0
+else {
+  let s = i * chunk
+  let e = if s + chunk < slen then s + chunk else slen
+  let p0 = __ffl_range_start(sh, slen, s)
+  let part = __ffl_range_walk_ls(sh, slen, p0, e, init, f)
+  prim.store_str(lh + 12 + i * 8, part)
+  __ffl_chunks_ls(sh, slen, lh, n, chunk, i + 1, init, f)
+}
+
+effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[List[String]], String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    let slen = prim.load32(th + 4)
+    let w = if workers < 1 then 1 else workers
+    let chunk = slen / w + 1
+    let full = (slen + chunk - 1) / chunk
+    let n = if w < full then w else full
+    let parts: List[List[String]] = prim.alloc_list_str(n)
+    let _c = __ffl_chunks_ls(th, slen, prim.handle(parts), n, chunk, 0, init, f)
+    ok(parts)
+  }
+}
+
 effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file(path)
   let rh = prim.handle(r)
