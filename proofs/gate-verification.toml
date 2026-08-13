@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "7"
+# unverified_ceiling = "6"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -76,7 +76,8 @@ evidence = "flight-evidence-gaps.md F4 close: 5 consecutive full-run greens afte
 
 [[gate]]
 path = "proofs/build-checker.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5 (coqc/ocamlopt present locally, so the gate RAN): the forge went into the TRUSTED GLUE the proof does not cover — driver.ml's ownership arm rubber-stamped to `true` gave 'FAIL double_free.cert: got exit 0 want 1 (ACCEPT)', and to `false` gave 'FAIL balanced.cert: got exit 1 want 0 (REJECT)'; both the accept and the reject assertions therefore bind. Restored green (26/26)"
 
 [[gate]]
 path = "proofs/coverage.sh"
