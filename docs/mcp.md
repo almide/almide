@@ -93,6 +93,9 @@ reintroduce exactly the fragility this server exists to remove.
 - **`almide compile --json`** (the full module interface with ABI layout) is
   CLI-only. `almide_api` covers the signature-level question an agent actually
   asks; the ABI detail belongs to binding generators.
+- **`almide ide doc <symbol>`** (signature + doc comment for ONE symbol) has no
+  `--json` form, so it is not exposed rather than scraped. `almide_api` answers
+  the same question at signature level for a whole module.
 
 ## Files
 
