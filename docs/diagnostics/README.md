@@ -39,6 +39,7 @@ Use `almide explain <code>` to read these from the CLI.
 | [E046](E046.md) | `_` in a call argument — not a value, not partial application (the typed hole `_` is expression-position only) |
 | [E047](E047.md) | Invalid escape in a string literal — an undefined escape, or `\u{…}` outside the Unicode scalar range |
 | [E048](E048.md) | Variant pattern the subject's type does not have — wrong family (`ok`/`err` on an Option), a builtin carrier over a user variant, or a foreign user case |
+| [E049](E049.md) | `let ... in <expr>` is OCaml/Haskell syntax — bindings chain by newline (machine-applicable fix-it + `almide fix`) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
@@ -65,3 +66,40 @@ Every doc should include:
    their case.
 6. **Related** — cross-references to adjacent codes and cheatsheet
    sections.
+
+## Fix-its and applicability (#1312)
+
+A diagnostic that knows the span and the replacement **is** the fix.
+`almide fix` carries no rewrite table of its own for these: it collects
+every fix-it the compiler emitted, applies the machine-applicable ones,
+re-checks, and iterates. A new diagnostic that can state its fix exactly
+gets auto-fix the day it lands.
+
+Attaching one is a two-way choice, and the builder makes you take it —
+there is no way to attach a replacement span without naming an
+applicability:
+
+| Builder | Applicability | Who applies it |
+|---|---|---|
+| `.with_machine_fix(line, col, end_col, text)` | `machine-applicable` | `almide fix`, unattended |
+| `.with_suggested_fix(line, col, end_col, text)` | `maybe-incorrect` | a human or a model, after choosing |
+| `.with_try(text)` (no span) | `unspecified` | nobody — display only |
+
+**Use `with_machine_fix` only for a re-spelling**: same value, same type,
+same evaluation, exactly one reading of what the author meant. Deleting a
+keyword the language does not have (E049) qualifies. A rename picked by
+edit distance does not — it compiles and it may call the wrong function.
+Nor does anything that changes `T` into `Option[T]`: applying it moves the
+error instead of closing it.
+
+**The span must be exact.** Derive it from a real token or `Span`; never
+from searching the text for what you expect to be there. A fix-it anchored
+to a guessed range rewrites the wrong bytes silently, which is strictly
+worse than no fix-it at all — so if the exact range is not available,
+fall back to `with_try` and let a human read the snippet. `with_machine_fix`
+refuses a range that cannot name real source (line/col 0, inverted) and
+degrades it to display-only rather than trust it.
+
+Both halves are gated: `tests/diagnostic_harness_test.rs` asserts that every
+span-anchored fix-it in the fixture corpus declares an applicability, applies
+cleanly, compiles, and reproduces `fixed.almd`.
