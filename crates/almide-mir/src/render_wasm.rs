@@ -80,6 +80,11 @@ const FS_ERR_NOTDIR_ADDR: u32 = 312; // "Not a directory (os error 20)" — WASI
 const FS_ERR_NOTDIR_LEN: u32 = 29;
 const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
 const FS_ERR_ISDIR_LEN: u32 = 28;
+// native `write_all`'s ErrorKind::WriteZero Display — NOT an OS string (Rust's own
+// const message), so it is platform-independent like the four above. Reached when
+// fd_write accepts 0 bytes with no errno (#1385's latent short-write arm).
+const FS_ERR_WRITEZERO_ADDR: u32 = 400; // "failed to write whole buffer" — 400..428
+const FS_ERR_WRITEZERO_LEN: u32 = 28;
 // The bump allocator's DEFAULT start — also the mutable-global slot region's base
 // (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
 // module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots

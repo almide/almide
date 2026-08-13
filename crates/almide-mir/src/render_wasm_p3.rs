@@ -104,6 +104,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (data (i32.const {FS_ERR_ACCES_ADDR}) "Permission denied (os error 13)")
   (data (i32.const {FS_ERR_NOTDIR_ADDR}) "Not a directory (os error 20)")
   (data (i32.const {FS_ERR_ISDIR_ADDR}) "Is a directory (os error 21)")
+  (data (i32.const {FS_ERR_WRITEZERO_ADDR}) "failed to write whole buffer")
   ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
   (data (i32.const {RDIR_ERR_ADDR}) "directory not found")
   ;; the fs.write path_open/fd_write error message — a CONST byte run the Err arm copies.
