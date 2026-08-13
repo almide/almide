@@ -77,4 +77,12 @@ wasm の fs ランタイムは起動時に WASI preopen ディレクトリ表を
 同一パスへの書き込み→読み戻しは native std::fs と同じホストファイルに
 到達する（CWD 非依存）。open エラー文言は ALS-T6 系の native 文言規範
 に従う。
-Contracts: C-042。
+
+`fs.list_dir(path)` はディレクトリの**全**エントリを返す。エントリ数に
+上限はなく、ホストのバッファ境界（wasm の `fd_readdir` は resumable API で
+あり、1 パスで返るのは呼び出し側バッファに収まる分だけ）は観測に現れない。
+`.` と `..` は両ターゲットで除外され、順序は**バイト辞書順**に正規化される
+（native は `names.sort()`、wasm は同じバイト比較の挿入ソート）。ファイル
+システムの readdir 順は観測できない。読み取り失敗は短いリストではなく err。
+テスト: `spec/wasm_cross/fs_list_dir_multipass.almd`
+Contracts: C-042, C-272。
