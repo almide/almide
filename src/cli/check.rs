@@ -86,7 +86,56 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     (diagnostics, checker)
 }
 
-pub fn cmd_check(file: &str, deny_warnings: bool) {
+/// Render the `--timings` per-phase breakdown (#1311).
+///
+/// TWO LINES, on stderr next to the rest of `check`'s output: a human summary,
+/// and one `almide-timings ` + JSON line for harnesses. The JSON keys are API —
+/// `scripts/check-frontend-phases.sh` ratchets phase SHARES computed from them,
+/// so renaming one silently blinds that gate.
+///
+/// `other` is the front-end work that is none of the three: reading files off
+/// disk, import resolution, canonicalization, and the IR lowering that feeds the
+/// unused-variable warnings. It is reported rather than hidden — a phase
+/// accounting whose residual is unnamed can absorb an arbitrary regression.
+fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
+    use almide_base::profile::PHASE_NAMES;
+    let ms = |ns: u64| ns as f64 / 1e6;
+    let total_ms = total_secs * 1000.0;
+    let accounted: u64 = r.nanos.iter().sum();
+    let other_ms = (total_ms - ms(accounted)).max(0.0);
+    let kls = |ns: u64| if ns == 0 { 0.0 } else { r.lines as f64 / (ns as f64 / 1e9) / 1000.0 };
+
+    let mut human = String::from("timings:");
+    for (i, name) in PHASE_NAMES.iter().enumerate() {
+        human.push_str(&format!(
+            " {} {:.1}ms ({:.1}%, {:.0}k lines/s)",
+            name,
+            ms(r.nanos[i]),
+            if total_ms > 0.0 { ms(r.nanos[i]) / total_ms * 100.0 } else { 0.0 },
+            kls(r.nanos[i]),
+        ));
+    }
+    human.push_str(&format!(
+        " | other {:.1}ms | total {:.1}ms over {} lines in {} sources",
+        other_ms, total_ms, r.lines, r.sources
+    ));
+    err(&human);
+
+    err(&format!(
+        "almide-timings {{\"lex_ns\":{},\"parse_ns\":{},\"check_ns\":{},\"total_ns\":{},\
+         \"lines\":{},\"bytes\":{},\"sources\":{}}}",
+        r.nanos[0], r.nanos[1], r.nanos[2], (total_secs * 1e9) as u64, r.lines, r.bytes, r.sources
+    ));
+}
+
+pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool) {
+    // Arm the accounting BEFORE the first source is read; a phase counter that
+    // starts mid-pipeline reports a front end with no lexer.
+    if timings {
+        almide_base::profile::phase_accounting_on();
+    }
+    let total_timer = almide_base::profile::ProfileTimer::start(timings);
+
     let (mut program, source_text, parse_errors) = parse_file(file);
     let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
 
@@ -122,6 +171,13 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
                 }
             }
         }
+    }
+
+    // After the last front-end work, before the verdict line. Only on the clean
+    // path on purpose: a check that errored out spent its time in the diagnostic
+    // renderer, and timing that would report the wrong thing.
+    if let (Some(t), Some(r)) = (total_timer.as_ref(), almide_base::profile::phase_report()) {
+        report_timings(&r, t.elapsed_secs());
     }
 
     err(&format!("No errors found"));

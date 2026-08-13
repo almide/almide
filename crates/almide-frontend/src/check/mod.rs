@@ -840,6 +840,8 @@ impl Checker {
     /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
     /// Skips import table building and declaration registration — inference only.
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // #1311 front-end phase accounting (no-op unless `--timings`).
+        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
         // ADR-0006 D1 (#1108): record every fn DECLARED `-> T!` before
         // resolution erases the marker, so a named callback argument's
         // fallibility bit is known at HOF call sites.
