@@ -108,10 +108,15 @@ nothing is published that `bench.py` did not produce.
   `flat_map`'s intermediate list. That is an MSR problem before it is a perf
   problem — the idiom docs are the in-context material that steers generated
   code, so "recommended" and "fast" have to name the same shape. The three now
-  sit within 2% of each other. `check-perf-ratio.sh` gates each row's ratio
-  like every other benchmark AND gates the relation between them directly
-  (`IDIOM_CEILING`), because the ratios drifting apart is the failure this
-  family exists to catch.
+  sit within 2% of each other. What `check-perf-ratio.sh` gates for this family
+  is the RELATION between the rows (`IDIOM_CEILING`), not each row's ratio
+  against Rust: the absolute ratio here turns out to be strongly
+  architecture-dependent — 1.58 on an M4 Pro and 0.91 on the ubuntu-latest CI
+  runner from the same commit, because the workload's cost is allocation rather
+  than arithmetic and the two allocators behave differently. So this is the one
+  family where "the ratio cancels the machine" does not hold; the rows are
+  reported like onebrc, and the relation — 1.018x locally, 1.045x on CI — is
+  what carries a gate.
 
 ## Run
 

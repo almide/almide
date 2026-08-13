@@ -39,7 +39,23 @@ BASELINE_FILE="scripts/perf-ratio-baseline.txt"
 BUDGET_PCT="${PERF_RATIO_BUDGET_PCT:-40}"
 RUNS="${PERF_RATIO_RUNS:-3}"
 # Gated pairs: bench -> same-shape rust-ref variant.
-PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild"
+#
+# The three `listbuild` rows are deliberately NOT here. Their almide/rust ratio
+# turns out to be strongly ARCHITECTURE-dependent — the ratchet's founding
+# assumption, "the ratio cancels the machine", does not hold for a workload
+# whose cost is allocation rather than arithmetic. Same commit, same day:
+# `listbuild` reads 1.58 on an M4 Pro and 0.91 on the ubuntu-latest CI runner
+# (where Almide BEATS the reference, glibc calloc handing back zero pages that
+# `Vec::with_capacity` + push has to fault in). A per-row anchor would sit ~16%
+# off the two-sided floor on one of the two machines and flake there, and
+# re-anchoring per architecture is not something a single committed baseline
+# can express. So the rows are MEASURED and REPORTED below (same policy the
+# README states for onebrc), and what is gated is the relation between them —
+# which is the property #1337 is about and which IS machine-stable: 1.018x on
+# the M4 Pro, 1.045x on the CI runner, from the same commit.
+PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft"
+# Rows measured for the record and printed, but not anchored (see above).
+REPORTED="listbuild listbuild-append listbuild-comb"
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
 # the mission depends on: CLAUDE.md and docs/CHEATSHEET.md tell authors (and
@@ -70,14 +86,15 @@ python3 research/benchmark/perf/bench.py \
   --bench nbody,spectralnorm,fasta,fft,listbuild,listbuild-append,listbuild-comb \
   --label ratchet --out "$out"
 
-python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" <<'PY'
+python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" <<'PY'
 import json, sys
 
-out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling = sys.argv[1:7]
+out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling, reported_arg = sys.argv[1:8]
 budget = float(budget_pct)
 min_s = float(min_s)
 idiom_ceiling = float(idiom_ceiling)
 pairs = dict(p.split("=", 1) for p in pairs_arg.split())
+reported = reported_arg.split()
 
 data = json.load(open(out_path))["results"]
 ratios = {}
@@ -126,6 +143,12 @@ for bench, ratio in sorted(ratios.items()):
         verdict = f"UNDER floor {floor:.3f} (broken bench or durable win — re-anchor on purpose)"
         failed = True
     print(f"perf-ratio: {bench:16s} {ratio:.3f} (baseline {base:.3f}, +{budget:.0f}% budget) {verdict}")
+
+for bench in reported:
+    v = data[bench]["variants"]
+    nat = v[f"{bench}/native"]["median"]
+    ref = v[f"{bench}/rust:listbuild"]["median"]
+    print(f"perf-ratio: {bench:16s} {nat / ref:.3f} (reported, not anchored — machine-dependent)")
 
 # The listbuild idiom relation (#1337): the RECOMMENDED combinator shape
 # against the `var` + `for` append loop it is documented to replace, from this
