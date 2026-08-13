@@ -191,3 +191,8 @@ evidence = "landing PR: an unresolvable section (ALS-Z999) and a dropped row (UN
 path = "scripts/check-lark-grammar.sh"
 class = "MUTATION_TESTED"
 evidence = "#1310 landing PR: 5 fail directions demonstrated before first green — keyword respelled (fan->fann: parity BOTH ways + 4 corpus under-accepts), EXCLUDED '..=' re-declared in OPERATORS (leak), param type annotation made optional (negative fixture 'param-without-type' ACCEPTED), '++' fixture shown to still PARSE with the compiler (stale-fixture direction, fixture retired), and an .almd-free corpus dir (blind-gate guard)"
+
+[[gate]]
+path = "scripts/check-rustc-warnings.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1228 landing PR: all four fail directions demonstrated before first green — an injected unused import (1 > 0), a raised baseline (0 < 5, ratchet-down demand), a failing cargo invocation, and an empty message stream (0 units < the 40 floor, #976 blindness class)"
