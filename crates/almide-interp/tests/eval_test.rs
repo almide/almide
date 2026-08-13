@@ -13,12 +13,10 @@
 
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
-use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_interp::{Interpreter, RunStatus};
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_optimize::{mono, optimize};
 
 /// Lower source to a linked `IrProgram` at the interpreter's cut point.
 fn lower(src: &str) -> almide_ir::IrProgram {

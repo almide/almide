@@ -119,6 +119,13 @@ enum Status {
     Works,
     /// Red at introduction — the gate asserts it KEEPS failing until fixed
     /// (then the flag must be removed). The string names why / the tracker.
+    ///
+    /// `dead_code` is CORRECT right now and must stay allowed: the ledger is
+    /// empty (every cell is `Works`), which is the state this ratchet exists
+    /// to hold. Deleting the variant because nothing constructs it would
+    /// delete the vocabulary the next red cell has to be declared in — and
+    /// the `(KnownBroken, true)` arm below that forces the flag off again.
+    #[allow(dead_code)]
     KnownBroken(&'static str),
 }
 

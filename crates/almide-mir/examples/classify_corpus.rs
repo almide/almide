@@ -29,7 +29,6 @@
 
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
-use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_ir::IrTypeDeclKind;
 use almide_lang::lexer::Lexer;
@@ -39,7 +38,6 @@ use almide_mir::certificate::{
     reachable_caps_or_tainted,
 };
 use almide_mir::{Capability, MirFunction, MirProgram, Op};
-use almide_optimize::{mono, optimize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};

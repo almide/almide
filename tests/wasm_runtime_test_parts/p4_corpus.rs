@@ -4,12 +4,10 @@
 // this binary can host the 3-way gate at all.
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
-use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_interp::{Interpreter, RunStatus};
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_optimize::{mono, optimize};
 use std::path::PathBuf;
 
 // ── The spec/wasm_cross corpus: built ONCE, asserted by three gates ──
