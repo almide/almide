@@ -1,6 +1,6 @@
 # ALS §E — Expression Semantics (normative)
 
-> Last updated: 2026-08-12
+> Last updated: 2026-08-13
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0(native)と
 > v1(MIR/wasm)の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -509,9 +509,11 @@ stdlib と外部パッケージに必須 — ALS の import 規範は module-sys
 
 **値の規範**: fixture が import(json の parse→stringify 往復)・variant
 型・トップ let(Int/String)・fn/effect fn を一本で貫き、両ターゲット同一
-(300 / hi / careful / [1,2])。`module` ヘッダの実行 evidence は
-`spec/integration/modules/` 群(実 module ヘッダで CI 毎回実行; fixture に
-置けないのは fmt の並べ替えバグ #1323 のため — fmt(valid)→invalid 族)。protocol の解決規範は既存契約
+(300 / hi / careful / [1,2])。fixture 先頭はコメントブロック直下の `module`
+ヘッダ — #1323(fmt(valid)→invalid 族)が整形不能にしていた形 — なので
+コメント付き module ヘッダが fmt を通過することもここで pin される。複数
+モジュールの実行 evidence は引き続き `spec/integration/modules/` 群(CI 毎回
+実行)。protocol の解決規範は既存契約
 C-094/C-126(`protocol_ufcs_inferred_lambda.almd`)が pin。test ブロックは
 `almide test` の wasm レグで常時実行される(spec/lang 全域が evidence;
 `test where` は `spec/lang/test_where_test.almd`)。
