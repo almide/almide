@@ -233,6 +233,23 @@ fn try_render_wasm_source_impl_rest(
                     almide_lang::types::Ty::Unit => None,
                     t => Some(is_float_ty(t)),
                 };
+                // A wasm export NAME must be unique across the module — a second
+                // `(export "x" …)` makes the artifact unparseable, which every
+                // consumer hits before a single Almide semantic runs. Emitting one
+                // is never a legal outcome, so this is a WALL (a named build-time
+                // refusal), never a silent dedup: the duplicate always means an
+                // upstream generator keyed a helper by SITE instead of by
+                // instantiation (#1357), and a quiet dedup would hide the next one
+                // instead of reporting it. A wall is recoverable; a broken artifact
+                // is exactly what the trust spine exists to make impossible.
+                if exports.iter().any(|(e, _, _, _)| e == &export_name) {
+                    return Err(LowerError::Unsupported(format!(
+                        "duplicate wasm export name `{export_name}` — two functions \
+                         claim it, which is an invalid module. A generated per-type \
+                         helper must be emitted once per INSTANTIATION, never once \
+                         per use site"
+                    )));
+                }
                 exports.push((export_name, n.to_string(), param_floats, ret_float));
             } else {
                 // Name the CAUSE, not just the enclosing construct. The bare
