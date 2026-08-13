@@ -138,10 +138,7 @@ pub fn synthesize(rng: &mut SplitMix64, catalogue: &[Signature]) -> Generated {
 
     let source = render_main(&body);
 
-    Generated {
-        source,
-        origin: Origin::Synthesis,
-    }
+    Generated::plain(source, Origin::Synthesis)
 }
 
 /// Wrap a list of statement lines into a complete `fn main` program.
