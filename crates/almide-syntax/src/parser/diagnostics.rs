@@ -62,7 +62,7 @@ impl Parser {
         d
     }
 
-    /// E046 (#1264): reject every escape the string decoders declined instead
+    /// E047 (#1264): reject every escape the string decoders declined instead
     /// of letting it through as literal text.
     ///
     /// `"bad:\q"` used to evaluate to the two characters `\` `q` and
@@ -99,7 +99,7 @@ impl Parser {
                     ),
                 };
                 let mut d = Diagnostic::error(message, hint, "string literal")
-                    .with_code("E046");
+                    .with_code("E047");
                 if let Some(f) = &self.file { d.file = Some(f.clone()); }
                 d.line = Some(line);
                 d.col = Some(col);
