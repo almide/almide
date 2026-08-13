@@ -69,6 +69,21 @@ impl LowerCtx {
         // range, `for x in xs` over a List[Int], then `for (k, v) in m` over a
         // self-hosted Map layout. Out of that subset each rolls back and we keep
         // the model-one-iteration form below.
+        // #1400: `for i in r` where `r` is a `let`-bound range whose ONLY use is this
+        // head. The bind emitted nothing, so substitute the Range it stood for and
+        // take the same counting loop the INLINE `for i in 0..<n` spelling already
+        // takes on both legs. If that path declines for any reason, fall through to
+        // materializing the bind right here — the var is never left without a value.
+        if let IrExprKind::Var { id } = &iterable.kind {
+            if let Some(range) = self.range_counting_vars.get(id).cloned() {
+                if self.try_lower_scalar_for_range(var, var_tuple, &range, body) {
+                    return Ok(());
+                }
+                let bind_var = *id;
+                self.range_counting_vars.remove(&bind_var);
+                self.lower_bind(bind_var, &iterable.ty, &range)?;
+            }
+        }
         if self.try_lower_scalar_for_range(var, var_tuple, iterable, body)
             || self.try_lower_scalar_for_list(var, var_tuple, iterable, body)
             || self.try_lower_scalar_for_map(var, var_tuple, iterable, body)

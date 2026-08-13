@@ -296,6 +296,14 @@ impl LowerCtx {
         for v in crate::lower::loop_reassigned_vars(body) {
             self.loop_reassigned_vars.insert(v);
         }
+        // #1400: same shape, same place — computed once over the (possibly
+        // tail-duplicated) body. A recompute over a rewritten body can only
+        // SHRINK the set (a new non-head read disqualifies), and shrinking it
+        // just returns a var to today's materializing path, so extending the
+        // map rather than replacing it stays sound.
+        for (v, r) in crate::lower::range_counting_vars(body) {
+            self.range_counting_vars.entry(v).or_insert(r);
+        }
         let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
             _ => (&[], Some(body)),

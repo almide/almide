@@ -357,6 +357,12 @@ pub(crate) struct LowerCtx {
     /// flat fold cannot see). Inside a frame such a reassignment is DEFERRED: the var
     /// keeps its still-live handle and the new value is carried like every `Opaque`.
     in_frame: u32,
+    /// #1400: `let`-bound RANGE vars whose only use is a `for-in` head → the Range
+    /// initializer, kept as IR so the loop can take the counting path. Populated
+    /// once per body by `range_counting_vars`; the bind for one of these emits
+    /// NOTHING (no `list.range` block), and `lower_for_in` reads the stored Range.
+    /// Empty for every body without such a var, so nothing else changes.
+    range_counting_vars: HashMap<VarId, IrExpr>,
     /// Depth of enclosing DEFUNCTIONALIZED HOF bodies (`list.map((x) => …)`) being lowered inline.
     /// When > 0, a SELF-RECURSIVE call in a heap-result body is BOUNDED (the map iterates a finite
     /// list; a `render_el(child, …)` recurses to the tree's depth, not unbounded), so it is ADMITTED —

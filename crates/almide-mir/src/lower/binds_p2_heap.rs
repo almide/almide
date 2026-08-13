@@ -467,6 +467,16 @@ impl LowerCtx {
     /// later `for i in r` / `r[i]` reads a populated block. A non-scalar bound
     /// walls (a deferred Opaque here was the #1272 silent zero-iteration).
     fn lower_bind_heap_range(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        // #1400: this var's only use is a `for-in` HEAD, so it never needs a block —
+        // `lower_for_in` reads the Range straight out of `range_counting_vars` and
+        // takes the counting loop. Materializing here is what made a range longer
+        // than memory OOM on wasm while native iterated it lazily and printed the
+        // right answer. Emitting nothing is safe BECAUSE of the analysis: no other
+        // reader exists, so there is no empty block for anyone to iterate zero
+        // times (#1272's failure needed a reader of a DEFERRED value).
+        if self.range_counting_vars.contains_key(&var) {
+            return Ok(());
+        }
         let IrExprKind::Range { start, end, inclusive } = &value.kind else { unreachable!() };
         let range_mark = self.ops.len();
         let (s_v, e_v0) = match (self.lower_scalar_value(start), self.lower_scalar_value(end)) {
