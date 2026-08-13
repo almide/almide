@@ -725,7 +725,6 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(n) = names { w!(out, ".{{{}}}", join_syms(n, ", ")); }
             if let Some(a) = alias { w!(out, " as {a}"); }
         }
-        Decl::Strict { mode, .. } => w!(out, "{i}strict \"{mode}\""),
         Decl::Type { .. } => fmt_decl_type(out, decl, depth),
         Decl::TopLet { .. } => fmt_decl_top_let(out, decl, depth),
         Decl::Fn { .. } => fmt_decl_fn(out, decl, depth),

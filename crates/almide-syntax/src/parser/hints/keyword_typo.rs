@@ -65,6 +65,17 @@ pub fn check(ctx: &HintContext) -> Option<HintResult> {
         });
     }
 
+    // `strict <mode>` — a declaration that parsed, checked, and was consumed by
+    // nothing (#1321). Removed from the language; `strict` is a plain identifier
+    // again, so a top-level `strict effects` lands here as an unexpected Ident.
+    if value == "strict" && ctx.got.token_type == TokenType::Ident {
+        return Some(HintResult {
+            message: Some("'strict' declarations were removed from Almide".into()),
+            hint: "The 'strict types' / 'strict effects' declaration enabled no checking — \
+                   delete the line. Effect propagation is already always checked (E041/E042).".into(),
+        });
+    }
+
     // Import after declarations
     if value == "import" && ctx.got.token_type == TokenType::Import {
         return Some(HintResult {
