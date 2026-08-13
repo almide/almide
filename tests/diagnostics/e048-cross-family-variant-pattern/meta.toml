@@ -1,0 +1,3 @@
+expects_code = "E048"
+expects_error = "destructures a Result, but the subject is"
+hint_substring = "Write `some(..)` here"

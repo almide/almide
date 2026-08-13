@@ -787,7 +787,7 @@ impl CtorPat {
     }
 }
 
-/// The E047 diagnostic for a cross-family constructor pattern. `fix` is the
+/// The E048 diagnostic for a cross-family constructor pattern. `fix` is the
 /// same arm position spelled in the subject's family, and is both the `try:`
 /// snippet and the noun the hint tells the author to write.
 fn cross_family_pattern_diag(
@@ -815,6 +815,6 @@ fn cross_family_pattern_diag(
         ),
         "match pattern".to_string(),
     )
-    .with_code("E047")
+    .with_code("E048")
     .with_try(fix.spelling())
 }
