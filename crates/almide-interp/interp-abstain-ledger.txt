@@ -36,6 +36,7 @@ fs_composition_family  out-of-interp-scope capability: prim.alloc_bytes
 fs_fallible_stream_callback  out-of-interp-scope capability: prim.alloc_bytes
 fs_list_dir_multipass  out-of-interp-scope capability: prim.alloc_bytes
 fs_metadata_family  out-of-interp-scope capability: prim.alloc_bytes
+fs_read_directory_errno  out-of-interp-scope capability: prim.alloc_bytes
 fs_read_lines  out-of-interp-scope capability: prim.alloc_bytes
 fs_write_errno  out-of-interp-scope capability: prim.alloc_bytes
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
