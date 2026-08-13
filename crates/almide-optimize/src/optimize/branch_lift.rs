@@ -215,7 +215,11 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
             }),
             _ => false,
         };
-        if self.dense_depth > 0 && heap_branch_kind && is_heap_ty(&expr.ty) {
+        if self.dense_depth > 0
+            && heap_branch_kind
+            && is_heap_ty(&expr.ty)
+            && !holds_error_op(expr)
+        {
             let ty = expr.ty.clone();
             self.lift_bind_value(ty, expr);
         }
@@ -259,11 +263,42 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
                 IrExprKind::If { .. } => self.loop_depth > 0 || self.dense_depth > 0,
                 _ => false,
             };
-            if fire {
+            if fire && !holds_error_op(value) {
                 self.lift_bind_value(ty.clone(), value);
             }
         }
     }
+}
+
+/// Does this branch carry an error-PROPAGATING `!`/`?` (`IrExprKind::Unwrap`/`Try`) that
+/// belongs to the ENCLOSING function? The helper this pass synthesizes is a plain
+/// `fn … -> <payload>` — non-effect, payload-returning — so a propagation lifted into it
+/// has NO channel out: the native backend emitted `?` in a non-`Result` fn (rustc
+/// E0277) and the wasm side always-wrapped the helper's body in `ok(..)` while the call
+/// site bound it as the bare payload, printing the ok-discriminant (`match json.parse("hi")
+/// { ok(p) => p, err(_) => json.parse("[1,2]")! }` → `true`). DECLINE the lift; the branch
+/// keeps its in-place route, where the `!` still sits in the fn that owns it. A `Lambda`
+/// body is NOT descended — a `!` there propagates to the lambda's own result, which the
+/// lift carries along unchanged.
+fn holds_error_op(e: &IrExpr) -> bool {
+    struct V {
+        found: bool,
+    }
+    impl visit::IrVisitor for V {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found || matches!(e.kind, IrExprKind::Lambda { .. }) {
+                return;
+            }
+            if matches!(e.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
+                self.found = true;
+                return;
+            }
+            visit::walk_expr(self, e);
+        }
+    }
+    let mut v = V { found: false };
+    visit::IrVisitor::visit_expr(&mut v, e);
+    v.found
 }
 
 impl<'a> BranchLifter<'a> {
