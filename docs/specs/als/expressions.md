@@ -497,3 +497,26 @@ E004。
 match の網羅性は ALS-E18(E010)。
 
 テスト: `spec/wasm_cross/call_lambda_ctor.almd`(契約 C-259)。
+
+## ALS-D1 宣言(`Decl::Module` / `Decl::Import` / `Decl::Type` / `Decl::Fn` / `Decl::TopLet` / `Decl::Protocol` / `Decl::Test` / `Decl::TestWhereDef`)
+
+**受理形**: `module name`(先頭、任意)/ `import mod`(自動 import 外の
+stdlib と外部パッケージに必須 — ALS の import 規範は module-system spec)/
+`type T = Case | Case(payload)` と `type T = { fields }` / `fn f(…) -> T =
+…`・`effect fn …` / トップレベル `let NAME = value`(fn 本体から参照可)/
+`protocol P { fn sig }` と `fn T.method(…)` 実装 / `test "name" { … }`
+ブロックと `local test where` / `mod test where` 定義。
+
+**値の規範**: fixture が import(json の parse→stringify 往復)・variant
+型・トップ let(Int/String)・fn/effect fn を一本で貫き、両ターゲット同一
+(300 / hi / careful / [1,2])。`module` ヘッダの実行 evidence は
+`spec/integration/modules/` 群(実 module ヘッダで CI 毎回実行; fixture に
+置けないのは fmt の並べ替えバグ #1323 のため — fmt(valid)→invalid 族)。protocol の解決規範は既存契約
+C-094/C-126(`protocol_ufcs_inferred_lambda.almd`)が pin。test ブロックは
+`almide test` の wasm レグで常時実行される(spec/lang 全域が evidence;
+`test where` は `spec/lang/test_where_test.almd`)。
+
+**Strict は未節化**: `strict <mode>` は受理されるが現状どの層も消費しない
+(#1321 — accept-and-ignored)。裁定が下るまで UNWRITTEN 維持。
+
+テスト: `spec/wasm_cross/declaration_forms.almd`(契約 C-260)。
