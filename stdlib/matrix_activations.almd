@@ -391,8 +391,9 @@ fn __q10_val(base: Int, k: Int) -> Float = {
   let bits_start = block_start + 2
   let byte_idx = bits_start + prim.band(prim.bshr_u(k, 3), 15)
   let bit = prim.band(prim.bshr_u(prim.load8(base + byte_idx), prim.band(k, 7)), 1)
-  // Every element is +scale or -scale, so the ruling is settled by canonicalizing
-  // the two branch values — per block, not per weight.
+  // Every element is +scale or -scale, so canonicalizing the two branch values
+  // settles the ruling for the whole block. (Native does this once per block;
+  // here the scale is already recomputed per element, so this rides along.)
   if bit == 1 then __dq_zero(scale) else __dq_zero(0.0 - scale)
 }
 
