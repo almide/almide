@@ -19,7 +19,7 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
 > **Stage 3 (semantics freeze): 256/256 contracts spec-keyed; syntax-element coverage
-> 40/73 sectioned (33 UNWRITTEN, shrink-only — the freeze precondition is 0).**
+> 46/73 sectioned (27 UNWRITTEN, shrink-only — the freeze precondition is 0).**
 >
 > **Stage 4 (durability): fuzz true-green streak = 0 day(s)** (dated meter;
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
