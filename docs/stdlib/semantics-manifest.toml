@@ -2444,9 +2444,16 @@ to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
 """
 
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
-# regex and bool bear no Int in any swept signature today, so their entry
+# regex, bool and path bear no Int in any swept signature today, so their entry
 # lists are empty — but COVERED_MODULES holds them, so the first Int-bearing
 # fn to land in any of them cannot merge without declaring its unit here.
+#
+# path is the strongest case for a zero-Int ratchet: its whole surface is
+# String → String (join / dirname / basename / extension / stem / normalize)
+# plus the SafePath newtype, and the ONE dimension a caller would get wrong —
+# whether a position counts bytes or codepoints — cannot arise until someone
+# adds an Int-bearing fn (a `path.depth`, a `path.split_at`). This section is
+# the tripwire for that day.
 [map]
 default_index_unit = "value"
 fn = []
@@ -2472,5 +2479,9 @@ default_index_unit = "value"
 fn = []
 
 [bool]
+default_index_unit = "value"
+fn = []
+
+[path]
 default_index_unit = "value"
 fn = []
