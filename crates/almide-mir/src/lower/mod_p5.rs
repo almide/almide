@@ -124,6 +124,10 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             | ("fs", "fold_lines")
             | ("fs", "fold_lines_chunked")
             | ("fs", "fold_lines_range")
+            // #1144: the fallible carrier's twin builds its Result the same way
+            // (ok()/err() ctors), and additionally FORWARDS the callback's own
+            // err block — same cap-as-tag layout either way.
+            | ("fs", "__fallible_fold_lines")
             // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
             // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
             // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the

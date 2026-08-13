@@ -57,6 +57,40 @@ effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String
   }
 }
 
+// The ADR-0006 FALLIBLE walker (#1144, C-220's tracked cell): the same byte
+// walk, with a callback answering `Result[_, String]` and the FIRST err ending
+// the walk — the callback is NOT invoked for any later line. The native leg
+// additionally stops READING at the failing line (`almide_rt_fs_fold_lines_effect`
+// returns out of the BufReader loop); here the whole file was already in memory
+// before the first line was cut, so "where the reader stopped" is not a wasm
+// observable. What IS observable on both legs — the callback-invocation trace
+// and the err message — is byte-identical, which is exactly what the contract
+// promises. Typed twin: the `Map[String, Int]` accumulator, the same shape the
+// total `_msi` walker carries; every other accumulator routes to an
+// unregistered `_x` name and walls at render.
+fn __ffl_walk_eff_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = if pos >= slen then ok(acc)
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  match f(acc, line) {
+    ok(nacc) => __ffl_walk_eff_msi(sh, slen, e + 1, nacc, f),
+    err(m) => err(m),
+  }
+}
+
+effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    __ffl_walk_eff_msi(th, prim.load32(th + 4), 0, init, f)
+  }
+}
+
 // The RANGE walker — the native `fold_lines_range_impl` transcribed over the
 // in-memory bytes: a line is owned by the chunk containing the byte BEFORE its
 // first byte (line 0 by the chunk containing byte 0). `start > 0` begins at

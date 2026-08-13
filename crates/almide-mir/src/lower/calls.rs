@@ -832,7 +832,10 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // acc to an unregistered name that walls cleanly at render. Their
         // CLOSURE argument rides the same lift machinery every pure fold twin
         // uses — the callback's own capabilities are captured by the lift.
-        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range"))
+        // #1144: the ADR-0006 fallible carrier the checker rewrites
+        // `fs.fold_lines(p, z, (a, l) => g(a, l)!)` into — same read, same
+        // capability, only the callback's answer changed shape.
+        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range" | "__fallible_fold_lines"))
 }
 
 /// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up, group 3
