@@ -1,0 +1,28 @@
+// @contract: C-256
+// ALS-E24 (docs/specs/als/expressions.md): break and continue in loop
+// bodies — the #1277 repro (continue skips one iteration, break exits;
+// 18/7), and the MID-BODY break shape (#1306's second find: the deferred
+// flag-rewrite made BOTH v1 legs agree on the WRONG value 4 while v0 and
+// the interp said 3 — a class only a 3-way-voted fixture can see, which is
+// exactly why this file lives in spec/wasm_cross).
+effect fn main() -> Unit = {
+  var i = 0
+  var s = 0
+  while i < 10 {
+    i = i + 1
+    if i == 3 then continue
+    else ()
+    if i > 6 then break
+    else ()
+    s = s + i
+  }
+  println(int.to_string(s))
+  println(int.to_string(i))
+  var last = 0
+  for k in 0..<10 {
+    if k > 3 then break
+    else ()
+    last = k
+  }
+  println(int.to_string(last))
+}

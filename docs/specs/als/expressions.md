@@ -262,10 +262,8 @@ t + 1 }` → 11、if アーム内ブロック → 9、両ターゲット同一)�
 — Collatz(16) → 4 ステップ — 両ターゲット同一)。条件は各反復の先頭で
 再評価される。
 
-**既知の制限(loud、誤値なし)**: `break` / `continue` は v1 renderer が
-wall する(#1277 — ループ機構に early-exit 分岐がない)。両行
-(`ExprKind::Break` / `ExprKind::Continue`)の節化はこの brick 待ちで
-UNWRITTEN 維持(native 単独の意味論を規範化しない — F1)。
+**break/continue**: 文位置のガード形が両ターゲットで実行される
+(ALS-E24、#1306 で brick 着地)。ヒープフレーム跨ぎは wall 維持。
 
 テスト: `spec/wasm_cross/while_loops.almd`(契約 C-244)。
 
@@ -432,3 +430,24 @@ pin。
 束縛上でのみ(ALS-S5)。
 
 テスト: `spec/wasm_cross/record_forms.almd`(契約 C-255)。
+
+## ALS-E24 break と continue(`ExprKind::Break` / `ExprKind::Continue`)
+
+**受理形**: ループ本体(`while` / `for-in`)内の文位置 `break` /
+`continue` — 裸、または `if cond then break` / `if cond then continue` の
+ガード形。
+
+**値の規範**: `continue` は現在の反復の残りを飛ばして次反復へ
+(**for-range では step が必ず実行される** — 飛ばすと無限ループになる罠は
+lowering が構造的に排除)。`break` はループを即座に抜ける。**mid-body の
+break はその位置で即時**に効く(fixture: `if k > 3 then break; last = k`
+→ 3 — 遅延フラグ化で 4 になる誤りは #1306 で修正、v0・interp・v1 native・
+v1 wasm の 4 者一致)。
+
+**3-way の裁定**: この fixture は意図的に spec/wasm_cross に置く — #1306 の
+発見(両 v1 レグが同じ誤値で一致し 2-way ゲートに不可視)は interp が投票
+する 3-way でのみ検出できるクラス。ヒープフレームを跨ぐ break は per-
+iteration Drop を飛ばすため引き続き wall(loud)。
+
+テスト: `spec/wasm_cross/loop_break_continue.almd`(契約 C-256)、
+`spec/lang/loop_break_continue_test.almd`(wasm レグ)。
