@@ -178,6 +178,11 @@ class = "NEGATIVE_TESTED"
 evidence = "landing PR: a TOR row retargeted to a nonexistent instrument demonstrated to FAIL before first green"
 
 [[gate]]
+path = "scripts/check-keyed-container-index.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1363 (landing PR): five forged inputs, each diff-verified to have LANDED before the run, each demonstrated to FAIL — (1) a real index rowed linear (map_core indexed->linear:#1219) => 'NOW carries sidecar helper(s): _reindex _probe _idx_put'; (2) a scanning repr rowed indexed (map_str linear->indexed) => 'missing sidecar helper(s)'; (3) a row retargeted off its module (set_core->set_gone) => STALE row AND the orphaned module's NO-row error, so both directions of the row<->module bijection bite; (4) a bogus state word (map_if n/a->indexedish) => 'unknown state'; (5) a new repr module with no row (stdlib/map_forgeprobe.almd) => NO-row error. The FIRST probe round exposed a real weakness: a single `_reindex(` grep would pass a half-reverted index, so the marker set was tightened to all three sidecar helpers before the evidence was recorded. Restored green (19 rowed: 2 indexed, 8 linear, 9 n/a)"
+
+[[gate]]
 path = "scripts/check-als-element-coverage.sh"
 class = "NEGATIVE_TESTED"
 evidence = "landing PR: an unresolvable section (ALS-Z999) and a dropped row (UNCLASSIFIED) each demonstrated to FAIL before first green, with the below-ceiling ratchet demand firing in both"

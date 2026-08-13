@@ -55,19 +55,25 @@ while read -r mod state _rest; do
         fail=1
         continue
     fi
-    has_index=no
-    grep -q "_reindex(" "$src" && has_index=yes
+    # The sidecar is identified by its three REQUIRED helpers (a naming convention this
+    # gate enforces, so a half-reverted index — buckets read but never rebuilt, say —
+    # is a failure, not a silent downgrade to a scan that still calls itself indexed).
+    present=""
+    missing=""
+    for marker in _reindex _probe _idx_put; do
+        if grep -q "$marker(" "$src"; then present="$present $marker"; else missing="$missing $marker"; fi
+    done
     case "$state" in
         indexed)
-            if [ "$has_index" = no ]; then
-                echo "::error::keyed-container-index: $mod is rowed 'indexed' but carries no index sidecar"
-                echo "  (expected a __${mod%%_*}_reindex helper — did the index get reverted?)"
+            if [ -n "$missing" ]; then
+                echo "::error::keyed-container-index: $mod is rowed 'indexed' but is missing sidecar helper(s):$missing"
+                echo "  (an indexed repr defines __<x>_reindex / __<x>_probe / __<x>_idx_put — was the index reverted?)"
                 fail=1
             fi
             ;;
         linear:*|n/a)
-            if [ "$has_index" = yes ]; then
-                echo "::error::keyed-container-index: $mod is rowed '$state' but NOW carries an index sidecar"
+            if [ -n "$present" ]; then
+                echo "::error::keyed-container-index: $mod is rowed '$state' but NOW carries sidecar helper(s):$present"
                 echo "  — flip its row to 'indexed' in scripts/check-keyed-container-index.sh"
                 fail=1
             fi
