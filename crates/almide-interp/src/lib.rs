@@ -26,6 +26,7 @@ mod eval;
 mod hofs;
 mod inplace;
 mod stdlib_pool;
+mod heap;
 mod vfs;
 mod value;
 
@@ -108,6 +109,12 @@ pub struct Interpreter<'a> {
     /// The sandboxed fs overlay (#1218) — writes land here, never on disk;
     /// reads fall back to the real filesystem read-only. See `vfs.rs`.
     pub(crate) vfs: vfs::Vfs,
+    /// The block heap (#1226): the arena a self-hosted stdlib body's
+    /// `prim.handle`/`prim.load*`/`prim.store*` resolve against. Per
+    /// interpreter, like `vfs` — `cargo test` runs the gates in parallel
+    /// threads, and a shared arena would let one fixture observe another's
+    /// blocks.
+    pub(crate) heap: heap::Heap,
     /// Named record types keyed by their SORTED field-name set, mapping to
     /// `(type name, declaration-order field names)`. Lets the repr recover the
     /// nominal name + declaration order for a record LITERAL whose inferred type
@@ -353,6 +360,7 @@ impl<'a> Interpreter<'a> {
             program,
             args: Vec::new(),
             vfs: vfs::Vfs::new(),
+            heap: heap::Heap::new(),
             fns,
             module_fns,
             named_records,
