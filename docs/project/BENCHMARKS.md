@@ -80,6 +80,16 @@ Median of 15 interleaved runs; all three shapes produce byte-identical output,
 checked before timing. The three ratios are within run-to-run noise of each
 other on this box — the point of the table is that the spread is gone.
 
+**Read the ratio column as machine-specific, not as a property of the
+language.** Unlike the arithmetic kernels above, this workload's cost is
+allocation, and the two allocators disagree: the same commit measured on the
+ubuntu-latest CI runner reads **0.91×** on the preallocated row — Almide
+*beating* the reference, because glibc `calloc` hands back zero pages that
+`Vec::with_capacity` + push has to fault in — against 1.57× here. What is
+stable across both machines, and what CI therefore gates, is the *relation*
+between the three shapes (1.018× here, 1.045× on the runner), not any row's
+absolute ratio.
+
 It was not. The A/B at 2^22 (median of 11, same run):
 
 | Build shape (2^22) | Before | After |
