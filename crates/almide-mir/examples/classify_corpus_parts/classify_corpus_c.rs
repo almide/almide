@@ -44,6 +44,56 @@ fn classify_check_unlinkable_call(ctx: &FileCtx, t: &mut Tally, mir: &MirFunctio
     }
 }
 
+/// The per-MIR witness emission of [`classify_lowered_fn`]: the borrow-by-default
+/// backing gate, then one ownership-certificate + name-witness pair per function.
+///
+/// Split out because it is the only phase of that function that LOOPS with a
+/// `continue` and writes three streams — the shape that carried most of its
+/// cognitive complexity. Everything here is a LOCAL property (ownership is one
+/// heap object per line, names are one line per function; no transitivity), so
+/// the phase is genuinely independent of the caps count that follows it.
+fn emit_cert_witnesses(
+    ctx: &FileCtx,
+    mirs: &[MirFunction],
+    t: &mut Tally,
+    s: &mut CertStreams,
+) {
+for mir in mirs {
+        // The borrow-by-default soundness gate: every `+1` event must
+        // be backed by a real runtime op (no synthetic param `+1`).
+        if !plus_one_events_backed(mir) {
+            t.cert_backing_breaches
+                .push(format!("{}::{}", ctx.file.display(), mir.name));
+        }
+        // Ownership is one heap object per line; names are one line per
+        // function. Both are LOCAL properties — no transitivity.
+        let (cert, poisoned) = almide_mir::certificate::ownership_certificate_with_poison(mir);
+        // A POISONED certificate (a nested-region arm flushed as the
+        // always-rejecting `{i|}`) is kernel-UNREPRESENTABLE by its own
+        // declaration — shipping it in the witness would fail the gate
+        // by design, not by finding a bug (#1146: the C-220 test fns
+        // were the first in-profile poisoned certs; every earlier
+        // poisoned fn sat outside the witness). EXCLUDE it, COUNTED —
+        // the render is still covered by the executable verifier.
+        if poisoned {
+            t.cert_poisoned_excluded += 1;
+            s.names.push_str(&name_witness_string(mir));
+            s.names.push('\n');
+            continue;
+        }
+        // Parallel name index (ownership.names): one `<file>::<fn>` line per
+        // cert line, so a checker REJECT bisects straight to its function
+        // (the anonymous 20k-line cert made a reject a needle hunt).
+        for _ in cert.lines() {
+            s.ownership_names
+                .push_str(&format!("{}::{}\n", ctx.file.display(), mir.name));
+        }
+        s.ownership.push_str(&cert);
+        s.names.push_str(&name_witness_string(mir));
+        s.names.push('\n');
+    }
+}
+
 /// The LOWERED arm of [`classify_lower_one_fn`], verbatim (codopsy
 /// A-maintenance split): witness emission, interp/link coverage, and the
 /// two-sided call-count gate for a function the lowering accepted.
@@ -122,40 +172,7 @@ fn classify_lowered_fn(
             }
         }
     }
-    for mir in &mirs {
-        // The borrow-by-default soundness gate: every `+1` event must
-        // be backed by a real runtime op (no synthetic param `+1`).
-        if !plus_one_events_backed(mir) {
-            t.cert_backing_breaches
-                .push(format!("{}::{}", ctx.file.display(), mir.name));
-        }
-        // Ownership is one heap object per line; names are one line per
-        // function. Both are LOCAL properties — no transitivity.
-        let (cert, poisoned) = almide_mir::certificate::ownership_certificate_with_poison(mir);
-        // A POISONED certificate (a nested-region arm flushed as the
-        // always-rejecting `{i|}`) is kernel-UNREPRESENTABLE by its own
-        // declaration — shipping it in the witness would fail the gate
-        // by design, not by finding a bug (#1146: the C-220 test fns
-        // were the first in-profile poisoned certs; every earlier
-        // poisoned fn sat outside the witness). EXCLUDE it, COUNTED —
-        // the render is still covered by the executable verifier.
-        if poisoned {
-            t.cert_poisoned_excluded += 1;
-            s.names.push_str(&name_witness_string(mir));
-            s.names.push('\n');
-            continue;
-        }
-        // Parallel name index (ownership.names): one `<file>::<fn>` line per
-        // cert line, so a checker REJECT bisects straight to its function
-        // (the anonymous 20k-line cert made a reject a needle hunt).
-        for _ in cert.lines() {
-            s.ownership_names
-                .push_str(&format!("{}::{}\n", ctx.file.display(), mir.name));
-        }
-        s.ownership.push_str(&cert);
-        s.names.push_str(&name_witness_string(mir));
-        s.names.push('\n');
-    }
+    emit_cert_witnesses(ctx, &mirs, t, s);
     // CAPS SOUNDNESS: count the source's call nodes. A call ELIDED by
     // Opaque lowering (a list element, ctor payload, BinOp operand, …) is
     // absent from the MIR ops, so the transitive caps fold over CallFn /
