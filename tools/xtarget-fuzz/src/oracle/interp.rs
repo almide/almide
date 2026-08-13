@@ -211,6 +211,38 @@ fn main() -> Unit = {
         );
     }
 
+    /// The shrinker's soundness, checked by EXECUTION rather than by
+    /// reading the code: every candidate `identity::shrink` proposes must
+    /// still be an identity program, i.e. still print exactly what it
+    /// declares.
+    ///
+    /// This is the property the whole minimization path rests on. If a
+    /// shrink could change the expected value, the minimizer would accept
+    /// candidates that "reproduce" for a reason unrelated to the bug and
+    /// hand back a repro that proves nothing.
+    #[test]
+    fn every_shrink_candidate_is_still_an_identity_program() {
+        use crate::generator::identity;
+        use crate::rng::SplitMix64;
+
+        let oracle = InterpOracle::new();
+        let mut checked = 0usize;
+        for index in 0..12u64 {
+            let plan = identity::plan(&mut SplitMix64::for_program(0xBEEF, index));
+            for candidate in identity::shrink(&plan) {
+                let (src, expected) = identity::render(&candidate);
+                if let Some(out) = oracle.evaluate(&src) {
+                    checked += 1;
+                    assert_eq!(
+                        out, expected,
+                        "a shrink candidate stopped being an identity:\n{src}"
+                    );
+                }
+            }
+        }
+        assert!(checked > 100, "only {checked} candidates were actually run");
+    }
+
     /// A shape the interpreter cannot run must NOT be read as
     /// non-termination: `Unsupported` says nothing about whether the
     /// program halts, and conflating the two would silently suppress real
