@@ -202,13 +202,7 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.scalar_loop_depth += 1;
-        let mut ok = true;
-        for stmt in body {
-            if self.lower_while_body_stmt(stmt).is_err() {
-                ok = false;
-                break;
-            }
-        }
+        let ok = self.lower_while_body_stmts(body).is_ok();
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
 
@@ -267,6 +261,68 @@ impl LowerCtx {
             }
         }
         None
+    }
+
+    /// Lower a scalar-loop BODY as a statement LIST (#1277). Per-statement shapes
+    /// stay in [`Self::lower_while_body_stmt`]; the LIST level owns `continue`,
+    /// which is a statement-POSITION fact ("skip the REST of this iteration"):
+    ///   - a BARE `continue` statement makes the remaining statements unreachable
+    ///     in EVERY iteration — stop lowering here (the iteration close — the
+    ///     per-iteration drops, the for-range STEP, the back-edge — still runs);
+    ///   - `if c then continue else ()` restructures to the GUARDED REST
+    ///     `if (1-c) then { rest }` (the same shape `guard c else continue`
+    ///     already desugars to). NO branch op: on the continue path control falls
+    ///     THROUGH to the iteration close, so the for-range step still executes
+    ///     (a naive br-to-head would skip the step and loop forever).
+    /// A `continue` in any other position keeps the per-statement path's honest
+    /// decline → the loop attempt rolls back → the model fallback WALLS.
+    pub(crate) fn lower_while_body_stmts(&mut self, stmts: &[IrStmt]) -> Result<(), LowerError> {
+        for (k, stmt) in stmts.iter().enumerate() {
+            if let IrStmtKind::Expr { expr } = &stmt.kind {
+                if while_body_is_continue(expr) {
+                    return Ok(());
+                }
+                if let IrExprKind::If { cond, then, else_ } = &expr.kind {
+                    if while_body_is_continue(then) && while_body_is_unit(else_) {
+                        return self.lower_while_body_continue_guard(cond, &stmts[k + 1..]);
+                    }
+                }
+            }
+            self.lower_while_body_stmt(stmt)?;
+        }
+        Ok(())
+    }
+
+    /// The guarded-rest form of a conditional `continue`: capture the scalar cond,
+    /// negate it (`1 - c`, the conditional-break idiom), and run the REST of the
+    /// body inside an `IfThen` region. The rest re-enters
+    /// [`Self::lower_while_body_stmts`], so a conditional `break` inside it emits
+    /// its `LoopBreakUnless` INSIDE the `IfThen` region — the wasm render's named
+    /// `$brk` labels branch out of a nested `if`, and the BCE analysis already
+    /// tracks breaks at if-depth > 0 (they only shrink the iteration space).
+    /// Heap temps the rest allocates are dropped INSIDE the arm
+    /// (`drop_arm_locals`), so the unconditional iteration-end drops never see a
+    /// conditionally-initialized handle. Scalar reassignments in the rest keep
+    /// their loop-carried `SetLocal`-in-place discipline (`scalar_loop_depth`).
+    fn lower_while_body_continue_guard(
+        &mut self,
+        cond: &IrExpr,
+        rest: &[IrStmt],
+    ) -> Result<(), LowerError> {
+        let c = self.lower_scalar_value(cond).ok_or_else(|| {
+            LowerError::Unsupported("while conditional-continue cond".into())
+        })?;
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let nc = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: nc, op: IntOp::Sub, a: one, b: c });
+        self.ops.push(Op::IfThen { cond: nc, dst: None });
+        let mark = self.live_heap_handles.len();
+        self.lower_while_body_stmts(rest)?;
+        self.drop_arm_locals(mark);
+        self.ops.push(Op::Else { val: None });
+        self.ops.push(Op::EndIf { val: None });
+        Ok(())
     }
 
     fn lower_while_body_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
@@ -552,5 +608,33 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst, op: IntOp::Sub, a: one, b: eq });
         Some(dst)
+    }
+}
+
+/// `e` is a `continue` (directly, or wrapped in a trivial one-entry Block) —
+/// the mirror of `lower_while_body_stmt`'s local `is_break`.
+fn while_body_is_continue(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Continue => true,
+        IrExprKind::Block { stmts, expr } => {
+            (stmts.is_empty() && expr.as_deref().is_some_and(while_body_is_continue))
+                || (expr.is_none()
+                    && stmts.len() == 1
+                    && matches!(&stmts[0].kind,
+                        IrStmtKind::Expr { expr } if while_body_is_continue(expr)))
+        }
+        _ => false,
+    }
+}
+
+/// `e` is `()` (directly, or an empty/unit-tail Block) — the free-fn twin of
+/// `lower_while_body_stmt`'s local `is_unit`, reusable at the list level.
+fn while_body_is_unit(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Unit => true,
+        IrExprKind::Block { stmts, expr } => {
+            stmts.is_empty() && expr.as_deref().map_or(true, while_body_is_unit)
+        }
+        _ => false,
     }
 }
