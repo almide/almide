@@ -2,6 +2,10 @@
 
 > 現在 0.40.2。ここから 1.0 までの全 minor を decade（0.4x / 0.5x / …）単位のアークに割り、
 > 各 minor に「顔となる大機能」を 1 つずつ載せる台帳。open issue 40 件は全てこの台帳のどこかに割付済み。
+>
+> **これは時間軸の文書**。同じ作業を評価軸（速度 / 性能 / 正しさ / LLM writability / DX / エコシステム）
+> から見た勝ち筋と勝利条件は [ALL_AXES.md](ALL_AXES.md) にある。新しい軸の作業は、
+> ALL_AXES で勝利条件を数字で定義してから、ここの decade に割り付ける。
 
 ## 読み方と運用ルール
 
@@ -229,6 +233,19 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | [#1318](https://github.com/almide/almide/issues/1318) | **BUG**: fmt がブロックコメントを黙って削除(lexer が `/* */` を無トークン化) | 0.5x | #1309 の verifier 構築中に発見。fmt 破壊ファミリの残党 — conservation ゲートの適用範囲拡大とセット |
 | [#1322](https://github.com/almide/almide/issues/1322) | **BUG**: 全ツリー wasm tier で exercise 3 本が失敗 — affine-cipher は native 合格/wasm TRAP の parity 穴、2 本は現行ルールに未追随の腐り | 0.5x | tier 実行(#1308/#1309 検証)中に発見、クリーン develop で A/B 済みの既存負債。wasm leg 対等性(decade テーマ)の管轄 |
 | [#1326](https://github.com/almide/almide/issues/1326) | fmt の inline コメント帰属(式中 `/* */`・継続行前の trailing `//`)— 現状は verifier が拒否で防護 | 0.5x | #1318 修復(#ブロックコメントのトークン化)の残余。黙殺は既に不可能、帰属規則は ○× 待ち |
+
+## 軸ロードマップ発 issue の割付(2026-08-13)
+
+[ALL_AXES.md](ALL_AXES.md)(評価軸から見た勝ち筋)が特定した、台帳に行のなかった 5 件。
+勝利条件は ALL_AXES 側に、実行順序はここに置く。
+
+| Issue | 軸 | 内容 | Decade | 割付の根拠 |
+|---|---|---|---|---|
+| [#1332](https://github.com/almide/almide/issues/1332) | C 正しさ | linked IR 上の生成型差分ファザー(Rustlantis 型、v0 レッグも比較対象に) | **0.5x** | #1322 が実証した構造的穴 — 共有 MIR のバグは 394 fixture を全て緑で通過する。計測器が手術より先の原則で最優先 |
+| [#1334](https://github.com/almide/almide/issues/1334) | A 速度 | スケール非依存ゲート(10k 行 dogfood の p50/p95) | 0.5x | 0.47/0.49 の着工判断がこの数字待ち。#1311 は throughput、これは end-to-end latency |
+| [#1333](https://github.com/almide/almide/issues/1333) | E DX | MCP サーバ + Claude Code plugin 定義 | 0.5x | #1312/#1313 で構造化した診断・テスト出力を露出する側。順序は 1312/1313 の後 |
+| [#1330](https://github.com/almide/almide/issues/1330) | B 性能 | 意味論最適化で handwritten Rust を抜く勝利宣言(≥2 ワークロード、ラチェット付き) | **0.6x** | RcCow(0.55–0.56)で表現が確定してから。数字が動く土台の上で主張しない |
+| [#1331](https://github.com/almide/almide/issues/1331) | B 性能 | fan → WGSL で CPU/GPU 同一出力デモ(オラクル 4 レッグ目) | 0.6x | バックエンドは既存。契約台帳に GPU 等価性の行を足す作業とセット |
 
 dojo 側: [almide-dojo#2](https://github.com/almide/almide-dojo/issues/2)(effect 宣言有無の MSR A/B — 文献に存在しない最初の数字)は repo 境界ルールにより Dojo 管轄。0.59 と #585(ポジションペーパー)に給餌する。
 
