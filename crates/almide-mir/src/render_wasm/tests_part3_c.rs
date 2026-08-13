@@ -223,6 +223,107 @@
         assert!(wat.contains("(unreachable)"), "rc_dec must trap on an already-freed cell");
     }
 
+    /// #909 sentinel 3 — the RENDERER half of "reuse restores rc=1".
+    ///
+    /// `proofs/FreeListRc.v` proves the ALLOCATOR half (a block handed back off
+    /// the free-list carries count 0 — `reuse_hands_back_a_zero_count_block`) and
+    /// the PAIR (`reuse_restores_rc_1`: `$alloc` then the constructor's store
+    /// leaves the block at exactly `RC_INITIAL`). What no proof ABOUT THE
+    /// ALLOCATOR can reach is whether the emitter really writes that store at
+    /// every rc-managed allocation site — the proof file names this gate as the
+    /// thing that closes it, so the boundary is executable, not asserted.
+    ///
+    /// The rule: every `call $alloc` the renderer can emit either initializes the
+    /// rc cell within the next few emitted lines, or is a named RAW-SCRATCH site
+    /// — `FreeListRc.v`'s `alloc_raw` category: allocated, never rc-tracked,
+    /// never released, its payload clobbering its own rc cell (proven harmless
+    /// for ANY value by `scratch_alloc_cannot_corrupt_the_rc_invariant`).
+    #[test]
+    fn every_rc_managed_alloc_site_initializes_the_rc_cell() {
+        // The raw byte-scratch destinations: the argv/envp vectors and their
+        // string buffers ($args_get_list / $env_get / $path_norm). They never
+        // reach `$rc_dec`, so they never reach the free-list.
+        const SCRATCH: &[&str] = &[
+            "$argc_ptr", "$argv ", "$argbuf", "$cnt_ptr", "$sz_ptr", "$envp ", "$envbuf",
+        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        // The constant is READ from the proof, never hand-copied: a renderer that
+        // changed the initial count without changing `FreeListRc.v` fails here
+        // instead of silently orphaning the theorem (the check-wasm-bytes.sh
+        // closed-triangle pattern).
+        let read_coq_int = |file: &str, name: &str| -> i64 {
+            let text = std::fs::read_to_string(root.join(file))
+                .unwrap_or_else(|e| panic!("{file}: {e}"));
+            let line = text
+                .lines()
+                .find(|l| l.starts_with(&format!("Definition {name} ")))
+                .unwrap_or_else(|| panic!("{file} no longer defines {name}"));
+            line.split(":=").nth(1).expect("a := rhs").trim().trim_end_matches('.').trim()
+                .parse()
+                .unwrap_or_else(|e| panic!("{file} {name} is not an integer: {e}"))
+        };
+        assert_eq!(
+            i64::from(RC_INITIAL),
+            read_coq_int("proofs/FreeListRc.v", "RC_INITIAL"),
+            "the renderer's RC_INITIAL and FreeListRc.v's must be the same number"
+        );
+        assert_eq!(
+            i64::from(LIST_RC_OFFSET),
+            read_coq_int("proofs/RuntimeModel.v", "RC_OFFSET"),
+            "the renderer's rc-cell offset and RuntimeModel.v's RC_OFFSET must agree"
+        );
+
+        let mut managed = 0usize;
+        let mut scratch = 0usize;
+        let mut files: Vec<_> = std::fs::read_dir(&src)
+            .expect("renderer sources")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                n.starts_with("render_wasm") && n.ends_with(".rs") && !n.contains("tests")
+            })
+            .collect();
+        files.sort();
+        for path in files {
+            let text = std::fs::read_to_string(&path).expect("read renderer source");
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                // `$alloc8` is the PINNED_RC bump path (sentinel 2) — never
+                // rc-managed, never on the free-list; the trailing space excludes it.
+                if !line.contains("call $alloc ") {
+                    continue;
+                }
+                if SCRATCH.iter().any(|m| line.contains(m)) {
+                    scratch += 1;
+                    continue;
+                }
+                let initialized = lines[i..(i + 4).min(lines.len())]
+                    .iter()
+                    .any(|l| l.contains("LIST_RC_OFFSET") && l.contains("RC_INITIAL"));
+                assert!(
+                    initialized,
+                    "{}:{} allocates through $alloc without initializing the rc cell to \
+                     RC_INITIAL. Either emit the store (FreeListRc.reuse_restores_rc_1 is \
+                     about the PAIR, not about $alloc alone) or, if this is raw scratch \
+                     that is never released, add its destination to SCRATCH here with a \
+                     reason.",
+                    path.display(),
+                    i + 1
+                );
+                managed += 1;
+            }
+        }
+        // Non-vacuity: the four inline `Alloc` arms plus `$list_new`.
+        assert!(
+            managed >= 5,
+            "found only {managed} rc-managed $alloc sites — the scan stopped seeing the \
+             renderer's allocation sites, so this gate would pass on anything"
+        );
+        assert!(scratch >= 7, "found only {scratch} raw-scratch $alloc sites");
+    }
+
     #[test]
     fn wasm_runs_value_semantics_matching_rust() {
         let mir = value_semantics_mir();

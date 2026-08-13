@@ -16,6 +16,7 @@ CallModes.v
 StackBalance.v
 Termination.v
 FreeList.v
+FreeListRc.v
 WasmRcDec.v
 WasmEncode.v
 WasmExec.v

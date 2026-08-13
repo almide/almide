@@ -24,7 +24,7 @@ SPINE_FILES=(
   Subset.v OwnershipChecker.v OwnershipLoop.v OwnershipFilter.v CoownLoop.v
   CoownCompose.v ALS.v Translation.v RuntimeModel.v NameTotality.v
   TypeConcretization.v CapabilityBound.v CapabilityReach.v CallModes.v
-  StackBalance.v Termination.v FreeList.v WasmRcDec.v WasmEncode.v WasmExec.v
+  StackBalance.v Termination.v FreeList.v FreeListRc.v WasmRcDec.v WasmEncode.v WasmExec.v
   WasmIsa.v WasmDecode.v CowSafety.v
 )
 

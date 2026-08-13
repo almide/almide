@@ -127,7 +127,7 @@ site = "crates/almide-mir/src/render_wasm_p3.rs:175"
 digest = "63591a64eb5c"
 class = "PROVEN"
 via = "alias_combinator_rc.almd"
-proof = "proofs/FreeList.v"
+proof = "proofs/FreeList.v + proofs/FreeListRc.v"
 
 [[fn]]
 name = "alloc8"
@@ -377,7 +377,7 @@ site = "crates/almide-mir/src/render_wasm_p3.rs:281"
 digest = "08a8b2207fd9"
 class = "PROVEN"
 via = "alias_combinator_rc.almd"
-proof = "proofs/FreeList.v"
+proof = "proofs/FreeListRc.v + proofs/WasmRcDec.v"
 
 [[fn]]
 name = "rc_inc"

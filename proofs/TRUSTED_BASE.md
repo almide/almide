@@ -75,6 +75,10 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `region_reset_leaves_no_free_into_the_region` | FreeList.v | Closed under the global context |
 | `pinned_stays_immortal_forever` | FreeList.v | Closed under the global context |
 | `p_region_reset_preserves_PINV` | FreeList.v | Closed under the global context |
+| `reuse_restores_rc_1` | FreeListRc.v | Closed under the global context |
+| `reuse_hands_back_a_zero_count_block` | FreeListRc.v | Closed under the global context |
+| `double_release_traps` | FreeListRc.v | Closed under the global context |
+| `r_region_reset_preserves_RINV` | FreeListRc.v | Closed under the global context |
 | `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
 | `rc_inc_bytes_encode_the_instruction_tree` | WasmEncode.v | Closed under the global context |
 | `rc_inc_bytes_execute_to_rt_inc` | WasmExec.v | Closed under the global context |
@@ -109,7 +113,14 @@ The receipt's claims are scoped to exactly this:
   and the preopen tables — is, over an ARBITRARY run, never freed, never on the
   free-list and never returned by `$alloc`, and survives a region reset:
   `FreeList.pinned_stays_immortal_forever` / `FreeList.p_region_reset_preserves_PINV`;
-  this is the invariant C-042 violated), copy-on-write alias-safety
+  this is the invariant C-042 violated), the COUNT side of reuse (a block handed back
+  off the free-list carries NO stale reference count — it arrives at exactly 0,
+  `FreeListRc.reuse_hands_back_a_zero_count_block` — and the constructor's store
+  leaves it at exactly `RC_INITIAL` = 1, `FreeListRc.reuse_restores_rc_1`; the
+  free-list holds only zero-count blocks and the live set only positive-count ones
+  over an ARBITRARY run and across a region reset, so a double release provably
+  TRAPS on the `$rc_dec` sentinel — `FreeListRc.double_release_traps` /
+  `r_region_reset_preserves_RINV`), copy-on-write alias-safety
   (`MakeUnique` yields a uniquely-owned block — no aliased in-place mutation,
   `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec` /
   `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
@@ -118,7 +129,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (82 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (95 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
@@ -360,7 +371,18 @@ The receipt's claims are scoped to exactly this:
   double-free sentinel is PRESERVED — the free-list link lives in the dead LEN field,
   NOT the rc cell, so a re-release of a freed block still traps (verified: the
   double-free trap test and a reuse test, `p1==p2` on alloc/free/realloc, both pass
-  on wasmtime; the value-semantics output is byte-unchanged). HONEST scope of what is
+  on wasmtime; the value-semantics output is byte-unchanged). Since #909's third
+  sentinel that sentence is PROVEN, not merely verified: `FreeListRc.v` carries the
+  reference COUNT (as `RuntimeModel.read_rc`, the same cell the byte theorems write)
+  alongside the allocator, and proves `double_release_traps` — a free-list block
+  reads 0, so the sentinel fires — plus `reuse_restores_rc_1`, the alloc/store PAIR.
+  What stays TRUSTED is narrower than before and now EXECUTABLY gated rather than
+  asserted: that the emitter writes that `RC_INITIAL` store at every rc-managed
+  `call $alloc` site is checked by `almide-mir`'s
+  `every_rc_managed_alloc_site_initializes_the_rc_cell`, which enumerates all 16
+  `$alloc` sites in the renderer, requires each to initialize the rc cell or be a
+  named raw-scratch site (the proven `alloc_raw` category), and reads `RC_INITIAL`
+  out of the `.v` file so the constant cannot drift. HONEST scope of what is
   SHARING is now REALIZED too (A1.3-render): `Dup` shares via `rc_inc` (no copy) and
   `MakeUnique` is a copy-on-write (clone-on-shared — `rc_dec`-FIRST so the alias keeps
   the original alive and no temp is needed, then `list_copy`), refining
