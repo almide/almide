@@ -237,7 +237,7 @@ via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "is_dot_entry"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:730"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:829"
 digest = "c3ca7c77e168"
 class = "CORPUS"
 via = "fs_relative_path.almd"
@@ -389,11 +389,10 @@ proof = "proofs/FreeList.v"
 
 [[fn]]
 name = "read_dir"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:641"
-digest = "db5c55e61af0"
-class = "FALLBACK_ONLY"
-via = "fs.list_dir"
-why = "reached through prim.read_dir; every fixture that would exercise it is in proofs/wasm-fallback-baseline.txt, so it runs on the NATIVE leg and the byte oracle never renders it. Shrinks with that ratchet."
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:660"
+digest = "0ff958e8f4da"
+class = "CORPUS"
+via = "fs_list_dir_multipass.almd"
 
 [[fn]]
 name = "read_line"

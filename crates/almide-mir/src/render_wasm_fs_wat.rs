@@ -631,19 +631,41 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
 
   ;; fs.list_dir(path) — the WASI directory-listing floor. $path is a borrowed canonical String.
   ;; Opens the directory (path_open with oflags=O_DIRECTORY(2), rights=fd_readdir(0x4000),
-  ;; preopen fd 3, leading '/' stripped — same resolution as $read_text_file), reads its entries
-  ;; via fd_readdir into a 4 KiB buffer, parses each dirent (`d_next 8 / d_ino 8 / d_namlen 4 /
-  ;; d_type 4` = 24-byte header, then name[d_namlen]) SKIPPING "." and "..", builds an owned
-  ;; List[String] of the names, SORTS it lexicographically (insertion sort via $str_lt) to match
-  ;; native `names.sort()`, and wraps it Ok via $rtf_result. On a path_open error wraps the
-  ;; "directory not found" message Err. The FIFTH sandbox exit (Capability::FsRead) — the result
-  ;; is an owned Result[List[String], String] the caller's scope-end DropResultListStr balances.
+  ;; preopen fd 3, leading '/' stripped — same resolution as $read_text_file), reads ALL of its
+  ;; entries via the RESUMABLE fd_readdir sweep below, parses each dirent (`d_next 8 / d_ino 8 /
+  ;; d_namlen 4 / d_type 4` = 24-byte header, then name[d_namlen]) SKIPPING "." and "..", builds
+  ;; an owned List[String] of the names, SORTS it lexicographically (insertion sort via $str_lt)
+  ;; to match native `names.sort()`, and wraps it Ok via $rtf_result. On a path_open OR fd_readdir
+  ;; error wraps the "directory not found" message Err. The FIFTH sandbox exit (Capability::FsRead)
+  ;; — the result is an owned Result[List[String], String] the caller's scope-end
+  ;; DropResultListStr balances.
+  ;;
+  ;; #1384 — `fd_readdir` is a RESUMABLE api and ONE pass is not a listing. A single `cookie=0`
+  ;; pass into a 4 KiB buffer silently TRUNCATED every directory whose dirents did not fit (200
+  ;; short-named entries came back as 130 = (4096-51)/31, 60 long-named ones as 41) and still
+  ;; wrapped the short list `ok(...)`: a silent WRONG VALUE, not a wall and not an err, and
+  ;; indistinguishable from a genuinely smaller directory. The sweep continues from the `d_next`
+  ;; cookie of the last COMPLETE record until a pass returns FEWER bytes than the buffer (WASI's
+  ;; documented end-of-directory signal), concatenating each pass's complete records into a
+  ;; doubling accumulation buffer the two parse passes below then read as one contiguous dirent
+  ;; run. Two traps the loop is written around:
+  ;;   - a pass that EXACTLY fills the buffer is NOT necessarily the end, so `bufused == buflen`
+  ;;     always re-reads (a genuinely final exact fill costs one extra empty pass, never a lost
+  ;;     entry);
+  ;;   - the host truncates the trailing record when a name STRADDLES the buffer end, so only
+  ;;     records whose header AND name both fit are accumulated and the resume cookie is the last
+  ;;     COMPLETE record's `d_next` — a half-read name can never reach $rtf_str.
+  ;; A name too long to ever fit would make a pass yield no complete record at all; that doubles
+  ;; the pass buffer and retries the SAME cookie instead of spinning.
   (func $read_dir (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $buf i32) (local $bufbase i32) (local $bufused_p i32) (local $bufused i32)
     (local $off i32) (local $namlen i32) (local $skip i32) (local $count i32)
     (local $list i32) (local $ci i32) (local $name i32) (local $msg i32)
     (local $namebase i32) (local $si i32) (local $sj i32) (local $hi i64) (local $hj i64)
+    (local $buflen i32) (local $cookie i64) (local $good i32) (local $rderr i32)
+    (local $acc i32) (local $accbase i32) (local $acccap i32) (local $accused i32)
+    (local $newacc i32) (local $cp i32)
     ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
     (call $path_norm (local.get $path))
     (local.set $plen)
@@ -660,28 +682,105 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (call $rtf_result (local.get $msg) (i32.const 1)))
       (else
         (local.set $fd (i32.load (local.get $fd_out)))
-        ;; fd_readdir(fd, buf, buf_len, cookie=0, bufused_p) — one pass (4 KiB holds a typical
-        ;; directory; a fuller re-read loop is a future refinement). The 4 KiB buffer is a
-        ;; RECLAIMABLE $list_new block (512 i64 slots = 4096 data bytes after the header) so a
-        ;; list_dir LOOP frees it each call (rc_dec below) instead of leaking immortal $alloc8
-        ;; scratch (which OOMs a tight loop). The WASI write target is `$bufbase = buf + HEADER`,
-        ;; keeping the rc cell @0 intact for the final $rc_dec. fd_out/bufused_p stay $alloc8
-        ;; (4-byte immortal scratch, like read_text_file's out-params — negligible).
+        ;; The 4 KiB PASS buffer and the ACCUMULATION buffer are both RECLAIMABLE $list_new
+        ;; blocks (512 i64 slots = 4096 data bytes after the header) so a list_dir LOOP frees
+        ;; them each call (rc_dec below) instead of leaking immortal $alloc8 scratch (which OOMs
+        ;; a tight loop). The WASI write target is `$bufbase = buf + HEADER`, keeping the rc cell
+        ;; @0 intact for the final $rc_dec. fd_out/bufused_p stay $alloc8 (4-byte immortal
+        ;; scratch, like read_text_file's out-params — negligible).
+        (local.set $buflen (i32.const 4096))
         (local.set $buf (call $list_new (i32.const 0) (i32.const 512)))
         (local.set $bufbase (i32.add (local.get $buf) (i32.const {LIST_HEADER})))
         (local.set $bufused_p (call $alloc8 (i32.const 4)))
-        (drop (call $fd_readdir (local.get $fd) (local.get $bufbase) (i32.const 4096)
-                                (i64.const 0) (local.get $bufused_p)))
-        (local.set $bufused (i32.load (local.get $bufused_p)))
+        (local.set $acccap (i32.const 4096))
+        (local.set $acc (call $list_new (i32.const 0) (i32.const 512)))
+        (local.set $accbase (i32.add (local.get $acc) (i32.const {LIST_HEADER})))
+        (local.set $accused (i32.const 0))
+        (local.set $cookie (i64.const 0))
+        (local.set $rderr (i32.const 0))
+        ;; THE SWEEP — fd_readdir(fd, buf, buf_len, cookie, bufused_p), resumed until the host
+        ;; reports end-of-directory by returning fewer bytes than the buffer holds.
+        (block $sweepdone (loop $sweep
+          ;; the errno is KEPT, not dropped: a real readdir failure must become Err. Dropping it
+          ;; left $bufused reading fresh (zeroed) scratch, so a failed listing returned `ok([])` —
+          ;; the same fall-through-to-Ok shape as the truncation (#1384).
+          (local.set $errno (call $fd_readdir (local.get $fd) (local.get $bufbase)
+                                              (local.get $buflen) (local.get $cookie)
+                                              (local.get $bufused_p)))
+          (if (i32.ne (local.get $errno) (i32.const 0))
+            (then (local.set $rderr (i32.const 1)) (br $sweepdone)))
+          (local.set $bufused (i32.load (local.get $bufused_p)))
+          ;; Scan this pass for COMPLETE records only — header AND name inside $bufused.
+          ;; $good = the bytes they cover; $cookie = the last one's d_next (the resume point).
+          (local.set $off (i32.const 0))
+          (local.set $good (i32.const 0))
+          (block $scandone (loop $scan
+            (br_if $scandone (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
+            (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
+            ;; a d_namlen past the whole buffer can never complete — and would WRAP the add below.
+            (br_if $scandone (i32.gt_u (local.get $namlen) (local.get $buflen)))
+            (br_if $scandone (i32.gt_u (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen))
+                                       (local.get $bufused)))
+            (local.set $cookie (i64.load (i32.add (local.get $bufbase) (local.get $off))))
+            (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen)))
+            (local.set $good (local.get $off))
+            (br $scan)))
+          ;; GROW the accumulation buffer (doubling) until this pass's complete records fit.
+          (if (i32.gt_u (i32.add (local.get $accused) (local.get $good)) (local.get $acccap))
+            (then
+              (block $capdone (loop $caploop
+                (br_if $capdone (i32.ge_u (local.get $acccap)
+                                          (i32.add (local.get $accused) (local.get $good))))
+                (local.set $acccap (i32.shl (local.get $acccap) (i32.const 1)))
+                (br $caploop)))
+              (local.set $newacc (call $list_new (i32.const 0) (i32.shr_u (local.get $acccap) (i32.const 3))))
+              (local.set $cp (i32.const 0))
+              (block $movedone (loop $moveloop
+                (br_if $movedone (i32.ge_u (local.get $cp) (local.get $accused)))
+                (i32.store8 (i32.add (i32.add (local.get $newacc) (i32.const {LIST_HEADER})) (local.get $cp))
+                            (i32.load8_u (i32.add (local.get $accbase) (local.get $cp))))
+                (local.set $cp (i32.add (local.get $cp) (i32.const 1)))
+                (br $moveloop)))
+              (call $rc_dec (local.get $acc))
+              (local.set $acc (local.get $newacc))
+              (local.set $accbase (i32.add (local.get $acc) (i32.const {LIST_HEADER})))))
+          ;; APPEND this pass's complete records.
+          (local.set $cp (i32.const 0))
+          (block $appdone (loop $apploop
+            (br_if $appdone (i32.ge_u (local.get $cp) (local.get $good)))
+            (i32.store8 (i32.add (i32.add (local.get $accbase) (local.get $accused)) (local.get $cp))
+                        (i32.load8_u (i32.add (local.get $bufbase) (local.get $cp))))
+            (local.set $cp (i32.add (local.get $cp) (i32.const 1)))
+            (br $apploop)))
+          (local.set $accused (i32.add (local.get $accused) (local.get $good)))
+          ;; END OF DIRECTORY: a pass that did NOT fill the buffer. An EXACT fill re-reads.
+          (br_if $sweepdone (i32.lt_u (local.get $bufused) (local.get $buflen)))
+          ;; full buffer, not one complete record: a single dirent exceeds the whole buffer.
+          ;; Double it and retry the SAME cookie — without this the sweep would spin forever.
+          (if (i32.eqz (local.get $good))
+            (then
+              (call $rc_dec (local.get $buf))
+              (local.set $buflen (i32.shl (local.get $buflen) (i32.const 1)))
+              (local.set $buf (call $list_new (i32.const 0) (i32.shr_u (local.get $buflen) (i32.const 3))))
+              (local.set $bufbase (i32.add (local.get $buf) (i32.const {LIST_HEADER})))))
+          (br $sweep)))
         (drop (call $fd_close (local.get $fd)))
+        ;; free the pass buffer — every complete record is in $acc now.
+        (call $rc_dec (local.get $buf))
+        (if (local.get $rderr)
+          (then
+            (call $rc_dec (local.get $acc))
+            (local.set $msg (call $rtf_str (i32.const {RDIR_ERR_ADDR}) (i32.const {RDIR_ERR_LEN})))
+            (return (call $rtf_result (local.get $msg) (i32.const 1)))))
         ;; PASS 1 — count entries (skip "." and ".."). 24-byte dirent header; d_namlen @16, name @24.
         (local.set $off (i32.const 0))
         (local.set $count (i32.const 0))
         (block $c1done (loop $c1
-          ;; stop when the next header would exceed bufused (a truncated trailing record).
-          (br_if $c1done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
-          (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
-          (local.set $namebase (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 24)))
+          ;; stop when the next header would exceed accused (never mid-record: the sweep only
+          ;; accumulates COMPLETE dirents).
+          (br_if $c1done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $accused)))
+          (local.set $namlen (i32.load (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 16))))
+          (local.set $namebase (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 24)))
           (local.set $skip (call $is_dot_entry (local.get $namebase) (local.get $namlen)))
           (if (i32.eqz (local.get $skip))
             (then (local.set $count (i32.add (local.get $count) (i32.const 1)))))
@@ -693,9 +792,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (local.set $off (i32.const 0))
         (local.set $ci (i32.const 0))
         (block $c2done (loop $c2
-          (br_if $c2done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
-          (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
-          (local.set $namebase (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 24)))
+          (br_if $c2done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $accused)))
+          (local.set $namlen (i32.load (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 16))))
+          (local.set $namebase (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 24)))
           (if (i32.eqz (call $is_dot_entry (local.get $namebase) (local.get $namlen)))
             (then
               (local.set $name (call $rtf_str (local.get $namebase) (local.get $namlen)))
@@ -703,9 +802,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
               (local.set $ci (i32.add (local.get $ci) (i32.const 1)))))
           (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen)))
           (br $c2)))
-        ;; free the readdir buffer (all names are now copied into the list) — reclaimable, so a
-        ;; list_dir loop reuses it instead of leaking.
-        (call $rc_dec (local.get $buf))
+        ;; free the accumulation buffer (all names are now copied into the list) — reclaimable,
+        ;; so a list_dir loop reuses it instead of leaking.
+        (call $rc_dec (local.get $acc))
         ;; SORT the names lexicographically (insertion sort) — match native names.sort().
         (local.set $si (i32.const 1))
         (block $sdone (loop $sloop

@@ -3337,3 +3337,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_unwrap_fallback.almd", class = "fixture" },
 ]
+
+# ── fs.list_dir IS THE WHOLE DIRECTORY, AT EVERY READDIR BUFFER BOUNDARY ─
+[[contract]]
+id        = "C-272"
+spec      = "ALS-R6"
+title     = "`fs.list_dir` returns EVERY entry on both targets, whatever the directory's size, sorted by bytes"
+statement = "`fs.list_dir(path)` yields the same `List[String]` native <-> wasm for a directory of ANY size, and the order is contractual: both legs sort the names lexicographically by BYTES (native `names.sort()` over `String` = `str` Ord; wasm's insertion sort over `$str_lt`), so the filesystem's arbitrary readdir order is never observable. WASI's `fd_readdir` is a RESUMABLE api — one pass fills the caller's buffer and reports the bytes written, and the listing continues from the last entry's `d_next` cookie until a pass returns FEWER bytes than the buffer — but the wasm floor (`$read_dir`) did ONE `cookie=0` pass into 4 KiB and parsed whatever landed there. Every directory whose dirents did not fit came back SILENTLY SHORT still wrapped `ok(...)`: a wrong value, not a wall and not an err, indistinguishable from a genuinely smaller directory (#1384 — 200 entries answered 130 = (4096-51)/31, 60 long-named ones answered 41). Six sizes pin the sweep, measured on both legs before and after: empty (0/0) and one (1/1) unchanged; 4096 bytes of dirents EXACTLY (130 entries) already agreed and must keep agreeing, because a pass that exactly fills the buffer is NOT the end and the sweep has to re-read rather than stop; one entry over (131) was 130; a record whose HEADER fits at 4050 but whose NAME runs past 4096 (130) was 129, since the old parser trusted `d_namlen` and read past `bufused`; 200 entries (200) was 130; and 60 x 76-byte names (60) was 41 WITH heap garbage spliced onto the first name — the straddling read, observable in stdout. The same site dropped `fd_readdir`'s errno, so a failed listing read the zeroed `$bufused` scratch and returned `ok([])`; the errno is now kept and a readdir failure becomes the same Err as a failed `path_open`. `$read_dir` was FALLBACK_ONLY in proofs/wat-prelude-audit.toml — no `spec/wasm_cross` fixture reached `fs.list_dir` at all, which is exactly why one pass survived from the beginning; the fixture below upgrades it to CORPUS."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_list_dir_multipass.almd", class = "fixture" },
+]

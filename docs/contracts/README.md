@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-271 contracts
+272 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -299,4 +299,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-269 | A nested variant match bound to a let executes identically on both targets; a constructor pattern the subject lacks is a check-time E048 on both | 0.57.1 | active | fixture | 1 |
 | C-270 | The shared fp16 block scale decodes the whole fp16 domain identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-271 | `carrier ?? call!` yields the fallback's PAYLOAD, never its Result block, for a handle-carrying payload on both targets | 0.57.1 | active | fixture | 1 |
+| C-272 | `fs.list_dir` returns EVERY entry on both targets, whatever the directory's size, sorted by bytes | 0.57.1 | active | fixture | 1 |
 
