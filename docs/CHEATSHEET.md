@@ -456,6 +456,16 @@ if list.is_empty(errs) then ok(oks) else err(errs)   // Result[List[T], List[E]]
 
 ### Error-handling doctrine (ADR-0004)
 
+**Choosing `E` is a layer assignment, not a taste call.** `E = String` is the
+**erasure** layer — the *reporting* channel, read by humans and models; it is
+the default. A variant `E` is the **refinement** layer — the *branching*
+channel, where the program changes behaviour on the content — and it is worth
+its cost only inside a **closed domain**: a module or package that takes care
+of that error itself. Crossing out of that domain, the variant is **demoted**
+back to String, and the demotion is always visible as a `map_err` (there is no
+conversion hook, so it cannot happen silently). Full rule:
+[docs/specs/result-option-effect.md §8.0](./specs/result-option-effect.md).
+
 **Never branch on the text of an error message** (`string.contains(e, …)`,
 `e == "No such file"`) — the text is a report, not an API, and E035 warns.
 When a caller must branch on the failure *kind*, that is the signal to

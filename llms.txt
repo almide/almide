@@ -139,6 +139,32 @@ result.get(v, key)?                  // Result → Option (inside a fn returning
 parse_int(s)!                        // unwrap a Result, propagate err (effect fn only)
 ```
 
+### Which error type — a layer, not a taste call
+
+`E = String` is the **erasure** layer: the *reporting* channel, read by humans
+and models. It is the DEFAULT and what the whole stdlib uses. A variant `E` is
+the **refinement** layer: the *branching* channel, where the program changes
+behaviour on the content. Pick it only when you want to branch on the content
+AND the domain is closed — a module or package that takes care of that error
+itself. Leaving that domain, demote to String; the demotion is always spelled
+as a `map_err`, because there is no conversion hook to hide it.
+
+```almide
+// erasure (default) — add context, never replace silently
+fs.read_text(p) |> result.map_err((e) => "loading config: ${e}")!
+
+// refinement — inside the module that handles these kinds
+type LoadError = | NotFound(String) | BadValue(String)
+
+// demotion at the boundary — visible, never implicit
+load(p) |> result.map_err((e) => "${e}")
+```
+
+Do not branch on message TEXT (`string.contains(e, …)`, `e == "..."`) — E035.
+Non-goals, decided and not open: no `From`-style conversion hook, no error
+sets / unions / rows, no implicit propagation, no inferred lambda error type,
+`main` stays String. Full rule: `docs/specs/result-option-effect.md` §8.0, §9.
+
 ### Operators, not comparison functions
 
 Almide uses operators for comparison and equality. There is no
