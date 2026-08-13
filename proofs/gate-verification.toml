@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "6"
+# unverified_ceiling = "5"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -85,7 +85,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "proofs/diff-fuzz.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: no live miscompile was needed — one was PLANTED in the v1 renderer (render_wasm_calls.rs int_binop_instr) and the generative net caught it at N=40 SEED=12345. IntOp::Mul => i64.add gave 'match=9 mismatch=10' with each failing program's source printed for repro; IntOp::Mul => an unassemblable mnemonic gave the other branch, 'RUNERR (v1 traps)'. Unforged: match=19 mismatch=0 runerr=0, OK"
 
 [[gate]]
 path = "proofs/receipt.sh"
