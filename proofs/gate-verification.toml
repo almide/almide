@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "4"
+# unverified_ceiling = "3"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -81,7 +81,8 @@ evidence = "#1244 round 5 (coqc/ocamlopt present locally, so the gate RAN): the 
 
 [[gate]]
 path = "proofs/coverage.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: the FIRST probe exposed a real hole — `find -perm /111` is GNU-only, so on any BSD/macOS host the gate died at step 2/4 with 'illegal mode string' and never reached the ratchet; fixed portably (same PR) plus a hard error when discovery finds no test binaries (a 0-binary run would still have reported a number). Then the ratchet itself: proofs/coverage-baseline.txt forged 5819 -> 9900 gave 'COVERAGE RATCHET FAIL: TOTAL 70.09% < baseline 99.00%' on a full real measurement, and `coverage.sh --bogus` gave the #990 usage error exit 2. Measured 70.09% is above the real 58.19% floor, so the same measurement is the pass direction"
 
 [[gate]]
 path = "proofs/diff-fuzz.sh"
