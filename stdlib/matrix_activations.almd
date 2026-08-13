@@ -375,7 +375,8 @@ fn __fp16_bits(raw: Int) -> Int = {
   let signbits = prim.bshl(prim.band(prim.bshr_u(raw, 15), 1), 31)
   let expv = prim.band(prim.bshr_u(raw, 10), 31)
   let mant = prim.band(raw, 1023)
-  if expv == 0 then (if mant == 0 then 0 else __fp16_subnormal_bits(signbits, mant, 0 - 14))
+  if expv == 0 and mant == 0 then 0
+  else if expv == 0 then __fp16_subnormal_bits(signbits, mant, 0 - 14)
   else if expv == 31 then prim.bor(prim.bor(signbits, prim.bshl(255, 23)), prim.bshl(mant, 13))
   else prim.bor(prim.bor(signbits, prim.bshl(expv + 112, 23)), prim.bshl(mant, 13))
 }
