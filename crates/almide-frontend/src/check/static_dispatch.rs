@@ -254,8 +254,26 @@ impl Checker {
                 }
                 let result_elem = self.fresh_var();
                 let callback_ret = Ty::result(result_elem.clone(), Ty::String);
+                // #1350: the mapper slot is declared `is_effect: TRUE`. It was
+                // `false` from the landing and that was a DECLARATION bug, not a
+                // permission: unification is effect-agnostic on purpose (#1055), so
+                // the bit never gated anything, and effect callbacks were always
+                // accepted, run, and gated (spec/lang/fan_{map,mapper,value_regression}_test.almd
+                // all pass `effect fn` mappers). Measured 2026-08-14 against 0.57.0,
+                // holding the shape constant and varying only the callback:
+                //   (u) => ok(string.len(u))          pure         -> both legs, ok 2
+                //   (u) => elen(u)   elen: effect fn  pure body    -> both legs, ok 2
+                //   probe            effect fn VALUE               -> both legs, ok 50
+                //   fan.map/settle with an effect fn                -> both legs, identical
+                // The wall #1350 reported ("fan.any_map with an unliftable ...
+                // higher-order argument") came from `http.get`, which has no wasm
+                // implementation and walls IDENTICALLY with no fan in the program at
+                // all — that is #1233's capability ledger, not a mapper-purity
+                // question. So the honest slot is the effect-capable one, matching the
+                // block heads. `is_effect: true` also picks up `effect_slot_accepts`
+                // (#1055), which admits the pure spelling — the pure mapper stays legal.
                 self.constrain(arg_tys[1].clone(),
-                    Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret) },
+                    Ty::Fn { is_effect: true, params: vec![elem_ty], ret: Box::new(callback_ret) },
                     "fan.map callback");
                 Some(Ty::result(Ty::list(resolve_ty(&result_elem, &self.uf)), Ty::String))
             }
@@ -331,7 +349,8 @@ impl Checker {
                     let result_elem = self.fresh_var();
                     let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                     self.constrain(arg_tys[1].clone(),
-                        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret) },
+                        // #1350: effect-capable, same ruling as fan.map above.
+                        Ty::Fn { is_effect: true, params: vec![elem_ty], ret: Box::new(callback_ret) },
                         "fan.any callback");
                     return Some(Ty::result(resolve_ty(&result_elem, &self.uf), Ty::String));
                 }
@@ -364,7 +383,8 @@ impl Checker {
                     let result_elem = self.fresh_var();
                     let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                     self.constrain(arg_tys[1].clone(),
-                        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
+                        // #1350: effect-capable, same ruling as fan.map above.
+                        Ty::Fn { is_effect: true, params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
                         "fan.settle callback");
                     return Some(Ty::list(Ty::result(
                         resolve_ty(&result_elem, &self.uf),

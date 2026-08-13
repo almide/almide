@@ -15,7 +15,7 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 > scalar-read 63 arms / 0 UNGUARDED; WAT prelude 63 fns classified;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
-> **Stage 2 (translation validation): 284/412 fixtures cast a real 3-way vote (68%)** —
+> **Stage 2 (translation validation): 285/413 fixtures cast a real 3-way vote (69%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
 > **Stage 3 (semantics freeze): 275/275 contracts spec-keyed; syntax-element coverage

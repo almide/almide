@@ -110,7 +110,7 @@ evidence  = [
 id        = "C-004"
 spec      = "ALS-R3"
 title     = "fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
+statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle. The three MAPPER heads (`fan.map/any/settle(xs, f)`) accept an EFFECT callback in both spellings — an inline lambda calling an effect fn, and a bare effect-fn value — and the result is byte-identical on both legs (#1350; the slot's `is_effect: false` was a declaration bug, never a permission, since unification is effect-agnostic by #1055). A callback reaching a stdlib capability with no wasm implementation (`http.get`) walls on the wasm leg, but that is the capability's own gap — it walls identically with no `fan` in the program — not a mapper-purity rule."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -118,6 +118,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_inline_lambda.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_pure_thunks.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_var_thunk_list.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_effect_mapper.almd", class = "fixture" },
 ]
 
 [[contract]]
