@@ -149,3 +149,13 @@ belt の思想をビルド単位の証明に拡張: 「この .wasm はこの検
 | カバレッジ工数の沼 | 安全パス限定の MC/DC から始め、全体は branch ratchet のみ |
 | Critical profile が言語を二つに割る | subset 原則 (CG-3) を gate で強制 — Critical で valid なら通常モードでも valid |
 | 認証ごっこ (誰も使わない dossier) | CG-5 は trust-layer の `make verify` と同一物の整形。独立の成果物を作らない |
+
+## 組織・実績のはしご(B/C セクション)
+
+flight-grade プログラムのうち**エンジニアリングでない**部分 — 署名できる法人、
+DER との折衝、LTS ポリシー、最初の実運用配備、サービス履歴の記録、機械筆記
+コードの認証に関する立場表明 — は
+[flight-organization.md](./flight-organization.md) に集約されている。
+以前は issue #577–#585 として queue に並んでいたが、いずれも本文で
+「エンジニアリング項目ではない」と自称しており、着手可能な作業の列に混ざると
+queue が嘘をつく。umbrella issue #586 のチェックリストが引き続き進捗を持つ。
