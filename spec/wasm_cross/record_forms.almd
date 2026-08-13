@@ -1,0 +1,17 @@
+// @contract: C-255
+// ALS-E23 (docs/specs/als/expressions.md): records — the literal
+// `{ x: 1, … }`, member reads `p.x` (Int and String fields), the spread
+// update `{ ...p, y: 20 }` (unlisted fields inherited), and VALUE SEMANTICS:
+// the spread source is untouched afterward (p.y still 2). Identical
+// observables on both targets.
+type Pt = { x: Int, y: Int, tag: String }
+
+effect fn main() -> Unit = {
+  let p = { x: 1, y: 2, tag: "a" }
+  println(int.to_string(p.x + p.y))
+  println(p.tag)
+  let q = { ...p, y: 20 }
+  println(int.to_string(q.x + q.y))
+  println(q.tag)
+  println(int.to_string(p.y))
+}

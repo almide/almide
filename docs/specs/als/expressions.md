@@ -419,3 +419,16 @@ pin。
 (fixture: `(7: Int)` → 7)。実行時表現に影響しない。
 
 テスト: `spec/wasm_cross/place_assign_ascription.almd`(契約 C-253)。
+
+## ALS-E23 レコード(`ExprKind::Record` / `ExprKind::SpreadRecord` / `ExprKind::Member`)
+
+**受理形**: リテラル `{ x: 1, y: 2, tag: "a" }`(型は宣言 `type Pt = { … }`
+または文脈から)、フィールド読み `p.x`、スプレッド更新 `{ ...p, y: 20 }`
+(列挙外フィールドは継承)。
+
+**値の規範**: フィールド読みは宣言型の値を返す。スプレッドは**新しい値**を
+作り、**元の値は不変**(fixture: `q = { ...p, y: 20 }` 後も `p.y` は 2 —
+値意味論、共有を通じた変異は観測されない)。フィールドへの代入は `var`
+束縛上でのみ(ALS-S5)。
+
+テスト: `spec/wasm_cross/record_forms.almd`(契約 C-255)。
