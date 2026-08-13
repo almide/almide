@@ -1,4 +1,3 @@
-import env
 import json
 
 test "parse and get string" {
@@ -21,9 +20,9 @@ test "get missing key" {
 
 test "get nested" {
   match json.parse('{"a": {"b": 42}}') {
-    ok(v) => match json.get(v, "a") {
-      some(a) => assert_eq(json.get_int(a, "b"), some(42)),
-      none => assert(false),
+    ok(v) => match value.field(v, "a") {
+      ok(a) => assert_eq(json.get_int(a, "b"), some(42)),
+      err(_) => assert(false),
     },
     err(_) => assert(false),
   }
@@ -62,7 +61,7 @@ test "parse invalid" {
 
 test "keys" {
   match json.parse('{"a": 1, "b": 2}') {
-    ok(v) => assert_eq(list.len(json.keys(v)), 2),
+    ok(v) => assert_eq(list.len(value.keys(v)), 2),
     err(_) => assert(false),
   }
 }
@@ -75,7 +74,7 @@ test "stringify pretty" {
 }
 
 test "builder shortcuts" {
-  let v = json.object([("name", json.from_string("Alice")), ("age", json.from_int(30))]);
+  let v = value.object([("name", value.str("Alice")), ("age", value.int(30))]);
   assert_eq(json.get_string(v, "name"), some("Alice"));
   assert_eq(json.get_int(v, "age"), some(30))
 }
