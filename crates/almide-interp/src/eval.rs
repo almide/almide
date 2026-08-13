@@ -233,10 +233,16 @@ impl<'a> Interpreter<'a> {
     fn eval_expr_call(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
         Some(match &expr.kind {
             // ── Calls ──
-            IrExprKind::Call { target, args, .. } => self.eval_call(target, args, scope),
+            IrExprKind::Call { target, args, .. } => {
+                let flow = self.eval_call(target, args, scope);
+                lift_to_declared_carrier(&expr.ty, flow)
+            }
             // TailCall is codegen-inserted (TailCallMarkPass, post-cut) but we
             // treat it == Call defensively.
-            IrExprKind::TailCall { target, args } => self.eval_call(target, args, scope),
+            IrExprKind::TailCall { target, args } => {
+                let flow = self.eval_call(target, args, scope);
+                lift_to_declared_carrier(&expr.ty, flow)
+            }
             _ => return None,
         })
     }
@@ -927,4 +933,35 @@ fn unreachable_post_cut(kind: &IrExprKind) -> ! {
         other => unreachable!("{:?} is not a codegen-inserted node", std::mem::discriminant(other)),
     };
     unreachable!("{} is codegen-inserted ({}); interp runs pre-codegen", node, pass)
+}
+
+/// Put a call's value into the carrier the CHECKER says the call site has.
+///
+/// An `effect fn f() -> T` has ABI return type `Result[T, String]`, and both
+/// backends materialize that carrier; since ADR-0008 removed implicit
+/// propagation, a call in any position yields a Result value. The interpreter
+/// handed the success value back BARE while modelling the failure channel as
+/// `Result(Err(..))` — so `match <effect call> { ok(v) => .., err(e) => .. }`,
+/// one of the sanctioned consumption spellings, saw a plain scalar, matched no
+/// arm, and aborted. A wrong third vote against two agreeing backends, which
+/// this crate rates worse than an honest skip (#1366).
+///
+/// **Driven by the call NODE's type, not by the callee's `is_effect` flag.**
+/// The first attempt keyed off the callee and wrapped inside
+/// `call_function_keeping_frame`; that also caught the lowered stdlib module
+/// bodies, whose call sites want the bare value — seven fixtures started
+/// dissenting with `list.len on non-list` and `if-condition is Result not Bool`.
+/// The checker's type at the site is the authority on what shape belongs there,
+/// so consult it: a site typed `Result[..]` gets the carrier, everything else
+/// is untouched. A value that is ALREADY a Result is the failure the body
+/// propagated with `!`, and must not be buried inside an `Ok`.
+fn lift_to_declared_carrier(ty: &Ty, flow: Flow) -> Flow {
+    if !ty.is_result() {
+        return flow;
+    }
+    match flow {
+        Flow::Value(Value::Result(r)) => Flow::Value(Value::Result(r)),
+        Flow::Value(v) => Flow::Value(Value::Result(Ok(Box::new(v)))),
+        other => other,
+    }
 }
