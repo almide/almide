@@ -342,50 +342,85 @@ pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> 
 
 /// BREAK elimination — rewrite the FIRST `for`/`while` loop whose body carries a `break` into
 /// the flag form: `var __bk = false` before the loop; each `break` (admitted ONLY as a WHOLE
-/// `if` arm — the shape `guard c else break` desugars to, with the iteration's remainder nested
-/// in the opposite arm, so nothing in the same iteration follows the flag-set) becomes
-/// `{ __bk = true }`; a ForIn guards its body on `not __bk` (finite iterable — the remaining
-/// no-op iterations terminate, the `desugar_loop_unwrap` precedent), a While injects
-/// `not __bk and cond` (the body holds the induction update, so a body-guard alone would spin).
-/// A `break`/`continue` anywhere else declines — the loop keeps its honest wall. Count-invariant
+/// `if` arm ON THE BODY'S TRAILING STATEMENT SPINE — the shape `guard c else break` desugars
+/// to, with the iteration's remainder nested in the opposite arm, so nothing in the same
+/// iteration follows the flag-set) becomes `{ __bk = true }`; a ForIn guards its body on
+/// `not __bk` (finite iterable — the remaining no-op iterations terminate, the
+/// `desugar_loop_unwrap` precedent), a While injects `not __bk and cond` (the body holds the
+/// induction update, so a body-guard alone would spin).
+/// The trailing-spine requirement is CHECKED, not assumed (#1277 measurement): the flag-set
+/// only defers the exit to the next loop-head test, so for a NON-trailing break
+/// (`if c then break` with statements after it) the rewrite ran the rest of the break
+/// iteration — v1 native+wasm printed a deferred-break value where v0/interp break
+/// immediately (probe `for k in 0..<10 { if k > 3 then break\n last = k }` → v1 `4`, v0 `3`).
+/// A `break`/`continue` anywhere else declines — the shape routes to the scalar-loop
+/// machinery's immediate `LoopBreakUnless`, or keeps its honest wall. Count-invariant
 /// (flag literals only), so the shared-desugar caps accounting holds.
 pub fn desugar_loop_break(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
-    fn scan_breaks(e: &IrExpr, any: &mut bool, bad: &mut bool) {
+    /// FORBID scan for NON-TRAILING positions: any Break/Continue reachable in
+    /// `e` (outside a nested loop's own scope) is an unadmitted position.
+    fn scan_forbid(e: &IrExpr, bad: &mut bool) {
         use almide_ir::visit::{walk_expr, IrVisitor};
-        struct S<'a> {
-            any: &'a mut bool,
+        struct F<'a> {
             bad: &'a mut bool,
         }
-        impl IrVisitor for S<'_> {
+        impl IrVisitor for F<'_> {
             fn visit_expr(&mut self, e: &IrExpr) {
                 match &e.kind {
-                    // A whole-arm break is consumed by the rewrite WITHOUT descending, so a
-                    // visit reaching a BARE Break/Continue here is an unadmitted position.
-                    IrExprKind::If { cond, then, else_ } => {
-                        self.visit_expr(cond);
-                        for arm in [then, else_] {
-                            if matches!(&arm.kind, IrExprKind::Break) {
-                                *self.any = true;
-                            } else {
-                                self.visit_expr(arm);
-                            }
-                        }
-                    }
                     IrExprKind::Break | IrExprKind::Continue => *self.bad = true,
                     IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {} // own scope
                     _ => walk_expr(self, e),
                 }
             }
         }
-        S { any, bad }.visit_expr(e);
+        F { bad }.visit_expr(e);
+    }
+    fn scan_forbid_stmts(stmts: &[IrStmt], bad: &mut bool) {
+        let blk = loop_uw_node(IrExprKind::Block { stmts: stmts.to_vec(), expr: None }, Ty::Unit);
+        scan_forbid(&blk, bad);
+    }
+    /// TRAILING-SPINE scan: a BARE `break` as a WHOLE `if` arm is admissible
+    /// (`any`); statements BEFORE the spine position, `if` conditions, and any
+    /// other Break/Continue shape (a bare statement break, a block-wrapped arm
+    /// break — `rewrite_breaks` only fixes whole arms) mark `bad`.
+    fn scan_trailing(e: &IrExpr, any: &mut bool, bad: &mut bool) {
+        match &e.kind {
+            IrExprKind::If { cond, then, else_ } => {
+                scan_forbid(cond, bad);
+                for arm in [then, else_] {
+                    if matches!(&arm.kind, IrExprKind::Break) {
+                        *any = true;
+                    } else {
+                        scan_trailing(arm, any, bad);
+                    }
+                }
+            }
+            IrExprKind::Block { stmts, expr } => match expr.as_deref() {
+                Some(t) => {
+                    scan_forbid_stmts(stmts, bad);
+                    scan_trailing(t, any, bad);
+                }
+                None => scan_trailing_stmts(stmts, any, bad),
+            },
+            IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {} // own scope
+            IrExprKind::Break | IrExprKind::Continue => *bad = true,
+            _ => scan_forbid(e, bad),
+        }
+    }
+    fn scan_trailing_stmts(stmts: &[IrStmt], any: &mut bool, bad: &mut bool) {
+        let Some((last, init)) = stmts.split_last() else { return };
+        scan_forbid_stmts(init, bad);
+        match &last.kind {
+            IrStmtKind::Expr { expr } => scan_trailing(expr, any, bad),
+            _ => scan_forbid_stmts(std::slice::from_ref(last), bad),
+        }
     }
     let has_admissible_break = |lbody: &[IrStmt]| -> Option<bool> {
-        let blk = loop_uw_node(IrExprKind::Block { stmts: lbody.to_vec(), expr: None }, Ty::Unit);
         let (mut any, mut bad) = (false, false);
-        scan_breaks(&blk, &mut any, &mut bad);
+        scan_trailing_stmts(lbody, &mut any, &mut bad);
         if bad {
             return None; // unadmitted break/continue position — decline the whole pass
         }
