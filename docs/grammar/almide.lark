@@ -1,0 +1,647 @@
+// almide.lark — the machine-readable Almide grammar artifact.
+//
+// PURPOSE: feed decode-time constraint engines (llguidance, XGrammar, OpenAI
+// custom tools) so a sampler cannot emit syntactically invalid Almide.
+//
+// CONTRACT (what this file promises, enforced by scripts/check-lark-grammar.sh):
+//   1. CORPUS SUPERSET — every file in the checked corpus that the compiler's
+//      parser accepts, this grammar accepts. Over-acceptance is the safe
+//      direction for a decoder (it only fails to block a bad token);
+//      under-acceptance is not (it makes a legal program unrepresentable).
+//   2. LEXICAL PARITY — the keyword and operator tables below are diffed
+//      token-for-token against crates/almide-syntax/src/lexer.rs.
+//   3. DISCRIMINATION — every fixture in negative-fixtures.txt must be
+//      REJECTED, so the grammar cannot rot into `.*`.
+//
+// See README.md in this directory for the gap list (what the grammar cannot
+// express) and for exactly what the gate does and does not prove.
+//
+// Mirrors: crates/almide-syntax/src/lexer.rs   (tokens)
+//          crates/almide-syntax/src/parser/    (structure)
+//          grammar/precedence.toml             (descriptive precedence table)
+//
+// STYLE NOTE: optional elements are spelled as nullable `_o_*` helper rules
+// rather than inline `X?`. Lark expands an inline `?` combinatorially — a rule
+// with seven optionals becomes 128 productions — and an Earley recognizer pays
+// for every one of them on every column.
+
+// ═══════════════════════════════════════════════════════════════════
+// Entry
+// ═══════════════════════════════════════════════════════════════════
+
+start: _nl _o_program
+_o_program: _program
+          |
+_program: module_decl _nl _rest
+        | _rest
+_rest: _imports _nl _decls
+     | _imports
+     | _decls
+_imports: import_decl (_NL import_decl)*
+_decls: top_decl (_NL top_decl)* _nl
+
+// ═══════════════════════════════════════════════════════════════════
+// Declarations
+// ═══════════════════════════════════════════════════════════════════
+
+module_decl: MODULE module_path
+
+import_decl: IMPORT module_path DOT "{" import_names "}"
+           | IMPORT module_path _o_import_alias
+_o_import_alias: AS IDENT
+               |
+import_names: name_tok (COMMA name_tok)* _comma
+module_path: IDENT (DOT IDENT)*
+
+?top_decl: fn_decl
+         | type_decl
+         | protocol_decl
+         | top_let
+         | test_decl
+         | test_where_def
+
+// ── fn ───────────────────────────────────────────────────────────
+// [@attr…] [pub] [local|mod] [effect] fn name[G](params) -> Ty[!] [= body]
+fn_decl: _o_attrs _o_pub _o_vis _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr _o_bang _o_fn_body
+
+_o_fn_body: fn_body
+          |
+fn_body: EQ _nl braceless_block
+       | EQ _nl expr
+
+// A fn body that OPENS with let/var/guard is a brace-less statement block
+// (Parser::parse_braceless_block).
+braceless_block: _braceless_head (_stmt_sep stmt)* _o_stmt_sep
+_braceless_head: let_stmt | var_stmt | guard_stmt
+
+fn_name: TYPENAME DOT IDENT
+       | IDENT
+
+param_list: _nl _o_params _nl
+// The first parameter may be BARE (no `: Type`) — that is the convention
+// method's `self` receiver. The compiler accepts only the literal spelling
+// `self` there; this grammar accepts any identifier, so `self` stays an
+// ordinary identifier everywhere else (README gap G6).
+_o_params: _bare_receiver (COMMA _nl param)* _comma
+         | param (COMMA _nl param)* _comma
+         |
+_bare_receiver: IDENT
+param: _o_attrs _o_mut _param_name COLON type_expr _o_default
+_param_name: IDENT | VAR
+
+// ── type ─────────────────────────────────────────────────────────
+type_decl: _o_vis TYPE_KW TYPENAME _o_generics _o_deriving _nl EQ _nl type_expr
+_o_deriving: COLON TYPENAME (COMMA TYPENAME)*
+           |
+
+// ── protocol ─────────────────────────────────────────────────────
+protocol_decl: PROTOCOL TYPENAME _o_generics "{" _nl (protocol_method _nl)* "}"
+protocol_method: _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr
+
+// ── top-level let / var ──────────────────────────────────────────
+top_let: _o_top_vis _let_or_var name_tok _o_ty_ann EQ _nl expr
+_o_top_vis: PUB | LOCAL | MOD
+          |
+_let_or_var: LET | VAR
+
+// ── test ─────────────────────────────────────────────────────────
+test_decl: TEST plain_string test_where_clause* _nl block
+test_where_clause: _nl WHERE _nl _where_body
+_where_body: where_table | where_case | where_binding
+where_table: "[" _nl (where_case _seps)* _o_where_case "]"
+_o_where_case: where_case
+             |
+where_case: plain_string "[" _nl (where_binding _seps)* _o_where_binding "]"
+_o_where_binding: where_binding
+                |
+where_binding: where_path "(" where_params ")" FATARROW expr
+             | where_path EQ expr
+where_path: IDENT (DOT IDENT)*
+where_params: (pattern _comma)*
+
+test_where_def: _vis TEST _o_where "{" _nl (where_binding _def_seps)* "}"
+_o_where: WHERE
+        |
+_def_seps: (SEMI | COMMA | _NL)+
+
+// ── attributes ───────────────────────────────────────────────────
+attribute: AT attr_name _o_attr_args
+_o_attr_args: attr_args
+            |
+attr_args: "(" _nl _o_attr_arg_list ")"
+_o_attr_arg_list: attr_arg (COMMA _nl attr_arg)* _comma _nl
+                |
+attr_arg: IDENT EQ attr_value
+        | attr_value
+?attr_value: plain_string | INT | MINUS INT | TRUE | FALSE | IDENT
+?attr_name: IDENT | TYPENAME | keyword_as_name
+
+// ═══════════════════════════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════════════════════════
+
+?type_expr: EFFECT type_expr                      -> effect_type
+          | leading_variant
+          | record_type
+          | fn_type
+          | paren_type
+          | INT                                   -> const_type
+          | named_type
+
+leading_variant: (_nl PIPE _nl variant_case)+
+
+named_type: qualified_type_name type_tail (_nl PIPE _nl variant_case)*
+type_tail: "[" type_args "]" _o_question
+         | "(" _o_type_list ")"
+         | _o_question
+
+qualified_type_name: (IDENT DOT)* TYPENAME
+
+type_args: _nl type_expr (COMMA _nl type_expr)* _nl
+type_list: type_expr (COMMA type_expr)*
+_o_type_list: type_list
+            |
+
+fn_type: _fn_head "(" _o_type_list ")" ARROW type_expr _o_bang
+_fn_head: FN | FN_TYPENAME
+
+paren_type: "(" ")" _o_arrow_ret
+          | "(" type_expr ")" ARROW type_expr _o_bang
+          | "(" type_expr ")" _o_question
+          | "(" type_expr (COMMA type_expr)+ ")" ARROW type_expr _o_bang
+          | "(" type_expr (COMMA type_expr)+ ")" _o_question
+_o_arrow_ret: ARROW type_expr _o_bang
+            |
+
+record_type: "{" _nl _o_field_types _o_open_rest "}"
+_o_open_rest: DOTDOT _nl
+            |
+_o_field_types: field_type (_seps field_type)* _o_seps
+              |
+field_type: _o_attrs name_tok _o_field_alias COLON type_expr _o_default
+_o_field_alias: AS plain_string
+              |
+
+variant_case: TYPENAME "(" _o_type_list ")"
+            | TYPENAME "{" _nl _o_field_types "}"
+            | TYPENAME
+
+generic_params: "[" generic_param (COMMA generic_param)* "]"
+generic_param: TYPENAME _o_generic_bound
+_o_generic_bound: COLON record_type
+                | COLON TYPENAME (PLUS TYPENAME)*
+                |
+
+// ═══════════════════════════════════════════════════════════════════
+// Statements
+// ═══════════════════════════════════════════════════════════════════
+
+?stmt: let_stmt
+     | var_stmt
+     | guard_stmt
+     | assign_stmt
+     | index_assign_stmt
+     | field_assign_stmt
+     | expr
+
+// A statement separator. The compiler also tolerates NO separator between two
+// statements on one line; this grammar requires one — README gap G8.
+_stmt_sep: SEMI _nl
+         | _NL
+_o_stmt_sep: _stmt_sep
+           |
+
+let_stmt: LET "{" name_tok (COMMA _nl name_tok)* _comma "}" EQ _nl expr   -> let_record
+        | LET destructure_tuple EQ _nl expr                               -> let_tuple
+        | LET _bind_name _o_ty_ann EQ _nl expr
+
+var_stmt: VAR IDENT _o_ty_ann EQ _nl expr
+
+guard_stmt: GUARD LET _nl IDENT _nl EQ _nl expr _nl ELSE _nl expr
+          | GUARD expr ELSE _nl expr
+
+assign_stmt: IDENT EQ _nl expr
+index_assign_stmt: IDENT "[" expr "]" EQ _nl expr
+field_assign_stmt: IDENT DOT name_tok EQ _nl expr
+
+destructure_tuple: "(" (_destructure_elem _comma _nl)* ")"
+_destructure_elem: destructure_tuple | UNDERSCORE | IDENT
+_bind_name: IDENT | UNDERSCORE
+
+// ═══════════════════════════════════════════════════════════════════
+// Expressions
+//
+// A leading `_nl` marks an operator that may open a continuation line
+// (Parser::INFIX_TOKENS); `<`, `>` and `...` deliberately may not.
+// ═══════════════════════════════════════════════════════════════════
+
+?expr: bool_level
+
+// `or` / `and` — the loosest binding, and the only level whose operands are
+// full comparisons.
+?bool_level: bool_level _nl bool_op _nl cmp_level | cmp_level
+!bool_op: OR | AND
+
+// Comparison is NON-ASSOCIATIVE: `a < b < c` is a parse error, so at most one
+// comparison operator may appear here.
+?cmp_level: range_level _nl cmp_op_nl _nl range_level
+          | range_level cmp_op_bare _nl range_level
+          | range_level
+!cmp_op_nl: EQEQ | BANGEQ | LTEQ | GTEQ
+!cmp_op_bare: LT | GT
+
+// Ranges are NON-ASSOCIATIVE too — `0..<1..<2` is rejected (#899).
+?range_level: bin_level _nl DOTDOTLT _nl bin_level   -> range_exclusive
+            | bin_level DOTDOTDOT _nl bin_level      -> range_inclusive
+            | bin_level
+
+// The arithmetic / pipeline operators. Their relative BINDING POWERS live in
+// grammar/precedence.toml and Parser::infix_bp; they are flattened to a single
+// level here because the ordering changes only the parse TREE, never the SET
+// of accepted token strings — and depth is what an Earley recognizer pays for
+// on every column. See README gap G9.
+?bin_level: bin_level _nl PIPEARROW _nl pipe_match
+          | bin_level _nl bin_op _nl unary
+          | unary
+!bin_op: PIPEARROW | COMPOSE | PLUS | MINUS | STAR | SLASH | PERCENT | CARET | STARSTAR
+pipe_match: MATCH _nl "{" match_body "}"
+
+?unary: MINUS unary   -> neg
+      | NOT unary     -> logical_not
+      | postfix
+
+?postfix: primary postfix_op*
+
+postfix_op: _nl DOT TYPENAME named_record          -> qualified_record
+          | _nl DOT name_tok                       -> member
+          | DOT INT                                -> tuple_index
+          | "[" type_args "]" "(" call_args ")"    -> type_args_call
+          | "[" expr "]"                           -> index
+          | "(" call_args ")"                      -> call
+          | BANG                                   -> unwrap
+          | QQ _nl unary                           -> unwrap_or
+          | QDOT name_tok                          -> optional_chain
+          | QUESTION                               -> to_option
+
+call_args: _nl _o_call_arg_list _nl
+_o_call_arg_list: call_arg (COMMA _nl call_arg)* _comma
+                |
+?call_arg: UNDERSCORE                              -> placeholder
+         | IDENT COLON _nl expr                    -> named_arg
+         | expr COLON type_expr                    -> ascribed_arg
+         | expr
+
+// Flattened on purpose: a `literal` / `string` / `plain_string` chain of unit
+// rules costs one extra Earley prediction level at EVERY expression position.
+?primary: INT | FLOAT | TRUE | FALSE | UNDERSCORE | BREAK | CONTINUE
+        | STRING | SQ_STRING | RAW_STRING | RAW_HEREDOC | HEREDOC
+        | INTERP_STRING | HEREDOC_INTERP
+        | NONE | NONE_UC
+        | ctor_expr
+        | if_expr
+        | match_expr
+        | while_expr
+        | for_expr
+        | fan_expr
+        | record_lit
+        | spread_record
+        | block
+        | list_expr
+        | paren_expr
+        | typename_expr
+        | IDENT
+
+// The positions where the compiler demands TokenType::String specifically —
+// an INTERPOLATED string is a different token and is a parse error there.
+?plain_string: STRING | SQ_STRING | RAW_STRING | RAW_HEREDOC | HEREDOC
+
+// The four constructor keywords each have a capitalized alias that lexes to
+// the SAME token (lexer.rs KEYWORDS carries two rows for each).
+ctor_expr: SOME "(" expr ")"
+         | SOME_UC "(" expr ")"
+         | OK "(" expr ")"
+         | OK_UC "(" expr ")"
+         | ERR "(" expr ")"
+         | ERR_UC "(" expr ")"
+         | TODO "(" plain_string ")"
+
+// ── control flow ─────────────────────────────────────────────────
+
+if_expr: IF _nl LET _nl IDENT _nl EQ _nl expr _nl block _nl ELSE _nl block  -> if_let
+       | IF _nl expr _nl THEN _nl _if_branch _o_else
+_o_else: _nl ELSE _nl _if_branch
+       |
+_if_branch: assign_stmt | index_assign_stmt | field_assign_stmt | expr
+
+match_expr: MATCH _nl expr _nl "{" match_body "}"
+match_body: _nl (match_arm _seps)* _o_match_arm
+_o_match_arm: match_arm
+            |
+match_arm: pattern _o_guard FATARROW _nl expr
+_o_guard: IF expr
+        |
+
+while_expr: WHILE _nl expr _nl block
+for_expr: FOR _for_binder IN expr block
+_for_binder: UNDERSCORE
+           | IDENT
+           | "(" _for_name (COMMA _for_name)* ")"
+_for_name: IDENT | UNDERSCORE
+
+// `fan { … }`, `fan.<head> { … }`, `fan.<head>(arg) { … }`. The head NAME is
+// left open (any IDENT); the compiler restricts it to
+// bounded/timeout/race/settle/any — README gap G7.
+fan_expr: FAN DOT IDENT "(" _nl expr _nl ")" _nl block   -> fan_head_call
+        | FAN DOT IDENT _nl fan_arm_block                -> fan_head_block
+        | FAN fan_arm_block                              -> fan_block
+        | FAN                                            -> fan_name
+
+fan_arm_block: "{" _nl (expr _stmt_sep)* _o_expr "}"
+_o_expr: expr
+       |
+
+// ── grouping ─────────────────────────────────────────────────────
+
+block: "{" _nl (stmt _stmt_sep)* _o_stmt "}"
+_o_stmt: stmt
+       |
+
+record_lit: "{" _nl field_kv (_seps field_init)* _o_seps "}"
+spread_record: "{" _nl DOTDOTDOT expr (COMMA _nl field_init)* _o_seps "}"
+field_kv: name_tok COLON _nl expr
+?field_init: field_kv | name_tok
+
+list_expr: "[" _nl "]"                                                  -> empty_list
+         | "[" _nl COLON "]"                                            -> empty_map
+         | "[" _nl expr _nl (COMMA _nl expr _nl)* _comma "]"            -> list_lit
+         | "[" _nl map_entry (COMMA _nl map_entry)* _comma "]"          -> map_lit
+map_entry: expr _nl COLON _nl expr _nl
+
+paren_expr: "(" ")"                                          -> unit
+          | "(" lambda_params ")" FATARROW _nl expr          -> lambda
+          | "(" expr COLON type_expr ")"                     -> ascription
+          | "(" expr (COMMA expr)* _comma ")"                -> tuple_or_paren
+
+lambda_params: lambda_param (COMMA lambda_param)*
+             |
+?lambda_param: "(" (_for_name _comma)* ")"          -> lambda_tuple_param
+             | _for_name _o_ty_ann
+
+typename_expr: TYPENAME "[" type_args "]" "(" call_args ")"   -> ctor_type_args_call
+             | TYPENAME "(" call_args ")"                     -> ctor_call
+             | TYPENAME _nl named_record                      -> named_record_lit
+             | TYPENAME                                       -> type_name_value
+
+named_record: "{" _nl DOTDOTDOT expr (COMMA _nl field_init)* _o_seps "}"  -> named_spread
+            | "{" _nl (field_init _seps)* _o_field_init "}"               -> named_fields
+_o_field_init: field_init
+             |
+
+// ═══════════════════════════════════════════════════════════════════
+// Patterns
+// ═══════════════════════════════════════════════════════════════════
+
+?pattern: UNDERSCORE
+        | NONE | NONE_UC
+        | _some_kw "(" pattern ")"              -> some_pat
+        | _ok_kw "(" pattern ")"                -> ok_pat
+        | _err_kw "(" pattern ")"               -> err_pat
+        | "(" pattern (COMMA pattern)* ")"      -> tuple_pat
+        | "[" _o_pattern_list "]"               -> list_pat
+        | MINUS INT                             -> neg_int_pat
+        | MINUS FLOAT                           -> neg_float_pat
+        | INT | FLOAT
+        | STRING | SQ_STRING | RAW_STRING | RAW_HEREDOC | HEREDOC
+        | INTERP_STRING | HEREDOC_INTERP
+        | TRUE | FALSE
+        | ctor_pattern
+        | IDENT                                 -> bind_pat
+
+_ok_kw: OK | OK_UC
+_err_kw: ERR | ERR_UC
+_some_kw: SOME | SOME_UC
+
+_o_pattern_list: pattern (COMMA pattern)* _comma
+               |
+
+ctor_pattern: qualified_ctor "(" _o_pattern_args ")"   -> ctor_args_pat
+            | qualified_ctor record_pattern            -> ctor_record_pat
+            | qualified_ctor                           -> ctor_unit_pat
+_o_pattern_args: pattern (COMMA pattern)*
+               |
+
+qualified_ctor: _o_module_prefix TYPENAME
+_o_module_prefix: IDENT DOT
+                |
+
+record_pattern: "{" _nl (field_pattern _seps)* _o_record_pat_tail "}"
+_o_record_pat_tail: field_pattern
+                  | DOTDOT _comma _nl
+                  |
+field_pattern: name_tok _o_field_pat
+_o_field_pat: COLON pattern
+            |
+
+// ═══════════════════════════════════════════════════════════════════
+// Shared name positions and nullable helpers
+// ═══════════════════════════════════════════════════════════════════
+
+// `expect_any_name`: identifier, TypeName, or a SOFT KEYWORD used as a name.
+?name_tok: IDENT | TYPENAME | soft_keyword
+!soft_keyword: OK | OK_UC | ERR | ERR_UC | SOME | SOME_UC | NONE | NONE_UC | TODO
+!keyword_as_name: EFFECT | TYPE_KW | TEST | FN | LET | VAR | MOD | IN | FOR | MATCH
+
+_nl: _NL
+   |
+_comma: COMMA
+      |
+_seps: (COMMA | _NL)+
+_o_seps: _seps
+       |
+_attrs: (attribute _nl)+
+_o_attrs: _attrs
+        |
+_o_pub: PUB
+      |
+_vis: LOCAL | MOD
+_o_vis: _vis
+      |
+_o_effect: EFFECT
+         |
+_o_mut: MUT
+      |
+_o_generics: generic_params
+           |
+_o_bang: BANG
+       |
+_o_question: QUESTION
+           |
+_o_ty_ann: COLON type_expr
+         |
+_o_default: EQ expr
+          |
+
+// ═══════════════════════════════════════════════════════════════════
+// TERMINALS
+//
+// The two tables below are the ones scripts/check-lark-grammar.sh diffs
+// against crates/almide-syntax/src/lexer.rs. Editing the lexer without
+// editing these fails the gate.
+// ═══════════════════════════════════════════════════════════════════
+
+// ── keywords (lexer.rs KEYWORDS) ──── BEGIN-KEYWORDS ──
+// Plain STRING terminals on purpose: Lark re-types an IDENT/TYPENAME match
+// whose WHOLE text is one of these, which is exactly the compiler's rule
+// (`keyword()` runs after the identifier scan) — so `matches` stays an
+// identifier instead of lexing as `match` + `es`.
+MODULE: "module"
+IMPORT: "import"
+TYPE_KW: "type"
+PROTOCOL: "protocol"
+FOR: "for"
+IN: "in"
+FN: "fn"
+LET: "let"
+VAR: "var"
+MUT: "mut"
+IF: "if"
+THEN: "then"
+ELSE: "else"
+MATCH: "match"
+OK: "ok"
+OK_UC: "Ok"
+ERR: "err"
+ERR_UC: "Err"
+SOME: "some"
+SOME_UC: "Some"
+NONE: "none"
+NONE_UC: "None"
+TODO: "todo"
+TRUE: "true"
+FALSE: "false"
+NOT: "not"
+AND: "and"
+OR: "or"
+PUB: "pub"
+EFFECT: "effect"
+TEST: "test"
+GUARD: "guard"
+BREAK: "break"
+CONTINUE: "continue"
+WHILE: "while"
+LOCAL: "local"
+MOD: "mod"
+FAN: "fan"
+// ──── END-KEYWORDS ──
+
+// Contextual identifiers the parser matches by SPELLING, not by token type.
+// They are ordinary identifiers to the lexer; this grammar reserves them.
+// See README gap G6.
+AS: "as"
+WHERE: "where"
+FN_TYPENAME: "Fn"
+
+// ── operators & delimiters (lexer.rs OPERATORS) ──── BEGIN-OPERATORS ──
+DOTDOTDOT: "..."
+DOTDOTLT: "..<"
+ARROW: "->"
+FATARROW: "=>"
+EQEQ: "=="
+BANGEQ: "!="
+LTEQ: "<="
+COMPOSE: ">>"
+GTEQ: ">="
+PIPEARROW: "|>"
+QQ: "??"
+QDOT: "?."
+DOTDOT: ".."
+STARSTAR: "**"
+LPAREN: "("
+RPAREN: ")"
+LBRACE: "{"
+RBRACE: "}"
+LBRACKET: "["
+RBRACKET: "]"
+COMMA: ","
+DOT: "."
+COLON: ":"
+SEMI: ";"
+EQ: "="
+BANG: "!"
+LT: "<"
+GT: ">"
+PLUS: "+"
+MINUS: "-"
+STAR: "*"
+SLASH: "/"
+PERCENT: "%"
+PIPE: "|"
+CARET: "^"
+QUESTION: "?"
+UNDERSCORE: "_"
+AT: "@"
+// ──── END-OPERATORS ──
+//
+// DELIBERATELY EXCLUDED — the lexer produces these tokens ONLY so the parser
+// can emit a migration diagnostic; they are not Almide, and a decoder must
+// never be allowed to sample them. The gate checks each line is still ABSENT
+// from this grammar and PRESENT in the lexer. ──── BEGIN-EXCLUDED ──
+// EXCLUDED: "&&"   -> not Almide; the parser answers with "use `and`"
+// EXCLUDED: "||"   -> not Almide; the parser answers with "use `or`"
+// EXCLUDED: "++"   -> not Almide; the parser answers with "use `+`"
+// EXCLUDED: "..="  -> E031, a retired range spelling; write `...`
+// ──── END-EXCLUDED ──
+
+// ── identifiers ──
+IDENT: /[a-z][A-Za-z0-9_]*/
+     | /_[A-Za-z0-9_]+/
+     | /`[a-z_][A-Za-z0-9_]*`/
+TYPENAME: /[A-Z][A-Za-z0-9_]*/
+        | /`[A-Z][A-Za-z0-9_]*`/
+
+// ── numbers ── (FLOAT outranks INT so `1.5` is one token, mirroring the
+// lexer's scan_float_tail; radix forms keep their prefix in the token value)
+INT.2: /0[xX][0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*/
+     | /0[bB][01_]*[01][01_]*/
+     | /0[oO][0-7_]*[0-7][0-7_]*/
+     | /[0-9][0-9_]*/
+FLOAT.3: /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9]*)?/
+       | /[0-9][0-9_]*[eE][+-]?[0-9]*/
+
+// ── strings ──
+// An escape pair, and the two nested-literal shapes an interpolation hole may
+// contain: the lexer scans `${…}` quote-aware, so a nested "…" neither closes
+// the outer string nor moves the brace depth (#1073).
+_ESC: /\\[\s\S]/
+_NESTED_DQ: "\"" (/[^"\\]/ | _ESC)* "\""
+_NESTED_SQ: "'" (/[^'\\]/ | _ESC)* "'"
+_HOLE_A: /[^{}"']/ | _NESTED_DQ | _NESTED_SQ
+_HOLE_B: _HOLE_A | "{" _HOLE_A* "}"
+_HOLE_C: _HOLE_A | "{" _HOLE_B* "}"
+_HOLE: "${" _HOLE_C* "}"
+_DQ_PLAIN_ATOM: /[^"\\$]/ | _ESC | /\$(?!\{)/
+
+// String terminals outrank IDENT so the `r` of a raw string is never taken as
+// an identifier, and HEREDOC outranks HEREDOC_INTERP so a heredoc with no
+// `${` hole lexes as the plain (TokenType::String) form.
+STRING.4: "\"" _DQ_PLAIN_ATOM* "\""
+INTERP_STRING.4: "\"" _DQ_PLAIN_ATOM* _HOLE (_DQ_PLAIN_ATOM | _HOLE)* "\""
+SQ_STRING.4: "'" (/[^'\\]/ | _ESC)* "'"
+RAW_STRING.5: /r"[^"]*"/
+RAW_HEREDOC.6: /r"""[\s\S]*?"""/
+HEREDOC.6: /"""(?:(?!"""|\$\{)[\s\S])*"""/
+HEREDOC_INTERP.5: /"""[\s\S]*?"""/
+
+// ── trivia ──
+// _NL is one LINE-BREAK RUN: consecutive blank lines, and the trailing or
+// own-line comments riding on them, collapse into a single token. The compiler
+// treats them the same way (skip_newlines drops Newline and Comment alike),
+// and it keeps the grammar free of unbounded newline repetition.
+_NL.1: /(?:[ \t\r]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)*\n)+/
+WS_INLINE: /[ \t\r]+/
+LINE_COMMENT: /\/\/[^\n]*/
+BLOCK_COMMENT: /\/\*[\s\S]*?\*\//
+
+%ignore WS_INLINE
+%ignore LINE_COMMENT
+%ignore BLOCK_COMMENT

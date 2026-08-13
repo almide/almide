@@ -1,0 +1,133 @@
+# Negative fixtures for the published grammar (docs/grammar/almide.lark).
+#
+# WHY THIS FILE EXISTS: a grammar that accepts everything would pass the
+# corpus-superset check trivially. Every fixture below must be REJECTED by the
+# published grammar AND by the compiler's own parser. The gate
+# (scripts/check-lark-grammar.sh) checks both directions, so a fixture can
+# neither rot into valid Almide nor be "satisfied" by a grammar that stopped
+# discriminating.
+#
+# Format: `### <name>` opens a fixture; every following line up to the next
+# `### ` (or EOF) is its source. Lines starting with `#` at column 0 outside a
+# fixture are comments.
+
+### missing-return-type
+fn add(a: Int, b: Int) {
+  a + b
+}
+
+### missing-eq-before-body
+fn add(a: Int, b: Int) -> Int {
+  a + b
+}
+
+### let-mut-rust-style
+fn f() -> Int = {
+  let mut x = 1
+  x
+}
+
+### bare-lambda-param
+fn f(xs: List[Int]) -> List[Int] = list.map(xs, x => x + 1)
+
+### c-style-and
+fn f(a: Bool, b: Bool) -> Bool = a && b
+
+### c-style-or
+fn f(a: Bool, b: Bool) -> Bool = a || b
+
+### elif-chain
+fn f(n: Int) -> String =
+  if n == 0 then "zero"
+  elif n == 1 then "one"
+  else "many"
+
+### match-arm-missing-fat-arrow
+fn f(x: Int) -> Int = match x {
+  0 => 1,
+  1 2,
+}
+
+### retired-exclusive-range
+fn f(n: Int) -> Int = {
+  var s = 0
+  for i in 0..n { s = s + i }
+  s
+}
+
+### retired-inclusive-range
+fn f(n: Int) -> Int = {
+  var s = 0
+  for i in 0..=n { s = s + i }
+  s
+}
+
+### ml-let-in
+fn f() -> Int = let x = 1 in x + 1
+
+### pascal-while-do
+fn f() -> Unit = {
+  var i = 0
+  while i < 3 do
+    i = i + 1
+  done
+}
+
+### chained-comparison
+fn f(a: Int, b: Int, c: Int) -> Bool = a < b < c
+
+### chained-range
+fn f() -> List[Int] = list.from_range(0..<1..<2)
+
+### cons-pattern
+fn f(xs: List[Int]) -> Int = match xs {
+  [] => 0,
+  h :: t => h,
+}
+
+### if-without-then
+fn f(a: Bool) -> Int = if a { 1 } else { 2 }
+
+### braced-import
+import { json }
+
+fn main() -> Unit = println("x")
+
+### uppercase-fn-name
+fn Add(a: Int, b: Int) -> Int = a + b
+
+### pub-on-type-decl
+pub type Point = { x: Int, y: Int }
+
+### bang-as-boolean-not
+fn f(a: Bool) -> Bool = !a
+
+### missing-pattern-before-arrow
+fn f(x: Int) -> Int = match x {
+  => 0,
+}
+
+### unclosed-block
+fn f() -> Int = {
+  let a = 1
+  a
+
+### function-keyword
+function add(a: Int, b: Int) -> Int = a + b
+
+### return-statement
+fn f() -> Int = {
+  return 1
+}
+
+### type-annotation-without-type
+fn f() -> Int = {
+  let x: = 1
+  x
+}
+
+### trailing-binary-operator
+fn f(a: Int) -> Int = a +
+
+### param-without-type
+fn add(a, b) -> Int = a + b
