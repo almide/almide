@@ -227,6 +227,7 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | [#1314](https://github.com/almide/almide/issues/1314) | snapshot/expect テスト内蔵(--update-snapshots) | 0.6x | 内蔵例のない差別化空白。仕様凍結(0.96)より前に。inline vs .snap は ○× |
 | [#1316](https://github.com/almide/almide/issues/1316) | 新設データ構造の flat index-based レイアウト規律(方針) | 0.6x | 0.61(CLIF spike)の前提規律。0.49 キャッシュ形式実装も拘束する |
 | [#1318](https://github.com/almide/almide/issues/1318) | **BUG**: fmt がブロックコメントを黙って削除(lexer が `/* */` を無トークン化) | 0.5x | #1309 の verifier 構築中に発見。fmt 破壊ファミリの残党 — conservation ゲートの適用範囲拡大とセット |
+| [#1322](https://github.com/almide/almide/issues/1322) | **BUG**: 全ツリー wasm tier で exercise 3 本が失敗 — affine-cipher は native 合格/wasm TRAP の parity 穴、2 本は現行ルールに未追随の腐り | 0.5x | tier 実行(#1308/#1309 検証)中に発見、クリーン develop で A/B 済みの既存負債。wasm leg 対等性(decade テーマ)の管轄 |
 
 dojo 側: [almide-dojo#2](https://github.com/almide/almide-dojo/issues/2)(effect 宣言有無の MSR A/B — 文献に存在しない最初の数字)は repo 境界ルールにより Dojo 管轄。0.59 と #585(ポジションペーパー)に給餌する。
 
