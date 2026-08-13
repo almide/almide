@@ -87,6 +87,11 @@ pub struct Lexer;
 
 impl Lexer {
     pub fn tokenize(src: &str) -> Vec<Token> {
+        // #1311 front-end phase accounting. `note_source` sits OUTSIDE the span
+        // so its newline scan is not billed to `lex`; both are no-ops unless
+        // `almide check --timings` armed the accounting.
+        almide_base::profile::note_source(src);
+        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Lex);
         let mut tokens = Vec::new();
         // Strip a leading UTF-8 BOM (editor/Windows artifact). Without this it
         // would lex as an Unknown token and fail the whole file (#1308).

@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 
 ## Overview
 
@@ -129,6 +129,7 @@ almide check --deny-warnings            # 警告をエラーとして扱う
 almide check --json                     # 診断を JSON で出力
 almide check --explain E001             # エラーコードの説明
 almide check --effects                  # 各関数のエフェクト分析を表示
+almide check --timings                  # フロントエンドの phase 別内訳
 ```
 
 | オプション | 説明 |
@@ -137,6 +138,31 @@ almide check --effects                  # 各関数のエフェクト分析を�
 | `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
 | `--explain <code>` | エラーコード (E001〜E030, E420) の説明 |
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析 |
+| `--timings` | lex / parse / check の phase 別 wall time（#1311） |
+
+#### `--timings`
+
+フロントエンドの時間を lex / parse / check に分解して stderr に 2 行出す。
+1 行目は人間向け、2 行目は機械可読（キー名は API — `scripts/check-edit-loop-scale.sh`
+の per-phase ratchet が読む）:
+
+```
+$ almide check --timings spec/lang/expr_test.almd
+timings: lex 1.8ms (16.9%, 2443k lines/s) parse 1.6ms (15.3%, 2692k lines/s) check 3.9ms (35.9%, 1149k lines/s) | other 3.4ms | total 10.7ms over 4426 lines in 43 sources
+almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns":10717583,"lines":4426,"bytes":109057,"sources":43}
+```
+
+- 計上は `--timings` を付けた時だけ有効。付けない実行は clock を一切読まない
+  （計測が計測対象を動かさないため — 実測 A/B は `research/benchmark/editloop/scale.py` の冒頭）。
+- `lines` / `sources` は **実際に lex したもの全部**。エントリと自プロジェクトの
+  モジュールに加え、どのチェックも必ず払う auto-import 済み bundled stdlib を含む。
+  lines/sec の分母はこれ。
+- `other` は 3 phase 以外の残り（ファイル I/O、import 解決、canonicalize、
+  unused 警告用の lowering）。残余に名前を与えないと任意の回帰を吸ってしまう。
+- エラーで終了した check では出さない。時間が診断レンダラに行っているため。
+
+テスト: `tests/check_timings_test.rs`（キー一式、各 phase 非ゼロ、二重計上なし、
+`--timings` なしでは無出力）。ratchet 側は `scripts/check-edit-loop-scale.sh`。
 
 `--json` の 1 行は
 `{level, code, message, hint, here, try, try_replace, context, file, line, col, end_col, secondary}`。

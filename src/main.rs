@@ -169,6 +169,10 @@ enum Commands {
         /// Show effect/capability analysis for each function
         #[arg(long)]
         effects: bool,
+        /// Report front-end wall time split by phase (lex / parse / check) plus
+        /// a machine-readable `almide-timings {...}` line (#1311)
+        #[arg(long)]
+        timings: bool,
     },
     /// Start the Language Server Protocol server (for editor integration)
     Lsp,
@@ -568,7 +572,7 @@ fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json
 /// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
 /// returns early into the caller via its own `bool` return (`true` = already
 /// handled, caller should return).
-fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool) {
+fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool, timings: bool) {
     if let Some(code) = explain {
         print_error_explanation(&code);
         return;
@@ -579,7 +583,7 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
     } else if json {
         cli::cmd_check_json(&file);
     } else {
-        cli::cmd_check(&file, deny_warnings);
+        cli::cmd_check(&file, deny_warnings, timings);
     }
 }
 
@@ -821,7 +825,7 @@ fn dispatch(cli: Cli) {
             });
         }
         Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
-        Commands::Check { file, deny_warnings, json, explain, effects } => dispatch_check(file, deny_warnings, json, explain, effects),
+        Commands::Check { file, deny_warnings, json, explain, effects, timings } => dispatch_check(file, deny_warnings, json, explain, effects, timings),
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
             cli::cmd_fix(&file, dry_run, json);
