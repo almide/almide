@@ -6,6 +6,7 @@ pub fn takes_raw_fn_last_arg(name: &str) -> bool {
     matches!(name,
         "almide_rt_fs_fold_lines_chunked" |
         "almide_rt_fs_fold_lines_range" |
+        "almide_rt_list_flat_map_arr" |
         "almide_rt_value_decode_list" |
         "almide_rt_value_decode_option" |
         "almide_rt_value_decode_option_custom" |
@@ -381,6 +382,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_list_find_index" => &[false, false],
         "almide_rt_list_first" => &[false],
         "almide_rt_list_flat_map" => &[false, false],
+        "almide_rt_list_flat_map_arr" => &[false, false],
         "almide_rt_list_flat_map_effect" => &[false, false],
         "almide_rt_list_flatten" => &[false],
         "almide_rt_list_fold" => &[false, false, false],

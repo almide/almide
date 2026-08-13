@@ -5,10 +5,14 @@
 //!
 //! 2. **Borrow index lift**: `xs[f(xs)] = v` → `{ let __idx = f(xs); xs[__idx] = v; }`
 //!    Resolves Rust simultaneous mutable+immutable borrow conflicts in IndexAssign.
+//!
+//! 3. **flat_map array return** (#1337): `list.flat_map(xs, |x| … [a, b])` →
+//!    `almide_rt_list_flat_map_arr` with the tail literal emitted as a Rust
+//!    ARRAY. Kills one heap allocation PER ELEMENT.
 
 use std::collections::HashSet;
 use almide_ir::*;
-use almide_base::intern::sym;
+use almide_base::intern::{Sym, sym};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -21,6 +25,13 @@ impl NanoPass for RustLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
+        // (A0, #1337) `flat_map` with a fixed-arity list literal in the lambda
+        //     tail → the array-returning runtime twin. Runs BEFORE the boxing
+        //     step below so that step sees the NEW symbol: the generated
+        //     `takes_raw_fn_last_arg` registry reads the twin's `F: Fn` bound
+        //     and un-boxes the closure, which is what keeps the per-element
+        //     call static. See `lower_flat_map_arrays`.
+        if lower_flat_map_arrays(&mut program) { changed = true; }
         // (A) Box closures sitting in type-erased join slots as `Rc<dyn Fn>`.
         //     Single source of truth — see `box_closures_program` below.
         if box_closures_program(&mut program) { changed = true; }
@@ -127,6 +138,99 @@ fn box_closures_program(program: &mut IrProgram) -> bool {
 
 fn unit_ir() -> IrExpr {
     IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// flat_map with a fixed-arity literal → array return (#1337)
+//
+// `list.range(0, n) |> list.flat_map((i) => [a, b])` is the materializing build
+// idiom CLAUDE.md and docs/CHEATSHEET.md recommend, and it lowered to
+// `almide_rt_list_flat_map(xs, Rc<dyn Fn(A) -> Vec<B>>)` — a signature that
+// forces the lambda to HEAP-ALLOCATE its two-element intermediate on every
+// iteration. Measured on the listbuild benchmark's shape at 2^22 elements
+// (M4 Pro, `--release`, median of 9), building the same 8.4M-element result:
+//
+//   with_capacity + push (Rust ref)               33.3 ms
+//   range-Vec + Rc<dyn Fn> + `vec![a, b]`         79.0 ms   ← what we emitted
+//   range-Vec + Rc<dyn Fn> + `[a, b]`             35.2 ms
+//   range-Vec + static fn  + `vec![a, b]`         71.3 ms
+//   (0..n) iter  + static fn + `[a, b]`           35.8 ms
+//
+// The per-element `Vec` is 44 ms of the 79 — the entire gap. The `Rc<dyn Fn>`
+// indirection is 8 ms and the materialized `list.range` intermediate is ~0, so
+// neither is worth a pass on its own. Emitting the tail literal as an ARRAY is.
+//
+// The rewrite changes only the intermediate's REPRESENTATION — same order, same
+// elements, same length, same lambda body — so it needs no guard beyond the
+// shape itself: the tail of the lambda body must be a `List` literal whose
+// arity is statically known. A tail that is a call, a branch, or a spread keeps
+// the `Vec`-returning form.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Largest tail-literal arity that gets the array form. Above this the
+/// per-element allocation is amortized over enough work that the `[T; N]`
+/// move (copied through `extend` rather than pointer-swapped) stops paying,
+/// and the shape stops being the one the idiom docs produce.
+const FLAT_MAP_ARRAY_MAX_ARITY: usize = 8;
+
+fn lower_flat_map_arrays(program: &mut IrProgram) -> bool {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+
+    struct Lower { changed: bool }
+    impl IrMutVisitor for Lower {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            if try_flat_map_array(expr) { self.changed = true; }
+        }
+    }
+
+    let mut l = Lower { changed: false };
+    for f in program.functions.iter_mut() { l.visit_expr_mut(&mut f.body); }
+    for tl in program.top_lets.iter_mut() { l.visit_expr_mut(&mut tl.value); }
+    for m in program.modules.iter_mut() {
+        for f in m.functions.iter_mut() { l.visit_expr_mut(&mut f.body); }
+        for tl in m.top_lets.iter_mut() { l.visit_expr_mut(&mut tl.value); }
+    }
+    l.changed
+}
+
+/// Rewrite ONE `almide_rt_list_flat_map` node whose lambda tail is a
+/// fixed-arity list literal. Returns whether it fired.
+fn try_flat_map_array(expr: &mut IrExpr) -> bool {
+    let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { return false };
+    if symbol.as_str() != "almide_rt_list_flat_map" || args.len() != 2 { return false; }
+    let Some(IrExpr { kind: IrExprKind::Lambda { body, .. }, .. }) = args.get_mut(1) else { return false };
+    if !rewrite_tail_list_to_array(body) { return false; }
+    *symbol = sym("almide_rt_list_flat_map_arr");
+    true
+}
+
+/// Rewrite the list literal a lambda body EVALUATES to — itself, or the tail
+/// of the (possibly nested) block it ends in — into an `InlineRust` array
+/// literal. Declines on a block with no tail expression, on a non-literal
+/// tail (a call, a branch), and on an arity outside the array band.
+fn rewrite_tail_list_to_array(e: &mut IrExpr) -> bool {
+    match &mut e.kind {
+        IrExprKind::Block { expr: Some(tail), .. } => return rewrite_tail_list_to_array(tail),
+        IrExprKind::List { elements } => {
+            let arity = elements.len();
+            if arity == 0 || arity > FLAT_MAP_ARRAY_MAX_ARITY { return false; }
+            // `[{e0}, {e1}, …]` — the element exprs ride the IR to the walker
+            // like any other InlineRust arg, so clone/borrow decoration on
+            // them still renders.
+            let template = format!(
+                "[{}]",
+                (0..arity).map(|i| format!("{{e{}}}", i)).collect::<Vec<_>>().join(", "),
+            );
+            let named: Vec<(Sym, IrExpr)> = std::mem::take(elements).into_iter()
+                .enumerate()
+                .map(|(i, el)| (sym(&format!("e{}", i)), el))
+                .collect();
+            e.kind = IrExprKind::InlineRust { template, args: named };
+            true
+        }
+        _ => false,
+    }
 }
 
 /// True for a `fan.*` call (`fan.any`/`settle`/`race`/`map`, in either
