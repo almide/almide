@@ -162,8 +162,19 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// C-145 registry miss walled every `or_else` instantiation, and the same miss in
 /// `is_self_host_option_module_fn` left a `match` over a mono-specialized
 /// `option.collect` result UNTRACKED, walling the whole function.
+///
+/// #1144: a carrier name may itself BEGIN with `__` (the ADR-0006
+/// `__fallible_*` family — `fs.__fallible_fold_lines`). The mono suffix is a
+/// `__` strictly INSIDE the name, so the split must start AFTER a leading
+/// `__`; splitting at offset 0 returned the empty string, and every name-keyed
+/// decision (registry routing, read-shape tracking) then missed silently —
+/// walling the whole fn instead of routing it.
 pub(crate) fn base_stdlib_fn_name(func: &str) -> &str {
-    func.split_once("__").map_or(func, |(base, _)| base)
+    let lead = if func.starts_with("__") { 2 } else { 0 };
+    match func[lead..].split_once("__") {
+        Some((base, _)) => &func[..lead + base.len()],
+        None => func,
+    }
 }
 
 pub(crate) fn list_heap_call_name(
@@ -229,6 +240,22 @@ fn list_heap_call_name_special_cases(
     // `_ls` (fold_lines_range, the collect_partition shape). Any other
     // accumulator type routes to an unregistered `_x` name and walls cleanly
     // at render — never a wrong-typed link.
+    // #1144 (C-269): the ADR-0006 fallible carrier the checker rewrites
+    // `fs.fold_lines(p, z, (a, l) => g(a, l)!)` into. It routes on the SAME
+    // accumulator key as the total form — `Map[String, Int]` to the `_msi`
+    // fallible walker (fs_fold_lines.almd), every other accumulator to an
+    // unregistered `_x` name that walls at render rather than mislinking.
+    if module == "fs" && func == "__fallible_fold_lines" {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let msi_acc = matches!(arg_tys.get(1),
+            Some(Ty::Applied(TC::Map, a)) if a.len() == 2
+                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+        return Some(if msi_acc {
+            "fs.__fallible_fold_lines_msi".to_string()
+        } else {
+            "fs.__fallible_fold_lines_x".to_string()
+        });
+    }
     if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range") {
         use almide_lang::types::constructor::TypeConstructorId as TC;
         let init_idx = match func { "fold_lines" => 1, "fold_lines_chunked" => 2, _ => 3 };
