@@ -3143,3 +3143,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/place_assign_ascription.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-255"
+spec      = "ALS-E23"
+title     = "Record literals, member reads, and spread updates preserve value semantics identically on both targets"
+statement = "ALS-E23: the record literal, Int and String member reads, and the spread update `{ ...p, y: 20 }` (unlisted fields inherited) — with VALUE SEMANTICS pinned: the spread source is unchanged afterward (p.y still 2). Byte-identical native <-> wasm (fixture pins 3/a/21/a/2)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/record_forms.almd", class = "fixture" },
+]
