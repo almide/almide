@@ -832,10 +832,18 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // acc to an unregistered name that walls cleanly at render. Their
         // CLOSURE argument rides the same lift machinery every pure fold twin
         // uses — the callback's own capabilities are captured by the lift.
-        // #1144: the ADR-0006 fallible carrier the checker rewrites
-        // `fs.fold_lines(p, z, (a, l) => g(a, l)!)` into — same read, same
-        // capability, only the callback's answer changed shape.
-        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range" | "__fallible_fold_lines"))
+        // #1144: the ADR-0006 fallible carriers the checker rewrites
+        // `fs.fold_lines(p, z, (a, l) => g(a, l)!)` / `fs.for_each_line(p, (l)
+        // => g(l)!)` into — same read, same capability, only the callback's
+        // answer changed shape. BOTH must be admitted, including
+        // `__fallible_for_each_line`, which has no wasm twin: an unadmitted
+        // effectful call is refused HERE, in lower_function, which walls the
+        // enclosing REAL function and trips the walled-real ratchet
+        // (proofs/walled-real-baseline.txt is permanently 0). Admitting it
+        // keeps lowering TOTAL and moves the honest refusal to the renderer,
+        // where the unlinked twin name lives — the same place the `_x`
+        // accumulator cells of the total family wall.
+        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range" | "__fallible_fold_lines" | "__fallible_for_each_line"))
 }
 
 /// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up, group 3

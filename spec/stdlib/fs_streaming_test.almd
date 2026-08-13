@@ -102,6 +102,14 @@ local effect fn traced_note(log: String, line: String) -> Unit = {
 
 local effect fn fold_traced(p: String, log: String) -> Int = fs.fold_lines(p, 0, (acc, line) => traced_step(log, acc, line)!)!
 
+// `each_traced` is a REAL function in the corpus-wall scan (proofs/corpus-wall.sh
+// enumerates functions, not runnable files, so this file's `wasm:skip` does not
+// shield it). It must therefore LOWER — `proofs/walled-real-baseline.txt` is
+// permanently 0 and a new walled-real row is a reviewed regression, not a fix.
+// It does lower: the capability witness admits `fs.__fallible_for_each_line`
+// (crates/almide-mir/src/lower/calls.rs), so the honest refusal lands in the
+// RENDERER on the unlinked twin name — the same layer the total family's `_x`
+// accumulator cells wall at, not in lower_function.
 local effect fn each_traced(p: String, log: String) -> Unit = fs.for_each_line(p, (line) => traced_note(log, line)!)!
 
 test "fold_lines with a fallible callback stops at the FIRST err" {
