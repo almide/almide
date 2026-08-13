@@ -115,4 +115,29 @@ native 限定の性質であり、観測可能な約束には含まれない。
 テスト: `spec/wasm_cross/fs_fallible_stream_callback.almd`（両レッグ）,
 `spec/stdlib/fs_streaming_test.almd`（for_each_line セル — native 限定）,
 `tests/fs_streaming_family_gate_test.rs`（行列ゲート）。
-Contracts: C-274。
+
+Contracts: C-042。
+
+## ALS-R7 HTTP レスポンスヘッダの規範
+
+`http` のレスポンス構築族（`response` / `json` / `redirect` / `with_headers` /
+`status` / `body` / `set_header` / `get_header`）は**ネットワークに触れない純
+データ操作**で、両ターゲットで走る。ヘッダ名の規範は3つ:
+
+- **フィールド名は大小文字を区別しない**（RFC 9110 §5.1）。畳み込みは
+  **ASCII のみ**（フィールド名は `token` であり、v0 の
+  `eq_ignore_ascii_case` と一致させる — Unicode の `string.to_lower` を
+  使ってはならない）。`get_header` は最初の一致を返し、無ければ none。
+- **1つのフィールド名につきエントリは高々1つ。** 書き込み（`set_header`・
+  `with_headers`）は大小文字を無視して既存エントリの**値をその場で上書き**
+  し（名前の綴りは最初に格納されたものを保つ・位置も動かない）、無ければ
+  末尾に追加する。ゆえに `get_header(set_header(r, k, v), k') == some(v)`
+  は `k` と `k'` が ASCII 大小文字違いなら常に成り立つ。
+- **`with_headers` は渡された Map そのもの**（map 順）を返し、
+  `Content-Type` を勝手に**播かない**。既定の Content-Type は、名前を与える
+  手段が他にない `response`（`text/plain`）と `json`
+  （`application/json`）だけが持つ。`redirect` は `Location` のみを持つ。
+
+テスト: `spec/wasm_cross/http_response_headers.almd`,
+`spec/stdlib/http_response_test.almd`。
+Contracts: C-275。

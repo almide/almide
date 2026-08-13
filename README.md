@@ -100,7 +100,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 274 contracts — 274 active, 0 flagged-for-revision.**
+> **Ledger: 275 contracts — 275 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
@@ -261,7 +261,7 @@ publishing, and a figure measured with `time -p` on a sub-10ms program is noise.
 LLM-writability row above and the artifact sizes below are the claims this README currently
 stands behind.
 
-| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), 1.16–1.18× on fasta and FFT — these carry a CI ratio ratchet. The allocation-heavy rows are reported, not anchored (the ratio compares allocators): 1.12× on the string workload against same-semantics Rust, ~1.6× on `listbuild` which is the deterministic software libm rather than codegen ([why](./research/benchmark/perf/string-gap-1004.md)). [Scoreboard](./docs/project/BENCHMARKS.md) |
+| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), 1.16–1.18× on fasta and FFT; ~1.6× where the workload is list materialization rather than arithmetic (#1004) — CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)) |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
 reachability DCE prunes unreached runtime helpers inside the renderer itself, but
@@ -296,18 +296,6 @@ Single source of truth for Almide syntax — keywords, operators, precedence, an
 
 - **VS Code** — [vscode-almide](https://github.com/almide/vscode-almide) — Syntax highlighting, bracket matching, comment toggling, code folding
 - **Tree-sitter** — [tree-sitter-almide](https://github.com/almide/tree-sitter-almide) — Tree-sitter grammar for editors that support it (Neovim, Helix, Zed)
-- **LSP** — built into the binary: `almide lsp` (hover, completion, documentSymbol, formatting, definition, signatureHelp, codeAction)
-
-### Agent Support — MCP
-
-Agents are a user class here, and for this language they are *the* user class. `almide mcp` serves the compiler over the Model Context Protocol, so a model calls `check` / `test` / API-outline / `explain` / `fmt --check` as typed tools and reads JSON instead of parsing rendered text — the step where accuracy leaks.
-
-```bash
-/plugin marketplace add almide/almide     # Claude Code: MCP tools + the .almd LSP
-/plugin install almide@almide
-```
-
-See [docs/mcp.md](./docs/mcp.md) for the tool list, the JSON shapes, and what is deliberately not structured yet.
 
 ### Playground — [playground](https://github.com/almide/playground)
 
@@ -319,7 +307,6 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/SPEC.md](./docs/SPEC.md) — Full language specification
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
-- [docs/mcp.md](./docs/mcp.md) — MCP server + Claude Code plugin: the agent-facing compiler surface
 - [docs/design/DESIGN.md](./docs/design/DESIGN.md) — Design philosophy and trade-offs
 - [docs/design/EQUIVALENCE.md](./docs/design/EQUIVALENCE.md) — The byte-identity claim: scope, ledger mechanics, evidence layers
 - [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1 proof-carrying compilation architecture

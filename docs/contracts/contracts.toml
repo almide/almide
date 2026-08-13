@@ -3375,4 +3375,15 @@ evidence  = [
   { path = "spec/wasm_cross/fs_fallible_stream_callback.almd", class = "fixture" },
   { path = "spec/stdlib/fs_streaming_test.almd", class = "fixture" },
   { path = "tests/fs_streaming_family_gate_test.rs", name = "every_streaming_cell_decides_its_fallible_form", class = "fixture" },
+
+# ── http RESPONSE HEADERS ──────────────────────────────────────────────
+[[contract]]
+id        = "C-275"
+spec      = "ALS-R7"
+title     = "The http response-header surface answers identically on both targets, with case-insensitive field names"
+statement = "ALS-R7: header field names are CASE-INSENSITIVE under an ASCII fold (RFC 9110 §5.1 — a field name is a `token`, so the fold matches `eq_ignore_ascii_case` and must not reach for the Unicode string.to_lower), a response carries AT MOST ONE entry per field name because every write upserts the matching entry's value in place, and `with_headers` yields EXACTLY the caller's map — no seeded Content-Type, which only `response` (text/plain) and `json` (application/json) carry because they give the caller no other way to name one, while `redirect` carries only Location. #1352 measured NINE divergent cells here: native seeded a Content-Type in `with_headers` and matched case-insensitively in `get_header` while the self-host seeded nothing and matched with `==`, so a wasm-target program inspecting a response it had just built silently read `none`. The seeding side lost the ruling on REACHABILITY — with the seed, `with_headers` cannot express a response without a Content-Type (there is no remove_header), without it both shapes are reachable — and `set_header`'s case-SENSITIVE match lost on both legs at once: setting `content-type` on a response holding `Content-Type` appended a second entry the case-insensitive lookup then shadowed, so the write vanished natively too."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/http_response_headers.almd", class = "fixture" },
 ]

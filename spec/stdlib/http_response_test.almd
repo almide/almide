@@ -49,7 +49,7 @@ test "http.with_headers creates response with custom headers" {
   }
 }
 
-// ALS-R7 / C-269 — the three header rulings, asserted on the native leg too.
+// ALS-R7 / C-275 — the three header rulings, asserted on the native leg too.
 test "http.with_headers seeds nothing the caller did not pass" {
   let resp = http.with_headers(200, "hi", map.new() |> map.set("X-A", "1"))
   assert_eq(http.get_header(resp, "Content-Type") ?? "none", "none")
