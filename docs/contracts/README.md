@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-266 contracts
+267 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -294,4 +294,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-264 | Scalar-field optional chains yield some/none identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-265 | The guard statement's pass and raise paths behave identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-266 | guard let binds the success payload and raises on the failing polarity, identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-267 | The binary operator surface evaluates identically on both targets, including the signed division rulings | 0.57.1 | active | fixture | 1 |
 

@@ -3275,3 +3275,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-267"
+spec      = "ALS-E29"
+title     = "The binary operator surface evaluates identically on both targets, including the signed division rulings"
+statement = "ALS-E29: Int arithmetic with the SIGNED rulings pinned — `/` truncates toward zero (-7 / 3 = -2, not the floor -3) and `%` takes the dividend's sign (-7 % 3 = -1), the C/Rust convention rather than floor division — plus Float addition, the OVERLOADED `+` on String (catdog) and List (length 3), all six comparisons, `==`/`!=` on Int and String, the `and`/`or` keywords (there is no `&&`/`||`; negation is `not`, ALS-E7), and `**` which desugars to a math.pow/math.fpow call credited 1:1 in the caps ledger. Byte-identical native <-> wasm across 14 observation points."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/binary_operators.almd", class = "fixture" },
+]
