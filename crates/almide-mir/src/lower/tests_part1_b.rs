@@ -116,6 +116,39 @@
     }
 
     #[test]
+    fn range_bind_used_only_as_a_for_in_head_does_not_materialize() {
+        // #1400, the counterpart to the pin above: when the bound range's ONLY read
+        // is the `for-in` head, the bind emits NO `list.range` — the loop takes the
+        // counting path instead, the way the inline `for i in 0..<3` head already
+        // did. Materializing here is what made a range longer than memory OOM on
+        // the wasm leg while native iterated it lazily.
+        let range = IrExprKind::Range {
+            start: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+            end: Box::new(ir_expr(IrExprKind::LitInt { value: 3 }, Ty::Int)),
+            inclusive: false,
+        };
+        let loop_expr = ir_expr(
+            IrExprKind::ForIn {
+                var: VarId(1),
+                var_tuple: None,
+                iterable: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                body: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(range, list_int())),
+            stmt(IrStmtKind::Expr { expr: loop_expr }),
+        ]);
+        let mir = lower_body(&b, "main").expect("lowers");
+        assert!(
+            !mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "list.range")),
+            "a head-only Range bind must NOT materialize — it takes the counting loop"
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
     fn range_bind_with_call_bounds_executes_them() {
         use almide_lang::intern::sym;
         // let r = f()..<g() — scalar CALL bounds are lowered as REAL calls (not

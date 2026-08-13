@@ -1,33 +1,19 @@
 // @contract: C-238
-// #1400: a `let`-bound range whose ONLY use is a `for-in` head is NOT materialized
-// — it takes the same counting loop the inline `for i in 0..<n` spelling takes.
+// #1400 guard rails: a `let`-bound range whose ONLY use is a `for-in` head takes
+// the counting loop instead of materializing a `list.range` block. The cell that
+// can ONLY pass by not materializing (4294967294 iterations) lives in
+// range_bind_huge.almd — alone, because it is the one cell the reference
+// interpreter cannot vote on. Everything here is small enough for all THREE
+// oracles, and exists to prove the deferral did not break the shapes
+// range_first_class.almd already pins.
 //
-// The bind used to emit the real `list.range` block on the wasm leg (#1272's fix for
-// a deferred-empty bind that iterated ZERO times). Native never materialized: it
-// iterates lazily. So a range longer than memory printed the right answer natively
-// and died with `Error: out of memory` on wasm — the fuzzer found it (2026-08-13
-// nightly, run 31667874852 seed 506685997633 index 522, mutating range_first_class).
-//
-// The FIRST cell is the one that could only pass by not materializing: 4294967294
-// iterations. A materializing leg needs ~32 GB for the block; a counting leg needs
-// two locals. It is the load-bearing case — the rest of this file is the guard rail
-// that the deferral did not break the shapes range_first_class.almd already pins.
-//
-// The cells after it are the DISQUALIFYING shapes, which must still materialize and
-// still be correct: a var that is also indexed or measured, and a var read by two
-// separate heads. And the #1272 shape itself — an EMPTY bound range must iterate
-// zero times, not once, on both legs.
+// The DISQUALIFYING shapes must still materialize and still be correct: a var
+// that is also indexed or measured, and a var read by two separate heads. And
+// the #1272 shape itself — an EMPTY bound range must iterate zero times, not
+// once, on both legs.
 fn upper() -> Int = 4
 
 effect fn main() -> Unit = {
-  // The load-bearing cell: 0 + 1 + … + 4294967293 = 9223372030412324865, which is
-  // representable in i64 (it is < 2^63-1 by 942). Both legs must print it.
-  let huge = 0..<4294967295
-  var hs = 0
-  for i in huge {
-    hs = hs + i
-  }
-  println("huge=" + int.to_string(hs))
   // Exclusive, inclusive, non-zero start, call-typed bound — head-only, so all four
   // take the counting path now.
   let a = 0..<4
