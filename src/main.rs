@@ -184,6 +184,10 @@ enum Commands {
         /// Check formatting without writing (exit non-zero on drift)
         #[arg(long)]
         check: bool,
+        /// Machine-readable `--check`: one JSON object naming the files that
+        /// need formatting (implies --check; still exits non-zero on drift)
+        #[arg(long)]
+        json: bool,
         /// Print the formatted text to stdout without writing
         #[arg(long)]
         dry_run: bool,
@@ -600,11 +604,14 @@ fn dispatch_ide(cmd: IdeCommand) {
 /// `parse_file` as-is and report "Is a directory", which the always-zero exit then
 /// swallowed, so a CI job pointed at a tree silently checked nothing (#919). With no
 /// argument at all the `src/` sweep is unchanged.
-fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool, no_import_edit: bool) {
-    let mode = match (check, dry_run) {
-        (true, _) => cli::FmtMode::Check,
-        (false, true) => cli::FmtMode::DryRun,
-        (false, false) => cli::FmtMode::Write,
+fn dispatch_fmt(files: Vec<String>, check: bool, json: bool, dry_run: bool, no_import_edit: bool) {
+    let mode = match (json, check, dry_run) {
+        // `--json` is the machine-readable spelling of the SAME gate: it never
+        // writes, and it exits non-zero on drift exactly like `--check`.
+        (true, _, _) => cli::FmtMode::CheckJson,
+        (false, true, _) => cli::FmtMode::Check,
+        (false, false, true) => cli::FmtMode::DryRun,
+        (false, false, false) => cli::FmtMode::Write,
     };
     let fmt_files = if files.is_empty() {
         let mut found = Vec::new();
@@ -732,7 +739,7 @@ fn dispatch_rest(command: Commands) {
             print_error_explanation(&code);
         }
         Commands::Ide { cmd } => dispatch_ide(cmd),
-        Commands::Fmt { files, check, dry_run, no_import_edit } => dispatch_fmt(files, check, dry_run, no_import_edit),
+        Commands::Fmt { files, check, json, dry_run, no_import_edit } => dispatch_fmt(files, check, json, dry_run, no_import_edit),
         Commands::Compile { module, json, dry_run, output } => {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
