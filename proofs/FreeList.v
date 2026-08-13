@@ -760,11 +760,12 @@ Proof.
   apply p_steps_refl.
 Qed.
 
-(* WHAT REMAINS TRUSTED here (#909's third bullet, deliberately NOT claimed):
-   "reuse restores rc=1". This model tracks ADDRESSES — which block is free, live
-   or pinned — not reference COUNTS, so the rc value a reused block starts life
-   with is still guarded by the churn + byte gates and by `WasmExec`'s byte-level
-   rc theorems, not by this file. *)
+(* WHAT THIS FILE DOES NOT COVER — #909's third bullet, "reuse restores rc=1".
+   This model tracks ADDRESSES: which block is free, live or pinned. The reference
+   COUNT lives in the companion `FreeListRc.v`, which pairs this allocator with
+   `RuntimeModel`'s linear memory and proves that a block handed back off the
+   free-list carries no stale count and leaves the constructor's store at exactly
+   1 (`reuse_hands_back_a_zero_count_block` / `reuse_restores_rc_1`). *)
 
 (* AXIOM AUDIT — soundness rests on the kernel alone. *)
 Print Assumptions alloc_not_live.

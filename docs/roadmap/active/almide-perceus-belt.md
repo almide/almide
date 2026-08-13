@@ -171,8 +171,27 @@ of which was in the proof surface at the time.
   (`pinned_stays_immortal_forever`, `p_region_reset_preserves_PINV`). This is the
   invariant C-042 violated.
 
-STILL TRUSTED, not proven: **"reuse restores rc=1"** and "a block on the free
-list has rc=0" — `FreeList.v` tracks ADDRESSES, not reference COUNTS, so the rc
-side of reuse is still guarded by the churn + byte gates and `WasmExec`'s
-byte-level rc theorems. Emitter-level rc operations (stored-field dups,
-in-runtime incs) also remain invisible to the IR verifier by construction.
+- **"reuse restores rc=1"** — the COUNT side, in the companion
+  [`proofs/FreeListRc.v`](../../../proofs/FreeListRc.v). It puts the reference
+  count in scope as `RuntimeModel.read_rc` (the same cell `WasmRcDec`/`WasmExec`
+  bind to the emitted bytes) and proves the two halves separately: the ALLOCATOR
+  hands a reused block back carrying no stale count — it arrives at exactly 0
+  (`reuse_hands_back_a_zero_count_block`) — and the constructor's store leaves it
+  at exactly `RC_INITIAL` = 1 (`reuse_restores_rc_1`). The invariant "a free-list
+  block reads 0, a live block reads ≥ 1" survives an arbitrary run
+  (`r_steps_preserve_RINV`) and a region reset
+  (`r_region_reset_preserves_RINV`), which is what makes the `$rc_dec` sentinel a
+  wall: `double_release_traps`. The pair is proven NECESSARY, not decorative —
+  `omitting_the_rc_store_traps_on_the_first_release` runs the trace where the
+  renderer's store is missing and the reused block traps at its first release.
+
+STILL TRUSTED, and only this: that the EMITTER writes the `RC_INITIAL` store at
+every rc-managed `call $alloc` site — a property of the renderer, not of the
+allocator, so no proof about the allocator can reach it. It is gated executably
+by `almide-mir`'s `every_rc_managed_alloc_site_initializes_the_rc_cell`, which
+enumerates all 16 `$alloc` sites in the renderer sources, requires each to
+initialize the rc cell or be a named raw-scratch site (the modelled-and-proven
+`alloc_raw` category: argv/envp buffers, never released), and reads `RC_INITIAL`
+out of the `.v` file so the constant cannot drift. Emitter-level rc operations
+(stored-field dups, in-runtime incs) also remain invisible to the IR verifier by
+construction.

@@ -50,7 +50,7 @@ The **trusted base is the Rocq kernel plus the extracted checker** (~1,400 lines
 
 <!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
 > **Measured, regenerated:** extracted checker `proofs/checker.ml` = **1196 lines** (+ 309
-> `.mli`); Rocq spine = **121 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
+> `.mli`); Rocq spine = **148 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
 > Lean Perceus belt = **41 theorems**, 0 sorry (CI-gated).
 <!-- tcb:generated:end -->
 
