@@ -1,0 +1,40 @@
+// listbuild — materialize 2^k interleaved (re, im) Float pairs, three ways (#1337).
+//
+// SHAPE: preallocate + indexed write. One sized allocation, no growth, no
+// intermediates. This is the fastest Almide shape and the one `fft.almd` uses.
+//
+// The three listbuild rows differ ONLY in the build loop; the arithmetic and
+// the checksum consumer are byte-identical, so the row delta IS the shape cost.
+// The Rust reference (rust-ref/listbuild.rs) is `Vec::with_capacity` + push.
+
+import math
+import env
+import int
+import float
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let size = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 20 },
+      none => 20,
+    }
+  } else 20
+
+  let n = math.pow(2, size)
+
+  var data: List[Float] = list.repeat(0.0, 2 * n)
+  for i in 0..<n {
+    let theta = float.from_int(i) / float.from_int(n) * math.pi()
+    let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
+    let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
+    data[2 * i] = float.round(re * 100.0) / 100.0
+    data[2 * i + 1] = float.round(im * 100.0) / 100.0
+  }
+
+  var acc = 0.0
+  for i in 0..<(2 * n) {
+    acc = acc + data[i]
+  }
+  println("len: ${int.to_string(list.len(data))} checksum: ${float.to_fixed(acc, 6)}")
+}

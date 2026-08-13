@@ -1,0 +1,39 @@
+// listbuild — materialize 2^k interleaved (re, im) Float pairs, three ways (#1337).
+//
+// SHAPE: `list.range |> list.flat_map` — the form CLAUDE.md and
+// docs/CHEATSHEET.md recommend. THIS ROW IS THE POINT OF THE BENCHMARK: the
+// documented idiom must not be the slowest shape, or the idiom docs are
+// steering generated code onto the slow path (#1337).
+//
+// The three listbuild rows differ ONLY in the build loop; the arithmetic and
+// the checksum consumer are byte-identical, so the row delta IS the shape cost.
+
+import math
+import env
+import int
+import float
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let size = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 20 },
+      none => 20,
+    }
+  } else 20
+
+  let n = math.pow(2, size)
+
+  let data = list.range(0, n) |> list.flat_map((i) => {
+    let theta = float.from_int(i) / float.from_int(n) * math.pi()
+    let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
+    let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
+    [float.round(re * 100.0) / 100.0, float.round(im * 100.0) / 100.0]
+  })
+
+  var acc = 0.0
+  for i in 0..<(2 * n) {
+    acc = acc + data[i]
+  }
+  println("len: ${int.to_string(list.len(data))} checksum: ${float.to_fixed(acc, 6)}")
+}

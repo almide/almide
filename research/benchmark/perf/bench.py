@@ -50,6 +50,17 @@ SUITE = [
     ("onebrc",       "onebrc/onebrc.almd",               ["onebrc.rs"],                     "10000000", "50000", "bytes", ["native", "rust"]),
     ("binarytrees",  "binarytrees/binarytrees.almd",     [],                                "18",       "10",   "bytes", None),
     ("mandelbrot",   "mandelbrot/mandelbrot.almd",       [],                                "4000",     "200",  "bytes", None),
+    # listbuild (#1337): the SAME materializing workload written three ways.
+    # The rows differ only in the build loop — same arithmetic, same checksum
+    # consumer — so the spread between them is the cost of the SHAPE, and the
+    # `combinator` row is the shape CLAUDE.md/CHEATSHEET recommend. A
+    # recommended idiom slower than the loop it replaces is an MSR bug, not
+    # just a perf bug, so all three are gated against one Rust reference.
+    # Native/rust only: the wasm leg hits the same `data[i] = x` cliff the
+    # fft row documents, at a workload that would not finish.
+    ("listbuild",       "listbuild/listbuild_prealloc.almd",   ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
+    ("listbuild-append","listbuild/listbuild_append.almd",     ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
+    ("listbuild-comb",  "listbuild/listbuild_combinator.almd", ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -64,6 +75,9 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "onebrc": "1000000",
     "binarytrees": "14",
     "mandelbrot": "1000",
+    "listbuild": "23",
+    "listbuild-append": "23",
+    "listbuild-comb": "23",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

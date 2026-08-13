@@ -76,6 +76,30 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
 pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
 pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().flat_map(f).collect() }
+// FIXED-ARITY twin of `almide_rt_list_flat_map`, for the `|x| … [a, b]` shape
+// the CHEATSHEET's recommended build idiom produces
+// (`list.range |> list.flat_map`). `RustLoweringPass::lower_flat_map_arrays`
+// retargets those call sites here and rewrites the tail list literal to a Rust
+// ARRAY, which is what makes the difference: the `Rc<dyn Fn(A) -> Vec<B>>`
+// signature above forces ONE HEAP ALLOCATION PER ELEMENT for the intermediate
+// list, and at 2^22 elements that single `vec![a, b]` was 44 ms of a 79 ms
+// build — the whole of the 3x gap between the recommended idiom and a
+// hand-written append loop (#1337).
+//
+// `F: Fn` rather than `Rc<dyn Fn>`: it keeps the per-element call STATIC so
+// rustc inlines the body and the arity stays a constant it can unroll (the
+// generated `build.rs` registry derives the un-boxing from this `F: Fn` bound
+// — see `takes_raw_fn_last_arg`). `with_capacity` removes the growth reallocs
+// `flat_map().collect()` cannot avoid, since `FlatMap`'s `size_hint` lower
+// bound is 0.
+//
+// Semantics are identical to `almide_rt_list_flat_map`: same order, same
+// elements, same length. Only the intermediate container is gone.
+pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs: Vec<A>, f: F) -> Vec<B> {
+    let mut out = Vec::with_capacity(xs.len().saturating_mul(N));
+    for x in xs { out.extend(f(x)); }
+    out
+}
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
 pub fn almide_rt_list_find_index<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.into_iter().position(|x| f(x)).map(|i| i as i64) }

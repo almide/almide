@@ -1,11 +1,11 @@
 # Perf Suite — Native & WASM Runtime Scoreboard (#917)
 
-Eight benchmark programs — seven Computer-Language-Benchmarks-Game-style
-kernels plus a scaled One Billion Row Challenge — run on every leg the
-compiler ships, against handwritten Rust references where a fair reference
-exists. This directory is the source of the numbers in
-[docs/project/BENCHMARKS.md](../../../docs/project/BENCHMARKS.md) — nothing is published that
-`bench.py` did not produce.
+Nine benchmark programs — seven Computer-Language-Benchmarks-Game-style
+kernels, a scaled One Billion Row Challenge, and the three-shape `listbuild`
+family — run on every leg the compiler ships, against handwritten Rust
+references where a fair reference exists. This directory is the source of the
+numbers in [docs/project/BENCHMARKS.md](../../../docs/project/BENCHMARKS.md) —
+nothing is published that `bench.py` did not produce.
 
 ## Layout
 
@@ -82,6 +82,22 @@ exists. This directory is the source of the numbers in
   `data[i] = x` list writes (~3 orders of magnitude at 2^18) — the canonical
   2^22 workload would take hours on that leg. The cliff is the finding; it is
   recorded at a workload that terminates.
+- **`listbuild` is three rows, one workload** (#1337): the same 2^23-element
+  interleaved `Float` array built by (a) preallocate + indexed write,
+  (b) `var` + `for` + `data = data + [x]`, (c) `list.range |> list.flat_map`.
+  The three sources differ ONLY in the build loop — identical arithmetic,
+  identical checksum consumer — so the spread between the rows IS the cost of
+  the shape, and all three are verified byte-identical before timing. The
+  family exists because (c) is the shape CLAUDE.md and docs/CHEATSHEET.md
+  recommend, and it was the SLOWEST of the three: 1.67x the append loop it is
+  documented to replace, all of it one heap allocation per element for
+  `flat_map`'s intermediate list. That is an MSR problem before it is a perf
+  problem — the idiom docs are the in-context material that steers generated
+  code, so "recommended" and "fast" have to name the same shape. The three now
+  sit within 2% of each other. `check-perf-ratio.sh` gates each row's ratio
+  like every other benchmark AND gates the relation between them directly
+  (`IDIOM_CEILING`), because the ratios drifting apart is the failure this
+  family exists to catch.
 
 ## Run
 
@@ -107,7 +123,12 @@ full policy.
 ## Not yet covered
 
 - The 2–3 stdlib micro-benchmarks #917 asks for (string/map churn) — the
-  scoreboard covers the seven whole-program benches only so far.
+  scoreboard covers the whole-program benches plus the `listbuild` shape family
+  so far.
+- The residual **materialization** cost every listbuild row shares (~1.6x vs
+  handwritten Rust for the identical build, whichever shape writes it) is
+  #1004, and it is untouched by #1337: closing the shape spread only proved
+  that the remaining gap is not about the shape.
 - The wasm leg is measured but not ratcheted: the fft list-write cliff
   (~3,500× at 2^18) and the mandelbrot crater (~130× at 4000) have to be fixed
   first, otherwise the gate would just re-report two known craters. On the

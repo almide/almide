@@ -39,7 +39,26 @@ BASELINE_FILE="scripts/perf-ratio-baseline.txt"
 BUDGET_PCT="${PERF_RATIO_BUDGET_PCT:-40}"
 RUNS="${PERF_RATIO_RUNS:-3}"
 # Gated pairs: bench -> same-shape rust-ref variant.
-PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft"
+PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild"
+# IDIOM GATE (#1337). The three listbuild rows build the SAME result three
+# ways, so beyond each row's own ratio there is a relation between them that
+# the mission depends on: CLAUDE.md and docs/CHEATSHEET.md tell authors (and
+# the models we measure MSR on) to prefer `list.range |> list.flat_map` over
+# `var` + `for`, and a recommended idiom that is slower than the loop it
+# replaces teaches generated code onto the slow path. It WAS slower — 1.67x,
+# all of it one heap allocation per element for `flat_map`'s intermediate
+# list. The ceiling below is what keeps that closed.
+#
+# Measured as (comb / its own rust ref) / (append / its own rust ref), on the
+# MIN of each variant's runs rather than the median. Both rows time the SAME
+# reference binary, so dividing each side by its own reference cancels
+# whatever load hit that row's window; the min is the least-contaminated
+# observation. Both corrections are needed: a run where an unrelated build
+# landed on the box during the comb row read 1.30x on raw medians and 1.07x
+# this way, against a clean-run 1.02x. The tighter-than-40% ceiling is
+# affordable BECAUSE of that normalization — this is a same-machine,
+# same-run, same-reference relation, not an absolute time.
+IDIOM_CEILING=1.15
 # Medians under this many seconds are process-spawn noise, not measurement.
 MIN_SECONDS=0.08
 
@@ -48,15 +67,16 @@ trap 'rm -f "$out"' EXIT
 
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft \
+  --bench nbody,spectralnorm,fasta,fft,listbuild,listbuild-append,listbuild-comb \
   --label ratchet --out "$out"
 
-python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" <<'PY'
+python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" <<'PY'
 import json, sys
 
-out_path, baseline_path, budget_pct, pairs_arg, min_s = sys.argv[1:6]
+out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling = sys.argv[1:7]
 budget = float(budget_pct)
 min_s = float(min_s)
+idiom_ceiling = float(idiom_ceiling)
 pairs = dict(p.split("=", 1) for p in pairs_arg.split())
 
 data = json.load(open(out_path))["results"]
@@ -105,7 +125,30 @@ for bench, ratio in sorted(ratios.items()):
     elif ratio < floor:
         verdict = f"UNDER floor {floor:.3f} (broken bench or durable win — re-anchor on purpose)"
         failed = True
-    print(f"perf-ratio: {bench:14s} {ratio:.3f} (baseline {base:.3f}, +{budget:.0f}% budget) {verdict}")
+    print(f"perf-ratio: {bench:16s} {ratio:.3f} (baseline {base:.3f}, +{budget:.0f}% budget) {verdict}")
+
+# The listbuild idiom relation (#1337): the RECOMMENDED combinator shape
+# against the `var` + `for` append loop it is documented to replace, from this
+# same run. This is the property the idiom docs assert, so it is checked
+# directly rather than inferred from two absolute ratios drifting apart. See
+# IDIOM_CEILING above for why it is min-of-runs and reference-normalized.
+def own_ratio(bench):
+    v = data[bench]["variants"]
+    return v[f"{bench}/native"]["min"] / v[f"{bench}/rust:listbuild"]["min"]
+
+penalty = own_ratio("listbuild-comb") / own_ratio("listbuild-append")
+if penalty > idiom_ceiling:
+    failed = True
+    print(f"::error::perf-ratio: the RECOMMENDED list idiom costs {penalty:.3f}x the append "
+          f"loop it replaces (ceiling {idiom_ceiling:.2f}x). CLAUDE.md and docs/CHEATSHEET.md "
+          "tell authors to write `list.range |> list.flat_map` instead of `var` + `for`; that "
+          "guidance is only honest while this holds. The usual cause is the flat_map lambda "
+          "losing its array return (RustLoweringPass::lower_flat_map_arrays) and going back to "
+          "a heap Vec per element. Either restore the lowering or change the guidance — not "
+          "the ceiling.")
+else:
+    print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.3f}x the append loop "
+          f"(ceiling {idiom_ceiling:.2f}x) ok")
 
 if failed:
     print("::error::perf-ratio: a gated almide/rust runtime ratio left its band. A real")
