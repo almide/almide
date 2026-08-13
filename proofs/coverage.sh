@@ -51,13 +51,43 @@ cd "$ROOT"
 # measured the WRONG binary twice (0.00% over 4 stray files reported as data,
 # 2026-07-03), so each step here is explicit and its artifact is checked.
 COVDIR="$ROOT/target/coverage"
-rm -rf "$COVDIR"; mkdir -p "$COVDIR"
+rm -rf "$COVDIR"; mkdir -p "$COVDIR/build"
+
+# `-C instrument-coverage` also instruments BUILD SCRIPTS and proc-macro hosts,
+# which then RUN during the build with no LLVM_PROFILE_FILE set — so they drop
+# `default_<hash>_<n>.profraw` into their own cwd, i.e. the repo root and the
+# crate dirs (~94 files per run, #1361). Two problems, neither about coverage
+# numbers: the working tree goes dirty right after a gate run (easy to
+# `git add -A` by accident), and `stamp.sh`'s toolchain_fingerprint hashes
+# untracked files, so a coverage run makes `receipt.sh` unable to reuse a
+# `make verify-trust` result.
+#
+# Point the build steps' profraw at $COVDIR/build/ — one level DOWN, so the
+# merge glob `$COVDIR/*.profraw` below does not pick it up. Build-script
+# coverage is not data we want in the report (llvm-cov is scoped by -object
+# anyway); we just want it to land somewhere harmless.
 export RUSTFLAGS="-C instrument-coverage"
 
+# Anything that still escapes (a child process that resets the variable) is
+# swept on the way out, on every exit path. Scoped to llvm's own default
+# profraw naming, never inside target/, and it reports what it removed rather
+# than deleting silently.
+sweep_stray_profraw() {
+    local stray
+    stray="$(find "$ROOT" -maxdepth 3 -name 'default_*_*.profraw' -not -path "$ROOT/target/*" 2>/dev/null || true)"
+    [ -n "$stray" ] || return 0
+    printf '%s\n' "$stray" | while read -r f; do rm -f "$f"; done
+    echo "coverage: swept $(printf '%s\n' "$stray" | wc -l | tr -d ' ') stray default_*.profraw (#1361)"
+}
+trap sweep_stray_profraw EXIT
+
 echo "== 1/4 instrumented build (almide-mir + almide-codegen tests, render_program, the almide CLI) =="
-cargo test -p almide-mir -p almide-codegen --release --no-run --target-dir "$COVDIR/t" 2>&1 | tail -1
-cargo build --release -p almide-mir --example render_program --target-dir "$COVDIR/t" 2>&1 | tail -1
-cargo build --release --bin almide --target-dir "$COVDIR/t" 2>&1 | tail -1
+LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
+  cargo test -p almide-mir -p almide-codegen --release --no-run --target-dir "$COVDIR/t" 2>&1 | tail -1
+LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
+  cargo build --release -p almide-mir --example render_program --target-dir "$COVDIR/t" 2>&1 | tail -1
+LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
+  cargo build --release --bin almide --target-dir "$COVDIR/t" 2>&1 | tail -1
 
 echo "== 2/4 run the test suites =="
 # `-perm -u+x`, not `-perm /111`: the `/` form is a GNU extension and BSD find
