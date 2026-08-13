@@ -28,4 +28,5 @@ fmt_test                         17
 fuzz_test                        15
 io_read_all_test                 13
 eval_test                        9
+mcp_test                         9
 diagnostic_harness_test          7
