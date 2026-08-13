@@ -26,6 +26,7 @@ compound_eq  out-of-interp-scope capability: prim.handle
 compound_repr_interp  out-of-interp-scope capability: prim.handle
 compound_repr_records_interp  out-of-interp-scope capability: prim.handle
 datetime_format  out-of-interp-scope capability: prim.alloc_str
+declaration_forms  out-of-interp-scope capability: prim.handle
 effect_tuple_result_tco  out-of-interp-scope capability: prim.alloc_value
 empty_collection_annotated  out-of-interp-scope capability: prim.alloc_set
 empty_collection_fold  out-of-interp-scope capability: prim.alloc_map
