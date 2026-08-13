@@ -46,6 +46,13 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
                 buf.pop();
             }
         }
+        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+        // the ledger proposed as a free memcpy saving. `take` steals the String's
+        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+        // doublings for an ~80-byte line) where `clone` allocates one right-sized
+        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
         acc = f(acc, buf.clone());
     }
 }
@@ -83,6 +90,13 @@ fn fold_lines_range_impl<A, F: Fn(A, String) -> A>(path: &str, start: i64, end: 
                 buf.pop();
             }
         }
+        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+        // the ledger proposed as a free memcpy saving. `take` steals the String's
+        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+        // doublings for an ~80-byte line) where `clone` allocates one right-sized
+        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
         acc = f(acc, buf.clone());
     }
     Ok(acc)
@@ -142,6 +156,13 @@ pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) ->
                 buf.pop();
             }
         }
+        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+        // the ledger proposed as a free memcpy saving. `take` steals the String's
+        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+        // doublings for an ~80-byte line) where `clone` allocates one right-sized
+        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
         f(buf.clone());
     }
 }
@@ -171,6 +192,13 @@ pub fn almide_rt_fs_fold_lines_effect<A>(path: &str, init: A, f: std::rc::Rc<dyn
                 buf.pop();
             }
         }
+        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+        // the ledger proposed as a free memcpy saving. `take` steals the String's
+        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+        // doublings for an ~80-byte line) where `clone` allocates one right-sized
+        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
         acc = f(acc, buf.clone())?;
     }
 }
@@ -189,6 +217,13 @@ pub fn almide_rt_fs_for_each_line_effect(path: &str, f: std::rc::Rc<dyn Fn(Strin
                 buf.pop();
             }
         }
+        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+        // the ledger proposed as a free memcpy saving. `take` steals the String's
+        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+        // doublings for an ~80-byte line) where `clone` allocates one right-sized
+        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
         f(buf.clone())?;
     }
 }
