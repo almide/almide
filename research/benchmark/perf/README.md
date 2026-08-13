@@ -1,10 +1,11 @@
 # Perf Suite — Native & WASM Runtime Scoreboard (#917)
 
-Nine benchmark programs — seven Computer-Language-Benchmarks-Game-style
-kernels, a scaled One Billion Row Challenge, and the three-shape `listbuild`
-family — run on every leg the compiler ships, against handwritten Rust
-references where a fair reference exists. This directory is the source of the
-numbers in [docs/project/BENCHMARKS.md](../../../docs/project/BENCHMARKS.md) —
+Ten benchmark programs — seven Computer-Language-Benchmarks-Game-style
+kernels, a scaled One Billion Row Challenge, the three-shape `listbuild`
+family, and the allocation-heavy `strchurn` string row — run on every leg the
+compiler ships, against handwritten Rust references where a fair reference
+exists. This directory is the source of the numbers in
+[docs/project/BENCHMARKS.md](../../../docs/project/BENCHMARKS.md) —
 nothing is published that `bench.py` did not produce.
 
 ## Layout
@@ -16,6 +17,8 @@ nothing is published that `bench.py` did not produce.
 | `bench.py` | Build + verify + time harness; writes `results/` |
 | `results/<date>-<label>.json` | Dated raw results (committed) |
 | `native/` | The README binary-size/CLI measurement (`measure.sh`, separate from the scoreboard) |
+| `string-gap-1004.md` | The #1004 attribution: where the string row's gap actually goes |
+| `strchurn/ladder.py` | The differential ladder that produced it (re-runnable) |
 
 ## Method
 
@@ -116,7 +119,35 @@ nothing is published that `bench.py` did not produce.
   than arithmetic and the two allocators behave differently. So this is the one
   family where "the ratio cancels the machine" does not hold; the rows are
   reported like onebrc, and the relation — 1.018x locally, 1.045x on CI — is
-  what carries a gate.
+  what carries a gate. **What the residual ~1.6x actually IS was measured on
+  2026-08-13 and it is neither materialization nor #1004's representation
+  story: it is the deterministic software libm.** Swapping ONLY
+  `almide_rt_libm_sin`/`_cos` — required by the cross-target byte-identity
+  contract — for the platform ones in the emitted Rust takes the row from
+  194.5 ms to 105.5 ms against a 123.9 ms reference; without transcendental
+  determinism the emitted code BEATS the handwritten reference by 1.17x. The
+  build shape is innocent: `list.repeat` + bounds-checked indexed writes
+  measure 75.5 ms against `Vec::with_capacity` + push at 90.6 ms. Evidence:
+  [string-gap-1004.md](./string-gap-1004.md).
+- **`strchurn` is the string row** (#1004): N ints → `int.to_string` →
+  `string.join` → `string.split` → `string.len` → `list.sum`, the workload
+  whose 1.7x-vs-Rust opened that issue. It carries TWO references. The
+  comparison that means anything is against `rust-ref/strchurn.rs`, which
+  honours the two stdlib obligations the Almide program cannot escape — `split`
+  collects owned `String`s (`List[String]`'s element type is owned) and length
+  is `chars().count()` (`string.len` is a character count) — and reads 1.12x on
+  an M4 Pro. `rust-ref/strchurn_idiomatic.rs` is the same program with borrowed
+  `&str` pieces and byte `len()` and runs 1.9x faster; that entire spread is
+  the API contract, not codegen. Like the listbuild family the row is REPORTED,
+  not anchored: 75% of its delta is malloc/memcpy/free of N owned `String`s, so
+  it compares allocators before it compares codegen and one architecture's
+  number should not become a gate (unlike listbuild, though, both sides here
+  allocate identically, so a second architecture's reading may well promote
+  it). Full attribution — 75% `split`'s return type, 11% `string.len`'s
+  semantics, 9% the rlib boundary, 5% list intermediates, and the `RcCow` the
+  issue title blamed not present on the path at all — in
+  [string-gap-1004.md](./string-gap-1004.md); `strchurn/ladder.py` rebuilds it
+  from scratch.
 
 ## Run
 
@@ -141,13 +172,21 @@ full policy.
 
 ## Not yet covered
 
-- The 2–3 stdlib micro-benchmarks #917 asks for (string/map churn) — the
-  scoreboard covers the whole-program benches plus the `listbuild` shape family
-  so far.
-- The residual **materialization** cost every listbuild row shares (~1.6x vs
-  handwritten Rust for the identical build, whichever shape writes it) is
-  #1004, and it is untouched by #1337: closing the shape spread only proved
-  that the remaining gap is not about the shape.
+- The MAP-churn micro-benchmark #917 asks for. The string half of that ask is
+  covered by `strchurn` as of #1004; `AlmideMap`'s linear scan is still
+  measured only incidentally, inside `onebrc`.
+- **List-combinator laziness.** `IterChain`, the fused-iterator IR node, never
+  fires on the Rust target: `list.map`/`filter`/`fold` all emit
+  `almide_rt_list_*(Vec, Rc<dyn Fn>)` over a materialized `Vec`, in a pipe, in
+  a direct call, and over a `list.range` source alike. (What DOES work is the
+  egg pass's combinator fusion — `range` → `map` → `fold` becomes one
+  `almide_rt_list_fold` with the map composed into the reducer.) On a cheap
+  lambda body at 30M elements this is worth **6.6x**: 31.5 ms for the
+  egg-fused shape against 4.8 ms for a fused Rust iterator chain, essentially
+  all of it `list.range` being a real 240 MB `Vec` rather than an
+  `impl Iterator`. Measured 2026-08-13 in
+  [string-gap-1004.md](./string-gap-1004.md) finding (a); no benchmark row
+  covers it yet, and it is the largest un-taken win the suite has surfaced.
 - The wasm leg is measured but not ratcheted: the fft list-write cliff
   (~3,500× at 2^18) and the mandelbrot crater (~130× at 4000) have to be fixed
   first, otherwise the gate would just re-report two known craters. On the

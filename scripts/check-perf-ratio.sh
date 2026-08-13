@@ -54,8 +54,21 @@ RUNS="${PERF_RATIO_RUNS:-3}"
 # which is the property #1337 is about and which IS machine-stable: 1.018x on
 # the M4 Pro, 1.045x on the CI runner, from the same commit.
 PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft"
-# Rows measured for the record and printed, but not anchored (see above).
-REPORTED="listbuild listbuild-append listbuild-comb"
+# Rows measured for the record and printed, but not anchored (see above), as
+# `bench=rust-ref-variant`.
+#
+# `strchurn` (#1004) joins them under the same rule and for the same reason:
+# 75% of its almide/rust delta is malloc/memcpy/free of N owned `String`s, so
+# it is an allocator comparison first and a codegen comparison second, and this
+# repo has one architecture's reading of it. Its reference is deliberately
+# `rust:strchurn`, the SAME-SHAPE/SAME-SEMANTICS one (owned `String`s out of
+# split, `chars().count()` for len) — `rust:strchurn_idiomatic` is 1.9x faster
+# but every bit of that spread is the stdlib's API contract, and watching it
+# would make a language design decision look like a compiler regression.
+# Promoting this row to PAIRS wants a second architecture's number first; note
+# that unlike `listbuild` both sides here allocate identically, so it may well
+# turn out to be anchorable. See research/benchmark/perf/string-gap-1004.md.
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn"
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
 # the mission depends on: CLAUDE.md and docs/CHEATSHEET.md tell authors (and
@@ -83,7 +96,7 @@ trap 'rm -f "$out"' EXIT
 
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,listbuild,listbuild-append,listbuild-comb \
+  --bench nbody,spectralnorm,fasta,fft,listbuild,listbuild-append,listbuild-comb,strchurn \
   --label ratchet --out "$out"
 
 python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" <<'PY'
@@ -94,7 +107,7 @@ budget = float(budget_pct)
 min_s = float(min_s)
 idiom_ceiling = float(idiom_ceiling)
 pairs = dict(p.split("=", 1) for p in pairs_arg.split())
-reported = reported_arg.split()
+reported = dict(p.split("=", 1) for p in reported_arg.split())
 
 data = json.load(open(out_path))["results"]
 ratios = {}
@@ -144,10 +157,10 @@ for bench, ratio in sorted(ratios.items()):
         failed = True
     print(f"perf-ratio: {bench:16s} {ratio:.3f} (baseline {base:.3f}, +{budget:.0f}% budget) {verdict}")
 
-for bench in reported:
+for bench, ref_name in sorted(reported.items()):
     v = data[bench]["variants"]
     nat = v[f"{bench}/native"]["median"]
-    ref = v[f"{bench}/rust:listbuild"]["median"]
+    ref = v[f"{bench}/{ref_name}"]["median"]
     print(f"perf-ratio: {bench:16s} {nat / ref:.3f} (reported, not anchored — machine-dependent)")
 
 # The listbuild idiom relation (#1337): the RECOMMENDED combinator shape

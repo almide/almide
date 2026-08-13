@@ -82,10 +82,21 @@ LLVM に命令選択で挑まないという方針は維持するが、B の敗�
 
 ### B1（守り）: ratchet 維持 + materialize コストの返済 — **この軸の最優先**
 
-既存の `scripts/check-perf-ratio.sh` 文化を維持し、RcCow（0.55–0.56 / [#1004](https://github.com/almide/almide/issues/1004)）で
-materialize ギャップを畳む。上の実測が示す通り、これは「負けないため」ではなく**勝つための前提**になった —
-カーネルが 0.872× でも総 wall が 1.111× に留まる原因が全てここにあるため。関連:
-[#1337](https://github.com/almide/almide/issues/1337)（推奨イディオムが最遅という矛盾）、
+既存の `scripts/check-perf-ratio.sh` 文化を維持し、materialize ギャップを畳む
+（0.55–0.56 / [#1004](https://github.com/almide/almide/issues/1004)）。上の実測が示す通り、
+これは「負けないため」ではなく**勝つための前提**になった —
+カーネルが 0.872× でも総 wall が 1.111× に留まる原因が全てここにあるため。
+
+> **2026-08-13 のプロファイルによる訂正**（[string-gap-1004.md](../../research/benchmark/perf/string-gap-1004.md)）:
+> この軸で「RcCow 表現コスト」と呼んでいたものは存在しない。`String` は Rust の `String` に
+> 1:1 で落ちており、`RcCow` は Bytes/Matrix 専用（`codegen/templates/rust.toml`）。
+> また `listbuild` の ~1.6× は materialize ですらなく、**決定論的ソフトウェア libm**（`sin`/`cos`）
+> が全量で、プラットフォーム libm に差し替えると emit 済みコードが手書き Rust を 1.17× 上回る。
+> materialize が本当に効くのは **安価な lambda body のリストパイプライン**であり、そこでは
+> `list.range` の実体化だけで 6.6×（30M 要素、`IterChain` は Rust ターゲットで一度も発火していない）。
+> 畳むべき対象はこれ。
+
+関連: [#1337](https://github.com/almide/almide/issues/1337)（推奨イディオムが最遅という矛盾）、
 [#1338](https://github.com/almide/almide/issues/1338)（公開ベンチ自身が最遅の形を使っている）。
 
 ### B2（攻め）: 意味論が許す最適化で handwritten Rust を抜く ← [#1330](https://github.com/almide/almide/issues/1330)
