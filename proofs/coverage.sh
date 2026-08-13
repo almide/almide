@@ -60,8 +60,16 @@ cargo build --release -p almide-mir --example render_program --target-dir "$COVD
 cargo build --release --bin almide --target-dir "$COVDIR/t" 2>&1 | tail -1
 
 echo "== 2/4 run the test suites =="
-TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm /111 ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|almide_codegen|integration|lower|render)[^/]*$' || true)"
-[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm /111 ! -name '*.d' ! -name '*.dylib')"
+# `-perm -u+x`, not `-perm /111`: the `/` form is a GNU extension and BSD find
+# (macOS) rejects it outright — the second call has no `|| true`, so under
+# `set -e` this whole gate died at step 2/4 with "illegal mode string" on every
+# non-GNU host, never reaching the ratchet it exists to enforce (#1244 round 5).
+TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|almide_codegen|integration|lower|render)[^/]*$' || true)"
+[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib')"
+# No vacuous measurement: zero test binaries would still produce profraw from
+# the step-3 workloads, so the run would report a NUMBER for a suite that never
+# ran. That is the #990 failure mode again — fail instead.
+[ -n "$TESTBINS" ] || { echo "coverage: NO test binaries found under $COVDIR/t/release/deps — the discovery went blind"; exit 1; }
 i=0
 for tb in $TESTBINS; do
     i=$((i+1))
