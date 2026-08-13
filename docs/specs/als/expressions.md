@@ -563,3 +563,23 @@ AST に回復ノードが**ゼロ**であること、(2) 壊れたファイル�
 
 テスト: `tests/parser_recovery_test.rs`(構造検証)、
 `spec/wasm_cross/declaration_forms.almd`(受理側、契約 C-263)。
+
+## ALS-E28 オプショナルチェーン(`ExprKind::OptionalChain`)
+
+**受理形**: `expr?.field` — 後置、改行を跨がない(行頭の `?` は別式)。
+主体は `Option[レコード]`。
+
+**値の規範**: 主体が `some(v)` なら `some(v.field)`、`none` なら `none`
+(fixture: `some({x:3,y:4})?.x ?? 0` → 3、`none?.x ?? -9` → -9、両ターゲット
+同一)。連鎖全体の型は `Option[フィールド型]` — つまり `?.` は「あれば
+読む」を Option に包んで返す(値を剥がすのは `??`/match の仕事)。
+
+**scalar/heap の境界**: スカラーフィールドは #1329 で v1 の wall を解除
+(desugar を共有 optimize カットポイントへ移し、合成ヘルパを Named 呼び
+出しにしたため全位置で lowering 可能)。**heap ペイロード(String
+フィールド)は既存経路のまま** — ユーザー記述の同型ヘルパ自体が
+`heap-result match は空の遅延ヒープ値を move out する` brick に当たると
+実測済みで、これは OptionalChain 固有ではない。解除は当該 brick 待ち。
+
+テスト: `spec/wasm_cross/optional_chain_scalar.almd`(契約 C-264)、
+`spec/lang/optional_chain_test.almd`(wasm レグ 4 ケース)。

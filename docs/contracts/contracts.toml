@@ -3242,3 +3242,14 @@ evidence  = [
   { path = "tests/parser_recovery_test.rs", name = "accepted_corpus_contains_zero_recovery_nodes", class = "by-construction" },
   { path = "tests/parser_recovery_test.rs", name = "broken_file_recovers_past_the_error", class = "by-construction" },
 ]
+
+[[contract]]
+id        = "C-264"
+spec      = "ALS-E28"
+title     = "Scalar-field optional chains yield some/none identically on both targets"
+statement = "ALS-E28: `p?.x` over a SCALAR record field evaluates to some(v.x) on the some path and none on the none path, byte-identical native <-> wasm (fixture pins 3 and -9 through `??`). The whole chain is Option-typed — `?.` wraps 'read if present', the unwrapping belongs to `??`/match. #1329 un-walled the wasm leg by moving the desugar to the shared optimize cut point so the synthesized tail-match helper is a Named call that lowers in every position (bind, call argument, `??` operand). HEAP-payload fields stay on the older route: the identical user-written helper hits the pre-existing heap-result-match brick (measured, not an OptionalChain defect), so that class is deliberately outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/optional_chain_scalar.almd", class = "fixture" },
+]
