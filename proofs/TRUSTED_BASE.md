@@ -73,6 +73,8 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `alloc_not_live` | FreeList.v | Closed under the global context |
 | `region_window_reuse_safe` | FreeList.v | Closed under the global context |
 | `region_reset_leaves_no_free_into_the_region` | FreeList.v | Closed under the global context |
+| `pinned_stays_immortal_forever` | FreeList.v | Closed under the global context |
+| `p_region_reset_preserves_PINV` | FreeList.v | Closed under the global context |
 | `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
 | `rc_inc_bytes_encode_the_instruction_tree` | WasmEncode.v | Closed under the global context |
 | `rc_inc_bytes_execute_to_rt_inc` | WasmExec.v | Closed under the global context |
@@ -102,7 +104,12 @@ The receipt's claims are scoped to exactly this:
   ARBITRARY body, so the frontier reset leaves NO free-list entry pointing into the
   reclaimed region and reuse-safety survives the reset —
   `FreeList.region_window_reuse_safe` /
-  `FreeList.region_reset_leaves_no_free_into_the_region`), copy-on-write alias-safety
+  `FreeList.region_reset_leaves_no_free_into_the_region`), PINNED_RC immortality (a
+  block allocated by `$alloc8` / `__alloc_pinned` — every host-written WASI buffer
+  and the preopen tables — is, over an ARBITRARY run, never freed, never on the
+  free-list and never returned by `$alloc`, and survives a region reset:
+  `FreeList.pinned_stays_immortal_forever` / `FreeList.p_region_reset_preserves_PINV`;
+  this is the invariant C-042 violated), copy-on-write alias-safety
   (`MakeUnique` yields a uniquely-owned block — no aliased in-place mutation,
   `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec` /
   `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
