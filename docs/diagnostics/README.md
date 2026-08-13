@@ -34,6 +34,9 @@ Use `almide explain <code>` to read these from the CLI.
 | [E041](E041.md) | Implicit propagation removed — the value stays a Result; write `!` |
 | [E042](E042.md) | Statement-position Result discarded (must-use) — `expr!` or `let _ = expr` |
 | [E043](E043.md) | `list.try_*` removed, and `list.__fallible_*` is not a spelling — the core HOF is fallibility-polymorphic |
+| [E044](E044.md) | A pure `main` returns Unit — a program's result is its output, not a return value |
+| [E045](E045.md) | Tuple index `.k` on a non-tuple, or out of range |
+| [E046](E046.md) | `_` in a call argument — not a value, not partial application (the typed hole `_` is expression-position only) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
