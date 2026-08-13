@@ -82,6 +82,20 @@ nothing is published that `bench.py` did not produce.
   `data[i] = x` list writes (~3 orders of magnitude at 2^18) — the canonical
   2^22 workload would take hours on that leg. The cliff is the finding; it is
   recorded at a workload that terminates.
+- **`fft` measures the transform, not its input** (#1338). The row used to
+  build its 8.4M-element input with `data = data + [x]` in a loop, which put
+  ~8% of the row's wall clock into list construction and published it as
+  codegen: the 1.27x it reported was part setup. It now preallocates and writes
+  by index — the same shape as the reference's `Vec::with_capacity` + push,
+  which is the fairness rule stated for `nbody_unrolled.rs` above. Re-anchored
+  2026-08-13 at 1.18x. The transform is bit-identical across the change,
+  checked out of band at 2^12 / 2^16 / 2^20 on a position-weighted checksum of
+  the whole array — the row's own `line1` verify mode compares only
+  `size: 2^k = n`, which carries no computed value, so the harness cannot see a
+  broken transform on this row. That gap is worth closing; it is not closed
+  here, because a checksum pass in the timed path would re-introduce exactly
+  the "the benchmark measures something other than its kernel" problem #1338
+  was filed about.
 - **`listbuild` is three rows, one workload** (#1337): the same 2^23-element
   interleaved `Float` array built by (a) preallocate + indexed write,
   (b) `var` + `for` + `data = data + [x]`, (c) `list.range |> list.flat_map`.
