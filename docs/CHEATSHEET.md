@@ -504,12 +504,15 @@ guard not fs.exists(path) else {
 All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in Almide.
 
 ```
-// Parallel map: first Err (in list order) propagates
-let results = fan.map(urls, (u) => http.get(u))!         // Result[List[B], String]
+// Dynamic mappers — a list + one callback returning Result (the mapper matrix
+// covers every A→B pairing with A, B in {Int, Float, String}):
+let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: first Err (list order) propagates
+let winner  = fan.any(mirrors, (m) => fetch(m)) ?? fb     // Result[B, String]: first Ok in LIST order; an Err skips that element
+let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, String]]: EVERY element's Result, Errs captured
 
 // Block heads — arms are single function calls separated by `;` or newline
 let first = fan.any { fetch_a(); fetch_b() } ?? fallback  // first Ok in SOURCE order
-let all   = fan.settle { job_a(); job_b() }               // List[Result[T, String]]
+let all   = fan.settle { job_a(); job_b() }               // TUPLE of per-arm Results (heterogeneous arms allowed)
 let win   = fan.race { solve_fast(); solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
 
 // Budgets: deterministic compute-time limits, built with compute.* constructors

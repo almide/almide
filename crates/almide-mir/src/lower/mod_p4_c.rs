@@ -198,10 +198,19 @@ fn random_call_name(func: &str, arg_tys: &[Ty]) -> String {
 }
 
 /// `fan.map` monomorphic-variant routing (see the block comment).
+///
+/// COMPLETENESS RULE (the fan mapper matrix, shared with `fan_any_call_name`):
+/// every (A, B) pairing with A, B ∈ {Int, Float, String} has a self-host —
+/// the full 3×3, gated by `spec/lang/fan_mapper_matrix_test.almd` (a missing
+/// link walls the wasm leg, so the gate cannot rot silently). Intentional
+/// omissions: Bool payloads (ride Int 0/1 until a dogfood need appears) and
+/// heap element types (the funcref-callback rails are scalar/String — a wall,
+/// not a wrong value). `fan.settle(xs, f)` is NOT in this table by design:
+/// it desugars to `list.map` in frontend lowering and is generic for free.
 fn fan_map_call_name(arg_tys: &[Ty], result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
     // `fan.map` selects a monomorphic self-host by (input element A, output element B) — `fan.map<sfx>`
-    // where A/B in {Int (""), String ("s")}. The input A is `arg_tys[0] = List[A]`; the output B is
+    // where the suffix spells (A, B) initials. The input A is `arg_tys[0] = List[A]`; the output B is
     // `result_ty = Result[List[B], String]`. An unsupported pairing routes to the UNLINKED
     // `fan.map_x` → a clean render wall (never a wrong-typed link = never invalid wasm).
     fn elem_of(t: Option<&Ty>) -> Option<&Ty> {
@@ -215,14 +224,25 @@ fn fan_map_call_name(arg_tys: &[Ty], result_ty: &Ty) -> String {
         Ty::Applied(TypeConstructorId::Result, r) if r.len() == 2 => elem_of(Some(&r[0])),
         _ => None,
     };
-    let sfx = match (a, b) {
+    let sfx = fan_pair_suffix(a, b);
+    format!("fan.map{sfx}")
+}
+
+/// The shared (A, B) → suffix table of the fan mapper matrix. `_x` is the
+/// deliberate unlinked-name wall for pairings outside the completeness rule.
+fn fan_pair_suffix(a: Option<&Ty>, b: Option<&Ty>) -> &'static str {
+    match (a, b) {
         (Some(Ty::Int), Some(Ty::Int)) => "",
         (Some(Ty::Int), Some(Ty::String)) => "_is",
         (Some(Ty::String), Some(Ty::String)) => "_ss",
         (Some(Ty::String), Some(Ty::Int)) => "_si",
+        (Some(Ty::Int), Some(Ty::Float)) => "_if",
+        (Some(Ty::Float), Some(Ty::Int)) => "_fi",
+        (Some(Ty::Float), Some(Ty::Float)) => "_ff",
+        (Some(Ty::Float), Some(Ty::String)) => "_fs",
+        (Some(Ty::String), Some(Ty::Float)) => "_sf",
         _ => "_x",
-    };
-    format!("fan.map{sfx}")
+    }
 }
 
 /// `fan.any_map` monomorphic-variant routing — the T2-3 mapper form. Same
@@ -243,13 +263,8 @@ fn fan_any_call_name(arg_tys: &[Ty], result_ty: &Ty) -> String {
         Ty::Applied(TypeConstructorId::Result, r) if r.len() == 2 => Some(&r[0]),
         _ => None,
     };
-    let sfx = match (a, b) {
-        (Some(Ty::Int), Some(Ty::Int)) => "",
-        (Some(Ty::Int), Some(Ty::String)) => "_is",
-        (Some(Ty::String), Some(Ty::String)) => "_ss",
-        (Some(Ty::String), Some(Ty::Int)) => "_si",
-        _ => "_x",
-    };
+    // Same 3×3 completeness rule as `fan_map_call_name` — one shared table.
+    let sfx = fan_pair_suffix(a, b);
     format!("fan.any_map{sfx}")
 }
 

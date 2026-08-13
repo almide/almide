@@ -185,7 +185,7 @@ impl Checker {
             // LIVE surfaces only. `fan.race` is tombstoned (E027) and naming it here sent a
             // user who merely mistyped toward a function that no longer exists — the same
             // defect class as a tombstone whose migration target is itself removed.
-            "Available: fan.map(xs, f), and the block heads fan.any / fan.settle / fan.race / fan.bounded",
+            "Available: the mappers fan.map(xs, f) / fan.any(xs, f) / fan.settle(xs, f), and the block heads fan.any / fan.settle / fan.race / fan.bounded / fan.timeout",
             format!("call to fan.{}()", field)));
         Some(Ty::Unknown)
     }
@@ -313,7 +313,7 @@ impl Checker {
                     self.emit(super::err(
                         "fan.any changed signature: the thunk-list form was removed; any is now a block head",
                         "New form: `fan.any { a(); b() }` — first Ok in source order. \
-                         The dynamic mapper form `fan.any(xs, f)` is declared for Wave 2.",
+                         A dynamic list maps via `fan.any(xs, f)` (first Ok in list order).",
                         "call to fan.any()".to_string()).with_code("E027"));
                     return Some(Ty::Unknown);
                 }
@@ -346,8 +346,8 @@ impl Checker {
                     self.emit(super::err(
                         "fan.settle changed signature: the thunk-list form was removed; settle is now a block head",
                         "New form: `fan.settle { a(); b() }` — collects every result in \
-                         source order. The dynamic mapper form `fan.settle(xs, f)` is \
-                         declared for Wave 2.",
+                         source order. A dynamic list settles via `fan.settle(xs, f)` \
+                         (every element's Result, Errs captured).",
                         "call to fan.settle()".to_string()).with_code("E027"));
                     return Some(Ty::Unknown);
                 }
