@@ -281,12 +281,12 @@ pub fn mutate_one(
     // fuzzer would explore the same program forever.
     almide::ast::strip_literal_raw(&mut program);
     let source = format_program(&program);
-    Some(Generated {
+    Some(Generated::plain(
         source,
-        origin: Origin::Mutation {
+        Origin::Mutation {
             corpus_file: entry.path.clone(),
         },
-    })
+    ))
 }
 
 /// Replace one literal with another of the same type from the pools.
