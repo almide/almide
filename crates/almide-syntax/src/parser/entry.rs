@@ -44,6 +44,7 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Result<Program, String> {
+        self.report_invalid_escapes();
         let mut program = Program {
             module: None,
             imports: Vec::new(),

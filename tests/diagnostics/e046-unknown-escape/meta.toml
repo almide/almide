@@ -1,0 +1,5 @@
+# NOTE: the harness reads these as RAW text (trim the quotes, no TOML
+# unescaping), so backslashes here are literal.
+expects_code = "E046"
+expects_error = "unknown escape sequence `\d` in a string literal"
+hint_substring = "for a literal backslash"
