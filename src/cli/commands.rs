@@ -858,8 +858,51 @@ pub enum FmtMode {
     Write,
     /// Compare only: report each file that is not already formatted, exit 1 if any is.
     Check,
+    /// `Check`, reported as one JSON object on stdout (`--json`). Same gate,
+    /// same exit code — the difference is who reads it. Added for the MCP
+    /// server (`almide mcp`), which must not parse the human report.
+    CheckJson,
     /// Print the formatted text; never write, never fail.
     DryRun,
+}
+
+impl FmtMode {
+    /// True for the two comparing modes — neither writes a file.
+    fn is_check(self) -> bool {
+        matches!(self, FmtMode::Check | FmtMode::CheckJson)
+    }
+}
+
+/// `cmd_fmt`'s `--check` verdict. Text mode prints it to stderr and JSON mode
+/// prints it as one object to stdout; both exit 1 on any drift, so a gate
+/// written against either spelling fails identically.
+fn report_fmt_check(mode: FmtMode, total: usize, unformatted: &[String], unreadable: &[String], verify_failed: bool) {
+    let ok = unformatted.is_empty() && unreadable.is_empty() && !verify_failed;
+    if mode == FmtMode::CheckJson {
+        let report = serde_json::json!({
+            "checked": total,
+            "unformatted": unformatted,
+            "unreadable": unreadable,
+            "verify_failed": verify_failed,
+            "ok": ok,
+        });
+        out(&format!("{}", report));
+        if !ok { std::process::exit(1); }
+        return;
+    }
+    if ok {
+        err(&format!("fmt: {} file(s) already formatted", total));
+        return;
+    }
+    for f in unformatted {
+        err(&format!("not formatted: {}", f));
+    }
+    err(&format!(
+        "fmt --check: {} of {} file(s) need formatting — run `almide fmt <path>`",
+        unformatted.len(),
+        total
+    ));
+    std::process::exit(1);
 }
 
 pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
@@ -868,7 +911,7 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
     // `--check` is a gate: a file that differs, and a file that cannot even be parsed,
     // both make the run fail. Under the other modes a parse error stays a skip.
     let mut unformatted: Vec<String> = Vec::new();
-    let mut unreadable = false;
+    let mut unreadable: Vec<String> = Vec::new();
     let mut verify_failed = false;
 
     for file in files {
@@ -881,7 +924,7 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
                 err(&format!("{}", crate::diagnostic_render::display_with_source(e, &source_text)));
             }
             err(&format!("{}: {} parse error(s), skipping", file, parse_errors.len()));
-            unreadable = true;
+            unreadable.push(file.clone());
             continue;
         }
         // Auto-manage imports: add missing, remove unused. `--no-import-edit`
@@ -912,7 +955,7 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
                     .unwrap_or_else(|e| { err(&format!("Failed to write {}: {}", file, e)); std::process::exit(1); });
                 err(&format!("Formatted {}", file));
             }
-            FmtMode::Check => {
+            FmtMode::Check | FmtMode::CheckJson => {
                 if formatted != source_text {
                     unformatted.push(file.clone());
                 }
@@ -921,25 +964,13 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
         }
     }
 
-    if verify_failed && mode != FmtMode::Check {
+    if verify_failed && !mode.is_check() {
         std::process::exit(1);
     }
-    if mode != FmtMode::Check {
+    if !mode.is_check() {
         return;
     }
-    if unformatted.is_empty() && !unreadable && !verify_failed {
-        err(&format!("fmt: {} file(s) already formatted", files.len()));
-        return;
-    }
-    for f in &unformatted {
-        err(&format!("not formatted: {}", f));
-    }
-    err(&format!(
-        "fmt --check: {} of {} file(s) need formatting — run `almide fmt <path>`",
-        unformatted.len(),
-        files.len()
-    ));
-    std::process::exit(1);
+    report_fmt_check(mode, files.len(), &unformatted, &unreadable, verify_failed);
 }
 
 pub fn cmd_clean() {
