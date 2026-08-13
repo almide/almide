@@ -112,10 +112,15 @@ local effect fn fold_traced(p: String, log: String) -> Int = fs.fold_lines(p, 0,
 // accumulator cells wall at, not in lower_function.
 local effect fn each_traced(p: String, log: String) -> Unit = fs.for_each_line(p, (line) => traced_note(log, line)!)!
 
+// `tmp()` keys its suffix on the clock, so two tests entering it in the same
+// tick share a directory — the generated test binary runs these in PARALLEL
+// threads. Each test below therefore uses its OWN file names: a shared
+// `log.txt` made the trace assertions read another test's partial write and
+// fail intermittently (observed once as `found: "a;"`).
 test "fold_lines with a fallible callback stops at the FIRST err" {
   let d = tmp()!
-  let p = d + "/data.txt"
-  let log = d + "/log.txt"
+  let p = d + "/fold_firsterr.txt"
+  let log = d + "/fold_firsterr.log"
   fs.write(p, "a\nbb\nbad\nccc\ndddd\n")!
   fs.write(log, "")!
   testing.assert_err(fold_traced(p, log))
@@ -125,8 +130,8 @@ test "fold_lines with a fallible callback stops at the FIRST err" {
 
 test "for_each_line with a fallible callback stops at the FIRST err" {
   let d = tmp()!
-  let p = d + "/data.txt"
-  let log = d + "/log.txt"
+  let p = d + "/each_firsterr.txt"
+  let log = d + "/each_firsterr.log"
   fs.write(p, "a\nbb\nbad\nccc\n")!
   fs.write(log, "")!
   testing.assert_err(each_traced(p, log))
@@ -135,8 +140,8 @@ test "for_each_line with a fallible callback stops at the FIRST err" {
 
 test "a fallible callback that never errs folds every line" {
   let d = tmp()!
-  let p = d + "/data.txt"
-  let log = d + "/log.txt"
+  let p = d + "/fold_allok.txt"
+  let log = d + "/fold_allok.log"
   fs.write(p, "a\nbb\nccc\n")!
   fs.write(log, "")!
   assert_eq(fold_traced(p, log), ok(6))
@@ -145,8 +150,8 @@ test "a fallible callback that never errs folds every line" {
 
 test "an empty file runs a fallible callback zero times" {
   let d = tmp()!
-  let p = d + "/empty.txt"
-  let log = d + "/log.txt"
+  let p = d + "/fallible_empty.txt"
+  let log = d + "/fallible_empty.log"
   fs.write(p, "")!
   fs.write(log, "")!
   assert_eq(fold_traced(p, log), ok(0))
@@ -157,7 +162,7 @@ test "an empty file runs a fallible callback zero times" {
 
 test "a missing file errs before the fallible callback runs at all" {
   let d = tmp()!
-  let log = d + "/log.txt"
+  let log = d + "/fallible_missing.log"
   fs.write(log, "")!
   testing.assert_err(fold_traced(d + "/nope.txt", log))
   testing.assert_err(each_traced(d + "/nope.txt", log))
