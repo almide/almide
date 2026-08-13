@@ -360,7 +360,7 @@ pub fn desugar_sort_by_cached_keys(body: &IrExpr) -> Option<IrExpr> {
                     // trap, fuzz seed-20260718 index 866) and a Float key would sort by
                     // i64 BIT patterns (wrong order for negatives). Non-Int keys fall
                     // through to the mod_p4 sort_by route: Float → sort_by_float,
-                    // String → the honest `sort_by_str_key_x` wall.
+                    // String → sort_by_str_key (`_rc` when the elements are heap).
                     && matches!(&args[1].ty, Ty::Fn { ret, .. } if **ret == Ty::Int));
             if !hit {
                 return;
