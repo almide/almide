@@ -76,7 +76,7 @@ almide test spec/lang/                  # ディレクトリ指定
 almide test spec/lang/expr_test.almd    # ファイル指定
 almide test --run "pattern"             # テスト名でフィルタ
 almide test --target wasm               # WASM ターゲットでテスト
-almide test --json                      # 結果を JSON (1行1テスト) で出力
+almide test --json                      # 結果を JSONL (1行1ファイル) で出力
 ```
 
 | オプション | 説明 |
@@ -85,6 +85,20 @@ almide test --json                      # 結果を JSON (1行1テスト) で出
 | `--no-check` | 型チェックをスキップ |
 | `--json` | JSON 形式で結果出力 |
 | `--target wasm` | wasmtime で実行 |
+
+失敗の報告は**構造化ブロック**（`FAILED: <file>` に続けて `test:` / `at:` /
+`hint:` / `diff:` または `expected:` `found:`）。複数行文字列・リスト・レコードは
+単位ごとの実差分になる。ファイル内の失敗は**ソース行順**に並ぶので、2回の実行を
+そのまま diff できる。
+
+`--json` は1ファイル1行の JSONL:
+
+```json
+{"file":"spec/lang/x_test.almd","status":"fail","exit_code":101,
+ "failures":[{"name":"string mismatch","file":"spec/lang/x_test.almd","line":4,
+              "op":"assert_eq","expected":"\"a\\nB\"","found":"\"a\\nb\"",
+              "diff":"      a\n    - B\n    + b\n","message":"…"}]}
+```
 
 テストの書き方:
 
