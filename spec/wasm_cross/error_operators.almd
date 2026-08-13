@@ -1,0 +1,19 @@
+// @contract: C-257
+// ALS-E25 (docs/specs/als/expressions.md): the scalar error operators —
+// postfix `!` (unwrap-propagate, effect fn only), postfix `?` (Result →
+// Option), and `??` (fallback) — through both polarities of an effect
+// call. Identical observables on both targets. `?.` (OptionalChain) is
+// deliberately absent: its record subject hits the untracked-subject match
+// wall on wasm (loud), so its row stays UNWRITTEN.
+effect fn half(n: Int) -> Int = if n % 2 == 0 then ok(n / 2) else err("odd")
+
+effect fn main() -> Unit = {
+  let a = half(10)!
+  println(int.to_string(a))
+  let r: Result[Int, String] = half(7)
+  let o: Int? = r?
+  println(int.to_string(o ?? -1))
+  let g: Result[Int, String] = half(8)
+  let o2: Int? = g?
+  println(int.to_string(o2 ?? -1))
+}
