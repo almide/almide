@@ -520,14 +520,16 @@ let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], Str
 let winner  = fan.any(mirrors, (m) => fetch(m)) ?? fb     // Result[B, String]: first Ok in LIST order; an Err skips that element
 let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, String]]: EVERY element's Result, Errs captured
 
-// Block heads — arms are single function calls separated by `;` or newline
-let first = fan.any { fetch_a(); fetch_b() } ?? fallback  // first Ok in SOURCE order
-let all   = fan.settle { job_a(); job_b() }               // TUPLE of per-arm Results (heterogeneous arms allowed)
-let win   = fan.race { solve_fast(); solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
+// Block heads — arms are parallel siblings separated by `,` or newline
+// (`;` between arms is an error: it means sequencing, and stays legal only
+//  INSIDE a block arm — `{ let x = f(); g(x) }`)
+let first = fan.any { fetch_a(), fetch_b() } ?? fallback  // first Ok in SOURCE order
+let all   = fan.settle { job_a(), job_b() }               // TUPLE of per-arm Results (heterogeneous arms allowed)
+let win   = fan.race { solve_fast(), solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
 
 // Budgets: deterministic compute-time limits, built with compute.* constructors
 let r = fan.bounded(compute.ms(100)) { work(input) } ?? -1   // Err if work exceeds 100ms of deterministic compute
-let w = fan.race(compute.us(50)) { a(); b() } ?? -1          // arms over budget are excluded
+let w = fan.race(compute.us(50)) { a(), b() } ?? -1          // arms over budget are excluded
 
 // Mapper form: race ONE pure lambda over a dynamic list (winner = cheapest, tie → list order)
 let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback        // mapper returns Result: err(...) disqualifies
@@ -786,7 +788,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms
-- `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(); b() }`
+- `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(), b() }`
 - `fan.bounded(100) {...}` / `fan.race(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
 - `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
 - `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`

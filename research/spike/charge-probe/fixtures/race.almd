@@ -10,14 +10,14 @@ fn mid(n: Int) -> Int = heavy(n) + 1000000
 
 effect fn main() -> Unit = {
   // arm 1 (cheap, ~2 units) beats arm 0 (heavy(2000), ~2003 units)
-  let a = fan.race { heavy(2000); cheap(7) } ?? -1
+  let a = fan.race { heavy(2000), cheap(7) } ?? -1
   // tie on spend: identical calls -> source order, arm 0 wins
-  let b = fan.race { cheap(3); cheap(9) } ?? -1
+  let b = fan.race { cheap(3), cheap(9) } ?? -1
   // budget cuts BOTH long arms -> fallback
-  let c = fan.race(compute.us(5)) { heavy(2000); mid(3000) } ?? -1
+  let c = fan.race(compute.us(5)) { heavy(2000), mid(3000) } ?? -1
   // budget admits only the cheap arm (us(1) = 333 units at CM-1 v0.3;
   // heavy(2000) needs ~2003)
-  let d = fan.race(compute.us(1)) { heavy(2000); cheap(4) } ?? -1
+  let d = fan.race(compute.us(1)) { heavy(2000), cheap(4) } ?? -1
   println(int.to_string(a))
   println(int.to_string(b))
   println(int.to_string(c))

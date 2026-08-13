@@ -3,6 +3,6 @@ effect fn a() -> Result[Int, String] = ok(1)
 effect fn b() -> Result[Int, String] = ok(2)
 
 effect fn main() -> Unit = {
-  let r = fan.any { a(); b() }!
+  let r = fan.any { a(), b() }!
   println(int.to_string(r))
 }

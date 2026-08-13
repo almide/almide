@@ -55,13 +55,13 @@ fn pure_work(n: Int) -> Int = n * 2
 fn fan_surface_matrix() {
     // ── Implemented cells: every one must type-check. ──
     let implemented: &[(&str, String)] = &[
-        ("all_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let (x, y) = fan {{ ea(); eb() }}\n  println(int.to_string(x + y))\n}}\n")),
+        ("all_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let (x, y) = fan {{ ea(), eb() }}\n  println(int.to_string(x + y))\n}}\n")),
         ("all_mapper", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let ys = fan.map([1, 2, 3], (x) => ok(pure_work(x)))!\n  println(int.to_string(list.len(ys)))\n}}\n")),
-        ("settle_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let (ra, rb) = fan.settle {{ ea(); eb() }}\n  println(int.to_string((ra ?? -1) + (rb ?? -1)))\n}}\n")),
+        ("settle_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let (ra, rb) = fan.settle {{ ea(), eb() }}\n  println(int.to_string((ra ?? -1) + (rb ?? -1)))\n}}\n")),
         ("settle_mapper", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let rs = fan.settle([1, 2], (x) => ok(pure_work(x)))\n  println(int.to_string(list.len(rs)))\n}}\n")),
-        ("any_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.any {{ ea(); eb() }}!\n  println(int.to_string(v))\n}}\n")),
+        ("any_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.any {{ ea(), eb() }}!\n  println(int.to_string(v))\n}}\n")),
         ("any_mapper", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.any([1, 2], (x) => ok(pure_work(x)))!\n  println(int.to_string(v))\n}}\n")),
-        ("race_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race(compute.ms(5)) {{ pure_work(1); pure_work(2) }} ?? -1\n  println(int.to_string(v))\n}}\n")),
+        ("race_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race(compute.ms(5)) {{ pure_work(1), pure_work(2) }} ?? -1\n  println(int.to_string(v))\n}}\n")),
         ("race_mapper", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race([1, 2], (x) => ok(pure_work(x))) ?? -1\n  println(int.to_string(v))\n}}\n")),
         ("race_mapper_budget", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race(compute.ms(5), [1, 2], (x) => ok(pure_work(x))) ?? -1\n  println(int.to_string(v))\n}}\n")),
         ("bounded_body", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.bounded(compute.ms(50)) {{ pure_work(21) }} ?? -1\n  println(int.to_string(v))\n}}\n")),

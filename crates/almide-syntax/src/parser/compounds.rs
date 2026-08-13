@@ -191,7 +191,12 @@ impl Parser {
             let expr = self.parse_expr()?;
             exprs.push(expr);
             self.skip_newlines();
+            // Same separator rule as every fan arm block: `,`/newline between
+            // parallel siblings; `;` is a targeted error (it means sequencing).
             if self.check(TokenType::Semicolon) {
+                return Err(self.fan_arm_semicolon_error("fan block"));
+            }
+            if self.check(TokenType::Comma) {
                 self.advance();
                 self.skip_newlines();
             }

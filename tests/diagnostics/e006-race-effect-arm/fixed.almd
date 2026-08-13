@@ -6,6 +6,6 @@ fn quick(n: Int) -> Int = n
 
 effect fn main() -> Unit = {
   let t = fs.read_text("x.txt") ?? ""
-  let r = fan.race { score(t); quick(2) } ?? -1
+  let r = fan.race { score(t), quick(2) } ?? -1
   println(int.to_string(r))
 }

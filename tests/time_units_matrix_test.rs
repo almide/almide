@@ -173,7 +173,7 @@ fn s3_operator_matrix() {
 fn t3_8_fan_parallel_inside_metered_region_is_rejected() {
     let src = "fn work(n: Int) -> Int = n * 10\n\
          fn helper() -> Int = {\n\
-           let (a, b) = fan { work(1); work(2) }\n\
+           let (a, b) = fan { work(1), work(2) }\n\
            a + b\n\
          }\n\
          effect fn main() -> Unit = {\n\

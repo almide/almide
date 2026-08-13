@@ -276,7 +276,7 @@ impl Checker {
                 // an actionable migration, not an alias. No coexistence.
                 self.emit(super::err(
                     "fan.race changed signature: the thunk-list form was removed; race is now a deterministic block head",
-                    "New form: `fan.race { a(); b() }` — the winner is the branch that \
+                    "New form: `fan.race { a(), b() }` — the winner is the branch that \
                      completes with the LEAST deterministic computation ((spend, index) \
                      minimum; ties go to source order). An optional per-branch budget is \
                      `fan.race(compute.ms(5)) { … }`. If you meant the first candidate \
@@ -312,7 +312,7 @@ impl Checker {
                 if arg_tys.len() == 1 {
                     self.emit(super::err(
                         "fan.any changed signature: the thunk-list form was removed; any is now a block head",
-                        "New form: `fan.any { a(); b() }` — first Ok in source order. \
+                        "New form: `fan.any { a(), b() }` — first Ok in source order. \
                          A dynamic list maps via `fan.any(xs, f)` (first Ok in list order).",
                         "call to fan.any()".to_string()).with_code("E027"));
                     return Some(Ty::Unknown);
@@ -337,7 +337,7 @@ impl Checker {
                 }
                 self.emit(super::err(
                     format!("fan.any() expects a block but got {} arguments", arg_tys.len()),
-                    "Usage: fan.any { a(); b() }",
+                    "Usage: fan.any { a(), b() }",
                     "call to fan.any()".to_string()));
                 Some(Ty::Unknown)
             }
@@ -345,7 +345,7 @@ impl Checker {
                 if arg_tys.len() == 1 {
                     self.emit(super::err(
                         "fan.settle changed signature: the thunk-list form was removed; settle is now a block head",
-                        "New form: `fan.settle { a(); b() }` — collects every result in \
+                        "New form: `fan.settle { a(), b() }` — collects every result in \
                          source order. A dynamic list settles via `fan.settle(xs, f)` \
                          (every element's Result, Errs captured).",
                         "call to fan.settle()".to_string()).with_code("E027"));
@@ -373,7 +373,7 @@ impl Checker {
                 }
                 self.emit(super::err(
                     format!("fan.settle() expects a block but got {} arguments", arg_tys.len()),
-                    "Usage: fan.settle { a(); b() }",
+                    "Usage: fan.settle { a(), b() }",
                     "call to fan.settle()".to_string()));
                 Some(Ty::Unknown)
             }
