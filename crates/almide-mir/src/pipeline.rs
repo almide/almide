@@ -884,13 +884,20 @@ fn build_ir_with_drops(
             self_modules,
         )?
     };
-    if test_mode {
-        synthesize_test_runner_main(&mut ir)?;
-    }
     // #881: module-level top-let ids are per-region — make them globally
     // unique BEFORE any layout/slot phase keys a map by the raw id (the
     // globals union and the mutable-slot map both key raw ids).
+    //
+    // This runs BEFORE the test-runner synthesis (#1233): the runner's per-test
+    // re-init needs to name MODULE top-lets from a MAIN-region `Assign`, which
+    // is only sound once every module id is program-unique. Disambiguation only
+    // rewrites `ir.modules` (declarations, module fn bodies, top-let inits) and
+    // never reads `ir.functions`, so moving it ahead of the synthesis is a pure
+    // reordering for every other file.
     disambiguate_module_global_regions(&mut ir);
+    if test_mode {
+        synthesize_test_runner_main(&mut ir)?;
+    }
     Ok(ir)
 }
 
