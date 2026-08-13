@@ -846,7 +846,7 @@ impl Checker {
         }
         const FALLIBLE_HOF_CORE: &[&str] =
             &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
-        // #1144 (C-220's tracked cell, now C-269): the fs streaming walkers
+        // #1144 (C-220's tracked cell, now C-274): the fs streaming walkers
         // take the same rule — but only the two SEQUENTIAL, callback-driven
         // cells. `fold_lines_range` / `fold_lines_chunked` are deliberately
         // excluded: a partitioned walk has no defined FIRST err (which chunk
