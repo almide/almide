@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "5"
+# unverified_ceiling = "4"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -152,7 +152,8 @@ evidence = "#1244 burn-down PR: dropped-site (UNCLASSIFIED) and bogus-verdict (B
 
 [[gate]]
 path = "scripts/check-perf-ratio.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok"
 
 [[gate]]
 path = "scripts/check-rt-oracle-registry.sh"
