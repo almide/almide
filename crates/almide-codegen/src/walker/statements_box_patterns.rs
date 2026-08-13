@@ -304,11 +304,6 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
         .unwrap_or_else(|| format!("_ => _,"))
 }
 
-/// Check if any match arm uses a list pattern.
-pub fn arms_have_list_pattern(arms: &[IrMatchArm]) -> bool {
-    arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::List { .. }))
-}
-
 pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
     render_pattern_hinted(ctx, pat, None)
 }
