@@ -33,6 +33,7 @@ empty_collection_fold  out-of-interp-scope capability: prim.alloc_map
 empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
 fs_composition_family  out-of-interp-scope capability: prim.alloc_bytes
+fs_fallible_stream_callback  out-of-interp-scope capability: prim.alloc_bytes
 fs_list_dir_multipass  out-of-interp-scope capability: prim.alloc_bytes
 fs_metadata_family  out-of-interp-scope capability: prim.alloc_bytes
 fs_read_lines  out-of-interp-scope capability: prim.alloc_bytes
