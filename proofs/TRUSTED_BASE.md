@@ -71,6 +71,8 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `eager_copy_refines_safety` | ALS.v | Closed under the global context |
 | `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
 | `alloc_not_live` | FreeList.v | Closed under the global context |
+| `region_window_reuse_safe` | FreeList.v | Closed under the global context |
+| `region_reset_leaves_no_free_into_the_region` | FreeList.v | Closed under the global context |
 | `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
 | `rc_inc_bytes_encode_the_instruction_tree` | WasmEncode.v | Closed under the global context |
 | `rc_inc_bytes_execute_to_rt_inc` | WasmExec.v | Closed under the global context |
@@ -95,7 +97,12 @@ The receipt's claims are scoped to exactly this:
   type-concretization, memory-model leak-freedom, reuse soundness (a `Reuse` acts
   only on a UNIQUELY-owned object — no aliased in-place reuse), free-list
   reuse-safety (a valid allocation never returns a currently-LIVE block — no
-  reuse-after-free, `FreeList.alloc_not_live`), copy-on-write alias-safety
+  reuse-after-free, `FreeList.alloc_not_live`), region-reset safety (a
+  `RegionSave`/`RegionRestore` window preserves the allocator invariant across an
+  ARBITRARY body, so the frontier reset leaves NO free-list entry pointing into the
+  reclaimed region and reuse-safety survives the reset —
+  `FreeList.region_window_reuse_safe` /
+  `FreeList.region_reset_leaves_no_free_into_the_region`), copy-on-write alias-safety
   (`MakeUnique` yields a uniquely-owned block — no aliased in-place mutation,
   `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec` /
   `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
