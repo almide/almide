@@ -372,7 +372,7 @@ impl Checker {
             ast::Pattern::Err { inner } => self.bind_pattern_err(inner, ty),
             ast::Pattern::None => {
                 let resolved = resolve_ty(ty, &self.uf);
-                self.reject_ctor_pattern_on_scalar("none", "an Option", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::None, &resolved);
             }
             ast::Pattern::Literal { .. } => {}
         }
@@ -500,11 +500,23 @@ impl Checker {
                 inner_v
             }
             _ => {
-                self.reject_ctor_pattern_on_scalar("some(..)", "an Option", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::Some, &resolved);
                 Ty::Unknown
             }
         };
         self.bind_pattern(inner, &it);
+    }
+
+    /// The single entry point for "this constructor pattern cannot destructure
+    /// this subject". Two distinct slips reach it, so it routes to the one that
+    /// applies and stays silent otherwise (an unresolved subject is ordinary
+    /// error recovery, not a second error to pile on).
+    fn reject_ctor_pattern_mismatch(&mut self, ctor: CtorPat, resolved: &Ty) {
+        if let Some(fix) = ctor.cross_family_fix(resolved) {
+            self.emit(cross_family_pattern_diag(ctor, fix, resolved));
+            return;
+        }
+        self.reject_ctor_pattern_on_scalar(ctor.spelling(), ctor.wants(), resolved);
     }
 
     /// A Option/Result CONSTRUCTOR pattern over a plain scalar subject is a
@@ -548,7 +560,7 @@ impl Checker {
                 ok_v
             }
             _ => {
-                self.reject_ctor_pattern_on_scalar("ok(..)", "a Result", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::Ok, &resolved);
                 Ty::Unknown
             }
         };
@@ -567,7 +579,7 @@ impl Checker {
                 err_v
             }
             _ => {
-                self.reject_ctor_pattern_on_scalar("err(..)", "a Result", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::Err, &resolved);
                 Ty::Unknown
             }
         };
@@ -707,4 +719,102 @@ impl Checker {
         }
         None
     }
+}
+
+// ── Builtin variant-constructor patterns (#1341) ────────────────────────
+//
+// `some`/`none` destructure an Option; `ok`/`err` a Result. Almide keeps the
+// two families disjoint (an `Option` is not a `Result`), but until #1341 the
+// checker only rejected a constructor pattern aimed at a plain SCALAR. Aiming
+// one family's pattern at the other family's subject — `match list.get(xs, 0)
+// { ok(a) => … }`, where `list.get` returns `A?` — fell through silently and
+// bound the payload as `Ty::Unknown`. That Unknown survived to codegen and
+// detonated there: a `[COMPILER BUG] internal type resolution failed` banner on
+// native, an "outside the executable subset" wall on wasm. Both blamed the
+// compiler for what is a plain type error in the program, and neither named the
+// one-word fix. Naming it HERE — the only place that sees both the pattern and
+// the subject's type — is the whole fix.
+
+/// One builtin variant-constructor pattern spelling, tagged with the family it
+/// destructures.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CtorPat { Some, None, Ok, Err }
+
+impl CtorPat {
+    /// How the pattern reads in source — what the diagnostic quotes back.
+    fn spelling(self) -> &'static str {
+        match self {
+            CtorPat::Some => "some(..)",
+            CtorPat::None => "none",
+            CtorPat::Ok => "ok(..)",
+            CtorPat::Err => "err(..)",
+        }
+    }
+
+    /// The family this pattern destructures, phrased for the message.
+    fn wants(self) -> &'static str {
+        match self {
+            CtorPat::Some | CtorPat::None => "an Option",
+            CtorPat::Ok | CtorPat::Err => "a Result",
+        }
+    }
+
+    /// The same ARM POSITION in the other family: the payload-carrying success
+    /// arm maps to the other's success arm, the failure arm to its failure arm.
+    /// `err(e)` ↔ `none` is the one asymmetric pair — Option's failure arm
+    /// carries no payload, which the hint calls out.
+    fn twin(self) -> CtorPat {
+        match self {
+            CtorPat::Some => CtorPat::Ok,
+            CtorPat::Ok => CtorPat::Some,
+            CtorPat::None => CtorPat::Err,
+            CtorPat::Err => CtorPat::None,
+        }
+    }
+
+    /// `Some(twin)` when this pattern is aimed at the OTHER variant family's
+    /// subject, `None` when the pairing is anything else (a matching family, a
+    /// scalar, a record, an unresolved type — all handled elsewhere or left to
+    /// error recovery).
+    fn cross_family_fix(self, resolved: &Ty) -> Option<CtorPat> {
+        let subject_is_option = match resolved {
+            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => true,
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => false,
+            _ => return None,
+        };
+        let pattern_is_option = matches!(self, CtorPat::Some | CtorPat::None);
+        (pattern_is_option != subject_is_option).then(|| self.twin())
+    }
+}
+
+/// The E047 diagnostic for a cross-family constructor pattern. `fix` is the
+/// same arm position spelled in the subject's family, and is both the `try:`
+/// snippet and the noun the hint tells the author to write.
+fn cross_family_pattern_diag(
+    ctor: CtorPat,
+    fix: CtorPat,
+    resolved: &Ty,
+) -> crate::diagnostic::Diagnostic {
+    let payload_note = if ctor == CtorPat::Err {
+        " An Option's failure arm carries no error value, so the binder goes away."
+    } else if fix == CtorPat::Err {
+        " A Result's failure arm carries the error value: `err(e)`."
+    } else {
+        ""
+    };
+    super::err(
+        format!(
+            "pattern `{}` destructures {}, but the subject is `{}`",
+            ctor.spelling(), ctor.wants(), resolved.display()
+        ),
+        format!(
+            "Option and Result are separate types: an Option is matched with \
+             `some(..)` / `none`, a Result with `ok(..)` / `err(..)`. Write `{}` \
+             here.{}",
+            fix.spelling(), payload_note
+        ),
+        "match pattern".to_string(),
+    )
+    .with_code("E047")
+    .with_try(fix.spelling())
 }
