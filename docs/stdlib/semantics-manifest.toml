@@ -2641,6 +2641,162 @@ to 127.0.0.1:8791, so the Int is a TCP PORT NUMBER, not a status and not a
 backlog size or a timeout.
 """
 
+# index_unit vocabulary — net (HOST_CAPABILITY on the wasm leg — net is an OS
+# socket API, named as such in proofs/wasm-fallback-baseline.txt for
+# spec/stdlib/net_test.almd — so every entry is DECLARED with a non-calling
+# probe; a calling probe would push this generated file off the wasm leg. The
+# native semantics below were MEASURED out-of-band on 2026-08-13 with a
+# self-connecting listen/connect/accept program, values quoted per row):
+#   handle      — the Int is an opaque STREAM or LISTENER token. Measured: it
+#                 is a slot index into a per-kind table starting at 0, NOT a
+#                 file descriptor and NOT an address — the first listener and
+#                 the first stream are BOTH 0, so the two namespaces are
+#                 disjoint and a listener handle passed to a stream fn silently
+#                 addresses a different socket. Meaningless to arithmetic on
+#   port        — the Int is a TCP PORT to bind (tcp_listen) or dial
+#                 (tcp_connect), 0–65535 — the same unit as http.serve's
+#   byte-count  — the Int counts BYTES: a read budget, or the number pending
+#   millisecond — the Int is a timeout in MILLISECONDS, never seconds
+[net]
+
+[[net.fn]]
+name = "tcp_connect"
+index_unit = "port"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Int PARAMETER is a TCP port; the
+Ok Int is a stream handle. Measured natively: tcp_connect("127.0.0.1", 8792)
+against a listener on that port returns handle 0 — the first slot of the
+stream table, not an fd.
+"""
+
+[[net.fn]]
+name = "tcp_listen"
+index_unit = "port"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively:
+tcp_listen("127.0.0.1", 8792) returns listener handle 0 and a subsequent
+tcp_connect to 8792 succeeds — the Int is the port actually bound.
+"""
+
+[[net.fn]]
+name = "tcp_accept"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively: accept on listener
+0 returned STREAM handle 1 while the client's own stream was 0 — the argument
+is a LISTENER handle and the result is a STREAM handle, two disjoint
+namespaces that both count from 0.
+"""
+
+[[net.fn]]
+name = "tcp_read"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). len is a BYTE budget, and the read is
+UP TO that many: measured natively, after 5 bytes arrived, tcp_read(s, 2)
+returned exactly [1, 2] and left the rest queued — len is not a message count
+and not a record count.
+"""
+
+[[net.fn]]
+name = "tcp_read_exact"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively, continuing the same
+stream after tcp_read(s, 2): tcp_read_exact(s, 3) returned [3, 4, 5] — len is
+a BYTE count, the read resumes at the stream position (it is not an offset),
+and unlike tcp_read it delivers exactly len bytes or fails.
+"""
+
+[[net.fn]]
+name = "tcp_available"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively: after a 5-byte
+write arrived, tcp_available(s) returned 5 — the Ok Int counts BYTES pending,
+not messages, and it is the argument tcp_read's len takes.
+"""
+
+[[net.fn]]
+name = "tcp_write"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The only Int is the stream handle —
+the payload is Bytes, and nothing is returned, so no byte COUNT crosses this
+signature (a caller expecting a written-bytes count gets Unit).
+"""
+
+[[net.fn]]
+name = "tcp_read_timeout"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). timeout_ms is MILLISECONDS — the
+second/millisecond confusion this unit exists to prevent. Measured natively
+on a stream with nothing pending: tcp_read_timeout(s, 1, 100) returned
+Err("tcp_read_timeout: Resource temporarily unavailable (os error 35)") and
+the call returned promptly — 100 is a tenth of a second, not 100 seconds.
+"""
+
+[[net.fn]]
+name = "tcp_set_timeout"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The same MILLISECOND scale as
+tcp_read_timeout, applied to the stream instead of to one call. Measured
+natively: tcp_set_timeout(s, 100) is Ok on an open stream.
+"""
+
+[[net.fn]]
+name = "tcp_is_open"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Int is a stream handle, and the
+answer tracks the handle's SLOT, not the peer: measured natively, is_open was
+true before tcp_close(c) and false after.
+"""
+
+[[net.fn]]
+name = "tcp_close"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Consumes a STREAM handle (the stream
+table), not a listener handle — the same Int 0 means a different socket in
+each table.
+"""
+
+[[net.fn]]
+name = "tcp_close_listener"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The listener-table counterpart of
+tcp_close; the split spelling exists precisely because the handle number alone
+cannot say which table it belongs to.
+"""
+
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
 # regex, bool, path, base64, hex and html bear no Int in any swept signature
 # today, so their entry lists are empty — but COVERED_MODULES holds them, so the first
