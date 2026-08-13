@@ -233,6 +233,9 @@ impl Parser {
         let tok = self.current();
         let (line, col, token_type, value) =
             (tok.line, tok.col, tok.token_type.clone(), tok.value.clone());
+        if token_type == TokenType::Unknown {
+            return self.unknown_char_error(&value, line, col);
+        }
         if let Some(result) = self.check_hint(None, super::hints::HintScope::TopLevel) {
             let msg = result.message.as_deref().unwrap_or("Unexpected token at top level");
             return format!("{} at line {}:{}\n  Hint: {}", msg, line, col, result.hint);

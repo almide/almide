@@ -33,6 +33,21 @@ impl Parser {
 
     // ── Diagnostic helpers ────────────────────────────────────────
 
+    /// The unknown-character error (#1308): a character no lexer rule matched
+    /// (full-width punctuation, invisible Unicode, ...). Pushes the rich
+    /// diagnostic and returns the string form for the `Err` channel — callers
+    /// that dedupe on `errors.len()` (entry.rs) will skip the string twin.
+    pub(crate) fn unknown_char_error(&mut self, value: &str, line: usize, col: usize) -> String {
+        let ch = value.chars().next().unwrap_or('\u{FFFD}');
+        let msg = format!("Unexpected character '{}' (U+{:04X})", ch, ch as u32);
+        let hint = "This character is not Almide syntax. Full-width or invisible Unicode \
+                    characters often sneak in from copy-paste — delete it, or move it into \
+                    a string or comment.";
+        let diag = self.diag_error(msg.clone(), hint, "unknown-char");
+        self.errors.push(diag);
+        format!("{} at line {}:{}", msg, line, col)
+    }
+
     pub(crate) fn diag_error(&self, message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Diagnostic {
         let mut d = Diagnostic::error(message, hint, context);
         let tok = self.current();

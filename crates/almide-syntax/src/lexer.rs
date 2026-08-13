@@ -56,6 +56,9 @@ pub enum TokenType {
     At,        // @
     // Whitespace / structure
     Comment, Newline, EOF,
+    // A character no lexer rule matched (e.g. a stray full-width character
+    // outside a string). Must surface as a parse error — never dropped (#1308).
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,9 @@ pub struct Lexer;
 impl Lexer {
     pub fn tokenize(src: &str) -> Vec<Token> {
         let mut tokens = Vec::new();
+        // Strip a leading UTF-8 BOM (editor/Windows artifact). Without this it
+        // would lex as an Unknown token and fail the whole file (#1308).
+        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
         // Normalize CRLF → LF (Windows compatibility)
         let normalized;
         let src = if src.contains('\r') {
@@ -776,8 +782,11 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
             return (tok, len);
         }
     }
-    // Unknown char: skip it (an EOF-typed placeholder, exactly the old wildcard arm).
-    (Token { token_type: TokenType::EOF, value: String::new(), line, col, end_col: col + 1 }, 1)
+    // Unknown char: emit an Unknown token carrying the character. The old arm
+    // returned an EOF-typed placeholder, which made the parser stop at the
+    // first stray non-ASCII character and silently drop the rest of the file
+    // with every gate green (#1308).
+    (Token { token_type: TokenType::Unknown, value: chars[pos].to_string(), line, col, end_col: col + 1 }, 1)
 }
 
 fn peek(chars: &[char], pos: usize) -> Option<char> {

@@ -156,6 +156,13 @@ impl Parser {
             return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
         }
 
+        // A character the lexer could not tokenize (full-width punctuation,
+        // invisible Unicode, ...). Dedicated wording — "(got Unknown '。')"
+        // reads like a compiler bug, not a source bug (#1308).
+        if tok.token_type == TokenType::Unknown {
+            return Err(self.unknown_char_error(&tok.value.clone(), tok.line, tok.col));
+        }
+
         Err(format!(
             "Expected expression at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
