@@ -1,4 +1,4 @@
-use crate::{parse_file, canonicalize, check as check_mod, diagnostic, resolve, project, out, err};
+use crate::{parse_file, canonicalize, check as check_mod, diagnostic, lexer, parser, resolve, project, out, err};
 
 /// `cmd_check`'s combined parse+checker error reporting and
 /// `--deny-warnings` gate. Extracted verbatim — exits the process exactly
@@ -127,8 +127,44 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     err(&format!("No errors found"));
 }
 
+/// `cmd_check_json`'s parse step.
+///
+/// `Parser::parse` returns `Err` when NO top-level declaration survived
+/// (`parser/entry.rs`) — a whole-file syntax error — and `parse_file` renders
+/// that in human form and exits. So `almide check --json` emitted no JSON at
+/// all for a plain syntax error: the most common thing an LLM gets wrong
+/// reached the caller as prose it had to parse back, which is the failure this
+/// flag exists to prevent. The diagnostics are still on the parser, so the JSON
+/// path takes them from there.
+///
+/// Returns `None` for the program when the file did not parse at all; the
+/// diagnostics are returned in both cases.
+fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diagnostic::Diagnostic>) {
+    // `.json` input is an AST dump, not source — leave it on the shared path.
+    if file.ends_with(".json") {
+        let (program, source, errors) = parse_file(file);
+        return (Some(program), source, errors);
+    }
+    let input = std::fs::read_to_string(file)
+        .unwrap_or_else(|e| { err(&format!("Error reading {}: {}", file, e)); std::process::exit(1); });
+    let tokens = lexer::Lexer::tokenize(&input);
+    let mut p = parser::Parser::new(tokens).with_file(file);
+    let program = p.parse().ok();
+    let errors = std::mem::take(&mut p.errors);
+    (program, input, errors)
+}
+
 pub fn cmd_check_json(file: &str) {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+    let (parsed, source_text, parse_errors) = parse_for_json(file);
+    let Some(mut program) = parsed else {
+        for d in &parse_errors {
+            out(&format!("{}", crate::diagnostic_render::to_json(d)));
+        }
+        // The exit code is deliberately unchanged (1 = this file did not
+        // parse). A harness that gates on it must not silently flip to
+        // success just because the diagnostics got a better shape.
+        std::process::exit(1);
+    };
     let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
 
     // Output each diagnostic as JSON (one per line)
