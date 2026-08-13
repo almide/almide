@@ -3,10 +3,12 @@
 // program — explicit import (json parse/stringify round-trip), a variant
 // type declaration, top-level lets (Int and String) read from a fn body,
 // fn and effect-fn declarations. Identical observables on both targets.
-// The `module` header is deliberately absent: fmt reorders a leading
-// comment block above it into unparseable output (#1323), so a fmt-gated
-// fixture cannot carry one — the Module row's evidence is the
-// spec/integration/modules/ suite (real module headers, run every CI).
+// The `module` header leads, under this very comment block: that shape used
+// to be un-formattable (#1323 sank `module` below the imports), so this
+// fixture doubles as the fmt-gated proof that a commented module header
+// survives the formatter.
+module app
+
 import json
 
 type Mode = | Fast | Careful
