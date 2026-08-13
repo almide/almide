@@ -92,9 +92,9 @@ pub fn desugar_fn_body_guards(program: &mut almide_ir::IrProgram) {
     }
 }
 
-/// TAIL ERR-RAISE IF → BIND-POSITION UNWRAP (a pre-lowering program pass, shared
-/// chain like [`desugar_fn_body_guards`], which feeds it: a fn-body guard whose
-/// else is `err(x)` / `err(x)!` restructures into exactly this shape). A
+/// TAIL ERR-RAISE BRANCH → BIND-POSITION UNWRAP (a pre-lowering program pass,
+/// shared chain like [`desugar_fn_body_guards`], which feeds it: a fn-body guard
+/// whose else is `err(x)` / `err(x)!` restructures into exactly this shape). A
 /// SCALAR-tail `if` whose one arm RAISES (`if c then a / b else err("…")[!]` —
 /// an always-Err Result, with or without the explicit `!`; see
 /// `err_raise_inner`) cannot lower on the scalar tail path (no early return).
@@ -109,8 +109,27 @@ pub fn desugar_fn_body_guards(program: &mut almide_ir::IrProgram) {
 /// Both orientations (raise in then / raise in else) normalize. Only the
 /// FN-BODY tail chain is rewritten (same scope as the guard pass); no calls
 /// are added or removed, so the caps `mir == ir` invariant holds.
+///
+/// The same normalization covers the tail-position variant `match` with a raise
+/// leaf — the shape `guard let v = int.parse(s) else err("…")` desugars to. That
+/// rewrite happens in the FRONTEND (`lower_block_body`), so it never reaches the
+/// MIR `Guard` statement or the `if`-restructure above; it arrives here already
+/// shaped as
+///
+///   { match int.parse(s) { ok(v) => v * 2, _ => err("…") } }
+///
+/// nested one level under the fn-body Block. That one level is the whole
+/// difference: the auto-wrap ABI retype (`auto_wrap_abi_body`) rewrites the ty of
+/// the body ROOT only, so a BARE `= match … { ok(v) => v*2, err(_) => err("…") }`
+/// tail carries the `Result[Int, String]` carrier and lowers through the proven
+/// heap-tail match, while the identical match one level down keeps its `Int` ty,
+/// falls to `lower_tail_scalar_match`, and hits the variant-match wall. Folding
+/// the non-root branch into the Result-typed bind shape puts it back on the same
+/// proven path. Root branches are left ALONE (they lower today — normalizing them
+/// would take a working shape off a proven path, the over-reach that regressed the
+/// first heap-`??` attempt).
 pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
-    use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
+    use almide_ir::{IrExpr, IrExprKind, IrMatchArm, IrStmt, IrStmtKind, Mutability, VarTable};
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
 
@@ -142,10 +161,13 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
         }
     }
 
-    fn rewrite_tail(e: &mut IrExpr, vt: &mut VarTable) {
+    /// `root` = this expr IS the function body (not nested under a Block tail).
+    /// A root `match` already carries the auto-wrap ABI's Result carrier and
+    /// lowers as-is, so only NON-root matches normalize (see the pass doc).
+    fn rewrite_tail(e: &mut IrExpr, vt: &mut VarTable, root: bool) {
         match &mut e.kind {
             IrExprKind::Block { stmts, expr: Some(t) } => {
-                rewrite_tail(t, vt);
+                rewrite_tail(t, vt, false);
                 // FLATTEN a Block-valued tail into THIS block (its statements run
                 // unconditionally before the tail value; VarIds are unique, and the
                 // lowering already rides nested-block locals to the enclosing scope —
@@ -160,27 +182,36 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                     }
                 }
             }
-            IrExprKind::If { .. } => rewrite_tail_if_arm(e, vt),
+            IrExprKind::If { .. } => rewrite_tail_raise_branch(e, vt),
+            // The `guard let` shape: a variant (Option/Result) `match` in a
+            // NON-root tail with a raise leaf. Gated on a variant subject —
+            // that is the class the tail wall rejects, and the class the
+            // bind-position value-match machinery is proven over.
+            IrExprKind::Match { subject, .. }
+                if !root && crate::lower::is_variant_ty(&subject.ty) =>
+            {
+                rewrite_tail_raise_branch(e, vt)
+            }
             _ => {}
         }
     }
 
-    /// The `If` arm's whole body, moved out of [`rewrite_tail`]'s match — same
+    /// The branch arm's whole body, moved out of [`rewrite_tail`]'s match — same
     /// "outer name router unchanged, arm body to a named helper" split used
     /// throughout this pass family (e.g. [`rewrite_tail_block`] above). A
     /// sibling nested `fn` in the same block as `rewrite_tail`, so it shares
     /// that block's other nested-fn items (`is_scalar_value_ty`,
     /// `err_raise_inner`) exactly as the inline arm body did.
     ///
-    /// Fold the WHOLE guard if-CHAIN (any nesting of raise arms and one
-    /// value-ty leaf class) into ONE Result-typed if tree: every VALUE
-    /// leaf wraps in ok(…), every RAISE leaf sheds its `!` — so a chained
-    /// guard (`validate_age`'s two guards) normalizes to a single bind +
-    /// unwrap instead of nesting ok() around inner binds (which no
-    /// lowering path executes). `classify_chain` returns the uniform
-    /// value-leaf ty and the raise arms' Err ty, or None outside the
-    /// subset (a leaf that is neither).
-    fn rewrite_tail_if_arm(e: &mut IrExpr, vt: &mut VarTable) {
+    /// Fold the WHOLE guard BRANCH-CHAIN (any nesting of `if`s and variant
+    /// `match`es mixing raise arms and one value-ty leaf class) into ONE
+    /// Result-typed branch tree: every VALUE leaf wraps in ok(…), every RAISE
+    /// leaf sheds its `!` — so a chained guard (`validate_age`'s two guards, or
+    /// two stacked `guard let`s) normalizes to a single bind + unwrap instead of
+    /// nesting ok() around inner binds (which no lowering path executes).
+    /// `classify_chain` returns the uniform value-leaf ty and the raise arms' Err
+    /// ty, or None outside the subset (a leaf that is neither).
+    fn rewrite_tail_raise_branch(e: &mut IrExpr, vt: &mut VarTable) {
         // Look through the empty-Block wrappers the guard restructure leaves
         // around each continuation (`if c then { <inner if> } else E`).
         fn peel(e: &IrExpr) -> &IrExpr {
@@ -201,15 +232,37 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                 // A raise leaf: no value ty contributed; err ty named.
                 return Some((Ty::Unknown, Some(a[1].clone())));
             }
+            /// Unify two leaf classifications: `Unknown` (a raise leaf, which
+            /// contributes no value ty) yields to the other side; two concrete
+            /// value tys must agree, else the chain is outside the subset.
+            fn unify(a: &Ty, b: &Ty) -> Option<Ty> {
+                match (a, b) {
+                    (Ty::Unknown, v) | (v, Ty::Unknown) => Some(v.clone()),
+                    (x, y) if x == y => Some(x.clone()),
+                    _ => None,
+                }
+            }
             if let IrExprKind::If { then, else_, .. } = &e.kind {
                 let (t_val, t_err) = classify_chain(then)?;
                 let (e_val, e_err) = classify_chain(else_)?;
-                let val = match (&t_val, &e_val) {
-                    (Ty::Unknown, v) | (v, Ty::Unknown) => (*v).clone(),
-                    (a, b) if a == b => (*a).clone(),
-                    _ => return None,
-                };
-                return Some((val, t_err.or(e_err)));
+                return Some((unify(&t_val, &e_val)?, t_err.or(e_err)));
+            }
+            // A variant `match` is the same chain node with N arms. A GUARDED
+            // arm declines: the rewrite keeps the arms verbatim, and the
+            // bind-position value-match subset the fold targets is proven over
+            // un-guarded constructor arms only.
+            if let IrExprKind::Match { arms, .. } = &e.kind {
+                let mut val = Ty::Unknown;
+                let mut err = None;
+                for arm in arms {
+                    if arm.guard.is_some() {
+                        return None;
+                    }
+                    let (a_val, a_err) = classify_chain(&arm.body)?;
+                    val = unify(&val, &a_val)?;
+                    err = err.or(a_err);
+                }
+                return Some((val, err));
             }
             Some((e.ty.clone(), None))
         }
@@ -237,6 +290,27 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                     def_id: None,
                 };
             }
+            // The variant-`match` chain node: subject and patterns verbatim
+            // (the arm binders keep binding exactly what they bound), only the
+            // arm BODIES are lifted to the Result carrier.
+            if let IrExprKind::Match { subject, arms } = &e.kind {
+                return IrExpr {
+                    kind: IrExprKind::Match {
+                        subject: subject.clone(),
+                        arms: arms
+                            .iter()
+                            .map(|arm| IrMatchArm {
+                                pattern: arm.pattern.clone(),
+                                guard: arm.guard.clone(),
+                                body: to_result_tree(&arm.body, result_ty),
+                            })
+                            .collect(),
+                    },
+                    ty: result_ty.clone(),
+                    span: e.span.clone(),
+                    def_id: None,
+                };
+            }
             IrExpr {
                 kind: IrExprKind::ResultOk { expr: Box::new(e.clone()) },
                 ty: result_ty.clone(),
@@ -244,10 +318,10 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                 def_id: None,
             }
         }
-        let (new_then, new_else) = {
-            let IrExprKind::If { then, else_, .. } = &e.kind else { unreachable!() };
-            (to_result_tree(then, &result_ty), to_result_tree(else_, &result_ty))
-        };
+        // The WHOLE branch tree lifted to the Result carrier — for an `if` this is
+        // literally the old per-arm `to_result_tree` pair reassembled, for a
+        // `match` it is the arms with their patterns intact.
+        let result_branch = to_result_tree(e, &result_ty);
         // Two-step bind: the Result-if materializes into a TRACKED var first
         // (the heap-result-if BIND machinery seeds its match shape), then the
         // bind-position `!` unwraps THAT var — the exact subject class the
@@ -264,24 +338,11 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
             Mutability::Let,
             None,
         );
-        let result_if = IrExpr {
-            kind: IrExprKind::If {
-                cond: match &e.kind {
-                    IrExprKind::If { cond, .. } => cond.clone(),
-                    _ => unreachable!(),
-                },
-                then: Box::new(new_then),
-                else_: Box::new(new_else),
-            },
-            ty: result_ty.clone(),
-            span: e.span.clone(),
-            def_id: None,
-        };
         let bind_r = IrStmt {
             kind: IrStmtKind::Bind {
                 var: r,
                 ty: result_ty.clone(),
-                value: result_if,
+                value: result_branch,
                 mutability: Mutability::Let,
             },
             span: None,
@@ -328,7 +389,7 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
         .iter_mut()
         .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
     {
-        rewrite_tail(&mut func.body, var_table);
+        rewrite_tail(&mut func.body, var_table, true);
     }
 }
 
