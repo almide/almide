@@ -76,8 +76,13 @@ fn dce_stmt(stmt: &mut IrStmt, var_table: &VarTable, mutated: &HashSet<u32>) {
 }
 
 /// Remove `let x = <pure>` statements where x has use_count == 0 and is never
-/// written in place. Callers with no mutation analysis of their own use
-/// [`dce_stmts`]; the enclosing-body variant is [`dce_stmts_keeping`].
+/// written in place, deriving the mutation set from `stmts` alone.
+///
+/// TEST-ONLY entry point: the pass itself always has an enclosing body, so it
+/// derives the mutation set from the whole body ([`mutation_targets`]) and
+/// calls [`dce_stmts_keeping`] directly. Kept `#[cfg(test)]` rather than
+/// deleted because the unit tests exercise the retain rule on a bare stmt list.
+#[cfg(test)]
 pub(crate) fn dce_stmts(stmts: &mut Vec<IrStmt>, var_table: &VarTable) {
     let mut mutated = HashSet::new();
     for stmt in stmts.iter() {
