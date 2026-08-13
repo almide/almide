@@ -516,8 +516,7 @@ C-094/C-126(`protocol_ufcs_inferred_lambda.almd`)が pin。test ブロックは
 `almide test` の wasm レグで常時実行される(spec/lang 全域が evidence;
 `test where` は `spec/lang/test_where_test.almd`)。
 
-**Strict は未節化**: `strict <mode>` は受理されるが現状どの層も消費しない
-(#1321 — accept-and-ignored)。裁定が下るまで UNWRITTEN 維持。
+**Strict は撤去済み**: `strict <mode>` は受理されるだけで何も消費しない宣言だった(#1321)。裁定(2026-08-13)により**文法から削除** — 効かない検査モードを約束する形は言語に残さない。以後 `strict` は通常の識別子であり、宣言として書けばパースエラーになる。
 
 テスト: `spec/wasm_cross/declaration_forms.almd`(契約 C-260)。
 
