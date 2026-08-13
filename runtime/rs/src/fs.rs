@@ -146,6 +146,53 @@ pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) ->
     }
 }
 
+// The ADR-0006 FALLIBLE forms of the two callback-driven walkers (#1144, the
+// C-220 tracked cell). Same reader, same line semantics — the only difference
+// is that the callback answers `Result` and the FIRST err ends the walk: the
+// `?` returns before the next `read_line`, so the BufReader is dropped with
+// the rest of the file unread. The err-stop point is therefore observable
+// twice over: the callback is not invoked again, AND the reader consumed
+// exactly through the failing line (plus its buffered readahead, which is not
+// an observable). The checker routes `fs.fold_lines(p, z, (a, l) => g(a, l)!)`
+// here by rewriting the callee to `fs.__fallible_fold_lines`.
+pub fn almide_rt_fs_fold_lines_effect<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, String) -> Result<A, String>>) -> Result<A, String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(io_err)?);
+    let mut acc = init;
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        if reader.read_line(&mut buf).map_err(io_err)? == 0 {
+            return Ok(acc);
+        }
+        if buf.ends_with('\n') {
+            buf.pop();
+            if buf.ends_with('\r') {
+                buf.pop();
+            }
+        }
+        acc = f(acc, buf.clone())?;
+    }
+}
+pub fn almide_rt_fs_for_each_line_effect(path: &str, f: std::rc::Rc<dyn Fn(String) -> Result<(), String>>) -> Result<(), String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(io_err)?);
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        if reader.read_line(&mut buf).map_err(io_err)? == 0 {
+            return Ok(());
+        }
+        if buf.ends_with('\n') {
+            buf.pop();
+            if buf.ends_with('\r') {
+                buf.pop();
+            }
+        }
+        f(buf.clone())?;
+    }
+}
+
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): `Ok(None)` ⇔ the
 // path (or a parent) does not exist; every other failure (permission, a
 // directory at the path, IO) keeps the err path with the same message the

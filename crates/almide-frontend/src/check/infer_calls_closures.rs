@@ -846,9 +846,22 @@ impl Checker {
         }
         const FALLIBLE_HOF_CORE: &[&str] =
             &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
+        // #1144 (C-220's tracked cell, now C-269): the fs streaming walkers
+        // take the same rule — but only the two SEQUENTIAL, callback-driven
+        // cells. `fold_lines_range` / `fold_lines_chunked` are deliberately
+        // excluded: a partitioned walk has no defined FIRST err (which chunk
+        // errs first is a thread-schedule observable), so there is no stop
+        // point to short-circuit at. The matrix in
+        // tests/fs_streaming_family_gate_test.rs cross-checks this table.
+        const FALLIBLE_HOF_FS: &[&str] = &["fold_lines", "for_each_line"];
         let ExprKind::Member { object, field } = &mut callee.kind else { return };
         let ExprKind::Ident { name: mod_name, .. } = &object.kind else { return };
-        if mod_name.as_str() != "list" || !FALLIBLE_HOF_CORE.contains(&field.as_str()) {
+        let known = match mod_name.as_str() {
+            "list" => FALLIBLE_HOF_CORE.contains(&field.as_str()),
+            "fs" => FALLIBLE_HOF_FS.contains(&field.as_str()),
+            _ => false,
+        };
+        if !known {
             return;
         }
         fn contains_unwrap(e: &mut ast::Expr) -> bool {
