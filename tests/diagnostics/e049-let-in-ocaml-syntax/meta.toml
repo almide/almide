@@ -1,0 +1,3 @@
+expects_code = "E049"
+expects_error = "is OCaml/Haskell syntax"
+hint_substring = "chain by newlines"

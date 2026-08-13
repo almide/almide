@@ -48,6 +48,28 @@ impl Parser {
         format!("{} at line {}:{}", msg, line, col)
     }
 
+    /// The exact range `almide fix` deletes to turn an OCaml-style
+    /// `let x = e in body` into Almide's newline-chained form: the `in`
+    /// keyword plus the run of blanks up to the token that follows it on the
+    /// SAME line.
+    ///
+    /// Every column here comes from the lexer's own token positions —
+    /// nothing is derived by searching the text — so the range can only ever
+    /// name the keyword and the blanks after it. When the next token starts
+    /// on a later line there is no whitespace to absorb and the range is the
+    /// keyword alone; when the token positions are unusable the caller gets
+    /// `None` and emits no fix-it rather than guessing a span (#1312).
+    pub(crate) fn letin_deletion_span(&self) -> Option<(usize, usize, usize)> {
+        let tok = self.current();
+        if tok.token_type != TokenType::In { return None; }
+        if tok.line == 0 || tok.col == 0 || tok.end_col <= tok.col { return None; }
+        let end_col = match self.peek_at(1) {
+            Some(next) if next.line == tok.line && next.col > tok.end_col => next.col,
+            _ => tok.end_col,
+        };
+        Some((tok.line, tok.col, end_col))
+    }
+
     pub(crate) fn diag_error(&self, message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Diagnostic {
         let mut d = Diagnostic::error(message, hint, context);
         let tok = self.current();

@@ -98,7 +98,9 @@ fn let_in_across_newline_triggers_letin_diagnostic() {
     // dojo data: 70b writes OCaml-style `let x = expr\n  in <body>` and
     // pre-fix the parser fell through to a generic "Expected expression
     // (got In 'in')" parse error. Ensure the let-in detection fires across
-    // an intervening newline AND emits the chain-by-newline try: snippet.
+    // an intervening newline AND emits the machine-applicable deletion
+    // fix-it (#1312 — the illustrative snippet became a span-anchored
+    // fix on E047 that `almide fix` applies unattended).
     let p = write_tmp("try_letin_newline.almd", r#"
 fn sum_digits(n: Int) -> Int =
   let abs_n = int.abs(n)
@@ -109,8 +111,8 @@ fn sum_digits(n: Int) -> Int =
     assert!(!ok);
     assert!(out.contains("`let ... in <expr>` is OCaml/Haskell syntax"),
         "let-in detection didn't fire across newline:\n{}", out);
-    assert!(out.contains("let x = 1\n      let y = 2"),
-        "missing chain-by-newline try: snippet:\n{}", out);
+    assert!(out.contains("try: delete the highlighted text (machine-applicable"),
+        "missing machine-applicable deletion fix-it:\n{}", out);
     // After parser recovery, the partial Stmt::Let should survive so the
     // E001 fn-body Unit-leak snippet can name the actual binding.
     assert!(out.contains("let abs_n = ...") || out.contains("let abs_n ="),

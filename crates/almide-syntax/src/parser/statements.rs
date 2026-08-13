@@ -133,7 +133,17 @@ impl Parser {
                 "`let ... in <expr>` is OCaml/Haskell syntax",
                 "In Almide, multiple lets chain by newlines inside a block — no `in` keyword.",
                 "let ... in",
-            ).with_try("let x = 1\nlet y = 2\nx + y");
+            ).with_code("E049");
+            let diag = match self.letin_deletion_span() {
+                // Machine-applicable: `in` is not a keyword in Almide at
+                // all, and the body it introduces is already the
+                // newline-chained continuation. Deleting the token yields
+                // the identical program — nothing is decided for the author.
+                Some((line, col, end_col)) => diag.with_machine_fix(line, col, end_col, ""),
+                // No exact span (the `in` is the last token) — keep the
+                // display-only snippet rather than guess a range.
+                None => diag.with_try("let x = 1\nlet y = 2\nx + y"),
+            };
             self.errors.push(diag);
             // Recover: consume `in` and the trailing expression so the partial
             // `Stmt::Let { name, value }` survives in the AST. This lets
