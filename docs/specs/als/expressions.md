@@ -549,3 +549,17 @@ OPEN(#1263)**。未知エスケープ(`\q`)と範囲外 `\u{…}` の黙過は
 1 字(fixture が可視括りで pin)。空文字列は長さ 0 の値。
 
 テスト: `spec/wasm_cross/string_float_stable.almd`(契約 C-262)。
+## ALS-D2 回復ノード(`ExprKind::Error` / `Stmt::Error`)
+
+**裁定**: 両ノードは**回復語彙** — parse エラーの位置を占位して後続の診断
+収集を継続させるためだけに存在し、**受理されたプログラムには決して現れ
+ない**。構文上の対応物を持たない(ALS-E25 の `Try` と同じ扱いだが、こちらは
+エラー経路で実際に生成される)。
+
+**検証**: `tests/parser_recovery_test.rs` が両方向を pin —
+(1) spec/wasm_cross 全 corpus(受理・両ターゲット実行済みプログラム)の
+AST に回復ノードが**ゼロ**であること、(2) 壊れたファイルはエラーを報告
+しつつ**エラーの先まで解析が継続**すること(後続宣言が見える)。
+
+テスト: `tests/parser_recovery_test.rs`(構造検証)、
+`spec/wasm_cross/declaration_forms.almd`(受理側、契約 C-263)。

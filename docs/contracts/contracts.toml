@@ -1,7 +1,5 @@
-# ====================================================================
-# ALMIDE BEHAVIOR CONTRACT LEDGER — the language's cross-target law book
-# ====================================================================
-#
+# =============================================================# ALMIDE BEHAVIOR CONTRACT LEDGER — the language's cross-target law book
+# =============================================================#
 # Each [[contract]] is a NORMATIVE, observable promise the compiler keeps on
 # BOTH backends (native Rust and wasm32). "Observable" = stdout, stderr, exit
 # code. Native is the oracle; native == wasm is a hard invariant, NOT a "target
@@ -3230,4 +3228,17 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_float_stable.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-263"
+spec      = "ALS-D2"
+title     = "Recovery nodes never appear in accepted programs; a broken file still reports past its first error"
+statement = "ALS-D2: ExprKind::Error / Stmt::Error are recovery vocabulary — placeholders that keep diagnostic collection going past a parse error, never present in an accepted program. Both directions are pinned: the whole spec/wasm_cross corpus (300+ accepted, both-target-executed programs) parses with ZERO recovery nodes, and a deliberately broken file reports diagnostics while parsing CONTINUES past the error (the following declaration is still seen). The fixture leg is any accepted program executing identically with zero recovery artifacts."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
+  { path = "tests/parser_recovery_test.rs", name = "accepted_corpus_contains_zero_recovery_nodes", class = "by-construction" },
+  { path = "tests/parser_recovery_test.rs", name = "broken_file_recovers_past_the_error", class = "by-construction" },
 ]
