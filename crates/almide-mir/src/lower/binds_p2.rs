@@ -392,15 +392,23 @@ impl LowerCtx {
         // duplicable: no copy, no ownership). Without this, a bare-Var scalar RHS fell to the
         // deferred `Const` below and silently became 0 (the param-alias zeroing trap).
         //
-        // BUT a MUTABLE `var v = w` must get its OWN local: if it aliased w's local, a later
-        // `v = …` reassignment would `SetLocal` w's slot and SILENTLY CORRUPT w (the sha1
-        // `var a = h0; … a = temp` trap that clobbered h0). Seed a fresh scalar local with a
-        // type-agnostic i64 copy (`v = w + 0` — integer-add of 0 is identity on the i64-uniform
-        // bits of Int/Float/Bool), so reassigning `v` never touches `w`. An immutable `let v = w`
-        // is never reassigned, so the cheaper alias stays.
+        // A SCALAR `let/var v = w` ALWAYS gets its own value, seeded with a type-agnostic
+        // i64 copy (`v = w + 0` — integer-add of 0 is identity on the i64-uniform bits of
+        // Int/Float/Bool). Two mirror-image corruptions forced this, one per direction:
+        //   - a MUTABLE `var v = w` that aliased w's local: a later `v = …` would
+        //     `SetLocal` w's slot and SILENTLY CORRUPT w (the sha1 `var a = h0; … a = temp`
+        //     trap that clobbered h0);
+        //   - an immutable `let v = w` where W ITSELF is loop-carried (#1322): the alias
+        //     denotes w's stable local, so v reads w's POST-assignment value — the affine
+        //     gcd swap `let t = y; y = x % y; x = t` degenerated to x == y (t=0 on every
+        //     leg the v1 spine renders; v0/codegen-v3 was correct). "let is never
+        //     reassigned" was true but aimed at the wrong side of the alias.
+        // The copy anchors the READ at bind position, which is the value semantics both
+        // directions need. A HEAP `let v = w` keeps the alias: heap reassignment inside
+        // loops/arms is walled or deferred, never SetLocal'd in place.
         if let IrExprKind::Var { id } = &value.kind {
             if let Ok(src) = self.value_for(*id) {
-                if self.binding_is_mutable && !is_heap_ty(&value.ty) {
+                if !is_heap_ty(&value.ty) {
                     let zero = self.fresh_value();
                     self.ops.push(Op::ConstInt { dst: zero, value: 0 });
                     let dst = self.fresh_value();
