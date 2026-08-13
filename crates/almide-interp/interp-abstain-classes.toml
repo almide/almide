@@ -31,6 +31,12 @@ patterns = [
   "capability: prim.alloc_str",
   "capability: prim.alloc_set",
   "capability: prim.alloc_bytes",
+  # Raw pointer conversion — pointer work by definition, same class as handle.
+  "capability: prim.int_to_ptr",
+  # An access the #1226 slice-1 arena does not own. The flat String/Bytes
+  # family is modeled; a load/store landing outside it is still the heap
+  # boundary, one level in from `prim.handle`.
+  "outside this heap's arena",
 ]
 
 [[class]]
@@ -49,4 +55,16 @@ patterns = [
   "transcendental",
   "float `**`",
   "interp fuel/recursion budget exhausted",
+  # SURFACED BY #1226 slice 1, not introduced by it: these fixtures used to
+  # abstain at `prim.handle` (HEAP_BOUNDARY, first-hit) and now get past it to
+  # reveal the blocker underneath. Both are bounded dispatch work with no
+  # architectural change, which is what BRIDGEABLE means:
+  #   prim.die     — native panics with exit 101; `Flow::Abort` is this
+  #                  interpreter's exit-1 model, so voting it would be wrong
+  #                  (the #1366 lesson). Needs an abort that carries the exit
+  #                  code, not a new evaluation model.
+  #   prim.fd_write— the raw fd write. The interp already captures stdout
+  #                  (`self.stdout`), so this is glue at the argv/env/fs tier.
+  "capability: prim.die",
+  "capability: prim.fd_write",
 ]
