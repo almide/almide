@@ -435,10 +435,26 @@ impl<'a> Interpreter<'a> {
     fn eval_expr_misc(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
         Some(match &expr.kind {
             // ── Misc ──
-            IrExprKind::Hole => Flow::Abort(
-                "internal: evaluated a Hole (intrinsic-stub body reached as an expr)".into(),
+            // `_` and `todo(..)` ABORT the native leg as a Rust panic — the
+            // message on stderr and exit **101** (ALS-E30). `Flow::Abort` is
+            // this interpreter's model of the R1 abort, which is `Error: <msg>`
+            // and exit **1** — a different observable. Voting Abort here would
+            // therefore cast a WRONG third vote on every hole, and a wrong vote
+            // is worse than an honest skip (crate rule). The interpreter has no
+            // panic model, so it abstains by name.
+            //
+            // The same node is also the synthesized body of an intrinsic stub
+            // (`lower/mod.rs`), which `dispatch.rs` filters out before it can be
+            // evaluated. Both routes are named below, since an abstain that
+            // appears without a hole in the source means that filter broke.
+            IrExprKind::Hole => Flow::Unsupported(
+                "typed hole `_` (native panics with exit 101; no panic model here) \
+                 — or an intrinsic-stub body that escaped dispatch's filter"
+                    .into(),
             ),
-            IrExprKind::Todo { message } => Flow::Abort(message.clone()),
+            IrExprKind::Todo { message } => Flow::Unsupported(format!(
+                "todo({message:?}) (native panics with exit 101; no panic model here)"
+            )),
             // ── The ONE pre-codegen RuntimeCall family: the budget prims.
             // The fan.bounded/race frontend lowering emits these symbols
             // directly (they are the deterministic tier's floor on every

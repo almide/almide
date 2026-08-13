@@ -648,3 +648,46 @@ pin)。等値の意味論は型ごと — スカラーは prim 比較、String /
 Value は深い比較(ALS-E11、`list.eq_*` 族)。
 
 テスト: `spec/wasm_cross/binary_operators.almd`(契約 C-267)。
+
+## ALS-E30 ホールと未実装マーカー(`ExprKind::Hole` / `Todo` / `Placeholder`)
+
+**受理形**: 式位置の `_`(`ExprKind::Hole`)、`todo("メッセージ")`
+(`ExprKind::Todo`)、そして**呼び出し引数位置の `_`**
+(`ExprKind::Placeholder`)。前二者は**型付きホール** — 型検査を通り、型は
+文脈から推論される(`let y: Int = _` は Int)。第三のものは**受理されない**
+(下の裁定)。
+
+**値の規範(native)**: ホールも `todo` も**評価に到達したら中断する** —
+Rust の panic として `not yet implemented: <メッセージ>` を stderr に出し、
+**終了コード 101**。ホールのメッセージは Almide 側の行を名乗る
+(`hole at line 4`)。`todo` は自分の文字列をそのまま運ぶ(引用符を含んでも
+エスケープされて壊れない、#1346)。中断前に実行済みの出力は残る
+(fixture: `io.print("before")` の後に `todo` → stdout に `before`、その後
+101)。
+
+**裁定 1: これはクロスターゲット契約を持たない**。wasm レンダラは
+ホール/`todo` を含む関数を**ビルド時に拒否する**(loud wall)。しかも拒否は
+**到達可能性に依らない** — 実測で、決して評価されない match アームの
+`_ => todo(...)` を含むプログラムは native では正常終了(exit 0)する一方、
+wasm では関数まるごとが subset の外として拒否される。したがって
+`spec/wasm_cross/` の fixture は原理的に書けず、この節は**両ターゲット同一の
+振る舞いを主張しない**。ホールは native 限定のスケッチ用ワークフローであり、
+出荷対象のプログラムに残るものではない。契約台帳が担うのは下の裁定 2 の
+半分だけである。
+
+**裁定 2: 呼び出し引数の `_` は検査時エラー E046**(契約 C-268)。`add(_, 10)`
+は部分適用**ではない** — 束縛すると戻り値型が付き、パイプ位置では余分な引数と
+して E004 になる、つまり「値のないホール」がそのまま codegen へ流れる形だった
+(#1266 クラスの invalid Rust)。E046 は位置(第何引数か)を名乗り、ラムダ
+(`(x) => add(x, 10)`)へ誘導する。型検査はターゲット選択より前に走るため、
+このエラーは native と wasm で同一である(`fan.timeout` の E027 墓碑 C-006 と
+同じ構造)。
+
+**裁定 3: interp は棄権する**。native の中断は panic(exit 101)で、
+interp の `Flow::Abort` が模す R1 中断は `Error: <msg>` + exit 1 — **別の
+観測**である。第三の審判が誤った票を投じるより棄権する方が良い(almide-interp
+の規則)ので、`Hole` / `Todo` は理由付きの `Flow::Unsupported` を返す。
+
+テスト: `tests/diagnostics/e046-call-arg-placeholder/`(E046、契約 C-268)、
+`spec/lang/typed_hole_test.almd` と `tests/typed_hole_diag_test.rs`
+(native の中断形と行番号、`todo` のメッセージ保存)。

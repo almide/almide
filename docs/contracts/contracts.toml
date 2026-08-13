@@ -3286,3 +3286,16 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/binary_operators.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-268"
+spec      = "ALS-E30"
+title     = "A `_` in call-argument position is a check-time E046, identically on both targets"
+statement = "ALS-E30: `add(_, 10)` is REJECTED at check time as E046 naming the argument position, and the hint steers to a lambda (`(x) => add(x, 10)`) while explicitly denying partial application — binding the form types as the RETURN, and in pipe position it counts as an extra argument (E004). Before the ruling the checker typed the Placeholder as Unknown and it sailed into codegen, emitting invalid Rust behind the compiler-blaming banner (the #1266 class). Type check precedes the target split, so the diagnostic is identical native <-> wasm — the same structure as the E027 fan.timeout tombstone (C-006). The SIBLING forms in ALS-E30, the typed holes `_` (expression position) and `todo(msg)`, deliberately carry NO cross-target promise: they abort the native leg as a panic (exit 101) while the wasm renderer refuses the whole function at build time regardless of whether the hole is reachable, so no cross-target fixture can exist for them and none is claimed."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e046-call-arg-placeholder/broken.almd", class = "fixture" },
+  { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
+  { path = "tests/typed_hole_diag_test.rs", name = "typed_hole_panics_naming_the_almide_source_line", class = "by-construction" },
+]
