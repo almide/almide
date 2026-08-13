@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "3"
+# unverified_ceiling = "2"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -91,7 +91,8 @@ evidence = "#1244 round 5: no live miscompile was needed — one was PLANTED in 
 
 [[gate]]
 path = "proofs/receipt.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: the #984 guard demonstrated on the DERIVED path (no .verified-fingerprint present, so all four verdicts were really re-run). Forging the certified translation table (translation_validation.rs: Op::Dup's pattern -> a name the renderer never emits) rendered 'C-SAFE | PASS / FAIL' while C-PROVEN/C-WALL stayed PASS, and the script exited 1 with 'receipt: a verdict above is FAIL — refusing to exit green (#984)'. Restored; the VTEST cell is green again"
 
 [[gate]]
 path = "proofs/check-stdlib-purity-registry.sh"
