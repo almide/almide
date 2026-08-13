@@ -3402,7 +3402,7 @@ evidence  = [
 ]
 
 [[contract]]
-id        = "C-271"
+id        = "C-276"
 spec      = "ALS-C9"
 title     = "A String-key `list.sort_by` over HEAP elements orders and co-owns identically on both targets"
 statement = "ALS-C9: `list.sort_by(rows, (r) => <String>)` over a HEAP element type (List[List[String]], List[String], List[R]) is a STABLE sort on the cached key, compared byte-lexicographically (string.cmp — v0's String Ord), with the key fn called exactly once per element and the SOURCE list left readable afterwards; native and wasm agree byte-for-byte. The wasm leg routes the heap instantiation to `list.sort_by_str_key_rc`, whose fill ACQUIRES (rc_inc) each element handle copied into the result so the two lists co-own their elements — the scalar twin's raw copy is right for an Int element and a double-free for a heap one, which is why the heap instantiation previously walled the whole file (`sort_by_str_key_x` unlinked, #1233) and only native ever ran it. The fixture's 20000-round create+sort+drop loop is the balance gate: a missing acquire double-frees and a missing release leaks past page 1, and either traps well before the loop ends."
