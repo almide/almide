@@ -36,38 +36,7 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // shape, so a `match`/`!` over the bound result EXECUTES.
             | ("fs", "file_size")
             | ("fs", "modified_at")
-            // `fs.copy` / `fs.append` — Result[Unit, String] built by the ok(())/err(m)
-            // CTORS (fs_copy.almd / fs_append.almd): a NON-heap Ok routes through
-            // `try_lower_result_scalar_ok_ctor` → `materialize_result_ok`, the flat
-            // LEN-AS-TAG block (@4 — NOT the prim pass-through's cap-as-tag @16 that
-            // fs.write's $write_text_file builds). Listing them in the str-result
-            // (@16) family instead made every err read back as ok — the caller read
-            // the len-0 block's untouched @16 field (a silent wrong-branch, caught
-            // by the missing-src copy probe).
-            | ("fs", "copy")
-            | ("fs", "append")
-            // `fs.remove` / `fs.write_bytes` / `fs.write_bytes_raw` — the same
-            // ctor-built len-as-tag Result[Unit, String] (fs_remove.almd /
-            // fs_write_bytes.almd / fs_write_bytes_raw.almd).
-            | ("fs", "remove")
-            | ("fs", "write_bytes")
-            | ("fs", "write_bytes_raw")
     )
-}
-
-/// #1406: is this call the fan MAPPER `fan.any_map` (any of its nine 3×3
-/// pairings)? The classify sites (bind + match-subject) see the PRE-routing
-/// name — `fan_any_call_name` picks the suffixed self-host (`any_map_ss`, …)
-/// later, at emit — so the scalar-vs-heap-Ok FAMILY cannot be split by name
-/// there: `("fan", "any_map")` is all nine pairings. The split is the RESULT
-/// TYPE: a String-output pairing returns `Result[String, String]`
-/// (`is_heap_ok_result` — the cap-as-tag ctor layout, fs.read_text's shape),
-/// a scalar-output pairing returns `Result[Int|Float, String]` (len-as-tag,
-/// int.parse/float.parse's shape). The name row says only "this result is
-/// materialized"; the type says WHICH layout — the reference-compiler
-/// separation (rustc/Roc): names choose code, types choose layout.
-pub(crate) fn is_fan_any_map(module: &str, func: &str) -> bool {
-    module == "fan" && crate::lower::base_stdlib_fn_name(func) == "any_map"
 }
 
 /// Does `module.func` return a materialized HEAP-Ok `Result[String, String]` (the cap-as-tag
@@ -169,6 +138,21 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // identical cap-as-tag Result[Unit, String]: Ok len@4=0 + tag@16=0, Err with
             // @12=msg + tag@16=1), so a `match`/`!` reads tag @16 like fs.write.
             | ("fs", "rename")
+            // `fs.copy` / `fs.append` / `fs.remove` / `fs.write_bytes` /
+            // `fs.write_bytes_raw` — Result[Unit, String] built by the ok(())/err(m)
+            // CTORS (fs_copy.almd et al). Since result-family-from-type Phase 1 the
+            // ctor blocks are BYTE-IDENTICAL to the prim family above: Ok was always
+            // len@4=0 + @12=0 + tag@16=0 (`materialize_result_ok` with a Unit payload),
+            // and `materialize_result_err_str` now writes the Err tag@16=1 the 8-byte
+            // handle store used to leave at 0 — the exact field whose absence made the
+            // earlier str-family listing of fs.copy read every err back as ok (the
+            // silent wrong-branch recorded here before this arc). One type, one layout:
+            // the last name-keyed layout collision in the system is gone.
+            | ("fs", "copy")
+            | ("fs", "append")
+            | ("fs", "remove")
+            | ("fs", "write_bytes")
+            | ("fs", "write_bytes_raw")
             // `fs.remove_all` returns the SAME cap-as-tag `Result[Unit, String]` shape as fs.write
             // ($remove_all builds it identically — Ok with len@4=0 + @12=0 + tag@16=0, Err with
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
@@ -208,6 +192,65 @@ pub fn is_result_listval_ty(ty: &Ty) -> bool {
     matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, le)
             if le.len() == 1 && is_value_ty(&le[0])))
+}
+
+/// The physical FAMILY of a materialized `Result` block — THE single type→layout
+/// decision (result-family-from-type Phase 2). Mirrors what every reference
+/// compiler does (rustc `layout_of(Ty)`, Swift `TypeLowering` keyed on the type,
+/// Zig `firstParamSRet(cc, return_type)`): the (module, fn) name tables say only
+/// WHETHER a call's result is a real materialized block; WHICH layout it has is
+/// a total function of the type, decided here and nowhere else.
+///
+/// - `HeapOk` — the cap-as-tag layout (payload @12, Ok/Err tag @16): both arms
+///   heap (`Result[String, String]`, `Result[List[T], String]`, the heap-Ok
+///   variant-err class), or `Result[Unit, String]` (one layout per type since
+///   Phase 1 — the ctor and prim producers build the identical block).
+/// - `Scalar` — the len-as-tag layout (@4: Ok = len 0, Err = len 1, payload
+///   @12): scalar Ok (`Int`/`Float`/`Bool`), including the scalar-Ok
+///   variant-err and scalar-scalar classes.
+///
+/// The one-site precedent this generalizes: control_p2_b.rs's heap-Ok escape,
+/// whose comment already stated the law — "TYPE decides the repr, not the
+/// list" (a `result.map` listed len-as-tag returns cap-as-tag for a heap
+/// instantiation). That escape becomes structural here.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub(crate) enum ResultFamily {
+    Scalar,
+    HeapOk,
+}
+
+pub(crate) fn result_family(ty: &Ty) -> ResultFamily {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let both_heap = matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1]));
+    if both_heap || is_result_unit_str_ty(ty) {
+        ResultFamily::HeapOk
+    } else {
+        ResultFamily::Scalar
+    }
+}
+
+/// Does `module.func` return a real MATERIALIZED Result block (a self-host built
+/// through the ok()/err() ctor rails, or a prim floor whose render builds the
+/// canonical layout)? The MERGED name set (result-family-from-type Phase 2):
+/// membership means ONLY "materialized" — the layout family comes from
+/// [`result_family`] on the call's TYPE. (The two tables below survive as the
+/// merged set's storage; their split no longer carries family meaning.)
+pub(crate) fn is_self_host_materialized_result_fn(module: &str, func: &str) -> bool {
+    is_self_host_result_module_fn(module, func)
+        || is_self_host_result_str_module_fn(module, func)
+}
+
+/// Is `ty` a `Result[Unit, String]` (the fs.write/fs.copy shape — no Ok payload, a String
+/// Err)? Since result-family-from-type Phase 1 this type has ONE physical layout regardless
+/// of producer (prim render or ok(())/err(m) ctors): Ok = len@4 0 + @12 0 + tag@16 0,
+/// Err = len@4 1 + @12 msg + tag@16 1 — BOTH the len-as-tag read (the `??` scalar route,
+/// inverse sense) and the cap-as-tag read (the str-family `match`/`!` route) are valid on
+/// it, so gates may admit it on whichever route fits the consumer.
+pub fn is_result_unit_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(&a[0], Ty::Unit) && matches!(&a[1], Ty::String))
 }
 
 /// Is `ty` a `Result[String, String]` (the value.as_string shape — both arms a flat String)? The

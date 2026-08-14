@@ -65,12 +65,12 @@ impl LowerCtx {
         // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
         // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
         || (used_effect_subj && Self::is_heap_ok_result(&subject.ty))
-        // Any OTHER self-host Module call with a HEAP-Ok Result (`result.collect` /
-        // `result.map` over a heap payload — listed len-as-tag but cap-as-tag for these
-        // instantiations): TYPE decides the repr, not the list. Every heap-Ok Result is
-        // BUILT cap-as-tag (the ok()/err() ctors' materialize_result_str layout), so the
-        // read side must agree universally.
-        || (is_self_host_result_call(subject) && Self::is_heap_ok_result(&subject.ty))
+        // (The former fourth disjunct — a scalar-LISTED self-host call at a heap-Ok
+        // instantiation, `result.map` over a heap payload — is subsumed: since
+        // result-family-from-type Phase 2 the helpers themselves classify by
+        // `result_family(ty)`, so `is_self_host_result_str_call` above already
+        // admits exactly that case. Its comment's law — "TYPE decides the repr,
+        // not the list" — is now the definition, not an escape hatch.)
     {
         self.materialized_results_str.insert(subj);
         self.track_heap_ok_result_subject_drop(subj, &subject.ty);

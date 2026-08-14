@@ -184,7 +184,15 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Computed { .. }, .. } => {
                 is_result_ty(&expr.ty)
             }
-            _ => is_self_host_result_call(expr),
+            // A str-family `Result[Unit, String]` call (fs.write/fs.copy — the moved
+            // ctor family, result-family-from-type Phase 1) reads INVERSELY too: its
+            // block carries a valid len-as-tag reading (Ok len 0 / Err len 1), so the
+            // scalar `??` route below is exact for it.
+            _ => {
+                is_self_host_result_call(expr)
+                    || (is_self_host_result_str_call(expr)
+                        && crate::lower::is_result_unit_str_ty(&expr.ty))
+            }
         }
     }
 
@@ -235,7 +243,11 @@ impl LowerCtx {
             || (is_self_host_result_str_call(expr)
                 && (crate::lower::is_value_result_ty(&expr.ty)
                     || crate::lower::is_result_listval_ty(&expr.ty)
-                    || crate::lower::is_result_str_str_ty(&expr.ty)))
+                    || crate::lower::is_result_str_str_ty(&expr.ty)
+                    // `Result[Unit, String]` (fs.write/copy family) — its block also
+                    // carries the len-as-tag reading, so the scalar route is exact
+                    // (result-family-from-type Phase 1).
+                    || crate::lower::is_result_unit_str_ty(&expr.ty)))
             || is_named_variant_call
         {
             return self.call_unwrap_or_operand(expr, cx);
