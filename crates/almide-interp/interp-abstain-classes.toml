@@ -43,6 +43,13 @@ patterns = [
 name = "BRIDGEABLE"
 patterns = [
   "capability: HOF map.fold",
+  # SURFACED BY the #1416 ctor glue (map.new/set.new/with_capacity), not
+  # introduced by it: map_filter / map_set_typechange used to abstain at
+  # `prim.alloc_map` (HEAP_BOUNDARY, first-hit) and now get past the
+  # constructor to reveal the missing HOF arm underneath — dispatch glue,
+  # the textbook BRIDGEABLE shape.
+  "capability: HOF map.filter",
+  "capability: HOF map.map",
   "capability: HOF list.update",
   "capability: list.min/max on non-comparable elements",
   "capability: prim.args_get_list_full",
