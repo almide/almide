@@ -206,6 +206,17 @@ impl LowerCtx {
                 // `Result[Value, String]` (value.get) — a single dynamic Value Ok, freed
                 // recursively by `Op::DropResultValue` (Ok → `$__drop_value`).
                 self.value_result_results.insert(dst);
+            } else if crate::lower::is_list_str_result_ty(ty) {
+                // `Result[List[String], String]` (fs.list_dir/walk/glob/read_lines
+                // BOUND to a let) — the Ok payload is a List[String]; route the
+                // scope-end drop to the RECURSIVE DropResultListStr (frees each
+                // element String + the list block). This arm existed only on the
+                // statement-subject path (control.rs) until the #1414 audit: the
+                // bind path's flat heap_elem_lists/DropListStr leaked the payload
+                // list's element Strings (output-invisible — no fixture catches a
+                // leak — which is how the asymmetry survived).
+                self.list_str_result_results.insert(dst);
+                self.heap_elem_lists.insert(dst);
             } else if crate::lower::is_res_map_si_ty(ty)
                 || crate::lower::is_res_list_map_si_ty(ty)
             {
