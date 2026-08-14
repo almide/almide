@@ -147,6 +147,15 @@ impl LowerCtx {
             IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. } => {
                 self.lower_scalar_literal(expr)
             }
+            // `()` — the Unit value is 0 in the i64-uniform repr (the same
+            // convention `ok(())`'s payload placeholder uses). This is what lets a
+            // `Result[Unit, String] ?? ()` fallback lower on the scalar route
+            // (`fs.remove(p) ?? ()` walled on exactly this missing arm).
+            IrExprKind::Unit => {
+                let z = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                Some(z)
+            }
             // Decomposed (#781): the 340-line operator dispatch is a verbatim
             // text move into `lower_scalar_binop`.
             IrExprKind::BinOp { op, left, right } => {

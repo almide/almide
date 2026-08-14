@@ -1,0 +1,32 @@
+// `?? ()` — the Unit-fallback unwrap-or shapes. Both walled on the wasm leg
+// until the scalar-value lowering learned the Unit-is-0 arm (result-family-
+// from-type follow-up, 2026-08-14): the fallback `()` had no lowering, so the
+// whole `??` declined and the desugared match walled as an untracked subject.
+
+fn check(flag: Bool) -> Result[Unit, String] =
+  if flag then ok(()) else err("boom")
+
+fn swallow_err() -> Int = {
+  let _ = check(false) ?? ()
+  7
+}
+
+fn swallow_ok() -> Int = {
+  let _ = check(true) ?? ()
+  8
+}
+
+test "unit fallback swallows the err arm" {
+  assert_eq(swallow_err(), 7)
+}
+
+test "unit fallback passes the ok arm through" {
+  assert_eq(swallow_ok(), 8)
+}
+
+test "scalar fallback still reads the tag inversely" {
+  let n = int.parse("not a number") ?? -1
+  assert_eq(n, -1)
+  let m = int.parse("42") ?? -1
+  assert_eq(m, 42)
+}

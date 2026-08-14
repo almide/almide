@@ -240,14 +240,7 @@ impl LowerCtx {
         }
         if is_self_host_option_call(expr)
             || is_self_host_result_call(expr)
-            || (is_self_host_result_str_call(expr)
-                && (crate::lower::is_value_result_ty(&expr.ty)
-                    || crate::lower::is_result_listval_ty(&expr.ty)
-                    || crate::lower::is_result_str_str_ty(&expr.ty)
-                    // `Result[Unit, String]` (fs.write/copy family) — its block also
-                    // carries the len-as-tag reading, so the scalar route is exact
-                    // (result-family-from-type Phase 1).
-                    || crate::lower::is_result_unit_str_ty(&expr.ty)))
+            || (is_self_host_result_str_call(expr) && unwrap_or_heap_ok_route_exists(&expr.ty))
             || is_named_variant_call
         {
             return self.call_unwrap_or_operand(expr, cx);
@@ -832,4 +825,26 @@ impl LowerCtx {
         self.drop_arm_locals(lhh_mark);
         val
     }
+}
+
+/// Does the `??` machinery have an EXECUTABLE route for a heap-Ok (str-family)
+/// Result operand of this TYPE? This is ROUTE CAPABILITY, not family: the
+/// family (`result_family`) says which physical layout the block has; this
+/// says whether one of the downstream routes (`lower_value_helper_unwrap_or` →
+/// variant-ctor → closure → `lower_str_unwrap_or` → `lower_scalar_unwrap_or`)
+/// can faithfully compute `block ?? fallback` for that payload class. A
+/// heap-Ok type with NO route (e.g. `Result[List[Int], String] ?? [..]` — a
+/// heap fallback the scalar route cannot build) must DECLINE so the wall stays
+/// honest. Named and single-sourced so adding a route and admitting its type
+/// happen in one place — the anonymous inline conjunction this replaces was
+/// the same point-wise-list disease the result-family arc razed, one level up.
+fn unwrap_or_heap_ok_route_exists(ty: &Ty) -> bool {
+    // value / List[Value] payloads → the value-helper route;
+    // String payload → the str route (`result.str_unwrap_or`);
+    // Unit payload → the scalar route (the block also carries the len-as-tag
+    // reading; the fallback `()` lowers as 0 — the Unit-is-0 convention).
+    crate::lower::is_value_result_ty(ty)
+        || crate::lower::is_result_listval_ty(ty)
+        || crate::lower::is_result_str_str_ty(ty)
+        || crate::lower::is_result_unit_str_ty(ty)
 }
