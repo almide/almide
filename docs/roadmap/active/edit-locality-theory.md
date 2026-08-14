@@ -98,12 +98,23 @@ the gate working.)
    simulation proofs over the Rust implementation. The fragment gate is
    the ratchet until then; the R-group obligations in
    `docs/specs/edit-locality.md` §3 stay on their own ledger.
-4. **Prediction loop**: for each proposed language change, derive the L1
-   verdict (preserved / needs side condition / violated) and a predicted MSR
-   direction; Dojo measures the actual delta. Theory that predicts
-   measurements is the layer no other language team has — Koka has proofs
-   without an experiment, Dojo-less languages have experiments without a
-   theorem.
+4. **Prediction loop** (MACHINERY LIVE 2026-08-15; closes as post-landing
+   runs accumulate): `proofs/l1-verdicts.toml` is the lab book — every
+   semantics-touching change records its L1 verdict AND a committed MSR
+   prediction (up/neutral/down with the causal mechanism) BEFORE any
+   measurement; `scripts/check-l1-verdicts.sh` gates the schema in CI.
+   Dojo's side is `src/l1_loop.almd` (written in Almide, per the dogfood
+   rule — and dogfooding it immediately caught the `regex.captures`
+   doc/implementation drift, almide#1432): it joins the ledger against
+   `runs/*/summary.md` headline MSR numbers and reports each prediction's
+   standing — confirmed / refuted / inconclusive / awaiting — into
+   `dashboards/l1-loop.md`. A refuted prediction stays in the ledger as a
+   finding about the theory. Seeded with LV-001..005 (the arc's five
+   landings, all predicted `up`); all await post-landing runs — the last
+   scored run predates the arc, so the loop's first real datapoint arrives
+   with the next Dojo round. Theory that predicts measurements is the layer
+   no other language team has — Koka has proofs without an experiment,
+   Dojo-less languages have experiments without a theorem.
 
 ## Non-goals
 

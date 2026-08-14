@@ -856,6 +856,9 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      - name: L1 verdict ledger (edit-locality prediction loop — schema and vocabularies)
+        run: bash scripts/check-l1-verdicts.sh
+
       - name: Release evidence seals (every seal re-measured against its tag — the audit freeze)
         run: bash scripts/release-seal.sh check
 
