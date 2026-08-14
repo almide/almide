@@ -150,7 +150,20 @@ impl LowerCtx {
         match route {
             UnwrapOrRoute::Done(v) => Some(v),
             UnwrapOrRoute::Fail => None,
-            UnwrapOrRoute::Next => self.lower_scalar_unwrap_or(handle, fallback, cx),
+            UnwrapOrRoute::Next => {
+                // TERMINAL TYPE GUARD (the route chain's safety floor): the scalar
+                // route blind-reads len@4 + slot 0 — valid ONLY for a genuinely
+                // len-as-tag-readable operand. Every other type that slips past
+                // the routes above (an admitted-but-unroutable heap-Ok Result, a
+                // future admission-list mistake) must DECLINE to an honest wall
+                // here, never fall into the misread (a cap-as-tag block has
+                // len@4 = 1 on BOTH arms — the silent wrong-branch class).
+                if !scalar_route_len_tag_readable(&expr.ty) {
+                    self.unwrap_or_rollback(cx);
+                    return None;
+                }
+                self.lower_scalar_unwrap_or(handle, fallback, cx)
+            }
         }
     }
 
@@ -847,4 +860,24 @@ fn unwrap_or_heap_ok_route_exists(ty: &Ty) -> bool {
         || crate::lower::is_result_listval_ty(ty)
         || crate::lower::is_result_str_str_ty(ty)
         || crate::lower::is_result_unit_str_ty(ty)
+}
+
+/// Is a blind len-as-tag read (len@4 as the tag, slot 0 as an i64-copy payload —
+/// what `lower_scalar_unwrap_or` emits) VALID for this operand type? The
+/// terminal guard of the `??` route chain: a scalar-family Result (len 0 = Ok /
+/// len 1 = Err), `Result[Unit, String]` (one layout since the result-family
+/// arc — both the len and the @16 read are valid), or a SCALAR-payload Option
+/// (the 0-or-1-element block). A heap-Ok cap-as-tag Result has len@4 = 1 on
+/// BOTH arms — reading it here is the silent wrong-branch class this guard
+/// makes unrepresentable.
+fn scalar_route_len_tag_readable(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::Result, _) => {
+            crate::lower::result_family(ty) == crate::lower::ResultFamily::Scalar
+                || crate::lower::is_result_unit_str_ty(ty)
+        }
+        Ty::Applied(TC::Option, a) if a.len() == 1 => !is_heap_ty(&a[0]),
+        _ => false,
+    }
 }

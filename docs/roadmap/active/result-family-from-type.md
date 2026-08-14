@@ -135,6 +135,16 @@ ARCHITECTURE.md; move this doc to done/ with the measured deltas.
   column; until then the merged set is two storage tables with no family
   meaning.
 - Stage C: #1414.
+- The `??` route zoo (the same disease one level up — five per-payload-class
+  routes behind a point-wise admission list): CONTAINED 2026-08-15. The
+  terminal scalar route now type-guards (an admitted-but-unroutable operand
+  declines to an honest wall — the silent wrong-branch class is
+  unrepresentable), the admission list is a named single-source predicate
+  (`unwrap_or_heap_ok_route_exists` — route CAPABILITY, not family), and the
+  endgame desugar (`?? → match`, one rewrite, zoo deleted) is implemented
+  behind `ALMIDE_QQ_DESUGAR=all` with a MEASURED residual of 13 fixtures —
+  the acceptance matrix lives in #1418. Two coverage gaps closed on the way:
+  `?? ()` (the Unit-is-0 fallback arm) and user-fn `Result[Unit, String] ??`.
 
 ## Option family — surveyed 2026-08-14, NO family disease
 

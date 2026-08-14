@@ -642,28 +642,84 @@ pub fn desugar_tuple_unwrap_or(body: &IrExpr) -> Option<IrExpr> {
 /// Result-typed shape the arm pass-through is actually valid for. CALL-COUNT-INVARIANT (the two
 /// operand calls appear exactly once before and after), so `mir == ir` holds without re-counting.
 /// SCALAR payloads keep their own proven `??` route untouched — they never reach the heap arm.
-pub fn desugar_unwrap_or_unwrap_fallback(body: &IrExpr) -> Option<IrExpr> {
+/// The carrier's HIT/MISS pattern pair for a payload bound to `p`, or `None` when the
+/// operand is neither an `Option[<payload>]` nor a `Result[<payload>, _]`. Shared by the
+/// `?? f(..)!` rewrite below and the route-zoo replacement experiment
+/// (`desugar_unwrap_or_to_match`).
+fn carrier_patterns(
+    carrier: &Ty,
+    payload: &Ty,
+    p: almide_ir::VarId,
+) -> Option<(almide_ir::IrPattern, almide_ir::IrPattern)> {
+    use almide_ir::IrPattern;
     use almide_lang::types::constructor::TypeConstructorId;
-    /// The carrier's HIT/MISS pattern pair for a payload bound to `p`, or `None` when the
-    /// operand is neither an `Option[<payload>]` nor a `Result[<payload>, _]`.
-    fn carrier_patterns(
-        carrier: &Ty,
-        payload: &Ty,
-        p: almide_ir::VarId,
-    ) -> Option<(almide_ir::IrPattern, almide_ir::IrPattern)> {
-        use almide_ir::IrPattern;
-        let bind = IrPattern::Bind { var: p, ty: payload.clone() };
-        match carrier {
-            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && a[0] == *payload => Some((
-                IrPattern::Ok { inner: Box::new(bind) },
-                IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
-            )),
-            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && a[0] == *payload => {
-                Some((IrPattern::Some { inner: Box::new(bind) }, IrPattern::None))
-            }
-            _ => None,
+    let bind = IrPattern::Bind { var: p, ty: payload.clone() };
+    match carrier {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && a[0] == *payload => Some((
+            IrPattern::Ok { inner: Box::new(bind) },
+            IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+        )),
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && a[0] == *payload => {
+            Some((IrPattern::Some { inner: Box::new(bind) }, IrPattern::None))
+        }
+        _ => None,
+    }
+}
+
+/// THE `??` desugar (the route-zoo endgame, gated as an EXPERIMENT for now):
+/// `e ?? fb` ≡ `match e { ok(p) => p, err(_) => fb }` (Result operand) /
+/// `match e { some(p) => p, none => fb }` (Option operand) — one rewrite, after
+/// which the generalized match machinery (result_family et al.) does the work
+/// and the five per-payload-class `??` routes plus their admission gate become
+/// unnecessary. CALL-COUNT-INVARIANT (operand once, fallback once), so the
+/// desugar-before-both discipline holds `mir == ir` by construction.
+///
+/// Gated on `ALMIDE_QQ_DESUGAR=all` until the corpus proves the match path
+/// subsumes every shape the routes lower today — flip the env, run the
+/// 419-fixture 3-way corpus, and the delta IS the measured residual. The v0
+/// leg and the interpreter never see this rewrite, so they referee it.
+pub fn desugar_unwrap_or_to_match(body: &IrExpr) -> Option<IrExpr> {
+    if !std::env::var("ALMIDE_QQ_DESUGAR").is_ok_and(|v| v == "all") {
+        return None;
+    }
+    fn rewrite(e: IrExpr, changed: &mut bool, next: &mut u32) -> IrExpr {
+        let e = e.map_children(&mut |c| rewrite(c, changed, next));
+        let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return e };
+        let p = almide_ir::VarId(*next);
+        let Some((hit, miss)) = carrier_patterns(&expr.ty, &e.ty, p) else { return e };
+        *next += 1;
+        *changed = true;
+        let payload = IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty: e.ty.clone(),
+            span: e.span.clone(),
+            def_id: None,
+        };
+        IrExpr {
+            kind: IrExprKind::Match {
+                subject: expr.clone(),
+                arms: vec![
+                    almide_ir::IrMatchArm { pattern: hit, guard: None, body: payload },
+                    almide_ir::IrMatchArm {
+                        pattern: miss,
+                        guard: None,
+                        body: (**fallback).clone(),
+                    },
+                ],
+            },
+            ty: e.ty.clone(),
+            span: e.span.clone(),
+            def_id: e.def_id,
         }
     }
+    let mut changed = false;
+    let mut next = crate::lower::max_var_id(body) + 1;
+    let out = rewrite(body.clone(), &mut changed, &mut next);
+    changed.then_some(out)
+}
+
+pub fn desugar_unwrap_or_unwrap_fallback(body: &IrExpr) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
     fn rewrite(e: IrExpr, changed: &mut bool, next: &mut u32) -> IrExpr {
         let e = e.map_children(&mut |c| rewrite(c, changed, next));
         let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return e };
