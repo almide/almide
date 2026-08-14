@@ -492,80 +492,6 @@ fn is_list_str_field(t: &Ty, flat_names: &std::collections::HashSet<String>) -> 
             && (matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_names)))
 }
 
-/// Does the program's type decls carry a record OR variant field that routes to the
-/// shared `__drop_list_str` — a `List[String]` field, or a `List[<flat variant>]` field
-/// (record side only; the variant generator does not admit that shape yet)? Gates
-/// [`LIST_STR_DROP_SRC`]'s single emission in the pipeline (a program never touching
-/// this shape pays no dead drop routine).
-pub fn program_uses_list_str_drop_field(type_decls: &[almide_ir::IrTypeDecl]) -> bool {
-    use almide_ir::{IrTypeDeclKind, IrVariantKind};
-    let flat_names = flat_variant_type_names(type_decls);
-    type_decls.iter().any(|d| match &d.kind {
-        IrTypeDeclKind::Record { fields } => fields.iter().any(|f| is_list_str_field(&f.ty, &flat_names)),
-        IrTypeDeclKind::Variant { cases, .. } => cases.iter().any(|c| {
-            let tys: Vec<&Ty> = match &c.kind {
-                IrVariantKind::Unit => vec![],
-                IrVariantKind::Tuple { fields } => fields.iter().collect(),
-                IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
-            };
-            tys.iter().any(|t| is_list_str_field(t, &flat_names))
-        }),
-        _ => false,
-    })
-}
-
-/// Does the program carry an ANONYMOUS record shape (`{ out: List[String], flag: Bool }` —
-/// never declared via `type X = {...}`, so it never appears in `type_decls`) with a
-/// `List[String]`-ish field? These route to the SAME shared `__drop_list_str` as a named
-/// record's field (`anon_record_drop_name`'s generated `$__drop_<anonrec_...>` frees such a
-/// field via the identical flat routine) — but `program_uses_list_str_drop_field` only scans
-/// `type_decls`, so a program whose ONLY such field lives in an anonymous record (a `list.fold`
-/// accumulator record, a plain record literal/param never given a name) rendered a call to
-/// `__drop_list_str` that was never emitted (a dangling `(call $__drop_list_str)` — invalid
-/// wasm the render step's own type-check catches, not a silent wrong-bytes risk, but a hard
-/// failure on an otherwise-lowerable program). Whole-program scan (every expr's `.ty`, plus
-/// every function's param/return types) for a `Record`/`OpenRecord` field of this shape,
-/// mirroring `program_uses_closures`'s visitor.
-pub fn program_uses_anon_list_str_record(
-    program: &almide_ir::IrProgram,
-    type_decls: &[almide_ir::IrTypeDecl],
-) -> bool {
-    let flat_names = flat_variant_type_names(type_decls);
-    let has_field = |fields: &[(almide_lang::intern::Sym, Ty)]| {
-        fields.iter().any(|(_, t)| is_list_str_field(t, &flat_names))
-    };
-    let ty_matches = |t: &Ty| matches!(t, Ty::Record { fields } | Ty::OpenRecord { fields } if has_field(fields));
-    struct Finder<'a> {
-        found: bool,
-        ty_matches: &'a dyn Fn(&Ty) -> bool,
-    }
-    impl almide_ir::visit::IrVisitor for Finder<'_> {
-        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
-            if (self.ty_matches)(&expr.ty) {
-                self.found = true;
-            }
-            if !self.found {
-                almide_ir::visit::walk_expr(self, expr);
-            }
-        }
-    }
-    let mut finder = Finder { found: false, ty_matches: &ty_matches };
-    let funcs = program
-        .functions
-        .iter()
-        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
-    for f in funcs {
-        if ty_matches(&f.ret_ty) || f.params.iter().any(|p| ty_matches(&p.ty)) {
-            return true;
-        }
-        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
-        if finder.found {
-            return true;
-        }
-    }
-    false
-}
-
 pub const LENLIST_DROP_SRC: &str = "\
 fn __drop_list_lenlist(xs: List[Int]) -> Unit = {
   let h = prim.handle(xs)
@@ -695,33 +621,6 @@ pub fn is_res_list_map_si_ty(ty: &Ty) -> bool {
         && matches!(a[1], Ty::String))
 }
 
-/// Does the program mention either fs.fold_lines msi Result class anywhere a drop
-/// could fire? Gates the `$__drop_res_msi` / `$__drop_res_lmsi` source injection.
-pub fn program_uses_res_map_si(program: &almide_ir::IrProgram) -> bool {
-    struct C(bool);
-    impl almide_ir::visit::IrVisitor for C {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if is_res_map_si_ty(&e.ty) || is_res_list_map_si_ty(&e.ty) {
-                self.0 = true;
-            }
-            almide_ir::visit::walk_expr(self, e);
-        }
-    }
-    let mut c = C(false);
-    for f in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
-        if f.params.iter().any(|p| is_res_map_si_ty(&p.ty) || is_res_list_map_si_ty(&p.ty))
-            || is_res_map_si_ty(&f.ret_ty) || is_res_list_map_si_ty(&f.ret_ty)
-        {
-            return true;
-        }
-        almide_ir::visit::IrVisitor::visit_expr(&mut c, &f.body);
-        if c.0 {
-            return true;
-        }
-    }
-    false
-}
-
 /// Is `ty` exactly `Result[List[Int], List[String]]` (the result.collect return —
 /// the tag-aware `$__drop_res_ilsl` class)?
 pub fn is_res_intlist_strlist_ty(ty: &Ty) -> bool {
@@ -731,29 +630,3 @@ pub fn is_res_intlist_strlist_ty(ty: &Ty) -> bool {
         && matches!(&a[1], Ty::Applied(TC::List, s) if s.len() == 1 && matches!(s[0], Ty::String)))
 }
 
-/// Does the program mention `Result[List[Int], List[String]]` anywhere a drop could
-/// fire (fn sigs, binds, exprs)? Gates the `$__drop_res_ilsl` source injection.
-pub fn program_uses_res_intlist_strlist(program: &almide_ir::IrProgram) -> bool {
-    struct C(bool);
-    impl almide_ir::visit::IrVisitor for C {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if is_res_intlist_strlist_ty(&e.ty) {
-                self.0 = true;
-            }
-            almide_ir::visit::walk_expr(self, e);
-        }
-    }
-    let mut c = C(false);
-    for f in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
-        if f.params.iter().any(|p| is_res_intlist_strlist_ty(&p.ty))
-            || is_res_intlist_strlist_ty(&f.ret_ty)
-        {
-            return true;
-        }
-        almide_ir::visit::IrVisitor::visit_expr(&mut c, &f.body);
-        if c.0 {
-            return true;
-        }
-    }
-    false
-}
