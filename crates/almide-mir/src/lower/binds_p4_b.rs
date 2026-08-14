@@ -535,7 +535,7 @@ impl LowerCtx {
                     repr,
                     init: Init::OptSome { payload },
                 });
-                self.materialized_options.insert(dst);
+                self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
                 Some(dst)
             }
             IrExprKind::OptionNone => {
@@ -548,7 +548,7 @@ impl LowerCtx {
                     repr,
                     init: Init::OptNone,
                 });
-                self.materialized_options.insert(dst);
+                self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
                 // A HEAP-payload Option (`let x: Option[Msg] = none`) ALSO registers the
                 // nested-ownership class so a downstream match ADMITS its Some-arm payload
                 // bind (heap_or_scalar_bind gates on it); DropListStr over len 0 frees only

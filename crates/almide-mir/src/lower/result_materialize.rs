@@ -52,7 +52,7 @@ impl LowerCtx {
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
         self.heap_elem_lists.insert(obj);
-        self.materialized_options.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
 
@@ -89,7 +89,7 @@ impl LowerCtx {
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
         self.heap_elem_lists.insert(obj);
-        self.materialized_results.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultScalar);
         obj
     }
 
@@ -123,7 +123,7 @@ impl LowerCtx {
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
         self.variant_drop_handles.insert(obj, format!("optrec:{drop_fn}"));
-        self.materialized_options.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
 
@@ -151,7 +151,7 @@ impl LowerCtx {
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
         self.variant_drop_handles.insert(obj, "list_int_str".to_string());
-        self.materialized_options.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
 
@@ -163,7 +163,7 @@ impl LowerCtx {
         let obj = self.fresh_value();
         self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: zero } });
         self.heap_elem_lists.insert(obj);
-        self.materialized_options.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
 
@@ -329,7 +329,7 @@ impl LowerCtx {
         } else {
             self.heap_elem_lists.insert(obj);
         }
-        self.materialized_results_str.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultHeapOk);
         obj
     }
 
@@ -366,7 +366,7 @@ impl LowerCtx {
         self.ops.push(Op::ConstInt { dst: tag, value: if is_err { 1 } else { 0 } });
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![off16, tag] });
         self.variant_drop_handles.insert(obj, format!("resrec:{drop_fn}"));
-        self.materialized_results_str.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultHeapOk);
         obj
     }
 }

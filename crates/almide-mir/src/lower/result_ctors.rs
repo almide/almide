@@ -292,8 +292,8 @@ impl LowerCtx {
         // move form never needs. Result-only tracking (the value-position
         // both-flags-true conflict is resolved by removing the Option flag).
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.materialized_options.remove(&obj);
-        self.materialized_results.insert(obj);
+        self.value_shapes.remove(&obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultScalar);
         if needs_rec {
             self.heap_elem_lists.remove(&obj);
             self.variant_drop_handles.insert(obj, format!("res_{type_name}"));

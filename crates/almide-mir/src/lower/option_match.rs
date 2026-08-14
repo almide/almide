@@ -72,7 +72,7 @@ impl LowerCtx {
         use crate::PrimKind;
         // Gate 1: the subject is a TRACKED materialized Option.
         let subj = match subject_value {
-            Some(v) if self.materialized_options.contains(&v) => v,
+            Some(v) if self.value_shapes.get(&v) == Some(&crate::lower::VariantShape::Option) => v,
             _ => return false,
         };
         // Gate 2: exactly a `[Some(scalar-bind?), None]` shape, no guards, Unit bodies.

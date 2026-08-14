@@ -147,7 +147,7 @@ impl LowerCtx {
         // A self-host Option fn (`list.get`) returns a real materialized Option —
         // track the bound result so a later `match` over the var EXECUTES.
         if is_self_host_option_module_fn(module, func) {
-            self.materialized_options.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
         }
         // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
         // the closure-valued map read): the result IS a closure block — track it
@@ -221,7 +221,7 @@ impl LowerCtx {
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
             // either flat class would leak or double-free one side).
             self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
         if crate::lower::is_list_list_str_ty(ty) {

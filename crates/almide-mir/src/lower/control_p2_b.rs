@@ -13,7 +13,7 @@ impl LowerCtx {
             && crate::lower::is_variant_ty(&subject.ty)
             && !crate::lower::is_result_ty(&subject.ty))
     {
-        self.materialized_options.insert(subj);
+        self.value_shapes.insert(subj, crate::lower::VariantShape::Option);
         // An `Option[heap]` (`list.first(path): Option[String]` — toml set_nested's
         // `match list.first(path)`) OWNS its payload: track it as a nested-ownership list so the
         // Some-payload bind reads the borrowed element handle AND the scope-end drop is the
@@ -40,7 +40,7 @@ impl LowerCtx {
         // collect to the Err arm — the parse_all List[Int]-as-List[String] garbage join).
         || (used_effect_subj && !Self::is_heap_ok_result(&subject.ty))
     {
-        self.materialized_results.insert(subj);
+        self.value_shapes.insert(subj, crate::lower::VariantShape::ResultScalar);
         // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
         // unwrap-`!`-desugar's `err($x) => err($x)` re-wrap). The len-as-tag read stays @4
         // (materialized_results, NOT _str), but ALSO track heap_elem_lists so (a) the Err arm's
@@ -72,7 +72,7 @@ impl LowerCtx {
         // admits exactly that case. Its comment's law — "TYPE decides the repr,
         // not the list" — is now the definition, not an escape hatch.)
     {
-        self.materialized_results_str.insert(subj);
+        self.value_shapes.insert(subj, crate::lower::VariantShape::ResultHeapOk);
         self.track_heap_ok_result_subject_drop(subj, &subject.ty);
     }
     }
@@ -84,7 +84,7 @@ impl LowerCtx {
         use almide_lang::types::constructor::TypeConstructorId;
         match &subject.ty {
             Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                self.materialized_options.insert(subj);
+                self.value_shapes.insert(subj, crate::lower::VariantShape::Option);
                 if is_heap_ty(&a[0]) {
                     self.heap_elem_lists.insert(subj);
                 }
@@ -92,7 +92,7 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::Result, a)
                 if a.len() == 2 && !Self::is_heap_ok_result(&subject.ty) =>
             {
-                self.materialized_results.insert(subj);
+                self.value_shapes.insert(subj, crate::lower::VariantShape::ResultScalar);
                 if is_heap_ty(&a[1]) {
                     self.heap_elem_lists.insert(subj);
                 }
@@ -196,7 +196,7 @@ impl LowerCtx {
         // the Option's @12 slot; the result String is moved out fresh). Same len-as-tag layout as a
         // self-host Option/Result value — only the SOURCE (a field borrow, not a call) differs.
 
-        let is_option = self.materialized_options.contains(&subj);
+        let is_option = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::Option);
         // A scalar Result reads len-as-tag (@4); a HEAP-Ok `Result[String,String]` (value.as_string,
         // the cap-as-tag DynListStr) reads the tag at the slot-0 HIGH 32 bits (@16). Both arrange
         // Err=then(tag≠0)/Ok=else(tag0); only the tag OFFSET differs. A str-result match here is
@@ -204,8 +204,8 @@ impl LowerCtx {
         // — is_scalar_type); a heap-payload bind over a str-result (`ok(s: String)`) is the Camp-4
         // borrowed-slot case → gated out below (heap_or_scalar_bind already requires heap_elem_lists,
         // and the heap-RESULT branch defers it).
-        let is_result_str = self.materialized_results_str.contains(&subj);
-        let is_result = self.materialized_results.contains(&subj) || is_result_str;
+        let is_result_str = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultHeapOk);
+        let is_result = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultScalar) || is_result_str;
         if !is_option && !is_result {
             return rollback(self);
         }

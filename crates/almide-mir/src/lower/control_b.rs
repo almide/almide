@@ -388,7 +388,7 @@ impl LowerCtx {
     fn seed_option_some_payload_read_shape(&mut self, payload: ValueId, bind_ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         if matches!(bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
-            self.materialized_options.insert(payload);
+            self.value_shapes.insert(payload, crate::lower::VariantShape::Option);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
                 self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
@@ -397,7 +397,7 @@ impl LowerCtx {
             return;
         }
         if crate::lower::is_result_ty(bind_ty) {
-            self.materialized_results.insert(payload);
+            self.value_shapes.insert(payload, crate::lower::VariantShape::ResultScalar);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
                 self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {

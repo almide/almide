@@ -592,7 +592,7 @@ impl LowerCtx {
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
             // either flat class would leak or double-free one side).
             self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
         if crate::lower::is_list_list_str_ty(ty) {

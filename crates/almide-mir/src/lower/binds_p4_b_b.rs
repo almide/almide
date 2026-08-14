@@ -46,7 +46,7 @@ impl LowerCtx {
         let payload = self.lower_scalar_value(expr)?;
         let repr = repr_of(ty).ok()?;
         let dst = self.materialize_result_ok(payload, repr);
-        self.materialized_results.insert(dst);
+        self.value_shapes.insert(dst, crate::lower::VariantShape::ResultScalar);
         Some(dst)
     }
 
@@ -54,7 +54,7 @@ impl LowerCtx {
         let payload = self.lower_scalar_value(expr)?;
         let repr = repr_of(ty).ok()?;
         let dst = self.materialize_result_err_scalar(payload, repr);
-        self.materialized_results.insert(dst);
+        self.value_shapes.insert(dst, crate::lower::VariantShape::ResultScalar);
         Some(dst)
     }
 

@@ -264,12 +264,12 @@ impl LowerCtx {
         {
             use almide_lang::types::constructor::TypeConstructorId;
             if matches!(&subject.ty, Ty::Applied(TypeConstructorId::Option, _)) {
-                self.materialized_options.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                     self.heap_elem_lists.insert(v);
                 }
             } else if crate::lower::is_result_ty(&subject.ty) {
-                self.materialized_results.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
                 if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                     self.heap_elem_lists.insert(v);
                 }
@@ -281,7 +281,7 @@ impl LowerCtx {
     /// reduction): the self-host Option-call subject block, verbatim.
     fn seed_match_subject_option_call_shape(&mut self, subject: &IrExpr, v: ValueId) {
         if is_self_host_option_call(subject) {
-            self.materialized_options.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::Option);
             // An `Option[heap]` (e.g. `Option[(Int,Int)]` from option.zip) OWNS its
             // payload — track it as a nested-ownership list so the variant-match binds the
             // Some payload by `LoadHandle` (the borrowed element handle, not the whole
@@ -409,7 +409,7 @@ impl LowerCtx {
         ) = &subject.ty
         {
             if a.len() == 1 {
-                self.materialized_options.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if let Some(rn) = self.record_or_anon_drop_type_name(&a[0]) {
                     self.variant_drop_handles.insert(v, format!("optrec:{rn}"));
                     self.heap_elem_lists.insert(v);
@@ -433,7 +433,7 @@ impl LowerCtx {
             // (DropListStr). The match MUST agree: track materialized_results_str (read
             // tag @16) + heap_elem_lists (the err-arm String bind gate AND the flat
             // DropListStr the construction uses for the List[Int]/String Ok payload).
-            self.materialized_results_str.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::ResultHeapOk);
             // A `Result[(String, Int), String]` (toml parse_key_part) needs the
             // RECURSIVE DropResultStrInt (frees the Ok tuple's String + block) — a
             // flat DropListStr would rc_dec the @12 tuple HANDLE only, leaking its
@@ -450,7 +450,7 @@ impl LowerCtx {
                 self.heap_elem_lists.insert(v);
             }
         } else {
-            self.materialized_results.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
             if let Ty::Applied(
                 almide_lang::types::constructor::TypeConstructorId::Result,
                 a,

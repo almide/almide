@@ -65,14 +65,14 @@ impl LowerCtx {
     fn seed_tuple_slot_option_result_bind(&mut self, v: ValueId, ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         if matches!(ty, Ty::Applied(TypeConstructorId::Option, _)) {
-            self.materialized_options.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::Option);
             if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(v);
             }
             return;
         }
         if crate::lower::is_result_ty(ty) {
-            self.materialized_results.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
             if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(v);
             }

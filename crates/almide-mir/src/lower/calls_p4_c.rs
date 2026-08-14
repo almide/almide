@@ -27,7 +27,7 @@ impl LowerCtx {
             })?;
             let dst = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(dst), args: vec![path] });
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
@@ -47,7 +47,7 @@ impl LowerCtx {
             })?;
             let dst = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::ReadDir, dst: Some(dst), args: vec![path] });
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.heap_elem_lists.insert(dst);
             self.list_str_result_results.insert(dst);
             return Ok(Some(dst));
@@ -76,7 +76,7 @@ impl LowerCtx {
                 dst: Some(dst),
                 args: vec![path, content],
             });
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
@@ -101,7 +101,7 @@ impl LowerCtx {
                 dst: Some(dst),
                 args: vec![path],
             });
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
@@ -126,7 +126,7 @@ impl LowerCtx {
                 dst: Some(dst),
                 args: vec![path],
             });
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
@@ -161,7 +161,7 @@ impl LowerCtx {
                 dst: Some(dst),
                 args: vec![src, dstp],
             });
-            self.materialized_results_str.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }

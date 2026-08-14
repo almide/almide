@@ -78,7 +78,7 @@ impl LowerCtx {
     /// (`value.as_array`) frees recursively (`value_result_lists`), else a
     /// String Ok (`value.as_string`) frees flat (`heap_elem_lists`).
     fn seed_heap_result_param(&mut self, v: ValueId, ty: &Ty, err_ty: &Ty) {
-        self.materialized_results_str.insert(v);
+        self.value_shapes.insert(v, crate::lower::VariantShape::ResultHeapOk);
         if is_result_listval_ty(ty) {
             self.value_result_lists.insert(v);
             return;
@@ -110,7 +110,7 @@ impl LowerCtx {
         use almide_lang::types::constructor::TypeConstructorId;
         match ty {
             Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                self.materialized_options.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if is_heap_ty(&a[0]) {
                     self.heap_elem_lists.insert(v);
                 }
@@ -122,7 +122,7 @@ impl LowerCtx {
                     // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
                     // payload is owned by the Result block (DropListStr frees it); mark the nested-
                     // ownership so an `Err(e)` arm binds the borrowed slot-0 handle.
-                    self.materialized_results.insert(v);
+                    self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
                     if is_heap_ty(&a[1]) {
                         self.heap_elem_lists.insert(v);
                     }

@@ -463,20 +463,22 @@ pub(crate) struct LowerCtx {
     /// non-self-host Option-returning call) is `Opaque` with len=0 and would MISREAD as
     /// `None`, so it keeps the sound LINEARIZED match. This is the gate that makes the
     /// len-as-tag execution safe without any global materialization invariant.
-    materialized_options: HashSet<ValueId>,
+    /// #1414 shape-at-birth: THE per-value variant shape — one map, one fact
+    /// per value (law 4: the type IS the knowledge, attached when the value is
+    /// seeded). Replaces the three former membership sets
+    /// (materialized_options / materialized_results / materialized_results_str):
+    /// "untracked" is now the ABSENCE of a shape in one place, never a
+    /// disagreement between sets, and a shape overwrite is a plain insert.
+    value_shapes: HashMap<ValueId, crate::lower::VariantShape>,
     /// MIR values KNOWN to be MATERIALIZED Results (the DynListStr len-as-tag layout: `Ok(int)` =
     /// len 0 with the value in slot 0, `Err(string)` = len 1 owning the message). An `Ok`/`Err`
     /// `match` may EXECUTE (read `len` as the tag — len 0 → Ok, len != 0 → Err — and extract slot
     /// 0) ONLY over a subject in this set; any other Result is a deferred `Opaque` (len 0 → MISREADS
-    /// as Ok) and keeps the sound LINEARIZED match. The Result analogue of `materialized_options`.
-    materialized_results: HashSet<ValueId>,
     /// MIR values KNOWN to be MATERIALIZED HEAP-Ok Results (`Result[String, String]` etc.): a 1-slot
     /// DynListStr (cap 1, len 1 — IDENTICAL block size to every String, so the free-list reuses it)
     /// that ALWAYS owns one String in slot 0's LOW 32 bits (@12 — Ok's value OR Err's message), with
     /// the Ok/Err TAG in slot 0's HIGH 32 bits (@16: 0=Ok, 1=Err). `DropListStr` `i32.wrap`s the slot
     /// to the low-32 handle, so the high-32 tag is inert. An `Ok`/`Err` `match` reads @16 and binds
-    /// the @12 handle as a borrowed String. The heap-Ok-payload analogue of `materialized_results`.
-    materialized_results_str: HashSet<ValueId>,
     /// Lambda-lifted auxiliary functions produced while lowering this function's body
     /// (a non-capturing `let f = (x) => …` or a lambda call-argument lifts its body to a
     /// fresh MirFunction here, bound via `Op::FuncRef`). `lower_function_all` returns these

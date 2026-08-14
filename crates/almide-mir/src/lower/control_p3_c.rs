@@ -616,9 +616,7 @@ impl LowerCtx {
             // row). Decline instead.
             use almide_lang::types::constructor::TypeConstructorId as TC;
             if matches!(ty, Ty::Applied(TC::Option | TC::Result, _))
-                && !self.materialized_options.contains(&v)
-                && !self.materialized_results.contains(&v)
-                && !self.materialized_results_str.contains(&v)
+                && self.value_shapes.get(&v).is_none()
             {
                 return None;
             }

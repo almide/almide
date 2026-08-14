@@ -190,7 +190,7 @@ impl LowerCtx {
     fn seed_nested_option_result_bind_payload(&mut self, payload: ValueId, bind_ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         if matches!(bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
-            self.materialized_options.insert(payload);
+            self.value_shapes.insert(payload, crate::lower::VariantShape::Option);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
                 self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
@@ -199,7 +199,7 @@ impl LowerCtx {
             return;
         }
         if crate::lower::is_result_ty(bind_ty) {
-            self.materialized_results.insert(payload);
+            self.value_shapes.insert(payload, crate::lower::VariantShape::ResultScalar);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
                 self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
@@ -226,8 +226,8 @@ impl LowerCtx {
         // A HEAP-Ok `Result[String, String]` (cap-as-tag, Ok binds a heap String) vs the scalar
         // `Result[Int, String]` (len-as-tag, Ok binds a scalar int).
         let (subj, str_result) = match subject_value {
-            Some(v) if self.materialized_results_str.contains(&v) => (v, true),
-            Some(v) if self.materialized_results.contains(&v) => (v, false),
+            Some(v) if self.value_shapes.get(&v) == Some(&crate::lower::VariantShape::ResultHeapOk) => (v, true),
+            Some(v) if self.value_shapes.get(&v) == Some(&crate::lower::VariantShape::ResultScalar) => (v, false),
             _ => return false,
         };
         if !two_unguarded_arms(arms) {

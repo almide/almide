@@ -14,9 +14,7 @@ struct SpecSnapshot {
     ops_len: usize,
     lhh_len: usize,
     lifted_len: usize,
-    materialized_options: std::collections::HashSet<ValueId>,
-    materialized_results: std::collections::HashSet<ValueId>,
-    materialized_results_str: std::collections::HashSet<ValueId>,
+    value_shapes: std::collections::HashMap<ValueId, crate::lower::VariantShape>,
     heap_elem_lists: std::collections::HashSet<ValueId>,
     list_list_str_lists: std::collections::HashSet<ValueId>,
     value_result_results: std::collections::HashSet<ValueId>,
@@ -63,14 +61,14 @@ impl LowerCtx {
         use almide_lang::types::constructor::TypeConstructorId as TC;
         match ty {
             Ty::Applied(TC::Option, a) if a.len() == 1 => {
-                self.materialized_options.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if is_heap_ty(&a[0]) {
                     self.heap_elem_lists.insert(v);
                 }
             }
             Ty::Applied(TC::Result, a) => match crate::lower::result_family(ty) {
                 crate::lower::ResultFamily::Scalar => {
-                    self.materialized_results.insert(v);
+                    self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
                     // Camp-4: scalar-Ok / HEAP-Err — the Err arm's payload bind
                     // gate + the flat drop (Ok=len0 frees nothing, Err=len1
                     // frees the slot-0 String).
@@ -79,7 +77,7 @@ impl LowerCtx {
                     }
                 }
                 crate::lower::ResultFamily::HeapOk => {
-                    self.materialized_results_str.insert(v);
+                    self.value_shapes.insert(v, crate::lower::VariantShape::ResultHeapOk);
                     if crate::lower::is_result_listval_ty(ty) {
                         self.value_result_lists.insert(v);
                     } else if crate::lower::is_value_result_ty(ty) {
@@ -114,9 +112,7 @@ impl LowerCtx {
             ops_len: self.ops.len(),
             lhh_len: self.live_heap_handles.len(),
             lifted_len: self.lifted.len(),
-            materialized_options: self.materialized_options.clone(),
-            materialized_results: self.materialized_results.clone(),
-            materialized_results_str: self.materialized_results_str.clone(),
+            value_shapes: self.value_shapes.clone(),
             heap_elem_lists: self.heap_elem_lists.clone(),
             list_list_str_lists: self.list_list_str_lists.clone(),
             value_result_results: self.value_result_results.clone(),
@@ -141,9 +137,7 @@ impl LowerCtx {
             self.ops.truncate(snap.ops_len);
             self.live_heap_handles.truncate(snap.lhh_len);
             self.lifted.truncate(snap.lifted_len);
-            self.materialized_options = snap.materialized_options;
-            self.materialized_results = snap.materialized_results;
-            self.materialized_results_str = snap.materialized_results_str;
+            self.value_shapes = snap.value_shapes;
             self.heap_elem_lists = snap.heap_elem_lists;
             self.list_list_str_lists = snap.list_list_str_lists;
             self.value_result_results = snap.value_result_results;

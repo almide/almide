@@ -82,7 +82,7 @@ impl LowerCtx {
                 return None;
             }
         };
-        self.materialized_options.insert(subj);
+        self.value_shapes.insert(subj, crate::lower::VariantShape::Option);
         if crate::lower::is_heap_elem_list_ty(&subject.ty) {
             self.heap_elem_lists.insert(subj);
         }
@@ -298,7 +298,7 @@ impl LowerCtx {
                 && is_variant_ty(&subject.ty)
                 && !crate::lower::is_result_ty(&subject.ty))
         {
-            self.materialized_options.insert(subj);
+            self.value_shapes.insert(subj, crate::lower::VariantShape::Option);
             if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                 self.heap_elem_lists.insert(subj);
             }
@@ -319,7 +319,7 @@ impl LowerCtx {
                 && crate::lower::is_result_ty(&subject.ty)
                 && !Self::is_heap_ok_result(&subject.ty))
         {
-            self.materialized_results.insert(subj);
+            self.value_shapes.insert(subj, crate::lower::VariantShape::ResultScalar);
             // Scalar-Ok / heap-Err `Result[Int, String]` (the byte-match fixture's `mkResult`): the
             // len-as-tag read stays @4, but track heap_elem_lists so the Err arm's String payload drops
             // via DropListStr (Ok=len0 frees nothing, Err=len1 frees slot-0's String).
@@ -347,7 +347,7 @@ impl LowerCtx {
         if is_self_host_result_str_call(subject)
             || (is_named_call && Self::is_heap_ok_result(&subject.ty))
         {
-            self.materialized_results_str.insert(subj);
+            self.value_shapes.insert(subj, crate::lower::VariantShape::ResultHeapOk);
             self.track_heap_ok_result_subj_drop_no_record(subj, &subject.ty);
         }
     }
@@ -494,9 +494,9 @@ impl LowerCtx {
             _ => return rollback(self),
         };
         self.track_variant_match_subject_drop_sets(subject, subj);
-        let is_option = self.materialized_options.contains(&subj);
-        let is_result_str = self.materialized_results_str.contains(&subj);
-        let is_result = self.materialized_results.contains(&subj) || is_result_str;
+        let is_option = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::Option);
+        let is_result_str = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultHeapOk);
+        let is_result = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultScalar) || is_result_str;
         if !is_option && !is_result {
             return rollback(self);
         }

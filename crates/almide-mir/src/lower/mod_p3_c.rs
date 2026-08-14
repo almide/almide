@@ -459,7 +459,7 @@ impl LowerCtx {
         if !self.live_heap_handles.contains(&dst) {
             self.live_heap_handles.push(dst);
         }
-        self.materialized_options.insert(dst);
+        self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
         self.memo_global(var, dst);
         Some(dst)
     }

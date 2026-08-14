@@ -213,6 +213,21 @@ pub fn is_result_listval_ty(ty: &Ty) -> bool {
 /// whose comment already stated the law — "TYPE decides the repr, not the
 /// list" (a `result.map` listed len-as-tag returns cap-as-tag for a heap
 /// instantiation). That escape becomes structural here.
+/// #1414 shape-at-birth: the per-value VARIANT read shape — the one fact the
+/// match/`??`/drop machinery needs about a materialized Option/Result block.
+/// Stored in `LowerCtx::value_shapes` (one map, keyed by ValueId); written by
+/// `seed_variant_value_shape` (the single typed seeding entry) and the ctor
+/// materializers. "Untracked" = absent here, nowhere else.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub(crate) enum VariantShape {
+    /// A materialized Option (len-as-tag: len@4 = 0 none / 1 some).
+    Option,
+    /// A scalar-family Result (len-as-tag: len@4 = 0 Ok / 1 Err).
+    ResultScalar,
+    /// A heap-Ok-family Result (cap-as-tag: tag@16).
+    ResultHeapOk,
+}
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub(crate) enum ResultFamily {
     Scalar,
