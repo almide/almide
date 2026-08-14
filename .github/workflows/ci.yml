@@ -1,32 +1,31 @@
 name: CI
 
-# Path filtering uses `paths` with ordered negations (last match wins), NOT
-# `paths-ignore`: the blanket docs/** ignore let a PR touching ONLY the
-# contract ledger (docs/contracts/contracts.toml), the ALS normative specs, or
-# the semantics manifest skip this workflow entirely — i.e. skip exactly the
-# gates that exist to check those files (#982). The re-includes below keep the
-# gate inputs in scope while ordinary docs/markdown stay ignored.
+# NO path filtering. This workflow owns all 13 REQUIRED status checks, and a
+# required check that never reports is not a skipped check — it is a PR that
+# can never merge. A docs-only PR sat BLOCKED at 0 of 13 reported until this
+# was removed.
+#
+# What it replaces: an ordered-negation list (`'**'`, then `'!docs/**'`,
+# `'!*.md'`, `'!LICENSE'`, then re-includes for the contract ledger, the ALS
+# normative specs and the semantics manifest). It cost correctness twice, both
+# times for the same reason — it decided which gates to run by GUESSING which
+# files matter:
+#   1. #982: a PR touching ONLY docs/contracts/contracts.toml skipped this
+#      workflow, i.e. skipped exactly the gate that exists to check that file.
+#      The repair was a re-include, added one path at a time, forever.
+#   2. The negations made a whole CLASS of PR unmergeable. The obvious repair —
+#      a companion workflow re-declaring the same job names on the inverse
+#      filter — is worse than the disease: a PR touching both docs and code
+#      matches BOTH filters, so a no-op run and a real run report the same
+#      check name, and a fake green can mask a real red.
+#
+# Running the suite on a README edit costs runner minutes. Getting the guess
+# wrong costs a gate. The trade is not close.
 on:
   push:
     branches: [main, develop]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!*.md'
-      - '!LICENSE'
-      - 'docs/contracts/**'
-      - 'docs/stdlib/semantics-manifest.toml'
-      - 'docs/specs/als/**'
   pull_request:
     branches: [main, develop]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!*.md'
-      - '!LICENSE'
-      - 'docs/contracts/**'
-      - 'docs/stdlib/semantics-manifest.toml'
-      - 'docs/specs/als/**'
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -73,6 +72,13 @@ jobs:
           restore-keys: linux-cargo-${{ env.RUST_TOOLCHAIN }}-
 
       - run: cargo build --release
+
+      # Wired to `build`, not `checks`: the ratchet compiles the workspace, and
+      # `checks` downloads a prebuilt binary with no cargo toolchain. Runs after
+      # the release build so the warning set is measured against the same
+      # compilation the artifact came from (#1379 / #1228).
+      - name: Rustc warning ratchet (a noisy build hides the one warning that matters)
+        run: bash scripts/check-rustc-warnings.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -872,6 +878,15 @@ jobs:
           git diff --exit-code -- docs/contracts/README.md \
             || { echo "::error::docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"; exit 1; }
 
+      # The three gates below were written but never wired to a job. A gate that
+      # has never run is indistinguishable from one that does not exist, so they
+      # are attached here rather than left as scripts someone remembers to call.
+      - name: Grammar stays in sync with the parser (#1365)
+        run: bash scripts/check-lark-grammar.sh
+
+      - name: Layout discipline for new long-lived structures (#1387 / #1316)
+        run: bash scripts/check-layout-discipline.sh
+
   perf-ratchet:
     name: Perf ratchet (native/Rust ratio, #917)
     needs: build
@@ -895,6 +910,12 @@ jobs:
 
       - name: Native runtime ratio vs handwritten Rust
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
+
+      # Edit-loop cost lives here rather than in `checks`: it needs the same
+      # built binary and the same "measure, don't guess" runner as the ratio
+      # above, and both are the perf tier (#1383 scale, #1396 per-phase).
+      - name: Edit-loop cost stays scale-independent (#1383 / #1396)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-edit-loop-scale.sh
 
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
