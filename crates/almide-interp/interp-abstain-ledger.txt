@@ -16,11 +16,11 @@ base64_encode  out-of-interp-scope capability: prim.alloc_list
 bytes_f16_offset_overflow  out-of-interp-scope capability: prim.alloc_list_f64
 bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr
 bytes_set_value_semantics  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-chunk_str  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+chunk_str  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 codec_decode_errors  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 codec_float_int  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 codec_none_omission  out-of-interp-scope capability: prim.alloc_value
-compound_eq  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+compound_eq  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 compound_repr_interp  out-of-interp-scope capability: prim.alloc_set
 compound_repr_records_interp  out-of-interp-scope capability: prim.alloc_set
 datetime_format  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
@@ -30,6 +30,7 @@ empty_collection_annotated  out-of-interp-scope capability: prim.alloc_set
 empty_collection_fold  out-of-interp-scope capability: prim.alloc_map
 empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+fan_effect_mapper_capability  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 fs_composition_family  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 fs_fallible_stream_callback  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 fs_list_dir_multipass  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
@@ -55,19 +56,19 @@ list_chunk_windows  out-of-interp-scope capability: prim.alloc_list_str
 list_chunk_zero  out-of-interp-scope capability: prim.die
 list_comprehensive  out-of-interp-scope capability: prim.alloc_list
 list_count_index_truncation  out-of-interp-scope capability: prim.alloc_list_str
-list_flatten_borrow  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+list_flatten_borrow  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 list_modify_heap  out-of-interp-scope capability: prim.alloc_value
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list
 list_set_value  out-of-interp-scope capability: prim.alloc_value
-list_slice_oob  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+list_slice_oob  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 list_update_heap  out-of-interp-scope capability: prim.alloc_value
-list_window_zero  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+list_window_zero  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 list_windows_zero  out-of-interp-scope capability: prim.die
 list_with_capacity  out-of-interp-scope capability: prim.alloc_list
 map_filter  out-of-interp-scope capability: prim.alloc_map
 map_fold  out-of-interp-scope capability: prim.alloc_map
 map_fold_heap_acc  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_fold_heap_acc_skv  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+map_fold_heap_acc_skv  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 map_index_order  out-of-interp-scope capability: prim.alloc_map
 map_insertion_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 map_set_eq  out-of-interp-scope capability: prim.alloc_map
@@ -78,17 +79,17 @@ matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_rows  out-of-interp-scope capability: prim.alloc_list_str
 matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
-matrix_pow_libm  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+matrix_pow_libm  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.alloc_list_str
 matrix_select_rows  out-of-interp-scope capability: prim.alloc_list_str
 matrix_select_rows_oob  out-of-interp-scope capability: prim.alloc_list_str
-matrix_softmax_fastexp  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+matrix_softmax_fastexp  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 memory_stress  out-of-interp-scope capability: prim.alloc_list
 module_var_alias_cow  out-of-interp-scope capability: prim.alloc_list
 mut_map_param  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 mutual_append  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 negative_offset_and_width_totality  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-nested_hof_lambda_inference  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+nested_hof_lambda_inference  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 place_mutation  out-of-interp-scope capability: prim.alloc_map
 pure_bang_propagation  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 r5_lowmisc_param_try_err  out-of-interp-scope capability: prim.alloc_map
@@ -112,7 +113,7 @@ string_from_bytes  out-of-interp-scope capability: prim.alloc_list
 string_ops_drain  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 string_passthrough_share  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 string_rle  out-of-interp-scope capability: prim.alloc_list_str
-string_split_rle_codepoint  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+string_split_rle_codepoint  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 string_whitespace  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 tco_map_acc_seed  out-of-interp-scope capability: prim.alloc_map
 unwrap_or_unwrap_fallback  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
