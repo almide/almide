@@ -72,6 +72,14 @@ impl<'a> Interpreter<'a> {
             // mutating `list.push` is intercepted by the in-place-mutation guard
             // above and never reaches here.
             "append" => Some(self.list_append(args)),
+            // A fresh EMPTY list on every leg: native clamps and reserves
+            // (runtime/rs/src/list.rs::almide_rt_list_with_capacity) and the
+            // wasm self-host ignores `cap` outright (stdlib/list_make.almd) —
+            // the reservation is unobservable (C-034), so the cap value never
+            // matters here either. Without this arm the interp descended into
+            // the self-host body and abstained on `prim.alloc_list` (C-277's
+            // fixture, #1416).
+            "with_capacity" => Some(Flow::val(Value::list(Vec::new()))),
             "concat" => Some(self.list_concat(args)),
             // The aggregate/ordering ops are a second-tier sub-router — purely
             // to keep this router's own arm count (and cyclomatic weight)
@@ -333,9 +341,17 @@ impl<'a> Interpreter<'a> {
     // ── map ──
     fn eval_container_op_map(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
+            // The empty constructor — same value the `[:]` literal evaluates
+            // to (eval.rs::EmptyMap). Without this arm the interp descended
+            // into the self-host body and abstained on `prim.alloc_map`
+            // (C-277's fixture, #1416; `with_capacity`/`set.new` likewise).
+            "new" if args.is_empty() => Some(Flow::val(Value::Map(Rc::new(Vec::new())))),
             "len" | "size" => Some(self.map_len(args)),
             "get" => Some(self.map_get(args)),
-            "contains_key" | "has" => Some(self.map_contains_key(args)),
+            // `map.contains` is the stdlib's KEY-membership name
+            // (stdlib/map.almd: `fn contains[K, V](m, key) -> Bool`) —
+            // same op as the `contains_key`/`has` aliases.
+            "contains" | "contains_key" | "has" => Some(self.map_contains_key(args)),
             // `map.set` is FUNCTIONAL (`-> Map`, returns a new map); the
             // mutating `map.insert` (`mut m, .. -> Unit`) is intercepted by the
             // in-place-mutation guard above.
@@ -397,6 +413,14 @@ impl<'a> Interpreter<'a> {
     // ── set ──
     fn eval_container_op_set(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
+            // The empty constructor — see the `map.new` arm above.
+            "new" if args.is_empty() => Some(Flow::val(Value::Set(Rc::new(Vec::new())))),
+            // Dedup preserving FIRST-occurrence insertion order — the same
+            // order both backends print (spec/wasm_cross/compound_repr_interp
+            // pins `set.from_list([3, 1, 2, 1, 3])` as `{3, 1, 2}`), and the
+            // same rule `set_insert` below already implements one element at
+            // a time.
+            "from_list" => Some(self.set_from_list(args)),
             "len" | "size" => Some(self.set_len(args)),
             "contains" | "has" => Some(self.set_contains(args)),
             "insert" | "add" => Some(self.set_insert(args)),
@@ -409,6 +433,21 @@ impl<'a> Interpreter<'a> {
         match args.first() {
             Some(Value::Set(e)) => Flow::val(Value::Int(e.len() as i64)),
             _ => Flow::Abort("internal: set.len on non-set".into()),
+        }
+    }
+
+    fn set_from_list(&mut self, args: &[Value]) -> Flow {
+        match args.first().and_then(|v| v.as_iter_items()) {
+            Some(items) => {
+                let mut out: Vec<Value> = Vec::new();
+                for x in items {
+                    if !out.contains(&x) {
+                        out.push(x);
+                    }
+                }
+                Flow::val(Value::Set(Rc::new(out)))
+            }
+            None => Flow::Abort("internal: set.from_list on non-list".into()),
         }
     }
 
