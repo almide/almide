@@ -538,9 +538,76 @@ fn new_lower_ctx(
 /// `mir > ir` breach on every in-profile loop-`!` fn — the #1176 drift).
 pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
     if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(func.name.as_str())) {
-        Some(IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() })
+        let result_ty = Ty::result(func.ret_ty.clone(), Ty::String);
+        let mut body = IrExpr { ty: result_ty.clone(), ..func.body.clone() };
+        // #1410: a DECLARED-OPTION member's ok-path values are wrapped in
+        // `ok(...)` HERE, in the shared retype both the lowering and the
+        // classify count-side apply (the #1176 discipline, by construction).
+        // The scalar members' raw ok tails are handled by the existing
+        // machinery downstream and are left exactly as before; Option is the
+        // family whose raw tail survived to the renderer as the #841 hybrid —
+        // err path a wrapped Result block, ok path a raw Option block — which
+        // no consumer can discriminate: wasm swallowed a failed int.parse and
+        // continued with a garbage value where native aborted.
+        if matches!(
+            &func.ret_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+        ) {
+            wrap_option_return_positions(&mut body, &func.ret_ty, &result_ty);
+        }
+        Some(body)
     } else {
         None
+    }
+}
+
+/// Wrap every RETURN-position value of `expr` whose type is the declared
+/// Option in `ok(...)`, retyping the spine to the Result carrier as it goes.
+/// Return positions only — Block tails, If arms, Match arms — never operand
+/// or argument positions, so nothing an expression CONSUMES changes shape.
+/// `ResultOk`/`ResultErr` values are already the carrier and are left alone.
+fn wrap_option_return_positions(expr: &mut IrExpr, opt_ty: &Ty, result_ty: &Ty) {
+    match &mut expr.kind {
+        IrExprKind::Block { expr: tail, .. } => {
+            if let Some(t) = tail.as_deref_mut() {
+                wrap_option_return_positions(t, opt_ty, result_ty);
+            }
+            expr.ty = result_ty.clone();
+        }
+        IrExprKind::If { then, else_, .. } => {
+            wrap_option_return_positions(then, opt_ty, result_ty);
+            wrap_option_return_positions(else_, opt_ty, result_ty);
+            expr.ty = result_ty.clone();
+        }
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms.iter_mut() {
+                wrap_option_return_positions(&mut arm.body, opt_ty, result_ty);
+            }
+            expr.ty = result_ty.clone();
+        }
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => {}
+        _ => {
+            // A VALUE in return position. Wrap it when it produces the declared
+            // Option; anything else (a Never-typed die, an already-Result
+            // propagation) is left for the existing machinery.
+            if expr.ty == *opt_ty {
+                let inner = std::mem::replace(
+                    expr,
+                    IrExpr {
+                        kind: IrExprKind::Unit,
+                        ty: Ty::Unit,
+                        span: None,
+                        def_id: None,
+                    },
+                );
+                *expr = IrExpr {
+                    span: inner.span.clone(),
+                    def_id: inner.def_id,
+                    kind: IrExprKind::ResultOk { expr: Box::new(inner) },
+                    ty: result_ty.clone(),
+                };
+            }
+        }
     }
 }
 
