@@ -7,7 +7,26 @@
 // guard in this file is `checked_add`, so an out-of-range read takes its
 // documented default on both targets instead.
 
-#[inline(always)] pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
+#[inline(always)] /// The byte window `[pos, pos + width)` inside a buffer of `len`, or `None`
+/// when it does not fit — **including when `pos` is negative** (#1408).
+///
+/// `pos as usize` on a negative value is `usize::MAX`, and the `p + width <=
+/// b.len()` guard the writers below used then WRAPPED past its own check:
+/// `usize::MAX + 4` is 3, `3 <= 8` passes, and the slice index panics with a
+/// raw `range start index 18446744073709551615` — a native abort on input the
+/// wasm leg handles. The bounds check failed in exactly the case it existed
+/// for.
+///
+/// `try_from` rejects the negative BEFORE it can become a huge positive, and
+/// `checked_add` keeps the sum honest. This is the shape the `read_*` family
+/// already used, which is why reads never carried the bug — this makes the
+/// writers agree with them.
+fn window(pos: i64, width: usize, len: usize) -> Option<usize> {
+    let p = usize::try_from(pos).ok()?;
+    (p.checked_add(width)? <= len).then_some(p)
+}
+
+pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
 pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
 #[inline(always)] pub fn almide_rt_bytes_get(b: &Vec<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
 #[inline(always)] pub fn almide_rt_bytes_get_or(b: &Vec<u8>, i: i64, default: i64) -> i64 { b.get(i as usize).map(|&x| x as i64).unwrap_or(default) }
@@ -123,44 +142,36 @@ pub fn almide_rt_bytes_append_i16_be(b: &mut Vec<u8>, val: i64) {
     b.extend_from_slice(&((val as i16).to_be_bytes()));
 }
 pub fn almide_rt_bytes_set_i16_le(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as i16).to_le_bytes();
-    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_u16_be(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as u16).to_be_bytes();
-    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_i16_be(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as i16).to_be_bytes();
-    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_u32_be(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as u32).to_be_bytes();
-    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_i32_be(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as i32).to_be_bytes();
-    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_i64_be(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = val.to_be_bytes();
-    if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_f32_be(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let p = pos as usize;
     let bytes = (val as f32).to_be_bytes();
-    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_f64_be(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let p = pos as usize;
     let bytes = val.to_be_bytes();
-    if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 
 // ── XOR / pad / copy ──
@@ -408,38 +419,32 @@ pub fn almide_rt_bytes_copy_to_ptr(b: &Vec<u8>, ptr: *mut u8, cap: i64) -> i64 {
 // ── In-place little-endian writes & data pointer ──
 
 pub fn almide_rt_bytes_set_f32_le(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let p = pos as usize;
     let bytes = (val as f32).to_le_bytes();
-    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_u16_le(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as u16).to_le_bytes();
-    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_u8(b: &mut Vec<u8>, pos: i64, val: i64) {
     let p = pos as usize;
     if p < b.len() { b[p] = (val as u8) & 0xFF; }
 }
 pub fn almide_rt_bytes_set_u32_le(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as u32).to_le_bytes();
-    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_i32_le(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = (val as i32).to_le_bytes();
-    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_i64_le(b: &mut Vec<u8>, pos: i64, val: i64) {
-    let p = pos as usize;
     let bytes = val.to_le_bytes();
-    if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_f64_le(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let p = pos as usize;
     let bytes = val.to_le_bytes();
-    if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
+    if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 
 // ── Cursor family ──

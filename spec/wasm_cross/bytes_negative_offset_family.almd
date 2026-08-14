@@ -1,0 +1,75 @@
+// @contract: C-229
+// #1408: a NEGATIVE offset is a no-op for every `bytes.set_*` and a default
+// for every `bytes.read_*` — identically on both targets, never a panic.
+//
+// Found by the 2026-08-14 fuzz-nightly (run 31770547955, seed 508328767282
+// index 602, a matrix_select_rows_oob mutation). Native died with a raw slice
+// panic — `range start index 18446744073709551615 out of range for slice of
+// length 32` — while wasm ran to completion. Not a clean abort: a Rust panic
+// with a backtrace note.
+//
+// The cause was a bounds check defeated by its own overflow. The writers did
+//
+//     let p = pos as usize;                      // -1  ->  usize::MAX
+//     if p + 4 <= b.len() { b[p..p+4] = .. }     // MAX + 4 WRAPS to 3
+//
+// so `3 <= 8` passed and the slice index panicked. The `read_*` family already
+// used `checked_add` and was never affected, which is why this file asserts
+// BOTH halves: the fix made the writers agree with the readers, and the gate
+// has to hold that agreement rather than just the one cell the fuzzer hit.
+//
+// This is the family matrix CLAUDE.md requires ("an API family is extended by
+// matrix, never point-wise"): every width and both endiannesses, because the
+// defect lived in a per-width hand-written guard and a point fix would leave
+// the untested widths free to drift back.
+fn probe_writes(n: Int) -> String = {
+  var b = bytes.new(n)
+  // Every `set_*` width and order, all at offset -1. Each must be a NO-OP;
+  // the buffer must still read back as the zeros `bytes.new` produced.
+  bytes.set_u8(b, -1, 0xFF)
+  bytes.set_u16_le(b, -1, 0xFFFF)
+  bytes.set_u16_be(b, -1, 0xFFFF)
+  bytes.set_i16_le(b, -1, 0 - 1)
+  bytes.set_i16_be(b, -1, 0 - 1)
+  bytes.set_u32_le(b, -1, 0xFFFFFFFF)
+  bytes.set_u32_be(b, -1, 0xFFFFFFFF)
+  bytes.set_i32_le(b, -1, 0 - 1)
+  bytes.set_i32_be(b, -1, 0 - 1)
+  bytes.set_i64_le(b, -1, 0 - 1)
+  bytes.set_i64_be(b, -1, 0 - 1)
+  bytes.set_f32_le(b, -1, 5.0)
+  bytes.set_f32_be(b, -1, 5.0)
+  bytes.set_f64_le(b, -1, 5.0)
+  bytes.set_f64_be(b, -1, 5.0)
+  // A large-magnitude negative too: -1 is the cheapest wrap, but any negative
+  // must be rejected before the cast, not merely the one that wraps to a small
+  // number.
+  bytes.set_f64_le(b, 0 - 999999, 5.0)
+  bytes.set_u8(b, 0 - 999999, 0xFF)
+  var sum = 0
+  for i in 0..<bytes.len(b) {
+    sum = sum + bytes.read_u8(b, i)
+  }
+  "len=${int.to_string(bytes.len(b))} sum=${int.to_string(sum)}"
+}
+
+fn probe_reads(n: Int) -> String = {
+  var b = bytes.new(n)
+  bytes.set_u8(b, 0, 7)
+  // Every `read_*` at a negative offset yields the type's default, never a
+  // panic and never a byte from somewhere else.
+  let a = bytes.read_u16_le(b, -1) + bytes.read_u16_be(b, -1)
+  let c = bytes.read_i16_le(b, -1) + bytes.read_i16_be(b, -1)
+  let d = bytes.read_u32_le(b, -1) + bytes.read_u32_be(b, -1)
+  let e = bytes.read_i32_le(b, -1) + bytes.read_i32_be(b, -1)
+  let g = bytes.read_i64_le(b, -1) + bytes.read_i64_be(b, -1)
+  let h = bytes.read_f32_le(b, -1) + bytes.read_f64_le(b, -1)
+  let i = bytes.read_f32_be(b, -1) + bytes.read_f64_be(b, -1)
+  "ints=${int.to_string(a + c + d + e + g)} floats=${float.to_string(h + i)} intact=${int.to_string(bytes.read_u8(b, 0))}"
+}
+
+effect fn main() -> Unit = {
+  println(probe_writes(8))
+  println(probe_writes(1))
+  println(probe_reads(8))
+}
