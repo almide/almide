@@ -190,14 +190,68 @@ impl LowerCtx {
             lhh_mark: self.live_heap_handles.len(),
         };
         let handle = self.unwrap_or_operand_handle(expr, is_named_variant_call, cx)?;
-        let route = self
-            .lower_value_helper_unwrap_or(handle, expr, fallback, cx)
-            .or_try(|| self.lower_variant_ctor_unwrap_or(handle, expr, fallback, cx))
-            .or_try(|| self.lower_closure_unwrap_or(handle, expr, fallback, cx))
-            .or_try(|| self.lower_str_unwrap_or(handle, fallback, cx));
+        // #1418 DELETION-READINESS instrument: with ALMIDE_QQ_NO_ROUTES set, the
+        // route CHAIN is skipped (forced `Next`) — every `??` must survive on the
+        // match-first paths (scalar above, heap below) plus the position
+        // machinery. The corpus under this mode measures exactly what breaks the
+        // day the routes are deleted. Diagnostic only — never set in normal builds.
+        let route = if crate::trace::enabled("ALMIDE_QQ_NO_ROUTES") {
+            UnwrapOrRoute::Next
+        } else {
+            self.lower_value_helper_unwrap_or(handle, expr, fallback, cx)
+                .or_try(|| self.lower_variant_ctor_unwrap_or(handle, expr, fallback, cx))
+                .or_try(|| self.lower_closure_unwrap_or(handle, expr, fallback, cx))
+                .or_try(|| self.lower_str_unwrap_or(handle, fallback, cx))
+        };
         match route {
             UnwrapOrRoute::Done(v) => Some(v),
             UnwrapOrRoute::Fail => None,
+            UnwrapOrRoute::Next
+                if is_heap_ty(&fallback.ty)
+                    && !fallback_propagates
+                    && crate::trace::enabled("ALMIDE_QQ_NO_ROUTES") =>
+            {
+                // HEAP-payload match fallback — the #1418 DELETION-DAY path,
+                // exercised only under ALMIDE_QQ_NO_ROUTES (the readiness probe)
+                // until the routes are deleted: every heap `??` rides the generic
+                // value-position variant-match machinery, the same rewrite the
+                // bind position has used since #1270. NOT enabled in normal mode
+                // yet: a DECLINED speculative attempt pollutes the tracking sets
+                // for the SUBJECT's stable ValueId (materialized_options et al.
+                // cannot be un-inserted), which altered the downstream #1270
+                // bind rewrite's decisions (option_result_ctors regressed to a
+                // wall). At deletion time this arm becomes the only path and
+                // nothing falls through after it, so the pollution class
+                // disappears with the routes.
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let synth = IrExpr {
+                    kind: IrExprKind::Unit,
+                    ty: fallback.ty.clone(),
+                    span: expr.span.clone(),
+                    def_id: None,
+                };
+                let m = if expr.ty.is_result() {
+                    Self::unwrap_or_as_result_match(&synth, expr, fallback)
+                } else if expr.ty.is_option() {
+                    Self::unwrap_or_as_option_match(&synth, expr, fallback)
+                } else {
+                    return None;
+                };
+                let IrExprKind::Match { subject, arms } = &m.kind else { unreachable!() };
+                if let Some(v) = self.try_lower_variant_value_match(subject, arms, &m.ty) {
+                    crate::trace::trace("ALMIDE_DBG_QQ", || {
+                        format!("[qq] match-first took {:?} ?? (heap)", expr.ty)
+                    });
+                    return Some(v);
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                crate::trace::trace("ALMIDE_DBG_QQ", || {
+                    format!("[qq] heap match fallback declined for {:?} ??", expr.ty)
+                });
+                None
+            }
             UnwrapOrRoute::Next => {
                 // TERMINAL TYPE GUARD (the route chain's safety floor): the scalar
                 // route blind-reads len@4 + slot 0 — valid ONLY for a genuinely

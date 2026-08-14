@@ -64,6 +64,10 @@ pub(crate) const CHANNELS: &[(&str, &str)] = &[
         "which path lowered each ?? (match-first vs route fallback, #1418)",
     ),
     (
+        "ALMIDE_QQ_NO_ROUTES",
+        "skip the ?? route chain entirely — the #1418 deletion-readiness probe",
+    ),
+    (
         "DBG_LOWER_FN",
         "the lowered body of the fn named by the value",
     ),
