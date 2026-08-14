@@ -118,13 +118,10 @@ fn desugar_tuple_payload_arms(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<V
     if !has_tuple_payload {
         return None;
     }
-    let mut next = arms
-        .iter()
-        .map(|a| crate::lower::max_var_id(&a.body))
-        .max()
-        .unwrap_or(0)
-        .max(crate::lower::max_var_id(subject))
-        + 1;
+    // Band-allocated (the multi-line max-scan shape the 32-site sweep missed —
+    // the same collision class: a pass introducing binds above these arms would
+    // make this scan mint an id another pass already owns).
+    let mut next = crate::lower::desugar_var_seed();
     let mut out: Vec<IrMatchArm> = Vec::with_capacity(arms.len());
     for a in arms {
         let inner_tuple = match &a.pattern {

@@ -230,7 +230,10 @@ pub(crate) fn try_tco_rewrite(
     // empties since brick 1), so admit it; the collect/carried gates below still decline
     // anything outside the loop subset, falling back to the real recursion as before.
     let n = params.len();
-    let max_v = max_var_id(body).max(params.iter().map(|p| p.var.0).max().unwrap_or(0));
+    // Band-allocated (formerly a body+params max scan — the missed multi-line
+    // shape of the 32-site sweep; rk and the iterator index draw consecutive
+    // ids from one fresh chunk).
+    let max_v = crate::lower::desugar_var_seed();
     let rk = VarId(max_v + 1);
     // LIST-ITERATOR rewrite (the heap-loop-carried escape): a HEAP carried param `cs` consumed in
     // EVERY self-call ONLY as `list.drop(cs, 1)`, with the body matching on `list.first(cs)`, is a
