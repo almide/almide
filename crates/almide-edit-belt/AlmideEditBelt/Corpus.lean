@@ -247,10 +247,9 @@ def genInt (useX : Bool) : G SExpr := do
   else
     pure (.sInt k)
 
-/-- An inline `Result[Int, String]`-typed expression — ANY shape. Only safe
-where the surface anchors the type (an annotated `let`, a declared return):
-a bare `err(w)` in subject position is checker-accepted but dies in codegen
-(almide#1428), so `genResInferable` exists for those positions. -/
+/-- An inline `Result[Int, String]`-typed expression — any shape, in any
+position: an unanchored `err(w)`'s ok payload defaults to Unit at the
+surface (almide#1428's fix), matching the kernel's untyped view. -/
 def genRes (ctx : Ctx) (useX : Bool) : G SExpr := do
   let a ← genInt useX
   let c ← below (4 + ctx.pureRes.length + ctx.effFns.length)
@@ -267,18 +266,6 @@ def genRes (ctx : Ctx) (useX : Bool) : G SExpr := do
         let j := idx - ctx.pureRes.length
         pure (.sCall (ctx.effFns.getD j "missing") a)
 
-/-- A `Result`-typed expression whose ok payload the surface can infer
-WITHOUT an annotation: `ok(intExpr)` or a call with a declared signature.
-The only legal shapes for a bare `match` subject until almide#1428 lands. -/
-def genResInferable (ctx : Ctx) (useX : Bool) : G SExpr := do
-  let a ← genInt useX
-  let calls := ctx.pureRes ++ ctx.effFns
-  let c ← below (1 + calls.length)
-  if c == 0 then
-    pure (.sOk a)
-  else
-    pure (.sCall (calls.getD (c - 1) "missing") a)
-
 /-- An inline `String`-typed expression for `println`. -/
 def genStr (ctx : Ctx) : G SExpr := do
   let w ← word
@@ -288,6 +275,21 @@ def genStr (ctx : Ctx) : G SExpr := do
   else
     pure (.sCall (ctx.strFns.getD (c - 2) "missing") (.sStr w))
 
+/-- A `Result`-typed expression that never builds a literal `err(..)` — an
+`ok(..)` or a call. Inside a non-main effect fn, an err-carrier consumed by
+a MATCH makes the wasm renderer emit invalid code (almide#1431, any tail
+shape, annotated or bare) — until that lands, match subjects and match-fed
+lets in callee position draw from this pool. (`err(..)` consumed by `!`
+stays generated in callees; err-subject matches stay generated in `main`.) -/
+def genResNoErrLit (ctx : Ctx) (useX : Bool) : G SExpr := do
+  let a ← genInt useX
+  let calls := ctx.pureRes ++ ctx.effFns
+  let c ← below (1 + calls.length)
+  if c == 0 then
+    pure (.sOk a)
+  else
+    pure (.sCall (calls.getD (c - 1) "missing") a)
+
 /-- One to two unit statements usable anywhere (no `!`). `uniq` keeps the
 annotated-let-then-match form's binding unique in its scope. -/
 def genStmts (ctx : Ctx) (useX : Bool) (uniq : String) : G (List SStmt) := do
@@ -296,14 +298,15 @@ def genStmts (ctx : Ctx) (useX : Bool) (uniq : String) : G (List SStmt) := do
   | 0 => do let e ← genStr ctx; pure [.sPrintln e]
   | 1 => do let e ← genStr ctx; pure [.sPrintln e]
   | 2 => do
-      let subj ← genResInferable ctx useX
+      -- Any Result shape is a legal bare subject in MAIN since almide#1428's
+      -- fix (unconstrained ok payload defaults to Unit); callee position
+      -- avoids err carriers per almide#1431.
+      let subj ← if useX then genResNoErrLit ctx useX else genRes ctx useX
       let w1 ← word
       let w2 ← word
       pure [.sMatchUnit subj "_v" "_e" (.sStr w1) (.sStr w2)]
   | _ => do
-      -- The annotated-let form anchors the payload type, so ANY Result
-      -- shape (a bare err included) is legal as the bound value.
-      let rhs ← genRes ctx useX
+      let rhs ← if useX then genResNoErrLit ctx useX else genRes ctx useX
       let w1 ← word
       let w2 ← word
       let m := s!"m{uniq}"
@@ -336,10 +339,10 @@ def genEffDef (ctx : Ctx) (name : Name) : G SDef := do
     let tail := SExpr.sProp (.sVar "r")
     pure ⟨name, .int, .int, .effB ⟨stmts ++ [.sLet "r" (.res .int) rhs], tail⟩⟩
   else
-    -- Tail is a LITERAL only: a bare-parameter tail (`= x`) splits the v1
-    -- renderer's signature from its body (almide#1429) — re-admit `sVar "x"`
-    -- here when that lands.
-    let tail ← genInt false
+    -- Literal or bare-parameter tail — the passthrough shape is legal again
+    -- since almide#1429's fix (the ok-lift is a return-type override, not a
+    -- ret-value retype).
+    let tail ← genInt true
     pure ⟨name, .int, .int, .effB ⟨stmts, tail⟩⟩
 
 /-- A whole program. -/

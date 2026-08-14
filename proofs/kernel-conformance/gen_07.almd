@@ -24,7 +24,7 @@ effect fn main() -> Unit = {
     ok(_v) => println("lima"),
     err(_e) => println("bravo"),
   }
-  match e0(3) {
+  match p1(3) {
     ok(_v) => println("golf"),
     err(_e) => println("hotel"),
   }

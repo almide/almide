@@ -27,7 +27,7 @@ effect fn main() -> Unit = {
     ok(_v) => println("echo"),
     err(_e) => println("golf"),
   }
-  match p0(7) {
+  match ok(7) {
     ok(_v) => println("foxtrot"),
     err(_e) => println("alpha"),
   }

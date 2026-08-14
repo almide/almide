@@ -29,8 +29,8 @@ effect fn main() -> Unit = {
   println(s0("india"))
   println("oscar")
   println("kilo")
-  match e0(4) {
-    ok(_v) => println("delta"),
-    err(_e) => println("oscar"),
+  match err("delta") {
+    ok(_v) => println("oscar"),
+    err(_e) => println("delta"),
   }
 }

@@ -18,11 +18,8 @@ effect fn e0(x: Int) -> Int = {
 effect fn e1(x: Int) -> Int = 5
 
 effect fn main() -> Unit = {
-  match ok(6) {
-    ok(_v) => println("alpha"),
-    err(_e) => println("oscar"),
-  }
-  match ok(4) {
+  println("kilo")
+  match err("oscar") {
     ok(_v) => println("hotel"),
     err(_e) => println("november"),
   }
@@ -35,12 +32,12 @@ effect fn main() -> Unit = {
     ok(_v) => println("juliet"),
     err(_e) => println("papa"),
   }
-  match e1(4) {
+  match p1(4) {
     ok(_v) => println("lima"),
     err(_e) => println("november"),
   }
   println("juliet")
-  match e1(1) {
+  match ok(1) {
     ok(_v) => println("charlie"),
     err(_e) => println("lima"),
   }

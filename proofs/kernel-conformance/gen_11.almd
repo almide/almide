@@ -14,19 +14,28 @@ effect fn e0(x: Int) -> Int = {
     ok(_v) => println("bravo"),
     err(_e) => println("foxtrot"),
   }
-  0
+  x
 }
 
 effect fn main() -> Unit = {
-  println("echo")
-  match ok(1) {
-    ok(_v) => println("lima"),
-    err(_e) => println("charlie"),
-  }
-  println(s0("hotel"))
-  match ok(4) {
-    ok(_v) => println("echo"),
-    err(_e) => println("hotel"),
-  }
   println("india")
+  println("echo")
+  match ok(6) {
+    ok(_v) => println("november"),
+    err(_e) => println("oscar"),
+  }
+  match err("hotel") {
+    ok(_v) => println("alpha"),
+    err(_e) => println("india"),
+  }
+  let m4: Result[Int, String] = p0(0)
+  match m4 {
+    ok(_v) => println("charlie"),
+    err(_e) => println("echo"),
+  }
+  let m5: Result[Int, String] = err("november")
+  match m5 {
+    ok(_v) => println("kilo"),
+    err(_e) => println("delta"),
+  }
 }

@@ -11,18 +11,15 @@ fn p1(x: Int) -> Result[Int, String] = ok(p0(x) ?? 5)
 fn p2(x: Int) -> Result[Int, String] = ok(9)
 
 effect fn e0(x: Int) -> Int = {
-  let me00: Result[Int, String] = p2(x)
+  let me00: Result[Int, String] = p0(x)
   match me00 {
     ok(_v) => println("papa"),
     err(_e) => println("mike"),
   }
-  7
+  x
 }
 
-effect fn e1(x: Int) -> Int = {
-  let r: Result[Int, String] = p1(5)
-  r!
-}
+effect fn e1(x: Int) -> Int = 9
 
 effect fn main() -> Unit = {
   let m0: Result[Int, String] = err("india")
@@ -41,7 +38,7 @@ effect fn main() -> Unit = {
     err(_e) => println("alpha"),
   }
   println("papa")
-  match e1(5) {
+  match p1(5) {
     ok(_v) => println("hotel"),
     err(_e) => println("echo"),
   }

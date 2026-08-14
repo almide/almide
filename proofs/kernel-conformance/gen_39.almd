@@ -11,18 +11,17 @@ fn p1(x: Int) -> Result[Int, String] = ok(6)
 effect fn e0(x: Int) -> Int = 3
 
 effect fn main() -> Unit = {
-  let m0: Result[Int, String] = e0(7)
+  let m0: Result[Int, String] = p0(0)
   match m0 {
-    ok(_v) => println("delta"),
-    err(_e) => println("mike"),
+    ok(_v) => println("mike"),
+    err(_e) => println("delta"),
   }
-  let m1: Result[Int, String] = p0(6)
-  match m1 {
-    ok(_v) => println("india"),
-    err(_e) => println("golf"),
+  match err("golf") {
+    ok(_v) => println("bravo"),
+    err(_e) => println("echo"),
   }
-  println("echo")
-  println("echo")
-  println(s0("india"))
-  println(s0("echo"))
+  match err("kilo") {
+    ok(_v) => println("foxtrot"),
+    err(_e) => println("india"),
+  }
 }

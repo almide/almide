@@ -9,30 +9,22 @@ fn p0(x: Int) -> Result[Int, String] = ok(2)
 fn p1(x: Int) -> Result[Int, String] = ok(p0(x) ?? 5)
 
 effect fn e0(x: Int) -> Int = {
-  let me00: Result[Int, String] = err("echo")
+  let me00: Result[Int, String] = p0(8)
   match me00 {
-    ok(_v) => println("juliet"),
-    err(_e) => println("india"),
+    ok(_v) => println("echo"),
+    err(_e) => println("juliet"),
   }
-  let r: Result[Int, String] = p0(5)
+  let r: Result[Int, String] = p1(x)
   r!
 }
 
 effect fn main() -> Unit = {
-  let m0: Result[Int, String] = e0(1)
-  match m0 {
-    ok(_v) => println("india"),
-    err(_e) => println("echo"),
-  }
+  println(s0("lima"))
+  println("india")
   println("mike")
-  let m2: Result[Int, String] = p1(1)
-  match m2 {
+  let m3: Result[Int, String] = p1(1)
+  match m3 {
     ok(_v) => println("papa"),
     err(_e) => println("mike"),
-  }
-  println("delta")
-  match p1(0) {
-    ok(_v) => println("kilo"),
-    err(_e) => println("november"),
   }
 }

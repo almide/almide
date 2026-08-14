@@ -28,12 +28,9 @@ effect fn main() -> Unit = {
     ok(_v) => println("hotel"),
     err(_e) => println("papa"),
   }
-  match e0(0) {
-    ok(_v) => println("mike"),
-    err(_e) => println("juliet"),
+  match err("mike") {
+    ok(_v) => println("juliet"),
+    err(_e) => println("kilo"),
   }
-  match e0(2) {
-    ok(_v) => println("golf"),
-    err(_e) => println("charlie"),
-  }
+  println("alpha")
 }

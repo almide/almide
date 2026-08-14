@@ -28,7 +28,7 @@ effect fn main() -> Unit = {
   }
   println("juliet")
   println(s0("kilo"))
-  match p0(9) {
+  match ok(9) {
     ok(_v) => println("charlie"),
     err(_e) => println("papa"),
   }

@@ -17,26 +17,33 @@ effect fn e0(x: Int) -> Int = {
 }
 
 effect fn main() -> Unit = {
-  println("delta")
-  let m1: Result[Int, String] = err("echo")
-  match m1 {
-    ok(_v) => println("papa"),
-    err(_e) => println("oscar"),
+  let m0: Result[Int, String] = err("bravo")
+  match m0 {
+    ok(_v) => println("juliet"),
+    err(_e) => println("echo"),
   }
-  println(s0("india"))
-  let m3: Result[Int, String] = p1(7)
-  match m3 {
+  let m1: Result[Int, String] = p1(0)
+  match m1 {
+    ok(_v) => println("india"),
+    err(_e) => println("golf"),
+  }
+  let m2: Result[Int, String] = p1(7)
+  match m2 {
     ok(_v) => println("mike"),
     err(_e) => println("papa"),
   }
   println(s0("papa"))
-  match p0(9) {
+  match e0(9) {
     ok(_v) => println("oscar"),
     err(_e) => println("kilo"),
   }
-  let m6: Result[Int, String] = p2(8)
-  match m6 {
+  let m5: Result[Int, String] = p2(8)
+  match m5 {
     ok(_v) => println("foxtrot"),
     err(_e) => println("foxtrot"),
+  }
+  match p2(0) {
+    ok(_v) => println("echo"),
+    err(_e) => println("oscar"),
   }
 }

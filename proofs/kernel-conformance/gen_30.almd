@@ -20,22 +20,18 @@ effect fn e0(x: Int) -> Int = {
   r!
 }
 
-effect fn e1(x: Int) -> Int = 7
+effect fn e1(x: Int) -> Int = x
 
 effect fn main() -> Unit = {
-  let m0: Result[Int, String] = err("echo")
-  match m0 {
-    ok(_v) => println("india"),
-    err(_e) => println("juliet"),
+  match err("india") {
+    ok(_v) => println("juliet"),
+    err(_e) => println("india"),
   }
-  println(s0("echo"))
-  println("india")
-  match e1(1) {
-    ok(_v) => println("charlie"),
-    err(_e) => println("lima"),
-  }
-  match p0(7) {
-    ok(_v) => println("mike"),
-    err(_e) => println("alpha"),
+  println("charlie")
+  println(s0("hotel"))
+  let m3: Result[Int, String] = ok(1)
+  match m3 {
+    ok(_v) => println("lima"),
+    err(_e) => println("charlie"),
   }
 }

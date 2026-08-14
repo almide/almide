@@ -35,12 +35,13 @@ effect fn main() -> Unit = {
     err(_e) => println("echo"),
   }
   println("foxtrot")
-  match ok(3) {
-    ok(_v) => println("juliet"),
-    err(_e) => println("delta"),
+  match err("juliet") {
+    ok(_v) => println("delta"),
+    err(_e) => println("charlie"),
   }
-  match e0(7) {
-    ok(_v) => println("hotel"),
-    err(_e) => println("november"),
+  let m5: Result[Int, String] = e1(3)
+  match m5 {
+    ok(_v) => println("november"),
+    err(_e) => println("mike"),
   }
 }

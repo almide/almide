@@ -3462,3 +3462,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/kernel_conformance.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-281"
+spec      = "ALS-E18"
+title     = "Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics"
+statement = "ALS-E18 (match) x the effect-fn tail lift, pinning the two shapes the kernel-conformance corpus caught on its first run: a bare `err(..)` match subject (the checker defaults the unconstrained ok payload to Unit and codegen carries the resolved type as an `Err::<(), String>` turbofish — 0.57.x emitted invalid Rust, E0282, on checker-accepted code, almide#1428) and an effect fn whose tail is the bare parameter (`effect fn ident(x: Int) -> Int = x` — the v1 native renderer's ok-lift retyped the shared param/return ValueId and split the signature from the body, almide#1429; the lift is now a return-type override). Both run the kernel-semantic arms — err arm for the bare err, ok(x) reified at the call boundary for the passthrough, callee effects before the caller's continuation — byte-identical native <-> wasm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_default_and_passthrough.almd", class = "fixture" },
+]

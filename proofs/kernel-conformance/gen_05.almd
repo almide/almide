@@ -20,7 +20,7 @@ effect fn main() -> Unit = {
     ok(_v) => println("november"),
     err(_e) => println("mike"),
   }
-  match p1(3) {
+  match ok(3) {
     ok(_v) => println("mike"),
     err(_e) => println("lima"),
   }

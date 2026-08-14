@@ -21,16 +21,16 @@ effect fn e0(x: Int) -> Int = {
 
 effect fn main() -> Unit = {
   println(s0("juliet"))
-  match ok(2) {
+  match e0(2) {
     ok(_v) => println("charlie"),
     err(_e) => println("kilo"),
   }
   println("hotel")
   println("foxtrot")
-  match ok(9) {
-    ok(_v) => println("hotel"),
-    err(_e) => println("charlie"),
+  match err("hotel") {
+    ok(_v) => println("charlie"),
+    err(_e) => println("november"),
   }
-  println(s0("echo"))
-  println("foxtrot")
+  println("echo")
+  println(s0("juliet"))
 }

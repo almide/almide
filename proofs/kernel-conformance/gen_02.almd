@@ -38,8 +38,8 @@ effect fn main() -> Unit = {
   }
   println("oscar")
   println(s0("india"))
-  match ok(2) {
-    ok(_v) => println("mike"),
-    err(_e) => println("kilo"),
+  match err("mike") {
+    ok(_v) => println("kilo"),
+    err(_e) => println("bravo"),
   }
 }

@@ -23,7 +23,7 @@ effect fn main() -> Unit = {
     ok(_v) => println("oscar"),
     err(_e) => println("hotel"),
   }
-  match ok(2) {
+  match p0(2) {
     ok(_v) => println("kilo"),
     err(_e) => println("juliet"),
   }

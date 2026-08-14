@@ -25,18 +25,13 @@ effect fn e1(x: Int) -> Int = {
 }
 
 effect fn main() -> Unit = {
-  println("charlie")
-  let m1: Result[Int, String] = p1(8)
-  match m1 {
-    ok(_v) => println("oscar"),
-    err(_e) => println("oscar"),
+  match p2(3) {
+    ok(_v) => println("echo"),
+    err(_e) => println("alpha"),
   }
-  match e1(3) {
-    ok(_v) => println("india"),
-    err(_e) => println("golf"),
+  match e0(6) {
+    ok(_v) => println("delta"),
+    err(_e) => println("hotel"),
   }
-  match p2(9) {
-    ok(_v) => println("papa"),
-    err(_e) => println("foxtrot"),
-  }
+  println(s0("golf"))
 }

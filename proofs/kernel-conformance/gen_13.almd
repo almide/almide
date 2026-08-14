@@ -13,17 +13,19 @@ effect fn e0(x: Int) -> Int = {
     ok(_v) => println("november"),
     err(_e) => println("lima"),
   }
-  let me01: Result[Int, String] = err("golf")
+  let me01: Result[Int, String] = p0(2)
   match me01 {
-    ok(_v) => println("lima"),
-    err(_e) => println("delta"),
+    ok(_v) => println("golf"),
+    err(_e) => println("lima"),
   }
-  let r: Result[Int, String] = ok(x)
-  r!
+  0
 }
 
 effect fn main() -> Unit = {
-  println("bravo")
+  match p0(8) {
+    ok(_v) => println("bravo"),
+    err(_e) => println("kilo"),
+  }
   let m1: Result[Int, String] = p1(6)
   match m1 {
     ok(_v) => println("kilo"),
@@ -34,7 +36,7 @@ effect fn main() -> Unit = {
     ok(_v) => println("golf"),
     err(_e) => println("kilo"),
   }
-  match p0(0) {
+  match p1(0) {
     ok(_v) => println("charlie"),
     err(_e) => println("lima"),
   }
@@ -44,4 +46,5 @@ effect fn main() -> Unit = {
     ok(_v) => println("golf"),
     err(_e) => println("oscar"),
   }
+  println(s0("lima"))
 }

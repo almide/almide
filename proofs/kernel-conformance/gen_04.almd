@@ -11,8 +11,8 @@ fn p1(x: Int) -> Result[Int, String] = ok(x)
 effect fn e0(x: Int) -> Int = 2
 
 effect fn e1(x: Int) -> Int = {
-  println("kilo")
-  4
+  let r: Result[Int, String] = ok(x)
+  r!
 }
 
 effect fn main() -> Unit = {

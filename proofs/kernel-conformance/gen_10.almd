@@ -13,33 +13,24 @@ effect fn e0(x: Int) -> Int = {
     ok(_v) => println("alpha"),
     err(_e) => println("lima"),
   }
-  5
+  x
 }
 
-effect fn e1(x: Int) -> Int = 7
+effect fn e1(x: Int) -> Int = 3
 
 effect fn main() -> Unit = {
-  let m0: Result[Int, String] = p0(7)
-  match m0 {
-    ok(_v) => println("golf"),
-    err(_e) => println("delta"),
+  println(s0("golf"))
+  match err("echo") {
+    ok(_v) => println("alpha"),
+    err(_e) => println("papa"),
   }
-  match p1(0) {
-    ok(_v) => println("echo"),
-    err(_e) => println("alpha"),
-  }
-  let m2: Result[Int, String] = err("foxtrot")
-  match m2 {
+  match p1(3) {
     ok(_v) => println("papa"),
     err(_e) => println("lima"),
   }
   println("kilo")
-  match p0(1) {
+  match e1(1) {
     ok(_v) => println("hotel"),
     err(_e) => println("india"),
-  }
-  match p1(8) {
-    ok(_v) => println("oscar"),
-    err(_e) => println("juliet"),
   }
 }

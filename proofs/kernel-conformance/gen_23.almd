@@ -11,14 +11,10 @@ fn p1(x: Int) -> Result[Int, String] = err("bravo")
 effect fn e0(x: Int) -> Int = 4
 
 effect fn main() -> Unit = {
-  match ok(0) {
-    ok(_v) => println("hotel"),
-    err(_e) => println("oscar"),
+  match err("oscar") {
+    ok(_v) => println("papa"),
+    err(_e) => println("juliet"),
   }
-  let m1: Result[Int, String] = ok(5)
-  match m1 {
-    ok(_v) => println("delta"),
-    err(_e) => println("mike"),
-  }
+  println("delta")
   println("lima")
 }
