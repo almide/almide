@@ -739,6 +739,7 @@ jobs:
           if grep -rn '\bsorry\b' \
               crates/almide-perceus-belt/AlmidePerceusBelt/ \
               crates/almide-race-belt/AlmideRaceBelt/ \
+              crates/almide-edit-belt/AlmideEditBelt/ \
               --include='*.lean'; then
             echo "::error::sorry found in Lean proofs — all theorems must be fully proven"
             exit 1
@@ -749,7 +750,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.elan
-          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain') }}
+          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain', 'crates/almide-edit-belt/lean-toolchain') }}
 
       - name: Install elan (retry-resilient)
         # lean-action's internal elan-init has no retry, so a transient GitHub 504
@@ -785,6 +786,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           lake-package-directory: crates/almide-race-belt
+
+      - name: Kernel-check edit-belt proofs (lake build)
+        uses: leanprover/lean-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          lake-package-directory: crates/almide-edit-belt
 
   # ═══════════════════════════════════════════════
   # Checks

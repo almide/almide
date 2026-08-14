@@ -49,11 +49,31 @@ the gate working.)
    zero-trip loops; native traps, wasm prints) that 421 `wasm_cross`
    fixtures and the differential fuzz had not caught. The theorem found a
    real contract violation before a single line of proof was written.
-2. **Kernel calculus, mechanized**: a small core (λ_almd: `let`, `fn`,
-   `effect fn`, `match`, `!`, `??`, must-use) in Lean, with L1 proven for
-   the kernel. Lean already exists in the contract evidence-class vocabulary
-   (`scripts/lib/contract-classes.txt`), so the proof plugs into the existing
-   trust spine rather than starting a parallel one.
+2. **Kernel calculus, mechanized** (DONE 2026-08-15): λ_almd lives in
+   `crates/almide-edit-belt` — the third 0-sorry Lean belt, kernel-checked
+   by the CI `lean-proofs` job alongside perceus and race. The calculus:
+   top-level definitions with DECLARED signatures (`effect` flag included),
+   `let` / calls / `Result` construction and `match` / explicit `!`
+   (ADR-0008, as a `norm`/`abrupt` outcome split) / `??` / `print` (the
+   observable), big-step semantics instrumented with the trace and a ledger
+   of every definition entered. Theorems, all sorry-free:
+   - `ev_agree` — evaluation depends only on the definitions it actually
+     entered. The whole of L1 in one lemma; provable in a page because the
+     call rule reads the table at the called name and nowhere else.
+   - `edit_frame` / `edit_frame_observables` — L1 transport + (with
+     `ev_det`, determinism) the observables-identical form. A finding worth
+     recording: the UNTYPED frame does not need signature preservation at
+     all — replacing `f` by anything preserves executions that avoid `f`.
+     Signature preservation is purely the TYPED half's hypothesis:
+   - `typing_modular` — same-signature body swap keeps the program
+     well-typed, with every other definition's derivation literally the
+     same proof object (typing consults signatures only).
+   - `pure_silent` — code typed at `eff = false` evaluates with an empty
+     trace: the semantic content of "a pure `fn` cannot produce
+     observables" (E006's fence, machine-checked).
+   Honest scope: unary calls, `Result`-only data, one effect; must-use
+   (E041/E042) stays an implementation-level diagnostic — the kernel models
+   ADR-0008's runtime meaning, not its lint surface.
 3. **Backends as refinements**: position native and wasm codegen as
    refinements of the kernel semantics. The 280-contract ledger is then no
    longer the *definition* of cross-target agreement but its *test shadow* —

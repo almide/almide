@@ -1,0 +1,6 @@
+name = "almide-edit-belt"
+version = "0.1.0"
+defaultTargets = ["AlmideEditBelt"]
+
+[[lean_lib]]
+name = "AlmideEditBelt"

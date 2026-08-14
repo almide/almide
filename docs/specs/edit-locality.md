@@ -43,6 +43,15 @@ meaning of unedited code. Almide's rules, adopted one-by-one for MSR
 reasons, are exactly L1's preconditions — the table in §2 is that claim
 made checkable.
 
+For the kernel calculus λ_almd, L1 is a machine-checked theorem:
+`crates/almide-edit-belt` (the third 0-sorry Lean belt, CI `lean-proofs`
+job) proves `edit_frame` + determinism (the observables-identical form),
+`typing_modular` (same-signature body swaps preserve well-typedness with
+every other derivation untouched), and `pure_silent` (code typed outside
+an `effect fn` has an empty trace). The implementation-level statement
+over the full language remains gated by §2's evidence, per
+`docs/contracts/proven-vs-trusted.md`.
+
 ## 2. What enforces it today
 
 | Rule | Locality role | Evidence |

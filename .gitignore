@@ -21,3 +21,6 @@ proofs/.verified-fingerprint
 *.rmeta
 spec/**/*.wasm
 .DS_Store
+
+# Lean lake build dirs (local builds only; CI builds from scratch)
+.lake/
