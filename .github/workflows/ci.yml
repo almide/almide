@@ -881,8 +881,13 @@ jobs:
       # The three gates below were written but never wired to a job. A gate that
       # has never run is indistinguishable from one that does not exist, so they
       # are attached here rather than left as scripts someone remembers to call.
+      # `lark` is the gate's parser; without it the script exits 1 with an
+      # install hint rather than a verdict, so the install is part of the step
+      # instead of an assumption about the runner image.
       - name: Grammar stays in sync with the parser (#1365)
-        run: bash scripts/check-lark-grammar.sh
+        run: |
+          python3 -m pip install --quiet lark
+          bash scripts/check-lark-grammar.sh
 
       - name: Layout discipline for new long-lived structures (#1387 / #1316)
         run: bash scripts/check-layout-discipline.sh
