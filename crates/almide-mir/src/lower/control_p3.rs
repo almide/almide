@@ -48,6 +48,34 @@ struct SpecSnapshot {
 }
 
 impl LowerCtx {
+    /// Seed a value's VARIANT read shape from its TYPE — law 4 of the
+    /// rot-eradication constitution (the type IS the per-value knowledge):
+    /// an Option merge/temp reads len-as-tag with a heap-payload refinement;
+    /// a Result routes by `result_family`. Used by the `??` match-first paths
+    /// for their merge dsts and ANF'd subjects; the #1414 endgame turns this
+    /// into the shape attached at `fresh_value` time.
+    pub(crate) fn seed_variant_value_shape(&mut self, v: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        match ty {
+            Ty::Applied(TC::Option, a) if a.len() == 1 => {
+                self.materialized_options.insert(v);
+                if is_heap_ty(&a[0]) {
+                    self.heap_elem_lists.insert(v);
+                }
+            }
+            Ty::Applied(TC::Result, _) => match crate::lower::result_family(ty) {
+                crate::lower::ResultFamily::Scalar => {
+                    self.materialized_results.insert(v);
+                }
+                crate::lower::ResultFamily::HeapOk => {
+                    self.materialized_results_str.insert(v);
+                    self.heap_elem_lists.insert(v);
+                }
+            },
+            _ => {}
+        }
+    }
+
     /// Run `f` speculatively: on `Some` keep everything it did; on `None`
     /// restore the complete tracking snapshot taken at entry. See
     /// [`SpecSnapshot`].
@@ -351,6 +379,15 @@ impl LowerCtx {
                     }
                     let t = almide_ir::VarId(crate::lower::desugar_var_seed());
                     ctx.lower_bind(t, &subject.ty, subject).ok()?;
+                    // The bind's own seeding is NAME-gated (the rot this arc
+                    // razes) — a payload-returning helper outside the tables
+                    // (`result.unwrap_or`) binds fine but stays untracked. We
+                    // KNOW the temp's shape here (law 4: the type IS the
+                    // knowledge — the operand type came straight off the
+                    // checker), so seed it by type before dispatching.
+                    if let Ok(tval) = ctx.value_for(t) {
+                        ctx.seed_variant_value_shape(tval, &subject.ty);
+                    }
                     let tv = IrExpr {
                         kind: IrExprKind::Var { id: t },
                         ty: subject.ty.clone(),
@@ -365,26 +402,14 @@ impl LowerCtx {
                     // merge dst is untracked and the NEXT `??`/match over it
                     // declines (the p10a nested-Option chain: `sn ?? none`
                     // lowered here, then `inner ?? 9` found `inner` untracked).
-                    use almide_lang::types::constructor::TypeConstructorId as TC;
-                    match &m.ty {
-                        Ty::Applied(TC::Option, a) if a.len() == 1 => {
-                            self.materialized_options.insert(v);
-                            if is_heap_ty(&a[0]) {
-                                self.heap_elem_lists.insert(v);
-                            }
-                        }
-                        Ty::Applied(TC::Result, _) => {
-                            match crate::lower::result_family(&m.ty) {
-                                crate::lower::ResultFamily::Scalar => {
-                                    self.materialized_results.insert(v);
-                                }
-                                crate::lower::ResultFamily::HeapOk => {
-                                    self.materialized_results_str.insert(v);
-                                    self.heap_elem_lists.insert(v);
-                                }
-                            }
-                        }
-                        _ => {}
+                    self.seed_variant_value_shape(v, &m.ty);
+                    // …and OWN it like every route does: the caller's position
+                    // decides (a let/arg temp gets the scope-end drop; a tail
+                    // is moved out). Without this the merge had no owner — no
+                    // scope-end drop, and the tail `ok(c)` piece check (which
+                    // keys on ownership) walled the env_cwd impl body.
+                    if track_result && is_heap_ty(&m.ty) {
+                        self.live_heap_handles.push(v);
                     }
                 }
                 crate::trace::trace("ALMIDE_DBG_QQ", || match out {
