@@ -164,9 +164,22 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .collect();
     });
     if abi_probe {
-        crate::trace::trace("ALMIDE_ABI_PROBE", || format!(
-            "[abi] can_err={can_err:?} lifted={lifted_effect_fns:?} auto_wrap={:?}",
-            auto_wrap_abi_snapshot()));
+        crate::trace::trace("ALMIDE_ABI_PROBE", || {
+            // SORTED so two probe runs of the same program diff clean: the sets are
+            // HashSets, and their Debug order varies run-to-run — a 394-file corpus
+            // snapshot carried 74 lines of pure order noise before this (2026-08-14).
+            let sorted = |s: &std::collections::HashSet<String>| {
+                let mut v: Vec<&String> = s.iter().collect();
+                v.sort();
+                format!("{v:?}")
+            };
+            format!(
+                "[abi] can_err={} lifted={} auto_wrap={}",
+                sorted(&can_err),
+                sorted(&lifted_effect_fns),
+                sorted(&auto_wrap_abi_snapshot())
+            )
+        });
     }
     DECLARED_OPTION_FNS.with(|s| {
         *s.borrow_mut() = fns

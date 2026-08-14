@@ -136,6 +136,16 @@ ARCHITECTURE.md; move this doc to done/ with the measured deltas.
   meaning.
 - Stage C: #1414.
 
+## Option family — surveyed 2026-08-14, NO family disease
+
+`is_self_host_option_module_fn` (mod_p4.rs) was audited for the same bug class
+and is CLEAN: the name table means only "materialized" (exactly what the Result
+tables became in Phase 2) — payload routing is already type-driven at the
+classify sites (`is_heap_elem_list_ty`, the `opt_str_int` tuple route, …), and
+the checked numeric-conversion family is admitted by SHAPE with a drift gate
+(`checked_conversion_family_is_admitted`), which is ahead of where Results
+were. The only shared debt is the registry-derivation tail below.
+
 ## Non-goals
 
 - Physical unification of len-as-tag and cap-as-tag into one block shape
