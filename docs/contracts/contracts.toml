@@ -3416,3 +3416,15 @@ evidence  = [
   { path = "spec/wasm_cross/sort_by_str_key_heap.almd", class = "fixture" },
   { path = "crates/almide-mir/src/coown_names.rs", name = "coown_names_documented", class = "by-construction" },
 ]
+
+[[contract]]
+id        = "C-277"
+spec      = "ALS-C10"
+title     = "A return-only-generic constructor pinned by unification builds and runs identically on both targets even when const-folding erases the pinning context"
+statement = "A runtime constructor whose type parameter appears in NO argument — `list.with_capacity(n)`, `map.new()`, `set.new()` — that `almide check` ACCEPTED because unification pinned the element from the surrounding context (the other arm of an `if`, a later use) builds and runs identically on native and wasm even when that context is erased before emit (const-folding `if true then list.with_capacity(4) else [1, 2]` deletes the pinning arm) and the consumer is element-agnostic (`list.is_empty`, `map.contains`). The dual of C-058: there the UNDECIDABLE empty collection is a frontend error on both targets; here the DECIDED one must never die at the native build. The native emitter carries the checker's resolved type on the call as a turbofish (`almide_rt_list_with_capacity::<i64>(4)`), because after folding, the call site is the only place the resolution can survive; the wasm leg carries no element type and was never affected. Previously `check` accepted and rustc E0282'd behind the codegen wall (`cannot infer type of the type parameter A`) while wasm built and ran — a build-success asymmetry in the acceptance-gap class (#809, #1416; found by the first both-arch fuzz dispatch, run 31791673611, seed 508666777783, and for map/set by nightly-fuzz seed 1785045556318379299). The family is closed by measurement, not by hand: runtime_ctor_turbofish_family_gate_test.rs recomputes the return-only-generic set from runtime signatures and fails on any member without its emit arm, or any stale arm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_turbofish_family.almd", class = "fixture" },
+  { path = "tests/runtime_ctor_turbofish_family_gate_test.rs", name = "every_return_only_generic_ctor_has_a_turbofish_arm", class = "by-construction" },
+]
