@@ -48,7 +48,7 @@ impl LowerCtx {
             // wrapper — the Ok arm's Dup keeps a returned payload alive, so the dec is the
             // borrow's release, never a double-free. (A heap-ERR inner's own nested strings
             // free flat — the statement twin's `else heap_elem_lists` leak-parity bucket.)
-            self.heap_elem_lists.insert(subj);
+            self.value_drops.entry(subj).or_default().flat_elems = true;
         }
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });

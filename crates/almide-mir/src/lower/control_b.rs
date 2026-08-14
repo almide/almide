@@ -390,18 +390,18 @@ impl LowerCtx {
         if matches!(bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
             self.value_shapes.insert(payload, crate::lower::VariantShape::Option);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
-                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                self.value_drops.entry(payload).or_default().named_route = Some("list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
-                self.heap_elem_lists.insert(payload);
+                self.value_drops.entry(payload).or_default().flat_elems = true;
             }
             return;
         }
         if crate::lower::is_result_ty(bind_ty) {
             self.value_shapes.insert(payload, crate::lower::VariantShape::ResultScalar);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
-                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                self.value_drops.entry(payload).or_default().named_route = Some("list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
-                self.heap_elem_lists.insert(payload);
+                self.value_drops.entry(payload).or_default().flat_elems = true;
             }
             return;
         }

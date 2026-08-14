@@ -25,18 +25,19 @@ impl LowerCtx {
                     IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false, ty.clone())),
                     IrPattern::Bind { var, ty }
                         if is_heap_ty(ty)
-                            && (self.heap_elem_lists.contains(&subj)
+                            && (self.value_drops.get(&subj).is_some_and(|d| d.flat_elems)
                                 // `Option[List[String]]` (the heap-acc fold value) — routed
                                 // to the nested DropListListStr set; the payload-borrow
                                 // discipline is identical.
-                                || self.list_list_str_lists.contains(&subj)
+                                || self.value_drops.get(&subj).is_some_and(|d| d.list_list_str)
                                 // An `Option[record]` subject (the materialized option
                                 // toplet — its drop routes "optrec:<R>" via
                                 // DropWrapperRec): the record payload binds as the SAME
                                 // borrow; the option's recursive drop keeps ownership.
                                 || self
-                                    .variant_drop_handles
+                                    .value_drops
                                     .get(&subj)
+                                    .and_then(|d| d.named_route.as_ref())
                                     .is_some_and(|d| d.starts_with("optrec:"))) =>
                     {
                         Some((*var, true, ty.clone()))

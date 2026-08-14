@@ -65,8 +65,8 @@ impl LowerCtx {
             return self.materialize_result_aggregate(payload, repr, is_err, df.to_string());
         }
         let obj = self.materialize_result_str(payload, repr, is_err, false);
-        self.heap_elem_lists.remove(&obj);
-        self.str_int_result_results.insert(obj);
+        self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
+        self.value_drops.entry(obj).or_default().str_int_result = true;
         obj
     }
 
@@ -215,8 +215,8 @@ impl LowerCtx {
                 let piece = self.try_lower_variant_ctor(inner)?;
                 // The variant piece is MOVED into the Result @12 (Consumed by the materialize below) and
                 // freed by the Result's drop — detach its OWN scope-end drop so it is freed EXACTLY once.
-                self.variant_drop_handles.remove(&piece);
-                self.heap_elem_lists.remove(&piece);
+                self.value_drops.get_mut(&piece).map(|d| d.named_route = None);
+                self.value_drops.get_mut(&piece).map(|d| d.flat_elems = false);
                 if needs_rec {
                     Some(self.materialize_result_aggregate(piece, repr, false, type_name))
                 } else {
@@ -282,8 +282,8 @@ impl LowerCtx {
         });
         // The variant block is MOVED into the Result @slot 0 — detach its own
         // scope-end drop so it frees exactly once, through the wrapper.
-        self.variant_drop_handles.remove(&piece);
-        self.heap_elem_lists.remove(&piece);
+        self.value_drops.get_mut(&piece).map(|d| d.named_route = None);
+        self.value_drops.get_mut(&piece).map(|d| d.flat_elems = false);
         self.live_heap_handles.retain(|h| *h != piece);
         // The VARIANT-payload Err keeps the classic opt_str_some MOVE (the variant
         // block is moved into slot 0, its own drop route detached above): it is
@@ -295,8 +295,8 @@ impl LowerCtx {
         self.value_shapes.remove(&obj);
         self.value_shapes.insert(obj, crate::lower::VariantShape::ResultScalar);
         if needs_rec {
-            self.heap_elem_lists.remove(&obj);
-            self.variant_drop_handles.insert(obj, format!("res_{type_name}"));
+            self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
+            self.value_drops.entry(obj).or_default().named_route = Some(format!("res_{type_name}"));
         }
         Some(obj)
     }
@@ -348,13 +348,13 @@ impl LowerCtx {
         });
         // The variant block is MOVED into the wrapper @12 — detach its own scope-end
         // drop so it frees exactly once, through the wrapper.
-        self.variant_drop_handles.remove(&piece);
-        self.heap_elem_lists.remove(&piece);
+        self.value_drops.get_mut(&piece).map(|d| d.named_route = None);
+        self.value_drops.get_mut(&piece).map(|d| d.flat_elems = false);
         self.live_heap_handles.retain(|h| *h != piece);
         let obj = self.materialize_result_str(piece, repr, true, false);
         if needs_rec {
-            self.heap_elem_lists.remove(&obj);
-            self.variant_drop_handles.insert(obj, format!("reserr:{type_name}"));
+            self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
+            self.value_drops.entry(obj).or_default().named_route = Some(format!("reserr:{type_name}"));
         }
         Some(obj)
     }
@@ -443,7 +443,7 @@ impl LowerCtx {
                     // (`heap_elem_lists`). It is MOVED into the Result @12 (Consumed) and freed by the
                     // Result's `resrec:opt_str` → `$__drop_opt_str` instead — detach it so it is freed
                     // EXACTLY once (no double-free).
-                    self.heap_elem_lists.remove(&piece);
+                    self.value_drops.get_mut(&piece).map(|d| d.flat_elems = false);
                     Some(self.materialize_result_aggregate(piece, repr, false, "opt_str".to_string()))
                 } else {
                     let piece = self.try_lower_option_ctor(inner, ok_ty)?;
@@ -484,7 +484,7 @@ impl LowerCtx {
                 let obj = self.fresh_value();
                 self.ops
                     .push(Op::Alloc { dst: obj, repr, init: crate::Init::DynListStr { len: z } });
-                self.variant_drop_handles.insert(obj, format!("opt_{}", self.record_or_anon_drop_type_name(rec)?));
+                self.value_drops.entry(obj).or_default().named_route = Some(format!("opt_{}", self.record_or_anon_drop_type_name(rec)?));
                 Some(obj)
             }
             IrExprKind::OptionSome { expr: rec_expr } => {
@@ -606,8 +606,8 @@ impl LowerCtx {
         };
         // Re-route the drop: materialize_result_str(value_ok=false) tracked `heap_elem_lists`
         // (flat DropListStr); a (String, Int)-tuple Ok needs the recursive DropResultStrInt.
-        self.heap_elem_lists.remove(&obj);
-        self.str_int_result_results.insert(obj);
+        self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
+        self.value_drops.entry(obj).or_default().str_int_result = true;
         Some(obj)
     }
 
@@ -639,8 +639,8 @@ impl LowerCtx {
             }
             _ => return None,
         };
-        self.heap_elem_lists.remove(&obj);
-        self.value_int_result_results.insert(obj);
+        self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
+        self.value_drops.entry(obj).or_default().value_int_result = true;
         Some(obj)
     }
 
@@ -671,8 +671,8 @@ impl LowerCtx {
             }
             _ => return None,
         };
-        self.heap_elem_lists.remove(&obj);
-        self.list_value_int_result_results.insert(obj);
+        self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
+        self.value_drops.entry(obj).or_default().list_value_int_result = true;
         Some(obj)
     }
 
@@ -704,8 +704,8 @@ impl LowerCtx {
             }
             _ => return None,
         };
-        self.heap_elem_lists.remove(&obj);
-        self.list_str_int_result_results.insert(obj);
+        self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
+        self.value_drops.entry(obj).or_default().list_str_int_result = true;
         Some(obj)
     }
 
@@ -765,7 +765,7 @@ impl LowerCtx {
     pub(crate) fn materialize_result_ok(&mut self, payload: ValueId, repr: crate::Repr) -> ValueId {
         let obj = self.fresh_value();
         self.ops.push(Op::Alloc { dst: obj, repr, init: Init::ResOkScalar { payload } });
-        self.heap_elem_lists.insert(obj);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
         obj
     }
 }

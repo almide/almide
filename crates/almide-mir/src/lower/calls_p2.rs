@@ -478,7 +478,7 @@ impl LowerCtx {
             if crate::lower::is_value_ty(elem_ty) {
                 self.value_elem_lists.insert(dst);
             } else {
-                self.heap_elem_lists.insert(dst);
+                self.value_drops.entry(dst).or_default().flat_elems = true;
             }
             return true;
         }
@@ -486,7 +486,7 @@ impl LowerCtx {
             // A flat-variant element block owns no inner handle, so the per-element-`rc_dec`
             // `DropListStr` (each element + the list block) IS its full free — the SAME cert as a
             // `List[String]`. (Checked AFTER `heap_elem`, before the tuple/record arms.)
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return true;
         }
         if shape.str_value_elem {
@@ -494,19 +494,19 @@ impl LowerCtx {
             return true;
         }
         if shape.str_str_elem {
-            self.str_str_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().str_str_elems = true;
             return true;
         }
         if shape.int_str_elem {
-            self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_int_str".to_string());
             return true;
         }
         if shape.str_int_elem {
-            self.variant_drop_handles.insert(dst, "list_str_int".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_str_int".to_string());
             return true;
         }
         if shape.scalar_aggregate_elem {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return true;
         }
         // An Option/Result CTOR element (the codec `__dec_list_opt_*_go` accumulator):
@@ -517,18 +517,18 @@ impl LowerCtx {
         if let Some(class) = &shape.lenlist_elem {
             match class {
                 crate::lower::CtorElemClass::Flat => {
-                    self.heap_elem_lists.insert(dst);
+                    self.value_drops.entry(dst).or_default().flat_elems = true;
                 }
                 crate::lower::CtorElemClass::LenLoop => {
-                    self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+                    self.value_drops.entry(dst).or_default().named_route = Some("list_lenlist".to_string());
                 }
             }
             return true;
         }
         // An `Option[<record>]` element — the generated tag-aware per-record sweep.
         if let Some(rname) = &shape.opt_record_elem {
-            self.variant_drop_handles
-                .insert(dst, format!("list_opt_{}", crate::lower::drop_fn_ident(rname)));
+            self.value_drops.entry(dst).or_default().named_route =
+                Some(format!("list_opt_{}", crate::lower::drop_fn_ident(rname)));
             return true;
         }
         false
@@ -550,26 +550,26 @@ impl LowerCtx {
             // Two-level: the nested sweep frees each inner element, each inner
             // block, then the outer — exact for a scalar-only record element
             // too, whose own rc_dec is its full free (#888).
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return;
         }
         if shape.flat_list_elem {
             // Flat inner blocks: per-slot rc_dec is each element's FULL free.
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return;
         }
         if shape.closure_elem {
             // Per-element recursive free via `$__drop_list_closure` → `__drop_closure`.
-            self.variant_drop_handles.insert(dst, "list_closure".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_closure".to_string());
             return;
         }
         if let Some(vname) = shape.rich_variant_elem {
             // RECURSIVE per-element drop via `$__drop_list_<V>` (the generated variant list drop).
-            self.variant_drop_handles.insert(dst, format!("list_{vname}"));
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("list_{vname}"));
             return;
         }
         if let Some(rname) = shape.record_elem {
-            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("list_{rname}"));
         }
     }
 

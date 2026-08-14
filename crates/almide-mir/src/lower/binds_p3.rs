@@ -538,7 +538,7 @@ impl LowerCtx {
         // EXACT tracking mirror of the prim path (`emit_heap_field_variant_ctor_block` —
         // heap_slots is empty here, so only the needs_rec branch and the aggregate mark apply).
         if needs_rec {
-            self.variant_drop_handles.insert(dst, type_name);
+            self.value_drops.entry(dst).or_default().named_route = Some(type_name);
         }
         self.materialized_aggregates.insert(dst);
         dst
@@ -604,7 +604,7 @@ impl LowerCtx {
         // generated `$__drop_<T>` frees every heap field — variant slots recursively, String
         // slots flat — then the block). A String-only-field type uses the masked DropListStr.
         if needs_rec {
-            self.variant_drop_handles.insert(dst, type_name);
+            self.value_drops.entry(dst).or_default().named_route = Some(type_name);
         } else if !heap_slots.is_empty() {
             self.record_masks.insert(dst, heap_slots);
         }
@@ -658,7 +658,7 @@ impl LowerCtx {
         self.record_masks.insert(dst, heap_slots);
         self.materialized_aggregates.insert(dst);
         if let Some(name) = self.record_drop_type_name(&value.ty) {
-            self.variant_drop_handles.insert(dst, name);
+            self.value_drops.entry(dst).or_default().named_route = Some(name);
         }
         Some(dst)
     }

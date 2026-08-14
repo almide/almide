@@ -67,14 +67,14 @@ impl LowerCtx {
         if matches!(ty, Ty::Applied(TypeConstructorId::Option, _)) {
             self.value_shapes.insert(v, crate::lower::VariantShape::Option);
             if crate::lower::is_heap_elem_list_ty(ty) {
-                self.heap_elem_lists.insert(v);
+                self.value_drops.entry(v).or_default().flat_elems = true;
             }
             return;
         }
         if crate::lower::is_result_ty(ty) {
             self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
             if crate::lower::is_heap_elem_list_ty(ty) {
-                self.heap_elem_lists.insert(v);
+                self.value_drops.entry(v).or_default().flat_elems = true;
             }
         }
     }

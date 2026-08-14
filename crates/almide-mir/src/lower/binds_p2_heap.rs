@@ -362,11 +362,11 @@ impl LowerCtx {
         if self.param_values.contains(&src) && is_scalar_elem_list_ty(ty) {
             self.materialized_lists.insert(dst);
         }
-        if self.heap_elem_lists.contains(&src) {
-            self.heap_elem_lists.insert(dst);
+        if self.value_drops.get(&src).is_some_and(|d| d.flat_elems) {
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
-        if self.str_str_elem_lists.contains(&src) {
-            self.str_str_elem_lists.insert(dst);
+        if self.value_drops.get(&src).is_some_and(|d| d.str_str_elems) {
+            self.value_drops.entry(dst).or_default().str_str_elems = true;
         }
         if self.value_handles.contains(&src) {
             self.value_handles.insert(dst);
@@ -374,8 +374,8 @@ impl LowerCtx {
         if let Some(mask) = self.record_masks.get(&src).cloned() {
             self.record_masks.insert(dst, mask);
         }
-        if let Some(route) = self.variant_drop_handles.get(&src).cloned() {
-            self.variant_drop_handles.insert(dst, route);
+        if let Some(route) = self.value_drops.get(&src).and_then(|d| d.named_route.as_ref()).cloned() {
+            self.value_drops.entry(dst).or_default().named_route = Some(route);
         }
         Ok(())
     }

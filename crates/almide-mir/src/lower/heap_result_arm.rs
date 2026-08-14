@@ -493,7 +493,7 @@ impl LowerCtx {
         let elements = elements.clone();
         let piece = self.try_lower_tuple_construct(&elements)?;
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_str".to_string());
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)
@@ -561,7 +561,7 @@ impl LowerCtx {
         let elements = elements.clone();
         let piece = self.try_lower_tuple_construct(&elements)?;
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles.insert(obj, "opt_str_int".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_int".to_string());
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)

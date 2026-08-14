@@ -86,30 +86,30 @@ impl LowerCtx {
             return;
         }
         if elem_int_str {
-            self.variant_drop_handles.insert(list, "list_int_str".to_string());
+            self.value_drops.entry(list).or_default().named_route = Some("list_int_str".to_string());
             return;
         }
         if elem_str_int {
-            self.variant_drop_handles.insert(list, "list_str_int".to_string());
+            self.value_drops.entry(list).or_default().named_route = Some("list_str_int".to_string());
             return;
         }
         if elem_list_str || elem_list_flat {
             // elem_list_flat: each element is a matrix-shaped two-level block — the SAME
             // DropListListStr sweep (rc_dec each element's flat sub-blocks + the element,
             // then the list) is its exact recursive free.
-            self.list_list_str_lists.insert(list);
+            self.value_drops.entry(list).or_default().list_list_str = true;
             return;
         }
         if let Some(vname) = elem_rich_variant {
             // RECURSIVE per-element drop via the generated `$__drop_list_<V>`.
-            self.variant_drop_handles.insert(list, format!("list_{vname}"));
+            self.value_drops.entry(list).or_default().named_route = Some(format!("list_{vname}"));
             return;
         }
         if let Some(rname) = elem_recdrop {
-            self.variant_drop_handles.insert(list, format!("list_{rname}"));
+            self.value_drops.entry(list).or_default().named_route = Some(format!("list_{rname}"));
             return;
         }
-        self.heap_elem_lists.insert(list);
+        self.value_drops.entry(list).or_default().flat_elems = true;
     }
 
     /// The declared-type → admitted-class classification for

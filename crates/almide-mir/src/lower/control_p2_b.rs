@@ -19,7 +19,7 @@ impl LowerCtx {
         // Some-payload bind reads the borrowed element handle AND the scope-end drop is the
         // recursive DropListStr (mirrors control.rs:100 for the statement-match path).
         if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-            self.heap_elem_lists.insert(subj);
+            self.value_drops.entry(subj).or_default().flat_elems = true;
         }
     }
     }
@@ -51,7 +51,7 @@ impl LowerCtx {
         // so drop-subject-after frees slot-0 once (no double-free — gate-checked).
         if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = &subject.ty {
             if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                self.heap_elem_lists.insert(subj);
+                self.value_drops.entry(subj).or_default().flat_elems = true;
             }
         }
     }
@@ -86,7 +86,7 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
                 self.value_shapes.insert(subj, crate::lower::VariantShape::Option);
                 if is_heap_ty(&a[0]) {
-                    self.heap_elem_lists.insert(subj);
+                    self.value_drops.entry(subj).or_default().flat_elems = true;
                 }
             }
             Ty::Applied(TypeConstructorId::Result, a)
@@ -94,7 +94,7 @@ impl LowerCtx {
             {
                 self.value_shapes.insert(subj, crate::lower::VariantShape::ResultScalar);
                 if is_heap_ty(&a[1]) {
-                    self.heap_elem_lists.insert(subj);
+                    self.value_drops.entry(subj).or_default().flat_elems = true;
                 }
             }
             _ => {}

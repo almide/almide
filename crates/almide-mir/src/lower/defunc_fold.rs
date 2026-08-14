@@ -297,8 +297,8 @@ impl LowerCtx {
     /// per-iteration drop-old frees exactly the same grain its feeder allocated (no leak, no
     /// double-free). A plain String/scalar feeder is in no set ⇒ a no-op (the slot stays a flat `Drop`).
     pub(crate) fn copy_heap_drop_class(&mut self, from: ValueId, to: ValueId) {
-        if self.heap_elem_lists.contains(&from) {
-            self.heap_elem_lists.insert(to);
+        if self.value_drops.get(&from).is_some_and(|d| d.flat_elems) {
+            self.value_drops.entry(to).or_default().flat_elems = true;
         }
         if self.value_elem_lists.contains(&from) {
             self.value_elem_lists.insert(to);
@@ -306,17 +306,17 @@ impl LowerCtx {
         if self.str_value_elem_lists.contains(&from) {
             self.str_value_elem_lists.insert(to);
         }
-        if self.str_str_elem_lists.contains(&from) {
-            self.str_str_elem_lists.insert(to);
+        if self.value_drops.get(&from).is_some_and(|d| d.str_str_elems) {
+            self.value_drops.entry(to).or_default().str_str_elems = true;
         }
-        if self.list_list_str_lists.contains(&from) {
-            self.list_list_str_lists.insert(to);
+        if self.value_drops.get(&from).is_some_and(|d| d.list_list_str) {
+            self.value_drops.entry(to).or_default().list_list_str = true;
         }
         if self.value_handles.contains(&from) {
             self.value_handles.insert(to);
         }
-        if let Some(k) = self.variant_drop_handles.get(&from).cloned() {
-            self.variant_drop_handles.insert(to, k);
+        if let Some(k) = self.value_drops.get(&from).and_then(|d| d.named_route.as_ref()).cloned() {
+            self.value_drops.entry(to).or_default().named_route = Some(k);
         }
     }
 
@@ -499,7 +499,7 @@ impl LowerCtx {
             init: crate::Init::DynList { len: zero_len },
         });
         if list_elem_str {
-            self.heap_elem_lists.insert(list_slot);
+            self.value_drops.entry(list_slot).or_default().flat_elems = true;
         }
 
         // Seed the INT slot: a STABLE mutable scalar local (ConstInt-seed then SetLocal to the init —
@@ -588,7 +588,7 @@ impl LowerCtx {
         // Update the LIST slot: DROP-OLD the previous value, then SetLocal. The new list inherits the
         // slot's recursive-drop set (String → heap_elem_lists) so the slot's drop stays the right kind.
         if list_elem_str {
-            self.heap_elem_lists.insert(new_list);
+            self.value_drops.entry(new_list).or_default().flat_elems = true;
         }
         let drop_old = self.drop_op_for(list_slot);
         self.ops.push(drop_old);

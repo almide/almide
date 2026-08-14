@@ -266,12 +266,12 @@ impl LowerCtx {
             if matches!(&subject.ty, Ty::Applied(TypeConstructorId::Option, _)) {
                 self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             } else if crate::lower::is_result_ty(&subject.ty) {
                 self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
                 if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
         }
@@ -289,7 +289,7 @@ impl LowerCtx {
             // owned payload, no leak). Without this the heap-payload bind gate fails →
             // the match linearizes and reads the Option's own slots as the payload.
             if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(v);
+                self.value_drops.entry(v).or_default().flat_elems = true;
             }
             // `map.find`'s `Option[(String, <scalar>)]` payload OWNS a HEAP slot (the
             // String) inside the tuple — the flat `heap_elem_lists`/`DropListStr` route
@@ -310,7 +310,7 @@ impl LowerCtx {
                             && matches!(tys[0], Ty::String)
                             && !is_heap_ty(&tys[1])
                         {
-                            self.variant_drop_handles.insert(v, "opt_str_int".to_string());
+                            self.value_drops.entry(v).or_default().named_route = Some("opt_str_int".to_string());
                         }
                     }
                 }
@@ -411,10 +411,10 @@ impl LowerCtx {
             if a.len() == 1 {
                 self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if let Some(rn) = self.record_or_anon_drop_type_name(&a[0]) {
-                    self.variant_drop_handles.insert(v, format!("optrec:{rn}"));
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().named_route = Some(format!("optrec:{rn}"));
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 } else if is_heap_ty(&a[0]) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
         }
@@ -439,15 +439,15 @@ impl LowerCtx {
             // flat DropListStr would rc_dec the @12 tuple HANDLE only, leaking its
             // String. Other heap-Ok shapes keep the flat heap_elem_lists/DropListStr.
             if crate::lower::is_str_int_result_ty(&subject.ty) {
-                self.str_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().str_int_result = true;
             } else if crate::lower::is_value_int_result_ty(&subject.ty) {
-                self.value_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().value_int_result = true;
             } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
-                self.list_str_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().list_str_int_result = true;
             } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
-                self.list_value_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().list_value_int_result = true;
             } else {
-                self.heap_elem_lists.insert(v);
+                self.value_drops.entry(v).or_default().flat_elems = true;
             }
         } else {
             self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
@@ -457,7 +457,7 @@ impl LowerCtx {
             ) = &subject.ty
             {
                 if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
         }

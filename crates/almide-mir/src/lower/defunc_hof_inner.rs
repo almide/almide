@@ -389,13 +389,13 @@ impl LowerCtx {
         // shape — a `List[List[Float]]` (Matrix) accumulator would leak its
         // rows under a flat Drop.
         if crate::lower::is_list_list_str_ty(&init_expr.ty) {
-            self.list_list_str_lists.insert(acc);
+            self.value_drops.entry(acc).or_default().list_list_str = true;
         } else if let Some(rname) = self.record_or_anon_drop_type_name(&init_expr.ty) {
-            self.variant_drop_handles.insert(acc, rname);
+            self.value_drops.entry(acc).or_default().named_route = Some(rname);
         } else if crate::lower::is_lenlist_list_ty(&init_expr.ty) {
-            self.variant_drop_handles.insert(acc, "list_lenlist".to_string());
+            self.value_drops.entry(acc).or_default().named_route = Some("list_lenlist".to_string());
         } else if is_heap_elem_list_ty(&init_expr.ty) {
-            self.heap_elem_lists.insert(acc);
+            self.value_drops.entry(acc).or_default().flat_elems = true;
         }
         Some(acc)
     }
@@ -430,15 +430,15 @@ impl LowerCtx {
             self.value_elem_lists.insert(dst);
         } else if shape.matrix {
             // A List[Matrix] result — the nested two-level DropListListStr sweep.
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
         } else if let Some(rname) = &shape.record_drop {
             // A `List[<record>]` result: register the RECURSIVE `$__drop_list_<R>` (frees each
             // element's nested heap fields via `$__drop_<R>`), NOT the flat `heap_elem_lists`
             // DropListStr which would rc_dec only the element HANDLE and LEAK the record's String
             // fields (HOLE-1). Identical registration the record-list LITERAL uses (binds_p3:517).
-            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("list_{rname}"));
         } else if has_result_elem {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
         // filter needs a write-cursor (the count of kept elements) — a stable local.
         let cur = if func == "filter" {

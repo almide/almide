@@ -213,6 +213,43 @@ pub fn is_result_listval_ty(ty: &Ty) -> bool {
 /// whose comment already stated the law — "TYPE decides the repr, not the
 /// list" (a `result.map` listed len-as-tag returns cap-as-tag for a heap
 /// instantiation). That escape becomes structural here.
+/// #1414 shape-at-birth, DROP dimension: the per-value drop/bind facts —
+/// the faithful packing of the former eleven membership sets into ONE record
+/// per value. The old sets encoded a PRECEDENCE LATTICE (dual inserts were
+/// legal: `variant_drop_handles` wins over `heap_elem_lists`, which also
+/// gates heap-payload binds), so this is a STRUCT of the old memberships,
+/// not a single-valued enum — `drop_op_for` reads the fields in the same
+/// priority order the set checks ran. "Untracked" in this dimension is the
+/// absence of an entry in exactly one map (`LowerCtx::value_drops`).
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct DropFacts {
+    /// The named recursive route (`variant_drop_handles`): a user-ADT name or
+    /// a tagged wrapper spelling (`optrec:`/`resrec:`/`reserr:`/`res_msi`/…).
+    /// Highest precedence.
+    pub(crate) named_route: Option<String>,
+    /// `list_str_result_results` — DropResultListStr.
+    pub(crate) list_str_result: bool,
+    /// `value_result_results` — DropResultValue.
+    pub(crate) value_result: bool,
+    /// `value_result_lists` — DropResultListValue.
+    pub(crate) value_result_list: bool,
+    /// `str_int_result_results` — DropResultStrInt.
+    pub(crate) str_int_result: bool,
+    /// `value_int_result_results` — DropResultValueInt.
+    pub(crate) value_int_result: bool,
+    /// `list_value_int_result_results` — DropResultListValueInt.
+    pub(crate) list_value_int_result: bool,
+    /// `list_str_int_result_results` — DropResultListStrInt.
+    pub(crate) list_str_int_result: bool,
+    /// `list_list_str_lists` — DropListListStr.
+    pub(crate) list_list_str: bool,
+    /// `str_str_elem_lists` — DropListStrStr.
+    pub(crate) str_str_elems: bool,
+    /// `heap_elem_lists` — the flat elementwise DropListStr; ALSO the
+    /// heap-payload bind-admission gate. Lowest drop precedence.
+    pub(crate) flat_elems: bool,
+}
+
 /// #1414 shape-at-birth: the per-value VARIANT read shape — the one fact the
 /// match/`??`/drop machinery needs about a materialized Option/Result block.
 /// Stored in `LowerCtx::value_shapes` (one map, keyed by ValueId); written by

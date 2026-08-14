@@ -99,11 +99,11 @@ impl LowerCtx {
         if let Some(mask) = self.record_masks.get(&old).cloned() {
             self.record_masks.insert(new, mask);
         }
-        if let Some(route) = self.variant_drop_handles.get(&old).cloned() {
-            self.variant_drop_handles.insert(new, route);
+        if let Some(route) = self.value_drops.get(&old).and_then(|d| d.named_route.as_ref()).cloned() {
+            self.value_drops.entry(new).or_default().named_route = Some(route);
         }
-        if self.heap_elem_lists.contains(&old) {
-            self.heap_elem_lists.insert(new);
+        if self.value_drops.get(&old).is_some_and(|d| d.flat_elems) {
+            self.value_drops.entry(new).or_default().flat_elems = true;
         }
         let old_drop = self.drop_op_for(old);
         self.ops.push(old_drop);
@@ -262,19 +262,19 @@ impl LowerCtx {
     /// chain, no behavior change — see docs/roadmap/active/code-health-codopsy.md.
     fn classify_stmt_call_heap_drop(&mut self, dst: ValueId, ty: &Ty) {
         if crate::lower::is_result_listval_ty(ty) {
-            self.value_result_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().value_result_list = true;
             return;
         }
         if crate::lower::is_value_result_ty(ty) {
-            self.value_result_results.insert(dst);
+            self.value_drops.entry(dst).or_default().value_result = true;
             return;
         }
         if crate::lower::is_lenlist_list_ty(ty) {
-            self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_lenlist".to_string());
             return;
         }
         if crate::lower::is_heap_elem_list_ty(ty) {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
     }
 

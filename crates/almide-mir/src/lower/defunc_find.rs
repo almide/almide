@@ -149,9 +149,9 @@ impl LowerCtx {
         // (`heap_elem_lists` — DropListStr over the 0-or-1 slot). The option READS as a
         // materialized 0-or-1 list either way.
         if let Some(rn) = self.record_or_anon_drop_type_name(&elem_ty) {
-            self.variant_drop_handles.insert(opt, format!("optrec:{rn}"));
+            self.value_drops.entry(opt).or_default().named_route = Some(format!("optrec:{rn}"));
         } else if elem_heap {
-            self.heap_elem_lists.insert(opt);
+            self.value_drops.entry(opt).or_default().flat_elems = true;
         }
         self.materialized_lists.insert(opt);
         Some(opt)
@@ -189,9 +189,9 @@ impl LowerCtx {
                 // recursive drop (the uniform registration below adds the scope-end free). A
                 // matrix-shaped sublist (`List[Matrix]`) needs the nested DropListListStr grain.
                 if crate::lower::is_list_list_str_ty(&leaf.ty) {
-                    self.list_list_str_lists.insert(dst);
+                    self.value_drops.entry(dst).or_default().list_list_str = true;
                 } else {
-                    self.heap_elem_lists.insert(dst);
+                    self.value_drops.entry(dst).or_default().flat_elems = true;
                 }
                 dst
             }
@@ -203,9 +203,9 @@ impl LowerCtx {
                     .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &leaf.ty)
                     .ok()?;
                 if crate::lower::is_list_list_str_ty(&leaf.ty) {
-                    self.list_list_str_lists.insert(dst);
+                    self.value_drops.entry(dst).or_default().list_list_str = true;
                 } else {
-                    self.heap_elem_lists.insert(dst);
+                    self.value_drops.entry(dst).or_default().flat_elems = true;
                 }
                 dst
             }
@@ -293,7 +293,7 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.heap_elem_lists.insert(obj);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
         self.live_heap_handles.push(obj);
         obj
     }
@@ -312,10 +312,10 @@ impl LowerCtx {
             result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
         });
         // `new` inherits the acc's drop grain (a matrix-elem acc sweeps two levels).
-        if self.list_list_str_lists.contains(&acc) {
-            self.list_list_str_lists.insert(new);
+        if self.value_drops.get(&acc).is_some_and(|d| d.list_list_str) {
+            self.value_drops.entry(new).or_default().list_list_str = true;
         } else {
-            self.heap_elem_lists.insert(new);
+            self.value_drops.entry(new).or_default().flat_elems = true;
         }
         // DROP-OLD the previous accumulator value, then rebind the slot IN PLACE to `new`. `SetLocal`
         // folds `new`'s `i` into the slot stream (the loop-carried `i(id)m`).

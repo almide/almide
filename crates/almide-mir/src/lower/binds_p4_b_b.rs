@@ -94,8 +94,8 @@ impl LowerCtx {
         {
             let obj = self.try_lower_str_list_literal(expr)?;
             let dst = self.materialize_result_str(obj, repr, true, false);
-            self.heap_elem_lists.remove(&dst);
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.get_mut(&dst).map(|d| d.flat_elems = false);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return Some(dst);
         }
         let piece = self.lower_heap_err_common_piece(expr)?;

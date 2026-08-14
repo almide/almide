@@ -15,24 +15,14 @@ struct SpecSnapshot {
     lhh_len: usize,
     lifted_len: usize,
     value_shapes: std::collections::HashMap<ValueId, crate::lower::VariantShape>,
-    heap_elem_lists: std::collections::HashSet<ValueId>,
-    list_list_str_lists: std::collections::HashSet<ValueId>,
-    value_result_results: std::collections::HashSet<ValueId>,
-    str_int_result_results: std::collections::HashSet<ValueId>,
-    value_int_result_results: std::collections::HashSet<ValueId>,
-    list_value_int_result_results: std::collections::HashSet<ValueId>,
-    list_str_int_result_results: std::collections::HashSet<ValueId>,
-    list_str_result_results: std::collections::HashSet<ValueId>,
+    value_drops: std::collections::HashMap<ValueId, crate::lower::DropFacts>,
     materialized_lists: std::collections::HashSet<ValueId>,
     value_handles: std::collections::HashSet<ValueId>,
     value_elem_lists: std::collections::HashSet<ValueId>,
     str_value_elem_lists: std::collections::HashSet<ValueId>,
-    str_str_elem_lists: std::collections::HashSet<ValueId>,
-    value_result_lists: std::collections::HashSet<ValueId>,
     materialized_aggregates: std::collections::HashSet<ValueId>,
     closure_values: std::collections::HashSet<ValueId>,
     record_masks: std::collections::HashMap<ValueId, Vec<usize>>,
-    variant_drop_handles: std::collections::HashMap<ValueId, String>,
 }
 
 impl LowerCtx {
@@ -63,7 +53,7 @@ impl LowerCtx {
             Ty::Applied(TC::Option, a) if a.len() == 1 => {
                 self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if is_heap_ty(&a[0]) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
             Ty::Applied(TC::Result, a) => match crate::lower::result_family(ty) {
@@ -73,18 +63,18 @@ impl LowerCtx {
                     // gate + the flat drop (Ok=len0 frees nothing, Err=len1
                     // frees the slot-0 String).
                     if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                        self.heap_elem_lists.insert(v);
+                        self.value_drops.entry(v).or_default().flat_elems = true;
                     }
                 }
                 crate::lower::ResultFamily::HeapOk => {
                     self.value_shapes.insert(v, crate::lower::VariantShape::ResultHeapOk);
                     if crate::lower::is_result_listval_ty(ty) {
-                        self.value_result_lists.insert(v);
+                        self.value_drops.entry(v).or_default().value_result_list = true;
                     } else if crate::lower::is_value_result_ty(ty) {
-                        self.value_result_results.insert(v);
+                        self.value_drops.entry(v).or_default().value_result = true;
                     } else if crate::lower::is_list_str_result_ty(ty) {
-                        self.list_str_result_results.insert(v);
-                        self.heap_elem_lists.insert(v);
+                        self.value_drops.entry(v).or_default().list_str_result = true;
+                        self.value_drops.entry(v).or_default().flat_elems = true;
                     } else if crate::lower::is_res_map_si_ty(ty)
                         || crate::lower::is_res_list_map_si_ty(ty)
                     {
@@ -93,10 +83,10 @@ impl LowerCtx {
                         } else {
                             "res_lmsi"
                         };
-                        self.variant_drop_handles.insert(v, route.to_string());
-                        self.heap_elem_lists.insert(v);
+                        self.value_drops.entry(v).or_default().named_route = Some(route.to_string());
+                        self.value_drops.entry(v).or_default().flat_elems = true;
                     } else {
-                        self.heap_elem_lists.insert(v);
+                        self.value_drops.entry(v).or_default().flat_elems = true;
                     }
                 }
             },
@@ -113,24 +103,14 @@ impl LowerCtx {
             lhh_len: self.live_heap_handles.len(),
             lifted_len: self.lifted.len(),
             value_shapes: self.value_shapes.clone(),
-            heap_elem_lists: self.heap_elem_lists.clone(),
-            list_list_str_lists: self.list_list_str_lists.clone(),
-            value_result_results: self.value_result_results.clone(),
-            str_int_result_results: self.str_int_result_results.clone(),
-            value_int_result_results: self.value_int_result_results.clone(),
-            list_value_int_result_results: self.list_value_int_result_results.clone(),
-            list_str_int_result_results: self.list_str_int_result_results.clone(),
-            list_str_result_results: self.list_str_result_results.clone(),
+            value_drops: self.value_drops.clone(),
             materialized_lists: self.materialized_lists.clone(),
             value_handles: self.value_handles.clone(),
             value_elem_lists: self.value_elem_lists.clone(),
             str_value_elem_lists: self.str_value_elem_lists.clone(),
-            str_str_elem_lists: self.str_str_elem_lists.clone(),
-            value_result_lists: self.value_result_lists.clone(),
             materialized_aggregates: self.materialized_aggregates.clone(),
             closure_values: self.closure_values.clone(),
             record_masks: self.record_masks.clone(),
-            variant_drop_handles: self.variant_drop_handles.clone(),
         };
         let out = f(self);
         if out.is_none() {
@@ -138,24 +118,14 @@ impl LowerCtx {
             self.live_heap_handles.truncate(snap.lhh_len);
             self.lifted.truncate(snap.lifted_len);
             self.value_shapes = snap.value_shapes;
-            self.heap_elem_lists = snap.heap_elem_lists;
-            self.list_list_str_lists = snap.list_list_str_lists;
-            self.value_result_results = snap.value_result_results;
-            self.str_int_result_results = snap.str_int_result_results;
-            self.value_int_result_results = snap.value_int_result_results;
-            self.list_value_int_result_results = snap.list_value_int_result_results;
-            self.list_str_int_result_results = snap.list_str_int_result_results;
-            self.list_str_result_results = snap.list_str_result_results;
+            self.value_drops = snap.value_drops;
             self.materialized_lists = snap.materialized_lists;
             self.value_handles = snap.value_handles;
             self.value_elem_lists = snap.value_elem_lists;
             self.str_value_elem_lists = snap.str_value_elem_lists;
-            self.str_str_elem_lists = snap.str_str_elem_lists;
-            self.value_result_lists = snap.value_result_lists;
             self.materialized_aggregates = snap.materialized_aggregates;
             self.closure_values = snap.closure_values;
             self.record_masks = snap.record_masks;
-            self.variant_drop_handles = snap.variant_drop_handles;
         }
         out
     }

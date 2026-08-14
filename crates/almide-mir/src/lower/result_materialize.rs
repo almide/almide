@@ -51,7 +51,7 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.heap_elem_lists.insert(obj);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
         self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
@@ -88,7 +88,7 @@ impl LowerCtx {
         self.ops.push(Op::Alloc { dst: obj, repr, init: Init::ResErrStr { piece } });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.heap_elem_lists.insert(obj);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
         self.value_shapes.insert(obj, crate::lower::VariantShape::ResultScalar);
         obj
     }
@@ -122,7 +122,7 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.variant_drop_handles.insert(obj, format!("optrec:{drop_fn}"));
+        self.value_drops.entry(obj).or_default().named_route = Some(format!("optrec:{drop_fn}"));
         self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
@@ -150,7 +150,7 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.variant_drop_handles.insert(obj, "list_int_str".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("list_int_str".to_string());
         self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
@@ -162,7 +162,7 @@ impl LowerCtx {
         self.ops.push(Op::ConstInt { dst: zero, value: 0 });
         let obj = self.fresh_value();
         self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: zero } });
-        self.heap_elem_lists.insert(obj);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
         self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
@@ -325,9 +325,9 @@ impl LowerCtx {
         // A Value-Ok Result (`Result[Value, String]`) drops via the recursive `Op::DropResultValue`
         // (Ok → `$__drop_value`); a String-Ok Result via the flat `DropListStr` (rc_dec the String).
         if value_ok {
-            self.value_result_results.insert(obj);
+            self.value_drops.entry(obj).or_default().value_result = true;
         } else {
-            self.heap_elem_lists.insert(obj);
+            self.value_drops.entry(obj).or_default().flat_elems = true;
         }
         self.value_shapes.insert(obj, crate::lower::VariantShape::ResultHeapOk);
         obj
@@ -365,7 +365,7 @@ impl LowerCtx {
         let tag = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: tag, value: if is_err { 1 } else { 0 } });
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![off16, tag] });
-        self.variant_drop_handles.insert(obj, format!("resrec:{drop_fn}"));
+        self.value_drops.entry(obj).or_default().named_route = Some(format!("resrec:{drop_fn}"));
         self.value_shapes.insert(obj, crate::lower::VariantShape::ResultHeapOk);
         obj
     }

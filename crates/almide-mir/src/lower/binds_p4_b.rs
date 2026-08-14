@@ -182,8 +182,7 @@ impl LowerCtx {
             _ => self.lower_owned_heap_field(expr)?,
         };
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles
-            .insert(obj, "opt_str_str".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_str".to_string());
         Some(obj)
     }
 
@@ -208,8 +207,7 @@ impl LowerCtx {
             _ => self.lower_owned_heap_field(expr)?,
         };
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles
-            .insert(obj, "opt_str_int".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_int".to_string());
         Some(obj)
     }
 
@@ -557,7 +555,7 @@ impl LowerCtx {
                     ty
                 {
                     if a.len() == 1 && is_heap_ty(&a[0]) {
-                        self.heap_elem_lists.insert(dst);
+                        self.value_drops.entry(dst).or_default().flat_elems = true;
                     }
                 }
                 Some(dst)

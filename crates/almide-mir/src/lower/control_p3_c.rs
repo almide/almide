@@ -667,16 +667,16 @@ impl LowerCtx {
     /// the call-binding tracking in `lower_bind` so the cond-frame teardown frees nested ownership.
     pub(crate) fn register_owned_heap_eq_drop(&mut self, obj: ValueId, ty: &Ty) {
         if crate::lower::is_list_list_str_ty(ty) {
-            self.list_list_str_lists.insert(obj);
+            self.value_drops.entry(obj).or_default().list_list_str = true;
         } else if crate::lower::is_list_str_str_ty(ty) {
-            self.str_str_elem_lists.insert(obj);
+            self.value_drops.entry(obj).or_default().str_str_elems = true;
         } else if crate::lower::is_list_int_str_ty(ty) {
-            self.variant_drop_handles.insert(obj, "list_int_str".to_string());
+            self.value_drops.entry(obj).or_default().named_route = Some("list_int_str".to_string());
         } else if crate::lower::is_lenlist_list_ty(ty) {
-            self.variant_drop_handles.insert(obj, "list_lenlist".to_string());
+            self.value_drops.entry(obj).or_default().named_route = Some("list_lenlist".to_string());
         } else if is_heap_elem_list_ty(ty) {
             // List[heap] / Option[heap] / Result[_, heap] — the DynListStr recursive free.
-            self.heap_elem_lists.insert(obj);
+            self.value_drops.entry(obj).or_default().flat_elems = true;
         }
         if crate::lower::is_value_ty(ty) {
             self.value_handles.insert(obj);

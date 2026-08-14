@@ -470,6 +470,10 @@ pub(crate) struct LowerCtx {
     /// "untracked" is now the ABSENCE of a shape in one place, never a
     /// disagreement between sets, and a shape overwrite is a plain insert.
     value_shapes: HashMap<ValueId, crate::lower::VariantShape>,
+    /// #1414 drop dimension: ONE record per value (see `DropFacts`). Replaces
+    /// heap_elem_lists / variant_drop_handles / the *_result_results family /
+    /// list_list_str_lists / str_str_elem_lists.
+    value_drops: HashMap<ValueId, crate::lower::DropFacts>,
     /// MIR values KNOWN to be MATERIALIZED Results (the DynListStr len-as-tag layout: `Ok(int)` =
     /// len 0 with the value in slot 0, `Err(string)` = len 1 owning the message). An `Ok`/`Err`
     /// `match` may EXECUTE (read `len` as the tag — len 0 → Ok, len != 0 → Err — and extract slot
@@ -543,41 +547,33 @@ pub(crate) struct LowerCtx {
     /// String handles). A scope-end drop of one emits [`Op::DropListStr`] (recursive free),
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
     /// `alloc_list_str` result or a `List[String]`-typed bind is created (Machinery 2).
-    heap_elem_lists: HashSet<ValueId>,
     /// MIR values that are a `List[List[String]]` (the csv `rows` shape: a list whose element slots
     /// hold owned `List[String]` blocks). A scope-end drop emits [`Op::DropListListStr`] (a NESTED
     /// free: each row's cell Strings, then each row block, then the outer block) — a flat
     /// `DropListStr` would only `rc_dec` each inner-list handle, LEAKING the cells. Populated by the
     /// list-of-lists concat (`rows + [cur]`).
-    list_list_str_lists: HashSet<ValueId>,
     /// MIR values that are a `Result[Value, String]` (the `ok(value.array(...))` shape). A scope-end
     /// drop emits [`Op::DropResultValue`] (tag-dispatch: Ok → `$__drop_value`, Err → `rc_dec`) — a
     /// flat `DropListStr` would leak the Ok Value's nested payload.
-    value_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(String, Int), String]` wrapper (toml `parse_key_part`'s
     /// `ok((slice, pos))`). A scope-end drop emits [`Op::DropResultStrInt`] (tag-dispatch: Ok → free
     /// the `(String, Int)` tuple @12 recursively (its String slot only), Err → `rc_dec` the String) —
     /// a flat `DropListStr` would leak the Ok tuple's String + free the tuple block as if it were one.
-    str_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(Value, Int), String]` wrapper (toml `parse_val`'s
     /// `ok((value.…, pos))`). A scope-end drop emits [`Op::DropResultValueInt`] (Ok → free the
     /// (Value, Int) tuple recursively via `$__drop_value_tuple`, Err → `rc_dec` the String) — a flat
     /// `DropListStr` would leak the Value's nested payload.
-    value_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(List[Value], Int), String]` wrapper (toml `collect_array_items`'s
     /// `ok((items, np))`). A scope-end drop emits [`Op::DropResultListValueInt`] (Ok → free the
     /// (List[Value], Int) tuple recursively via `$__drop_list_value_tuple`, Err → `rc_dec` the String).
-    list_value_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(List[String], Int), String]` wrapper (toml `parse_key` /
     /// `parse_table_key`'s `ok((keys, pos))`). A scope-end drop emits [`Op::DropResultListStrInt`]
     /// (Ok → free the (List[String], Int) tuple recursively: each element String, the List block, the
     /// tuple block; Err → `rc_dec` the String) — a flat `DropListStr` would leak the List's Strings.
-    list_str_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[List[String], String]` wrapper (the `fs.list_dir` `ok([name,…])`
     /// shape — NO tuple). A scope-end drop emits [`Op::DropResultListStr`] (Ok → free the List[String]
     /// payload recursively: each element String, then the List block; Err → `rc_dec` the String) — a
     /// flat `DropListStr` would `rc_dec` only the @12 List HANDLE, leaking the element Strings + block.
-    list_str_result_results: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -621,13 +617,11 @@ pub(crate) struct LowerCtx {
     /// element slots hold owned (String, String) TUPLE blocks. A scope-end drop emits
     /// [`Op::DropListStrStr`] (`$__drop_list_str_str`: per tuple, rc_dec BOTH String slots, then the
     /// tuple, then the list). The (String,String) counterpart of `str_value_elem_lists`.
-    str_str_elem_lists: HashSet<ValueId>,
     /// MIR values that are a `value.as_array` Result `Result[List[Value], String]` (the cap-as-tag
     /// 1-slot block whose Ok payload @12 is a `List[Value]`). A scope-end drop emits
     /// [`Op::DropResultListValue`] (`$__drop_result_lv`: Ok → recursive list free, Err → String free)
     /// instead of the flat [`Op::DropListStr`] (which leaks the list's element Values). Read by the
     /// SAME cap@16 match machinery as a str-result (`materialized_results_str`); only the DROP differs.
-    value_result_lists: HashSet<ValueId>,
     /// MIR values KNOWN to be a record/tuple block this brick MATERIALIZED with the uniform
     /// slot layout (`try_lower_scalar_record_construct` / `try_lower_record_construct` /
     /// `try_lower_scalar_tuple_construct` / scalar-tuple/list-slot), plus aggregate-typed
@@ -690,7 +684,6 @@ pub(crate) struct LowerCtx {
     /// child blocks), mapped to their TYPE NAME (so the render calls the generated `$__drop_<ty>`).
     /// `drop_op_for` consults this before the flat/masked drops. Populated by
     /// `try_lower_variant_ctor` for a type that [`VariantLayouts::needs_recursive_drop`] (ADT brick 5b).
-    variant_drop_handles: HashMap<ValueId, String>,
     /// True when THIS function's DECLARED return type is an explicit `Result`/`Option` (e.g.
     /// `effect fn fs.write(...) -> Result[Unit, String]`). Such a return is a REAL inspectable
     /// heap value the caller `match`es on — so a `Result[Unit, _]` TAIL must produce the heap

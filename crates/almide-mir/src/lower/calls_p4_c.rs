@@ -28,7 +28,7 @@ impl LowerCtx {
             let dst = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(dst), args: vec![path] });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.read_dir(path)` — the WASI directory-listing floor (fs.list_dir). ONE BORROWED
@@ -48,8 +48,8 @@ impl LowerCtx {
             let dst = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::ReadDir, dst: Some(dst), args: vec![path] });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
-            self.heap_elem_lists.insert(dst);
-            self.list_str_result_results.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
+            self.value_drops.entry(dst).or_default().list_str_result = true;
             return Ok(Some(dst));
         }
         // `prim.write_text_file(path, content)` — the WASI file-WRITE floor (fs.write). TWO
@@ -77,7 +77,7 @@ impl LowerCtx {
                 args: vec![path, content],
             });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.make_dir(path)` — the WASI directory-CREATE floor (fs.mkdir_p). ONE BORROWED
@@ -102,7 +102,7 @@ impl LowerCtx {
                 args: vec![path],
             });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.remove_all(path)` — the WASI recursive-remove floor (fs.remove_all). ONE BORROWED
@@ -127,7 +127,7 @@ impl LowerCtx {
                 args: vec![path],
             });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.path_exists(path)` — the WASI path-stat floor (fs.exists). ONE BORROWED `String`
@@ -162,7 +162,7 @@ impl LowerCtx {
                 args: vec![src, dstp],
             });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.path_filestat_nofollow(bufaddr, path)` — the NO-FOLLOW stat twin
@@ -606,27 +606,27 @@ impl LowerCtx {
         // keeps its ref — so the flat rc_dec drop is correct there; a recursive free would
         // double-free the still-referenced slot. So only the list case is reclassified here.)
         if crate::lower::is_result_listval_ty(ty) {
-            self.value_result_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().value_result_list = true;
             return;
         }
         if crate::lower::is_list_list_str_ty(ty) {
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return;
         }
         if crate::lower::is_list_str_str_ty(ty) {
             // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
             // two Strings; the flat heap_elem_lists fallback would leak them.
-            self.str_str_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().str_str_elems = true;
             return;
         }
         if crate::lower::is_lenlist_list_ty(ty) {
-            self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_lenlist".to_string());
             return;
         }
         if crate::lower::is_map_fn_ty(ty) {
             // `Map[String, <Fn>]` arg temp — `$__drop_map_mclo` frees each value via
             // `__drop_closure` (a flat sweep would leak every captured env slot).
-            self.variant_drop_handles.insert(dst, "map_mclo".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_mclo".to_string());
             return;
         }
         self.seed_call_arg_map_drop_route(dst, ty);
@@ -638,7 +638,7 @@ impl LowerCtx {
     /// halves is unchanged (this one runs only after every guard above declined).
     fn seed_call_arg_map_drop_route(&mut self, dst: ValueId, ty: &Ty) {
         if let Some(hname) = self.map_named_value_drop(ty) {
-            self.variant_drop_handles.insert(dst, hname);
+            self.value_drops.entry(dst).or_default().named_route = Some(hname);
             return;
         }
         if crate::lower::is_map_msv_ty(ty) {
@@ -646,13 +646,13 @@ impl LowerCtx {
             // fed straight to `map.get_or` — map_fold_heap_acc's r7): `$__drop_map_msv`
             // sweeps each last-ref inner map; the flat fallback leaked the whole nested
             // map per iteration (loop OOM).
-            self.variant_drop_handles.insert(dst, "map_msv".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_msv".to_string());
             return;
         }
         if crate::lower::is_map_mlo_ty(ty) {
             // `Map[String, List[Option[Int]]]` arg temp — `$__drop_map_mlo` (the
             // bind-site route, mirrored; the flat fallback would leak the value lists).
-            self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_mlo".to_string());
             return;
         }
         if let Some(rname) = match ty {
@@ -666,7 +666,7 @@ impl LowerCtx {
             // A `List[<recursive-drop record>]` arg temp — `$__drop_list_<R>` (the
             // bind-site route, mirrored; the flat fallback leaked each element's
             // String fields — the krec-unique residue).
-            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("list_{rname}"));
             return;
         }
         if matches!(ty,
@@ -675,11 +675,11 @@ impl LowerCtx {
         {
             // `Map[String, <scalar>]` arg temp — the key-slot sweep (split layout, @4 = n),
             // mirroring the bind-site fix; the flat fallback leaked every key copy.
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return;
         }
         if crate::lower::is_heap_elem_list_ty(ty) {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
     }
 
@@ -714,7 +714,7 @@ impl LowerCtx {
                     (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
                 self.record_masks.insert(dst, heap_slots);
                 if let Some(name) = self.record_drop_type_name(ty) {
-                    self.variant_drop_handles.insert(dst, name);
+                    self.value_drops.entry(dst).or_default().named_route = Some(name);
                 }
             }
             CallArg::Handle(dst)

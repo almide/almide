@@ -80,14 +80,14 @@ impl LowerCtx {
     fn seed_heap_result_param(&mut self, v: ValueId, ty: &Ty, err_ty: &Ty) {
         self.value_shapes.insert(v, crate::lower::VariantShape::ResultHeapOk);
         if is_result_listval_ty(ty) {
-            self.value_result_lists.insert(v);
+            self.value_drops.entry(v).or_default().value_result_list = true;
             return;
         }
         if is_value_result_ty(ty) {
-            self.value_result_results.insert(v);
+            self.value_drops.entry(v).or_default().value_result = true;
             return;
         }
-        self.heap_elem_lists.insert(v);
+        self.value_drops.entry(v).or_default().flat_elems = true;
         // A RICH custom-variant Err payload (`Result[String, MathError]` —
         // Overflow(String) owns nested heap): the flat DropListStr would
         // free the variant BLOCK but leak its fields. Route the drop to the
@@ -103,7 +103,7 @@ impl LowerCtx {
         }) {
             return;
         }
-        self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
+        self.value_drops.entry(v).or_default().named_route = Some(format!("reserr:{vn}"));
     }
 
     fn seed_variant_param(&mut self, v: ValueId, ty: &Ty) {
@@ -112,7 +112,7 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
                 self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if is_heap_ty(&a[0]) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
             Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
@@ -124,7 +124,7 @@ impl LowerCtx {
                     // ownership so an `Err(e)` arm binds the borrowed slot-0 handle.
                     self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
                     if is_heap_ty(&a[1]) {
-                        self.heap_elem_lists.insert(v);
+                        self.value_drops.entry(v).or_default().flat_elems = true;
                     }
                 }
             }
