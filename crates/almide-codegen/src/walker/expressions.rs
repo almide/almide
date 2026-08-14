@@ -262,13 +262,31 @@ fn render_expr_result_ok(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String
     }
 }
 
-/// `ResultErr { expr: inner }` case of `render_expr`.
-fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr) -> String {
+/// `ResultErr { expr: inner }` case of `render_expr`. Mirrors
+/// `render_expr_result_ok`'s turbofish: a bare `Err(e)` leaves the OK type
+/// parameter open, and when nothing in the surrounding context pins it — a
+/// bare `match err("boom") { .. }` subject — rustc fails with E0282 on
+/// otherwise checker-accepted code (almide#1428). The checker resolved the
+/// full Result type (Unit-defaulted ok side), so carry it.
+fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String {
     let inner_str = render_expr(ctx, inner);
+    if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty) {
+        // Payload conversion matches the template chain below: only a
+        // String payload gets the `.to_string()`; a typed error payload
+        // (`Result[T, Int]`, a user error enum) passes through raw —
+        // converting those regressed match_container_literal and
+        // to_result_custom_e when this fix first landed unconditional.
+        let payload = if matches!(&inner.ty, Ty::String) {
+            format!("{}.to_string()", inner_str)
+        } else {
+            inner_str.clone()
+        };
+        return format!("Err::<{}, {}>({})", ok_s, err_s, payload);
+    }
     let construct = if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
     ctx.templates.render_with(construct, None, &[], &[("inner", inner_str.as_str())])
         .or_else(|| ctx.templates.render_with("err_expr", None, &[], &[("inner", inner_str.as_str())]))
-        .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
+        .unwrap_or_else(|| format!("Err({})", inner_str))
 }
 
 /// `Range { start, end, inclusive }` case of `render_expr`.
@@ -607,7 +625,7 @@ fn render_expr_data(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::OptionSome { expr: inner } => render_expr_option_some(ctx, inner),
         IrExprKind::OptionNone => render_expr_option_none(ctx, &expr.ty),
         IrExprKind::ResultOk { expr: inner } => render_expr_result_ok(ctx, inner, &expr.ty),
-        IrExprKind::ResultErr { expr: inner } => render_expr_result_err(ctx, inner),
+        IrExprKind::ResultErr { expr: inner } => render_expr_result_err(ctx, inner, &expr.ty),
 
         // ── Lambda ──
         // A bare (combinator-consumed) lambda leaves its params UNANNOTATED — a

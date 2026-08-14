@@ -438,7 +438,15 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
 fn result_turbofish_args(ctx: &RenderContext, ty: &Ty) -> Option<(String, String)> {
     match ty {
         Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
-            let ok_s = render_type(ctx, &args[0]);
+            // The ok side can be unresolved too — an `err(..)` whose ok
+            // payload nothing anchors (a bare match subject, almide#1428);
+            // the checker defaults that side to Unit, and an inference var
+            // that still leaks here pins to the same `()`.
+            let ok_s = match &args[0] {
+                Ty::Unknown => "()".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "()".to_string(),
+                _ => render_type(ctx, &args[0]),
+            };
             let err_s = match &args[1] {
                 Ty::Unknown => "String".to_string(),
                 Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
