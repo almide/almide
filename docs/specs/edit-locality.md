@@ -57,6 +57,7 @@ made checkable.
 | Type inference is module-isolated; call return types come from declared signatures; monomorphization is keyed by call-site argument types only | No constraint crosses a module boundary; callee bodies are never consulted for callers' types | `crates/almide-frontend/src/check/module_inference.rs:16-19`, `check/calls.rs:276-310`, `crates/almide-optimize/src/mono/discovery.rs:28-42` |
 | Stdlib purity is a hardcoded, machine-gated registry — never inferred from bodies | Optimization consumers see a fixed answer regardless of stdlib body edits | `crates/almide-mir/src/purity.rs:51,303-306`, gate `proofs/check-stdlib-purity-registry.sh` |
 | LICM hoists only speculation-safe expressions: no effects AND no possibly-trapping ops (indexing, map access, non-literal integer div/mod), enforced in both the expression predicate and the body fixpoint | An optimization cannot leak a trap onto a path the source never executes (zero-trip loop), so a body edit that flips inferred purity cannot create a new observable | `crates/almide-codegen/src/pass_licm_purity.rs` (`binop_may_trap` + trap-aware pure sets, #1424) — test: `spec/wasm_cross/licm_zero_trip_hoist.almd` (C-279) |
+| A local `fn` may not share a bare name with a selectively-imported one — hard error E050 at import-table build time | One bare name must have exactly one resolution; adding a definition can never silently re-target an existing call (the pre-fix checker/lowering split executed a different function than it type-checked, #1425) | `crates/almide-frontend/src/import_table.rs` (`check_selective_import_fn_collisions`) — tests: `tests/selective_import_collision_test.rs`, `docs/diagnostics/E050.md` |
 
 ## 3. Where it breaks today (hunt of 2026-08-15)
 
@@ -71,20 +72,14 @@ Was a live cross-target divergence on 0.57.0 (native trapped, wasm printed —
 the hunt's day-one catch). The speculation-safety rule is now a §2 row; the
 repro is pinned as `spec/wasm_cross/licm_zero_trip_hoist.almd` (C-279).
 
-### V2 — Checker and lowering disagree on local `fn` vs selective import
+### V2 — FIXED (#1425): checker and lowering disagreed on local `fn` vs selective import
 
-The checker resolves a bare call against the local `fn` first
-(`crates/almide-frontend/src/check/calls.rs:290-310`); lowering resolves
-the selective import first
-(`crates/almide-frontend/src/lower/calls_target.rs:43-47`); and
-registration has no collision diagnostic between the two
-(`crates/almide-frontend/src/canonicalize/registration.rs:551-553`). In a
-file with `import json.{parse}` (pattern:
-`spec/lang/selective_import_test.almd`), adding `fn parse(...)` makes
-existing `parse(x)` calls type-check against the new local function while
-still executing `json.parse`. Adding a definition silently changed the
-meaning of an existing reference — with a checker/codegen split. Fix: a
-hard collision error (the E012 family).
+The checker resolved a bare call against the local `fn` first, lowering
+resolved the selective import first — a call type-checked against one
+function and executed the other. The collision is now hard error E050 at
+import-table build time, so neither resolver can see the split; a §2 row
+records the rule. Tests: `tests/selective_import_collision_test.rs`,
+`spec/lang/selective_import_test.almd` (accepted forms unchanged).
 
 ### V3 — Constructor resolution is bare-name, first-registered-wins
 
