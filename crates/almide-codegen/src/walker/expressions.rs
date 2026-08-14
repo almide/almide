@@ -350,27 +350,31 @@ fn render_expr_empty_map(ctx: &RenderContext, ty: &Ty) -> String {
         .unwrap_or_else(|| format!("AlmideMap::<{}, {}>::new()", key_ty, value_ty))
 }
 
-/// `map.new()` / `set.new()` reaching Rust as a bare generic runtime call can
-/// leave rustc with an uninferrable type parameter when nothing downstream
-/// pins it: const-folding `if true then map.new() else <typed literal>`
-/// collapses the typing context away, and `map.contains` leaves `V` free —
-/// E0282 after `check` accepted (nightly-fuzz seed 1785045556318379299,
-/// index 867). The checker resolved the full container type on the node, so
-/// pin it with a turbofish — the same recipe as the `[:]` EmptyMap literal.
-/// Only a fully concrete type is pinned; anything unresolved falls back to
-/// plain rendering (inference handles it exactly as before).
+/// A runtime constructor whose generic appears in NO parameter type
+/// (`map.new()` / `set.new()` / `list.with_capacity(n)`) reaching Rust as a
+/// bare call can leave rustc with an uninferrable type parameter when nothing
+/// downstream pins it: const-folding `if true then map.new() else <typed
+/// literal>` collapses the typing context away, and an element-agnostic
+/// consumer (`map.contains`, `list.is_empty`) leaves it free — E0282 after
+/// `check` accepted (nightly-fuzz seed 1785045556318379299 index 867 for
+/// `map.new`; #1416, seed 508666777783, for `with_capacity`). The checker
+/// resolved the full container type on the node, so pin it with a turbofish —
+/// the same recipe as the `[:]` EmptyMap literal. Only a fully concrete type
+/// is pinned; anything unresolved falls back to plain rendering (inference
+/// handles it exactly as before).
+///
+/// Family rule (C-277): an arm here for EVERY runtime fn with a return-only
+/// generic — `runtime_ctor_turbofish_family_gate_test.rs` measures both sides
+/// from source and fails on any mismatch.
 fn render_runtime_ctor_turbofish(
     ctx: &RenderContext,
     symbol: &str,
     args: &[IrExpr],
     ty: &Ty,
 ) -> Option<String> {
-    if !args.is_empty() {
-        return None;
-    }
     match (symbol, ty) {
         ("almide_rt_map_new", Ty::Applied(TypeConstructorId::Map, targs))
-            if targs.len() == 2 && targs.iter().all(|t| !t.is_unresolved()) =>
+            if args.is_empty() && targs.len() == 2 && targs.iter().all(|t| !t.is_unresolved()) =>
         {
             Some(format!(
                 "almide_rt_map_new::<{}, {}>()",
@@ -379,11 +383,20 @@ fn render_runtime_ctor_turbofish(
             ))
         }
         ("almide_rt_set_new", Ty::Applied(TypeConstructorId::Set, targs))
-            if targs.len() == 1 && !targs[0].is_unresolved() =>
+            if args.is_empty() && targs.len() == 1 && !targs[0].is_unresolved() =>
         {
             Some(format!(
                 "almide_rt_set_new::<{}>()",
                 render_map_type_arg(ctx, &targs[0])
+            ))
+        }
+        ("almide_rt_list_with_capacity", Ty::Applied(TypeConstructorId::List, targs))
+            if args.len() == 1 && targs.len() == 1 && !targs[0].is_unresolved() =>
+        {
+            Some(format!(
+                "almide_rt_list_with_capacity::<{}>({})",
+                render_map_type_arg(ctx, &targs[0]),
+                render_expr_owned(ctx, &args[0])
             ))
         }
         _ => None,
