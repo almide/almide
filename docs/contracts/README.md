@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-277 contracts
+278 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -305,4 +305,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-275 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 1 |
 | C-276 | A String-key `list.sort_by` over HEAP elements orders and co-owns identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-277 | A return-only-generic constructor pinned by unification builds and runs identically on both targets even when const-folding erases the pinning context | 0.57.1 | active | fixture | 1 |
+| C-278 | The rope head geometry must fit the row: exceeding aborts identically, the uncovered tail copies through identically | 0.57.1 | active | fixture | 1 |
 
