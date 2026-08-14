@@ -122,14 +122,28 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .iter()
             .filter(|f| f.name.as_str() != "main")
             .filter(|f| {
-                !matches!(
+                let declared_result = matches!(
                     &f.ret_ty,
-                    Ty::Applied(
-                        almide_lang::types::constructor::TypeConstructorId::Result
-                            | almide_lang::types::constructor::TypeConstructorId::Option,
-                        _
-                    )
-                ) && (body_has_stmt_position_propagating_unwrap(&f.body)
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
+                );
+                let declared_option = matches!(
+                    &f.ret_ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+                );
+                // #1410: a CAN-ERR declared-Option effect fn is the #841 hybrid this
+                // registry exists to close — its err path returns a wrapped block
+                // (the propagation machinery builds `err(e)`) while its ok tail is
+                // the RAW Option, and no consumer can discriminate the two. It was
+                // excluded here by return TYPE, so the hybrid survived for exactly
+                // this family: wasm swallowed the error and read garbage (8260)
+                // where native aborted. Admitting it gives the true carrier
+                // `Result[Option[T], String]` on both v1 legs. A NEVER-ERR
+                // declared-Option fn stays excluded — its raw-Option ABI is sound
+                // and `strip_declared_option_trys` keeps its call sites free.
+                !declared_result
+                    && (!declared_option
+                        || (f.is_effect && can_err.contains(f.name.as_str())))
+                    && (body_has_stmt_position_propagating_unwrap(&f.body)
                     || body_has_tail_position_option_unwrap(&f.body)
                     || body_has_tail_position_canerr_try(&f.body, &can_err)
                     // #841: EVERY non-Unit CAN-ERR lifted effect fn always-wraps. Its
@@ -160,6 +174,17 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .filter(|f| {
                 matches!(&f.ret_ty,
                     Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+                    // #1410: NEVER-ERR only. This registry drives
+                    // `strip_declared_option_trys`, whose premise — "there is no
+                    // err channel, the propagation node is the identity" — is
+                    // only true when the callee cannot err. Stripping a CAN-ERR
+                    // member's `!` deleted the error propagation itself: wasm
+                    // continued past a failed int.parse with a garbage value
+                    // while native aborted. A can-err declared-Option fn now
+                    // rides AUTO_WRAP instead (true carrier
+                    // `Result[Option[T], String]`), so its `!` must survive to
+                    // become the real err/ok match.
+                    && !can_err.contains(f.name.as_str())
             })
             .map(|f| f.name.as_str().to_string())
             .collect();

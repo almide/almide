@@ -3,10 +3,11 @@
 // fn whose body's `!` fires must propagate the err out of main — on BOTH legs,
 // with the same message and a nonzero exit. This is the cell C-216's fixture
 // labels "can-err" but never actually errs (int.parse succeeds on every input
-// it passes). The wasm leg CURRENTLY swallows this error and continues with a
-// garbage value — #1410 — so this file enters the corpus as the KNOWN
-// divergence that gate tracks until the fix lands.
-// @xf-allow: #1410 — wasm swallows the err and continues (got=8260-class)
+// it passes). When this file entered the corpus the wasm leg swallowed the
+// error and continued with a garbage value (#1410, tracked via @xf-allow);
+// the fix — a can-err declared-Option effect fn rides AUTO_WRAP instead of
+// the never-err strip — re-agreed the legs, and the gate's stale-allow
+// detection is what retired the directive: the designed lifecycle, exercised.
 effect fn boom(k: String) -> Int? = {
   let n = int.parse(k)!
   if n > 0 then some(n) else none
