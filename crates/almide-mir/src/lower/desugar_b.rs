@@ -728,10 +728,13 @@ pub fn desugar_unwrap_or_unwrap_fallback(body: &IrExpr) -> Option<IrExpr> {
         else {
             return e;
         };
-        // HEAP payloads only — the scalar `??` never reaches the miscompiling arm.
-        if !is_heap_ty(&e.ty) {
-            return e;
-        }
+        // Formerly HEAP payloads only ("the scalar `??` never reaches the
+        // miscompiling arm") — no longer true since the #1418 match-first
+        // inversion: a SCALAR `a ?? f(..)!` whose match form reaches the
+        // value-position machinery hits the same propagation-arm miscompile
+        // class (#1421, invalid wasm). Rewriting BOTH payload classes to the
+        // `(match …)!` statement-propagation form routes every propagating
+        // fallback through the proven `desugar_let_unwrap` rails instead.
         // The fallback's `!` must yield EXACTLY the `??`'s own payload type, so `ok($p)` in the
         // hit arm and `f(..)` in the miss arm are the same `Result[payload, _]`.
         if !matches!(&inner.ty,
