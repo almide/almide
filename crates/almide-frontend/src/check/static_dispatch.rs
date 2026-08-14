@@ -427,8 +427,10 @@ impl Checker {
             self.env.import_table.mark_used(module);
             s.to_string()
         })?;
-        // Cross-module variant constructor call: binary.ImportFunc(0)
-        if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
+        // Cross-module variant constructor call: binary.ImportFunc(0).
+        // Owner-filtered (#1426): `m.Ctor` resolves inside `m` alone — another
+        // module's same-named ctor registering first must never be consulted.
+        if let Some((type_name, case)) = self.env.lookup_ctor_owned(&sym(field), &m) {
             let qualified = format!("{}.{}", m, type_name.as_str());
             if self.env.types.contains_key(&sym(&qualified)) {
                 self.check_constructor_args(field, &case, arg_tys);

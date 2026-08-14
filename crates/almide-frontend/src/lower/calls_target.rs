@@ -130,10 +130,11 @@ fn lower_call_target_module_call(ctx: &mut LowerCtx, object: &ast::Expr, field: 
             || ctx.env.user_modules.contains(module)
             || ctx.env.import_table.aliases.contains_key(module))
         {
-            // Cross-module variant constructor call: binary.ImportFunc(0)
-            if let Some((type_name, _)) = ctx.env.lookup_ctor(field) {
-                let resolved = ctx.env.import_table.aliases.get(module).copied()
-                    .unwrap_or(*module);
+            // Cross-module variant constructor call: binary.ImportFunc(0).
+            // Owner-filtered (#1426), mirroring the checker exactly.
+            let resolved = ctx.env.import_table.aliases.get(module).copied()
+                .unwrap_or(*module);
+            if let Some((type_name, _)) = ctx.env.lookup_ctor_owned(field, resolved.as_str()) {
                 let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
                 if ctx.env.types.contains_key(&sym(&qualified)) {
                     return Some(CallTarget::Named { name: *field });

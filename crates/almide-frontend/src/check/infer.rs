@@ -446,10 +446,11 @@ impl Checker {
                 self.env.import_table.mark_used(mod_name);
                 return Some(let_ty);
             }
-            // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
-            if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
-                let resolved_mod = self.env.import_table.resolve(mod_name)
-                    .unwrap_or(sym(mod_name));
+            // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc.
+            // Owner-filtered (#1426): resolve inside the named module alone.
+            let resolved_mod = self.env.import_table.resolve(mod_name)
+                .unwrap_or(sym(mod_name));
+            if let Some((type_name, case)) = self.env.lookup_ctor_owned(&sym(field), resolved_mod.as_str()) {
                 let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
                 if self.env.types.contains_key(&sym(&qualified)) {
                     self.type_map.insert(object.id, Ty::Unit);

@@ -440,7 +440,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     for gn in &gnames { env.types.remove(gn); }
 
     resolved = register_type_decl_opaque_alias(env, name, resolved, &gnames, prefix, visibility);
-    register_type_decl_variant_ctors(env, name, prefix, &mut resolved);
+    register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
     register_type_decl_finalize(env, name, ty, prefix, resolved);
 
@@ -467,7 +467,7 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, 
     resolved
 }
 /// Fix up a `Variant`'s registered name to the DECLARED name, and register each of its constructors. Verbatim text move out of [`register_type_decl`].
-fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Option<&str>, resolved: &mut Ty) {
+fn register_type_decl_variant_ctors(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, prefix: Option<&str>, resolved: &mut Ty) {
     if let Ty::Variant { name: vn, cases } = resolved {
         *vn = sym(name);
         // Push (not overwrite) so a constructor name declared in multiple variant types keeps ALL candidates — needed to detect ambiguity (#413) instead of silently letting the last-registered type win. #413: record each candidate's OWNING MODULE so a shared ctor name can be disambiguated by the current module (`lookup_ctor_in`). type_name stays BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
@@ -477,6 +477,22 @@ fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Optio
         let owner_mod = prefix.map(sym).or(env.alias_owner_module);
         for case in cases.iter() {
             let entry = env.constructors.entry(case.name).or_default();
+            // E019 (#1426): a SECOND type in the SAME module declaring this
+            // case name would make bare resolution registration-order-dependent
+            // — `lookup_ctor_in`'s owned-first find() would silently keep the
+            // older type winning and leave the new case unreachable. Reported
+            // once, on the canonical pass (`infer_module`'s unprefixed alias
+            // pass re-registers the same declarations; skip it like
+            // `register_type_decl_check_duplicate` does).
+            if env.alias_owner_module.is_none() {
+                if let Some((prior, _, _)) = entry.iter().find(|(t, m, _)| *t != sym(name) && *m == owner_mod) {
+                    diagnostics.push(err(
+                        format!("ambiguous constructor '{}': declared in both '{}' and '{}' of the same module", case.name, prior, name),
+                        format!("Rename the case in one of them so '{}' has exactly one meaning here.", case.name),
+                        format!("constructor {}", case.name),
+                    ).with_code("E019"));
+                }
+            }
             if !entry.iter().any(|(t, m, _)| *t == sym(name) && *m == owner_mod) {
                 entry.push((sym(name), owner_mod, case.clone()));
             }

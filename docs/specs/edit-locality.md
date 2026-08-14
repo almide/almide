@@ -58,6 +58,7 @@ made checkable.
 | Stdlib purity is a hardcoded, machine-gated registry — never inferred from bodies | Optimization consumers see a fixed answer regardless of stdlib body edits | `crates/almide-mir/src/purity.rs:51,303-306`, gate `proofs/check-stdlib-purity-registry.sh` |
 | LICM hoists only speculation-safe expressions: no effects AND no possibly-trapping ops (indexing, map access, non-literal integer div/mod), enforced in both the expression predicate and the body fixpoint | An optimization cannot leak a trap onto a path the source never executes (zero-trip loop), so a body edit that flips inferred purity cannot create a new observable | `crates/almide-codegen/src/pass_licm_purity.rs` (`binop_may_trap` + trap-aware pure sets, #1424) — test: `spec/wasm_cross/licm_zero_trip_hoist.almd` (C-279) |
 | A local `fn` may not share a bare name with a selectively-imported one — hard error E050 at import-table build time | One bare name must have exactly one resolution; adding a definition can never silently re-target an existing call (the pre-fix checker/lowering split executed a different function than it type-checked, #1425) | `crates/almide-frontend/src/import_table.rs` (`check_selective_import_fn_collisions`) — tests: `tests/selective_import_collision_test.rs`, `docs/diagnostics/E050.md` |
+| Constructor resolution is owner-scoped: qualified `mod.Ctor` resolves inside `mod` alone (`lookup_ctor_owned`), bare names prefer the current module's own case (#413, `lookup_ctor_in` — mirrored in lowering), and a same-module duplicate case name is hard error E019 at registration | Adding a variant elsewhere can never re-bind an existing constructor reference; within a module a case name has exactly one declaration | `crates/almide-frontend/src/type_env.rs` (`lookup_ctor_owned`), `canonicalize/registration.rs` (E019 at registration, #1426) — tests: `tests/ctor_ambiguity_test.rs`, `spec/integration/modules/qualified_ctor_test.almd` |
 
 ## 3. Where it breaks today (hunt of 2026-08-15)
 
@@ -81,13 +82,17 @@ import-table build time, so neither resolver can see the split; a §2 row
 records the rule. Tests: `tests/selective_import_collision_test.rs`,
 `spec/lang/selective_import_test.almd` (accepted forms unchanged).
 
-### V3 — Constructor resolution is bare-name, first-registered-wins
+### V3 — FIXED (#1426): constructor resolution was bare-name, first-registered-wins
 
-`lookup_ctor` returns `cands.first()` in registration order
-(`crates/almide-frontend/src/type_env.rs:412-414`), and the E019 ambiguity
-guard is skipped when the current module owns a candidate
-(`crates/almide-frontend/src/check/calls.rs:64-66`). Adding a same-named
-variant re-binds existing constructor references instead of erroring.
+Three closures, recorded as a §2 row: qualified `mod.Ctor` now resolves
+inside `mod` alone (`lookup_ctor_owned`, all four checker/lowering sites);
+lowering's bare-name payload lookups mirror the checker's owned-first
+choice (`lookup_ctor_in`); and a second type in the same module declaring
+an existing case name is hard error E019 at registration. The
+own-module-wins rule for bare names (#413) is unchanged — it is edit-local
+by construction. Tests: `tests/ctor_ambiguity_test.rs`,
+`spec/integration/modules/qualified_ctor_test.almd` (fails to compile on
+0.57.0, green on the fix).
 
 ### R — Backend refinement obligations
 

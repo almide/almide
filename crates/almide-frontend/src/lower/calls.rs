@@ -440,7 +440,9 @@ fn lower_call_coerce_args_named(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, n
     lower_call_coerce_assert_macro(ctx, ir_args, name);
     if let Some(sig) = ctx.env.functions.get(name).cloned() {
         lower_call_coerce_from_sig(ctx, ir_args, &sig);
-    } else if let Some((_, case)) = ctx.env.lookup_ctor(&almide_base::intern::sym(name)) {
+    } else if let Some((_, case)) = ctx.env.lookup_ctor_in(&almide_base::intern::sym(name), ctx.current_module.map(|s| s.as_str())) {
+        // Owned-first (#1426): mirror the checker's candidate choice so the
+        // coerced payload is the same case the checker validated.
         lower_call_coerce_from_ctor(ctx, ir_args, &case);
     } else if let Some((module, func)) = name.as_str().split_once('.') {
         if let Some(sig) = crate::stdlib::lookup_sig(module, func) {

@@ -133,8 +133,10 @@ fn lower_module_ctor_value(
     ty: &Ty,
     span: Option<crate::ast::Span>,
 ) -> Option<IrExpr> {
-    let (type_name, case) = ctx.env.lookup_ctor(field)?;
+    // Owner-filtered (#1426): `mod.Ctor` resolves inside `mod` alone,
+    // mirroring the checker exactly.
     let resolved = ctx.env.import_table.aliases.get(&mod_name).copied().unwrap_or(mod_name);
+    let (type_name, case) = ctx.env.lookup_ctor_owned(field, resolved.as_str())?;
     let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
     if !ctx.env.types.contains_key(&sym(&qualified)) {
         return None;
@@ -518,8 +520,9 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
 
 fn lower_expr_type_name(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
     let ast::ExprKind::TypeName { name, .. } = &expr.kind else { unreachable!("lower_expr_type_name called on the wrong ExprKind") };
-            // Variant constructor used as value (e.g., Red)
-            if let Some((_, case)) = ctx.env.lookup_ctor(&sym(name)) {
+            // Variant constructor used as value (e.g., Red). Owned-first
+            // (#1426): mirror the checker's candidate choice.
+            if let Some((_, case)) = ctx.env.lookup_ctor_in(&sym(name), ctx.current_module.map(|s| s.as_str())) {
                 if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
                     if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
                         // Constructor with payload as function value → generate lambda

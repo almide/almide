@@ -245,7 +245,9 @@ impl Checker {
             _ => None,
         };
         if let Some(n) = ctor_name {
-            if let Some((_, case)) = self.env.lookup_ctor(&sym(&n)) {
+            // Owned-first (#1426): the payload consulted for literal context
+            // must be the same case the checker resolved the call against.
+            if let Some((_, case)) = self.env.lookup_ctor_in(&sym(&n), self.current_module_prefix.as_deref()) {
                 if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
                     if let Some(ety) = expected.get(i) {
                         let ety = ety.clone();
@@ -584,7 +586,10 @@ impl Checker {
     // Returns `None` when neither claims the name, so the caller falls
     // through to the undefined-function diagnostic.
     fn try_unresolved_call_ctor_or_var(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
-        if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+        // Owned-first + ambiguity report (#1426): the same resolution and the
+        // same E019 the TypeName value path (infer_expr_type_name) applies.
+        if let Some((type_name, case)) = self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref()) {
+            self.report_ambiguous_ctor(name);
             self.check_constructor_args(name, &case, arg_tys);
             let generic_args = self.instantiate_type_generics(type_name.as_str());
             return Some(Ty::Named(type_name, generic_args));

@@ -413,6 +413,17 @@ impl TypeEnv {
         self.constructors.get(name).and_then(|cands| cands.first().map(|(t, _m, c)| (*t, c.clone())))
     }
 
+    /// Like `lookup_ctor`, but only among candidates OWNED by `module` — the
+    /// qualified-access question: `mod.Ctor` must resolve inside `mod` alone,
+    /// never to another module's same-named constructor that happened to
+    /// register first (almide#1426, edit-locality hunt V3).
+    pub fn lookup_ctor_owned(&self, name: &Sym, module: &str) -> Option<(Sym, VariantCase)> {
+        let cands = self.constructors.get(name)?;
+        cands.iter()
+            .find(|(_, owner, _)| owner.map_or(false, |o| o.as_str() == module))
+            .map(|(t, _m, c)| (*t, c.clone()))
+    }
+
     /// Like `lookup_ctor`, but when the constructor name is ambiguous across
     /// packages, prefer the candidate declared in `cur_mod` (#413) and return its
     /// type name QUALIFIED with that owner (`mod.Type`) so the construction's `.ty`
