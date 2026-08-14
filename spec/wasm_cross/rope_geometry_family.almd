@@ -1,0 +1,42 @@
+// @contract: C-278
+// #1419: the rope head-geometry family, DEFINED side. The abort on `n_heads *
+// head_dim > cols` is pinned by spec/wasm_fail/rope_geometry_exceeds_aborts
+// (a fixture cannot assert an abort and a clean exit in one program — the
+// C-198 split); this file pins every geometry that must COMPUTE, and above
+// all the one that used to be silently wrong:
+//
+// UNDER-COVERS (`n_heads * head_dim < cols`): both implementations always
+// documented "non-pair elements copy through", but only the self-hosted wasm
+// body did it — native initialized the output row to ZEROS and wrote pairs
+// only, so every column past the head geometry read 0.0 natively and the
+// input value on wasm. Both legs exit 0, different numbers: the silent-wrong
+// class, invisible to every existing fixture because they all use exact
+// geometry.
+fn row_str(m: Matrix, r: Int, cols: Int) -> String = list.range(0, cols) |> list.map((c) => float.to_string(matrix.get(m, r, c))) |> list.join(",")
+
+fn main() -> Unit = {
+  // Exact geometry, ODD head_dim (2 heads x dim 3 = 6 columns): each head's
+  // last column is a non-pair element that must copy through on both legs.
+  // Row 1 is the discriminating row — position 1 actually rotates the pairs,
+  // so a zeros-init would show 0.0 exactly in the copy-through columns (2, 5)
+  // while the rotated columns move.
+  let x = matrix.ones(2, 6)
+  let exact = matrix.rope_rotate(x, 2, 3, 10000.0)
+  println("exact0=" + row_str(exact, 0, 6))
+  println("exact1=" + row_str(exact, 1, 6))
+  // Under-covers: 1 head x dim 4 leaves columns 4..5 untouched — they must
+  // carry the INPUT through, not zeros.
+  let under = matrix.rope_rotate(x, 1, 4, 10000.0)
+  println("under=" + row_str(under, 0, 6))
+  // Position 0 rotates by angle 0 (cos=1, sin=0), so row 0 must reproduce
+  // the input exactly even inside the rotated pairs; row 1 actually rotates.
+  let y = matrix.ones(2, 4)
+  let r2 = matrix.rope_rotate(y, 2, 2, 10000.0)
+  println("row0=" + row_str(r2, 0, 4))
+  println("row1=" + row_str(r2, 1, 4))
+  // The empty matrix has no row to violate: any geometry is a no-op.
+  let e = matrix.zeros(0, 0)
+  let re = matrix.rope_rotate(e, 7, 9, 10000.0)
+  let (er, ec) = matrix.shape(re)
+  println("empty=${int.to_string(er)}x${int.to_string(ec)}")
+}

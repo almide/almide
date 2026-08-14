@@ -89,6 +89,7 @@ regex_fuzz_batch  out-of-interp-scope capability: prim.handle of a value outside
 result_list_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
 result_match_rewrap_modcall  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
 result_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
+rope_geometry_family  out-of-interp-scope capability: prim.alloc_list_str
 set_index_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 set_insertion_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 spread_record_share  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
