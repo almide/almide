@@ -137,6 +137,22 @@ pub fn almide_rt_matrix_head_count(n: i64) -> usize {
     n as usize
 }
 
+/// #1419: the head GEOMETRY rule for the rope family — `n_heads * head_dim`
+/// must fit the row. Exceeding it used to index straight past the row (a raw
+/// slice panic natively, an OOB memory trap on the self-hosted leg: exit 101
+/// vs 134, fuzz seed 508666777783 index 2120). Same abort family as the
+/// head-count domain above; the division form cannot overflow on a huge head
+/// count. An empty matrix has no row to violate and stays a no-op. The MHA /
+/// rms_norm entries derive `head_dim = cols / n_heads` internally and cannot
+/// express the mismatch — only the rope entries take both numbers, and
+/// `matrix_head_count_domain_test.rs` keeps every one of them routed here.
+pub fn almide_rt_matrix_head_geometry(n_heads_u: usize, head_dim_u: usize, rows: usize, cols: usize) {
+    if rows > 0 && head_dim_u > 0 && n_heads_u > cols / head_dim_u {
+        eprintln!("Error: head geometry exceeds row width");
+        std::process::exit(1);
+    }
+}
+
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     vec![vec![0.0; c]; r].into()

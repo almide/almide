@@ -224,6 +224,7 @@ pub fn almide_rt_matrix_rope_rotate_at(
     let cols = if rows == 0 { 0 } else { x[0].len() };
     let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
+    almide_rt_matrix_head_geometry(n_heads_u, head_dim_u, rows, cols);
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
@@ -235,7 +236,12 @@ pub fn almide_rt_matrix_rope_rotate_at(
     for p in 0..rows {
         let pos_f = (start + p) as f64;
         let row = &x[p];
-        let mut new_row = vec![0.0f64; cols];
+        // #1419: non-pair elements COPY THROUGH (the documented behavior, and
+        // what the self-hosted body always did) — a zeros init silently zeroed
+        // every column past `n_heads * head_dim` while wasm kept the input
+        // (`0.0` vs `1.0`, both legs exit 0: the silent-wrong class). Exact
+        // geometry writes every column, so this is invisible there.
+        let mut new_row = row.to_vec();
         for h in 0..n_heads_u {
             let head_start = h * head_dim_u;
             for i in 0..half {
@@ -733,6 +739,7 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
     let cols = if rows == 0 { 0 } else { x[0].len() };
     let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
+    almide_rt_matrix_head_geometry(n_heads_u, head_dim_u, rows, cols);
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
@@ -744,7 +751,8 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
     for p in 0..rows {
         let pos_f = (start + p) as f64;
         let row = &x[p];
-        let mut new_row = vec![0.0f64; cols];
+        // #1419: copy through — see rope_rotate_at.
+        let mut new_row = row.to_vec();
         for h in 0..n_heads_u {
             let head_start = h * head_dim_u;
             for j in 0..half {
