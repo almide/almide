@@ -881,10 +881,15 @@ jobs:
       # The three gates below were written but never wired to a job. A gate that
       # has never run is indistinguishable from one that does not exist, so they
       # are attached here rather than left as scripts someone remembers to call.
-      # `lark` is the gate's parser; without it the script exits 1 with an
-      # install hint rather than a verdict, so the install is part of the step
-      # instead of an assumption about the runner image.
+      # Two things this step must supply that the others in this job do not:
+      # `lark` (the gate's own parser — without it the script exits 1 with an
+      # install hint rather than a verdict), and the binary under the name THIS
+      # gate reads. It resolves `ALMIDE`, not the `ALMIDE_BIN` the rest of the
+      # job passes, and `checks` never builds — it downloads the artifact — so
+      # the default `target/release/almide` probe finds nothing.
       - name: Grammar stays in sync with the parser (#1365)
+        env:
+          ALMIDE: /tmp/almide-bin/almide
         run: |
           python3 -m pip install --quiet lark
           bash scripts/check-lark-grammar.sh
