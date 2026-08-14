@@ -37,33 +37,26 @@ effect fn main() -> Unit = {
   let d = fs.create_temp_dir("fanCap")!
   fs.write(d + "/a.txt", "alpha")!
   fs.write(d + "/b.txt", "beta")!
-
   // Shape B, ok path, `!` consumption.
   let b_ok = fan.any([d + "/a.txt"], (p) => fs.read_text(p))!
   println("B ok ${b_ok}")
-
   // Shape B, err path (no candidate exists), `??` consumption.
   let b_err = fan.any([d + "/missing1.txt", d + "/missing2.txt"], (p) => fs.read_text(p)) ?? "fb"
   println("B err ${b_err}")
-
   // Shape D, ok path, `!` consumption — first candidate missing, second ok:
   // fan.any skips the failure to find the Ok.
   let d_ok = fan.any([d + "/missing.txt", d + "/b.txt"], (p) => helper(p))!
   println("D ok ${d_ok}")
-
   // Shape D, err path, `??` consumption.
   let d_err = fan.any([d + "/nope.txt"], (p) => helper(p)) ?? "fb2"
   println("D err ${d_err}")
-
   // Shape D over fan.map (the collect-all mapper), ok path, `!` consumption —
   // the heap-Ok LIST payload family (`Result[List[String], String]`).
   let mapped = fan.map([d + "/a.txt", d + "/b.txt"], (p) => helper(p))!
   println("map ok ${mapped}")
-
   // fan.map err path: the FIRST failing element's err rides out (C-005's
   // first-err ordering), consumed via `??`.
   let map_err = fan.map([d + "/a.txt", d + "/gone.txt"], (p) => helper(p)) ?? ["fb3"]
   println("map err ${map_err}")
-
   fs.remove_all(d)!
 }
