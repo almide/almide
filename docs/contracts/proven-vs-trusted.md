@@ -64,24 +64,39 @@ gives the language a machine-checked reference semantics for its core:
 relation). The bridge to the shipping compiler runs through three layers
 with different standings:
 
-- **proven** — the kernel observables of the conformance family
-  (`Conformance.lean`): `#guard` + `eval_sound` + `ev_det` make each pinned
-  trace a theorem, checked by the Lean kernel on every CI run. (`evalE`
-  completeness is deliberately unproven — only `some`-outputs are ever
-  consumed, where soundness carries the claim.)
-- **trusted (reviewed seam)** — that
-  `spec/wasm_cross/kernel_conformance.almd` is the faithful surface image
-  of the λ_almd program `kAll`, and that the Rust test's expected literal
-  equals the Lean literal. Two machine-checked ends, one human link.
+- **proven** — the kernel observables of every conformance program: the
+  hand-written family (`Conformance.lean`, `#guard` + `rfl`) and the
+  48-program GENERATED corpus (`Corpus.lean`, `#guard corpusOK`), each an
+  `evalE` output that `eval_sound` + `ev_det` make THE meaning, checked by
+  the Lean kernel on every CI run. (`evalE` completeness is deliberately
+  unproven — only `some`-outputs are ever consumed, where soundness
+  carries the claim.)
+- **trusted (reviewed seam)** — the `eraseE`/`eraseChain` + `render*` pair
+  in `Corpus.lean`: two ~40-line functions walking the same surface
+  grammar, one producing the λ_almd term the evaluator scores, one the
+  almide text the compiler eats. Reviewing that they agree
+  constructor-by-constructor IS the trust obligation — reviewed once, not
+  per program. (The hand-written family adds the same seam by hand:
+  `spec/wasm_cross/kernel_conformance.almd` ↔ `kAll`, Rust literal ↔ Lean
+  literal.)
 - **gated** — that both backends produce those observables:
-  `tests/kernel_conformance_test.rs` (native stdout) and the `wasm_cross`
-  harness (cross-target equality), under contract C-280.
+  `tests/kernel_conformance_test.rs` runs the whole corpus on native and
+  (with a wasm runtime present) on wasm; the `wasm_cross` harness carries
+  the family; the `conformancegen --check` CI step pins the committed
+  corpus to `Corpus.lean` byte-for-byte. All under contract C-280.
 
-"Backends are refinements of the kernel" is therefore an EMPIRICALLY
-enforced statement over the family today, not a proven one over the
-language — closing that gap (a verified translation from surface core to
-λ_almd, and backend simulation proofs) is the remaining Stage 3 debt in
-`docs/roadmap/active/edit-locality-theory.md`.
+"Backends are refinements of the kernel" is therefore enforced over the
+GENERATED λ_almd-expressible fragment — machine-computed programs,
+machine-proven expected values, machine-diffed backends — with one
+reviewed ~80-line seam. What remains out of reach without rewriting the
+compiler in a prover: a verified surface-core→λ_almd translation and
+per-pass simulation proofs over the Rust implementation itself. Those are
+recorded as the research-grade residual in
+`docs/roadmap/active/edit-locality-theory.md`, and the fragment gate is
+the ratchet that holds until then. Day one of running it, the corpus
+caught two real compiler bugs (almide#1428: checker-accepted program dies
+in codegen; almide#1429: the v1 renderer splits an effect fn's signature
+from its body on a bare-parameter tail) — the gate bites.
 
 ## What each gate actually claims
 

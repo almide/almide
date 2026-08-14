@@ -74,22 +74,30 @@ the gate working.)
    Honest scope: unary calls, `Result`-only data, one effect; must-use
    (E041/E042) stays an implementation-level diagnostic — the kernel models
    ADR-0008's runtime meaning, not its lint surface.
-3. **Backends as refinements** (STARTED 2026-08-15 — stated, executable,
-   gated; full proof is the residual): the kernel is now an EXECUTABLE
-   specification — `Evaluator.lean` adds a fuel-indexed `evalE` with
-   `eval_sound` (whatever it returns, the relation derives; with `ev_det`,
-   uniquely — completeness deliberately unproven, only `some`-outputs are
-   consumed). `Conformance.lean` pins a seven-program family's kernel
-   observables as compile-time theorems (`#guard` + `rfl`), and the family's
-   almide-surface image ships as `spec/wasm_cross/kernel_conformance.almd`
-   under contract C-280: native stdout pinned by
-   `tests/kernel_conformance_test.rs`, wasm by the `wasm_cross` harness —
-   byte-identical on both targets at landing. The three-layer standing
-   (proven kernel trace / reviewed image seam / gated backend equality) is
-   recorded in `docs/contracts/proven-vs-trusted.md`. Remaining debt: a
-   verified surface-core→λ_almd translation and backend simulation proofs
-   (contracts-become-corollaries needs those), plus the R-group obligations
-   in `docs/specs/edit-locality.md` §3.
+3. **Backends as refinements** (DONE at fragment scope, 2026-08-15): the
+   kernel is an EXECUTABLE specification — `Evaluator.lean` adds a
+   fuel-indexed `evalE` with `eval_sound` (whatever it returns, the
+   relation derives; with `ev_det`, uniquely — completeness deliberately
+   unproven, only `some`-outputs are consumed). Enforcement is
+   generator-total, not hand-picked: `Corpus.lean` deterministically
+   generates a 48-program typed corpus over the λ_almd-expressible
+   fragment, proves every program's kernel observables at Lean compile
+   time (`#guard corpusOK`), and `conformancegen` emits/pins the committed
+   corpus (`proofs/kernel-conformance/`, CI drift-gated);
+   `tests/kernel_conformance_test.rs` runs all of it on native AND wasm
+   against those expected traces — 48/48 on both targets at landing, plus
+   the hand-written seven-program family under contract C-280. The trust
+   seam is the ~80-line `erase`/`render` pair, reviewed once; the
+   three-layer standing lives in `docs/contracts/proven-vs-trusted.md`.
+   Day-one yield: the corpus caught two real compiler bugs on its first
+   run — almide#1428 (checker accepts a bare `err(..)` match subject,
+   codegen emits invalid Rust) and almide#1429 (the v1 renderer splits an
+   effect fn's signature from its body on a bare-parameter tail). What
+   remains is research-grade, out of reach without a prover-hosted
+   compiler: a verified surface-core→λ_almd translation and per-pass
+   simulation proofs over the Rust implementation. The fragment gate is
+   the ratchet until then; the R-group obligations in
+   `docs/specs/edit-locality.md` §3 stay on their own ledger.
 4. **Prediction loop**: for each proposed language change, derive the L1
    verdict (preserved / needs side condition / violated) and a predicted MSR
    direction; Dojo measures the actual delta. Theory that predicts

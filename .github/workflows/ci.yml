@@ -795,6 +795,14 @@ jobs:
         with:
           lake-package-directory: crates/almide-edit-belt
 
+      - name: Kernel-conformance corpus is in sync with its generator
+        # The committed corpus (proofs/kernel-conformance) is a pure function
+        # of Corpus.lean; editing one without the other is the only way this
+        # can fail. Regenerate with `lake exe conformancegen --write`.
+        run: |
+          cd crates/almide-edit-belt
+          lake exe conformancegen --check ../../proofs/kernel-conformance
+
   # ═══════════════════════════════════════════════
   # Checks
   # ═══════════════════════════════════════════════
