@@ -449,6 +449,8 @@ pub(crate) fn is_higher_order(args: &[IrExpr]) -> bool {
 /// Returns `Some(rewritten_body)` when the desugar applies, `None` (the body is unchanged) otherwise.
 /// The max `VarId` used anywhere in `body` (0 if none) — so a fresh synthetic var can be
 /// allocated as `max + 1` without a frontend var-table round-trip.
+#[allow(dead_code)] // retired by desugar_var_seed (the band allocator); kept as the
+// documented inventory of every binder position a fresh-var scheme must clear.
 pub(crate) fn max_var_id(body: &IrExpr) -> u32 {
     use almide_ir::visit::IrVisitor;
     use almide_ir::IrPattern;

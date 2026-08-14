@@ -110,7 +110,7 @@ fn classify_variant_arm(
 /// slot). A raw tuple VAR/param destructure alone walls (no `param_values` entry), so the rewrite to
 /// the @12-handle bind is required, not a plain var destructure. `$p` ids start above subject+arms.
 /// `None` = no tuple payload anywhere (the caller keeps the original arms).
-fn desugar_tuple_payload_arms(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
+fn desugar_tuple_payload_arms(_subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
     let has_tuple_payload = arms.iter().any(|a| {
         matches!(&a.pattern, IrPattern::Some { inner } | IrPattern::Ok { inner }
             if matches!(&**inner, IrPattern::Tuple { .. }))

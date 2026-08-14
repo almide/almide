@@ -335,7 +335,29 @@ impl LowerCtx {
                 };
                 let out = self.speculate(|ctx| {
                     let IrExprKind::Match { subject, arms } = &m.kind else { unreachable!() };
-                    ctx.try_lower_variant_value_match(subject, arms, &m.ty)
+                    if let Some(v) = ctx.try_lower_variant_value_match(subject, arms, &m.ty) {
+                        return Some(v);
+                    }
+                    // Subject-ANF retry: a CALL subject the value-match path
+                    // cannot classify (`result.unwrap_or(r3, none) ?? "d"` — a
+                    // payload-returning helper outside the name sets) often
+                    // lowers fine as a BIND — the bind module-call path routes
+                    // the callee and seeds the read shape — after which the
+                    // match dispatches on a tracked VAR, the proven subject
+                    // shape. Same trick as the nested-`??` ANF above; the
+                    // enclosing `speculate` rolls everything back on decline.
+                    if !matches!(subject.kind, IrExprKind::Call { .. }) {
+                        return None;
+                    }
+                    let t = almide_ir::VarId(crate::lower::desugar_var_seed());
+                    ctx.lower_bind(t, &subject.ty, subject).ok()?;
+                    let tv = IrExpr {
+                        kind: IrExprKind::Var { id: t },
+                        ty: subject.ty.clone(),
+                        span: subject.span.clone(),
+                        def_id: None,
+                    };
+                    ctx.try_lower_variant_value_match(&tv, arms, &m.ty)
                 });
                 if let Some(v) = out {
                     // Seed the MERGE's read shape by TYPE, exactly as the bind
