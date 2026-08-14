@@ -187,15 +187,6 @@ impl Heap {
         Some(u32::from_le_bytes([self.mem[a], self.mem[a + 1], self.mem[a + 2], self.mem[a + 3]]))
     }
 
-    /// Drop every binding and block. Called between top-level runs so one
-    /// fixture's arena can never be observed by the next (the per-interpreter
-    /// discipline `vfs.rs` follows).
-    pub(crate) fn reset(&mut self) {
-        self.mem.truncate(PAYLOAD as usize);
-        self.bound.clear();
-        self.keepalive.clear();
-        self.kinds.clear();
-    }
 }
 
 /// The identity a value is bound under. `Rc::as_ptr` is stable while the value
@@ -256,12 +247,19 @@ mod tests {
     }
 
     #[test]
-    fn reset_forgets_every_binding() {
-        let mut h = Heap::new();
-        let a = h.bind(1, b"x", BlockKind::Str);
-        h.reset();
-        let b = h.bind(1, b"x", BlockKind::Str);
-        assert_eq!(a, b, "addresses restart, so no stale block survives a run");
-        assert_eq!(h.block_bytes(a).map(|(v, _)| v), Some(b"x".to_vec()));
+    fn a_fresh_heap_shares_nothing_with_an_earlier_one() {
+        // Per-run isolation comes from CONSTRUCTION, not from a reset call:
+        // every `Interpreter` builds its own `Heap`, and `cargo test` runs the
+        // gates in parallel threads, so one fixture's arena must be unreachable
+        // from the next. (An explicit `reset` was written first and deleted —
+        // the rustc-warning ratchet flagged it as never called, which was the
+        // correct read: construction already provides the property.)
+        let mut h1 = Heap::new();
+        let a = h1.bind(1, b"x", BlockKind::Str);
+        let mut h2 = Heap::new();
+        let b = h2.bind(1, b"yy", BlockKind::Str);
+        assert_eq!(a, b, "each arena numbers its blocks from the same origin");
+        assert_eq!(h1.block_bytes(a).map(|(v, _)| v), Some(b"x".to_vec()));
+        assert_eq!(h2.block_bytes(b).map(|(v, _)| v), Some(b"yy".to_vec()));
     }
 }
