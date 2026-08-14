@@ -441,126 +441,15 @@ fn operator_credit(
     n
 }
 
-/// The `??` (UnwrapOr) ir_call credits of [`count_ir_calls`]'s `visit_expr`,
-/// extracted verbatim: the heap-String route and the Value/List-payload routes,
-/// each credited exactly when the lowering emits its synthetic unwrap_or call.
-fn unwrap_or_credit(e: &almide_ir::IrExpr) -> usize {
-    let mut n = 0;
-    // A heap-String `??` (`Option[String] ?? default`) lowers to ONE synthetic
-    // `option.unwrap_or_str` CallFn (a mir_call) — but ONLY when its operand can be
-    // materialized as a self-host Option: a Var (possibly a materialized Option, which
-    // lowers) or a direct self-host OPTION call (string.first / list.get / json.as_string
-    // …). Count the operator node EXACTLY in those cases, so `mir_calls <= ir_calls` holds
-    // by construction without over-tainting a `??` over a NON-Option operand (a `Result`
-    // call like `value.as_string(x) ?? "?"`, or a not-yet-self-hosted `json.get_string`),
-    // which does NOT lower to a call (mir+0). A scalar `??` (non-String fallback) is also
-    // excluded (it lowers inline, no call). option.unwrap_or_str is pure (prim +
-    // string.repeat, no Stdout), so the synthetic call adds no real capability.
-    if let almide_ir::IrExprKind::UnwrapOr { expr, fallback } = &e.kind {
-        // The operand must be an OPTION (not a Result — `value.as_string(x) ?? "?"` is a
-        // Result `??`, expr.ty = Result, which the lowering does NOT route to
-        // option.unwrap_or_str, so counting it would falsely taint mir<ir).
-        let operand_is_option = matches!(
-            &expr.ty,
-            almide_lang::types::Ty::Applied(
-                almide_lang::types::constructor::TypeConstructorId::Option,
-                _
-            )
-        );
-        let operand_lowers = match &expr.kind {
-            almide_ir::IrExprKind::Var { .. } => true,
-            almide_ir::IrExprKind::Call {
-                target: almide_ir::CallTarget::Module { module, func, .. },
-                ..
-            } => {
-                almide_mir::lower::is_self_host_option_module_fn(module.as_str(), func.as_str())
-                            // The NEW operand-materialization path (`process.env(k) ?? "/tmp"` — an
-                            // IMPURE intrinsic `Option[String]`): it lowers to ONE synthetic
-                            // `option.unwrap_or_str` CallFn, so credit the node +1.
-                            || almide_mir::lower::unwrap_or_operand_admitted(expr)
-            }
-            // A USER function returning `Option[String]` (`fn first_char(s) ->
-            // Option[String]`, `first_char("hi") ?? "<none>"`): the lowering admits it
-            // through the `is_named_variant_call` operand route and then emits ONE
-            // `option.unwrap_or_str` — the SAME synthetic call a self-host operand gets.
-            // Credit it by the SAME shared predicate the lowering uses (#1079: uncredited,
-            // this was `mir 3 > ir 2`, a caps wall breach on correct output).
-            almide_ir::IrExprKind::Call {
-                target: almide_ir::CallTarget::Named { .. },
-                ..
-            } => almide_mir::lower::unwrap_or_named_variant_operand(expr),
-            _ => false,
-        };
-        if matches!(fallback.ty, almide_lang::types::Ty::String)
-            && operand_is_option
-            && operand_lowers
-        {
-            n += 1;
-        }
-        // A Value / List[Value] -payload Result `??` (`value.get(o,k) ?? value.null()`,
-        // `value.as_array(v) ?? []`) — the lowering routes it to ONE synthetic
-        // result.value_unwrap_or / result.list_value_unwrap_or CALL (a pure value_core
-        // helper, no Stdout). Count +1 so mir == ir, mirroring the String case.
-        let operand_is_value_result = almide_mir::lower::is_value_result_ty(&expr.ty)
-                    || almide_mir::lower::is_result_listval_ty(&expr.ty)
-                    || almide_mir::lower::is_result_str_str_ty(&expr.ty)
-                    || almide_mir::lower::is_option_value_ty(&expr.ty)
-                    // An Option[List[Value]] / Option[List[String]] `??` (`json.get_array(v,k) ?? []`,
-                    // `list.first_liststr(xs) ?? []`) routes to ONE synthetic option.listvalue_unwrap_or /
-                    // option.liststr_unwrap_or CALL (pure value_core helpers, no Stdout) — count +1 so
-                    // mir == ir, mirroring the Option[Value] case.
-                    || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                    || almide_mir::lower::is_option_liststr_ty(&expr.ty)
-                    // An Option[List[<scalar>]] `??` (`map.get(groups, k) ?? []` — B19's
-                    // group_by class) routes to ONE synthetic option.listint_unwrap_or CALL —
-                    // count +1 so mir == ir (the missing credit was the B19-ship breach the
-                    // corpus gate caught: mir 2 > ir 1 on every listint `??` site).
-                    || almide_mir::lower::is_option_listscalar_ty(&expr.ty);
-        // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits
-        // them) — INCLUDING a str-str Var, which now routes to `result.str_unwrap_or`
-        // (the materialized_results_str Var-gate admission). An Option[Value] operand
-        // is a self-host option CALL (list.get) or a Var.
-        let value_operand_lowers = match &expr.kind {
-            almide_ir::IrExprKind::Var { .. } => true,
-            almide_ir::IrExprKind::Call {
-                target: almide_ir::CallTarget::Module { module, func, .. },
-                ..
-            } => {
-                almide_mir::lower::is_self_host_result_str_module_fn(
-                            module.as_str(),
-                            func.as_str(),
-                        ) || ((almide_mir::lower::is_option_value_ty(&expr.ty)
-                            || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                            || almide_mir::lower::is_option_liststr_ty(&expr.ty)
-                            || almide_mir::lower::is_option_listscalar_ty(&expr.ty))
-                            && almide_mir::lower::is_self_host_option_module_fn(
-                                module.as_str(),
-                                func.as_str(),
-                            ))
-                            // The NEW operand-materialization path (`json.parse(s) ?? json.array([])`
-                            // — a PURE heap-`Result[Value, String]` module call): it lowers to ONE
-                            // synthetic `result.value_unwrap_or` CallFn, so credit the node +1.
-                            || almide_mir::lower::unwrap_or_operand_admitted(expr)
-            }
-            // A USER function returning a heap-payload variant (`fn lookup(k) ->
-            // Result[Value, String]`): admitted by the SAME `is_named_variant_call`
-            // operand route, then routed to ONE `result.value_unwrap_or` /
-            // `option.value_unwrap_or` helper — credit it, mirroring the String case
-            // above (#1079).
-            almide_ir::IrExprKind::Call {
-                target: almide_ir::CallTarget::Named { .. },
-                ..
-            } => almide_mir::lower::unwrap_or_named_variant_operand(expr),
-            _ => false,
-        };
-        if operand_is_value_result
-            && almide_mir::lower::is_heap_ty(&fallback.ty)
-            && value_operand_lowers
-        {
-            n += 1;
-        }
-    }
-    n
+/// The `??` (UnwrapOr) ir_call credit — ZERO since the route-zoo deletion
+/// (#1418, rot-eradication R1): the `??` lowering rides the generic match
+/// machinery on every path and emits NO synthetic unwrap_or helper CallFn, so
+/// there is nothing to credit. The function survives (returning 0) as the
+/// documented tombstone of the #1079 no-drift discipline: if a future path
+/// re-introduces a synthetic call, its credit goes HERE, keyed on the same
+/// predicate the lowering uses — never a parallel guess.
+fn unwrap_or_credit(_e: &almide_ir::IrExpr) -> usize {
+    0
 }
 
 fn count_ir_calls(

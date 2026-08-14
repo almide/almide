@@ -466,10 +466,6 @@ fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Opt
         // BEFORE the branch/unwrap desugars: the rewrite moves the fallback's `!` OUT of the
         // conditional arm into the `let x = e!` position `desugar_let_unwrap` then handles.
         desugar_unwrap_or_unwrap_fallback,
-        // AFTER the `?? f(..)!` rewrite (those `??`s are already gone): the
-        // route-zoo endgame experiment — every remaining `??` to its match form,
-        // gated on ALMIDE_QQ_DESUGAR=all (a no-op otherwise).
-        desugar_unwrap_or_to_match,
     ];
     let mut cur: Option<IrExpr> = None;
     for pass in PASSES {
@@ -768,7 +764,7 @@ mod calls;
 
 // The `??`-operand admission gates (free fns in the private `control` module) — re-exported so the
 // `classify_corpus` caps counter consults the SAME predicates the lowering uses (no count drift).
-pub use control::{unwrap_or_named_variant_operand, unwrap_or_operand_admitted};
+
 
 // The in-place `&mut` mutator surface (a free fn in the private `calls` module) — re-exported so
 // `inline_pure_call_globals`'s receiver fence tests the SAME predicate the receiver COW does, and
