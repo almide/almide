@@ -256,7 +256,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 1 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 2 |
-| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 1 |
+| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 2 |
 | C-230 | The flight reference PID kernel runs identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-231 | Integer and boolean literal forms evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-232 | Boolean literals and their display form are identical on both targets | 0.57.1 | active | fixture | 1 |
