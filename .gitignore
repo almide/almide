@@ -24,3 +24,4 @@ spec/**/*.wasm
 
 # Lean lake build dirs (local builds only; CI builds from scratch)
 .lake/
+crates/almide-mir/m.wasm
