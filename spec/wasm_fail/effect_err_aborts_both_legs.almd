@@ -1,0 +1,11 @@
+// @expect-fail: invalid digit found in string
+// #1411 stage 1. The CONTROL for int_parse_err_propagates: the same erring
+// int.parse, but through a plain effect chain with no declared-Option carrier
+// in the way. Both legs abort with the same message today; this file pins the
+// termination shape #1410's broken cell must be brought back to.
+effect fn parse_it(k: String) -> Int = int.parse(k)!
+
+effect fn main() -> Unit = {
+  let n = parse_it("XYZ")!
+  println("UNREACHABLE ${int.to_string(n)}")
+}
