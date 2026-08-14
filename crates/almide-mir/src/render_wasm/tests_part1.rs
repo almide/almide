@@ -415,45 +415,28 @@
         // ADT brick 5b: generate the per-type recursive-drop fns for nested-variant types and
         // re-lower with them in scope (the same two-pass as examples/render_program.rs).
         let anon_recs = crate::lower::collect_recursive_anon_records(ir);
-        let uses_result_opt_str = crate::lower::program_uses_result_option_str(ir);
+        // One fused walk answers every gate below (#1232) — mirrors pipeline.rs.
+        let usage = crate::lower::measure_program_usage(ir, &ir.type_decls);
+        let uses_result_opt_str = usage.result_option_str;
         // First-class function values need the uniform `$__drop_closure` (same
         // injection as the production pipeline).
-        let closure_drop = if crate::lower::program_uses_closures(ir) {
-            crate::lower::CLOSURE_DROP_SRC
-        } else {
-            ""
-        };
-        let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(ir) {
-            crate::lower::LENLIST_DROP_SRC
-        } else {
-            ""
-        };
+        let closure_drop = if usage.closures { crate::lower::CLOSURE_DROP_SRC } else { "" };
+        let lenlist_drop = if usage.lenlist_elem_lists { crate::lower::LENLIST_DROP_SRC } else { "" };
         // `__drop_list_str` (a `List[String]` record/variant ctor field, OR a closure's
         // nested-heap capture) — SHARED between the record and variant drop generators
         // (see pipeline.rs's `source_to_ir_with`, the same two-pass this helper mirrors),
         // emitted ONCE here rather than by either generator inline. Widened on
-        // `program_uses_closures` too — mirrors pipeline.rs's same conservative gate.
-        let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls)
-            || crate::lower::program_uses_anon_list_str_record(ir, &ir.type_decls)
-            || crate::lower::program_uses_closures(ir)
-        {
+        // `usage.closures` too — mirrors pipeline.rs's same conservative gate.
+        let list_str_drop = if usage.list_str_drop_field || usage.anon_list_str_record || usage.closures {
             crate::lower::LIST_STR_DROP_SRC
         } else {
             ""
         };
         // `List[<Fn>]` LITERAL — `$__drop_list_closure` (see pipeline.rs's mirror).
-        let list_closure_drop = if crate::lower::program_uses_closure_list(ir) {
-            crate::lower::LIST_CLOSURE_DROP_SRC
-        } else {
-            ""
-        };
+        let list_closure_drop = if usage.closure_list { crate::lower::LIST_CLOSURE_DROP_SRC } else { "" };
         // An `Option[(String, <scalar>)]` — `$__drop_opt_str_int` (see pipeline.rs's
         // mirror; type-driven gate, #840).
-        let opt_str_int_drop = if crate::lower::program_uses_opt_str_scalar(ir) {
-            crate::lower::OPT_STR_INT_DROP_SRC
-        } else {
-            ""
-        };
+        let opt_str_int_drop = if usage.opt_str_scalar { crate::lower::OPT_STR_INT_DROP_SRC } else { "" };
         let drops = format!(
             "{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),

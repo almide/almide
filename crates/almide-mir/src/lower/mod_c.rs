@@ -783,6 +783,7 @@ include!("repr_sources.rs");
 include!("repr_sources_b.rs");
 include!("repr_sources_c.rs");
 include!("repr_sources_d.rs");
+include!("usage_scan.rs");
 include!("newtype_erase.rs");
 include!("newtype_subst.rs");
 include!("record_defaults.rs");
