@@ -121,6 +121,31 @@ jobs:
             tools/xtarget-fuzz/target/release/xtarget-fuzz
           retention-days: 1
 
+  # Stage 5 of #1411: mutate the spec suite's own input literals and report
+  # files whose assertions survive every mutant — an assertion that cannot
+  # fail is the C-216 class (a can-err cell that never errs) before it has a
+  # bug to hide. TELEMETRY, never a hard red: suspects invite review, and at
+  # the budgeted K a survival can be sound (an inert literal), so the verdict
+  # is a report line, not an exit code. Rotates a fixed-size window through
+  # the suite by day number; x86 only (the oracle is assertion-vacuity, which
+  # is arch-independent — the arch axis belongs to the differential shards).
+  vacuity:
+    if: github.server_url == 'https://github.com'
+    name: Vacuity by mutation (rotating window)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: fuzz-binaries-${{ github.run_id }}-x86_64
+      - name: Restore the executable bit
+        run: chmod +x target/release/almide
+      - name: Mutate tonight's window
+        run: bash scripts/vacuity-mutation.sh
+
   fuzz:
     if: github.server_url == 'https://github.com'
     name: Generative differential fuzz (shard ${{ matrix.shard }}, ${{ matrix.arch }})
