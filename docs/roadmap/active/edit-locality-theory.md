@@ -74,10 +74,22 @@ the gate working.)
    Honest scope: unary calls, `Result`-only data, one effect; must-use
    (E041/E042) stays an implementation-level diagnostic — the kernel models
    ADR-0008's runtime meaning, not its lint surface.
-3. **Backends as refinements**: position native and wasm codegen as
-   refinements of the kernel semantics. The 280-contract ledger is then no
-   longer the *definition* of cross-target agreement but its *test shadow* —
-   contracts become corollaries, the ledger stays as the empirical ratchet.
+3. **Backends as refinements** (STARTED 2026-08-15 — stated, executable,
+   gated; full proof is the residual): the kernel is now an EXECUTABLE
+   specification — `Evaluator.lean` adds a fuel-indexed `evalE` with
+   `eval_sound` (whatever it returns, the relation derives; with `ev_det`,
+   uniquely — completeness deliberately unproven, only `some`-outputs are
+   consumed). `Conformance.lean` pins a seven-program family's kernel
+   observables as compile-time theorems (`#guard` + `rfl`), and the family's
+   almide-surface image ships as `spec/wasm_cross/kernel_conformance.almd`
+   under contract C-280: native stdout pinned by
+   `tests/kernel_conformance_test.rs`, wasm by the `wasm_cross` harness —
+   byte-identical on both targets at landing. The three-layer standing
+   (proven kernel trace / reviewed image seam / gated backend equality) is
+   recorded in `docs/contracts/proven-vs-trusted.md`. Remaining debt: a
+   verified surface-core→λ_almd translation and backend simulation proofs
+   (contracts-become-corollaries needs those), plus the R-group obligations
+   in `docs/specs/edit-locality.md` §3.
 4. **Prediction loop**: for each proposed language change, derive the L1
    verdict (preserved / needs side condition / violated) and a predicted MSR
    direction; Dojo measures the actual delta. Theory that predicts

@@ -55,6 +55,34 @@ every build.
 The per-class regression pins for all five are in
 [`proofs/TRUSTED_BASE.md`](../../proofs/TRUSTED_BASE.md#the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins).
 
+## The edit-locality kernel seam (Stage 3)
+
+The λ_almd kernel (`crates/almide-edit-belt`, the third 0-sorry Lean belt)
+gives the language a machine-checked reference semantics for its core:
+`ev_agree`/`edit_frame`/`ev_det` (L1 with determinism), `typing_modular`,
+`pure_silent`, and `eval_sound` (the executable evaluator agrees with the
+relation). The bridge to the shipping compiler runs through three layers
+with different standings:
+
+- **proven** — the kernel observables of the conformance family
+  (`Conformance.lean`): `#guard` + `eval_sound` + `ev_det` make each pinned
+  trace a theorem, checked by the Lean kernel on every CI run. (`evalE`
+  completeness is deliberately unproven — only `some`-outputs are ever
+  consumed, where soundness carries the claim.)
+- **trusted (reviewed seam)** — that
+  `spec/wasm_cross/kernel_conformance.almd` is the faithful surface image
+  of the λ_almd program `kAll`, and that the Rust test's expected literal
+  equals the Lean literal. Two machine-checked ends, one human link.
+- **gated** — that both backends produce those observables:
+  `tests/kernel_conformance_test.rs` (native stdout) and the `wasm_cross`
+  harness (cross-target equality), under contract C-280.
+
+"Backends are refinements of the kernel" is therefore an EMPIRICALLY
+enforced statement over the family today, not a proven one over the
+language — closing that gap (a verified translation from surface core to
+λ_almd, and backend simulation proofs) is the remaining Stage 3 debt in
+`docs/roadmap/active/edit-locality-theory.md`.
+
 ## What each gate actually claims
 
 | Gate | Claim | NOT a claim |
@@ -64,5 +92,6 @@ The per-class regression pins for all five are in
 | `proofs/output-parity.sh` | native and wasm agree, for the baseline set | anything outside that set |
 | `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |
 | the cross-target fuzz | no divergence found in N programs | no divergence exists |
+| the kernel-conformance pin (C-280) | the compiled family's observables equal the machine-checked λ_almd trace, on both targets | that every almide program refines the kernel — only the family's image is pinned |
 
 Reproduce all of it: `make verify-trust`.

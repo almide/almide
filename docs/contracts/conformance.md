@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-97 normative sections; 444 distinct executable fixtures.
+97 normative sections; 445 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -89,7 +89,7 @@
 | ALS-R7 | C-274, C-275 | `spec/wasm_cross/fs_fallible_stream_callback.almd` (byte-compare)<br>`spec/stdlib/fs_streaming_test.almd` (both-target test)<br>`tests/fs_streaming_family_gate_test.rs` (cargo gate)<br>`spec/wasm_cross/http_response_headers.almd` (byte-compare)<br>`spec/integration/modules/cross_module_global_state_loop_test.almd` (both-target test)<br>`spec/integration/modules/cross_module_cell_update_test.almd` (both-target test) |
 | ALS-S1 | C-016, C-065, C-241 | `spec/wasm_cross/string_codepoint.almd` (byte-compare)<br>`spec/wasm_cross/string_ops.almd` (byte-compare)<br>`spec/wasm_cross/string_codepoint_index.almd` (byte-compare)<br>`spec/wasm_cross/string_lines.almd` (byte-compare)<br>`spec/wasm_cross/binding_stmts.almd` (byte-compare) |
 | ALS-S2 | C-017, C-249 | `spec/wasm_cross/string_empty_pattern.almd` (byte-compare)<br>`spec/wasm_cross/for_in_forms.almd` (byte-compare)<br>`spec/wasm_cross/tuple_ops.almd` (byte-compare) |
-| ALS-S3 | C-018, C-019, C-252 | `spec/wasm_cross/string_predicates.almd` (byte-compare)<br>`spec/wasm_cross/string_ops_drain.almd` (byte-compare)<br>`spec/wasm_cross/string_rle.almd` (byte-compare)<br>`spec/wasm_cross/expr_stmt_comment.almd` (byte-compare) |
+| ALS-S3 | C-018, C-019, C-252, C-280 | `spec/wasm_cross/string_predicates.almd` (byte-compare)<br>`spec/wasm_cross/string_ops_drain.almd` (byte-compare)<br>`spec/wasm_cross/string_rle.almd` (byte-compare)<br>`spec/wasm_cross/expr_stmt_comment.almd` (byte-compare)<br>`spec/wasm_cross/kernel_conformance.almd` (byte-compare) |
 | ALS-S4 | C-022 | `spec/wasm_cross/string_from_bytes.almd` (byte-compare) |
 | ALS-S5 | C-050, C-253 | `spec/wasm_cross/string_split_rle_codepoint.almd` (byte-compare)<br>`spec/wasm_cross/place_assign_ascription.almd` (byte-compare) |
 | ALS-S6 | C-074, C-265 | `spec/wasm_cross/r5_wasm_split_replace_iterative.almd` (byte-compare)<br>`spec/wasm_cross/guard_statement.almd` (byte-compare) |

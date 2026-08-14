@@ -1,0 +1,52 @@
+// @contract: C-280
+// The λ_almd kernel-conformance family (edit-locality Stage 3): this file is
+// the almide-surface image of `kAll` in
+// crates/almide-edit-belt/AlmideEditBelt/Conformance.lean, where the expected
+// observables are pinned at Lean compile time (#guard + eval_sound + ev_det:
+// they are theorems about the kernel semantics, not just evaluator outputs).
+// tests/kernel_conformance_test.rs pins this file's native stdout to the same
+// nine lines; the wasm_cross harness extends the claim to wasm. Covered:
+// print order, pure ok/err through match, `!` on err reified at the call
+// boundary, `!` on ok under the effect-fn tail lift, callee effects ordered
+// before the caller continues.
+fn g(x: Int) -> Result[Int, String] = ok(x)
+
+fn h(x: Int) -> Result[Int, String] = err("nope")
+
+effect fn boom(x: Int) -> Int = err("kaboom")!
+
+effect fn five(x: Int) -> Int = {
+  let r: Result[Int, String] = ok(5)
+  r!
+}
+
+effect fn shout(x: Int) -> Int = {
+  println("inside")
+  1
+}
+
+effect fn main() -> Unit = {
+  println("alpha")
+  println("beta")
+  println("gamma")
+  match g(7) {
+    ok(_v) => println("got-ok"),
+    err(_e) => println("got-err"),
+  }
+  match h(0) {
+    ok(_v) => println("got-ok"),
+    err(_e) => println("got-err"),
+  }
+  match boom(0) {
+    ok(_v) => println("no-abort"),
+    err(_e) => println("reified"),
+  }
+  match five(0) {
+    ok(_v) => println("five-ok"),
+    err(_e) => println("five-err"),
+  }
+  match shout(0) {
+    ok(_v) => println("outside"),
+    err(_e) => println("boom"),
+  }
+}
