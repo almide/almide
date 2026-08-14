@@ -430,22 +430,21 @@ fn finish_native_fn(
 ) -> Result<(String, Option<NTy>), LowerError> {
     // A LIFTED effect fn (declared scalar ret, wrapped carrier ABI — the sigs
     // table widening in the pipeline): the body computes the raw scalar and
-    // the `Ok(..)` wrap happens HERE, at the single return seam. The body was
-    // already rendered with the scalar typing, so retyping the ret value now
-    // affects only the signature and the cut-marker patch below.
+    // the `Ok(..)` wrap happens HERE, at the single return seam. The wrap is
+    // carried as a RETURN-TYPE OVERRIDE, never by retyping the ret VALUE:
+    // when the body is a bare parameter passthrough (`effect fn f(x) = x`),
+    // ret and param share one ValueId, and retyping it turned the PARAM's
+    // rendered type into `Result<i64, String>` while callers kept passing the
+    // raw scalar — the almide#1429 signature/body split.
     let lifted_wrap = !is_main
         && matches!(
             sigs.get(func.name.as_str()),
             Some((_, Some(NativeSigKind::Res)))
         )
         && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
-    if lifted_wrap {
-        if let Some(v) = func.ret {
-            tys.insert(v, NTy::Res);
-        }
-    }
+    let ret_override = if lifted_wrap { Some(NTy::Res) } else { None };
     // Signature: the return type is known only after the body typed `func.ret`.
-    let mut sig = render_native_fn_sig(func, &tys, is_main)?;
+    let mut sig = render_native_fn_sig(func, &tys, is_main, ret_override)?;
     sig.push_str(" {\n");
 
     // The trailing return expression (moved out — fresh owned for heap).
@@ -459,7 +458,7 @@ fn finish_native_fn(
         out.push('\n');
     }
     out.push_str("}\n");
-    let ret_nty = func.ret.map(|v| tys[&v]);
+    let ret_nty = if lifted_wrap { Some(NTy::Res) } else { func.ret.map(|v| tys[&v]) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
     if out.contains(CUT_RET_MARKER) {
@@ -494,6 +493,7 @@ fn render_native_fn_sig(
     func: &MirFunction,
     tys: &BTreeMap<ValueId, NTy>,
     is_main: bool,
+    ret_override: Option<NTy>,
 ) -> Result<String, LowerError> {
     if is_main {
         if func.ret.is_some() {
@@ -536,7 +536,7 @@ fn render_native_fn_sig(
         .collect();
     let ret = match func.ret {
         None => String::new(),
-        Some(v) => match tys.get(&v) {
+        Some(v) => match ret_override.as_ref().or_else(|| tys.get(&v)) {
             Some(NTy::I64) => " -> i64".to_string(),
             Some(NTy::Str) => " -> String".to_string(),
             Some(NTy::StrRef) => " -> String".to_string(),
