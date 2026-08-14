@@ -65,7 +65,11 @@ merge (accepted-but-wrong; the guard in the `??` inversion isolates it).
 ≤1 surviving arm push the continuation into it (the tail-duplication
 machinery we already have), else reify the continuation as a synthesized
 join fn.** Lifts the `fallback_propagates` guard and closes the last scalar
-route fallback.
+route fallback. The load-bearing half of this cure — a frame-targeted
+`Op::Return` so a propagating arm CAN diverge — is now its own arc:
+[return-op-eradication.md](./return-op-eradication.md), which also deletes
+the `!` position-desugar zoo (~9 rows in `BRANCH_PASSES`) that exists only
+because the op is missing.
 
 ### R4 — the link-set divergence (env.cwd class; unfiled until now)
 Which self-host bodies get compiled disagreed with the calls the lowering
