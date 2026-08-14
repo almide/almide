@@ -216,7 +216,7 @@ pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<Ir
     }
 
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut next = crate::lower::desugar_var_seed();
     let mut out = body.clone();
     almide_ir::IrMutVisitor::visit_expr_mut(
         &mut BlockWalk { next: &mut next, changed: &mut changed },
@@ -415,7 +415,7 @@ pub(crate) fn desugar_heap_if_call_args(body: &IrExpr) -> Option<IrExpr> {
     }
 
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut next = crate::lower::desugar_var_seed();
     let mut out = body.clone();
     almide_ir::IrMutVisitor::visit_expr_mut(&mut BlockWalk { next: &mut next, changed: &mut changed }, &mut out);
     // A non-Block body whose tail needs hoists: wrap it.

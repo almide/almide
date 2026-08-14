@@ -80,7 +80,7 @@ impl LowerCtx {
 
         // SUBSTITUTE the state-param MEMBER projections with two synthetic vars; any OTHER
         // use of the state param declines (a bare `st` / spread would need the record block).
-        let acc_var = VarId(crate::lower::max_var_id(body) + 1);
+        let acc_var = VarId(crate::lower::desugar_var_seed());
         let n_var = VarId(acc_var.0 + 1);
         let body = substitute_state_members(body, state_param, list_fname, acc_var, scalar_fname, n_var)?;
         let (stmts, tail_list, tail_scalar) = parse_record_fold_body(&body, list_fname, scalar_fname)?;

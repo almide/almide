@@ -473,7 +473,7 @@ pub fn desugar_heap_branches(
     // Seed a FUNCTION-WIDE fresh-VarId counter ABOVE every id in the whole body, then thread it through
     // the recursion so a lift inside one `if` arm never reuses an id live in a SIBLING arm (block_line's
     // `string.drop` read the then-arm's concat because an arm-local `max_var_id` aliased `line`).
-    let mut next_var = max_var_id(body) + 1;
+    let mut next_var = crate::lower::desugar_var_seed();
     let rewritten = desugar_heap_branches_inner(body, &mut next_var, layouts)?;
     // EXPONENTIAL-BLOW-UP guard: each `let s = <heap branch>; rest` duplicates `rest`
     // into both arms, so N chained branch binds yield 2^N copies. Real programs chain

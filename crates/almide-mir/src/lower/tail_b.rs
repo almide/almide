@@ -780,7 +780,7 @@ impl LowerCtx {
             return self.lower_tail_heap_fresh(tail);
         }
         let payload_ty = tail.ty.clone();
-        let p = VarId(crate::lower::max_var_id(tail) + 1);
+        let p = VarId(crate::lower::desugar_var_seed());
         let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
         let (hit, miss) = if expr.ty.is_result() {
             (

@@ -332,7 +332,7 @@ fn desugar_optional_chain(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut s = S { changed: false, next_var: crate::lower::max_var_id(body) + 1 };
+    let mut s = S { changed: false, next_var: crate::lower::desugar_var_seed() };
     let mut out = body.clone();
     s.visit_expr_mut(&mut out);
     s.changed.then_some(out)
@@ -449,6 +449,11 @@ fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
 /// - `desugar_unwrap_or_unwrap_fallback` — `a ?? f(..)!` over a heap payload → `(match a { … })!` (#1375).
 /// - `desugar_list_slice_calls`, `desugar_optional_chain` — the remaining surface forms.
 fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Option<IrExpr> {
+    // Per-function band reset: every desugar of the same body draws the same
+    // chunk sequence, so the counting pass and the lowering pass re-derive
+    // IDENTICAL trees (desugar-before-both), and the band never grows across
+    // functions. In-lowering mints keep drawing from where the chain stopped.
+    crate::lower::reset_desugar_var_band();
     type Pass = fn(&IrExpr) -> Option<IrExpr>;
     const PASSES: &[Pass] = &[
         desugar_assert_calls,

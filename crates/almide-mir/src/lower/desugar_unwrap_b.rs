@@ -347,7 +347,7 @@ fn anf_let_unwrap_match_operand(body: &IrExpr, i: usize, inner: &IrExpr) -> Opti
     if !matches!(inner.kind, IrExprKind::Match { .. }) {
         return None;
     }
-    let u = VarId(max_var_id(body) + 1);
+    let u = VarId(crate::lower::desugar_var_seed());
     let mut anf_stmt = stmts.get(i)?.clone();
     let value = match &mut anf_stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => value,
@@ -427,7 +427,7 @@ fn let_unwrap_ok_binding(
             (almide_ir::IrPattern::Bind { var, ty }, rest.to_vec())
         }
         LetUnwrapTarget::Destructure { pattern } => {
-            let p2 = VarId(max_var_id(body) + 2);
+            let p2 = VarId(crate::lower::desugar_var_seed());
             let destr = IrStmt {
                 kind: IrStmtKind::BindDestructure {
                     pattern,
@@ -499,7 +499,7 @@ fn never_err_short_circuit(
     let almide_ir::IrPattern::Ok { inner: ok_inner } = &ok_arm.pattern else { return None };
     let var = match &**ok_inner {
         almide_ir::IrPattern::Bind { var, .. } => *var,
-        almide_ir::IrPattern::Wildcard => VarId(max_var_id(body) + 3),
+        almide_ir::IrPattern::Wildcard => VarId(crate::lower::desugar_var_seed()),
         _ => return None,
     };
     let bind_stmt = IrStmt {
@@ -597,7 +597,7 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
         _ => return None,
     };
     let result_ty = body.ty.clone();
-    let fresh = VarId(max_var_id(body) + 1);
+    let fresh = VarId(crate::lower::desugar_var_seed());
     let mk = |kind: IrExprKind, ty: Ty| IrExpr {
         kind,
         ty,
@@ -781,7 +781,7 @@ pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
         },
         res_ty.clone(),
     );
-    let r_var = VarId(max_var_id(body) + 1);
+    let r_var = VarId(crate::lower::desugar_var_seed());
     let r_bind = IrStmt {
         kind: IrStmtKind::Bind {
             var: r_var,

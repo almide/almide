@@ -117,7 +117,7 @@ impl LowerCtx {
         let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
         let IrExprKind::Block { expr: Some(tail), .. } = &body.kind else { return None };
         // Synthetic vars standing for the tag/payload locals inside projected trees.
-        let base = crate::lower::max_var_id(body).max(crate::lower::max_var_id(init)) + 1;
+        let base = crate::lower::desugar_var_seed();
         let ft = VarId(base);
         let fv = VarId(base + 1);
 

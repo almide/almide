@@ -619,7 +619,7 @@ pub fn desugar_tuple_unwrap_or(body: &IrExpr) -> Option<IrExpr> {
         e
     }
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut next = crate::lower::desugar_var_seed();
     let out = rewrite(body.clone(), &mut changed, &mut next);
     changed.then_some(out)
 }
@@ -713,7 +713,7 @@ pub fn desugar_unwrap_or_to_match(body: &IrExpr) -> Option<IrExpr> {
         }
     }
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut next = crate::lower::desugar_var_seed();
     let out = rewrite(body.clone(), &mut changed, &mut next);
     changed.then_some(out)
 }
@@ -781,7 +781,7 @@ pub fn desugar_unwrap_or_unwrap_fallback(body: &IrExpr) -> Option<IrExpr> {
         }
     }
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut next = crate::lower::desugar_var_seed();
     let out = rewrite(body.clone(), &mut changed, &mut next);
     changed.then_some(out)
 }
@@ -977,7 +977,7 @@ pub(crate) fn desugar_hof_chain_anf(body: &IrExpr) -> Option<IrExpr> {
         }
     }
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut next = crate::lower::desugar_var_seed();
     let mut out = rewrite_tail(body, &mut next, &mut changed);
     if changed {
         // Substitute across the WHOLE rewritten body — the chain links now live in

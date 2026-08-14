@@ -381,7 +381,7 @@ pub fn desugar_tuple_variant_match_deep(
             self.changed = true;
         }
     }
-    let mut v = V { next: max_var_id(body) + 1, layouts, changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), layouts, changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)

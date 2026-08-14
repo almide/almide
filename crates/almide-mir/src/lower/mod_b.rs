@@ -797,7 +797,7 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut s = S { changed: false, next_var: crate::lower::max_var_id(body) + 1 };
+    let mut s = S { changed: false, next_var: crate::lower::desugar_var_seed() };
     let mut out = body.clone();
     s.visit_expr_mut(&mut out);
     s.changed.then_some(out)

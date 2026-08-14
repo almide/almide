@@ -20,7 +20,7 @@ pub fn desugar_effect_unwrap(
     ret_is_result: bool,
     _layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
-    let mut next_var = max_var_id(body) + 1;
+    let mut next_var = crate::lower::desugar_var_seed();
     desugar_effect_unwrap_inner(body, &mut next_var, unit_main, ret_is_result)
 }
 
@@ -450,7 +450,7 @@ pub fn desugar_unit_main_err_arms(body: &IrExpr) -> Option<IrExpr> {
             }
         }
     }
-    let mut rw = Rw { next_var: max_var_id(body) + 1, changed: false };
+    let mut rw = Rw { next_var: crate::lower::desugar_var_seed(), changed: false };
     let mut out = body.clone();
     rw.visit_expr_mut(&mut out);
     rw.changed.then_some(out)

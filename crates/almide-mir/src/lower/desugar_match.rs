@@ -100,7 +100,7 @@ pub fn desugar_option_str_literal_match(body: &mut IrExpr) {
             };
         }
     }
-    let mut s = S { next_var: max_var_id(body) + 1 };
+    let mut s = S { next_var: crate::lower::desugar_var_seed() };
     s.visit_expr_mut(body);
 }
 
@@ -253,7 +253,7 @@ pub fn desugar_scalar_tuple_literal_match(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)
@@ -350,7 +350,7 @@ pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)

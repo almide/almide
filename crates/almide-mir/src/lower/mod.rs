@@ -660,6 +660,46 @@ impl Drop for StrictValuesGuard {
 
 thread_local! {
     static STRICT_VALUES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The DESUGAR VAR BAND cursor — see [`desugar_var_seed`].
+    static DESUGAR_VAR_CURSOR: std::cell::Cell<u32> = const { std::cell::Cell::new(DESUGAR_VAR_BAND) };
+}
+
+/// The floor of the synthetic-variable band the desugar/lowering rewrites mint
+/// from. Frontend `VarId`s are dense from 0 and never approach this;
+/// `fresh_synth_var` counts DOWN from `u32::MAX` (the other reserved band).
+pub(crate) const DESUGAR_VAR_BAND: u32 = 0x4000_0000;
+
+/// Reset the band cursor — called once per function at the desugar-chain entry
+/// (`apply_pre_lower_desugars`), so every desugar of the same body is
+/// DETERMINISTIC (the counting pass and the lowering pass re-derive identical
+/// trees — the desugar-before-both discipline) and the band is per-function
+/// bounded.
+pub(crate) fn reset_desugar_var_band() {
+    DESUGAR_VAR_CURSOR.with(|c| c.set(DESUGAR_VAR_BAND));
+}
+
+/// Reserve a fresh 4096-id chunk in the synthetic band and return its first id.
+///
+/// THE fresh-variable discipline for every IR→IR rewrite (the reference-compiler
+/// rule: fresh ids come from a MONOTONIC allocator owned by the context — never
+/// from scanning a subtree for `max + 1`). The `max_var_id(subtree) + k` scheme
+/// this replaces minted from whatever ids the measured SUBTREE happened to
+/// contain, so a pass that introduced pattern binds ABOVE another pass's subtree
+/// made the two mint the SAME id for two different-typed variables — one render
+/// local, two types, invalid wasm (`Ok(p1: Int)` colliding with a nested
+/// `err(e1: String)` bind, found via the ?? → match desugar experiment,
+/// 2026-08-15). Chunks are disjoint by construction, so call order never
+/// matters; passes that allocate sequentially keep doing `seed, seed+1, …`
+/// inside their own chunk.
+pub(crate) fn desugar_var_seed() -> u32 {
+    DESUGAR_VAR_CURSOR.with(|c| {
+        let seed = c.get();
+        // Well below fresh_synth_var's descending band even if a pathological
+        // function burns thousands of chunks.
+        debug_assert!(seed < u32::MAX / 2, "desugar var band exhausted");
+        c.set(seed + 4096);
+        seed
+    })
 }
 
 pub(crate) fn strict_values() -> bool {

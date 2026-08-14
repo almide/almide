@@ -650,7 +650,7 @@ pub fn hoist_assert_call_subjects(program: &mut almide_ir::IrProgram) {
         .iter_mut()
         .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
     {
-        let mut next = crate::lower::max_var_id(&func.body) + 1;
+        let mut next = crate::lower::desugar_var_seed();
         H { next: &mut next }.visit_expr_mut(&mut func.body);
     }
 }

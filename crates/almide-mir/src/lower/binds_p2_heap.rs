@@ -104,7 +104,7 @@ impl LowerCtx {
     fn unwrap_or_as_result_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
         use almide_ir::{IrMatchArm, IrPattern};
         let payload_ty = value.ty.clone();
-        let p = VarId(crate::lower::max_var_id(value) + 1);
+        let p = VarId(crate::lower::desugar_var_seed());
         let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
         let payload = IrExpr {
             kind: IrExprKind::Var { id: p },
@@ -140,7 +140,7 @@ impl LowerCtx {
     fn unwrap_or_as_option_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
         use almide_ir::{IrMatchArm, IrPattern};
         let payload_ty = value.ty.clone();
-        let p = VarId(crate::lower::max_var_id(value) + 1);
+        let p = VarId(crate::lower::desugar_var_seed());
         let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
         let payload = IrExpr {
             kind: IrExprKind::Var { id: p },

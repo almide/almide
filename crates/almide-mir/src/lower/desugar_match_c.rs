@@ -188,7 +188,7 @@ pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     // GROWTH CAP (arc v1-join-completeness, J0): this rewrite duplicates a
@@ -665,7 +665,7 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     // GROWTH CAP (arc v1-join-completeness, J0): this rewrite duplicates a
