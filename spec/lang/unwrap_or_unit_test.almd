@@ -2,9 +2,7 @@
 // until the scalar-value lowering learned the Unit-is-0 arm (result-family-
 // from-type follow-up, 2026-08-14): the fallback `()` had no lowering, so the
 // whole `??` declined and the desugared match walled as an untracked subject.
-
-fn check(flag: Bool) -> Result[Unit, String] =
-  if flag then ok(()) else err("boom")
+fn check(flag: Bool) -> Result[Unit, String] = if flag then ok(()) else err("boom")
 
 fn swallow_err() -> Int = {
   let _ = check(false) ?? ()
