@@ -471,6 +471,12 @@ fn collect_module_refs_stmt(stmt: &Stmt, used: &mut std::collections::HashSet<St
 }
 
 pub fn format_program(program: &Program) -> String {
+    // #1404: install this program's expression-comment bindings for the whole
+    // render, so every nested `fmt_expr` can bracket its node.
+    with_expr_comments(&program.expr_comments, || format_program_inner(program))
+}
+
+fn format_program_inner(program: &Program) -> String {
     let mut out = String::new();
     let cm = &program.comment_map;
     let mut ci = 0;

@@ -153,12 +153,38 @@ fn own_line_block_comments_survive_fmt() {
     assert_eq!(format_program(&second), formatted, "fmt must be idempotent");
 }
 
+/// SUPERSEDED BEHAVIOUR (#1404): this used to assert that an inline block
+/// comment made the verifier REFUSE, because the printer had no slot for it.
+/// It now attaches to the node it annotates and round-trips, so the assertion
+/// is inverted — kept rather than deleted so the change of contract is visible
+/// in the history at the place that pinned the old one.
 #[test]
-fn inline_block_comment_makes_the_verifier_refuse_not_delete() {
+fn inline_block_comment_is_attached_and_conserved() {
     let src = "fn f(a: Int, b: Int) -> Int = a + b\n\nfn main() -> Unit = {\n  let x = f(1 /* inline */, 2)\n  println(\"ok\")\n}\n";
     let program = parse(src).expect("inline block comments stay legal to parse");
     let formatted = format_program(&program);
+    verify_format(src, &program, &formatted)
+        .expect("an attached inline comment is conserved, not refused");
+    // TRAILING on `1`: it must not cross the comma onto `2`.
+    assert!(
+        formatted.contains("f(1 /* inline */, 2)"),
+        "inline comment moved off the node it annotates:\n{formatted}"
+    );
+    let second = parse(&formatted).expect("formatted parses");
+    assert_eq!(format_program(&second), formatted, "fmt must stay idempotent");
+}
+
+/// The half #1404 does NOT close, pinned so the boundary is explicit: a `//`
+/// comment before a continuation line still refuses. Reprinting it inline
+/// would comment out the rest of the line — an early attempt did exactly that
+/// and the verifier caught `binary -> int`, i.e. the `+ 2` had vanished. It
+/// needs line-aware placement, which the inline bracket is not.
+#[test]
+fn a_line_comment_before_a_continuation_still_refuses() {
+    let src = "fn main() -> Unit = {\n  let y = 1 + // why\n    2\n  println(\"ok\")\n}\n";
+    let program = parse(src).expect("parses");
+    let formatted = format_program(&program);
     let why = verify_format(src, &program, &formatted)
-        .expect_err("an unattachable inline comment must refuse, never silently drop");
+        .expect_err("an unattachable line comment must refuse, never silently drop");
     assert!(why.contains("comment"), "got: {why}");
 }

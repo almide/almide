@@ -191,6 +191,38 @@ mod attr_tests {
         format_program(&program)
     }
 
+    /// #1404: an inline `/* */` binds to the node it is adjacent to, on the
+    /// side it was written, and survives a format round-trip there.
+    ///
+    /// Before this, both spellings made fmt REFUSE (the conservation verifier
+    /// counted a comment the printer had no slot for), so the file was left
+    /// untouched with a "formatter bug" message.
+    #[test]
+    fn an_inline_block_comment_stays_on_the_node_it_annotates() {
+        // LEADING: written before `3`, so it travels with `3`.
+        let lead = roundtrip("fn f(a: Int, b: Int) -> Int = a + b\nfn main() -> Unit = {\n  let z = f(/* why */ 3, 4)\n}\n");
+        assert!(lead.contains("f(/* why */ 3, 4)"), "leading comment misplaced:\n{lead}");
+
+        // TRAILING: written after `1`, so it must NOT cross the comma onto `2`.
+        // Taking the ruling's "attach to the following node" literally would
+        // print `f(1, /* x */ 2)` — annotating a value its author never wrote
+        // it against.
+        let trail = roundtrip("fn f(a: Int, b: Int) -> Int = a + b\nfn main() -> Unit = {\n  let x = f(1 /* x */, 2)\n}\n");
+        assert!(trail.contains("f(1 /* x */, 2)"), "trailing comment crossed the separator:\n{trail}");
+    }
+
+    /// #1404 is idempotent: re-reading the formatted output re-attaches the
+    /// comment to the SAME node, so a second pass is a no-op. `almide fmt` is
+    /// idempotent-by-contract, and a comment that drifts one node per run
+    /// would satisfy the conservation count while corrupting the source.
+    #[test]
+    fn an_attached_comment_does_not_drift_on_a_second_pass() {
+        let src = "fn f(a: Int, b: Int) -> Int = a + b\nfn main() -> Unit = {\n  let x = f(1 /* x */, 2)\n  let z = f(/* why */ 3, 4)\n}\n";
+        let once = roundtrip(&src);
+        let twice = roundtrip(&once);
+        assert_eq!(once, twice, "formatting is not idempotent for attached comments");
+    }
+
     /// Parse → format → parse round-trip: the second parse must
     /// produce the same attribute structure as the first. This is
     /// the formatter's idempotency contract, stricter than matching
