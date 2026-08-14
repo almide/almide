@@ -22,7 +22,8 @@ pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
             Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                 out.push(*len)
             }
-            Init::OptSome { payload } => out.push(*payload),
+            Init::OptSome { payload } | Init::ResOkScalar { payload } => out.push(*payload),
+            Init::ResErrStr { piece } => out.push(*piece),
             Init::Opaque
             | Init::Empty
             | Init::OptNone
@@ -142,7 +143,8 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
                 Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                     out.push(*len)
                 }
-                Init::OptSome { payload } => out.push(*payload),
+                Init::OptSome { payload } | Init::ResOkScalar { payload } => out.push(*payload),
+                Init::ResErrStr { piece } => out.push(*piece),
                 Init::Opaque
                 | Init::Empty
                 | Init::OptNone

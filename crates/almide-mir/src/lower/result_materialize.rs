@@ -73,28 +73,19 @@ impl LowerCtx {
     /// message on Err, nothing on a len-0 Ok; NEVER `materialized_options`, the
     /// binds_p4_b_b.rs:116 both-flags bug class).
     pub(crate) fn materialize_result_err_str(&mut self, piece: ValueId, repr: crate::Repr) -> ValueId {
-        use crate::PrimKind;
-        // The tag rides the SAME 8-byte slot-0 store as the payload: low 32 bits = the
-        // handle, high 32 bits (@16) = the Err tag 1. One `Store { width: 8 }` — the op
-        // `materialize_opt_str_some` has always used — instead of a separate 4-byte tag
-        // store, because the METERED native rung lane (fan.bounded/fan.race) certifies a
-        // restricted op vocabulary that admits the 8-byte slot store but not a bare
-        // `Store { width: 4 }` (the fuel fixtures walled on exactly that op when this fn
-        // first landed as a post-hoc tag write).
-        let one = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        // ONE semantic `Alloc { init: ResErrStr }` (the result-family-from-type
+        // "desugar once" slice): the wasm render expands it to the len-as-tag Err
+        // block WITH the @16 tag riding the payload slot's high half; the native
+        // leg maps it 1:1 onto `PrimKind::ResMakeErrStr` in native_result_rewrite
+        // (a total single-op match — the fragile producer-window recognition this
+        // materializer kept breaking is retired).
+        //
+        // MOVE contract (the Init's documented ownership): the piece is consumed
+        // into slot 0 — the same `i…m` pair the retired window carried, so the
+        // native leg's kept Alloc/Consume accounting and the wasm block bytes are
+        // both unchanged.
         let obj = self.fresh_value();
-        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
-        let oh = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
-        let addr = self.const_add(oh, 12);
-        let ph = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![piece] });
-        let tagbits = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: tagbits, value: 1i64 << 32 });
-        let tagged = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: tagged, op: IntOp::Add, a: ph, b: tagbits });
-        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, tagged] });
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::ResErrStr { piece } });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
         self.heap_elem_lists.insert(obj);

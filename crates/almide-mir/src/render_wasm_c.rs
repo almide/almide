@@ -360,8 +360,16 @@ fn poison_alloc_init_operands(init: &Init, poison: &mut BTreeSet<ValueId>) {
         | Init::DynListStr { len } => {
             poison.insert(*len);
         }
-        Init::OptSome { payload } => {
+        // ResOkScalar's payload is stored via the i64-uniform 8-byte slot (a Float
+        // payload stores its BITS, read back via ffrombits — the same contract the
+        // old Store{width:8} sequence had), so it is poisoned exactly like OptSome's.
+        // ResErrStr's piece is a heap i32 handle — never f64-classified; poisoning
+        // it is a harmless no-op that keeps the arm total.
+        Init::OptSome { payload } | Init::ResOkScalar { payload } => {
             poison.insert(*payload);
+        }
+        Init::ResErrStr { piece } => {
+            poison.insert(*piece);
         }
         Init::Opaque
         | Init::Empty

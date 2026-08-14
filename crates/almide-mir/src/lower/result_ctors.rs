@@ -285,12 +285,15 @@ impl LowerCtx {
         self.variant_drop_handles.remove(&piece);
         self.heap_elem_lists.remove(&piece);
         self.live_heap_handles.retain(|h| *h != piece);
-        // `materialize_result_err_str` (result-family-from-type Phase 1) subsumes the old
-        // opt_str_some + add-Result-flag dance: Result-only tracking (no both-flags-true
-        // conflict for the value-position reader to resolve) and the @16 Err tag on top of
-        // the len-as-tag block — inert to this family's LEN readers (`seed_variant_param`),
-        // uniform with every other ctor-built Result-err block.
-        let obj = self.materialize_result_err_str(piece, repr);
+        // The VARIANT-payload Err keeps the classic opt_str_some MOVE (the variant
+        // block is moved into slot 0, its own drop route detached above): it is
+        // NOT `materialize_result_err_str`'s borrow-contract String shape — a
+        // co-owned rich variant would need rc-aware recursive-drop reasoning the
+        // move form never needs. Result-only tracking (the value-position
+        // both-flags-true conflict is resolved by removing the Option flag).
+        let obj = self.materialize_opt_str_some(piece, repr);
+        self.materialized_options.remove(&obj);
+        self.materialized_results.insert(obj);
         if needs_rec {
             self.heap_elem_lists.remove(&obj);
             self.variant_drop_handles.insert(obj, format!("res_{type_name}"));
@@ -753,28 +756,15 @@ impl LowerCtx {
         obj
     }
 
+    /// `ok(<scalar>)` — ONE semantic `Alloc { init: ResOkScalar }` (the
+    /// result-family-from-type "desugar once" slice). The wasm render expands it
+    /// to the byte-identical len-as-tag block the old 6-op window built (len 0 =
+    /// Ok tag, payload @12, @16 zeroed); the native leg maps it 1:1 onto
+    /// `PrimKind::ResMakeOk` in native_result_rewrite — a total single-op match
+    /// that replaced the fragile producer-window recognition.
     pub(crate) fn materialize_result_ok(&mut self, payload: ValueId, repr: crate::Repr) -> ValueId {
-        use crate::PrimKind;
-        let one = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: one, value: 1 });
         let obj = self.fresh_value();
-        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
-        let oh = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
-        // slot 0 (handle + 12) = the Ok int.
-        let twelve = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: twelve, value: 12 });
-        let daddr = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: daddr, op: IntOp::Add, a: oh, b: twelve });
-        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![daddr, payload] });
-        // len field (handle + 4) := 0 so DropListStr treats it as element-free (the Ok tag).
-        let four = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: four, value: 4 });
-        let laddr = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: laddr, op: IntOp::Add, a: oh, b: four });
-        let zero = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![laddr, zero] });
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::ResOkScalar { payload } });
         self.heap_elem_lists.insert(obj);
         obj
     }

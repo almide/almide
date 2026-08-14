@@ -260,6 +260,36 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
                 p = local(*payload),
             )
         }
+        // A materialized `ok(<scalar>)` — the len-as-tag Result block: len 0 IS the Ok
+        // tag, the payload rides slot 0 via a raw 8-byte store (len 0 means $list_set
+        // would bounds-abort, and the store's zero-extension also clears the @16 tag
+        // half — a Unit Ok therefore reads Ok on BOTH the len and the @16 route).
+        // Byte-identical to the retired materialize_result_ok 6-op window.
+        Op::Alloc { dst, init: Init::ResOkScalar { payload }, .. } => {
+            let cap = 1 + PUSH_HEADROOM;
+            format!(
+                "    (local.set {d} (call $list_new (i32.const 0) (i32.const {cap})))\n\
+                 \x20   (i64.store (i32.add (local.get {d}) (i32.const {LIST_HEADER})) (local.get {p}))\n",
+                d = local(*dst),
+                p = local(*payload),
+            )
+        }
+        // A materialized `err(<String>)` — len 1 (the len-as-tag Err), slot 0 = the
+        // message handle in the low half + the Err tag 1 in the high half (@16), ONE
+        // tagged 8-byte store. The piece is MOVED in (Init::ResErrStr's contract —
+        // the materializer emits the Consume right after this op): the store takes
+        // the caller's ref, no rc_inc, and the block's flat DropListStr is that
+        // ref's release — byte-identical to the retired window's bytes plus the tag.
+        Op::Alloc { dst, init: Init::ResErrStr { piece }, .. } => {
+            let cap = 1 + PUSH_HEADROOM;
+            format!(
+                "    (local.set {d} (call $list_new (i32.const 1) (i32.const {cap})))\n\
+                 \x20   (i64.store (i32.add (local.get {d}) (i32.const {LIST_HEADER}))\n\
+                 \x20       (i64.or (i64.extend_i32_u (local.get {p})) (i64.const 4294967296)))\n",
+                d = local(*dst),
+                p = local(*piece),
+            )
+        }
         // A runtime-sized OWNED `List[Int]` of `len` i64 slots: $alloc `LIST_HEADER +
         // len*ELEM_SIZE` bytes, set rc=1 + len + cap (= the element count). Elements are
         // left UNINITIALIZED for the caller to fill via `prim.store64`. The list-building
@@ -318,6 +348,8 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
                 | Init::DynStr { .. }
                 | Init::OptSome { .. }
                 | Init::OptNone
+                | Init::ResOkScalar { .. }
+                | Init::ResErrStr { .. }
                 | Init::DynList { .. }
                 | Init::DynListStr { .. } => &[],
             };
