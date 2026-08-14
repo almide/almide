@@ -60,6 +60,10 @@ pub(crate) const CHANNELS: &[(&str, &str)] = &[
         "why a list-literal Block element declined",
     ),
     (
+        "ALMIDE_DBG_QQ",
+        "which path lowered each ?? (match-first vs route fallback, #1418)",
+    ),
+    (
         "DBG_LOWER_FN",
         "the lowered body of the fn named by the value",
     ),

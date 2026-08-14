@@ -131,6 +131,54 @@ impl LowerCtx {
                 return None;
             }
         }
+        // #1418 SPECULATIVE ORDER INVERSION (scalar slice): try the MATCH form
+        // FIRST — `e ?? d` as `match e { ok(p) => p, err(_) => d }` (Roc's
+        // canonical desugar, character-identical) through the generic scalar
+        // value-match machinery — and only fall back to the route chain below
+        // when it declines (ops rolled back; the routes stay the safety net).
+        // Every shape the match path takes migrates off the routes with no
+        // behavior flag; the migration completes when the fallback count hits
+        // zero and the routes are deleted. SCALAR payloads only in this slice:
+        // the scalar routes emit no synthetic helper CallFn either, so the
+        // caps-counter accounting (#1079) is unchanged whichever path fires.
+        // A PROPAGATING fallback (`?? f(..)!`) stays on the route: the scalar
+        // value-match operand path accepts an Unwrap arm but emits an invalid
+        // early-return for it (i32 Result block where the merge expects i64 —
+        // found by this very inversion, 2026-08-15); the route's
+        // `lower_scalar_value` Unwrap arm is the proven lowering. Lift this
+        // guard when the value-match path learns the propagation arm.
+        let fallback_propagates =
+            matches!(&fallback.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. });
+        if !is_heap_ty(&fallback.ty) && !fallback_propagates {
+            let ops_mark = self.ops.len();
+            let lhh_mark = self.live_heap_handles.len();
+            let synth = IrExpr {
+                kind: IrExprKind::Unit,
+                ty: fallback.ty.clone(),
+                span: expr.span.clone(),
+                def_id: None,
+            };
+            let rewritten = if expr.ty.is_result() {
+                Some(Self::unwrap_or_as_result_match(&synth, expr, fallback))
+            } else if expr.ty.is_option() {
+                Some(Self::unwrap_or_as_option_match(&synth, expr, fallback))
+            } else {
+                None
+            };
+            if let Some(m) = rewritten {
+                if let Some(v) = self.lower_scalar_match_operand(&m) {
+                    crate::trace::trace("ALMIDE_DBG_QQ", || {
+                        format!("[qq] match-first took {:?} ?? (scalar)", expr.ty)
+                    });
+                    return Some(v);
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                crate::trace::trace("ALMIDE_DBG_QQ", || {
+                    format!("[qq] route fallback for {:?} ?? (scalar)", expr.ty)
+                });
+            }
+        }
         // Shared with the caps counter (`unwrap_or_named_variant_operand`) so the gate that
         // ADMITS a user-fn operand here and the gate that CREDITS its synthetic helper call in
         // `count_ir_calls` can never drift apart (#1079).

@@ -101,7 +101,7 @@ impl LowerCtx {
     /// The `e ?? d` → `match e { ok(p) => p, err(_) => d }` rewrite, shared shape with
     /// [`Self::lower_tail_heap_unwrap_or`]'s inline version (Result polarity only —
     /// the caller gates).
-    fn unwrap_or_as_result_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
+    pub(crate) fn unwrap_or_as_result_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
         use almide_ir::{IrMatchArm, IrPattern};
         let payload_ty = value.ty.clone();
         let p = VarId(crate::lower::desugar_var_seed());
@@ -137,7 +137,7 @@ impl LowerCtx {
     /// The Option-polarity mirror of [`Self::unwrap_or_as_result_match`] (#1270):
     /// `e ?? d` → `match e { some(p) => p, none => d }`, same speculative
     /// discipline (the caller gates on `is_option` and rolls back on decline).
-    fn unwrap_or_as_option_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
+    pub(crate) fn unwrap_or_as_option_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
         use almide_ir::{IrMatchArm, IrPattern};
         let payload_ty = value.ty.clone();
         let p = VarId(crate::lower::desugar_var_seed());

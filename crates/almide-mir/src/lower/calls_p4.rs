@@ -328,7 +328,7 @@ impl LowerCtx {
     /// #852): which match-execution strategy a scalar `match` operand gets — custom-variant
     /// tag dispatch, tuple refinement, variant (Option/Result) value-match, or the desugared
     /// if/block chain — in that priority order.
-    fn lower_scalar_match_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+    pub(crate) fn lower_scalar_match_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
         match &expr.kind {
             IrExprKind::Match { subject, arms } if !is_heap_ty(&expr.ty) => {
                 // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
