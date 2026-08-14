@@ -137,3 +137,157 @@ fn wasm_fail_corpus() {
         );
     }
 }
+
+// ── Stage 4 (#1411): the failure-side floor ──
+//
+// Measured 2026-08-14: 41 of 418 wasm_cross fixtures reach an error path.
+// Nothing said that number should be higher, and the week's three runtime
+// bugs all lived on the side no fixture ran. This gate fixes the measured
+// ratio as a FLOOR: the failure side may only grow its share.
+//
+// A RATIO, not a count, deliberately: a count floor is satisfied forever by
+// the 41 that already exist, while the corpus around them grows — the share
+// of the corpus that exercises failure would decay right back toward where
+// it started. The ratio floor means adding ~10 success-side fixtures obliges
+// one failure-side fixture, which is the pressure the category exists to
+// apply. And deliberately NO TARGET above the floor: a target invites
+// fixtures written to move a percentage (the RESEARCH doc's argument).
+//
+// Failure-side = wasm_cross fixtures whose NATIVE leg fails (nonzero exit or
+// an `Error:` line — same predicate as the 2026-08-14 measurement) plus every
+// wasm_fail fixture (failing is their admission criterion, enforced above).
+// Compared as a cross-multiplication so no float threshold can drift.
+const FAILURE_FLOOR_NUM: usize = 41; // of
+const FAILURE_FLOOR_DEN: usize = 418; // — the 2026-08-14 measurement
+
+#[test]
+fn failure_side_floor() {
+    let Some(legs) = corpus() else { return };
+    let cross_total = legs.len();
+    let cross_failing = legs
+        .iter()
+        .filter(|l| l.native.0 != 0 || l.native.2.contains("Error:"))
+        .count();
+
+    let fail_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_fail");
+    let fail_count = std::fs::read_dir(&fail_dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
+                .count()
+        })
+        .unwrap_or(0);
+
+    let num = cross_failing + fail_count;
+    let den = cross_total + fail_count;
+    eprintln!(
+        "failure_side_floor: {num}/{den} failure-side (wasm_cross {cross_failing}/{cross_total} + wasm_fail {fail_count}); floor {FAILURE_FLOOR_NUM}/{FAILURE_FLOOR_DEN}"
+    );
+    assert!(
+        num * FAILURE_FLOOR_DEN >= FAILURE_FLOOR_NUM * den,
+        "the failure-side share of the corpus fell below the floor: \
+         {num}/{den} < {FAILURE_FLOOR_NUM}/{FAILURE_FLOOR_DEN}. The corpus grew \
+         without its failure side growing — add the error-path fixture the new \
+         work implies (spec/wasm_fail/, or an erring wasm_cross cell), or this \
+         decays back to the 9.8% that hid #1400/#1408/#1410."
+    );
+}
+
+// ── Stage 3 (#1411): the declared failure ledger for wasm_cross ──
+//
+// The 2026-08-14 audit's finding was the OPPOSITE of the plan's premise: the
+// 41 error-reaching wasm_cross fixtures are not incidental — every one is a
+// deliberate failure test by name and by assertion (assert_abort_*,
+// int_div_by_zero, index_bounds*, option_none_unwrap_term, ...), and the
+// wasm_cross equality gate already holds them to "both legs break alike".
+// They were NOT moved to wasm_fail/: 41 files of contract-evidence path churn
+// to re-gain a property they already have.
+//
+// What they lacked is VACUITY detection — the C-216 class. wasm_cross passes
+// when both legs agree, including agreeing to SUCCEED: a change that makes
+// int_div_by_zero stop erroring on both legs would go green silently, and the
+// fixture would keep its name while testing nothing. This ledger closes that:
+// every fixture listed here must still FAIL on the native reference. One that
+// stops failing is flagged — either the intent changed (remove the row, a
+// reviewed shrink, same discipline as GENUINE_SKIPS in the wasm:skip ledger)
+// or a vacuity crept in (fix the fixture).
+//
+// A NEW error-path fixture in wasm_cross does not need a row (growth is free;
+// the floor above applies the pressure); this list only pins the ones whose
+// failure is load-bearing today.
+const WASM_CROSS_DECLARED_FAILING: &[&str] = &[
+    "assert_abort_eq",
+    "assert_abort_msg",
+    "assert_abort_multiline",
+    "assert_abort_ne",
+    "bytes_new_exhaustion",
+    "effect_fn_value",
+    "fan_any_allfail",
+    "fan_block_err_list_order",
+    "fan_map_err",
+    "fan_map_inline_err",
+    "fan_race_mapper",
+    "fan_sibling_trap",
+    "float_clamp_invalid",
+    "fuel_trap_window",
+    "guard_else_exit_code",
+    "index_bounds",
+    "index_bounds_i64",
+    "index_bounds_write_heap",
+    "index_bounds_write_only_var",
+    "int8_div_overflow",
+    "int_clamp_inverted",
+    "int_div_by_zero",
+    "int_div_by_zero_literal",
+    "int_div_overflow",
+    "int_mod_by_zero",
+    "int_mod_overflow",
+    "int_pow_negative_exponent",
+    "int_rotate_nonpositive_width",
+    "list_chunk_zero",
+    "list_window_zero",
+    "list_windows_zero",
+    "matrix_dims_guard_overflow",
+    "matrix_dims_guard_rows",
+    "option_none_unwrap_term",
+    "repeat_size_ceiling",
+    "time_negative_scale",
+    "time_negative_trap",
+    "to_fixed_domain_abort",
+    "to_fixed_domain_abort_hi",
+    "top_let_div_eager",
+    "top_let_div_used",
+];
+
+#[test]
+fn declared_failing_fixtures_still_fail() {
+    let Some(legs) = corpus() else { return };
+    let by_name: std::collections::HashMap<&str, &FixtureLegs> =
+        legs.iter().map(|l| (l.name.as_str(), l)).collect();
+    let mut problems: Vec<String> = Vec::new();
+    for name in WASM_CROSS_DECLARED_FAILING {
+        match by_name.get(name) {
+            None => problems.push(format!(
+                "{name}: listed as a declared-failing fixture but absent from spec/wasm_cross \
+                 — remove the row with the file, the ledger only shrinks deliberately"
+            )),
+            Some(l) => {
+                let fails = l.native.0 != 0 || l.native.2.contains("Error:");
+                if !fails {
+                    problems.push(format!(
+                        "{name}: declared failing but the native leg now SUCCEEDS \
+                         (exit={} stderr={:?}) — the fixture went vacuous (the C-216 class). \
+                         Restore the failing input, or remove the row as a reviewed change of intent.",
+                        l.native.0, l.native.2
+                    ));
+                }
+            }
+        }
+    }
+    eprintln!(
+        "declared_failing_fixtures_still_fail: {}/{} still failing",
+        WASM_CROSS_DECLARED_FAILING.len() - problems.len(),
+        WASM_CROSS_DECLARED_FAILING.len()
+    );
+    assert!(problems.is_empty(), "\n{}", problems.join("\n\n"));
+}
