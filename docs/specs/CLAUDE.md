@@ -25,4 +25,5 @@
 | `codegen.md` | コード生成: Nanopass pipeline, テンプレート, Rust/WASM 出力, モジュール命名 |
 | `cli.md` | CLI: 全コマンド, オプション, エラーコード, Legacy Mode |
 | `module-system.md` | モジュール: import, サブモジュール, ダイヤモンド依存, 可視性, @extern |
+| `edit-locality.md` | 編集局所性: L1–L3 不変条件, 施行マップ, 反例狩り (2026-08-15), 側条件, 機能ゲート |
 | `package-system.md` | パッケージ: 依存管理, MVS, バージョン共存, モジュール境界 |
