@@ -133,3 +133,67 @@ fn no_self_hosted_body_divides_by_a_raw_head_count() {
         offenders.join("\n  ")
     );
 }
+
+/// #1419 (C-278): the head GEOMETRY rule — the same family, one column over.
+/// C-198 fixed the head COUNT domain and every fixture then used exact
+/// geometry, so `n_heads * head_dim` vs `cols` stayed an unexecuted polarity:
+/// exceeding it was a raw slice panic natively and an OOB memory trap on wasm
+/// (fuzz seed 508666777783 index 2120). The rule lives in ONE shared helper
+/// per leg, and this gate keeps every rope entry routed through it.
+#[test]
+fn the_native_geometry_helper_aborts_and_every_rope_entry_routes_through_it() {
+    let src = read("runtime/rs/src/matrix.rs");
+    let start = src
+        .find("pub fn almide_rt_matrix_head_geometry")
+        .expect("almide_rt_matrix_head_geometry is missing — the rope family has no shared geometry rule");
+    let body = &src[start..start + 600.min(src.len() - start)];
+    assert!(
+        body.contains("Error: head geometry exceeds row width") && body.contains("exit(1)"),
+        "the geometry helper must raise the unified `Error: <msg>` + exit 1 so both targets \
+         print the SAME line: {body}"
+    );
+    assert!(
+        body.contains("cols / head_dim_u"),
+        "the geometry check must use the DIVISION form — a multiplied `n_heads * head_dim` \
+         overflows on a huge head count, which is the same class of defeated guard as #1408: {body}"
+    );
+
+    // Every native rope impl (the fns that take BOTH n_heads and head_dim and
+    // index `head_start + …` into the row) must call the helper.
+    let p2 = read("runtime/rs/src/matrix_p2.rs");
+    for entry in ["almide_rt_matrix_rope_rotate_at", "almide_rt_matrix_rope_rotate_neox_at"] {
+        let s = p2
+            .find(&format!("pub fn {entry}"))
+            .unwrap_or_else(|| panic!("{entry} is missing from matrix_p2.rs"));
+        let window = &p2[s..(s + 1200).min(p2.len())];
+        assert!(
+            window.contains("almide_rt_matrix_head_geometry("),
+            "{entry} does not route through almide_rt_matrix_head_geometry — the geometry \
+             rule grew a point-wise exception, which is how the head-count family got three \
+             answers (Wave 5 R2)"
+        );
+    }
+}
+
+/// The self-hosted (wasm) side carries the same geometry rule with the same message.
+#[test]
+fn the_self_hosted_geometry_guard_matches_the_native_message() {
+    for path in SELF_HOSTED_SRCS {
+        let src = read(path);
+        assert!(
+            src.contains("fn __mx_head_geometry"),
+            "{path} has no `__mx_head_geometry` — the wasm rope body would write past the \
+             row block (an OOB memory trap) where native aborts"
+        );
+        assert!(
+            src.contains("Error: head geometry exceeds row width"),
+            "{path}'s geometry guard must print the SAME line as the native helper, or the \
+             abort itself diverges across targets"
+        );
+        assert!(
+            src.contains("__mx_head_geometry(__mx_head_count("),
+            "{path}'s rope body must route through BOTH guards (count, then geometry) — \
+             composing them is what keeps the two domains one rule each"
+        );
+    }
+}
