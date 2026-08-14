@@ -63,36 +63,12 @@ made checkable.
 ## 3. Where it breaks today (hunt of 2026-08-15)
 
 Every finding below is a fact about the current compiler, with the
-mechanism cited. Triage: **V** = language/compiler bug, L1 must hold, fix
-it; **R** = backend refinement obligation (Stage 3 of the roadmap); **S** =
-side condition, declared in §4 instead of fixed.
-
-### V1 — FIXED (#1424): LICM speculatively executed body-inferred-"pure" partial ops
-
-Was a live cross-target divergence on 0.57.0 (native trapped, wasm printed —
-the hunt's day-one catch). The speculation-safety rule is now a §2 row; the
-repro is pinned as `spec/wasm_cross/licm_zero_trip_hoist.almd` (C-279).
-
-### V2 — FIXED (#1425): checker and lowering disagreed on local `fn` vs selective import
-
-The checker resolved a bare call against the local `fn` first, lowering
-resolved the selective import first — a call type-checked against one
-function and executed the other. The collision is now hard error E050 at
-import-table build time, so neither resolver can see the split; a §2 row
-records the rule. Tests: `tests/selective_import_collision_test.rs`,
-`spec/lang/selective_import_test.almd` (accepted forms unchanged).
-
-### V3 — FIXED (#1426): constructor resolution was bare-name, first-registered-wins
-
-Three closures, recorded as a §2 row: qualified `mod.Ctor` now resolves
-inside `mod` alone (`lookup_ctor_owned`, all four checker/lowering sites);
-lowering's bare-name payload lookups mirror the checker's owned-first
-choice (`lookup_ctor_in`); and a second type in the same module declaring
-an existing case name is hard error E019 at registration. The
-own-module-wins rule for bare names (#413) is unchanged — it is edit-local
-by construction. Tests: `tests/ctor_ambiguity_test.rs`,
-`spec/integration/modules/qualified_ctor_test.almd` (fails to compile on
-0.57.0, green on the fix).
+mechanism cited. Triage: **V** = language/compiler bug, L1 must hold —
+**all three V findings of the 2026-08-15 hunt are fixed and promoted to §2
+rows** (#1424 LICM speculation, #1425 selective-import collision, #1426
+constructor owner-scoping; this count may only stay at zero); **R** =
+backend refinement obligation (Stage 3 of the roadmap); **S** = side
+condition, declared in §4 instead of fixed.
 
 ### R — Backend refinement obligations
 
