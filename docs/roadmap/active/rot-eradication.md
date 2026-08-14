@@ -95,6 +95,26 @@ line-ceiling policy can count per-module instead of per-file) or a workspace
 rust-analyzer config acknowledging the splice roots.** Tooling decision, low
 risk, high review-bandwidth payoff.
 
+## Landed (2026-08-15, the night of the constitution)
+
+- **R1 COMPLETE** — #1418 closed. The route zoo is DELETED (+148/−1054): match
+  machinery is the only `??` path; the admission gate, operand resolvers,
+  counter credits, and the experiment pass are gone; three byte tests pin the
+  deletion. Readiness drove 25 → 0 via `speculate`, typed seeding, subject-ANF
+  at both payload widths, and the merge-ownership convention. The closure and
+  fallible-carrier route BODIES moved inside the path as payload-class cases.
+- **R3 first half** — the wrong-code acceptance is closed (the value-position
+  scalar match DECLINES propagating arms; every known producer rides the
+  `(match …)!` statement rewrite, now covering both payload classes). The
+  join-point lowering that would ACCEPT those arms in value position remains
+  #1421's body of work.
+- **R2 seed-once milestone** — `seed_variant_value_shape` is the single typed
+  entry for variant read-shape + drop-route seeding across all positions; the
+  per-position drift class is closed. The shape-at-birth endgame remains.
+- **R6 symptom noted** — the readiness probe's blind spot (unit tests and
+  spec/lang live outside the wasm_cross corpus) compounded the wall-vs-panic
+  reporting confusion; both go together when R6 is picked up.
+
 ## Order and gates
 
 R3 → R1 (R3 unblocks the last scalar fallback; R1's migration then empties
