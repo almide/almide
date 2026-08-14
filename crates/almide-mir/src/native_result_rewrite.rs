@@ -13,6 +13,10 @@
 //!                         Store8(H+12, p) → Store4(H+4, 0)
 //!   producer Err(str):    Alloc S Str(..) → ConstInt 1 → Alloc R DynListStr →
 //!                         Handle H → Handle SH(S) → Store8(H+12, SH)
+//!                         (or, since result-family-from-type Phase 1, the
+//!                         TAGGED form: … → TG = SH + (1 << 32) →
+//!                         Store8(H+12, TG) — the @16 Err tag riding the
+//!                         payload slot's high half; TG aliases SH here)
 //!   consumer tag:         Handle H(r) → Load4(H+4)
 //!   consumer ok payload:  Load8(H+12)
 //!   consumer err payload: LoadHandle(H+12)
@@ -221,6 +225,18 @@ impl ResultWindowTracker {
         } else if let (Some(r), Some(o)) = (self.res_handles.get(&a).copied(), off) {
             self.res_addrs.insert(dst, (r, o));
         } else {
+            // The TAGGED err payload (`materialize_result_err_str`,
+            // result-family-from-type Phase 1): `SH + (1 << 32)` packs the @16
+            // Err tag into the high half of the payload's own 8-byte slot
+            // store. The tagged value is STILL a handle to the same owned
+            // Str — alias it so the following Store8 completes the Err window
+            // exactly as the untagged form always has (the native carrier
+            // encodes err-ness structurally, so the tag bits are dead material
+            // the completion sweep removes). Emitted like the SH it derives
+            // from, so an abandoned window stays well-defined.
+            if let (Some(s), Some(4294967296)) = (self.str_handles.get(&a).copied(), off) {
+                self.str_handles.insert(dst, s);
+            }
             out.push(op);
         }
     }

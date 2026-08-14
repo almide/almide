@@ -56,6 +56,52 @@ impl LowerCtx {
         obj
     }
 
+    /// `err(<heap message/payload>)` for a SCALAR-or-Unit-Ok Result (`Result[Int, String]`,
+    /// `Result[Unit, String]`, the variant-err classes) — the len-as-tag Err block
+    /// (len@4 = 1, payload handle @12) that `materialize_opt_str_some` has always built
+    /// ("Err IS Some physically"), PLUS the Ok/Err tag at @16 (result-family-from-type
+    /// Phase 1): the 8-byte payload store zero-extends the handle so @16 was always 0;
+    /// writing 1 there makes the block SUPERSET-compatible — len-as-tag readers still
+    /// read len@4 (unchanged), and cap-as-tag readers (@16) now read Err correctly. The
+    /// scalar-Ok twin (`materialize_result_ok`) already leaves @16 = 0 for a Unit Ok
+    /// (payload 0), so after this fn the ctor-built `Result[Unit, String]` blocks are
+    /// BYTE-IDENTICAL to the prim-render family ($write_text_file: Ok len0/@12=0/tag0,
+    /// Err len1/@12=msg/tag1) — the one type-to-layout collision in the system, gone.
+    /// Cert: identical to `materialize_opt_str_some` (Alloc `i` + payload move-in `m`);
+    /// the tag store is an opaque prim op the checker ignores. Tracking: Result-only
+    /// (`materialized_results` + `heap_elem_lists` — the flat DropListStr frees the @12
+    /// message on Err, nothing on a len-0 Ok; NEVER `materialized_options`, the
+    /// binds_p4_b_b.rs:116 both-flags bug class).
+    pub(crate) fn materialize_result_err_str(&mut self, piece: ValueId, repr: crate::Repr) -> ValueId {
+        use crate::PrimKind;
+        // The tag rides the SAME 8-byte slot-0 store as the payload: low 32 bits = the
+        // handle, high 32 bits (@16) = the Err tag 1. One `Store { width: 8 }` — the op
+        // `materialize_opt_str_some` has always used — instead of a separate 4-byte tag
+        // store, because the METERED native rung lane (fan.bounded/fan.race) certifies a
+        // restricted op vocabulary that admits the 8-byte slot store but not a bare
+        // `Store { width: 4 }` (the fuel fixtures walled on exactly that op when this fn
+        // first landed as a post-hoc tag write).
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        let addr = self.const_add(oh, 12);
+        let ph = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![piece] });
+        let tagbits = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tagbits, value: 1i64 << 32 });
+        let tagged = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: tagged, op: IntOp::Add, a: ph, b: tagbits });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, tagged] });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        self.heap_elem_lists.insert(obj);
+        self.materialized_results.insert(obj);
+        obj
+    }
+
     /// `Some(<record>)` — an `Option[heap-record]` as a 1-element list holding the record handle @12
     /// (`some({key, val})` — porta find_eq_pos). SAME block as `materialize_opt_str_some` (the record
     /// is MOVED in at slot 0), but the Option's drop must RECURSIVELY free the record's nested heap

@@ -459,11 +459,12 @@ impl LowerCtx {
         // WITHIN this arm; the final message `piece` is MOVED into the Err block (not dropped).
         let arm_mark = self.live_heap_handles.len();
         let piece = self.lower_result_err_message_piece(expr)?;
-        // `Err` IS `Some(message)` physically (cap-1/len-1 DynListStr owning the String):
-        // `piece` is MOVED into slot 0 (removed from live_heap_handles), so the per-arm
-        // teardown frees only the interpolation's intermediates, never the moved-in message.
+        // `Err` IS `Some(message)` physically (cap-1/len-1 DynListStr owning the String)
+        // — plus the @16 Ok/Err tag (`materialize_result_err_str`, result-family-from-type
+        // Phase 1). `piece` is MOVED into slot 0 (removed from live_heap_handles), so the
+        // per-arm teardown frees only the interpolation's intermediates, never the message.
         self.live_heap_handles.retain(|h| *h != piece);
-        let obj = self.materialize_opt_str_some(piece, repr);
+        let obj = self.materialize_result_err_str(piece, repr);
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)
