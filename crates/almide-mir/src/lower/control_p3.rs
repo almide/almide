@@ -38,12 +38,27 @@ struct SpecSnapshot {
 }
 
 impl LowerCtx {
-    /// Seed a value's VARIANT read shape from its TYPE — law 4 of the
-    /// rot-eradication constitution (the type IS the per-value knowledge):
-    /// an Option merge/temp reads len-as-tag with a heap-payload refinement;
-    /// a Result routes by `result_family`. Used by the `??` match-first paths
-    /// for their merge dsts and ANF'd subjects; the #1414 endgame turns this
-    /// into the shape attached at `fresh_value` time.
+    /// Seed a value's VARIANT read shape AND drop route from its TYPE — law 4
+    /// of the rot-eradication constitution (the type IS the per-value
+    /// knowledge), the #1414 seed-once entry point: the ONE function every
+    /// position (bind, statement-subject, `??` merge, ANF temp) consults, so
+    /// the read-shape/drop refinements can never drift apart per position
+    /// again (the bind path's missing `list_str_result_results` arm leaked
+    /// element Strings for exactly that reason). The refinement set is the
+    /// UNION of what the positions historically seeded, all type-keyed:
+    ///
+    /// - Option: len-as-tag read; a heap payload also opens the heap-bind gate
+    ///   and routes the flat elementwise drop (`heap_elem_lists`).
+    /// - Result (Scalar family): len-as-tag read; a HEAP Err payload also
+    ///   opens the Err-bind gate + flat drop (the Camp-4 sub-case).
+    /// - Result (HeapOk family): cap-as-tag read (@16) plus the payload-class
+    ///   drop route — `List[Value]` recursive (`value_result_lists`), `Value`
+    ///   recursive (`value_result_results`), `List[String]` recursive
+    ///   (`list_str_result_results`), the fold-msi tag-aware routes, else the
+    ///   flat `heap_elem_lists`.
+    ///
+    /// The #1414 endgame turns this into the shape attached at `fresh_value`
+    /// time; until then this is the single insertion point.
     pub(crate) fn seed_variant_value_shape(&mut self, v: ValueId, ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId as TC;
         match ty {
@@ -53,13 +68,38 @@ impl LowerCtx {
                     self.heap_elem_lists.insert(v);
                 }
             }
-            Ty::Applied(TC::Result, _) => match crate::lower::result_family(ty) {
+            Ty::Applied(TC::Result, a) => match crate::lower::result_family(ty) {
                 crate::lower::ResultFamily::Scalar => {
                     self.materialized_results.insert(v);
+                    // Camp-4: scalar-Ok / HEAP-Err — the Err arm's payload bind
+                    // gate + the flat drop (Ok=len0 frees nothing, Err=len1
+                    // frees the slot-0 String).
+                    if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                        self.heap_elem_lists.insert(v);
+                    }
                 }
                 crate::lower::ResultFamily::HeapOk => {
                     self.materialized_results_str.insert(v);
-                    self.heap_elem_lists.insert(v);
+                    if crate::lower::is_result_listval_ty(ty) {
+                        self.value_result_lists.insert(v);
+                    } else if crate::lower::is_value_result_ty(ty) {
+                        self.value_result_results.insert(v);
+                    } else if crate::lower::is_list_str_result_ty(ty) {
+                        self.list_str_result_results.insert(v);
+                        self.heap_elem_lists.insert(v);
+                    } else if crate::lower::is_res_map_si_ty(ty)
+                        || crate::lower::is_res_list_map_si_ty(ty)
+                    {
+                        let route = if crate::lower::is_res_map_si_ty(ty) {
+                            "res_msi"
+                        } else {
+                            "res_lmsi"
+                        };
+                        self.variant_drop_handles.insert(v, route.to_string());
+                        self.heap_elem_lists.insert(v);
+                    } else {
+                        self.heap_elem_lists.insert(v);
+                    }
                 }
             },
             _ => {}

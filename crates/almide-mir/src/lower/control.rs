@@ -321,42 +321,14 @@ impl LowerCtx {
     /// Extracted from `Self::seed_match_subject_read_shape` (second-round split, cog
     /// reduction): the self-host Result-call subject blocks, verbatim.
     fn seed_match_subject_result_call_shape(&mut self, subject: &IrExpr, v: ValueId) {
-        if is_self_host_result_call(subject) {
-            self.materialized_results.insert(v);
-        }
-        // A self-host HEAP-Ok Result call (result.zip → Result[(Int,Int), String]) — track
-        // it in the cap-as-tag set (so the match reads tag @16 + binds the @12 payload
-        // handle) AND, since it owns a heap payload (the Err String / the Ok tuple), in
-        // heap_elem_lists (so the heap-payload bind gates open AND the scope-end drop is
-        // the recursive DropListStr). Without it the match linearizes → garbage.
-        if is_self_host_result_str_call(subject) {
-            self.materialized_results_str.insert(v);
-            if crate::lower::is_result_listval_ty(&subject.ty) {
-                self.value_result_lists.insert(v);
-            } else if crate::lower::is_list_str_result_ty(&subject.ty) {
-                // `Result[List[String], String]` (fs.list_dir) — the Ok payload is a
-                // List[String]; route the scope-end drop to the RECURSIVE DropResultListStr
-                // (frees each element String + the list block), NOT the flat DropListStr
-                // (heap_elem_lists) which would leak them.
-                self.list_str_result_results.insert(v);
-            } else if crate::lower::is_res_map_si_ty(&subject.ty)
-                || crate::lower::is_res_list_map_si_ty(&subject.ty)
-            {
-                // `Result[Map[String, <scalar>], String]` / the chunked List-of-maps
-                // sibling (fs.fold_lines msi): the TAG-AWARE `$__drop_res_msi` /
-                // `$__drop_res_lmsi` (Ok → the skv key sweep). `heap_elem_lists`
-                // ALSO inserted so the heap-payload bind gates open (the map.find
-                // dual-insert precedent); `variant_drop_handles` wins the drop.
-                let route = if crate::lower::is_res_map_si_ty(&subject.ty) {
-                    "res_msi"
-                } else {
-                    "res_lmsi"
-                };
-                self.variant_drop_handles.insert(v, route.to_string());
-                self.heap_elem_lists.insert(v);
-            } else if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(v);
-            }
+        // #1414 seed-once: the read shape AND drop route come from the ONE
+        // type-keyed entry point (`seed_variant_value_shape`) — the same
+        // function the bind path and the `??` merge/ANF paths consult, so the
+        // per-position refinement drift class (the bind-side list-payload
+        // leak) is structurally closed. The name check still gates WHETHER
+        // the call's result is a real materialized block.
+        if is_self_host_result_call(subject) || is_self_host_result_str_call(subject) {
+            self.seed_variant_value_shape(v, &subject.ty);
         }
     }
 
