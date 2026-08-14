@@ -21,9 +21,14 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("value", "as_int")
             | ("value", "as_bool")
             | ("value", "as_float")
-            // fan.any_map (T2-3) builds its Result[scalar, String] through the
-            // ordinary ok()/err() ctor rails of the fan_any self-host — a
-            // `match`/`??`/auto-unwrap over the bound result EXECUTES.
+            // fan.any_map (T2-3) builds its Result[T, String] through the ordinary
+            // ok()/err() ctor rails of the fan_any self-host — a `match`/`??`/
+            // auto-unwrap over the bound result EXECUTES. NOTE (#1406): this row
+            // covers ALL NINE 3×3 pairings — the classify sites see the PRE-routing
+            // name (`fan_any_call_name` suffixes at emit, later) — so this row means
+            // only "the result is materialized"; WHICH family (scalar len-as-tag vs
+            // heap-Ok cap-as-tag for the String-output pairings) is decided by the
+            // RESULT TYPE at the call sites via `is_fan_any_map` + `is_heap_ok_result`.
             | ("fan", "any_map")
             // `fs.file_size` / `fs.modified_at` build their Result[Int, String]
             // through the ordinary ok()/err() ctors over the path_filestat scratch
@@ -48,6 +53,21 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("fs", "write_bytes")
             | ("fs", "write_bytes_raw")
     )
+}
+
+/// #1406: is this call the fan MAPPER `fan.any_map` (any of its nine 3×3
+/// pairings)? The classify sites (bind + match-subject) see the PRE-routing
+/// name — `fan_any_call_name` picks the suffixed self-host (`any_map_ss`, …)
+/// later, at emit — so the scalar-vs-heap-Ok FAMILY cannot be split by name
+/// there: `("fan", "any_map")` is all nine pairings. The split is the RESULT
+/// TYPE: a String-output pairing returns `Result[String, String]`
+/// (`is_heap_ok_result` — the cap-as-tag ctor layout, fs.read_text's shape),
+/// a scalar-output pairing returns `Result[Int|Float, String]` (len-as-tag,
+/// int.parse/float.parse's shape). The name row says only "this result is
+/// materialized"; the type says WHICH layout — the reference-compiler
+/// separation (rustc/Roc): names choose code, types choose layout.
+pub(crate) fn is_fan_any_map(module: &str, func: &str) -> bool {
+    module == "fan" && crate::lower::base_stdlib_fn_name(func) == "any_map"
 }
 
 /// Does `module.func` return a materialized HEAP-Ok `Result[String, String]` (the cap-as-tag
@@ -158,6 +178,12 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // builds it with the ordinary `ok(acc)`/`err(e)` ctors — a heap-Ok Result in the exact
             // `materialize_result_str` layout, like `fs.list_dir`'s `Result[List[String], String]`).
             // So a `match`/`!` over it reads tag @16 + binds the @12 payload list handle.
+            // `fan.map` covers ALL NINE 3×3 pairings (the classify sites see the
+            // PRE-routing name; `fan_map_call_name` suffixes at emit) — every
+            // pairing returns Result[List[T], String], a heap-Ok LIST payload in
+            // the same ok()/err() ctor cap-as-tag layout, so one row is exact.
+            // The `map_is`/`map_ss`/`map_si` rows below are kept for the
+            // mono-suffixed direct forms that reach a classify site post-routing.
             | ("fan", "map")
             | ("fan", "map_is")
             | ("fan", "map_ss")

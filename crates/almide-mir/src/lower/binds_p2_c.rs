@@ -157,9 +157,15 @@ impl LowerCtx {
         if matches!(ty, Ty::Fn { .. }) {
             self.closure_values.insert(dst);
         }
+        // #1406: `fan.any_map`'s one name row covers all nine 3×3 pairings (the
+        // bind site sees the PRE-routing name), so the scalar-vs-heap-Ok family
+        // is TYPE-split here: a String-output pairing (`Result[String, String]`)
+        // takes the str block below, not the scalar one.
+        let fan_any_heap_ok =
+            crate::lower::is_fan_any_map(module, func) && Self::is_heap_ok_result(ty);
         // A self-host Result fn (`int.parse`) returns a real materialized Result — track it
         // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
-        if is_self_host_result_module_fn(module, func) {
+        if is_self_host_result_module_fn(module, func) && !fan_any_heap_ok {
             self.materialized_results.insert(dst);
             // A VARIANT-Err payload (`option.to_result(o, Missing("cfg"))` →
             // `Result[Int, LoadError]`, #1114's typed-error route): route the drop —
@@ -189,7 +195,7 @@ impl LowerCtx {
         // cap-as-tag set so a `match` reads tag @16 + binds the @12 payload. The DROP differs
         // by Ok-arm: a `List[Value]` Ok (`value.as_array`) frees recursively
         // (`value_result_lists` → `DropResultListValue`), else a String Ok flat (`DropListStr`).
-        if crate::lower::is_self_host_result_str_module_fn(module, func) {
+        if crate::lower::is_self_host_result_str_module_fn(module, func) || fan_any_heap_ok {
             self.materialized_results_str.insert(dst);
             if crate::lower::is_result_listval_ty(ty) {
                 self.value_result_lists.insert(dst);
