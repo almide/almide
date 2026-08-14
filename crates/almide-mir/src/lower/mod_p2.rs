@@ -166,7 +166,38 @@ fn has_result_err(body: &IrExpr) -> bool {
     }
     let mut v = V(false);
     v.visit_expr(body);
-    v.0
+    v.0 || returns_foreign_result(body)
+}
+
+/// The PASSTHROUGH seed (#1406): a fn whose RETURN position is a non-`Named`
+/// call typed `Result[..]` — `effect fn helper(p) = fs.read_text(p)`, or the
+/// lifted lambda `(p) => fs.read_text(p)` — CAN err (the callee's Err flows out
+/// verbatim), yet it builds no `ResultErr` node and carries no `!`/`?`, so
+/// neither of `has_result_err`'s walks sees it. Classified never-err it takes
+/// the raw-payload ABI, which is consistent for direct calls (both sides read
+/// the same table) but breaks the mapper FUNCREF contract — the callback must
+/// return the uniform Result carrier — and the mapper result lands untracked
+/// (the case-D wall: capability-bearing callback, `fan.any(xs, (p) =>
+/// helper(p))`). TAIL positions only: a Module-Result call CONSUMED inside the
+/// body (matched, `??`-defaulted) does not make the fn can-err, and widening
+/// this to every node would flip the ABI of most of the corpus for nothing.
+/// `Named` tail calls stay out — the `compute_can_err` fixpoint tracks them
+/// precisely through `unwrap_named_callees`.
+fn returns_foreign_result(body: &IrExpr) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn tail(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Call { target, .. } => {
+                !matches!(target, CallTarget::Named { .. })
+                    && matches!(&e.ty, Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2)
+            }
+            IrExprKind::Block { expr: Some(t), .. } => tail(t),
+            IrExprKind::If { then, else_, .. } => tail(then) || tail(else_),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| tail(&a.body)),
+            _ => false,
+        }
+    }
+    tail(body)
 }
 
 fn unwrap_named_callees(body: &IrExpr) -> std::collections::HashSet<String> {
