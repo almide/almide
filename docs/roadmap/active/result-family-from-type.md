@@ -108,12 +108,33 @@ Result-returning fn and asserts the classify sites and `result_family` agree —
 the matrix-gate discipline: a gated matrix cannot drift.
 
 ### Phase 4 — seed once (Stage-C direction) + close
-One `seed_result_read_shape(dst, ty)` entry point used by every site that
-tracks a materialized Result (bind / subject / prim), so the knowledge lives in
-one function. File the full per-value-repr design (Roc's `Local { layout_idx }`
-— makes "untracked" unrepresentable) as its own issue with this doc's survey
-as evidence; it is gated on Phases 1–3 and NOT part of this arc. Update
+The per-value-repr design (Roc's `Local { layout_idx }` — makes "untracked"
+unrepresentable), WITH the seed-once entry point as its first step, is filed as
+#1414 — it is the natural continuation, not part of this arc: the set-insertion
+mechanics it unifies are drop-routing code where a no-behavior-change refactor
+still carries real risk, and the decision logic this arc set out to centralize
+(`result_family` + the merged set) already IS the single point. Update
 ARCHITECTURE.md; move this doc to done/ with the measured deltas.
+
+## Landed state (2026-08-14)
+
+- Phase 0: cd0d01820..f837fa0a5 (can-err seed, type-split, C-004 fixture, this doc).
+- Phase 1: `materialize_result_err_str` (@16 tag on ctor Result-err blocks —
+  superset-compatible: len readers unchanged), the five ctor-built
+  `Result[Unit, String]` fns moved to the str family; `is_result_unit_str_ty`
+  admitted on the `??` scalar route. `Result[Unit, String]` now has ONE layout.
+- Phase 2: `result_family(ty)` + `is_self_host_materialized_result_fn` (merged
+  set); tracked_calls.rs / binds_p2_c.rs / control_p2_b.rs consult them; the
+  #1406 `is_fan_any_map` special case and the control_p2_b heap-ok escape
+  hatch dissolved into the general rule.
+- Phase 3 (first slice): three gate tests in
+  crates/almide-mir/src/lower/tests_result_family.rs pin the family function's
+  totality, the nine-pairings-one-name split, and the name-mangling incident
+  classes (C-145, #1144). Full registry-derivation of the merged set remains
+  this arc's open tail — do it when the registry grows a declared-return-type
+  column; until then the merged set is two storage tables with no family
+  meaning.
+- Stage C: #1414.
 
 ## Non-goals
 
