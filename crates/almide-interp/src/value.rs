@@ -377,7 +377,12 @@ impl Value {
                 repr_seq("[", "]", &items)
             }
             Value::Tuple(xs) => repr_seq("(", ")", xs),
-            Value::Set(xs) => repr_seq("[", "]", xs),
+            // Set: the CONSTRUCTOR form `set.from_list([...])`, empty included
+            // (runtime/rs/src/set.rs:108 — element order = insertion order).
+            // The bare `[...]` this arm previously produced was unobservable
+            // until the `set.new`/`set.from_list` glue made Set-repr fixtures
+            // evaluate, and the 3-way harness caught the dissent (#1416 PR).
+            Value::Set(xs) => repr_seq("set.from_list([", "])", xs),
             Value::Map(entries) => {
                 // Map: `["k": v]` insertion order (runtime/rs/src/map.rs:74),
                 // empty map `[:]`.
