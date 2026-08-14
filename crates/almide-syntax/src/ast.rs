@@ -425,6 +425,31 @@ pub enum TestWhere {
     Case { name: String, bindings: Vec<TestWhere> },
 }
 
+/// Comments attached to one EXPRESSION (#1404 / #1326).
+///
+/// The attachment rule, ruled 2026-08-14: **a comment binds to the node it is
+/// adjacent to, on the side it was written**.
+///
+/// ```text
+/// foo(/* why */ a, b)      // LEADING on `a`  — travels with `a` if it moves
+/// f(1 /* x */, 2)          // TRAILING on `1` — does NOT cross the comma
+/// let y = 1 + // why
+///   2                      // TRAILING on `1` — the operand it follows
+/// ```
+///
+/// The leading half is the ruling as asked; the trailing half is its mirror,
+/// because taking "attach to the FOLLOWING node" literally would move
+/// `/* x */` across the comma and onto `2`, annotating a value its author
+/// never wrote it against. rustfmt and prettier bind the same way.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExprComments {
+    /// Written before the node, on the same line.
+    pub leading: Vec<String>,
+    /// Written after the node — an inline `/* */` or an end-of-line `//` whose
+    /// expression continues on the next line.
+    pub trailing: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
     pub module: Option<Decl>,
@@ -446,6 +471,16 @@ pub struct Program {
     /// suppress cascading "undefined function" diagnostics from call sites.
     #[serde(skip)]
     pub failed_fn_names: std::collections::HashSet<String>,
+    /// #1404: comments bound to an EXPRESSION, keyed by `ExprId`.
+    ///
+    /// A SIDE TABLE rather than a field on `Expr`, deliberately: `Expr` is
+    /// constructed in hundreds of places across the parser and rebuilt by every
+    /// desugar, and a field would have to be threaded (and preserved) through
+    /// all of them — a comment silently dropped by one rebuild is exactly the
+    /// bug class the fmt conservation verifier exists to catch. Keyed by an id
+    /// the node already carries, nothing downstream has to know this exists.
+    #[serde(skip)]
+    pub expr_comments: std::collections::HashMap<ExprId, ExprComments>,
 }
 
 // ── Generic AST visitor ──

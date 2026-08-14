@@ -393,6 +393,7 @@ fn empty_program() -> crate::ast::Program {
         module: None, imports: vec![], decls: vec![],
         comment_map: vec![], doc_map: vec![], blank_lines_map: vec![],
         failed_fn_names: std::collections::HashSet::new(),
+        expr_comments: Default::default(),
     }
 }
 

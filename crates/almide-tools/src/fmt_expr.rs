@@ -1,3 +1,53 @@
+thread_local! {
+    /// #1404: the expression-comment bindings for the program being formatted.
+    ///
+    /// A thread_local rather than a parameter because `fmt_expr` has ~70 call
+    /// sites across this file and `fmt.rs`, and threading a map through all of
+    /// them is exactly the kind of mechanical edit where ONE missed site drops
+    /// a comment silently — the failure this feature exists to prevent. Scoped
+    /// by `with_expr_comments` so it can never outlive one format run, and the
+    /// crate already uses this idiom (`bundled_borrow_at`'s per-fn cache).
+    static EXPR_COMMENTS: std::cell::RefCell<std::collections::HashMap<ExprId, ExprComments>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Run `f` with `map` installed as the active expression-comment table, then
+/// restore. Nested calls are not expected, but restoring rather than clearing
+/// keeps one format run from blanking another's table if they ever are.
+pub(crate) fn with_expr_comments<R>(map: &std::collections::HashMap<ExprId, ExprComments>, f: impl FnOnce() -> R) -> R {
+    let prev = EXPR_COMMENTS.with(|c| c.replace(map.clone()));
+    let r = f();
+    EXPR_COMMENTS.with(|c| *c.borrow_mut() = prev);
+    r
+}
+
+/// The comments bound to `id`, if any.
+fn comments_for(id: ExprId) -> Option<ExprComments> {
+    EXPR_COMMENTS.with(|c| c.borrow().get(&id).cloned())
+}
+
+fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
+    // #1404: a bound comment brackets its node's rendering, on the side it was
+    // written. Both go inline — a leading one before the node, a trailing one
+    // after — because that is where the author put them and fmt is
+    // idempotent-by-contract: re-reading this output must re-attach them to the
+    // same node.
+    let attached = comments_for(expr.id);
+    if let Some(a) = &attached {
+        for c in &a.leading {
+            out.push_str(c);
+            out.push(' ');
+        }
+    }
+    fmt_expr_inner(out, expr, depth);
+    if let Some(a) = &attached {
+        for c in &a.trailing {
+            out.push(' ');
+            out.push_str(c);
+        }
+    }
+}
+
 /// Render an expression.
 ///
 /// Split into five EXHAUSTIVE groups by shape — leaf, wrapper (a fixed prefix or
@@ -10,7 +60,7 @@
 /// it any other way (a wildcard `_` in each group) would have silently shrunk
 /// the formatter's coverage — the one thing this function must not do, since a
 /// missing arm means source that fmt drops.
-fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
+fn fmt_expr_inner(out: &mut String, expr: &Expr, depth: usize) {
     let handled = fmt_expr_leaf(out, expr)
         || fmt_expr_wrapper(out, expr, depth)
         || fmt_expr_infix(out, expr, depth)
