@@ -259,6 +259,7 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | [#1338](https://github.com/almide/almide/issues/1338) | 公開 FFT ベンチが最遅の生成形を使っており、自分の wall の 12% を codegen ではなく list append の計測に使っている | 0.5x | 公開値を動かす判断なので ○× 必要。推奨は(b)= 行を足して両方可視化 |
 | [#1350](https://github.com/almide/almide/issues/1350) | **BUG**: fan mapper のコールバックが「純粋と型付けされるが effect lambda を受理」— native は走り wasm は壁の三すくみ | 0.5x | fan 行列完備化(cd050b8ce)で発見。裁定は ○×(許可して wasm を追うか、純粋を強制するか) |
 | [#1390](https://github.com/almide/almide/issues/1390) | **BUG(観測)**: 同一ソースの2ビルドが異なる codegen を出した — 片方は不正 Rust(branch_lift synth の `?`)と重複 wasm export。hash順序依存の疑い、二重ビルド diff のトリップワイヤを提案 | **0.5x** | 決定性は契約台帳の土台。#1332(生成型ファザー)と同族の計測器仕事 |
+| [#1406](https://github.com/almide/almide/issues/1406) | wasm funcref-effect 経路 — fan mapper の effect コールバックを v1 spine で実行(#1350 裁定(a)の stage 2)。実測済みの壁は funcref ではなく materialized_results 追跡 | 0.5x | クロスターゲット対等性(decade テーマ)そのもの。#1350(stage 1、checker 正直化)の後続 |
 | [#1388](https://github.com/almide/almide/issues/1388) | `fan {}` の並列レコードリテラル化(named fields・field 単位 `!`・settle ブロック統合、serial elision 獲得)— 設計は ○× 済、実装は edition 単位 | **0.9x** | 破壊的変更なので仕様凍結(0.96)前・ALS 動的意味論章(0.94)と同アークで。実利用 2 箇所 |
 
 dojo 側: [almide-dojo#2](https://github.com/almide/almide-dojo/issues/2)(effect 宣言有無の MSR A/B — 文献に存在しない最初の数字)は repo 境界ルールにより Dojo 管轄。0.59 と #585(ポジションペーパー)に給餌する。
