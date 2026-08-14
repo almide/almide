@@ -1,0 +1,24 @@
+// @contract: C-279
+// ALS-E19 (docs/specs/als/expressions.md): a zero-trip `for` performs none of
+// its body's effects or traps — under optimization included. 0.57.0's LICM
+// classified trapping ops (indexing, integer division) as pure, hoisted them
+// above the loop, and aborted on native while wasm printed `ok: 0`
+// (almide#1424, V1 of the edit-locality hunt in docs/specs/edit-locality.md).
+// Speculation safety: only total, effect-free expressions may move. Both trap
+// classes are pinned: a call whose body indexes, and a direct non-literal
+// integer division.
+fn risky(xs: List[Int]) -> Int = xs[0] * 2
+
+fn div_by(n: Int, d: Int) -> Int = n / d
+
+effect fn main() -> Unit = {
+  let empty: List[Int] = []
+  let zero = 0
+  var acc = 0
+  for _x in empty {
+    acc = acc + risky(empty)
+    acc = acc + div_by(10, zero)
+    acc = acc + (10 / zero)
+  }
+  println("ok: ${acc}")
+}

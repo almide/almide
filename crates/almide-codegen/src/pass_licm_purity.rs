@@ -11,9 +11,29 @@ fn call_target_is_pure(target: &CallTarget, pure_fns: &HashSet<Sym>) -> bool {
     }
 }
 
-/// Returns true if the expression is pure (no function calls, no I/O, no mutation).
-/// Only pure expressions can be hoisted out of loops.
-/// Conservative: any function call makes the expression impure.
+/// May this BinOp trap at runtime? Integer division/modulo trap on a zero
+/// divisor and PowInt can overflow-panic; their float duals are total (IEEE
+/// inf/NaN, never a trap). A nonzero integer-literal divisor is statically
+/// safe. Comparison, boolean, concat and wrapping arithmetic ops are total.
+fn binop_may_trap(op: BinOp, right: &IrExpr) -> bool {
+    match op {
+        BinOp::DivInt | BinOp::ModInt => {
+            !matches!(&right.kind, IrExprKind::LitInt { value } if *value != 0)
+        }
+        BinOp::PowInt => true,
+        _ => false,
+    }
+}
+
+/// Returns true if the expression is SPECULATION-SAFE: no function calls with
+/// effects, no I/O, no mutation, AND no possibly-trapping operations. LICM
+/// hoisting executes the expression even on paths where the original site
+/// would never have run (a zero-trip loop), so a hoisted trap is a new
+/// observable behavior — the almide#1424 native/wasm divergence. Trapping
+/// shapes (index/map access, non-literal integer div/mod) are therefore
+/// impure here even though they have no side effects.
+/// Conservative: any function call to a non-speculation-safe target makes the
+/// expression impure.
 /// Grouped by CHILD SHAPE: apart from calls (which consult the pure-fn set)
 /// and the conservatively-impure tail, a node is pure exactly when all of its
 /// children are.
@@ -41,10 +61,10 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => pure(e),
 
         // ── Two children ──
-        IrExprKind::BinOp { left: a, right: b, .. }
-        | IrExprKind::UnwrapOr { expr: a, fallback: b }
-        | IrExprKind::IndexAccess { object: a, index: b }
-        | IrExprKind::MapAccess { object: a, key: b }
+        IrExprKind::BinOp { op, left: a, right: b } => {
+            !binop_may_trap(*op, b) && pure(a) && pure(b)
+        }
+        IrExprKind::UnwrapOr { expr: a, fallback: b }
         | IrExprKind::Range { start: a, end: b, .. } => pure(a) && pure(b),
 
         // ── A flat sequence of children ──
@@ -67,8 +87,12 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
             IrStringPart::Lit { .. } => true,
         }),
 
-        // Everything else: conservatively impure. Listed explicitly so a new
-        // IrExprKind is a compile error here, not a silently-impure default.
+        // Everything else: conservatively impure. IndexAccess/MapAccess sit
+        // here (not in the two-children arm) because they can trap — an
+        // out-of-bounds index hoisted above a zero-trip loop is a speculative
+        // abort the source never performs (almide#1424). Listed explicitly so
+        // a new IrExprKind is a compile error here, not a silently-impure
+        // default.
         IrExprKind::If { .. } | IrExprKind::Match { .. }
         | IrExprKind::Block { .. } | IrExprKind::Fan { .. }
         | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
@@ -76,6 +100,7 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         | IrExprKind::Lambda { .. } | IrExprKind::Try { .. }
         | IrExprKind::Unwrap { .. } | IrExprKind::ToOption { .. }
         | IrExprKind::OptionalChain { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::IterChain { .. } | IrExprKind::Todo { .. } => false,
@@ -237,8 +262,11 @@ fn has_mut_in_inline_rust(attrs: &[almide_lang::ast::Attribute]) -> bool {
 
 // ── User function purity analysis (fixpoint) ──────────────────
 
-/// Analyze all user functions and return the set of names that are pure.
-/// A function is pure if its body contains no impure operations.
+/// Analyze all user functions and return the set of names that are
+/// SPECULATION-SAFE: the body contains no impure operations AND no
+/// possibly-trapping operations (see [`is_pure`] — a hoisted call runs even
+/// when the loop is zero-trip, so a callee that can trap must not be hoisted;
+/// almide#1424).
 /// Uses fixpoint iteration: mark impure functions, propagate, repeat until stable.
 fn analyze_pure_functions(program: &IrProgram) -> HashSet<Sym> {
 
@@ -304,9 +332,10 @@ fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => pure(e),
 
         // ── Two children ──
-        IrExprKind::BinOp { left: a, right: b, .. }
-        | IrExprKind::UnwrapOr { expr: a, fallback: b }
-        | IrExprKind::IndexAccess { object: a, index: b }
+        IrExprKind::BinOp { op, left: a, right: b } => {
+            !binop_may_trap(*op, b) && pure(a) && pure(b)
+        }
+        IrExprKind::UnwrapOr { expr: a, fallback: b }
         | IrExprKind::Range { start: a, end: b, .. } => pure(a) && pure(b),
 
         // ── Three children ──
@@ -333,13 +362,16 @@ fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
             IrStringPart::Lit { .. } => true,
         }),
 
-        // ForIn, While, Fan, Await, etc. — conservatively impure. Listed
-        // explicitly so a new IrExprKind is a compile error here, not a
-        // silently-impure default.
+        // ForIn, While, Fan, Await, etc. — conservatively impure. IndexAccess
+        // and MapAccess sit here because they can trap: a function whose body
+        // indexes is not speculation-safe, so it must not enter the pure set
+        // that licenses hoisting (almide#1424). Listed explicitly so a new
+        // IrExprKind is a compile error here, not a silently-impure default.
         IrExprKind::Fan { .. } | IrExprKind::ForIn { .. }
         | IrExprKind::While { .. } | IrExprKind::TailCall { .. }
         | IrExprKind::RuntimeCall { .. } | IrExprKind::MapLiteral { .. }
         | IrExprKind::SpreadRecord { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::IndexAccess { .. }
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
         | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
         | IrExprKind::RcWrap { .. }

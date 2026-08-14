@@ -3440,3 +3440,14 @@ evidence  = [
   { path = "spec/wasm_fail/rope_geometry_exceeds_aborts.almd", class = "fixture" },
   { path = "spec/wasm_cross/rope_geometry_family.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-279"
+spec      = "ALS-E19"
+title     = "A zero-trip loop performs none of its body's effects or traps on either target"
+statement = "ALS-E19: a `for` over an empty iterable executes its body zero times, so no call, trap, or abort authored inside the body may be observed — under optimization included. LICM hoisting is licensed only for SPECULATION-SAFE expressions (no effects AND no possibly-trapping ops: indexing, non-literal integer div/mod); 0.57.0's body-inferred purity classified `xs[0]` and `n / d` as pure, hoisted them above a zero-trip loop, and aborted on native (`Error: index out of bounds`, exit 1) while wasm printed `ok: 0` / exit 0 — one source, two behaviors (almide#1424, V1 of the edit-locality hunt, docs/specs/edit-locality.md). The fixture pins both trap classes (a call whose body indexes; a direct non-literal integer division) at `ok: 0` / exit 0 byte-identical on both targets."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/licm_zero_trip_hoist.almd", class = "fixture" },
+]

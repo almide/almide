@@ -56,6 +56,7 @@ made checkable.
 | Fixed UFCS ladder, stdlib-first | A new user `fn len` cannot steal `xs.len()` | `crates/almide-frontend/src/check/calls_ufcs.rs:36-67` — test: `spec/lang/user_fn_namespace_collision_test.almd` |
 | Type inference is module-isolated; call return types come from declared signatures; monomorphization is keyed by call-site argument types only | No constraint crosses a module boundary; callee bodies are never consulted for callers' types | `crates/almide-frontend/src/check/module_inference.rs:16-19`, `check/calls.rs:276-310`, `crates/almide-optimize/src/mono/discovery.rs:28-42` |
 | Stdlib purity is a hardcoded, machine-gated registry — never inferred from bodies | Optimization consumers see a fixed answer regardless of stdlib body edits | `crates/almide-mir/src/purity.rs:51,303-306`, gate `proofs/check-stdlib-purity-registry.sh` |
+| LICM hoists only speculation-safe expressions: no effects AND no possibly-trapping ops (indexing, map access, non-literal integer div/mod), enforced in both the expression predicate and the body fixpoint | An optimization cannot leak a trap onto a path the source never executes (zero-trip loop), so a body edit that flips inferred purity cannot create a new observable | `crates/almide-codegen/src/pass_licm_purity.rs` (`binop_may_trap` + trap-aware pure sets, #1424) — test: `spec/wasm_cross/licm_zero_trip_hoist.almd` (C-279) |
 
 ## 3. Where it breaks today (hunt of 2026-08-15)
 
@@ -64,41 +65,11 @@ mechanism cited. Triage: **V** = language/compiler bug, L1 must hold, fix
 it; **R** = backend refinement obligation (Stage 3 of the roadmap); **S** =
 side condition, declared in §4 instead of fixed.
 
-### V1 — LICM speculatively executes body-inferred-"pure" partial ops (live cross-target divergence)
+### V1 — FIXED (#1424): LICM speculatively executed body-inferred-"pure" partial ops
 
-`pass_licm_purity.rs` infers purity **from bodies** by whole-program
-fixpoint (`crates/almide-codegen/src/pass_licm_purity.rs:243-276`) and
-classifies partial operations — `xs[0]`, division, ranges — as pure
-(`:289-290`, `:307-310`). LICM then hoists such calls above the loop
-unconditionally (`crates/almide-codegen/src/pass_licm.rs:116-121`),
-including out of zero-trip loops. Shipped regression almide#846 was this
-shape (`pass_licm.rs:63-76`).
-
-Reproduced on `almide 0.57.0` (2026-08-15). This program:
-
-```almide
-fn risky(xs: List[Int]) -> Int = xs[0] * 2
-
-effect fn main() -> Unit = {
-  let empty: List[Int] = []
-  var acc = 0
-  for _x in empty {
-    acc = acc + risky(empty)
-  }
-  println("ok: ${acc}")
-}
-```
-
-must print `ok: 0` and exit 0 — the loop is zero-trip, `risky` is never
-called. Observed: **native prints `Error: index out of bounds` and exits
-1; wasm prints `ok: 0` and exits 0.** One source, two behaviors — this is
-simultaneously an L1 violation (a body edit that flips `risky`'s inferred
-purity toggles the hoist for callers that never execute it) and a
-cross-target contract violation that `spec/wasm_cross/` and the
-differential fuzz had not caught. The fix must either guard hoists of
-possibly-trapping ops or restrict the pure set to total operations; the
-repro above then lands as a `spec/wasm_cross/` fixture with its own
-contract.
+Was a live cross-target divergence on 0.57.0 (native trapped, wasm printed —
+the hunt's day-one catch). The speculation-safety rule is now a §2 row; the
+repro is pinned as `spec/wasm_cross/licm_zero_trip_hoist.almd` (C-279).
 
 ### V2 — Checker and lowering disagree on local `fn` vs selective import
 
