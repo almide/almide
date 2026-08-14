@@ -8,6 +8,107 @@
 /// next shape check (nothing emitted yet by the route), and `Fail` was the
 /// rollback-and-`return None` tail — the route has ALREADY truncated the
 /// ops/handle marks back when it reports `Fail`, so the caller just declines.
+/// A full snapshot of the ValueId-keyed TRACKING state a speculative lowering
+/// attempt can pollute — the read-shape sets, the drop-route maps, the lift
+/// list, the op stream. `LowerCtx::speculate` restores ALL of it when the
+/// attempt declines, so "try a rewrite, fall back on decline" can never leave
+/// a stale entry that alters a later path's decisions (the option_result_ctors
+/// regression: a declined heap-`??`-as-match attempt left the SUBJECT's stable
+/// ValueId in `materialized_options`, and the downstream #1270 bind rewrite
+/// then took a different, walling branch). Ops/lhh/lifted are length-truncated;
+/// the set/map state has no such watermark, so it is cloned wholesale — heavy,
+/// but compile-time-only and bounded by per-function set sizes. This is the
+/// #1100 rollback discipline generalized from the op stream to the WHOLE
+/// decision state; #1414's per-value repr eventually deletes the need.
+struct SpecSnapshot {
+    ops_len: usize,
+    lhh_len: usize,
+    lifted_len: usize,
+    materialized_options: std::collections::HashSet<ValueId>,
+    materialized_results: std::collections::HashSet<ValueId>,
+    materialized_results_str: std::collections::HashSet<ValueId>,
+    heap_elem_lists: std::collections::HashSet<ValueId>,
+    list_list_str_lists: std::collections::HashSet<ValueId>,
+    value_result_results: std::collections::HashSet<ValueId>,
+    str_int_result_results: std::collections::HashSet<ValueId>,
+    value_int_result_results: std::collections::HashSet<ValueId>,
+    list_value_int_result_results: std::collections::HashSet<ValueId>,
+    list_str_int_result_results: std::collections::HashSet<ValueId>,
+    list_str_result_results: std::collections::HashSet<ValueId>,
+    materialized_lists: std::collections::HashSet<ValueId>,
+    value_handles: std::collections::HashSet<ValueId>,
+    value_elem_lists: std::collections::HashSet<ValueId>,
+    str_value_elem_lists: std::collections::HashSet<ValueId>,
+    str_str_elem_lists: std::collections::HashSet<ValueId>,
+    value_result_lists: std::collections::HashSet<ValueId>,
+    materialized_aggregates: std::collections::HashSet<ValueId>,
+    closure_values: std::collections::HashSet<ValueId>,
+    record_masks: std::collections::HashMap<ValueId, Vec<usize>>,
+    variant_drop_handles: std::collections::HashMap<ValueId, String>,
+}
+
+impl LowerCtx {
+    /// Run `f` speculatively: on `Some` keep everything it did; on `None`
+    /// restore the complete tracking snapshot taken at entry. See
+    /// [`SpecSnapshot`].
+    fn speculate<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        let snap = SpecSnapshot {
+            ops_len: self.ops.len(),
+            lhh_len: self.live_heap_handles.len(),
+            lifted_len: self.lifted.len(),
+            materialized_options: self.materialized_options.clone(),
+            materialized_results: self.materialized_results.clone(),
+            materialized_results_str: self.materialized_results_str.clone(),
+            heap_elem_lists: self.heap_elem_lists.clone(),
+            list_list_str_lists: self.list_list_str_lists.clone(),
+            value_result_results: self.value_result_results.clone(),
+            str_int_result_results: self.str_int_result_results.clone(),
+            value_int_result_results: self.value_int_result_results.clone(),
+            list_value_int_result_results: self.list_value_int_result_results.clone(),
+            list_str_int_result_results: self.list_str_int_result_results.clone(),
+            list_str_result_results: self.list_str_result_results.clone(),
+            materialized_lists: self.materialized_lists.clone(),
+            value_handles: self.value_handles.clone(),
+            value_elem_lists: self.value_elem_lists.clone(),
+            str_value_elem_lists: self.str_value_elem_lists.clone(),
+            str_str_elem_lists: self.str_str_elem_lists.clone(),
+            value_result_lists: self.value_result_lists.clone(),
+            materialized_aggregates: self.materialized_aggregates.clone(),
+            closure_values: self.closure_values.clone(),
+            record_masks: self.record_masks.clone(),
+            variant_drop_handles: self.variant_drop_handles.clone(),
+        };
+        let out = f(self);
+        if out.is_none() {
+            self.ops.truncate(snap.ops_len);
+            self.live_heap_handles.truncate(snap.lhh_len);
+            self.lifted.truncate(snap.lifted_len);
+            self.materialized_options = snap.materialized_options;
+            self.materialized_results = snap.materialized_results;
+            self.materialized_results_str = snap.materialized_results_str;
+            self.heap_elem_lists = snap.heap_elem_lists;
+            self.list_list_str_lists = snap.list_list_str_lists;
+            self.value_result_results = snap.value_result_results;
+            self.str_int_result_results = snap.str_int_result_results;
+            self.value_int_result_results = snap.value_int_result_results;
+            self.list_value_int_result_results = snap.list_value_int_result_results;
+            self.list_str_int_result_results = snap.list_str_int_result_results;
+            self.list_str_result_results = snap.list_str_result_results;
+            self.materialized_lists = snap.materialized_lists;
+            self.value_handles = snap.value_handles;
+            self.value_elem_lists = snap.value_elem_lists;
+            self.str_value_elem_lists = snap.str_value_elem_lists;
+            self.str_str_elem_lists = snap.str_str_elem_lists;
+            self.value_result_lists = snap.value_result_lists;
+            self.materialized_aggregates = snap.materialized_aggregates;
+            self.closure_values = snap.closure_values;
+            self.record_masks = snap.record_masks;
+            self.variant_drop_handles = snap.variant_drop_handles;
+        }
+        out
+    }
+}
+
 enum UnwrapOrRoute {
     /// The route matched and lowered — carries the `??` result value.
     Done(ValueId),
@@ -215,16 +316,10 @@ impl LowerCtx {
                 // exercised only under ALMIDE_QQ_NO_ROUTES (the readiness probe)
                 // until the routes are deleted: every heap `??` rides the generic
                 // value-position variant-match machinery, the same rewrite the
-                // bind position has used since #1270. NOT enabled in normal mode
-                // yet: a DECLINED speculative attempt pollutes the tracking sets
-                // for the SUBJECT's stable ValueId (materialized_options et al.
-                // cannot be un-inserted), which altered the downstream #1270
-                // bind rewrite's decisions (option_result_ctors regressed to a
-                // wall). At deletion time this arm becomes the only path and
-                // nothing falls through after it, so the pollution class
-                // disappears with the routes.
-                let ops_mark = self.ops.len();
-                let lhh_mark = self.live_heap_handles.len();
+                // bind position has used since #1270. Runs under `speculate`, so
+                // a declined attempt restores the ENTIRE tracking state — the
+                // set-pollution class that regressed option_result_ctors when
+                // this arm first ran bare is unrepresentable here.
                 let synth = IrExpr {
                     kind: IrExprKind::Unit,
                     ty: fallback.ty.clone(),
@@ -238,19 +333,43 @@ impl LowerCtx {
                 } else {
                     return None;
                 };
-                let IrExprKind::Match { subject, arms } = &m.kind else { unreachable!() };
-                if let Some(v) = self.try_lower_variant_value_match(subject, arms, &m.ty) {
-                    crate::trace::trace("ALMIDE_DBG_QQ", || {
-                        format!("[qq] match-first took {:?} ?? (heap)", expr.ty)
-                    });
-                    return Some(v);
-                }
-                self.ops.truncate(ops_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                crate::trace::trace("ALMIDE_DBG_QQ", || {
-                    format!("[qq] heap match fallback declined for {:?} ??", expr.ty)
+                let out = self.speculate(|ctx| {
+                    let IrExprKind::Match { subject, arms } = &m.kind else { unreachable!() };
+                    ctx.try_lower_variant_value_match(subject, arms, &m.ty)
                 });
-                None
+                if let Some(v) = out {
+                    // Seed the MERGE's read shape by TYPE, exactly as the bind
+                    // position does for its #1270 rewrite — without this the
+                    // merge dst is untracked and the NEXT `??`/match over it
+                    // declines (the p10a nested-Option chain: `sn ?? none`
+                    // lowered here, then `inner ?? 9` found `inner` untracked).
+                    use almide_lang::types::constructor::TypeConstructorId as TC;
+                    match &m.ty {
+                        Ty::Applied(TC::Option, a) if a.len() == 1 => {
+                            self.materialized_options.insert(v);
+                            if is_heap_ty(&a[0]) {
+                                self.heap_elem_lists.insert(v);
+                            }
+                        }
+                        Ty::Applied(TC::Result, _) => {
+                            match crate::lower::result_family(&m.ty) {
+                                crate::lower::ResultFamily::Scalar => {
+                                    self.materialized_results.insert(v);
+                                }
+                                crate::lower::ResultFamily::HeapOk => {
+                                    self.materialized_results_str.insert(v);
+                                    self.heap_elem_lists.insert(v);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                crate::trace::trace("ALMIDE_DBG_QQ", || match out {
+                    Some(_) => format!("[qq] match-first took {:?} ?? (heap)", expr.ty),
+                    None => format!("[qq] heap match fallback declined for {:?} ??", expr.ty),
+                });
+                out
             }
             UnwrapOrRoute::Next => {
                 // TERMINAL TYPE GUARD (the route chain's safety floor): the scalar
