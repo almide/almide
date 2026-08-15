@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-FUNCTION native <-> wasm reachability sweep over the @intrinsic stdlib surface.
+"""Per-FUNCTION native <-> wasm reachability sweep over the PUBLIC stdlib surface.
 
 WHY THIS EXISTS
 ---------------
@@ -55,77 +55,132 @@ DECL_RX = re.compile(
     re.M)
 
 
+def stdlib_modules():
+    """STDLIB_MODULES re-read from stdlib_info.rs so the list cannot drift."""
+    src = open(os.path.join(REPO, "crates/almide-types/src/stdlib_info.rs")).read()
+    m = re.search(r"pub const STDLIB_MODULES[^=]*= &\[(.*?)\];", src, re.S)
+    return re.findall(r'"([a-z0-9_]+)"', m.group(1))
+
+
 def surface(module_filter=None):
-    """Every @intrinsic-backed fn on a module's DECLARATION surface (the bare
-    stdlib/<module>.almd; the <module>_*.almd parts are implementations)."""
+    """Every PUBLIC stdlib fn, from the module-interface JSON — not the
+    @intrinsic regex: the old enumeration missed every self-host-only fn
+    (list.group_by, map.upsert, result.partition, ...), which is exactly the
+    class most likely to lack a wasm body. `__`-prefixed internal carriers
+    (E043) are not surface."""
     out = []
-    for fn in sorted(os.listdir(os.path.join(REPO, "stdlib"))):
-        if not fn.endswith(".almd"):
-            continue
-        module = fn[:-5]
-        if "_" in module or module == "prim":   # parts are not the surface; prim IS the wasm floor
-            continue
+    for module in stdlib_modules():
         if module_filter and module not in module_filter:
             continue
-        src = open(os.path.join(REPO, "stdlib", fn)).read()
-        for m in DECL_RX.finditer(src):
-            out.append(dict(module=module, name=m.group(4), effect=bool(m.group(3)),
-                            params=m.group(5).strip(), ret=m.group(6).strip()))
+        rc = subprocess.run([ALMIDE, "compile", module, "--json"],
+                            capture_output=True, text=True, cwd=REPO)
+        if rc.returncode != 0:
+            continue
+        for f in json.loads(rc.stdout)["functions"]:
+            if f["name"].startswith("__"):
+                continue
+            out.append(dict(module=module, name=f["name"],
+                            effect=bool(f.get("effect")),
+                            params=f["params"],
+                            ret="Unit" if f["return"].get("kind") == "unit" else "T",
+                            ret_json=f["return"]))
     return out
 
 
-def synth_args(params):
-    """Literals for a parameter list, or None when a type is outside the table."""
-    if not params.strip():
+NAMED_CANDIDATES = {
+    "Value": ['json.parse("1")!', 'json.parse("1")'],
+    "Int8": ["(1).to_int8()"], "Int16": ["(1).to_int16()"],
+    "Int32": ["(1).to_int32()"], "Int64": ["(1).to_int64()"],
+    "UInt8": ["(1).to_uint8()"], "UInt16": ["(1).to_uint16()"],
+    "UInt32": ["(1).to_uint32()"], "UInt64": ["(1).to_uint64()"],
+    "Float32": ["(1.0).to_float32()"], "Float64": ["(1.0).to_float64()"],
+    "Endian": ["LittleEndian"],
+}
+
+
+def synth_ty(ty, depth=0):
+    """Candidate spellings for a value of a JSON-shaped type."""
+    if depth > 4:
         return []
-    args = []
-    depth, cur = 0, ""
-    for ch in params + ",":          # split on top-level commas only
-        if ch == "," and depth == 0:
-            args.append(cur.strip()); cur = ""
-            continue
-        if ch in "[(": depth += 1
-        if ch in "])": depth -= 1
-        cur += ch
-    lits = []
-    for a in args:
-        if not a:
-            continue
-        ty = a.split(":", 1)[1].strip() if ":" in a else None
-        if ty is None:
+    k = ty.get("kind")
+    if k == "int": return ["1"]
+    if k == "float": return ["1.5"]
+    if k == "string": return ['"a"']
+    if k == "bool": return ["true"]
+    if k == "unit": return ["()"]
+    if k == "bytes": return ["bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])"]
+    if k == "matrix": return ["matrix.ones(1, 1)"]
+    if k in ("named", "type_var"):
+        name = ty.get("name", "")
+        if name in NAMED_CANDIDATES: return NAMED_CANDIDATES[name]
+        if len(name) == 1 and name.isupper(): return ["1"]
+        return []
+    if k == "list":
+        return [f"[{c}]" for c in synth_ty(ty.get("inner", {}), depth + 1)[:1]]
+    if k == "set":
+        return [f"set.from_list([{c}])" for c in synth_ty(ty.get("inner", {}), depth + 1)[:1]]
+    if k == "option":
+        return [f"some({c})" for c in synth_ty(ty.get("inner", {}), depth + 1)[:1]]
+    if k == "result":
+        return [f"ok({c})" for c in synth_ty(ty.get("ok", ty.get("inner", {})), depth + 1)[:1]]
+    if k == "map":
+        ks = synth_ty(ty.get("key", {}), depth + 1)
+        vs = synth_ty(ty.get("value", {}), depth + 1)
+        return [f"[{ks[0]}: {vs[0]}]"] if ks and vs else []
+    if k == "tuple":
+        parts = [synth_ty(e, depth + 1) for e in ty.get("elements", []) or []]
+        return ["(" + ", ".join(x[0] for x in parts) + ")"] if parts and all(parts) else []
+    if k == "fn":
+        rets = synth_ty(ty.get("return", {}), depth + 1)
+        if not rets:
+            return []
+        names = ", ".join(f"p{i}" for i in range(len(ty.get("params", []))))
+        return [f"({names}) => {rets[0]}"]
+    return []
+
+
+def synth_args(params):
+    """One argument spelling per param (first candidate), or None."""
+    out = []
+    for prm in params:
+        c = synth_ty(prm["type"])
+        if not c:
             return None
-        ty = ty.removesuffix("?")     # an Option param still accepts the bare value
-        if ty not in LITERALS:
-            return None
-        lits.append(LITERALS[ty])
-    return lits
+        out.append((c[0], prm["type"].get("kind")))
+    return out
 
 
 def programs(f, args):
-    """Candidate probe shapes, tried in order until one builds NATIVELY.
-
-    A single fixed shape produces false GAPs: `let _ = <Unit-returning call>`
-    walls the wasm renderer on its own ("scalar binding outside the value
-    subset"), which reported all 40 of the bytes mutators — append_*, set_*,
-    fill, clear — as missing on wasm when the bare statement form lowers fine.
-    The verdict must describe the FUNCTION, not the wrapper, so the shape is
-    chosen by what the control leg accepts rather than assumed.
-    """
+    """Candidate probe shapes. `var`-hoisted receivers (a `let` receiver cannot
+    be passed to an in-place mutator, which alone accounted for most of the old
+    UNPROBEABLE set), the mixed shape (scalar literals inline — an all-hoisted
+    scalar `var` binding hits a v1 subset wall the call itself never does), and
+    both statement positions. The verdict must describe the FUNCTION, not the
+    wrapper, so every shape gets a turn (see classify)."""
     imp = f"import {f['module']}\n\n" if f["module"] in NEEDS_IMPORT else ""
-    # Every argument is HOISTED to a local binding. Passing a literal inline
-    # made the in-place mutators (set_*/write_*) report as gaps: the wasm
-    # renderer requires a writable receiver to be a binding, so
-    # `bytes.set_u8(bytes.from_list([…]), 0, 7)` walls on the RECEIVER SHAPE
-    # while the hoisted form lowers. Hoisting is also how real code is written.
-    binds = "".join(f"  let a{i} = {a}\n" for i, a in enumerate(args))
-    names = ", ".join(f"a{i}" for i in range(len(args)))
-    call = f"{f['module']}.{f['name']}({names})"
+    scalar = {"int", "float", "string", "bool", "unit"}
+    all_binds = "".join(f"  var a{i} = {a}\n" for i, (a, _) in enumerate(args))
+    all_names = ", ".join(f"a{i}" for i in range(len(args)))
+    mixed_binds, mixed_names = "", []
+    for i, (a, kind) in enumerate(args):
+        if kind in scalar:
+            mixed_names.append(a)
+        else:
+            mixed_binds += f"  var a{i} = {a}\n"
+            mixed_names.append(f"a{i}")
     bang = "!" if f["effect"] else ""
     head = "effect fn" if f["effect"] else "fn"
-    bodies = [f"  let _ = {call}{bang}", f"  {call}{bang}"]
-    if f["ret"] == "Unit":                       # a Unit result binds to nothing useful
-        bodies.reverse()
-    return [f"{imp}{head} main() -> Unit = {{\n{binds}{b}\n}}\n" for b in bodies]
+    shapes = []
+    for binds, names in ((all_binds, all_names), (mixed_binds, ", ".join(mixed_names))):
+        call = f"{f['module']}.{f['name']}({names})"
+        bodies = [f"  let _ = {call}{bang}", f"  {call}{bang}"]
+        if f["ret"] == "Unit":               # a Unit result binds to nothing useful
+            bodies.reverse()
+        for b in bodies:
+            prog = f"{imp}{head} main() -> Unit = {{\n{binds}{b}\n}}\n"
+            if prog not in shapes:
+                shapes.append(prog)
+    return shapes
 
 
 def run(cmd):
@@ -139,7 +194,9 @@ WALL_RX = re.compile(r"not yet supported by the verified wasm renderer|^wall:", 
 def classify(f):
     args = synth_args(f["params"])
     if args is None:
-        return "UNPROBEABLE", "parameter type outside the literal table"
+        return "UNPROBEABLE", "parameter type outside the synthesizer"
+    first_gap = None
+    any_native = False
     for src in programs(f, args):
         tf = tempfile.NamedTemporaryFile("w", suffix=".almd", delete=False, dir="/tmp")
         tf.write(src); tf.close()
@@ -150,16 +207,20 @@ def classify(f):
                 continue
             if run([ALMIDE, "build", tf.name, "-o", tf.name + ".bin"])[0] != 0:
                 continue
+            any_native = True
             rc, out = run([ALMIDE, "build", tf.name, "--target", "wasm", "-o", tf.name + ".wasm"])
             if rc == 0:
                 return "PARITY", ""
-            m = re.search(r"wall: (.+)", out)
-            return "GAP", (m.group(1)[:160] if m else
-                           "wasm renderer wall" if WALL_RX.search(out) else "wasm build failed")
+            if first_gap is None:
+                m = re.search(r"wall: (.+)", out)
+                first_gap = (m.group(1)[:160] if m else
+                             "wasm renderer wall" if WALL_RX.search(out) else "wasm build failed")
         finally:
             for ext in ("", ".bin", ".wasm"):
                 try: os.unlink(tf.name + ext)
                 except OSError: pass
+    if any_native:
+        return "GAP", first_gap or "wasm build failed"
     return "UNPROBEABLE", "no candidate shape builds natively"
 
 
@@ -184,7 +245,7 @@ def main():
             print(f"GAP  {r['module']}.{r['name']}  :: {r['why']}")
     n = len(fns)
     probed = counts["PARITY"] + counts["GAP"]
-    print(f"\n{n} intrinsic fns: {counts['PARITY']} parity, {counts['GAP']} gap, "
+    print(f"\n{n} public fns: {counts['PARITY']} parity, {counts['GAP']} gap, "
           f"{counts['UNPROBEABLE']} unprobeable "
           f"({100*probed//n if n else 0}% of the surface actually measured)")
 

@@ -29,161 +29,142 @@
 # COMPILER_FRONTIER — the burn-down:
 #
 # HOST_CAPABILITY (40) — out of scope by design:
-env.set :: HOST_CAPABILITY :: WASI preview1 has no environ-write syscall (environ_get is a read-only snapshot); an in-module overlay cannot reach the real environ the C-137 path resolution and child inheritance read — reclassified from COMPILER_FRONTIER 2026-08-11
-env.sleep_ms :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.sleep_ms needs a declared cap
-http.delete :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.delete needs a declared capa
-http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capabil
-http.patch :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.patch needs a declared capab
-http.post :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.post needs a declared capabi
-http.put :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.put needs a declared capabil
-net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared c
-net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declare
-net.tcp_close :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close needs a declared ca
-net.tcp_close_listener :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close_listener needs a de
-net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared 
-net.tcp_is_open :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
-net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_listen needs a declared c
-net.tcp_read :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read needs a declared cap
-net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_exact needs a declar
-net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a decl
-net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a decla
-net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared ca
-process.env :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.env needs a declared capa
-process.exec :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec needs a declared cap
-process.exec_in :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_in needs a declared 
-process.exec_status :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status needs a decla
-process.exec_status_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status_timeout needs
-process.exec_with_stdin :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_with_stdin needs a d
-process.exit :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
-process.is_alive :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
-process.kill :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.kill needs a declared cap
-process.pid :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed
-process.sleep :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.sleep needs a declared ca
-process.spawn :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.spawn needs a declared ca
-process.stdin_lines :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.stdin_lines needs a decla
-zlib.compress :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.compress needs a declared ca
-zlib.compress_level :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.compress_level needs a decla
-zlib.decompress :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.decompress needs a declared 
-zlib.deflate :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.deflate needs a declared cap
-zlib.deflate_level :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.deflate_level needs a declar
-zlib.gunzip :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.gunzip needs a declared capa
-zlib.gzip :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.gzip needs a declared capabi
-zlib.inflate :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.inflate needs a declared cap
 #
 # UNPROBEABLE (113) — the sweep's OWN coverage hole, not a compiler
 # verdict: the argument synthesizer has no literal for these parameter types
 # (Matrix, Value, Json, RawPtr, closures). Shrinking this list widens what
 # the ratchet can see, so it is listed and ratcheted too.
-bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the literal table
-bytes.copy_within :: UNPROBEABLE :: no candidate shape builds natively
-bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the literal table
-bytes.map_each :: UNPROBEABLE :: no candidate shape builds natively
-bytes.push :: UNPROBEABLE :: no candidate shape builds natively
-bytes.read_float32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.read_int32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.read_uint16 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.read_uint32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.set_at :: UNPROBEABLE :: no candidate shape builds natively
-bytes.set_float32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.set_int32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.set_uint16 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.set_uint32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.write_float32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.write_int32 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.write_uint16 :: UNPROBEABLE :: parameter type outside the literal table
-bytes.write_uint32 :: UNPROBEABLE :: parameter type outside the literal table
-fs.for_each_line :: UNPROBEABLE :: no candidate shape builds natively
-http.anthropic_streaming_call :: UNPROBEABLE :: no candidate shape builds natively
+
+bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
+bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
+env.set :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capability not in this brick
+env.sleep_ms :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.sleep_ms needs a declared capability not in this brick
+fs.fold_lines :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: fs.fold_lines_x — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to th
+fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
+fs.fold_lines_range :: UNPROBEABLE :: no candidate shape builds natively
+fs.for_each_line :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.for_each_line needs a declared capability not in this brick
+http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick
+http.body :: UNPROBEABLE :: parameter type outside the synthesizer
+http.delete :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.delete needs a declared capability not in this brick
+http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capability not in this brick
 http.get_bytes :: UNPROBEABLE :: no candidate shape builds natively
-http.openai_streaming_call :: UNPROBEABLE :: no candidate shape builds natively
-http.serve :: UNPROBEABLE :: no candidate shape builds natively
-json.field :: UNPROBEABLE :: parameter type outside the literal table
-json.get_array :: UNPROBEABLE :: parameter type outside the literal table
-json.get_bool :: UNPROBEABLE :: parameter type outside the literal table
-json.get_float :: UNPROBEABLE :: parameter type outside the literal table
-json.get_int :: UNPROBEABLE :: parameter type outside the literal table
-json.get_string :: UNPROBEABLE :: parameter type outside the literal table
-json.index :: UNPROBEABLE :: parameter type outside the literal table
-json.stringify :: UNPROBEABLE :: parameter type outside the literal table
-json.stringify_pretty :: UNPROBEABLE :: parameter type outside the literal table
-json.to_map :: UNPROBEABLE :: parameter type outside the literal table
-matrix.add :: UNPROBEABLE :: parameter type outside the literal table
-matrix.append_rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.attention_weights :: UNPROBEABLE :: parameter type outside the literal table
-matrix.broadcast_add_row :: UNPROBEABLE :: parameter type outside the literal table
-matrix.causal_mask_add :: UNPROBEABLE :: parameter type outside the literal table
-matrix.cols :: UNPROBEABLE :: parameter type outside the literal table
-matrix.concat_cols :: UNPROBEABLE :: parameter type outside the literal table
-matrix.concat_cols_many :: UNPROBEABLE :: parameter type outside the literal table
-matrix.conv1d :: UNPROBEABLE :: parameter type outside the literal table
-matrix.div :: UNPROBEABLE :: parameter type outside the literal table
-matrix.dot_row :: UNPROBEABLE :: parameter type outside the literal table
-matrix.fma :: UNPROBEABLE :: parameter type outside the literal table
-matrix.fma3 :: UNPROBEABLE :: parameter type outside the literal table
-matrix.from_lists :: UNPROBEABLE :: parameter type outside the literal table
-matrix.fused_gemm_bias_scale_gelu :: UNPROBEABLE :: parameter type outside the literal table
-matrix.gather_rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.gelu :: UNPROBEABLE :: parameter type outside the literal table
-matrix.get :: UNPROBEABLE :: parameter type outside the literal table
-matrix.layer_norm_rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.linear_f32_row_no_bias :: UNPROBEABLE :: parameter type outside the literal table
-matrix.linear_q1_0_row_no_bias :: UNPROBEABLE :: parameter type outside the literal table
-matrix.linear_q8_0_row_no_bias :: UNPROBEABLE :: parameter type outside the literal table
-matrix.linear_row :: UNPROBEABLE :: parameter type outside the literal table
-matrix.linear_row_gelu :: UNPROBEABLE :: parameter type outside the literal table
-matrix.linear_row_no_bias :: UNPROBEABLE :: parameter type outside the literal table
-matrix.map :: UNPROBEABLE :: parameter type outside the literal table
-matrix.masked_multi_head_attention :: UNPROBEABLE :: parameter type outside the literal table
-matrix.mul :: UNPROBEABLE :: parameter type outside the literal table
-matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the literal table
-matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the literal table
-matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the literal table
-matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the literal table
-matrix.mul_scaled :: UNPROBEABLE :: parameter type outside the literal table
-matrix.multi_head_attention :: UNPROBEABLE :: parameter type outside the literal table
-matrix.neg :: UNPROBEABLE :: parameter type outside the literal table
-matrix.pow :: UNPROBEABLE :: parameter type outside the literal table
-matrix.pre_norm_linear :: UNPROBEABLE :: parameter type outside the literal table
-matrix.qwen3_block_f32_kv :: UNPROBEABLE :: parameter type outside the literal table
-matrix.qwen3_block_q1_0_kv :: UNPROBEABLE :: parameter type outside the literal table
-matrix.qwen3_block_q8_0_kv :: UNPROBEABLE :: parameter type outside the literal table
-matrix.rms_norm_rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.rope_rotate :: UNPROBEABLE :: parameter type outside the literal table
-matrix.rope_rotate_at :: UNPROBEABLE :: parameter type outside the literal table
-matrix.rope_rotate_neox_at :: UNPROBEABLE :: parameter type outside the literal table
-matrix.row_dot :: UNPROBEABLE :: parameter type outside the literal table
-matrix.rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.scale :: UNPROBEABLE :: parameter type outside the literal table
-matrix.scaled_dot_product_attention :: UNPROBEABLE :: parameter type outside the literal table
-matrix.select_rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.shape :: UNPROBEABLE :: parameter type outside the literal table
-matrix.silu_mul :: UNPROBEABLE :: parameter type outside the literal table
-matrix.slice_rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.softmax_rows :: UNPROBEABLE :: parameter type outside the literal table
-matrix.split_cols_even :: UNPROBEABLE :: parameter type outside the literal table
-matrix.sub :: UNPROBEABLE :: parameter type outside the literal table
-matrix.swiglu_gate :: UNPROBEABLE :: parameter type outside the literal table
-matrix.to_bytes_f32_le :: UNPROBEABLE :: parameter type outside the literal table
-matrix.to_bytes_f64_le :: UNPROBEABLE :: parameter type outside the literal table
-matrix.to_lists :: UNPROBEABLE :: parameter type outside the literal table
-matrix.transpose :: UNPROBEABLE :: parameter type outside the literal table
-mem.restore :: UNPROBEABLE :: no candidate shape builds natively
-mem.save :: UNPROBEABLE :: no candidate shape builds natively
-string.clear :: UNPROBEABLE :: no candidate shape builds natively
-string.push :: UNPROBEABLE :: no candidate shape builds natively
-string.slice :: UNPROBEABLE :: parameter type outside the literal table
-testing.assert_throws :: UNPROBEABLE :: no candidate shape builds natively
-value.array :: UNPROBEABLE :: parameter type outside the literal table
-value.as_array :: UNPROBEABLE :: parameter type outside the literal table
-value.as_bool :: UNPROBEABLE :: parameter type outside the literal table
-value.as_float :: UNPROBEABLE :: parameter type outside the literal table
-value.as_int :: UNPROBEABLE :: parameter type outside the literal table
-value.as_string :: UNPROBEABLE :: parameter type outside the literal table
-value.field :: UNPROBEABLE :: parameter type outside the literal table
-value.keys :: UNPROBEABLE :: parameter type outside the literal table
-value.merge :: UNPROBEABLE :: parameter type outside the literal table
-value.omit :: UNPROBEABLE :: parameter type outside the literal table
-value.pick :: UNPROBEABLE :: parameter type outside the literal table
-value.stringify :: UNPROBEABLE :: parameter type outside the literal table
-value.to_camel_case :: UNPROBEABLE :: parameter type outside the literal table
-value.to_snake_case :: UNPROBEABLE :: parameter type outside the literal table
+http.get_header :: UNPROBEABLE :: parameter type outside the synthesizer
+http.openai_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.openai_streaming_call needs a declared capability not in this brick
+http.patch :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.patch needs a declared capability not in this brick
+http.post :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.post needs a declared capability not in this brick
+http.put :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.put needs a declared capability not in this brick
+http.query_params :: UNPROBEABLE :: parameter type outside the synthesizer
+http.req_body :: UNPROBEABLE :: parameter type outside the synthesizer
+http.req_header :: UNPROBEABLE :: parameter type outside the synthesizer
+http.req_method :: UNPROBEABLE :: parameter type outside the synthesizer
+http.req_path :: UNPROBEABLE :: parameter type outside the synthesizer
+http.request :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.request needs a declared capability not in this brick
+http.request_bytes :: UNPROBEABLE :: no candidate shape builds natively
+http.request_stream :: UNPROBEABLE :: no candidate shape builds natively
+http.serve :: UNPROBEABLE :: parameter type outside the synthesizer
+http.set_header :: UNPROBEABLE :: parameter type outside the synthesizer
+http.status :: UNPROBEABLE :: parameter type outside the synthesizer
+json.field :: UNPROBEABLE :: parameter type outside the synthesizer
+json.get_array :: UNPROBEABLE :: no candidate shape builds natively
+json.get_bool :: UNPROBEABLE :: no candidate shape builds natively
+json.get_float :: UNPROBEABLE :: no candidate shape builds natively
+json.get_int :: UNPROBEABLE :: no candidate shape builds natively
+json.get_path :: UNPROBEABLE :: parameter type outside the synthesizer
+json.get_string :: UNPROBEABLE :: no candidate shape builds natively
+json.index :: UNPROBEABLE :: parameter type outside the synthesizer
+json.remove_path :: UNPROBEABLE :: parameter type outside the synthesizer
+json.set_path :: UNPROBEABLE :: parameter type outside the synthesizer
+json.stringify :: UNPROBEABLE :: no candidate shape builds natively
+json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
+json.to_map :: UNPROBEABLE :: no candidate shape builds natively
+list.group_by :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: list.group_by_x — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to th
+list.with_capacity :: UNPROBEABLE :: no candidate shape builds natively
+map.find :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: map.find — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the self-
+map.map :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: map.map — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the self-h
+map.new :: UNPROBEABLE :: no candidate shape builds natively
+map.upsert :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: map.upsert — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the sel
+matrix.append_rows :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.append_rows — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to
+matrix.fma :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fma — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the sel
+matrix.fma3 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fma3 — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the se
+matrix.fused_gemm_bias_scale_gelu :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fused_gemm_bias_scale_gelu — rendering them would emit a dangling `(call $…)` (invalid wasm). Ad
+matrix.linear_f32_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_f32_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add th
+matrix.linear_q1_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q1_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
+matrix.linear_q8_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q8_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
+matrix.linear_row_gelu :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_row_gelu — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the calle
+matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the synthesizer
+matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
+matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the synthesizer
+matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
+matrix.pre_norm_linear :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.pre_norm_linear — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the calle
+matrix.qwen3_block_f32_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_f32_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the ca
+matrix.qwen3_block_q1_0_kv :: COMPILER_FRONTIER :: wasm build failed
+matrix.qwen3_block_q8_0_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_q8_0_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
+matrix.rope_rotate_at :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.rope_rotate_at — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee
+matrix.rope_rotate_neox_at :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.rope_rotate_neox_at — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
+matrix.select_rows :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to
+net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
+net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
+net.tcp_close :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close needs a declared capability not in this brick
+net.tcp_close_listener :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close_listener needs a declared capability not in this brick
+net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared capability not in this brick
+net.tcp_is_open :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
+net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_listen needs a declared capability not in this brick
+net.tcp_read :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read needs a declared capability not in this brick
+net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_exact needs a declared capability not in this brick
+net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
+net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
+net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared capability not in this brick
+process.env :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.env needs a declared capability not in this brick
+process.exec :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec needs a declared capability not in this brick
+process.exec_in :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_in needs a declared capability not in this brick
+process.exec_status :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status needs a declared capability not in this brick
+process.exec_status_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status_timeout needs a declared capability not in this brick
+process.exec_with_stdin :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_with_stdin needs a declared capability not in this brick
+process.exit :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
+process.is_alive :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
+process.kill :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.kill needs a declared capability not in this brick
+process.pid :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
+process.sleep :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.sleep needs a declared capability not in this brick
+process.spawn :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.spawn needs a declared capability not in this brick
+process.stdin_lines :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.stdin_lines needs a declared capability not in this brick
+result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
+result.flatten :: UNPROBEABLE :: no candidate shape builds natively
+result.is_err :: UNPROBEABLE :: no candidate shape builds natively
+result.is_ok :: UNPROBEABLE :: no candidate shape builds natively
+result.map :: UNPROBEABLE :: no candidate shape builds natively
+result.map_err :: UNPROBEABLE :: no candidate shape builds natively
+result.or_else :: UNPROBEABLE :: no candidate shape builds natively
+result.partition :: UNPROBEABLE :: no candidate shape builds natively
+result.to_err_option :: UNPROBEABLE :: no candidate shape builds natively
+result.to_list :: UNPROBEABLE :: no candidate shape builds natively
+result.to_option :: UNPROBEABLE :: no candidate shape builds natively
+result.unwrap_or :: UNPROBEABLE :: no candidate shape builds natively
+result.unwrap_or_else :: UNPROBEABLE :: no candidate shape builds natively
+result.zip :: UNPROBEABLE :: no candidate shape builds natively
+set.new :: UNPROBEABLE :: no candidate shape builds natively
+testing.assert_err :: UNPROBEABLE :: no candidate shape builds natively
+testing.assert_ok :: UNPROBEABLE :: no candidate shape builds natively
+testing.assert_throws :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call testing.assert_throws needs a declared capability not in this brick
+value.array :: UNPROBEABLE :: no candidate shape builds natively
+value.as_array :: UNPROBEABLE :: no candidate shape builds natively
+value.as_bool :: UNPROBEABLE :: no candidate shape builds natively
+value.as_float :: UNPROBEABLE :: no candidate shape builds natively
+value.as_int :: UNPROBEABLE :: no candidate shape builds natively
+value.as_string :: UNPROBEABLE :: no candidate shape builds natively
+value.field :: UNPROBEABLE :: no candidate shape builds natively
+value.keys :: UNPROBEABLE :: no candidate shape builds natively
+value.merge :: UNPROBEABLE :: no candidate shape builds natively
+value.object :: UNPROBEABLE :: no candidate shape builds natively
+value.omit :: UNPROBEABLE :: no candidate shape builds natively
+value.pick :: UNPROBEABLE :: no candidate shape builds natively
+value.stringify :: UNPROBEABLE :: no candidate shape builds natively
+value.to_camel_case :: UNPROBEABLE :: no candidate shape builds natively
+value.to_snake_case :: UNPROBEABLE :: no candidate shape builds natively
+zlib.compress :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.compress needs a declared capability not in this brick
+zlib.compress_level :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.compress_level needs a declared capability not in this brick
+zlib.decompress :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.decompress needs a declared capability not in this brick
+zlib.deflate :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.deflate needs a declared capability not in this brick
+zlib.deflate_level :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.deflate_level needs a declared capability not in this brick
+zlib.gunzip :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.gunzip needs a declared capability not in this brick
+zlib.gzip :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.gzip needs a declared capability not in this brick
+zlib.inflate :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.inflate needs a declared capability not in this brick
