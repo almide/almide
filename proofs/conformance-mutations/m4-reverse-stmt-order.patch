@@ -1,12 +1,12 @@
-diff --git a/crates/almide-codegen/src/walker/helpers.rs b/crates/almide-codegen/src/walker/helpers.rs
-index 0736d79ea..62d8af95f 100644
---- a/crates/almide-codegen/src/walker/helpers.rs
-+++ b/crates/almide-codegen/src/walker/helpers.rs
-@@ -128,6 +128,7 @@ pub fn render_body_content(ctx: &RenderContext, expr: &almide_ir::IrExpr) -> Str
-         IrExprKind::Block { stmts, expr: tail } => {
+diff --git a/crates/almide-codegen/src/walker/mod.rs b/crates/almide-codegen/src/walker/mod.rs
+index 0ed22cff6..4f1102c96 100644
+--- a/crates/almide-codegen/src/walker/mod.rs
++++ b/crates/almide-codegen/src/walker/mod.rs
+@@ -283,6 +283,7 @@ fn render_fn_body_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
+         IrExprKind::Block { stmts, expr } => {
              let mut parts: Vec<String> = stmts.iter()
-                 .map(|s| terminate_stmt(ctx, super::statements::render_stmt(ctx, s)))
+                 .map(|s| terminate_stmt(fn_ctx, render_stmt_fn(fn_ctx, s)))
 +                .rev()
                  .collect();
-             if let Some(e) = tail {
-                 let expr_str = super::expressions::render_expr_owned(ctx, e);
+             if let Some(e) = expr {
+                 let mut expr_str = render_expr_fn(fn_ctx, e);
