@@ -170,3 +170,55 @@ pub(crate) fn check_return_terminal(func: &MirFunction) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Negative controls: proofs the verifier FIRES (the swift
+/// `verifier-fail-*.sil` pattern). A gate that has never been seen
+/// rejecting anything is indistinguishable from `Ok(())`; each test here
+/// hands the checker a minimal violating function and asserts the named
+/// wall comes back.
+#[cfg(test)]
+mod tests {
+    use super::check_def_before_use;
+    use crate::{MirFunction, Op, ValueId};
+
+    fn func(ops: Vec<Op>, ret: Option<ValueId>) -> MirFunction {
+        MirFunction {
+            name: "negctl".to_string(),
+            ops,
+            ret,
+            ..MirFunction::default()
+        }
+    }
+
+    #[test]
+    fn well_formed_function_passes() {
+        let f = func(
+            vec![
+                Op::Const { dst: ValueId(0) },
+                Op::Dup { dst: ValueId(1), src: ValueId(0) },
+            ],
+            Some(ValueId(1)),
+        );
+        assert_eq!(check_def_before_use(&f), Ok(()));
+    }
+
+    #[test]
+    fn read_before_definition_is_a_named_wall() {
+        let f = func(vec![Op::Dup { dst: ValueId(1), src: ValueId(0) }], None);
+        let err = check_def_before_use(&f).expect_err("undefined read must be rejected");
+        assert!(
+            err.contains("INTERNAL mir-wellformed") && err.contains("before any definition"),
+            "wall must be named and cite the violation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn undefined_return_value_is_a_named_wall() {
+        let f = func(vec![Op::Const { dst: ValueId(0) }], Some(ValueId(9)));
+        let err = check_def_before_use(&f).expect_err("undefined return must be rejected");
+        assert!(
+            err.contains("INTERNAL mir-wellformed") && err.contains("no op defines"),
+            "wall must be named and cite the violation, got: {err}"
+        );
+    }
+}

@@ -823,6 +823,12 @@ jobs:
           cd crates/almide-edit-belt
           lake exe conformancegen --check ../../proofs/kernel-conformance
 
+      - name: Drift gate fires on corruption (negative controls)
+        # Proof the gate above can actually reject: corrupted/deleted corpus
+        # copies must FAIL --check. A gate only ever seen green is
+        # indistinguishable from `exit 0`.
+        run: bash scripts/check-conformance-negative.sh
+
   # ═══════════════════════════════════════════════
   # Checks
   # ═══════════════════════════════════════════════
@@ -878,6 +884,9 @@ jobs:
 
       - name: L1 verdict ledger (edit-locality prediction loop — schema and vocabularies)
         run: bash scripts/check-l1-verdicts.sh
+
+      - name: L1 verdict ledger gate fires on malformed input (negative controls)
+        run: bash scripts/check-l1-verdicts-negative.sh
 
       - name: Release evidence seals (every seal re-measured against its tag — the audit freeze)
         run: bash scripts/release-seal.sh check

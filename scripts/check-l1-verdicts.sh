@@ -16,7 +16,9 @@
 # refutations are findings, not failures.
 set -u
 
-LEDGER="proofs/l1-verdicts.toml"
+# Optional path override so the negative controls
+# (check-l1-verdicts-negative.sh) can feed this gate malformed ledgers.
+LEDGER="${1:-proofs/l1-verdicts.toml}"
 fail=0
 err() { echo "::error::$1"; fail=1; }
 
