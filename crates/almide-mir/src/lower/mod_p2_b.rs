@@ -710,6 +710,12 @@ pub(crate) struct LowerCtx {
     /// the err path (direct `Op::Return`, no rebox). `None` = no declared
     /// Result return (lifted/auto-wrapped fns decline the rule for now).
     decl_ret_family: Option<crate::lower::ResultFamily>,
+    /// The fn's declared return is literally `Unit` — the void convention.
+    /// Gates the R2 rule's ABORT exit (a `!` in a fn with no Result channel
+    /// dies with the message); a non-Unit channel-less fn (a pure fn
+    /// returning a tuple, whose `!` belongs to an enclosing fallible lambda)
+    /// must NOT abort.
+    decl_ret_ty_is_unit: bool,
     /// This fn's effective ERR type: the declared `Result[_, E]`'s `E`, or `String` for a
     /// lifted effect fn (the synthetic `Result[T, String]`); `None` when no Result ABI applies
     /// (a declared `-> Option[..]` fn, a lifted lambda sub-ctx). Gates the tail-`!` pass-through

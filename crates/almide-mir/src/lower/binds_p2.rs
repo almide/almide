@@ -113,26 +113,64 @@ impl LowerCtx {
             }};
         }
         let IrExprKind::Unwrap { expr } = &value.kind else { return Ok(false) };
-        // A DECLARED-Result fn admits by its declared family; an AUTO-WRAPPED
-        // (lifted) effect fn's synthetic `Result[T, String]` carrier is
-        // scalar-family BY CONSTRUCTION (only scalar-ret fns are lifted), so
-        // it admits the same Scalar rule.
-        let fn_fam = self.decl_ret_family.or_else(|| {
-            self.ret_is_result_abi.then_some(crate::lower::ResultFamily::Scalar)
-        });
-        let Some(fn_fam) = fn_fam else { decline!("fn-family") };
+        // A DECLARED-Result fn admits by its declared family; a LIFTED effect
+        // fn by its synthetic `Result[T, String]` carrier's family — BOTH are
+        // now computed at ctx build (`decl_ret_family` covers the lift; the
+        // first cut hard-coded Scalar here and mislabeled heap-ret lifted fns
+        // into the rebox path — the fs_fold_lines_range wrong-value).
+        let fn_fam = self.decl_ret_family;
+        // A VOID fn (a `main`/test block with no Result channel — the lifted
+        // Unit convention): its err path cannot RETURN a carrier, it ABORTS
+        // with the v0-identical "Error: <msg>\n" line. Same one rule, the
+        // exit action differs — Zig's `DefersToEmit` axis: one walk, a mode
+        // flag for what the exit does.
+        // A VOID fn has NO Result channel at all: not a declared Result, not
+        // an auto-wrapped lift (`decl_ret_family` covers both), and not the
+        // Result ABI flag. Its `!` aborts instead of returning.
+        // A VOID fn has NO Result channel at all: not a declared Result, not
+        // an auto-wrapped lift (`decl_ret_family` covers both), and not the
+        // Result ABI flag. Its `!` aborts instead of returning.
+        //
+        // NARROWED to a SCALAR-family callee: a lifted `effect fn -> <heap>`
+        // builds its carrier through the scalar-family materializer (len@4 as
+        // the tag) while `result_family` types it HeapOk (tag@16) — reading
+        // @16 there took the err branch on an OK carrier and `die`d on string
+        // bytes (bang_fold3). Closing that producer/consumer split is its own
+        // slice; until then a heap-ok callee in a void fn declines.
+        // …and the fn must ACTUALLY return Unit: a pure fn returning a real
+        // value (`fn use_first_class() -> (Int, Int)`) has no Result channel
+        // either, but its `!` is NOT an abort — inside a fallible lambda it
+        // is the lambda's own propagation (fallible_lambda L1: aborting there
+        // killed the process mid-test instead of yielding the `??` fallback).
+        let void_fn = fn_fam.is_none()
+            && !self.ret_is_result_abi
+            && matches!(self.decl_ret_ty_is_unit, true)
+            && crate::lower::result_family(&expr.ty) == crate::lower::ResultFamily::Scalar;
+        if fn_fam.is_none() && !void_fn {
+            decline!("fn-family");
+        }
         if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
             decline!("callee-family");
         }
         let callee_fam = crate::lower::result_family(&expr.ty);
-        // SAME family on both sides: the err layout is family-uniform (Scalar:
-        // len-as-tag@4, err String slot @12; HeapOk: len=1, tag@16, err String
-        // @12), so the callee's carrier IS a valid fn-ret value on the err
-        // path with NO rebox. Cross-family propagation needs the ResErrStr
-        // rebox — a later slice.
-        if callee_fam != fn_fam {
-            decline!("family-mismatch");
-        }
+        let fn_fam = fn_fam.unwrap_or(callee_fam);
+        // SAME family on both sides: the callee's carrier IS a valid fn-ret
+        // value on the err path (the err layout is family-uniform), returned
+        // with NO rebox. CROSS-family: the err String is extracted @12 (same
+        // offset both families), Dup'd (inc strictly before any release — the
+        // Lean oproj law), the carrier released, and the message reboxed via
+        // `materialize_result_err_str` — whose Err block is the FAMILY
+        // SUPERSET (len@4=1 for len-as-tag readers AND tag@16=1 for
+        // cap-as-tag readers), so ONE constructor serves both directions.
+        let rebox = !void_fn && callee_fam != fn_fam;
+        let rebox_repr = if rebox {
+            match crate::lower::repr_of(&expr.ty) {
+                Ok(r) => Some(r),
+                Err(_) => decline!("rebox-repr"),
+            }
+        } else {
+            None
+        };
         // The ok-payload bind classes this slice owns: scalar/Unit (value
         // copy), and for a HeapOk callee a String / flat heap-elem list /
         // tracked-variant payload (Dup'd — see below). Anything else (records,
@@ -185,14 +223,48 @@ impl LowerCtx {
         };
         let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
         self.ops.push(Op::IfThen { cond: tag, dst: None });
-        let live: Vec<ValueId> = self.live_heap_handles.clone();
-        for other in live {
-            if other != v {
-                let op = self.drop_op_for(other);
-                self.ops.push(op);
+        // The exit path never mutates `live_heap_handles` — the surviving ok
+        // continuation still owns everything; the arm only EMITS the drops.
+        if void_fn {
+            // ABORT exit: die with the err message — the v0 unit-main
+            // convention ("Error: <msg>\n" is prefixed by the die runtime's
+            // own line, exactly as build_main_die_line's split form feeds it).
+            // The err String sits @12 in BOTH families; the load is a BORROW
+            // and `prim.die` never returns, so no ownership event is needed
+            // (the process ends — the same accounting the overflow-abort
+            // shape uses).
+            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            // `prim.die` takes the message's ADDRESS (i64), not the i32
+            // handle — the same `Handle`-then-`Die` pair the overflow abort
+            // emits (calls_p4_b.rs:589-591).
+            let mh = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(mh), args: vec![eb] });
+            self.ops.push(Op::Prim { kind: PrimKind::Die, dst: None, args: vec![mh] });
+        } else if let Some(repr) = rebox_repr {
+            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            let e_dup = self.fresh_value();
+            self.ops.push(Op::Dup { dst: e_dup, src: eb });
+            let live: Vec<ValueId> = self.live_heap_handles.clone();
+            for other in live {
+                if other != v {
+                    let op = self.drop_op_for(other);
+                    self.ops.push(op);
+                }
             }
+            let vop = self.drop_op_for(v);
+            self.ops.push(vop);
+            let new = self.materialize_result_err_str(e_dup, repr);
+            self.ops.push(Op::Return { val: Some(new) });
+        } else {
+            let live: Vec<ValueId> = self.live_heap_handles.clone();
+            for other in live {
+                if other != v {
+                    let op = self.drop_op_for(other);
+                    self.ops.push(op);
+                }
+            }
+            self.ops.push(Op::Return { val: Some(v) });
         }
-        self.ops.push(Op::Return { val: Some(v) });
         self.ops.push(Op::EndIf { val: None });
         // Straight-line ok continuation: bind the payload; the carrier stays
         // live and the ordinary scope-end (recursive) drop releases it. A

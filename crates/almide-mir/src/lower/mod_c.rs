@@ -518,9 +518,35 @@ fn new_lower_ctx(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
         ) || crate::lower::AUTO_WRAP_ABI_FNS
             .with(|s| s.borrow().contains(func.name.as_str())),
+        decl_ret_ty_is_unit: matches!(&func.ret_ty, Ty::Unit),
         decl_ret_family: match &func.ret_ty {
             t @ Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _) => {
                 Some(crate::lower::result_family(t))
+            }
+            // A LIFTED effect fn (no declared Result/Option — `effect fn f()
+            // -> T`): its synthetic carrier is `Result[T, String]`, whose
+            // family follows the DECLARED ret's heapness. Heap-ret effect fns
+            // ARE lifted too (lifted_effect_fn_names filters only on
+            // is_effect + non-Result/Option decl), so hard-coding Scalar here
+            // mislabeled every `effect fn -> List[..]` (fs_fold_lines_range's
+            // collect_partition) into the rebox path.
+            // A LIFTED effect fn (`effect fn f() -> T`, no declared
+            // Result/Option): only a SCALAR T admits. A HEAP T's synthetic
+            // carrier is built by the scalar-family materializer (len@4 as
+            // the tag) while `result_family` would type it HeapOk (tag@16) —
+            // a real producer/consumer layout split (found via
+            // fs_fold_lines_range: the @16 read took the err branch on an OK
+            // carrier). `None` here keeps those fns walling until the split
+            // is closed in its own slice.
+            t if !crate::lower::is_heap_ty(t)
+                && !matches!(
+                    t,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+                )
+                && crate::lower::AUTO_WRAP_ABI_FNS
+                    .with(|s| s.borrow().contains(func.name.as_str())) =>
+            {
+                Some(crate::lower::ResultFamily::Scalar)
             }
             _ => None,
         },

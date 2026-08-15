@@ -29,10 +29,36 @@ pub(crate) fn desugar_stmt_value_nested_unwrap(
 ) -> Option<IrExpr> {
     let mut out = body.clone();
     if nested_unwrap_rewrite_expr(&mut out, next_var) {
-        Some(out)
-    } else {
-        None
+        return Some(out);
     }
+    // A BARE (blockless) fn body whose root expression nests a `!`
+    // (`fn f(s) -> Int! = int.parse(s)! * 2`): wrap it into a Block so the
+    // hoisted bind has a statement list to land in.
+    //
+    // NEVER for a LAMBDA body: `let g = (x) => parse1(x)! * 2` would hoist the
+    // `!` into the ENCLOSING fn, where `x` is not bound — the scope-capture
+    // violation Lean's `nestedActionForbiddenBinder` forbids (Do/Basic.lean:
+    // 838-841). `take_innermost_scalar_unwrap` already refuses to DESCEND
+    // into a Lambda, but the body handed here IS the lambda's own body when
+    // the lift lowers it, so the guard must also sit at the root.
+    if matches!(&out.kind, almide_ir::IrExprKind::Lambda { .. }) {
+        return None;
+    }
+    if let Some((bind, span)) = take_innermost_scalar_unwrap(&mut out, next_var) {
+        let tail = out;
+        let ty = tail.ty.clone();
+        let tspan = tail.span.clone();
+        return Some(IrExpr {
+            kind: almide_ir::IrExprKind::Block {
+                stmts: vec![almide_ir::IrStmt { kind: bind, span }],
+                expr: Some(Box::new(tail)),
+            },
+            ty,
+            span: tspan,
+            def_id: None,
+        });
+    }
+    None
 }
 
 /// Depth-first search for a statement list containing a qualifying stmt;
@@ -45,7 +71,18 @@ fn nested_unwrap_rewrite_expr(e: &mut IrExpr, next_var: &mut u32) -> bool {
                 return true;
             }
             if let Some(t) = expr {
-                return nested_unwrap_rewrite_expr(t, next_var);
+                // The TAIL: first recurse (a nested Block/If/Match tail), then
+                // hoist a tail-expression-nested `!` (`int.parse(s)! * 2` —
+                // the fallible_marker value-tail class: the scalar-operand
+                // path would read its payload tag-blind) into a bind appended
+                // to this block's statements.
+                if nested_unwrap_rewrite_expr(t, next_var) {
+                    return true;
+                }
+                if let Some((bind, span)) = take_innermost_scalar_unwrap(t, next_var) {
+                    stmts.push(almide_ir::IrStmt { kind: bind, span });
+                    return true;
+                }
             }
             false
         }
