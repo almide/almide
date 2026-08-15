@@ -245,9 +245,27 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Vec<(usize, MutLvalue)>, Flow> {
         let mut out = Vec::new();
         for (i, (param, arg)) in func.params.iter().zip(args.iter()).enumerate() {
-            if !param.is_mut {
+            // TWO ways a parameter copies out, and the second is why #1436
+            // existed. BY DECLARATION: a `mut` param, the C-132 lowering.
+            // BY TYPE: a `Bytes` param. The byte-writer family
+            // (`set_*`/`append_*`/`write_*`, and `fill`/`copy_from`/
+            // `copy_within`) is `@intrinsic`s whose mutation lives in the
+            // native `&mut Vec<u8>` signature — invisible to the `.almd`
+            // declaration, so a user fn taking a PLAIN `Bytes` param and
+            // writing into it mutates the CALLER's buffer on both backends
+            // while carrying no `mut` marker for this gate to see. The interp
+            // wrote back into the callee's own frame, the effect died at the
+            // frame boundary, and the third judge voted the UNMODIFIED buffer
+            // — a wrong vote where the module doc demands a skip. Copying a
+            // Bytes param out unconditionally is sound in the other direction
+            // too: a callee that never writes hands back the value it was
+            // given, so the copy-out is a no-op.
+            let by_decl = param.is_mut;
+            let by_type = matches!(param.ty, almide_lang::types::Ty::Bytes);
+            if !by_decl && !by_type {
                 continue;
             }
+            let kind = if by_decl { "mut-parameter" } else { "bytes-parameter" };
             match &arg.kind {
                 almide_ir::IrExprKind::Var { id } => out.push((i, MutLvalue::Var(*id))),
                 almide_ir::IrExprKind::Member { object, field } => match &object.kind {
@@ -256,7 +274,7 @@ impl<'a> Interpreter<'a> {
                     }
                     _ => {
                         return Err(Flow::Unsupported(format!(
-                            "mut-parameter argument through a nested lvalue \
+                            "{kind} argument through a nested lvalue \
                              (`{}` param {i}) — only a Var or one-level record \
                              field copies out (#1022)",
                             func.name.as_str()
@@ -267,13 +285,16 @@ impl<'a> Interpreter<'a> {
                 | almide_ir::IrExprKind::MapAccess { .. }
                 | almide_ir::IrExprKind::TupleIndex { .. } => {
                     return Err(Flow::Unsupported(format!(
-                        "mut-parameter argument through an index lvalue \
+                        "{kind} argument through an index lvalue \
                          (`{}` param {i}) — not yet copied out (#1022)",
                         func.name.as_str()
                     )))
                 }
-                // Unreachable in a checked program (E032 forbids a temporary
-                // to a `mut` param) — defensively skip rather than guess.
+                // A TEMPORARY argument. For a `mut` param this is unreachable
+                // (E032 forbids it); for a by-type `Bytes` param it is legal
+                // (`fill(bytes.new(4))`) and there is simply no caller slot to
+                // copy back into — nothing downstream can observe the buffer,
+                // so skipping is exact rather than a guess.
                 _ => {}
             }
         }
