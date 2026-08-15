@@ -1,15 +1,18 @@
 //! Kernel conformance (edit-locality Stage 3, C-280): the backends' stdout
 //! for λ_almd-image programs must be EXACTLY the trace the kernel semantics
-//! assigns — pinned at Lean compile time in
-//! crates/almide-edit-belt/AlmideEditBelt (#guard + eval_sound + ev_det).
+//! assigns — kernel-checked theorems for the family (k1_obs..kAll_ev,
+//! `:= by rfl` + eval_sound + ev_det) in
+//! crates/almide-edit-belt/AlmideEditBelt.
 //!
 //! Two layers: the hand-written family (`spec/wasm_cross/kernel_conformance
 //! .almd`, whose wasm leg the wasm_cross harness carries), and the GENERATED
 //! 48-program corpus (`proofs/kernel-conformance/`, from `lake exe
-//! conformancegen`; drift-gated in CI against Corpus.lean) — run here on
-//! native and, when a wasm runtime is present, on wasm too. Expected-output
-//! literals/files duplicate the Lean side by construction; that reviewed
-//! link is the trusted seam, per docs/contracts/proven-vs-trusted.md.
+//! conformancegen`; totality kernel-checked as `corpus_total`, the
+//! `.expected` traces evaluator-pinned and drift-gated in CI against
+//! Corpus.lean) — run here on native and, when a wasm runtime is present,
+//! on wasm too. Expected-output literals/files duplicate the Lean side by
+//! construction; that reviewed link is the trusted seam, per
+//! docs/contracts/proven-vs-trusted.md.
 
 use std::path::Path;
 use std::process::Command;

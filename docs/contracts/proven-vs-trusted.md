@@ -64,13 +64,23 @@ gives the language a machine-checked reference semantics for its core:
 relation). The bridge to the shipping compiler runs through three layers
 with different standings:
 
-- **proven** — the kernel observables of every conformance program: the
-  hand-written family (`Conformance.lean`, `#guard` + `rfl`) and the
-  48-program GENERATED corpus (`Corpus.lean`, `#guard corpusOK`), each an
-  `evalE` output that `eval_sound` + `ev_det` make THE meaning, checked by
-  the Lean kernel on every CI run. (`evalE` completeness is deliberately
-  unproven — only `some`-outputs are ever consumed, where soundness
-  carries the claim.)
+- **kernel-checked (proven)** — the hand-written family's observables:
+  `k1_obs`…`kAll_obs` and `corpus_total` are theorems proved `:= by rfl`,
+  i.e. by Lean KERNEL reduction, and their axiom sets are pinned with
+  `#guard_msgs in #print axioms` (`propext` only). `eval_sound` +
+  `ev_det` lift each pinned `evalE` output to THE derivation of `Ev`
+  (`kAll_ev`). For the generated corpus, what is kernel-checked is
+  TOTALITY — every one of the 48 programs evaluates to `some`
+  observables (`corpus_total`).
+- **evaluator-pinned (trusted)** — the VALUES in
+  `proofs/kernel-conformance/*.expected`: they are emitted by the
+  COMPILED Lean evaluator (`lake exe conformancegen --write`), so
+  trusting them means trusting the Lean compiler — the exact seam lean4
+  itself names with its `trustCompiler` axiom. The unproven completeness
+  direction of `evalE` is likewise an enumerable object, not a doc
+  comment: `EvalCompleteness` states it, the marker axiom
+  `trustEvalCompleteness` (kept at `True`) tags any argument that needs
+  it, and the CI axiom ratchet enumerates every `axiom` in the belts.
 - **trusted (reviewed seam)** — the `eraseE`/`eraseChain` + `render*` pair
   in `Corpus.lean`: two ~40-line functions walking the same surface
   grammar, one producing the λ_almd term the evaluator scores, one the
@@ -84,6 +94,20 @@ with different standings:
   (with a wasm runtime present) on wasm; the `wasm_cross` harness carries
   the family; the `conformancegen --check` CI step pins the committed
   corpus to `Corpus.lean` byte-for-byte. All under contract C-280.
+
+Lean's own three-tier vocabulary, which the classification above adopts
+(the correction came from reading lean4's source — Survey 4):
+
+| Lean idiom | Trust level | Why |
+|---|---|---|
+| `decide` / `:= by rfl` | kernel proof | the kernel re-reduces the term itself |
+| `#guard` | untrusted pin, **not a proof** | runs the untrusted elaborator evaluator (lean4 `src/Init/Guard.lean`) |
+| `native_decide` | compiled-evaluator proof **modulo a named axiom** | materializes `Lean.ofReduceBool`/`trustCompiler` so `#print axioms` shows the seam |
+
+The belts use tier 1 for every conformance claim; the `.expected` files
+sit at tier 3's trust level (compiled evaluation) with the seam recorded
+here instead of in an axiom, because the consumer is a shell gate, not a
+Lean proof.
 
 "Backends are refinements of the kernel" is therefore enforced over the
 GENERATED λ_almd-expressible fragment — machine-computed programs,
@@ -107,6 +131,6 @@ from its body on a bare-parameter tail) — the gate bites.
 | `proofs/output-parity.sh` | native and wasm agree, for the baseline set | anything outside that set |
 | `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |
 | the cross-target fuzz | no divergence found in N programs | no divergence exists |
-| the kernel-conformance pin (C-280) | the compiled family's observables equal the machine-checked λ_almd trace, on both targets | that every almide program refines the kernel — only the family's image is pinned |
+| the kernel-conformance pin (C-280) | the compiled family's observables equal the kernel-checked λ_almd trace, on both targets; the generated corpus matches the compiled evaluator's traces | that every almide program refines the kernel — only the fragment's image is pinned; corpus `.expected` values are evaluator-pinned (compiled Lean), not kernel-checked |
 
 Reproduce all of it: `make verify-trust`.

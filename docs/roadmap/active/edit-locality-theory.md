@@ -81,9 +81,11 @@ the gate working.)
    unproven, only `some`-outputs are consumed). Enforcement is
    generator-total, not hand-picked: `Corpus.lean` deterministically
    generates a 48-program typed corpus over the λ_almd-expressible
-   fragment, proves every program's kernel observables at Lean compile
-   time (`#guard corpusOK`), and `conformancegen` emits/pins the committed
-   corpus (`proofs/kernel-conformance/`, CI drift-gated);
+   fragment, kernel-checks that every program evaluates to observables
+   (theorem `corpus_total`, `:= by rfl`), and `conformancegen` emits/pins
+   the committed corpus (`proofs/kernel-conformance/`, CI drift-gated —
+   the `.expected` traces themselves are evaluator-pinned, the
+   `trustCompiler`-class seam);
    `tests/kernel_conformance_test.rs` runs all of it on native AND wasm
    against those expected traces — 48/48 on both targets at landing, plus
    the hand-written seven-program family under contract C-280. The trust
@@ -113,8 +115,15 @@ the gate working.)
    landings, all predicted `up`); all await post-landing runs — the last
    scored run predates the arc, so the loop's first real datapoint arrives
    with the next Dojo round. Theory that predicts measurements is the layer
-   no other language team has — Koka has proofs without an experiment,
-   Dojo-less languages have experiments without a theorem.
+   no other language team has. The precise Koka comparison (Survey 4,
+   verified in koka's source 2026-08-15): its proofs are paper-only — no
+   mechanization anywhere in the repo — and while its 812-line FIP/FBIP
+   verifier runs on every compile, its Core IR typechecker is disabled
+   three ways over (default off, commented out of the test suite,
+   warning-only even when on) and its cross-backend differential harness
+   exists but is never armed in CI. Machine-checked theorems wired to a
+   live measurement loop is the combination none of the nine surveyed
+   compilers has.
 
 ## Non-goals
 
