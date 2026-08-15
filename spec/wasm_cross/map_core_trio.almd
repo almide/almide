@@ -1,0 +1,22 @@
+// @contract: C-013
+// The scalar-key find/map/upsert trio (frontier burn-down, #1423): the
+// String-key (skv) instantiations always linked, but `Map[Int, Int]` walled on
+// wasm for all three — the core file simply lacked the twins, invisible until
+// the full-surface reachability sweep probed the generic instantiation at Int.
+// Pins: insertion-order first-hit find (some((k, v)) / none), value-only map
+// with keys copied in order, upsert's two halves (existing key keeps its
+// POSITION and takes f(old); a new key appends (key, init)).
+fn main() -> Unit = {
+  var m = [1: 10, 2: 20, 3: 30]
+  let f = map.find(m, (k, v) => v > 15) ?? (0, 0)
+  let (fk, fv) = f
+  println("find=${int.to_string(fk)}:${int.to_string(fv)}")
+  let miss = map.find(m, (k, v) => v > 99)
+  println("find_none=" + (if miss == none then "yes" else "no"))
+  let doubled = map.map(m, (v) => v * 2)
+  println("map=${map.get_or(doubled, 2, 0 - 1)} src_intact=${map.get_or(m, 2, 0 - 1)}")
+  let up1 = map.upsert(m, 2, 99, (v) => v + 1)
+  println("upsert_hit=${map.get_or(up1, 2, 0 - 1)} keys=${map.keys(up1)}")
+  let up2 = map.upsert(m, 7, 77, (v) => v + 1)
+  println("upsert_new=${map.get_or(up2, 7, 0 - 1)} len=${int.to_string(map.len(up2))}")
+}

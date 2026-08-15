@@ -241,6 +241,7 @@ evidence  = [
   { path = "spec/wasm_cross/map_filter.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_fold.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_index_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_core_trio.almd", class = "fixture" },
 ]
 
 [[contract]]

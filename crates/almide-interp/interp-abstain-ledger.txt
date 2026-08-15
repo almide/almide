@@ -58,6 +58,7 @@ list_slice_oob  out-of-interp-scope capability: prim.handle of a List whose elem
 list_update_heap  out-of-interp-scope capability: prim.alloc_value
 list_window_zero  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 list_windows_zero  out-of-interp-scope capability: prim.die
+map_core_trio  out-of-interp-scope capability: HOF map.find
 map_filter  out-of-interp-scope capability: HOF map.filter
 map_fold_heap_acc  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 map_index_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
