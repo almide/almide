@@ -306,5 +306,3 @@ fn run_interp_capture(source: &str) -> InterpLeg {
         }
     }
 }
-
-
