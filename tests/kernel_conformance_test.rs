@@ -116,10 +116,16 @@ fn kernel_conformance_corpus_matches_kernel_traces() {
         })
         .collect();
     programs.sort();
-    assert!(
-        programs.len() >= 40,
-        "corpus unexpectedly small: {} programs",
-        programs.len()
+    // EXACT count, not `>=` (the roc positive-control rule): a silently
+    // shrunk corpus must fail here, not pass with whatever remains. The
+    // number mirrors `corpusSize` in Corpus.lean — whose byte-level match
+    // with this directory the `conformancegen --check` CI step enforces —
+    // so it moves only on a deliberate corpus bump, in the same PR.
+    const CORPUS_SIZE: usize = 48;
+    assert_eq!(
+        programs.len(),
+        CORPUS_SIZE,
+        "corpus program count drifted from Corpus.lean's corpusSize"
     );
     let mut wasm_checked = 0usize;
     let mut wasm_available = true;

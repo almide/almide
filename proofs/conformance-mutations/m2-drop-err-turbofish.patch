@@ -1,0 +1,13 @@
+diff --git a/crates/almide-codegen/src/walker/expressions.rs b/crates/almide-codegen/src/walker/expressions.rs
+index 1574ba7b1..53a50f01e 100644
+--- a/crates/almide-codegen/src/walker/expressions.rs
++++ b/crates/almide-codegen/src/walker/expressions.rs
+@@ -270,7 +270,7 @@ fn render_expr_result_ok(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String
+ /// full Result type (Unit-defaulted ok side), so carry it.
+ fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String {
+     let inner_str = render_expr(ctx, inner);
+-    if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty) {
++    if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty).filter(|_| false) {
+         // Payload conversion matches the template chain below: only a
+         // String payload gets the `.to_string()`; a typed error payload
+         // (`Result[T, Int]`, a user error enum) passes through raw —

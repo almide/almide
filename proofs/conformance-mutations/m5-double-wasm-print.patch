@@ -1,0 +1,13 @@
+diff --git a/crates/almide-mir/src/render_wasm_c.rs b/crates/almide-mir/src/render_wasm_c.rs
+index 3e2841157..b8a7d818b 100644
+--- a/crates/almide-mir/src/render_wasm_c.rs
++++ b/crates/almide-mir/src/render_wasm_c.rs
+@@ -707,7 +707,7 @@ fn render_call(dst: Option<ValueId>, func: &RtFn, args: &[CallArg]) -> String {
+             t = local(*t)
+         ),
+         (RtFn::PrintStr, [CallArg::Handle(v)]) => {
+-            format!("    (call $print_str (local.get {}))\n", local(*v))
++            format!("    (call $print_str (local.get {v}))\n    (call $print_str (local.get {v}))\n", v = local(*v))
+         }
+         _ => panic!("malformed runtime call {func:?} with args {args:?}"),
+     }
