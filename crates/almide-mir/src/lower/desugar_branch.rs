@@ -660,11 +660,11 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
     // tuple sub-match a multi-field variant regroup produces).
     (RowTrigger::TupleMatch, |src, _, _| desugar_tuple_match(src)),
-    (RowTrigger::Always, |src, _, _| desugar_if_arm_unwrap(src)),
+    (RowTrigger::Always, |src, _, _| if crate::lower::bang_return_probe() { None } else { desugar_if_arm_unwrap(src) }),
     (RowTrigger::Always, |src, _, _| desugar_flatten_let_block(src)),
     (RowTrigger::Always, |src, _, _| desugar_inline_tail_accumulator(src)),
     (RowTrigger::Always, |src, next_var, _| desugar_callarg_heap_if(src, next_var)),
-    (RowTrigger::Always, |src, next_var, _| desugar_callarg_unwrap(src, next_var)),
+    (RowTrigger::Always, |src, next_var, _| if crate::lower::bang_return_probe() { None } else { desugar_callarg_unwrap(src, next_var) }),
     // Compile a tuple-of-VARIANTS match while it is still a VALUE match (binder-free
     // literal arms) — AFTER the call-arg lift above has pulled it out of an argument
     // position (`println(match (Red, Green) {…})` → `let tmp = match …; println(tmp)`,
@@ -678,8 +678,8 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
     // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
     // bare tail-call arms instead of a heap-Option continuation match.
-    (RowTrigger::Always, |src, _, _| desugar_unwrap_rewrap_identity(src)),
-    (RowTrigger::Always, |src, _, _| desugar_let_unwrap(src)),
+    (RowTrigger::Always, |src, _, _| if crate::lower::bang_return_probe() { None } else { desugar_unwrap_rewrap_identity(src) }),
+    (RowTrigger::Always, |src, _, _| if crate::lower::bang_return_probe() { None } else { desugar_let_unwrap(src) }),
     // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
     // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
     // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
@@ -688,10 +688,10 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // bind-position stmt (`out = out + [conv(s)!]` → `let $t = conv(s)!; out = out + [$t]`),
     // so the proven bind-position machinery — including the loop flag rewrite right below —
     // handles it instead of the tag-blind scalar-operand payload read.
-    (RowTrigger::AnyUnwrap, |src, next_var, _| desugar_stmt_value_nested_unwrap(src, next_var)),
+    (RowTrigger::AnyUnwrap, |src, next_var, _| if crate::lower::bang_return_probe() { None } else { desugar_stmt_value_nested_unwrap(src, next_var) }),
     // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
     // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
-    (RowTrigger::Always, |src, next_var, _| desugar_loop_unwrap(src, next_var)),
+    (RowTrigger::Always, |src, next_var, _| if crate::lower::bang_return_probe() { None } else { desugar_loop_unwrap(src, next_var) }),
     // `break` inside a `for`/`while` body → the `__bk` flag form (whole-arm breaks only;
     // see `desugar_loop_break`). Runs in this SHARED desugar (count-invariant flag ops).
     (RowTrigger::Always, |src, next_var, _| desugar_loop_break(src, next_var)),
@@ -702,7 +702,7 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
     // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
     // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
-    (RowTrigger::Always, |src, _, layouts| desugar_stmt_control_unwrap(src, layouts)),
+    (RowTrigger::Always, |src, _, layouts| if crate::lower::bang_return_probe() { None } else { desugar_stmt_control_unwrap(src, layouts) }),
     (RowTrigger::Always, |src, next_var, layouts| desugar_nested_branch_arms(src, next_var, layouts)),
 ];
 

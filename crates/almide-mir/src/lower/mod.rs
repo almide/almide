@@ -678,6 +678,17 @@ pub(crate) fn reset_desugar_var_band() {
     DESUGAR_VAR_CURSOR.with(|c| c.set(DESUGAR_VAR_BAND));
 }
 
+/// The `Op::Return` readiness probe (return-op-eradication R2, the #1418
+/// recipe): `ALMIDE_BANG_RETURN=1` turns OFF the per-position `!` desugars in
+/// BOTH the counted tree and the lowering (the desugar-before-both discipline
+/// holds — an un-desugared `Unwrap` adds no calls), so every `!` reaches the
+/// bind-position rule or WALLS loudly. The walls are the decline matrix; the
+/// deletion (R3) fires when it is empty.
+pub(crate) fn bang_return_probe() -> bool {
+    static PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PROBE.get_or_init(|| std::env::var_os("ALMIDE_BANG_RETURN").is_some())
+}
+
 /// Reserve a fresh 4096-id chunk in the synthetic band and return its first id.
 ///
 /// THE fresh-variable discipline for every IR→IR rewrite (the reference-compiler
