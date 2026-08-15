@@ -1,12 +1,19 @@
 diff --git a/crates/almide-codegen/src/walker/statements_box_patterns.rs b/crates/almide-codegen/src/walker/statements_box_patterns.rs
-index fda10af49..c2f3a4692 100644
+index fda10af49..30b336233 100644
 --- a/crates/almide-codegen/src/walker/statements_box_patterns.rs
 +++ b/crates/almide-codegen/src/walker/statements_box_patterns.rs
-@@ -335,6 +335,7 @@ fn resolve_pattern_enum_name(ctx: &RenderContext, enum_hint: Option<&str>, name:
- 
- /// `render_pattern_hinted`'s `Constructor` arm, extracted verbatim.
- fn render_pattern_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], enum_hint: Option<&str>) -> String {
-+    let name: &str = match name { "Ok" => "Err", "Err" => "Ok", _ => name };
-     let enum_name = resolve_pattern_enum_name(ctx, enum_hint, name);
-     let qualified = if let Some(enum_name) = enum_name {
-         ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name)])
+@@ -392,12 +392,12 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Op
+         IrPattern::None => template_or(ctx, "pattern_none", &[], "None"),
+         IrPattern::Ok { inner } => {
+             let binding_s = render_pattern(ctx, inner);
+-            ctx.templates.render_with("pattern_ok", None, &[], &[("binding", binding_s.as_str())])
++            ctx.templates.render_with("pattern_err", None, &[], &[("binding", binding_s.as_str())])
+                 .unwrap_or_else(|| format!("Ok(_)"))
+         }
+         IrPattern::Err { inner } => {
+             let binding_s = render_pattern(ctx, inner);
+-            ctx.templates.render_with("pattern_err", None, &[], &[("binding", binding_s.as_str())])
++            ctx.templates.render_with("pattern_ok", None, &[], &[("binding", binding_s.as_str())])
+                 .unwrap_or_else(|| format!("Err(_)"))
+         }
+         IrPattern::Constructor { name, args } => render_pattern_constructor(ctx, name, args, enum_hint),

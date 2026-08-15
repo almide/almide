@@ -1,13 +1,12 @@
-diff --git a/crates/almide-codegen/src/walker/expressions.rs b/crates/almide-codegen/src/walker/expressions.rs
-index 1574ba7b1..f5b0f079d 100644
---- a/crates/almide-codegen/src/walker/expressions.rs
-+++ b/crates/almide-codegen/src/walker/expressions.rs
-@@ -12,7 +12,7 @@ use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_cont
- /// Render a statement list. Peephole patterns are detected at IR level
- /// by PeepholePass; this just renders the resulting IR nodes.
- fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
--    stmts.iter().map(|s| render_stmt(ctx, s)).collect()
-+    stmts.iter().map(|s| render_stmt(ctx, s)).rev().collect()
- }
- 
- /// Mangle a type into the monomorphization suffix form (mirrors mono/utils.rs).
+diff --git a/crates/almide-codegen/src/walker/helpers.rs b/crates/almide-codegen/src/walker/helpers.rs
+index 0736d79ea..62d8af95f 100644
+--- a/crates/almide-codegen/src/walker/helpers.rs
++++ b/crates/almide-codegen/src/walker/helpers.rs
+@@ -128,6 +128,7 @@ pub fn render_body_content(ctx: &RenderContext, expr: &almide_ir::IrExpr) -> Str
+         IrExprKind::Block { stmts, expr: tail } => {
+             let mut parts: Vec<String> = stmts.iter()
+                 .map(|s| terminate_stmt(ctx, super::statements::render_stmt(ctx, s)))
++                .rev()
+                 .collect();
+             if let Some(e) = tail {
+                 let expr_str = super::expressions::render_expr_owned(ctx, e);

@@ -1,0 +1,64 @@
+name: Conformance mutations (nightly)
+
+# Mutation gate for the kernel-conformance harness (Survey 4 law 1, the roc
+# lambda_mono_mutation_check pattern): apply each seeded emit bug in
+# proofs/conformance-mutations/, and the 48-program corpus runner must FAIL
+# under every one of them. A surviving mutant means the corpus is not
+# actually protecting that emit path. Five full compiler rebuilds — nightly
+# and manual dispatch only, deliberately kept out of the PR/push CI.
+
+on:
+  schedule:
+    # 04:30 UTC daily — clear of the 03:00 fuzz night and the push/PR windows.
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.89.0"
+
+jobs:
+  mutation-gate:
+    name: 5 seeded emit bugs must all be caught
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: mutation-gate-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+
+      - name: Install wasmtime
+        # Pinned + cached + retried, same pattern as fuzz-nightly.yml. The
+        # gate REFUSES to run without a wasm runtime (the wasm-leg mutant m5
+        # would survive for the wrong reason).
+        run: |
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Run the mutation gate
+        run: bash scripts/check-conformance-mutations.sh
