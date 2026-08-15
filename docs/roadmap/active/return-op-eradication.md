@@ -31,6 +31,32 @@ let RHS, loop bodies (new statement scope), and `&&`/`||` RIGHT operands
 (Lean's one documented wart: its generic descent silently eagerizes the
 short-circuit — we forbid instead).
 
+### R2 state after the second increment batch (209def816)
+
+probe ON **349/54/0, zero traps**; probe OFF **391/12/0** (baseline exact).
+Slices landed: cross-family rebox (killed all 20 family-mismatch declines),
+tail + bare-root hoist, Unit-fn ABORT exit (die, not Return — the Zig
+`DefersToEmit` mode-flag shape), lambda-root hoist guard, probe narrowed to
+the statement-continuation rewrite only.
+
+THREE REAL BUGS the probe surfaced (all pre-existing, none probe artifacts):
+1. tail-position nested `!` read its payload TAG-BLIND (fixed by the hoist
+   extension — it fires probe-off too);
+2. **#1437** — the lifted heap-ret carrier: `result_family` types it HeapOk
+   (tag@16) while the lift materializes len-as-tag, AND (second pass) the
+   lift's ABI decision itself is derived from a TRIAL LOWERING, so which fns
+   get a Result ABI depends on the propagation machinery's current acceptance
+   set. Contained by declining lifted heap-ret fns; **30 of the remaining 42
+   matrix files sit behind this class**, so #1437 is R2's critical path;
+3. the void-abort predicate fired for any channel-less fn, including a pure
+   fn returning a tuple whose `!` belongs to an enclosing fallible lambda
+   (fallible_lambda L1) — narrowed to declared-`Unit` returns.
+
+Remaining matrix (42): 30 behind #1437, 3 callee-family (Option `!` — the
+Option carrier has no err channel to propagate, needs the none⇒err(msg)
+construction), 1 heap-payload-class (record/Value payloads), the rest walling
+only inside test-block fns.
+
 Wall-reason distribution over the 52 (first-wall per file):
 - 13× bind-rule decline (`unwrap ! bound to a let/var`) — increment-1 gates:
   heap payload / non-Scalar callee family / auto-wrap fn (admission landed) /
