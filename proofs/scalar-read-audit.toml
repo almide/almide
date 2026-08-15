@@ -449,3 +449,10 @@ loads = 2
 verdict = "TAG_DISPATCHED"
 why = "The closure-coalesce payload case (the retired lower_closure_unwrap_or body, moved inside at the #1418 route deletion): IfThen(tag@4); payload@12 LoadHandle in the Some arm only, over a materialized Option the speculate-guarded bind produced."
 
+
+[[arm]]
+file = "binds_p2.rs"
+fn = "try_lower_bind_unwrap_return"
+loads = 2
+verdict = "TAG_DISPATCHED"
+why = "The R2 one-rule `!` bind (return-op-eradication): tag@4 read first (scalar family len-as-tag, IfThen dispatches on it — the err arm drops live handles and Op::Returns the carrier), then the ok payload load64@12 sits in the SURVIVING straight-line continuation only, so no raw read precedes the tag dispatch."
