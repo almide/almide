@@ -120,17 +120,41 @@ impl LowerCtx {
         let fn_fam = self.decl_ret_family.or_else(|| {
             self.ret_is_result_abi.then_some(crate::lower::ResultFamily::Scalar)
         });
-        if fn_fam != Some(crate::lower::ResultFamily::Scalar) {
-            decline!("fn-family");
-        }
-        if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _))
-            || crate::lower::result_family(&expr.ty) != crate::lower::ResultFamily::Scalar
-        {
+        let Some(fn_fam) = fn_fam else { decline!("fn-family") };
+        if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
             decline!("callee-family");
         }
-        if is_heap_ty(ty) {
-            decline!("heap-payload");
+        let callee_fam = crate::lower::result_family(&expr.ty);
+        // SAME family on both sides: the err layout is family-uniform (Scalar:
+        // len-as-tag@4, err String slot @12; HeapOk: len=1, tag@16, err String
+        // @12), so the callee's carrier IS a valid fn-ret value on the err
+        // path with NO rebox. Cross-family propagation needs the ResErrStr
+        // rebox — a later slice.
+        if callee_fam != fn_fam {
+            decline!("family-mismatch");
         }
+        // The ok-payload bind classes this slice owns: scalar/Unit (value
+        // copy), and for a HeapOk callee a String / flat heap-elem list /
+        // tracked-variant payload (Dup'd — see below). Anything else (records,
+        // Value, maps) declines to the wall for the next slice.
+        let heap_payload_class = if is_heap_ty(ty) {
+            if callee_fam != crate::lower::ResultFamily::HeapOk {
+                decline!("heap-payload-scalar-carrier");
+            }
+            if matches!(ty, Ty::String)
+                || crate::lower::is_heap_elem_list_ty(ty)
+                || matches!(
+                    ty,
+                    Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _)
+                )
+            {
+                true
+            } else {
+                decline!("heap-payload-class");
+            }
+        } else {
+            false
+        };
         // The err components must agree — the pass-through would type-pun a
         // mismatched err payload (the collect_map! class; v0 map_err-coerces).
         if self.unwrap_tail_err_mismatch(expr) {
@@ -153,7 +177,13 @@ impl LowerCtx {
         let Some(v) = attempt else { decline!("callee-lowering") };
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
-        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        // The err tag: Scalar family reads len-as-tag @4; HeapOk reads the
+        // dedicated tag slot @16 (len is pinned to 1 there).
+        let tag_off = match callee_fam {
+            crate::lower::ResultFamily::Scalar => 4,
+            crate::lower::ResultFamily::HeapOk => 16,
+        };
+        let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
         self.ops.push(Op::IfThen { cond: tag, dst: None });
         let live: Vec<ValueId> = self.live_heap_handles.clone();
         for other in live {
@@ -164,12 +194,28 @@ impl LowerCtx {
         }
         self.ops.push(Op::Return { val: Some(v) });
         self.ops.push(Op::EndIf { val: None });
-        // Straight-line ok continuation: bind the payload copy; the carrier
-        // stays live and the ordinary scope-end drop releases it.
+        // Straight-line ok continuation: bind the payload; the carrier stays
+        // live and the ordinary scope-end (recursive) drop releases it. A
+        // SCALAR payload is a value COPY (load64). A HEAP payload is a BORROW
+        // (LoadHandle) immediately made an OWNED second reference (`Dup` —
+        // inc strictly before any release of the parent, which here is not
+        // until scope end), then seeded with its type's read/drop facts so
+        // downstream reads dispatch and the scope-end drop takes the right
+        // route.
         if matches!(ty, Ty::Unit) {
             let d = self.fresh_value();
             self.ops.push(Op::Const { dst: d });
             self.value_of.insert(var, d);
+        } else if heap_payload_class {
+            let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            let payload = self.fresh_value();
+            self.ops.push(Op::Dup { dst: payload, src: borrowed });
+            self.live_heap_handles.push(payload);
+            if crate::lower::is_heap_elem_list_ty(ty) {
+                self.value_drops.entry(payload).or_default().flat_elems = true;
+            }
+            self.seed_variant_value_shape(payload, ty);
+            self.value_of.insert(var, payload);
         } else {
             let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
             self.value_of.insert(var, payload);
