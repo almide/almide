@@ -495,6 +495,29 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     ) {
         Ok(wat) => match wat::parse_str(&wat) {
             Ok(bytes) => {
+                // Unconditional emit-time validation (the grain pattern:
+                // Binaryen `Module.validate` or die). `wat` ASSEMBLES without
+                // full stack-shape validation, so a renderer bug that types
+                // out (e.g. almide#1431's i32/i64 mismatch) would otherwise
+                // ship invalid bytes and surface as a wasmtime translation
+                // error at load — a runtime failure wearing the runner's
+                // vocabulary. Validate here, before the name section is
+                // stripped, so the wall can name the offending function.
+                if let Err(e) = wasmparser::validate(&bytes) {
+                    let site = wasm_function_at(&bytes, e.offset())
+                        .unwrap_or_else(|| "an unidentified function".to_string());
+                    err(&format!(
+                        "error: emitted wasm failed validation — this is an Almide bug: {} \
+                         (offset {:#x}, in {site})",
+                        e.message(),
+                        e.offset()
+                    ));
+                    err(
+                        "  hint: please file this with the source that triggered it: \
+                         https://github.com/almide/almide/issues",
+                    );
+                    return Err(());
+                }
                 let bytes = strip_wasm_name_section(bytes);
                 if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
                     err(&format!(
@@ -604,6 +627,57 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // exactly as without `--verified`.
     let _ = (&mut ir_program, allow_unverified, verified);
     render_wasm_module(&source_text, &v1_self_modules, library_ok)
+}
+
+/// Best-effort map of a validation-error byte offset to the function that
+/// contains it: which code-section body covers the offset, named through
+/// the name section (still present — validation runs before
+/// [`strip_wasm_name_section`]). `None` only if the module is too broken
+/// to walk section-by-section; the caller still reports the offset.
+fn wasm_function_at(bytes: &[u8], offset: usize) -> Option<String> {
+    use wasmparser::{KnownCustom, Name, Parser, Payload, TypeRef};
+    let mut imported_funcs: u32 = 0;
+    let mut code_index: u32 = 0;
+    let mut hit: Option<u32> = None;
+    let mut names: Vec<(u32, String)> = Vec::new();
+    for payload in Parser::new(0).parse_all(bytes) {
+        match payload.ok()? {
+            Payload::ImportSection(imports) => {
+                // 0.255 groups imports by module; each group yields
+                // `(byte_offset, Import)` items.
+                for group in imports.into_iter().flatten() {
+                    for (_, imp) in group.into_iter().flatten() {
+                        if matches!(imp.ty, TypeRef::Func(_)) {
+                            imported_funcs += 1;
+                        }
+                    }
+                }
+            }
+            Payload::CodeSectionEntry(body) => {
+                if body.range().contains(&offset) {
+                    hit = Some(imported_funcs + code_index);
+                }
+                code_index += 1;
+            }
+            Payload::CustomSection(c) => {
+                if let KnownCustom::Name(name_reader) = c.as_known() {
+                    for sub in name_reader.into_iter().flatten() {
+                        if let Name::Function(map) = sub {
+                            for naming in map.into_iter().flatten() {
+                                names.push((naming.index, naming.name.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let idx = hit?;
+    Some(match names.iter().find(|(i, _)| *i == idx) {
+        Some((_, name)) => format!("function `{name}` (index {idx})"),
+        None => format!("function index {idx}"),
+    })
 }
 
 /// Trim every "name"-id custom section down to its function-names
