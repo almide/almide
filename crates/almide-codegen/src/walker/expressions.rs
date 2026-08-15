@@ -270,6 +270,40 @@ fn render_expr_result_ok(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String
 /// full Result type (Unit-defaulted ok side), so carry it.
 fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String {
     let inner_str = render_expr(ctx, inner);
+    // Fire ONLY for the #1428 class — an UNANCHORED ok side (Unknown / an
+    // inference var / the checker's Unit default on a bare match subject).
+    // A concretely-resolved ok type means the surrounding context already
+    // pins the constructor, and pinning it AGAIN here regressed the two
+    // shapes that depended on the parameter staying open (#1434, first-bad
+    // b1ef4e70a): a guard's `return (Err(..))?` unifies the open ok side
+    // with the fn's WHOLE Result (pinned, the `?` yields the scalar and
+    // E0308s), and a tuple-payload fallible lambda's inferred return
+    // conflicts with the node-local scalar pin.
+    // The pin fires EXACTLY when the checker itself RESOLVED the ok side to
+    // its Unit default (the bare-match subject, almide#1428 / C-281): the
+    // checker only defaults in genuinely-unanchored positions — an anchored
+    // Unit-default would have failed the check — so `()` is always correct
+    // there. A still-OPEN ok side (`Unknown` / an inference var) must stay
+    // open: rustc anchors it from the surrounding context (a container
+    // literal of `Result<i64,_>` rows — map_higher_order, the fifth #1434
+    // victim), and a concrete non-Unit ok side is already pinned by that
+    // context (pinning it AGAIN node-locally broke the guard-`return (Err)?`
+    // and tuple-payload fallible-lambda shapes — #1434, first-bad b1ef4e70a).
+    let ok_is_checker_default = matches!(
+        ty,
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(&a[0], Ty::Unit)
+    );
+    if !ok_is_checker_default {
+        let construct =
+            if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
+        return ctx
+            .templates
+            .render_with(construct, None, &[], &[("inner", inner_str.as_str())])
+            .or_else(|| {
+                ctx.templates.render_with("err_expr", None, &[], &[("inner", inner_str.as_str())])
+            })
+            .unwrap_or_else(|| format!("Err({})", inner_str));
+    }
     if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty) {
         // Payload conversion matches the template chain below: only a
         // String payload gets the `.to_string()`; a typed error payload
