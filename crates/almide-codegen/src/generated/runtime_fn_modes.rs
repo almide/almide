@@ -503,6 +503,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_matrix_add" => &[false, false],
         "almide_rt_matrix_append_rows" => &[false, false],
         "almide_rt_matrix_attention_weights" => &[false, false, false],
+        "almide_rt_matrix_bounds" => &[false, false],
         "almide_rt_matrix_broadcast_add_row" => &[false, false],
         "almide_rt_matrix_causal_mask_add" => &[false, false],
         "almide_rt_matrix_cols" => &[false],

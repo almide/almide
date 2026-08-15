@@ -174,8 +174,29 @@ pub fn almide_rt_matrix_cols(m: &AlmideMatrix) -> i64 {
     if m.is_empty() { 0 } else { m[0].len() as i64 }
 }
 
+/// The INDEX-DOMAIN rule for the element accessor (#1423 night findings, C-282).
+/// `matrix.get` is indexing — the matrix analogue of `xs[i]`, which aborts with
+/// `Error: index out of bounds` (the `almide_index` macro) rather than inventing
+/// a value. An out-of-range row/col used to be a RAW index on both legs: a Rust
+/// slice panic (exit 101) natively against a wasm OOB trap (exit 134), and for a
+/// NEGATIVE index the wasm leg did not even fail — `row as usize` wrapped and it
+/// returned whatever heap bytes it landed on, exit 0 (the silent-wrong class,
+/// found by extending the fuzzer's positive-OOB finding to the whole family).
+/// Compared as i64 BEFORE any cast, so a negative can never wrap past the test.
+#[inline]
+pub fn almide_rt_matrix_bounds(idx: i64, extent: usize) {
+    if idx < 0 || (idx as u64) >= extent as u64 {
+        eprintln!("Error: matrix index out of bounds");
+        std::process::exit(1);
+    }
+}
+
 pub fn almide_rt_matrix_get(m: &AlmideMatrix, row: i64, col: i64) -> f64 {
-    m[row as usize][col as usize]
+    almide_rt_matrix_bounds(row, m.len());
+    let r = &m[row as usize];
+    // The COL extent is this row's own width, so a ragged matrix is exact.
+    almide_rt_matrix_bounds(col, r.len());
+    r[col as usize]
 }
 
 pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
