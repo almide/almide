@@ -1,13 +1,13 @@
 diff --git a/crates/almide-codegen/src/walker/expressions.rs b/crates/almide-codegen/src/walker/expressions.rs
-index 1574ba7b1..53a50f01e 100644
+index 61ad3badf..3fdc49de6 100644
 --- a/crates/almide-codegen/src/walker/expressions.rs
 +++ b/crates/almide-codegen/src/walker/expressions.rs
-@@ -270,7 +270,7 @@ fn render_expr_result_ok(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String
- /// full Result type (Unit-defaulted ok side), so carry it.
- fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String {
-     let inner_str = render_expr(ctx, inner);
--    if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty) {
-+    if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty).filter(|_| false) {
-         // Payload conversion matches the template chain below: only a
-         // String payload gets the `.to_string()`; a typed error payload
-         // (`Result[T, Int]`, a user error enum) passes through raw —
+@@ -289,7 +289,7 @@ fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> Strin
+     // victim), and a concrete non-Unit ok side is already pinned by that
+     // context (pinning it AGAIN node-locally broke the guard-`return (Err)?`
+     // and tuple-payload fallible-lambda shapes — #1434, first-bad b1ef4e70a).
+-    let ok_is_checker_default = matches!(
++    let ok_is_checker_default = false && matches!(
+         ty,
+         Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(&a[0], Ty::Unit)
+     );
