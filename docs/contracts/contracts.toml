@@ -3474,3 +3474,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_default_and_passthrough.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-282"
+spec      = "ALS-R6"
+title     = "A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead"
+statement = "`matrix.get(m, row, col)` is INDEXING — the matrix analogue of `xs[i]` — so an out-of-range index, NEGATIVE included, is the same unified abort the list index raises: `Error: matrix index out of bounds` on stderr and exit 1, on both targets, for the row against the matrix's row count and for the column against that row's own width. It never invents an element: there is no identity value for `the value at (r, c)`, and handing back 0.0 would be the plausible-but-wrong answer this language exists to avoid. Previously both legs raw-indexed: a too-large index was a Rust slice panic (exit 101) natively against a wasm OOB memory trap (exit 134), and a NEGATIVE index did not fail on the wasm leg at all — `col as usize` wrapped, the load landed outside the row block, and it printed whatever bytes were there with exit 0 (the silent-wrong class). The crash-class half was found by the first scheduled both-arch fuzz night (run 31861833115, seeds 509789329848 index 817 and 509789329844 index 772, both mutations of spec/wasm_cross/rope_at_family.almd); extending the finding across the whole accessor family — as CLAUDE.md requires — is what exposed the silent half. The guard compares as i64 BEFORE any cast, so a negative can never wrap past its own test (the defeated-by-overflow shape of #1408). The FAMILY RULE, and the reason it is not uniform: the two remaining index-taking accessors, `matrix.row_dot` and `matrix.dot_row`, are REDUCTIONS over a row, and a reduction has an identity — they answer 0.0 for an out-of-range or negative row, on both legs, and are pinned that way so this guard work can never silently convert them into aborts. An accessor with no identity aborts; a reduction with one answers it. The column extent is read from the selected row rather than from a matrix-wide width so the rule stays exact for a ragged matrix; no public constructor builds one today (`matrix.from_lists` rejects unequal rows), so that half is exactness by construction rather than a reachable cell."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_fail/matrix_index_oob_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_index_domain_family.almd", class = "fixture" },
+]
