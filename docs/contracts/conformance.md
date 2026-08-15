@@ -11,11 +11,11 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-97 normative sections; 449 distinct executable fixtures.
+97 normative sections; 450 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
-| ALS-C1 | C-013 | `spec/wasm_cross/map_insertion_order.almd` (byte-compare)<br>`spec/wasm_cross/map_filter.almd` (byte-compare)<br>`spec/wasm_cross/map_fold.almd` (byte-compare)<br>`spec/wasm_cross/map_index_order.almd` (byte-compare) |
+| ALS-C1 | C-013 | `spec/wasm_cross/map_insertion_order.almd` (byte-compare)<br>`spec/wasm_cross/map_filter.almd` (byte-compare)<br>`spec/wasm_cross/map_fold.almd` (byte-compare)<br>`spec/wasm_cross/map_index_order.almd` (byte-compare)<br>`spec/wasm_cross/map_core_trio.almd` (byte-compare) |
 | ALS-C2 | C-014 | `spec/wasm_cross/set_insertion_order.almd` (byte-compare)<br>`spec/wasm_cross/set_index_order.almd` (byte-compare) |
 | ALS-C3 | C-015, C-124, C-185 | `spec/wasm_cross/compound_eq.almd` (byte-compare)<br>`spec/wasm_cross/deep_eq_heap.almd` (byte-compare)<br>`spec/wasm_cross/map_set_eq.almd` (byte-compare)<br>`spec/wasm_cross/value_deep_eq.almd` (byte-compare)<br>`spec/wasm_cross/fan_any_early_winner.almd` (byte-compare) |
 | ALS-C4 | C-034 | `spec/wasm_cross/list_insert_clamp.almd` (byte-compare)<br>`spec/wasm_cross/list_remove_at_oob.almd` (byte-compare)<br>`spec/wasm_cross/list_swap_oob.almd` (byte-compare)<br>`spec/wasm_cross/list_slice_oob.almd` (byte-compare)<br>`spec/wasm_cross/list_sort_short.almd` (byte-compare)<br>`spec/wasm_cross/list_with_capacity.almd` (byte-compare)<br>`spec/wasm_cross/negative_offset_and_width_totality.almd` (byte-compare)<br>`spec/wasm_cross/repeat_size_ceiling.almd` (byte-compare) |

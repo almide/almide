@@ -50,6 +50,11 @@ patterns = [
   # the textbook BRIDGEABLE shape.
   "capability: HOF map.filter",
   "capability: HOF map.map",
+  # Surfaced by the scalar-key find/map/upsert twins (#1423 burn-down): the
+  # fixture now gets PAST `prim.alloc_map` (which used to abstain first) and
+  # reaches the missing dispatch arm underneath — bounded glue, same shape as
+  # its map.filter/map.map siblings above.
+  "capability: HOF map.find",
   "capability: HOF list.update",
   "capability: list.min/max on non-comparable elements",
   "capability: prim.args_get_list_full",
