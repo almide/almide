@@ -79,10 +79,7 @@ json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
 json.to_map :: UNPROBEABLE :: no candidate shape builds natively
 list.group_by :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: list.group_by_x — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to th
 list.with_capacity :: UNPROBEABLE :: no candidate shape builds natively
-map.find :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: map.find — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the self-
-map.map :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: map.map — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the self-h
 map.new :: UNPROBEABLE :: no candidate shape builds natively
-map.upsert :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: map.upsert — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the sel
 matrix.append_rows :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.append_rows — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to
 matrix.fma :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fma — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the sel
 matrix.fma3 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fma3 — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the se
