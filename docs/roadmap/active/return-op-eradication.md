@@ -13,6 +13,24 @@ R2 census (probe ON, full almd suite; baseline 391/12/0):
   files beyond the baseline 12 (`scratchpad matrix52` snapshot below is in
   the wall sweep, non-durable — regenerate via ALMIDE_FALLBACK_NAMES=1).
 
+Increment H (3b6ceb7f8): HeapOk×HeapOk admitted — same-family carrier direct
+return (tag@16), heap payload = LoadHandle@12 + Dup + typed seeding (String /
+flat heap-elem list / tracked variant). The Dup-then-lazy-carrier-drop shape
+is verified idiomatic (Lean's `oproj` rule: inc strictly before any parent
+release; ExplicitRC.lean:575-578 + the 421-444 inc-before-dec law). Fn-level
+decline split AFTER H (build-reachable): **20 family-mismatch** (the ResErrStr
+REBOX slice — extract err @12, Dup, drop carrier, construct the FN-family err,
+Return), 10 fn-family (test-block Unit fns — the ABORT shape, not Return),
+3 callee-family (Option `!`), 2 heap-payload-class (records/Value).
+
+Hoist admission table (Lean Do/Basic.lean:805-909, ported design): HOIST from
+if/while conditions, match SUBJECTS, binder-less let RHS, any statement
+subterm — left-to-right, innermost-first, band-allocator temps. HARD-ERROR
+(never silent skip) from: lambda bodies, match ARM bodies, binder-carrying
+let RHS, loop bodies (new statement scope), and `&&`/`||` RIGHT operands
+(Lean's one documented wart: its generic descent silently eagerizes the
+short-circuit — we forbid instead).
+
 Wall-reason distribution over the 52 (first-wall per file):
 - 13× bind-rule decline (`unwrap ! bound to a let/var`) — increment-1 gates:
   heap payload / non-Scalar callee family / auto-wrap fn (admission landed) /
