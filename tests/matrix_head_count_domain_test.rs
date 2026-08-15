@@ -197,3 +197,59 @@ fn the_self_hosted_geometry_guard_matches_the_native_message() {
         );
     }
 }
+
+/// #1423 night findings (C-282): the INDEX domain — the third rule of this
+/// family, and the one whose negative half was silently wrong on the wasm leg
+/// (a wrapped `as usize` read outside the row block and exited 0). One shared
+/// guard per leg, and every element accessor routes through it.
+#[test]
+fn the_native_index_guard_aborts_and_get_routes_through_it() {
+    let src = read("runtime/rs/src/matrix.rs");
+    let start = src
+        .find("pub fn almide_rt_matrix_bounds")
+        .expect("almide_rt_matrix_bounds is missing — the accessor family has no shared index rule");
+    let body = &src[start..start + 400.min(src.len() - start)];
+    assert!(
+        body.contains("Error: matrix index out of bounds") && body.contains("exit(1)"),
+        "the index guard must raise the unified `Error: <msg>` + exit 1 both targets print: {body}"
+    );
+    assert!(
+        body.contains("idx < 0"),
+        "the guard must reject a NEGATIVE index BEFORE the unsigned cast — testing only \
+         `>= extent` after `as usize` is the defeated-by-overflow shape of #1408: {body}"
+    );
+
+    let s = src
+        .find("pub fn almide_rt_matrix_get")
+        .expect("almide_rt_matrix_get is missing");
+    let get = &src[s..(s + 600).min(src.len())];
+    assert_eq!(
+        get.matches("almide_rt_matrix_bounds(").count(),
+        2,
+        "matrix.get must guard BOTH indices (row against the matrix, col against that \
+         row's own width) — one call means one axis is still raw: {get}"
+    );
+}
+
+/// The self-hosted (wasm) side carries the same index rule, same message.
+#[test]
+fn the_self_hosted_index_guard_matches_the_native_message() {
+    let src = read("stdlib/matrix_core.almd");
+    assert!(
+        src.contains("fn __mx_bounds"),
+        "stdlib/matrix_core.almd has no `__mx_bounds` — the wasm leg would raw-index, \
+         which traps for a large index and reads out of the block for a negative one"
+    );
+    assert!(
+        src.contains("Error: matrix index out of bounds"),
+        "the self-hosted guard must print the SAME line as the native helper, or the abort \
+         itself diverges across targets"
+    );
+    let s = src.find("fn matrix_get").expect("matrix_get is missing");
+    let get = &src[s..(s + 500).min(src.len())];
+    assert_eq!(
+        get.matches("__mx_bounds(").count(),
+        2,
+        "the self-hosted matrix_get must guard BOTH indices, mirroring the native twin: {get}"
+    );
+}
