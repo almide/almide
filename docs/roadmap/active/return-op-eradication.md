@@ -1,6 +1,16 @@
 # Return-op eradication: one desugar for `!`, position zoo deleted
 
-Status: PLANNED (research sealed 2026-08-15; ratification pending)
+Status: R2 IN PROGRESS (ratified ○ 2026-08-15; R1 landed 3358f26f6+53439f582 —
+op through both renderers, verifier diverged rule, cert marker `x`, kernel
+format v5 `check_xc` all green; probe `ALMIDE_BANG_RETURN=1` gates the 9
+position rows, 2e73deceb).
+
+R2 census (probe ON, full almd suite; baseline 391/12/0):
+- 335 via WASM, **64 fallback (+52 = the file-level decline matrix)**,
+- **4 FAILED** — `fallible_lambda`, `guard`, `result_of`,
+  `result_option_matrix`: shapes only v1 ever carried; the v0 fallback's own
+  `?`-emit gap (the v0-unwrap-early-return-leak class) breaks under them, so
+  these four are MANDATORY reclaims for the one rule, not optional.
 Law: rot-eradication law 6 — a diverging arm drops the merge continuation.
 Prior art: the `??` route-zoo deletion (#1418, +148/−1054) — same disease, one
 level up: the recognizer grew a case per fixture; here the desugar table grows
