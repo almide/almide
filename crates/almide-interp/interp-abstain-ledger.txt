@@ -69,6 +69,7 @@ matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_rows  out-of-interp-scope capability: prim.alloc_list_str
 matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
+matrix_index_domain_family  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 matrix_pow_libm  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.alloc_list_str
 matrix_select_rows  out-of-interp-scope capability: prim.alloc_list_str
