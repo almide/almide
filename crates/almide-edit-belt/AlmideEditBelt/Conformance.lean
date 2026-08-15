@@ -5,9 +5,11 @@ import AlmideEditBelt.Evaluator
 
 Stage 3's bridge between the proven kernel and the shipping backends. Each
 `k*` below is a λ_almd program whose almide-surface image lives in
-`spec/wasm_cross/kernel_conformance.almd`; the `#guard`s pin the
-kernel-semantic observables at COMPILE TIME (by `eval_sound` + `ev_det`
-these are theorems about `Ev`, not just evaluator outputs), and
+`spec/wasm_cross/kernel_conformance.almd`; the `k*_obs` THEOREMS pin the
+kernel-semantic observables by KERNEL REDUCTION (`:= by rfl` — not
+`#guard`, which runs the untrusted evaluator and "passing is not a proof",
+lean4 `src/Init/Guard.lean`). By `eval_sound` + `ev_det` each pinned
+output is THE derivation of `Ev`, and `kAll_ev` states that explicitly.
 `tests/kernel_conformance_test.rs` pins the real compiler's stdout to the
 same strings on native, with the `wasm_cross` harness extending the claim
 to wasm.
@@ -86,29 +88,41 @@ def k7 : Expr := .orElse (.call "h" (.intLit 0)) (.intLit 9)
 `spec/wasm_cross/kernel_conformance.almd`'s `main`. -/
 def kAll : Expr := .seq k1 (.seq k2 (.seq k3 (.seq k4 (.seq k5 k6))))
 
-#guard evalE DC 32 emptyEnv k1 =
-  some (.norm .vUnit, ["alpha", "beta", "gamma"], [])
-#guard evalE DC 32 emptyEnv k2 = some (.norm .vUnit, ["got-ok"], ["g"])
-#guard evalE DC 32 emptyEnv k3 = some (.norm .vUnit, ["got-err"], ["h"])
-#guard evalE DC 32 emptyEnv k4 = some (.norm .vUnit, ["reified"], ["boom"])
-#guard evalE DC 32 emptyEnv k5 = some (.norm .vUnit, ["five-ok"], ["five"])
-#guard evalE DC 32 emptyEnv k6 =
-  some (.norm .vUnit, ["inside", "outside"], ["shout"])
-#guard evalE DC 32 emptyEnv k7 = some (.norm (.vInt 9), [], ["h"])
-#guard evalE DC 64 emptyEnv kAll =
-  some (.norm .vUnit,
-    ["alpha", "beta", "gamma", "got-ok", "got-err", "reified", "five-ok",
-     "inside", "outside"],
-    ["g", "h", "boom", "five", "shout"])
+theorem k1_obs : evalE DC 32 emptyEnv k1 =
+    some (.norm .vUnit, ["alpha", "beta", "gamma"], []) := by rfl
+theorem k2_obs : evalE DC 32 emptyEnv k2 =
+    some (.norm .vUnit, ["got-ok"], ["g"]) := by rfl
+theorem k3_obs : evalE DC 32 emptyEnv k3 =
+    some (.norm .vUnit, ["got-err"], ["h"]) := by rfl
+theorem k4_obs : evalE DC 32 emptyEnv k4 =
+    some (.norm .vUnit, ["reified"], ["boom"]) := by rfl
+theorem k5_obs : evalE DC 32 emptyEnv k5 =
+    some (.norm .vUnit, ["five-ok"], ["five"]) := by rfl
+theorem k6_obs : evalE DC 32 emptyEnv k6 =
+    some (.norm .vUnit, ["inside", "outside"], ["shout"]) := by rfl
+theorem k7_obs : evalE DC 32 emptyEnv k7 =
+    some (.norm (.vInt 9), [], ["h"]) := by rfl
+theorem kAll_obs : evalE DC 64 emptyEnv kAll =
+    some (.norm .vUnit,
+      ["alpha", "beta", "gamma", "got-ok", "got-err", "reified", "five-ok",
+       "inside", "outside"],
+      ["g", "h", "boom", "five", "shout"]) := by rfl
 
 /-- The pinned family observables are not merely evaluator outputs: by
 `eval_sound` they are derivations of the relational semantics, and by
 `ev_det` the only ones. -/
-example :
+theorem kAll_ev :
     Ev DC emptyEnv kAll (.norm .vUnit)
       ["alpha", "beta", "gamma", "got-ok", "got-err", "reified", "five-ok",
        "inside", "outside"]
       ["g", "h", "boom", "five", "shout"] :=
-  eval_sound 64 _ _ _ _ _ (by rfl)
+  eval_sound 64 _ _ _ _ _ kAll_obs
+
+-- Axiom audit, pinned: `propext` only (standard, via `eval_sound`'s simp
+-- steps). A future `native_decide`/`trustEvalCompleteness`/`sorryAx`
+-- sneaking in fails the build here, not just the audit.
+/-- info: 'LambdaAlmd.kAll_ev' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms kAll_ev
 
 end LambdaAlmd

@@ -10,13 +10,16 @@ direction that matters for conformance —
 
 * `eval_sound` — whatever `evalE` returns, the relational semantics `Ev`
   derives. Together with `ev_det` (determinism, `EditFrame.lean`) this
-  makes every `#guard`-pinned evaluator output THE kernel-semantic
-  observables of that program: `evalE` says so, `eval_sound` lifts it to a
-  derivation, `ev_det` says no other derivation exists.
+  makes every kernel-reduced `evalE`-output theorem (`:= by rfl`, in
+  `Conformance.lean`/`Corpus.lean`) THE kernel-semantic observables of
+  that program: `evalE` says so, `eval_sound` lifts it to a derivation,
+  `ev_det` says no other derivation exists.
 
 The other direction (completeness: every derivation is reached by some
 fuel) is deliberately NOT proven: the conformance gate only ever consumes
-`some`-outputs, where soundness alone carries the claim. The boundary is
+`some`-outputs, where soundness alone carries the claim. The assumption
+is an enumerable object — `EvalCompleteness` states it,
+`trustEvalCompleteness` marks it — not a doc comment; the boundary is
 recorded in `docs/contracts/proven-vs-trusted.md`.
 -/
 
@@ -210,5 +213,21 @@ theorem eval_sound {D : Defs} :
           · cases h
         · cases h; exact .seqAbrupt (ih _ _ _ _ _ (by assumption))
         · cases h
+
+/-- The completeness direction as a first-class statement: every
+derivation is reached at some fuel. DELIBERATELY UNPROVEN — the
+conformance gate only ever consumes `some`-outputs, where `eval_sound`
+alone carries the claim. -/
+def EvalCompleteness : Prop :=
+  ∀ (D : Defs) (ρ : Env) (e : Expr) (r : Res) (t : Trace) (c : Calls),
+    Ev D ρ e r t c → ∃ n, evalE D n ρ e = some (r, t, c)
+
+/-- The trusted assumption as an enumerable object (lean4's
+`trustCompiler` pattern, `src/Init/Core.lean`): an argument that needs
+`EvalCompleteness` — "`evalE` returning `none` at every fuel means no
+derivation exists" — must cite this axiom, so the seam shows up in the
+axiom audits (`#print axioms`, the CI ratchet) instead of hiding in a
+doc comment. Kept at `True` so it can prove nothing by accident. -/
+axiom trustEvalCompleteness : True
 
 end LambdaAlmd

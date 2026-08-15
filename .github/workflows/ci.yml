@@ -746,6 +746,26 @@ jobs:
           fi
           echo "✓ 0 sorry in Lean proofs"
 
+      # Axiom ratchet: every `axiom` in the belts must be on this allowlist.
+      # The only sanctioned one is the trustEvalCompleteness MARKER (: True,
+      # can prove nothing) that makes the evaluator-completeness assumption
+      # enumerable (lean4 trustCompiler pattern). A new axiom = a new trusted
+      # assumption = it must be argued onto this list in its own PR.
+      - name: Axiom ratchet
+        run: |
+          found=$(grep -rnE '^\s*axiom\s+\w+\s*:' \
+              crates/almide-perceus-belt/AlmidePerceusBelt/ \
+              crates/almide-race-belt/AlmideRaceBelt/ \
+              crates/almide-edit-belt/AlmideEditBelt/ \
+              --include='*.lean' || true)
+          unexpected=$(echo "$found" | grep -v 'axiom trustEvalCompleteness : True' | grep -v '^$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "$unexpected"
+            echo "::error::unlisted axiom in Lean proofs — trusted assumptions must be added to the CI allowlist deliberately"
+            exit 1
+          fi
+          echo "✓ axiom audit: only the sanctioned marker axiom present"
+
       - name: Cache elan + Lean toolchain
         uses: actions/cache@v6
         with:
