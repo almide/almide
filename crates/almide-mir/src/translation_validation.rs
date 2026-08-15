@@ -101,9 +101,12 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         | Op::EndIf { .. }
         // Loop markers + scalar reassignment are exec-slice control flow, not corpus V
         // gate ops (like the if-markers above): no per-op pattern claim here.
+        // `Return` is the same control-flow class (renders to a bare wasm
+        // `return`, a token too generic for a presence claim).
         | Op::LoopStart
         | Op::LoopBreakUnless { .. }
         | Op::LoopEnd
+        | Op::Return { .. }
         | Op::SetLocal { .. }
         // CallIndirect renders to `call_indirect` once the table is wired; no single-token
         // per-op pattern claim here (like the if-markers), and no lowering emits it yet.

@@ -80,7 +80,14 @@ impl Streams {
         for o in fr.order {
             let t = fr.then_ev.get(&o).cloned().unwrap_or_default();
             let e = fr.else_ev.get(&o).cloned().unwrap_or_default();
-            let seg = if seg_net(&t) == 0 && seg_net(&e) == 0 {
+            // An arm carrying the divergence marker `x` NEVER flattens (even at
+            // net 0): the bracket is what tells the checker WHICH side exited
+            // the frame, so the flat concat would erase the exit obligation.
+            let seg = if seg_net(&t) == 0
+                && seg_net(&e) == 0
+                && !t.contains('x')
+                && !e.contains('x')
+            {
                 format!("{t}{e}")
             } else if t.contains(['(', ')', '{', '}', '[', ']'])
                 || e.contains(['(', ')', '{', '}', '[', ']'])
@@ -352,6 +359,29 @@ impl CertScan {
             Op::IfThen { dst, .. } => self.open_merge(*dst),
             Op::Else { val } => self.close_arm(val, false),
             Op::EndIf { val } => self.close_arm(val, true),
+            // Frame-targeted early exit (law 6): the returned value MOVES out
+            // HERE — the same boundary `m` the tail emits for `func.ret`, at
+            // the exit op — then EVERY object tracked so far takes the
+            // divergence marker `x` (+0; `r` is taken by Reuse) into the
+            // current arm buffer, so each object's `{then|else}` bracket
+            // carries its own per-object exit obligation: the side ending in
+            // `x` must be at count 0 there (the lowering's pre-return drops
+            // are its real `d`s), and the join continues from the surviving
+            // side alone. An object created later (in the surviving
+            // continuation) correctly gets no `x`; a borrowed param's lone
+            // `x` sits at count 0 and passes trivially.
+            Op::Return { val } => {
+                if let Some(v) = val {
+                    if self.s.of.contains_key(v) {
+                        let o = self.s.object_of(*v);
+                        self.s.event(o, 'm');
+                    }
+                }
+                let objs: BTreeSet<ValueId> = self.s.of.values().copied().collect();
+                for o in objs {
+                    self.s.event(o, 'x');
+                }
+            }
             // A LIVE USE — a read-only borrow or an in-place unique use (`xs[i] = v`
             // via MakeUnique) — on an object whose stream HOLDS ownership (it has a
             // +1 event) is witnessed as `b` (+0, liveness-guarded, brick 5b): a use

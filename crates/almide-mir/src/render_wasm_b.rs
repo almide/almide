@@ -380,6 +380,14 @@ fn render_op_range(
             Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
                 render_if_marker_op(ctx, st, op, body);
             }
+            // Frame-targeted early exit: a wasm `return` is valid at any block
+            // depth (it exits the whole function, through any open `if`/`loop`
+            // nesting) — the same instruction the T1-1 strict cut emits.
+            Op::Return { val } => {
+                st.fuser.flush_all(body);
+                let v = val.map(|v| format!(" (local.get {})", local(v))).unwrap_or_default();
+                body.push_str(&format!("    (return{v})\n"));
+            }
             Op::Charge { .. } | Op::ChargeDyn { .. } => {
                 render_charge_marker_op(ctx, st, op, body);
             }

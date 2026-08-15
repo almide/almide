@@ -119,6 +119,13 @@ struct OwnershipScan {
     borrowed: BTreeSet<ValueId>,
     branches: Vec<BranchFrame>,
     violations: Vec<Violation>,
+    /// A pending [`Op::Return`] divergence (law 6): the current arm ended in a
+    /// frame-targeted early exit whose whole function-exit obligation was
+    /// checked AT the `Return` op. Consumed by the next `Else`/`EndIf` (the
+    /// arm's closing marker — mir_wellformed guarantees nothing sits between);
+    /// still set at scan end = a TOP-LEVEL return, so the phase-3/4 boundary
+    /// checks are skipped (they already ran at the op).
+    diverged: bool,
 }
 
     struct BranchFrame {
@@ -137,6 +144,10 @@ struct OwnershipScan {
         /// later release of it walls conservatively, as before.
         dst: Option<ValueId>,
         moved_in: bool,
+        /// The then arm ended in [`Op::Return`] (its exit state is DIVERGED —
+        /// it took its whole exit obligation at the op and takes no part in
+        /// the agreement; the join continues from the surviving arm alone).
+        then_diverged: bool,
     }
 
 impl OwnershipScan {
@@ -271,7 +282,36 @@ impl OwnershipScan {
             // count). For a SCALAR src (the scalar-TCO loop var) `self.object_of` has no
             // entry, so this is a no-op, as before.
             Op::SetLocal { local, src } => self.rebind_local_slot(*local, *src),
+            // Frame-targeted early exit (law 6): the arm ends HERE, so this op
+            // index carries the whole function-exit obligation the tail carries
+            // at ops.len() — then the arm is marked DIVERGED for its closing
+            // marker to consume.
+            Op::Return { val } => self.diverge_return(i, *val),
         }
+    }
+
+    /// The `Return` arm: the boundary release of the returned value (the
+    /// [`check_return_release`] rule, applied at THIS index — returning a
+    /// borrowed param we never acquired is the same double-owner fault) and the
+    /// leak obligation over everything else (the [`check_leaks`] rule, at THIS
+    /// index — the lowering must have emitted this exit path's drops before the
+    /// op). Sets [`Self::diverged`]; the enclosing `Else`/`EndIf` consumes it,
+    /// or scan end reads it as a top-level return (boundary phases skip).
+    fn diverge_return(&mut self, i: usize, val: Option<ValueId>) {
+        if let Some(v) = val {
+            if self.object_of.contains_key(&v)
+                && release(&self.object_of, &mut self.rc, &mut self.dead, &self.borrowed, v)
+                    .is_err()
+            {
+                self.violations.push(violation(i, v, ViolationKind::UseAfterMove));
+            }
+        }
+        for (o, c) in &self.rc {
+            if *c > 0 {
+                self.violations.push(violation(i, *o, ViolationKind::Leak));
+            }
+        }
+        self.diverged = true;
     }
 
     /// Extracted from [`Self::step`] (codopsy r2, #852): a FRESH owned object —
@@ -372,6 +412,7 @@ impl OwnershipScan {
             then_exit: None,
             dst,
             moved_in: false,
+            then_diverged: false,
         });
     }
 
@@ -381,9 +422,15 @@ impl OwnershipScan {
     fn switch_to_else_arm(&mut self, val: Option<ValueId>) {
         // The move into the merge happens BEFORE the arm's exit state is
         // snapshotted — the release is part of the then arm's accounting.
-        let moved = self.merge_val_move(val);
+        // A DIVERGED then arm (it ended in `Return`) moved nothing into the
+        // merge and its exit state is not a join input: park the divergence on
+        // the frame instead of a snapshot (`then_exit` stays the "Else was
+        // seen" witness either way).
+        let diverged = std::mem::take(&mut self.diverged);
+        let moved = if diverged { false } else { self.merge_val_move(val) };
         if let Some(fr) = self.branches.last_mut() {
             fr.moved_in |= moved;
+            fr.then_diverged = diverged;
             fr.then_exit = Some((self.rc.clone(), self.dead.clone()));
             self.rc = fr.entry_rc.clone();
             self.dead = fr.entry_dead.clone();
@@ -394,10 +441,61 @@ impl OwnershipScan {
     /// frame, then run the two phases the arm always ran in this order, the
     /// agreement CHECK first (it only reads) and the JOIN second. Verbatim.
     fn join_branch_arms(&mut self, i: usize, val: Option<ValueId>) {
-        let moved = self.merge_val_move(val);
+        // A pending divergence belongs to the arm that just ENDED at this
+        // `EndIf`: the else arm when an `Else` marker was seen (`then_exit` is
+        // its witness), otherwise the then arm (the else arm is empty). A
+        // diverged arm moved nothing into the merge and is not a join input.
+        let pending = std::mem::take(&mut self.diverged);
+        let moved = if pending { false } else { self.merge_val_move(val) };
         if let Some(mut fr) = self.branches.pop() {
+            let else_seen = fr.then_exit.is_some();
+            let (then_diverged, else_diverged) = if else_seen {
+                (fr.then_diverged, pending)
+            } else {
+                (fr.then_diverged || pending, false)
+            };
             fr.moved_in |= moved;
             let dst = fr.dst.filter(|_| fr.moved_in);
+            // Law 6 — a diverged arm drops the merge continuation: the join
+            // continues from the SURVIVING arm's state alone, and agreement is
+            // only between join inputs (none needed with ≤1 survivor). Each
+            // diverged arm already took its whole exit obligation at its
+            // `Return`. Both arms diverged ⇒ the `if` itself diverges — the
+            // divergence propagates to the enclosing arm's closing marker
+            // (state parks at the frame entry; every path out was checked).
+            match (then_diverged, else_diverged) {
+                (false, false) => {}
+                (true, false) => {
+                    // Continue from the surviving (else) state: the current
+                    // state when an `Else` ran, the untouched entry state when
+                    // the else arm is empty (the current state is then the
+                    // diverged then-arm's residue).
+                    if !else_seen {
+                        self.rc = fr.entry_rc;
+                        self.dead = fr.entry_dead;
+                    }
+                    if let Some(d) = dst {
+                        self.own_fresh_object(d);
+                    }
+                    return;
+                }
+                (false, true) => {
+                    // Continue from the surviving (then) state.
+                    let (then_rc, then_dead) = self.take_then_arm_exit(fr);
+                    self.rc = then_rc;
+                    self.dead = then_dead;
+                    if let Some(d) = dst {
+                        self.own_fresh_object(d);
+                    }
+                    return;
+                }
+                (true, true) => {
+                    self.rc = fr.entry_rc;
+                    self.dead = fr.entry_dead;
+                    self.diverged = true;
+                    return;
+                }
+            }
             let (then_rc, then_dead) = self.take_then_arm_exit(fr);
             self.check_branch_agreement(i, &then_rc);
             self.merge_branch_exits(then_rc, then_dead);
@@ -648,14 +746,22 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         borrowed,
         branches: Vec::new(),
         violations,
+        diverged: false,
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
     }
-    let OwnershipScan { object_of, mut rc, mut dead, borrowed, mut violations, .. } = scan;
+    let OwnershipScan { object_of, mut rc, mut dead, borrowed, mut violations, diverged, .. } =
+        scan;
 
-    check_return_release(func, &object_of, &mut rc, &mut dead, &borrowed, &mut violations);
-    check_leaks(func, &rc, &mut violations);
+    // A TOP-LEVEL `Op::Return` already took the whole boundary obligation at
+    // its own op index (and mir_wellformed forbids ops after it), so the tail
+    // is unreachable — running the boundary phases again would double-release
+    // the returned value and re-report the same leaks.
+    if !diverged {
+        check_return_release(func, &object_of, &mut rc, &mut dead, &borrowed, &mut violations);
+        check_leaks(func, &rc, &mut violations);
+    }
 
     if violations.is_empty() {
         Ok(())

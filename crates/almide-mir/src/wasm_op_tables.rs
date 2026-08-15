@@ -95,7 +95,8 @@ fn op_reads_flow(op: &Op, out: &mut Vec<ValueId>) {
         }
         Op::Prim { args, .. } => out.extend(args.iter().copied()),
         Op::IfThen { cond, .. } => out.push(*cond),
-        Op::Else { val } | Op::EndIf { val } => {
+        // `Return` READS its returned value exactly like an arm-result marker.
+        Op::Else { val } | Op::EndIf { val } | Op::Return { val } => {
             if let Some(v) = val {
                 out.push(*v);
             }
@@ -234,7 +235,7 @@ fn op_values_flow(op: &Op, out: &mut Vec<ValueId>) {
             out.push(*cond);
             push_opt(out, *dst);
         }
-        Op::Else { val } | Op::EndIf { val } => push_opt(out, *val),
+        Op::Else { val } | Op::EndIf { val } | Op::Return { val } => push_opt(out, *val),
         Op::LoopBreakUnless { cond } => out.push(*cond),
         Op::LoopStart | Op::LoopEnd => {}
         // The data half's families — handled by the caller; listed (not `_`)

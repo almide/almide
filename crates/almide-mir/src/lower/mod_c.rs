@@ -752,6 +752,11 @@ fn lower_function_all_impl(
         if let Err(reason) = crate::mir_wellformed::check_def_before_use(f) {
             return Err(LowerError::Unsupported(reason));
         }
+        // The `Return` terminal discipline (law 6) rides the same rail: a
+        // violation is a lowering bug surfaced as a named wall.
+        if let Err(reason) = crate::mir_wellformed::check_return_terminal(f) {
+            return Err(LowerError::Unsupported(reason));
+        }
     }
     Ok(all)
 }

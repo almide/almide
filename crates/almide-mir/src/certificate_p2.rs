@@ -736,3 +736,125 @@
         }
         assert_eq!(call_modes_witness(&prog2, &no), ";|2 0");
     }
+
+    #[test]
+    fn return_divergence_certifies_and_verifies() {
+        // THE `!` SHAPE (law 6, format v5): own a value; the err arm releases
+        // everything it owns and RETURNS (frame-targeted exit); the ok arm
+        // survives and releases later. The cert carries the arm-terminal `x`
+        // divergence marker (kernel: the marked side must reach exactly 0; the
+        // line continues from the survivor alone) and verify_ownership's
+        // diverged rule waives the branch agreement for the returning arm.
+        let (x, c, y) = (ValueId(0), ValueId(1), ValueId(2));
+        let mut ret_scalar = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Drop { v: x },
+            Op::Return { val: Some(c) },
+            Op::Else { val: None },
+            Op::EndIf { val: None },
+            Op::Drop { v: x },
+        ]);
+        ret_scalar.ret = Some(c);
+        assert_eq!(ownership_certificate(&ret_scalar), "i{dx|}d\n");
+        assert_eq!(verify_ownership(&ret_scalar), Ok(()));
+        assert!(crate::mir_wellformed::check_return_terminal(&ret_scalar).is_ok());
+
+        // The returned value IS the tracked object: its move-out is the exit's
+        // `m` (at the op, not the tail); the surviving path aliases + releases
+        // and the tail moves the alias out.
+        let mut ret_heap = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Return { val: Some(x) },
+            Op::Else { val: None },
+            Op::EndIf { val: None },
+            Op::Dup { dst: y, src: x },
+            Op::Drop { v: x },
+        ]);
+        ret_heap.ret = Some(y);
+        assert_eq!(ownership_certificate(&ret_heap), "i{mx|}adm\n");
+        assert_eq!(verify_ownership(&ret_heap), Ok(()));
+
+        // REJECT witness: the returning arm still owns `x` (a missed pre-return
+        // drop) — a leak ON THE EXIT PATH, flagged AT the Return's op index by
+        // the verifier; the cert's `{x|}` side sits at count 1 and the proven
+        // checker rejects it (cert_xc_exit_leak_rejects mirrors this string).
+        let mut leaky = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Return { val: Some(c) },
+            Op::Else { val: None },
+            Op::EndIf { val: None },
+            Op::Drop { v: x },
+        ]);
+        leaky.ret = Some(c);
+        assert_eq!(ownership_certificate(&leaky), "i{x|}d\n");
+        let errs = verify_ownership(&leaky).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|v| v.kind == crate::ViolationKind::Leak && v.op_index == 3 && v.value == x),
+            "expected a Leak at the Return, got {errs:?}"
+        );
+
+        // REJECT witness: returning a BORROWED param we never acquired — the
+        // caller would get a second owner of its own reference (the dual of the
+        // cert's `m` at rc 0).
+        let mut borrowed_ret = func(vec![
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Return { val: Some(x) },
+            Op::Else { val: None },
+            Op::EndIf { val: None },
+        ]);
+        borrowed_ret.params = vec![MirParam { value: x, repr: heap() }];
+        borrowed_ret.ret = Some(x);
+        let errs = verify_ownership(&borrowed_ret).unwrap_err();
+        assert!(
+            errs.iter().any(|v| v.kind == crate::ViolationKind::UseAfterMove),
+            "expected the borrowed-return UseAfterMove, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn return_terminal_discipline_rejects_malformed_shapes() {
+        let (x, c) = (ValueId(0), ValueId(1));
+        // Rule 2: an op after the Return inside the same arm.
+        let trailing = func(vec![
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Return { val: None },
+            Op::Const { dst: x },
+            Op::EndIf { val: None },
+        ]);
+        assert!(crate::mir_wellformed::check_return_terminal(&trailing).is_err());
+
+        // Rule 1: a top-level Return (the tail already returns).
+        let toplevel = func(vec![Op::Const { dst: c }, Op::Return { val: None }]);
+        assert!(crate::mir_wellformed::check_return_terminal(&toplevel).is_err());
+
+        // Rule 3: both arms of one IfThen end in Return.
+        let both = func(vec![
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Return { val: None },
+            Op::Else { val: None },
+            Op::Return { val: None },
+            Op::EndIf { val: None },
+        ]);
+        assert!(crate::mir_wellformed::check_return_terminal(&both).is_err());
+
+        // Rule 4: value presence must match the fn's ret presence.
+        let mut mismatched = func(vec![
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Return { val: None },
+            Op::Else { val: None },
+            Op::EndIf { val: None },
+        ]);
+        mismatched.ret = Some(c);
+        assert!(crate::mir_wellformed::check_return_terminal(&mismatched).is_err());
+    }

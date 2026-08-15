@@ -586,6 +586,18 @@ pub enum Op {
     LoopBreakUnless { cond: ValueId },
     /// Closes the loop with a back-edge to its top.
     LoopEnd,
+    /// Frame-targeted EARLY EXIT: return `val` (`None` = a Unit fn) to the caller
+    /// NOW, from any structured depth — a wasm `return` / native Rust `return`,
+    /// both valid at any block nesting, so no enclosing marker cooperates.
+    /// TERMINAL: nothing may follow it in its enclosing arm (mir_wellformed), and
+    /// `val`'s presence must match the function's `ret` presence. Ownership: the
+    /// lowering emits the exit-path drops BEFORE this op, so HERE every owned
+    /// object is at count 0 EXCEPT `val`, which MOVES to the caller (the same
+    /// implied boundary `Consume` as the tail `ret` — one `m`). The verifier
+    /// treats an arm ending here as DIVERGED: it takes no part in the branch
+    /// agreement (the join continues from the surviving arm alone) and instead
+    /// satisfies the function-exit obligation at this op (law 6).
+    Return { val: Option<ValueId> },
     /// Reassign a mutable SCALAR local: `local := src` (a stable i64 wasm local re-written
     /// — the loop-carried state). No ownership (scalar copy); `local` was already defined
     /// by its `var` bind, `src` is the freshly computed value.

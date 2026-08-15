@@ -202,7 +202,10 @@ fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
         | Op::DropListListStr { .. }
         | Op::DropVariant { .. }
         | Op::DropWrapperRec { .. }
-        | Op::Consume { .. } => {}
+        | Op::Consume { .. }
+        // A `Return` MOVES its value out to the caller (the boundary `m`,
+        // same class as `Consume`) — terminal, no alias created in here.
+        | Op::Return { .. } => {}
         // `PrimKind::LoadHandle` reads "the heap handle CURRENTLY stored at
         // this address" — a record field, a heap-typed list/Option/Result
         // slot, anything reached via `Handle`+`IntBinOp`+`LoadHandle`. This is

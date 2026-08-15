@@ -184,6 +184,7 @@ pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::LoopStart
         | Op::LoopBreakUnless { .. }
         | Op::LoopEnd
+        | Op::Return { .. }
         | Op::SetLocal { .. } => None,
         Op::Charge { .. } => None,
     }
@@ -457,7 +458,9 @@ fn classify_f64_op(
             poison.insert(*cond);
             record_f64_result(dst, poison);
         }
-        Op::Else { val } | Op::EndIf { val } => {
+        // A `Return`'s value feeds the fn's i64-uniform result slot — the same
+        // boundary the arm-result markers feed, so the same poison rule.
+        Op::Else { val } | Op::EndIf { val } | Op::Return { val } => {
             record_f64_result(val, poison);
         }
         Op::LoopStart | Op::LoopEnd => {}

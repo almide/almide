@@ -175,7 +175,10 @@ impl NameWitness {
                 self.use_one(*cond);
                 self.define_opt(*dst);
             }
-            Op::Else { val } | Op::EndIf { val } => self.use_many(val.iter().copied()),
+            // A `Return` USES its moved-out value, like an arm-result marker.
+            Op::Else { val } | Op::EndIf { val } | Op::Return { val } => {
+                self.use_many(val.iter().copied())
+            }
             // A scalar reassignment USES the source value and the target local
             // (already defined by its `var` bind — re-written, not newly defined).
             Op::SetLocal { local, src } => self.use_many([*local, *src]),

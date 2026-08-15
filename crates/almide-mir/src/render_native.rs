@@ -657,6 +657,20 @@ fn render_native_flow_op(
             *indent -= 1;
             line!("}}");
         }
+        // Frame-targeted early exit: a Rust `return` at any nesting depth —
+        // the same move-out expression the trailing return uses. (A LIFTED
+        // effect fn's `Ok(..)` wrap happens at the single tail seam only; an
+        // early `Return` inside one would mistype and rustc rejects the
+        // build — an honest wall, revisit when a lowering emits that shape.)
+        Op::Return { val } => match val {
+            Some(v) => {
+                let t = *tys
+                    .get(v)
+                    .ok_or_else(|| wall("native: Return of an untyped value"))?;
+                line!("return {};", native_ret_expr(*v, t));
+            }
+            None => line!("return;"),
+        },
         _ => return Ok(false),
     }
     Ok(true)
