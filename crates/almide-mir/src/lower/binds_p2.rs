@@ -92,7 +92,7 @@ impl LowerCtx {
     /// The callee lowers through the ordinary `lower_bind` machinery (full
     /// tracking/seeding) under a [`Self::speculate`] snapshot, so a decline
     /// leaves no half-emitted ops.
-    fn try_lower_bind_unwrap_return(
+    pub(crate) fn try_lower_bind_unwrap_return(
         &mut self,
         var: VarId,
         ty: &Ty,
