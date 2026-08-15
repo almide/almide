@@ -221,11 +221,7 @@ impl LowerCtx {
         // already draws exactly this line (tail.rs's Result[Unit] tail-voiding gate reuses it).
         let unit_main = self.fn_name == "main" && !self.decl_ret_is_result;
         if let Some(rewritten) =
-            if crate::lower::bang_return_probe() {
-                None
-            } else {
-                desugar_effect_unwrap(body, unit_main, self.ret_is_result_abi, &self.variant_layouts)
-            }
+            desugar_effect_unwrap(body, unit_main, self.ret_is_result_abi, &self.variant_layouts)
         {
             return Some(rewritten);
         }

@@ -477,13 +477,7 @@ fn desugar_all_try_call_access_passes(
         // `ret_is_result=false`: this debug-dump-only path has no per-fn ABI fact available;
         // the bare-tail-Option-`!` rewrite it skips is call-count-invariant, so the dump stays
         // representative for the count-diff use this function serves.
-        .or_else(|| {
-            if crate::lower::bang_return_probe() {
-                None
-            } else {
-                desugar_effect_unwrap(cur, unit_main, false, layouts)
-            }
-        })
+        .or_else(|| desugar_effect_unwrap(cur, unit_main, false, layouts))
 }
 
 /// Extracted from `desugar_all` (codopsy8 complexity sweep, group 2 of 2 — passes 13-25 of

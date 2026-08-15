@@ -103,6 +103,15 @@ fn desugar_effect_unwrap_inner(
                 continue;
             }
         }
+        // R2 probe: the STMT-position continuation rewrite is exactly what the
+        // one Return rule replaces — skip it so the `!` reaches the rule (or
+        // walls). The pass's OTHER jobs (the tail-position navigation below,
+        // the for-in head hoist above) are NOT position-continuation
+        // machinery and must keep running: they shape non-`!` returns too, and
+        // gating the whole pass walled fns that carry no `!` at all.
+        if crate::lower::bang_return_probe() {
+            continue;
+        }
         // The continuation = the rest of the block `{ stmts[i+1..]; tail }`, typed as the whole body
         // (it produces the fn's return). RECURSE so a LATER `!` in the continuation also desugars.
         let cont = IrExpr {
