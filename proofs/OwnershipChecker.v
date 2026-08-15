@@ -358,7 +358,7 @@ Inductive CertItem : Type :=
        is the degenerate case `then = else = body`; this strictly generalizes it.
        Ported from OwnershipFilter.v (`cexec`/`ccheck_unroll_sound`, kernel-checked,
        axiom-clean) onto the production Inc/Alias/Dec/MoveOut/Reuse `exec`. *)
-  | CBranch : list Op -> list Op -> CertItem.
+  | CBranch : list Op -> list Op -> CertItem
     (* a ONE-SHOT branch (brick 5a): the run takes EXACTLY ONE of the two flat
        arm bodies. Accepted iff BOTH arms execute from the entry count WITHOUT
        faulting to the SAME result — the arms AGREE on the leaving resource
@@ -369,6 +369,22 @@ Inductive CertItem : Type :=
        per-arm-balance TRUSTED convention: cross-arm compensation (an `i` in one
        arm balanced by a `d` in the other — runtime-unsafe either way the branch
        goes, yet flat-balanced) becomes structurally REJECTED. *)
+  | CBranchRet : bool -> list Op -> list Op -> CertItem
+    (* a one-shot branch whose flagged arm (true = then, false = else) ends in
+       a frame-targeted EARLY RETURN (`Op::Return`, law 6 — format v5). The
+       returning arm takes the WHOLE function-exit obligation at its exit:
+       it must run fault-free from the entry count to EXACTLY 0 (the
+       lowering's pre-return drops are its real `d`s; the returned value's
+       move-out is its `m`). It then takes NO part in the join — the line
+       CONTINUES from the SURVIVING arm's result alone (agreement is only
+       between join inputs, and with one survivor there is nothing to agree
+       with). On the runtime path that takes the returning arm, the rest of
+       the line NEVER RUNS — which is exactly why the arm must already be at
+       0: there is no later release to balance it. *)
+  | CPoison : CertItem.
+    (* an always-rejecting parse residue (format v5): a malformed exit marker
+       (`x` not arm-terminal, both arms exiting, or `x` outside a `{…|…}`
+       branch) parses to this instead of guessing — never a silent accept. *)
 
 (* exec_line folds a cert LINE. A CLoop body is checked via the existing flat `exec`
    (its body is plain ops); accepted iff the body preserves rc (sufficient for any
@@ -404,6 +420,18 @@ Fixpoint exec_line (cs : list CertItem) (rc : Z) : option Z :=
       | Some rt, Some re => if Z.eqb rt re then exec_line rest rt else None
       | _, _ => None
       end
+  | CBranchRet retthen thenb elseb :: rest =>
+      (* law 6: the returning arm discharges the whole exit obligation INSIDE
+         the arm (fault-free from the entry count to exactly 0); the line
+         continues from the surviving arm's result alone — no agreement. *)
+      match exec thenb rc, exec elseb rc with
+      | Some rt, Some re =>
+          if retthen
+          then if Z.eqb rt 0 then exec_line rest re else None
+          else if Z.eqb re 0 then exec_line rest rt else None
+      | _, _ => None
+      end
+  | CPoison :: _ => None
   end.
 
 Definition check_line (cs : list CertItem) : bool :=
@@ -483,16 +511,34 @@ Inductive UnrollsL : list CertItem -> list Op -> Prop :=
   (* a one-shot branch unrolls to EXACTLY ONE arm — the runtime choice. *)
   | UL_branch : forall thenb elseb a b (choice : bool),
       UnrollsL a b ->
-      UnrollsL (CBranch thenb elseb :: a) ((if choice then thenb else elseb) ++ b).
+      UnrollsL (CBranch thenb elseb :: a) ((if choice then thenb else elseb) ++ b)
+  (* a returning branch, EXIT path: the runtime takes the returning arm and the
+     function exits — the REST OF THE LINE NEVER RUNS, so the unrolled run is
+     the arm alone (no continuation). No UnrollsL constructor exists for
+     CPoison: a poisoned line is never accepted, so it has nothing to unroll. *)
+  | UL_branchret_exit : forall retthen thenb elseb a,
+      UnrollsL (CBranchRet retthen thenb elseb :: a)
+               (if retthen then thenb else elseb)
+  (* a returning branch, SURVIVING path: the runtime takes the other arm and
+     the line continues as usual. *)
+  | UL_branchret_cont : forall retthen thenb elseb a b,
+      UnrollsL a b ->
+      UnrollsL (CBranchRet retthen thenb elseb :: a)
+               ((if retthen then elseb else thenb) ++ b).
 
-(* SOUNDNESS CORE: an accepting line, at any rc, executes EVERY unrolling to the
-   same result — so no unrolling faults and the final rc matches. *)
+(* SOUNDNESS CORE: an accepting line, at any rc, executes EVERY unrolling either
+   to the line's own result — or, on a path that EXITS through a returning
+   branch arm (law 6, format v5), to EXACTLY 0: the arm's whole exit obligation
+   was discharged inside it, and the rest of the line never ran. Both disjuncts
+   collapse to `Some 0` at the accepted top level (check_line demands r = 0),
+   which is all the headline theorem needs. *)
 Lemma exec_line_unroll :
   forall cs fops, UnrollsL cs fops ->
-    forall rc r, exec_line cs rc = Some r -> exec fops rc = Some r.
+    forall rc r, exec_line cs rc = Some r ->
+      exec fops rc = Some r \/ exec fops rc = Some 0.
 Proof.
   intros cs fops HU. induction HU; intros rc r Hexec.
-  - (* nil *) simpl in *. exact Hexec.
+  - (* nil *) left. simpl in *. exact Hexec.
   - (* COp o — case on the concrete op so exec/exec_line both reduce *)
     destruct o; simpl in *.
     + apply IHHU; exact Hexec.
@@ -526,11 +572,33 @@ Proof.
     rewrite exec_app. destruct choice.
     + rewrite Et. apply IHHU. exact Hexec.
     + rewrite Ee. apply IHHU. exact Hexec.
+  - (* CBranchRet, EXIT path — the returning arm ran to exactly 0 (its guard)
+       and the rest of the line never runs: the run ends at 0. *)
+    simpl in *.
+    destruct (exec thenb rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec elseb rc) as [re |] eqn:Ee; [| discriminate].
+    destruct retthen.
+    + destruct (Z.eqb rt 0) eqn:Ez; [| discriminate].
+      apply Z.eqb_eq in Ez. subst rt. right. exact Et.
+    + destruct (Z.eqb re 0) eqn:Ez; [| discriminate].
+      apply Z.eqb_eq in Ez. subst re. right. exact Ee.
+  - (* CBranchRet, SURVIVING path — the line continues from the surviving
+       arm's result alone. *)
+    simpl in *.
+    destruct (exec thenb rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec elseb rc) as [re |] eqn:Ee; [| discriminate].
+    rewrite exec_app. destruct retthen.
+    + destruct (Z.eqb rt 0); [| discriminate].
+      rewrite Ee. apply IHHU. exact Hexec.
+    + destruct (Z.eqb re 0); [| discriminate].
+      rewrite Et. apply IHHU. exact Hexec.
 Qed.
 
 (* The headline: an ACCEPTED loop cert line guarantees EVERY concrete unrolling is
    free of double-free / use-after-free AND leak — the completeness the flat cert
-   lacked, now SOUND (the false-rejection closed at the root). *)
+   lacked, now SOUND (the false-rejection closed at the root). A run exiting
+   through a returning branch arm lands on the second disjunct; at the accepted
+   top level both disjuncts are `Some 0`. *)
 Theorem check_line_unroll_sound :
   forall cs, check_line cs = true ->
     forall fops, UnrollsL cs fops ->
@@ -539,7 +607,8 @@ Proof.
   intros cs H fops HU. unfold check_line in H. unfold run.
   destruct (exec_line cs 0) as [z |] eqn:E; [| discriminate].
   apply Z.eqb_eq in H. subst z.
-  rewrite (exec_line_unroll cs fops HU 0 0 E). split. discriminate. reflexivity.
+  destruct (exec_line_unroll cs fops HU 0 0 E) as [H0 | H0]; rewrite H0;
+    split; (discriminate || reflexivity).
 Qed.
 
 (* non-vacuity: the accumulator slot accepts; a leaky/draining loop body is rejected. *)
@@ -868,6 +937,167 @@ Proof. reflexivity. Qed.
 Example cert_bc_cross_arm_rejects : check_bc "{i|d}"%string = false.     (* cross-arm compensation faults *)
 Proof. reflexivity. Qed.
 
+(* ─── EXIT-aware certificate parsing (format v5, backward-compatible) ───
+   Extends format v4 with the frame-exit marker `x` as the LAST event of a
+   `{ then | else }` arm: the marked arm ends in `Op::Return` (law 6), takes
+   its whole exit obligation inside the arm (fault-free to exactly 0 — the
+   pre-return drops are its `d`s, the returned value's move its `m`), and the
+   line continues from the SURVIVING arm alone. `parse_xc` is a SUPERSET of
+   `parse_bc`: a cert with no `x` parses byte-for-byte identically (`x` was
+   previously a skipped byte), so every flat, CLoop, CCondLoop and CBranch
+   certificate is unchanged. Malformed `x` — not arm-terminal, both arms
+   marked, or outside a `{…}` — parses to the always-rejecting CPoison:
+   never a silent accept. *)
+Definition xmark_lc : ascii := "x"%char.
+Definition xmark_uc : ascii := "X"%char.
+Definition is_xmark (b : ascii) : bool :=
+  orb (Ascii.eqb b xmark_lc) (Ascii.eqb b xmark_uc).
+
+(* in-progress branch state with the exit marker:
+   (in_else, then_exited, else_exited, malformed, then-acc-rev, else-acc-rev). *)
+Definition brxst : Type := (bool * bool * bool * bool * list Op * list Op)%type.
+
+(* Close a `{…|…}` region: malformed or both-arms-exited → poison; one marked
+   arm → CBranchRet (flag = which side); no marker → the ordinary CBranch. *)
+Definition close_brx (st : brxst) : CertItem :=
+  match st with
+  | (_, tx, ex, bad, th, el) =>
+      if orb bad (andb tx ex) then CPoison
+      else if tx then CBranchRet true (rev th) (rev el)
+      else if ex then CBranchRet false (rev th) (rev el)
+      else CBranch (rev th) (rev el)
+  end.
+
+(* Flush the in-progress line, defensively closing a dangling `{`-branch first
+   (well-formed certs close every `{` before newline/EOF), else deferring to
+   the format-v3 flush. *)
+Definition finish_line_x (cur : list CertItem) (lp : option (list Op))
+                         (cp : option condst) (bp : option brxst) : list CertItem :=
+  match bp with
+  | Some st => rev (close_brx st :: cur)
+  | None => finish_line_c cur lp cp
+  end.
+
+Fixpoint parse_xc (s : string) (cur : list CertItem)
+                  (lp : option (list Op)) (cp : option condst) (bp : option brxst)
+                  {struct s} : list (list CertItem) :=
+  match s with
+  | EmptyString => [finish_line_x cur lp cp bp]
+  | String b rest =>
+      if Ascii.eqb b newline then finish_line_x cur lp cp bp :: parse_xc rest [] None None None
+      else match bp with
+      | Some (in_else, tx, ex, bad, th, el) =>
+          (* inside `{ … | … }` — collect ops / the exit marker per arm *)
+          if Ascii.eqb b bar then parse_xc rest cur lp cp (Some (true, tx, ex, bad, th, el))
+          else if Ascii.eqb b rbrace then
+            parse_xc rest (close_brx (in_else, tx, ex, bad, th, el) :: cur) lp cp None
+          else if is_xmark b then
+            (* mark the CURRENT arm exited; a second mark on the same arm is
+               malformed. *)
+            if in_else
+            then parse_xc rest cur lp cp (Some (true, tx, true, orb bad ex, th, el))
+            else parse_xc rest cur lp cp (Some (false, true, ex, orb bad tx, th, el))
+          else match parse_byte b with
+               | Some op =>
+                   (* an op AFTER the current arm's exit marker: `x` must be
+                      arm-terminal — malformed. *)
+                   if in_else
+                   then parse_xc rest cur lp cp (Some (true, tx, ex, orb bad ex, th, op :: el))
+                   else parse_xc rest cur lp cp (Some (false, tx, ex, orb bad tx, op :: th, el))
+               | None => parse_xc rest cur lp cp bp
+               end
+      | None =>
+          (* an exit marker OUTSIDE a `{…}` branch is malformed — poison the
+             line (a top-level return has no branch to survive it). *)
+          if is_xmark b then parse_xc rest (CPoison :: cur) lp cp None
+          else match cp with
+          | Some (in_else, th, el) =>
+              (* inside `[ … | … ]` — exactly parse_clc's conditional-loop state *)
+              if Ascii.eqb b bar then parse_xc rest cur lp (Some (true, th, el)) None
+              else if Ascii.eqb b rbracket then
+                parse_xc rest (CCondLoop (rev th) (rev el) :: cur) lp None None
+              else match parse_byte b with
+                   | Some op =>
+                       if in_else then parse_xc rest cur lp (Some (true, th, op :: el)) None
+                       else parse_xc rest cur lp (Some (false, op :: th, el)) None
+                   | None => parse_xc rest cur lp cp None
+                   end
+          | None =>
+              if Ascii.eqb b lbrace then parse_xc rest cur lp None (Some (false, false, false, false, [], []))
+              else if Ascii.eqb b lbracket then parse_xc rest cur lp (Some (false, [], [])) None
+              else if Ascii.eqb b lparen then parse_xc rest cur (Some []) None None
+              else if Ascii.eqb b rparen then
+                match lp with
+                | Some body => parse_xc rest (CLoop (rev body) :: cur) None None None
+                | None => parse_xc rest cur None None None
+                end
+              else match parse_byte b with
+                   | Some op =>
+                       match lp with
+                       | Some body => parse_xc rest cur (Some (op :: body)) None None
+                       | None => parse_xc rest (COp op :: cur) None None None
+                       end
+                   | None => parse_xc rest cur lp None None
+                   end
+          end
+      end
+  end.
+
+(* The full exit-aware checker over raw certificate bytes (format v5). *)
+Definition check_xc (s : string) : bool :=
+  forallb check_line (parse_xc s [] None None None).
+
+(* SOUNDNESS over bytes (1-line corollary of check_line_unroll_sound, covering
+   CBranchRet via UL_branchret_exit / UL_branchret_cont): an accepted exit-aware
+   certificate has, for EVERY parsed line and EVERY concrete unrolling — each
+   branch resolved to the ONE arm the runtime takes, a returning arm ENDING the
+   run — no double-free / use-after-free and no leak. *)
+Theorem check_xc_unroll_sound :
+  forall s, check_xc s = true ->
+    forall cs, In cs (parse_xc s [] None None None) ->
+      forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0.
+Proof.
+  intros s H cs Hin fops HU.
+  unfold check_xc in H. rewrite forallb_forall in H.
+  apply (check_line_unroll_sound cs (H cs Hin) fops HU).
+Qed.
+
+(* backward-compat (flat + loop + cond-loop + branch certs verify exactly as
+   before) + the new exit-marked branch certs, on real bytes *)
+Example cert_xc_flat_accepts : check_xc "iidd"%string = true.
+Proof. reflexivity. Qed.
+Example cert_xc_flat_rejects : check_xc "idd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_loop_accepts : check_xc "i(di)m"%string = true.          (* v2 CLoop still accepts *)
+Proof. reflexivity. Qed.
+Example cert_xc_filter_accepts : check_xc "i[di|]m"%string = true.       (* v3 CCondLoop still accepts *)
+Proof. reflexivity. Qed.
+Example cert_xc_branch_accepts : check_xc "i{i|i}dd"%string = true.      (* v4 CBranch still accepts *)
+Proof. reflexivity. Qed.
+Example cert_xc_branch_disagree_rejects : check_xc "i{i|}d"%string = false. (* v4 disagreement still rejects *)
+Proof. reflexivity. Qed.
+(* THE `!` SHAPE: own a value; the err arm drops it and returns (`dx` — at 0 at
+   the exit), the ok arm keeps it; the surviving path releases it later. *)
+Example cert_xc_exit_then_accepts : check_xc "i{dx|}d"%string = true.
+Proof. reflexivity. Qed.
+(* the mirror: the ELSE arm is the returning one. *)
+Example cert_xc_exit_else_accepts : check_xc "i{|dx}d"%string = true.
+Proof. reflexivity. Qed.
+(* the returned value itself: moved out (`m`) by the exit — same −1, accepts. *)
+Example cert_xc_exit_move_accepts : check_xc "i{mx|}d"%string = true.
+Proof. reflexivity. Qed.
+(* LEAK ON THE EXIT PATH: the returning arm still owns the value (no `d` before
+   `x`) — the rest of the line never runs there, so this MUST reject. *)
+Example cert_xc_exit_leak_rejects : check_xc "i{x|}d"%string = false.
+Proof. reflexivity. Qed.
+(* malformed: `x` not arm-terminal / both arms exiting / outside a branch. *)
+Example cert_xc_exit_midarm_rejects : check_xc "i{xd|}d"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_exit_both_rejects : check_xc "i{dx|dx}"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_exit_toplevel_rejects : check_xc "idx"%string = false.
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
@@ -876,6 +1106,7 @@ Print Assumptions check_line_unroll_sound.
 Print Assumptions check_cert_lc_sound.
 Print Assumptions check_clc_unroll_sound.
 Print Assumptions check_bc_unroll_sound.
+Print Assumptions check_xc_unroll_sound.
 Print Assumptions check_all_sound.
 Print Assumptions check_cert_sound.
 Print Assumptions check_reuse_sound.

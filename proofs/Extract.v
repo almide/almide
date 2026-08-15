@@ -38,6 +38,11 @@ Set Extraction Output Directory ".".
    SUPERSET of `check_clc`: it also parses `{ then | else }` one-shot branches
    whose arms must AGREE on the leaving resource state; flat, CLoop and CCondLoop
    certs parse identically, so it is fully backward-compatible). It also carries
-   the `b` (borrow, +0 live-use) letter (brick 5b). The driver dispatches
-   ownership to it. *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_names_cert check_caps_cert check_prog_cert check_modes_cert.
+   the `b` (borrow, +0 live-use) letter (brick 5b). *)
+(* `check_xc` is the EXIT-aware ownership checker (format v5, law 6 — a SUPERSET
+   of `check_bc`: it also parses the arm-terminal `x` exit marker, `Op::Return`'s
+   divergence: the marked arm must discharge the whole frame-exit obligation
+   inside itself — fault-free to exactly 0 — and the line continues from the
+   surviving arm alone. A cert with no `x` parses byte-for-byte as `check_bc`,
+   so every earlier format is unchanged). The driver dispatches ownership to it. *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert.

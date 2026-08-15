@@ -259,7 +259,7 @@ KGEN="$(mktemp /tmp/KernelCorpus_XXXXXX).v"
 # for its literal at elaboration, vm_compute bytecode-compilation, Qed
 # re-checking, and .vo serialization. One goal over the WHOLE witness set made
 # the peak term multi-million-node (the 2026-07-27 oracle park). Chunking bounds
-# the peak per goal and lets coqc GC between goals; `check_bc` folds per LINE
+# the peak per goal and lets coqc GC between goals; `check_xc` folds per LINE
 # and `forallb` distributes over ++, so per-chunk goals certify exactly the
 # same verdicts.
 python3 - "$OUTDIR" > "$KGEN" <<'PYEOF'
@@ -278,7 +278,7 @@ print("From Stdlib Require Import String List.")
 print("Import ListNotations.")
 print("Open Scope string_scope.")
 for chunk in chunked(lines('ownership.cert'), OWN_CHUNK):
-    print("Goal check_bc %s = true." % lit("\n".join(chunk) + "\n"))
+    print("Goal check_xc %s = true." % lit("\n".join(chunk) + "\n"))
     print("Proof. vm_compute. reflexivity. Qed.")
 for name, fn in (('names.cert', 'check_names_cert'),
                  ('caps.cert', 'check_caps_cert'),
