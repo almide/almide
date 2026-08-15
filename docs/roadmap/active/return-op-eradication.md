@@ -6,11 +6,25 @@ format v5 `check_xc` all green; probe `ALMIDE_BANG_RETURN=1` gates the 9
 position rows, 2e73deceb).
 
 R2 census (probe ON, full almd suite; baseline 391/12/0):
-- 335 via WASM, **64 fallback (+52 = the file-level decline matrix)**,
-- **4 FAILED** — `fallible_lambda`, `guard`, `result_of`,
-  `result_option_matrix`: shapes only v1 ever carried; the v0 fallback's own
-  `?`-emit gap (the v0-unwrap-early-return-leak class) breaks under them, so
-  these four are MANDATORY reclaims for the one rule, not optional.
+- initial: 335/64/**4 failed** — the 4 were the #1434 v0 regression
+  (Err-turbofish, fixed 52326a54e), NOT rule signal.
+- clean (rule increments 1-2 live: scalar bind + stmt positions): **339/64/0**
+  — every probe decline falls back safely; the matrix is the 52 fallback
+  files beyond the baseline 12 (`scratchpad matrix52` snapshot below is in
+  the wall sweep, non-durable — regenerate via ALMIDE_FALLBACK_NAMES=1).
+
+Wall-reason distribution over the 52 (first-wall per file):
+- 13× bind-rule decline (`unwrap ! bound to a let/var`) — increment-1 gates:
+  heap payload / non-Scalar callee family / auto-wrap fn (admission landed) /
+  err mismatch. Next: split by gate (ALMIDE_DBG_BANG) and open heap payload.
+- 8× `scalar binding outside the value subset` — `!` nested inside a bind
+  value expression: the GENERIC HOIST's class.
+- 7× `effect-unwrap desugar's reach` + 1× call-argument `!` + 1× loop var —
+  hoist + loop classes.
+- 3× heap-result `if` + 1× `match` + 1× Tuple return — downstream shapes,
+  likely melt once the rule owns the err path.
+- 16× wall only inside TEST-block fns (`almide build` shows none; the codec
+  family) — capture via per-file `almide test` when prioritizing.
 Law: rot-eradication law 6 — a diverging arm drops the merge continuation.
 Prior art: the `??` route-zoo deletion (#1418, +148/−1054) — same disease, one
 level up: the recognizer grew a case per fixture; here the desugar table grows

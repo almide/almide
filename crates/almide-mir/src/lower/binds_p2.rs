@@ -104,7 +104,14 @@ impl LowerCtx {
             return Ok(false);
         }
         let IrExprKind::Unwrap { expr } = &value.kind else { return Ok(false) };
-        if self.decl_ret_family != Some(crate::lower::ResultFamily::Scalar) {
+        // A DECLARED-Result fn admits by its declared family; an AUTO-WRAPPED
+        // (lifted) effect fn's synthetic `Result[T, String]` carrier is
+        // scalar-family BY CONSTRUCTION (only scalar-ret fns are lifted), so
+        // it admits the same Scalar rule.
+        let fn_fam = self.decl_ret_family.or_else(|| {
+            self.ret_is_result_abi.then_some(crate::lower::ResultFamily::Scalar)
+        });
+        if fn_fam != Some(crate::lower::ResultFamily::Scalar) {
             return Ok(false);
         }
         if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _))
