@@ -103,6 +103,15 @@ impl LowerCtx {
         if !crate::lower::bang_return_probe() {
             return Ok(false);
         }
+        let dbg = std::env::var_os("ALMIDE_DBG_BANG").is_some();
+        macro_rules! decline {
+            ($gate:expr) => {{
+                if dbg {
+                    eprintln!("BANG-DECLINE {} :: {}", $gate, self.fn_name);
+                }
+                return Ok(false);
+            }};
+        }
         let IrExprKind::Unwrap { expr } = &value.kind else { return Ok(false) };
         // A DECLARED-Result fn admits by its declared family; an AUTO-WRAPPED
         // (lifted) effect fn's synthetic `Result[T, String]` carrier is
@@ -112,20 +121,20 @@ impl LowerCtx {
             self.ret_is_result_abi.then_some(crate::lower::ResultFamily::Scalar)
         });
         if fn_fam != Some(crate::lower::ResultFamily::Scalar) {
-            return Ok(false);
+            decline!("fn-family");
         }
         if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _))
             || crate::lower::result_family(&expr.ty) != crate::lower::ResultFamily::Scalar
         {
-            return Ok(false);
+            decline!("callee-family");
         }
         if is_heap_ty(ty) {
-            return Ok(false);
+            decline!("heap-payload");
         }
         // The err components must agree — the pass-through would type-pun a
         // mismatched err payload (the collect_map! class; v0 map_err-coerces).
         if self.unwrap_tail_err_mismatch(expr) {
-            return Ok(false);
+            decline!("err-mismatch");
         }
         // Lower the callee through the FULL existing bind machinery onto a
         // synthetic var, under a speculation snapshot: a decline (or a carrier
@@ -141,7 +150,7 @@ impl LowerCtx {
             }
             Some(v)
         });
-        let Some(v) = attempt else { return Ok(false) };
+        let Some(v) = attempt else { decline!("callee-lowering") };
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
