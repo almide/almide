@@ -704,6 +704,12 @@ pub(crate) struct LowerCtx {
     /// Option handle AS the Result — a confirmed silent wrong-value. Threaded as an explicit
     /// per-fn FACT (the `unit_main` pattern) so the desugar never trusts a tree-local `.ty`.
     ret_is_result_abi: bool,
+    /// The DECLARED `Result[..]` return's [`ResultFamily`] — the carrier-compat
+    /// fact the R2 `!` bind rule reads: the err layout is FAMILY-uniform, so a
+    /// same-family callee carrier IS a valid value of this fn's Result ABI on
+    /// the err path (direct `Op::Return`, no rebox). `None` = no declared
+    /// Result return (lifted/auto-wrapped fns decline the rule for now).
+    decl_ret_family: Option<crate::lower::ResultFamily>,
     /// This fn's effective ERR type: the declared `Result[_, E]`'s `E`, or `String` for a
     /// lifted effect fn (the synthetic `Result[T, String]`); `None` when no Result ABI applies
     /// (a declared `-> Option[..]` fn, a lifted lambda sub-ctx). Gates the tail-`!` pass-through

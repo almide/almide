@@ -97,7 +97,7 @@ impl LowerCtx {
     /// Run `f` speculatively: on `Some` keep everything it did; on `None`
     /// restore the complete tracking snapshot taken at entry. See
     /// [`SpecSnapshot`].
-    fn speculate<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+    pub(crate) fn speculate<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
         let snap = SpecSnapshot {
             ops_len: self.ops.len(),
             lhh_len: self.live_heap_handles.len(),

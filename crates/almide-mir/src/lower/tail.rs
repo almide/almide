@@ -39,7 +39,7 @@ impl LowerCtx {
     /// with `.map_err(...)` at the `?` site, so stripping the `!` here would type-pun
     /// the err payload (the `result.collect_map(..)!` List[String]-as-String class).
     /// `None` (a declared-Option fn, a lambda sub-ctx) keeps the pass-through.
-    fn unwrap_tail_err_mismatch(&self, inner: &IrExpr) -> bool {
+    pub(crate) fn unwrap_tail_err_mismatch(&self, inner: &IrExpr) -> bool {
         use almide_lang::types::constructor::TypeConstructorId as TC;
         if let (Ty::Applied(TC::Result, a), Some(fe)) = (&inner.ty, &self.decl_fn_err) {
             a.len() == 2 && &a[1] != fe

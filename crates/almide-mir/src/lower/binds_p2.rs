@@ -29,9 +29,14 @@ impl LowerCtx {
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         // `let r = e!` (Unwrap — effect-fn error propagation) bound to a let/var was a deferred
         // `Const`/`Alloc{Opaque}` = a SILENT MISCOMPILE (`int.parse(s)!` bound 0, `g()!` empty).
-        // The faithful lowering needs early-return-on-Err (a later brick); until then WALL it —
-        // NEVER bind a silently-wrong value (the ② cardinal rule). Both scalar + heap paths.
+        // The early-return brick HAS now arrived (`Op::Return`, R2): under the probe the ONE
+        // rule lowers it linearly; outside the admitted shapes (and always with the probe off,
+        // where the position desugars still run first) WALL it — NEVER bind a silently-wrong
+        // value (the ② cardinal rule). Both scalar + heap paths.
         if matches!(&value.kind, IrExprKind::Unwrap { .. }) {
+            if self.try_lower_bind_unwrap_return(var, ty, value)? {
+                return Ok(());
+            }
             return Err(LowerError::Unsupported(
                 "unwrap `!` bound to a let/var cannot be faithfully computed (needs early-return \
                  propagation; a Const/Opaque would be a silently wrong value) not in this brick"
@@ -66,6 +71,94 @@ impl LowerCtx {
             return self.lower_bind_scalar(var, ty, value);
         }
         self.lower_bind_heap(var, ty, value)
+    }
+
+    /// THE ONE `!` RULE (return-op-eradication R2, law 6): `let x = f()!` in a
+    /// declared-Result fn lowers to a linear err-check + frame exit + payload
+    /// bind — no continuation nesting, no tail duplication, no loop flag:
+    ///
+    ///   v = lower(f())                      // the callee's Result carrier
+    ///   tag = load32(handle(v) + 4)         // scalar family: len-as-tag
+    ///   IfThen(tag) {                       // err ⇒ this path EXITS the frame
+    ///     drops(live_heap_handles ∖ {v})    // derived from the live walk
+    ///     Return(v)                         // the carrier IS the fn's err value
+    ///   } EndIf
+    ///   x = load64(handle(v) + 12)          // straight-line ok-payload bind
+    ///
+    /// Increment 1 admits: probe ON, declared-Result fn, SCALAR family on BOTH
+    /// sides (the err layout is family-uniform, so the callee's carrier is a
+    /// valid fn-ret value with NO rebox), scalar/Unit payload, matching err
+    /// types. Everything else declines to the wall (the R2 decline matrix).
+    /// The callee lowers through the ordinary `lower_bind` machinery (full
+    /// tracking/seeding) under a [`Self::speculate`] snapshot, so a decline
+    /// leaves no half-emitted ops.
+    fn try_lower_bind_unwrap_return(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !crate::lower::bang_return_probe() {
+            return Ok(false);
+        }
+        let IrExprKind::Unwrap { expr } = &value.kind else { return Ok(false) };
+        if self.decl_ret_family != Some(crate::lower::ResultFamily::Scalar) {
+            return Ok(false);
+        }
+        if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _))
+            || crate::lower::result_family(&expr.ty) != crate::lower::ResultFamily::Scalar
+        {
+            return Ok(false);
+        }
+        if is_heap_ty(ty) {
+            return Ok(false);
+        }
+        // The err components must agree — the pass-through would type-pun a
+        // mismatched err payload (the collect_map! class; v0 map_err-coerces).
+        if self.unwrap_tail_err_mismatch(expr) {
+            return Ok(false);
+        }
+        // Lower the callee through the FULL existing bind machinery onto a
+        // synthetic var, under a speculation snapshot: a decline (or a carrier
+        // the rule's ownership story cannot hold — it needs an OWNED live
+        // handle: the err path moves it out, the ok path leaves it to the
+        // scope-end drop) rolls back with no half-emitted ops.
+        let attempt = self.speculate(|ctx| {
+            let tmp = VarId(crate::lower::desugar_var_seed());
+            ctx.lower_bind(tmp, &expr.ty, expr).ok()?;
+            let v = *ctx.value_of.get(&tmp)?;
+            if !ctx.live_heap_handles.contains(&v) {
+                return None;
+            }
+            Some(v)
+        });
+        let Some(v) = attempt else { return Ok(false) };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        let live: Vec<ValueId> = self.live_heap_handles.clone();
+        for other in live {
+            if other != v {
+                let op = self.drop_op_for(other);
+                self.ops.push(op);
+            }
+        }
+        self.ops.push(Op::Return { val: Some(v) });
+        self.ops.push(Op::EndIf { val: None });
+        // Straight-line ok continuation: bind the payload copy; the carrier
+        // stays live and the ordinary scope-end drop releases it.
+        if matches!(ty, Ty::Unit) {
+            let d = self.fresh_value();
+            self.ops.push(Op::Const { dst: d });
+            self.value_of.insert(var, d);
+        } else {
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.value_of.insert(var, payload);
+        }
+        Ok(true)
     }
 
     /// The SCALAR half of [`Self::lower_bind`] (`!is_heap_ty(ty)`): Copy values,
