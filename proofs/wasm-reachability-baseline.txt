@@ -99,8 +99,6 @@ matrix.pre_norm_linear :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) w
 matrix.qwen3_block_f32_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_f32_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the ca
 matrix.qwen3_block_q1_0_kv :: COMPILER_FRONTIER :: wasm build failed
 matrix.qwen3_block_q8_0_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_q8_0_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
-matrix.rope_rotate_at :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.rope_rotate_at — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee
-matrix.rope_rotate_neox_at :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.rope_rotate_neox_at — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
 matrix.select_rows :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.select_rows — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
