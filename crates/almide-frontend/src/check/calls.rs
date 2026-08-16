@@ -101,6 +101,10 @@ impl Checker {
     }
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         // Expected-type-directed argument inference (#653). The default is strictly-left-to-right bottom-up inference of every argument. The one place that breaks down is an INFERRED lambda param passed to a higher-order function inside a generic body: `list.map(xs, (e) => e.name())` where `xs: List[T]`, `T: Labelled`. Inferred bottom-up, `e` is a fresh var, so `e.name()` cannot see the protocol bound and collapses `e` into a closure type (`Fn() -> String`) -- the later `(T)->U` constraint can no longer undo that, yielding a spurious native E0308. Fix: resolve the callee's signature up front; as we infer args left-to-right we unify each non-lambda arg against its declared param to learn the generic bindings (`A := T`), then, just before inferring a lambda arg whose param slot is a `Fn`, pin the lambda's (unannotated) params to the substituted expected element type (`T`, carrying the bound). The lambda body then resolves `e.name()` via the protocol path. Calls without a `Fn`-param sig are unaffected -- they take the plain bottom-up path below.
+        // A deprecated callee gets its migration instruction here, once per
+        // call site, before any argument inference can bury it under a
+        // cascade of type errors.
+        self.warn_if_deprecated(callee);
         let call_sig = self.lookup_call_sig(callee);
         let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
