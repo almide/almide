@@ -22,6 +22,46 @@
 // matrix, never point-wise"): every width and both endiannesses, because the
 // defect lived in a per-width hand-written guard and a point fix would leave
 // the untested widths free to drift back.
+// The POSITIVE end of the SAME domain, and the same overflow reading the other
+// way. The #1408 fix made native's writers `checked_add`, but the wasm self-host
+// kept the `pos + N <= n` room test, and that sum wraps for a `pos` near the top
+// of i64: the wrapped negative passed `<= n`, the store went ahead, and
+// `base + pos` landed back inside the buffer. `bytes.set_f32_le(b, i64::MAX, 4.0)`
+// left native's buffer untouched and MUTATED the wasm one — exit 0 on both, so
+// nothing said a word (differential fuzz, seed 510754018593 index 222, a
+// matrix_select_rows mutation, where it surfaced as a denormal f32 appearing in a
+// decoded row). The room test SUBTRACTS now: `pos <= n - N` cannot overflow,
+// because `n` is a length.
+fn probe_high_writes(n: Int) -> String = {
+  var b = bytes.new(n)
+  let hi = 9223372036854775807
+  bytes.set_u8(b, hi, 0xFF)
+  bytes.set_u16_le(b, hi, 0xFFFF)
+  bytes.set_u16_be(b, hi, 0xFFFF)
+  bytes.set_i16_le(b, hi, 0 - 1)
+  bytes.set_i16_be(b, hi, 0 - 1)
+  bytes.set_u32_le(b, hi, 0xFFFFFFFF)
+  bytes.set_u32_be(b, hi, 0xFFFFFFFF)
+  bytes.set_i32_le(b, hi, 0 - 1)
+  bytes.set_i32_be(b, hi, 0 - 1)
+  bytes.set_i64_le(b, hi, 0 - 1)
+  bytes.set_i64_be(b, hi, 0 - 1)
+  bytes.set_f32_le(b, hi, 5.0)
+  bytes.set_f32_be(b, hi, 5.0)
+  bytes.set_f64_le(b, hi, 5.0)
+  bytes.set_f64_be(b, hi, 5.0)
+  // One below the top, and the 2^32 boundary the narrowing cares about — the
+  // three points where a wrap could hide.
+  bytes.set_f64_le(b, hi - 1, 5.0)
+  bytes.set_u8(b, hi - 1, 0xFF)
+  bytes.set_u8(b, 4294967296, 0xFF)
+  var sum = 0
+  for i in 0..<bytes.len(b) {
+    sum = sum + bytes.read_u8(b, i)
+  }
+  "high_writes(${int.to_string(n)}) sum=${int.to_string(sum)}"
+}
+
 fn probe_writes(n: Int) -> String = {
   var b = bytes.new(n)
   // Every `set_*` width and order, all at offset -1. Each must be a NO-OP;
@@ -72,4 +112,6 @@ effect fn main() -> Unit = {
   println(probe_writes(8))
   println(probe_writes(1))
   println(probe_reads(8))
+  println(probe_high_writes(8))
+  println(probe_high_writes(1))
 }
