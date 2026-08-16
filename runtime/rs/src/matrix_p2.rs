@@ -175,8 +175,23 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     let off = offset.max(0) as usize;
     let mut flat = Vec::<f64>::with_capacity(total);
     let num_blocks = total / 128;
+    // Per-ROW OOB->zeros, the edge C-229 gave the row-subset twin. This loop had
+    // no bound at all, so a rows/cols pair asking for more blocks than the buffer
+    // holds indexed straight past it and died with a raw slice panic (exit 101,
+    // the form ALS-T6 forbids) where the wasm self-host read its linear memory
+    // and answered. `blocks_per_row` is exact because `cols` is a 128-multiple by
+    // construction, so a row always starts on a block boundary.
+    let blocks_per_row = (cols_u / 128).max(1);
+    let row_bytes = blocks_per_row * 18;
     for b in 0..num_blocks {
         let block_start = off + b * 18;
+        let row_of_block = b / blocks_per_row;
+        if off + row_of_block * row_bytes + row_bytes > data.len() {
+            for _ in 0..128 {
+                flat.push(0.0);
+            }
+            continue;
+        }
         let scale_raw = (data[block_start] as u16) | ((data[block_start + 1] as u16) << 8);
         // Every element of this block is one of these two values, so applying
         // the dequantization-zero ruling to the pair settles the whole block —

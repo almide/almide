@@ -83,7 +83,16 @@ fn __gelu_scalar(x: Float) -> Float = {
   // the same limit every SIMD lane has, and tanh is flat long before that.
   let e2 = __fast_exp(2.0 * inner)
   let t = 1.0 - 2.0 / (e2 + 1.0)
-  0.5 * ((1.0 + t) * x)
+  // ASSOCIATION, not just the operands: the native kernel spells this
+  // `0.5 * x * (1.0 + tanh)`, which Rust parses as `(0.5 * x) * (1.0 + tanh)`
+  // — halve FIRST, then double. This transcribed v0's `0.5 * ((1 + t) * x)`
+  // instead, which doubles first, and `2.0 * x` overflows to `inf` for an `x`
+  // near f64::MAX where the native order stays finite: `matrix.gelu` on
+  // 1.7976931348623157e308 answered that value natively and `inf` on wasm,
+  // both exit 0 (differential fuzz, a matrix_softmax_fastexp mutation). All
+  // four native lanes (naive/avx/neon/chunked) agree on the native order, so
+  // the self-host follows it.
+  (0.5 * x) * (1.0 + t)
 }
 
 fn __gelu_row(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
@@ -488,18 +497,30 @@ else {
   __q10_row(dh, base, row_k0, cols, c + 1)
 }
 
-fn __q10_rows(ho: Int, base: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
+// The FULL-MATRIX loader takes the same per-ROW OOB->zeros edge its row-subset
+// twin `__q10_sel_rows` already took (C-229). It had no `limit` at all, so a
+// `rows`/`cols` pair asking for more blocks than the buffer holds read straight
+// past it: native bounds-checks its slice and died with a raw panic (exit 101,
+// the form ALS-T6 forbids) while wasm read whatever linear memory held and
+// answered — `from_q1_0_bytes(bytes.new(18), 0, 4, 128)` was exit 101 against a
+// four-row answer (differential fuzz, a matrix_select_rows_oob mutation).
+fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
 else {
+  let row_bytes = cols / 128 * 18
   let row = prim.alloc_list_f64(cols)
-  let _c = __q10_row(prim.handle(row), base, r * cols, cols, 0)
+  let _c = if base + r * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
+  else __q10_row(prim.handle(row), base, r * cols, cols, 0)
   prim.store_str(ho + 12 + r * 8, row)
-  __q10_rows(ho, base, rows, cols, r + 1)
+  __q10_rows(ho, base, limit, rows, cols, r + 1)
 }
 
 fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
-  let base = prim.handle(data) + 12 + offset
+  let hd = prim.handle(data)
+  let off = if offset < 0 then 0 else offset
+  let base = hd + 12 + off
+  let limit = hd + 12 + prim.load32(hd + 4)
   let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __q10_rows(prim.handle(out), base, rows, cols, 0)
+  let _x = __q10_rows(prim.handle(out), base, limit, rows, cols, 0)
   out
 }
 
