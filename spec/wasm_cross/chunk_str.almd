@@ -24,4 +24,20 @@ effect fn main() -> Unit = {
   println(int.to_string(list.len(list.windows(xs, -1))))
   println(int.to_string(list.len(list.chunk(xs, -2147483648))))
   println(int.to_string(list.len(list.chunk(one, -1))))
+  // The POSITIVE extreme of the same domain, which nothing exercised: the
+  // chunk count was `(total + n - 1) / n`, and that sum overflows i64 long
+  // before any narrowing happens. At `n = i64::MAX` over a 5-element list the
+  // wrap made the count 0, so wasm printed 0 chunks where native printed 1 —
+  // both exit 0, so the two legs disagreed in silence; at `i64::MAX - 1` the
+  // wrapped count reached the allocator and wasm died out of memory (found by
+  // the differential fuzz, seed 510721188963 index 2460, mutating this very
+  // file). Ceiling division is `total / n + (total % n != 0)` now, which
+  // cannot overflow for a positive n. Int-element twin included: both
+  // variants carried the same line.
+  println(int.to_string(list.len(list.chunk(xs, 9223372036854775807))))
+  println(int.to_string(list.len(list.chunk(xs, 9223372036854775806))))
+  println(int.to_string(list.len(list.chunk(one, 9223372036854775807))))
+  let ns = [1, 2, 3, 4, 5]
+  println(int.to_string(list.len(list.chunk(ns, 9223372036854775807))))
+  println(int.to_string(list.len(list.chunk(ns, 9223372036854775806))))
 }

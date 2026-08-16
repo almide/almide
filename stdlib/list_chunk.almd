@@ -40,7 +40,15 @@ fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
   // keeps the genuine div (native `chunks(0)` panics; the trap IS the oracle).
   let n = if n < 0 then (if total > 0 then total else 1)
   else n
-  let num = (total + n - 1) / n
+  // Ceiling division WITHOUT the `total + n - 1` rounding trick: that sum
+  // overflows i64 for a large `n` and the wrap decides the chunk count. With
+  // `n = i64::MAX` over a 5-element list it wrapped negative, `alloc_list_str`
+  // took a bogus count and the program printed 0 chunks where native printed
+  // 1 — both exit 0, so nothing said a word (found by the differential fuzz,
+  // seed 510721188963 index 2460, mutating spec/wasm_cross/chunk_str.almd).
+  // Division and remainder cannot overflow for a positive `n`, so this form is
+  // total over the whole domain.
+  let num = total / n + (if total % n != 0 then 1 else 0)
   let outer = prim.alloc_list_str(num)
   let _x = __chunk_outer(prim.handle(outer), sh, total, n, 0, 0)
   outer
@@ -112,7 +120,15 @@ fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
   // unclamped `clen = cn` asked __chunk_one_str for a NEGATIVE-length alloc.
   let n = if n < 0 then (if total > 0 then total else 1)
   else n
-  let num = (total + n - 1) / n
+  // Ceiling division WITHOUT the `total + n - 1` rounding trick: that sum
+  // overflows i64 for a large `n` and the wrap decides the chunk count. With
+  // `n = i64::MAX` over a 5-element list it wrapped negative, `alloc_list_str`
+  // took a bogus count and the program printed 0 chunks where native printed
+  // 1 — both exit 0, so nothing said a word (found by the differential fuzz,
+  // seed 510721188963 index 2460, mutating spec/wasm_cross/chunk_str.almd).
+  // Division and remainder cannot overflow for a positive `n`, so this form is
+  // total over the whole domain.
+  let num = total / n + (if total % n != 0 then 1 else 0)
   let outer = prim.alloc_list_str(num)
   let _x = __chunk_outer_str(prim.handle(outer), sh, total, n, 0, 0)
   outer
