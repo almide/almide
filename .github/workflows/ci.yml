@@ -891,6 +891,12 @@ jobs:
       - name: Release evidence seals (every seal re-measured against its tag — the audit freeze)
         run: bash scripts/release-seal.sh check
 
+      - name: Dialect epoch ledger (@dialect(N) means one thing, and the compiler agrees)
+        run: bash scripts/check-dialect-epochs.sh
+
+      - name: Dialect epoch gate fires on forged ledgers and constants (negative controls)
+        run: bash scripts/check-dialect-epochs-negative.sh
+
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 

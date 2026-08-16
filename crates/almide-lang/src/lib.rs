@@ -8,6 +8,9 @@ pub use almide_syntax::parser;
 pub use almide_syntax::parse_cached;
 
 pub use almide_types::types;
+/// The language dialect epoch (`@dialect(N)`) — one constant and one
+/// standing enum, cross-checked against `proofs/dialect-epochs.toml`.
+pub use almide_types::dialect;
 /// The comment-blanked embedded stdlib (#878) — see `almide_types::embedded`.
 pub use almide_types::embedded;
 pub use almide_types::stdlib_info;
