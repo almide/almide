@@ -9,8 +9,31 @@ else {
   __range_fill(lh, start, count, i + 1)
 }
 
+// The element count of [start, end) computed WITHOUT the subtraction that overflows.
+// `end - start` for a span like (i64::MIN, 3) wraps NEGATIVE, and the allocation was
+// then sized from the wrapped value: native died on a raw panic (exit 101, the form
+// ALS-T6 forbids) where wasm aborted with `Error: out of memory` (exit 1).
+//
+// Rejecting the endpoints outright would be wrong — `range(1000000000, 1000000001)` is
+// one element at a large offset and must still work — so the cases are split by sign
+// instead. When both endpoints share a sign the difference is bounded by i64::MAX and
+// cannot overflow; only a span that STRADDLES zero can, and there either half exceeding
+// the ceiling already settles it (`count = end + |start| > end`), leaving a subtraction
+// whose operands are both within one ceiling of zero.
+//
+// `0 - 1` is the too-wide sentinel: a real count is never negative.
+fn __range_count(start: Int, end: Int) -> Int = if end <= start then 0
+else if start >= 0 then end - start
+else if end < 0 then end - start
+else if end > 268435456 then 0 - 1
+else if start < 0 - 268435456 then 0 - 1
+else end - start
+
 fn list_range(start: Int, end: Int) -> List[Int] = {
-  let count = if end > start then end - start else 0
+  let count = __range_count(start, end)
+  // The SAME ceiling `list_repeat` takes twelve lines below — which is where this rule
+  // was already written down, and where `list_range` never joined it.
+  if count < 0 or count > 268435456 then prim.die(prim.handle("Error: repeat result too large\n")) else ()
   let buf = prim.alloc_list(count)
   let _x = __range_fill(prim.handle(buf), start, count, 0)
   buf

@@ -90,6 +90,14 @@ pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
     let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
+    // The same ceiling `string_repeat` above takes, on the same grounds: without it
+    // `pad_end("a", u32::MAX, "x")` built a 4 GiB String here while the wasm leg — which
+    // cannot address that much — aborted. Tested by DIVISION because the byte count is
+    // `(w - len) * p.len_utf8()`, and that product is what overflows.
+    if (w - len) as i64 > ALMIDE_REPEAT_MAX_BYTES / p.len_utf8() as i64 {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
     format!("{}{}", std::iter::repeat(p).take(w - len).collect::<String>(), s)
 }
 
@@ -97,6 +105,14 @@ pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
     let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
+    // The same ceiling `string_repeat` above takes, on the same grounds: without it
+    // `pad_end("a", u32::MAX, "x")` built a 4 GiB String here while the wasm leg — which
+    // cannot address that much — aborted. Tested by DIVISION because the byte count is
+    // `(w - len) * p.len_utf8()`, and that product is what overflows.
+    if (w - len) as i64 > ALMIDE_REPEAT_MAX_BYTES / p.len_utf8() as i64 {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
     format!("{}{}", s, std::iter::repeat(p).take(w - len).collect::<String>())
 }
 

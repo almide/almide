@@ -144,7 +144,16 @@ pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
     }
     vec![x; n.max(0) as usize]
 }
-pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> { (start..end).collect() }
+// `(start..end)` sized its allocation from a span this leg would attempt and the other
+// could not: `range(i64::MIN, 3)` is ~9.2e18 elements. `saturating_sub` keeps the count
+// honest where `end - start` would wrap, and the ceiling is `list_repeat`'s.
+pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
+    if end.saturating_sub(start).max(0) > ALMIDE_LIST_REPEAT_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    (start..end).collect()
+}
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
 pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.

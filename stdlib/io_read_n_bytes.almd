@@ -8,4 +8,18 @@
 // carries Capability::Stdin — the SAME distinct capability io.read_line carries — so a caller is
 // caps-verified ONLY if it declares Stdin (an `effect fn`). NON-DETERMINISTIC (reads live stdin):
 // no byte-match unless stdin is fixed. Matches io.almd's `fn read_n_bytes(n: Int) -> List[Int]`.
-fn io_read_n_bytes(n: Int) -> List[Int] = prim.read_n_bytes(n)
+//
+// THE PER-CALL MAXIMUM is 2^26 bytes (64 MiB), and it is a real part of the contract
+// rather than an implementation detail, because `n` is a LIMIT and the answer is already
+// allowed to be shorter ("fewer than n at EOF" — the same latitude POSIX read() takes).
+//
+// It exists because `prim.read_n_bytes` takes an i32 at the host floor, so a count that
+// does not fit arrived TRUNCATED: `read_n_bytes(i64::MAX)` became -1 and this leg returned
+// NOTHING where native read every available byte, and 2^32 became 0. Clamping in the
+// semantics layer means the floor only ever sees a count it can represent, and 64 MiB is
+// MEASURED, not chosen: the wasm buffer allocates at 2^26 and fails at 2^27. Native applies
+// the identical clamp (ALMIDE_IO_READ_MAX_BYTES, runtime/rs/src/io.rs), so a caller that
+// wants more loops until the answer is empty — on either target, identically.
+fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0)
+else if n > 67108864 then prim.read_n_bytes(67108864)
+else prim.read_n_bytes(n)

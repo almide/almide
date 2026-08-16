@@ -1,0 +1,54 @@
+// @contract: C-161
+// The three NON-bytes count families the integer-domain matrix still had open —
+// `list.range`, `string.pad_start`/`pad_end`, `io.read_n_bytes` — 19 cells, all of
+// them a count that sized an allocation without being checked first.
+//
+// 1. list.range. `end - start` IS the count, and for a span like (i64::MIN, 3) that
+//    subtraction OVERFLOWS: the count came out negative and the allocation was sized
+//    from the wrapped value — native died on a raw panic (exit 101, the form ALS-T6
+//    forbids) where wasm aborted with `Error: out of memory`.
+//
+//    Rejecting the endpoints outright would be wrong, since `range(1e9, 1e9+1)` is one
+//    element at a large offset, so the cases split by sign: when both endpoints share a
+//    sign the difference is bounded by i64::MAX and cannot overflow, and only a span
+//    straddling zero can — where either half exceeding the ceiling already settles it.
+//
+//    Read where the ceiling came from: `list_repeat` carries it TWELVE LINES BELOW
+//    `list_range` in the same file, with the same limit and the same message. Adjacency
+//    is not a mechanism.
+//
+// 2. string.pad_start / pad_end. The pad byte count is `n * pclen`, and that product is
+//    what overflows, so the ceiling is tested by DIVISION — a guard computed from the
+//    product tests the wrapped value. Without it `pad_end("a", u32::MAX, "x")` built a
+//    4 GiB String natively and aborted on wasm.
+//
+// 3. io.read_n_bytes. Two separate defects meeting in the middle: native reserved
+//    `vec![0u8; n as usize]` up front, so a NEGATIVE n asked for ~1.8e19 bytes; and the
+//    wasm host floor takes an i32, so a large n arrived TRUNCATED — i64::MAX became -1
+//    and the read returned nothing at all.
+//
+//    The fix is not a ceiling here but a CLAMP, because `n` is a limit whose answer is
+//    already allowed to be shorter ("fewer than n at EOF" — the latitude POSIX read()
+//    takes). Both legs now read up to min(n, 2^26) bytes. 64 MiB is MEASURED, not
+//    chosen: the wasm buffer allocates at 2^26 and fails at 2^27.
+import io
+
+fn main() -> Unit = {
+  // ── list.range: the wide span, and the legitimate ones it must not swallow.
+  println("r_ok=" + int.to_string(list.len(list.range(0, 5))))
+  println("r_far=" + int.to_string(list.len(list.range(1000000000, 1000000001))))
+  println("r_neg=" + int.to_string(list.len(list.range(0 - 5, 5))))
+  println("r_empty=" + int.to_string(list.len(list.range(5, 1))))
+  // ── string.pad: in range, multi-byte pad, and the no-op negative width.
+  println("p_ok=" + string.pad_start("a", 4, "x"))
+  println("p_mb=" + string.pad_end("a", 4, "あ"))
+  println("p_neg=" + string.pad_start("ab", 0 - 5, "x"))
+  // ── io.read_n_bytes: stdin is empty under `almide test`, so every count agrees at 0.
+  // What is pinned here is that a huge or negative count does not abort and does not
+  // truncate into a different count.
+  println("io_neg=" + int.to_string(list.len(io.read_n_bytes(0 - 1))))
+  println("io_max=" + int.to_string(list.len(io.read_n_bytes(9223372036854775807))))
+  println("io_2p32=" + int.to_string(list.len(io.read_n_bytes(4294967296))))
+  // ── the aborts, last, so every value above is observed first.
+  println("r_wide=" + int.to_string(list.len(list.range(0 - 9223372036854775807 - 1, 3))))
+}
