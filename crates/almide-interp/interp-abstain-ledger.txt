@@ -20,6 +20,7 @@ codec_decode_errors  out-of-interp-scope capability: prim.handle of a value outs
 codec_float_int  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 codec_none_omission  out-of-interp-scope capability: prim.alloc_value
 compound_eq  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
+count_domain_nonbytes  out-of-interp-scope capability: prim.alloc_list
 datetime_format  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 declaration_forms  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 effect_tuple_result_tco  out-of-interp-scope capability: prim.alloc_value
@@ -115,6 +116,7 @@ value_array_tuple_tco  out-of-interp-scope capability: prim.alloc_value
 value_as_array_leak_loop  out-of-interp-scope capability: prim.alloc_value
 value_as_array_roundtrip  out-of-interp-scope capability: prim.alloc_value
 value_deep_eq  out-of-interp-scope capability: prim.alloc_value
+value_domain_arith  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 value_eq  out-of-interp-scope capability: prim.alloc_value
 value_merge  out-of-interp-scope capability: prim.alloc_value
 value_object_leak_loop  out-of-interp-scope capability: prim.alloc_value

@@ -98,14 +98,20 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 pub fn almide_rt_math_factorial(n: i64) -> i64 {
     (1..=n).product()
 }
+// The accumulation is i64 and WRAPPING, matching Almide's Int and matching the
+// self-host `__choose_loop` exactly. It used to run in u64: `choose(i64::MAX, 2)` came
+// out 4611686018427387905 here and -4611686018427387903 there, because an overflowing
+// product wraps differently in the two widths. Neither value is a binomial coefficient;
+// they simply have to be the same non-answer. `n >= k >= 0` holds past the guard, so
+// only the product can overflow.
 pub fn almide_rt_math_choose(n: i64, k: i64) -> i64 {
     if k < 0 || k > n { return 0; }
-    let k = k.min(n - k) as u64;
-    let mut result: u64 = 1;
+    let k = k.min(n - k);
+    let mut result: i64 = 1;
     for i in 0..k {
-        result = result * (n as u64 - i) / (i + 1);
+        result = result.wrapping_mul(n - i) / (i + 1);
     }
-    result as i64
+    result
 }
 // Lanczos approximation (g=7, n=9 coefficients). Both the native and the wasm
 // log_gamma compute this SAME polynomial; the only ULP-level divergence was the
