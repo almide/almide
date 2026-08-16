@@ -11,7 +11,7 @@ use almide_base::intern::sym;
 use almide_lang::ast;
 use almide_lang::ast::ExprKind;
 
-use crate::deprecation::{classify, EditKind};
+use crate::deprecation::classify;
 
 impl super::Checker {
     /// The `functions` key a callee resolves to, mirroring `lookup_call_sig`.
