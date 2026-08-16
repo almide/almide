@@ -241,3 +241,13 @@ evidence = "dialect-stamp landing (2026-08-16): companion check-dialect-epochs-n
 path = "scripts/check-dialect-epochs-negative.sh"
 class = "EXERCISED"
 evidence = "dialect-stamp landing (2026-08-16): recorded 6-mode exercise on every run — one positive control (the committed ledger and constant must PASS, so a broken harness cannot report vacuous green) plus the five forged-input negatives enumerated in the row above. Wired into the checks job directly after the gate it guards, so the proof-it-fires reruns on every push."
+
+[[gate]]
+path = "scripts/check-retired-spellings.sh"
+class = "NEGATIVE_TESTED"
+evidence = "retired-spelling ledger landing (2026-08-16): companion check-retired-spellings-negative.sh feeds four forged ledgers, each demonstrated to FAIL, with the committed ledger as the positive control — (1) an EMPTY ledger (#976 find-nothing-exit-0); (2) a row claiming the LIVE `list.map` is retired, which passes only if the gate is not actually executing its rows; (3) every row's `code` forged to a diagnostic the compiler never emits, proving the ledger stays joined to the diagnostic; (4) the three `kind = \"carrier\"` rows reclassified as `\"spelling\"`, which must fail because a carrier IS defined in stdlib on purpose. The gate itself is unusual in being EXECUTED rather than asserted: it compiles a probe per row and requires the declared code to come out, so deleting an arm of the hardcoded `match` in check/infer.rs — the way this enforcement could previously die unnoticed — now reddens the build. Its own first run caught an over-broad rule in this script (carriers legitimately keep their stdlib definition), which is why `kind` exists."
+
+[[gate]]
+path = "scripts/check-retired-spellings-negative.sh"
+class = "EXERCISED"
+evidence = "retired-spelling ledger landing (2026-08-16): recorded 5-mode exercise on every run — one positive control (the committed ledger must PASS, so a broken harness cannot report vacuous green) plus the four forged-ledger negatives enumerated in the row above. Wired into the checks job directly after the gate it guards."

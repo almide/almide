@@ -891,6 +891,14 @@ jobs:
       - name: Release evidence seals (every seal re-measured against its tag — the audit freeze)
         run: bash scripts/release-seal.sh check
 
+      - name: Retired spellings stay retired (every retirement executed, not asserted)
+        # Compiles a probe per ledger row against the built binary, so the
+        # gate needs it on ALMIDE_BIN like the other compiler-driven checks.
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-retired-spellings.sh
+
+      - name: Retired-spelling gate fires on forged ledgers (negative controls)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-retired-spellings-negative.sh
+
       - name: Dialect epoch ledger (@dialect(N) means one thing, and the compiler agrees)
         run: bash scripts/check-dialect-epochs.sh
 

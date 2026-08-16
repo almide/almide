@@ -1,0 +1,132 @@
+# =============================================================
+# RETIRED SPELLING LEDGER — names the language will not take back
+# =============================================================
+# A model writes whatever dialect it learned. When Almide removes a spelling,
+# the removal only holds if reaching for the old name produces a diagnostic
+# that names the modern form — otherwise the dead spelling either silently
+# fails ("no such function", a whole retry wasted guessing) or, worse, quietly
+# comes back because nothing was counting.
+#
+# roc's version of this is 79 banned-identifier rules, 75 of them with
+# strictly-empty allowlists (`ci/check_postcheck_architecture.pl`), and its own
+# retrospective is the reason: "generators whose mechanism was DELETED stayed
+# dead, while generators that were centralized but left a parallel old path
+# kept firing on uncovered axes."
+#
+# What this ledger adds over the diagnostic that already exists: the diagnostic
+# lives in a hardcoded `match` in `check/infer.rs`. Deleting one arm of that
+# match removes one retirement and nothing notices. Here the retirements are
+# data, the list is APPEND-ONLY, and `scripts/check-retired-spellings.sh`
+# EXECUTES each row — a row whose spelling no longer produces its diagnostic
+# fails the build. A retirement nobody can prove is a retirement that already
+# came back.
+#
+# Rules:
+#   - APPEND-ONLY. A row that shipped is history: removing it un-retires a
+#     name, which is a language change and belongs in a dialect epoch.
+#   - `epoch` is the dialect epoch the removal landed in
+#     (proofs/dialect-epochs.toml).
+#   - `code` is the diagnostic the spelling must produce, and the gate runs
+#     the spelling to confirm it still does.
+#   - `replacement` is what the writer should have written. It is prose here
+#     because the diagnostic owns the authoritative text; this column is for
+#     the reader of the ledger.
+#   - `kind` says what was retired:
+#       "spelling" — the name is gone entirely; it must not be DEFINED in
+#                    stdlib either, or the retirement is undone by redefinition.
+#       "carrier"  — the definition legitimately still exists as the desugar
+#                    TARGET; what is retired is source's ability to NAME it.
+#                    Deleting the public name while leaving a nameable carrier
+#                    would have renamed the second spelling, not removed it.
+
+# ── ADR-0006: the fallibility-polymorphic core HOFs (dialect epoch 2) ──
+#
+# The core combinator already selects its fallible form from the callback's
+# `!`, so a second name per combinator was a second spelling for one thing.
+# Both the seven PUBLIC names and the seven INTERNAL carriers they left behind
+# are retired: deleting the public name while leaving the carrier reachable
+# would have renamed the second spelling, not removed it.
+
+[[retired]]
+spelling = "list.try_map"
+epoch = 2
+code = "E043"
+replacement = "list.map(xs, (x) => f(x)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "list.try_filter"
+epoch = 2
+code = "E043"
+replacement = "list.filter(xs, (x) => f(x)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "list.try_flat_map"
+epoch = 2
+code = "E043"
+replacement = "list.flat_map(xs, (x) => f(x)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "list.try_filter_map"
+epoch = 2
+code = "E043"
+replacement = "list.filter_map(xs, (x) => f(x)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "list.try_fold"
+epoch = 2
+code = "E043"
+replacement = "list.fold(xs, z, (a, x) => f(a, x)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "list.try_find"
+epoch = 2
+code = "E043"
+replacement = "list.find(xs, (x) => f(x)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "list.try_each"
+epoch = 2
+code = "E043"
+replacement = "list.each(xs, (x) => f(x)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "list.__fallible_map"
+epoch = 2
+code = "E043"
+replacement = "list.map(xs, (x) => f(x)!)! — the carrier is a desugar target, not a spelling"
+kind = "carrier"
+
+[[retired]]
+spelling = "list.__fallible_fold"
+epoch = 2
+code = "E043"
+replacement = "list.fold(xs, z, (a, x) => f(a, x)!)! — the carrier is a desugar target, not a spelling"
+kind = "carrier"
+
+[[retired]]
+spelling = "fs.try_fold_lines"
+epoch = 2
+code = "E043"
+replacement = "fs.fold_lines(path, z, (a, l) => f(a, l)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "fs.try_for_each_line"
+epoch = 2
+code = "E043"
+replacement = "fs.for_each_line(path, (l) => f(l)!)!"
+kind = "spelling"
+
+[[retired]]
+spelling = "fs.__fallible_fold_lines"
+epoch = 2
+code = "E043"
+replacement = "fs.fold_lines(path, z, (a, l) => f(a, l)!)! — the carrier is a desugar target, not a spelling"
+kind = "carrier"
