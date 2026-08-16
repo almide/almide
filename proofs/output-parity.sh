@@ -79,10 +79,13 @@ match=0; wall=0; mismatch=0; runerr=0; v0fail=0; skip=0; xfail=0
 # comparable when the render succeeds: the traps (div-by-zero, index-bounds,
 # unwrap-none) PROMISE identical stderr + exit 1 cross-target (C-001/C-035).
 # v1 stderr is normalized (the wasmtime trap preamble names the tmp wat path).
-# STDIN IS CLOSED for every fixture run. The corpus arrives on this script's own
-# stdin (`done < <(find spec ...)`), so a fixture that READS stdin consumes the
-# rest of the file list and the sweep stops early — silently, because the loop
-# simply runs out of input and the summary prints as if it had finished.
+# STDIN IS CLOSED for every fixture run. The corpus USED to arrive on this
+# script's own stdin (`done < <(find spec ...)`), so a fixture that READS stdin
+# consumed the rest of the file list and the sweep stopped early — silently,
+# because the loop simply ran out of input and the summary printed as if it had
+# finished. The worklist has since moved to fd 3 (see the sweep below), so the
+# two descriptors no longer overlap at all; this redirect stays because it is
+# the half that holds however the worklist is delivered.
 #
 # It cost a green build to learn: `count_domain_nonbytes.almd` calls
 # `io.read_n_bytes`, and the run that introduced it classified 547 of 932 files
@@ -148,12 +151,12 @@ declare -a suspects=()
 # baseline file past the cut looked like it had "stopped byte-matching" — a
 # REGRESSION verdict for work no one had touched (#1473).
 #
-# `spec/wasm_cross/count_domain_nonbytes.almd` is the fixture that hit it, and
-# the fixture is fine. It calls `io.read_n_bytes(i64::MAX)`; before that call
-# was brought under the count-domain rule it aborted on a capacity overflow
-# BEFORE reaching stdin, so the defect here was masked. Fixing the intrinsic is
-# what armed it — which is the shape to remember: this gate must not depend on
-# what the corpus chooses to read.
+# Belt and braces with the `< /dev/null` on the two fixture invocations inside
+# run_one: that redirect closes stdin for the commands that exist today, this
+# one puts the worklist out of reach of ANY command the loop body might grow.
+# The account of how the hazard came to be armed lives above run_one; the shape
+# to remember is that it was armed by FIXING an intrinsic, so this gate must
+# never depend on what the corpus chooses to read.
 while IFS= read -r f <&3; do
   grep -q 'fn main' "$f" || { skip=$((skip+1)); continue; }
   # `// wasm:skip` — a multi-module / harness-incompatible fixture that cannot run
