@@ -276,11 +276,13 @@ pub struct FnSigToRegister<'a> {
     pub prefix: Option<&'a str>,
     pub span: Option<&'a ast::Span>,
     pub visibility: ast::Visibility,
+    /// The declaration's attributes, so registration can read `@deprecated`.
+    pub attrs: &'a [ast::Attribute],
 }
 
 pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let FnSigToRegister {
-        name, params, return_type, effect, generics, prefix, span, visibility,
+        name, params, return_type, effect, generics, prefix, span, visibility, attrs,
     } = *decl;
     let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
     let sb = collect_structural_bounds(env, generics);
@@ -317,6 +319,9 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, mut_params });
+    if let Ok(Some(dep)) = crate::deprecation::parse(attrs) {
+        env.deprecations.insert(sym(&key), dep);
+    }
     // Record visibility so `resolve_module_call` can reject cross-module access to `mod fn` / `local fn`. Only non-Public entries need to be stored — the lookup in the checker treats "missing" as Public (stdlib, impl methods, derived stubs).
     if !matches!(visibility, ast::Visibility::Public) {
         env.fn_visibility.insert(sym(&key), visibility);
@@ -594,7 +599,7 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
 }
 /// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).
 fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {
-    let ast::Decl::Fn { name, params, return_type, effect, generics, span, visibility, extern_attrs, body, .. } = decl else { unreachable!() };
+    let ast::Decl::Fn { name, params, return_type, effect, generics, span, visibility, extern_attrs, body, attrs, .. } = decl else { unreachable!() };
     // Skip duplicates that come from @extern re-export (name may appear twice by design).
     if extern_attrs.is_empty() {
         let key = prefixed_key(prefix, name);
@@ -622,7 +627,7 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     }
     register_fn_sig(env, &FnSigToRegister {
         name, params, return_type, effect, generics,
-        prefix, span: span.as_ref(), visibility: *visibility,
+        prefix, span: span.as_ref(), visibility: *visibility, attrs,
     });
     // Register in DefTable
     let fn_key = prefixed_key(prefix, name);

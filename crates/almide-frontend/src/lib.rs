@@ -4,6 +4,7 @@ pub mod lower;
 pub mod ir_link;
 pub mod import_table;
 pub mod dialect_check;
+pub mod deprecation;
 pub mod stdlib;
 pub mod bundled_sigs;
 

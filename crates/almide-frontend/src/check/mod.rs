@@ -27,6 +27,7 @@ mod builtin_calls;
 mod static_dispatch;
 mod solving;
 mod diagnostics;
+mod deprecation_warn;
 mod exhaustiveness;
 
 use almide_lang::ast;
@@ -884,6 +885,7 @@ impl Checker {
                         prefix: None,
                         span: span.as_ref(),
                         visibility: *visibility,
+                        attrs: &[],
                     },
                 );
             }

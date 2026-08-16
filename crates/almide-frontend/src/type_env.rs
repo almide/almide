@@ -21,6 +21,11 @@ pub struct TypeEnv {
     pub types: std::collections::HashMap<Sym, Ty>,
     /// Function signatures: name -> FnSig
     pub functions: std::collections::HashMap<Sym, almide_lang::types::FnSig>,
+    /// Deprecated functions: same key as `functions`. Populated at
+    /// registration from `@deprecated`; read at every call site so the
+    /// warning can name the replacement instead of leaving the caller to
+    /// guess it.
+    pub deprecations: std::collections::HashMap<Sym, crate::deprecation::Deprecation>,
     /// Local variable scopes (stack of scopes)
     pub scopes: Vec<std::collections::HashMap<Sym, Ty>>,
     /// Current function's return type
@@ -169,6 +174,7 @@ pub struct TypeEnv {
 impl TypeEnv {
     pub fn new() -> Self {
         TypeEnv {
+            deprecations: std::collections::HashMap::new(),
             types: std::collections::HashMap::new(),
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],
