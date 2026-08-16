@@ -51,19 +51,30 @@ pub fn almide_rt_io_read_byte() -> i64 {
 // the two agree by teaching BOTH to abort; `take` makes them agree by teaching this one
 // not to need the count at all, which is the better answer: `read_n_bytes(i64::MAX)` on
 // empty stdin is honestly the empty list, not an error.
-/// The per-call maximum for `read_n_bytes`, in bytes. NOT an allocation ceiling and not
-/// part of the 2 GiB roster: it is the largest count the wasm leg's host-floor buffer can
-/// take (MEASURED — it allocates at 2^26 and fails at 2^27), and `n` is a limit whose
-/// answer may already be shorter, so clamping it keeps the two legs identical instead of
-/// making one abort. Keep equal to the literal in stdlib/io_read_n_bytes.almd.
-pub const ALMIDE_IO_READ_MAX_BYTES: i64 = 1 << 26;
+/// The chunk this leg's SELF-HOST twin reads in. Native has no reason to chunk — it
+/// hands `n` straight to `take` — but the constant is rostered so the two halves of
+/// `read_n_bytes` cannot drift apart in the ONE way that matters: the answer's length.
+/// Keep equal to the literal in stdlib/io_read_n_bytes.almd.
+pub const ALMIDE_IO_READ_CHUNK_BYTES: i64 = 1 << 26;
 
+// `read_n_bytes(n)` answers min(n, what stdin has). No ceiling, no clamp.
+//
+// A clamp shipped here briefly and it was WRONG: it capped the answer at 2^26, so
+// `read_n_bytes(100 MiB)` on 100 MiB of stdin returned 64 MiB and no error, on BOTH
+// legs, for a call that used to work correctly on both. Silent truncation of a
+// caller's data is the worst outcome this function has.
+//
+// The measurement that justified it was taken with FIVE BYTES on stdin: a large `n`
+// failed there because the wasm floor pre-allocates the REQUESTED size, not because
+// the data could not be delivered. With real input, 100 MiB round-trips fine. The
+// real defect was only ever `n` too large to REPRESENT at the i32 host boundary
+// (i64::MAX truncated to -1 and read nothing), and the self-host twin now solves that
+// by looping over 2^26 chunks instead of asking the floor for the whole span at once.
 pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
     use std::io::Read;
     if n <= 0 { return Vec::new(); }
-    let want = n.min(ALMIDE_IO_READ_MAX_BYTES) as u64;
     let mut buf: Vec<u8> = Vec::new();
-    let _ = std::io::stdin().take(want).read_to_end(&mut buf);
+    let _ = std::io::stdin().take(n as u64).read_to_end(&mut buf);
     buf.into_iter().map(|b| b as i64).collect()
 }
 

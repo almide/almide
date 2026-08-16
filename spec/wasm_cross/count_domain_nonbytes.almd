@@ -29,10 +29,16 @@
 //    wasm host floor takes an i32, so a large n arrived TRUNCATED — i64::MAX became -1
 //    and the read returned nothing at all.
 //
-//    The fix is not a ceiling here but a CLAMP, because `n` is a limit whose answer is
-//    already allowed to be shorter ("fewer than n at EOF" — the latitude POSIX read()
-//    takes). Both legs now read up to min(n, 2^26) bytes. 64 MiB is MEASURED, not
-//    chosen: the wasm buffer allocates at 2^26 and fails at 2^27.
+//    The answer is min(n, what stdin has) — no ceiling, no cap. The self-host reads in
+//    2^26 CHUNKS so the wasm floor is never handed a span it cannot represent or
+//    allocate; the chunk bounds the BUFFER, not the answer.
+//
+//    A cap shipped here briefly and it was wrong: it truncated `read_n_bytes(100 MiB)`
+//    on a 100 MiB stream to 64 MiB, silently, on BOTH legs — for a call 0.57.0 got
+//    right on both. The measurement behind it was taken with FIVE BYTES on stdin, where
+//    a large `n` fails because the floor pre-allocates the REQUESTED size, not because
+//    the data cannot be delivered. Measuring a guard on input that cannot exercise it
+//    is how a cap ends up below every real use of the function.
 import io
 
 fn main() -> Unit = {

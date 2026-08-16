@@ -9,17 +9,36 @@
 // caps-verified ONLY if it declares Stdin (an `effect fn`). NON-DETERMINISTIC (reads live stdin):
 // no byte-match unless stdin is fixed. Matches io.almd's `fn read_n_bytes(n: Int) -> List[Int]`.
 //
-// THE PER-CALL MAXIMUM is 2^26 bytes (64 MiB), and it is a real part of the contract
-// rather than an implementation detail, because `n` is a LIMIT and the answer is already
-// allowed to be shorter ("fewer than n at EOF" — the same latitude POSIX read() takes).
+// THERE IS NO PER-CALL MAXIMUM. The answer is min(n, what stdin has), and a caller who
+// asks for 100 MiB of a 100 MiB stream gets 100 MiB.
 //
-// It exists because `prim.read_n_bytes` takes an i32 at the host floor, so a count that
-// does not fit arrived TRUNCATED: `read_n_bytes(i64::MAX)` became -1 and this leg returned
-// NOTHING where native read every available byte, and 2^32 became 0. Clamping in the
-// semantics layer means the floor only ever sees a count it can represent, and 64 MiB is
-// MEASURED, not chosen: the wasm buffer allocates at 2^26 and fails at 2^27. Native applies
-// the identical clamp (ALMIDE_IO_READ_MAX_BYTES, runtime/rs/src/io.rs), so a caller that
-// wants more loops until the answer is empty — on either target, identically.
+// A cap shipped here briefly and it was wrong: it truncated the answer at 2^26 silently,
+// on BOTH legs, for a call that had worked correctly on both. The measurement behind it
+// was taken with FIVE BYTES on stdin — a large `n` failed there because this floor
+// pre-allocates the REQUESTED size, not because the data could not be delivered.
+//
+// What IS real is the floor's i32 boundary: `prim.read_n_bytes` takes an i32, so an `n`
+// that does not fit arrives truncated (i64::MAX became -1 and read nothing). The answer
+// is to never hand the floor more than it can represent AND allocate — so this reads in
+// 2^26 chunks and concatenates until it has `n` or the stream runs short. The chunk size
+// bounds the wasm buffer; it does not bound the ANSWER. Keep it equal to
+// ALMIDE_IO_READ_CHUNK_BYTES (runtime/rs/src/io.rs); the gate checks that pair.
+//
+// A short chunk means EOF, so the recursion stops there rather than spinning on an
+// exhausted stream.
+// `remaining <= 0` is the base case and it is NOT decoration: without it the exact-fit
+// path recurses forever. A caller asking for exactly one chunk's worth reaches
+// remaining = 0, where `want` is 0 and the short-read test `0 < 0` is FALSE — so the
+// "keep going" branch is taken with remaining unchanged, and the recursion never ends.
+// It cost a wasm `alloc` trap on `read_n_bytes(3)` to find, which is the cheapest input
+// there is.
+fn __read_n_chunked(remaining: Int) -> List[Int] = if remaining <= 0 then prim.read_n_bytes(0)
+else {
+  let want = if remaining > 67108864 then 67108864 else remaining
+  let got = prim.read_n_bytes(want)
+  if list.len(got) < want then got
+  else got + __read_n_chunked(remaining - want)
+}
+
 fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0)
-else if n > 67108864 then prim.read_n_bytes(67108864)
-else prim.read_n_bytes(n)
+else __read_n_chunked(n)

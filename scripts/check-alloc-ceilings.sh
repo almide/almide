@@ -113,8 +113,13 @@ for rel, _, _ in NATIVE:
 # literal — and that is the same drift shape wearing different clothes. Each pair below
 # is checked for EQUALITY only; what the number means is the pair's own business.
 PAIRS = [
-    ("runtime/rs/src/io.rs", "ALMIDE_IO_READ_MAX_BYTES",
-     "stdlib/io_read_n_bytes.almd", r"prim\.read_n_bytes\((\d{6,})\)"),
+    # read_n_bytes: the CHUNK the self-host reads in, not a cap on the answer. The
+    # answer is min(n, what stdin has) on both legs; the chunk only bounds the wasm
+    # buffer. It was briefly a cap, and capping the ANSWER silently truncated a
+    # caller's data — the pair is rostered so the two halves cannot drift, and the
+    # name says chunk so nobody re-reads it as a limit.
+    ("runtime/rs/src/io.rs", "ALMIDE_IO_READ_CHUNK_BYTES",
+     "stdlib/io_read_n_bytes.almd", r"remaining > (\d{6,})"),
 ]
 for rs_rel, name, almd_rel, almd_pat in PAIRS:
     rs_p, almd_p = repo / rs_rel, repo / almd_rel
