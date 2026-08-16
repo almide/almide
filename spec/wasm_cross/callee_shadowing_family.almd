@@ -19,6 +19,10 @@
 // the IR verifier aborted the compile — for a two-line program that never
 // mentions `flat_map`. `f` is one of the names a caller is most likely to pick,
 // and the stdlib's own parameter names must not be part of a user's namespace.
+// BOUNDARY: the cells below are about a local whose type is `Fn`. A non-function
+// local of the same name, and a TOP-LEVEL `let` holding a closure, both still
+// resolve the top-level fn at call position — identically on both legs, and
+// unchanged here. Those are scoping questions, not cross-target divergences.
 fn tag(n: Int) -> String = "g" + int.to_string(n)
 
 // The param SHADOWS the global, and their signatures disagree — which is what
