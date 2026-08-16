@@ -79,15 +79,29 @@ match=0; wall=0; mismatch=0; runerr=0; v0fail=0; skip=0; xfail=0
 # comparable when the render succeeds: the traps (div-by-zero, index-bounds,
 # unwrap-none) PROMISE identical stderr + exit 1 cross-target (C-001/C-035).
 # v1 stderr is normalized (the wasmtime trap preamble names the tmp wat path).
+# STDIN IS CLOSED for every fixture run. The corpus arrives on this script's own
+# stdin (`done < <(find spec ...)`), so a fixture that READS stdin consumes the
+# rest of the file list and the sweep stops early — silently, because the loop
+# simply runs out of input and the summary prints as if it had finished.
+#
+# It cost a green build to learn: `count_domain_nonbytes.almd` calls
+# `io.read_n_bytes`, and the run that introduced it classified 547 of 932 files
+# and reported ~300 baseline entries as "stopped byte-matching" — none of which
+# had regressed; they were never run. `MISMATCH=0` alongside hundreds of
+# regressions is the signature.
+#
+# The fixture was not even the first to read stdin — it was the first to SUCCEED
+# at it. `read_n_bytes(i64::MAX)` used to truncate to i32 and read nothing, so
+# the hazard sat here harmless until that truncation was fixed.
 run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
   local f="$1" t="$2"
-  to "$t" "$ALM" run "$f" > "$TMP/v0" 2>"$TMP/v0e"
+  to "$t" "$ALM" run "$f" > "$TMP/v0" 2>"$TMP/v0e" < /dev/null
   local v0rc=$?
   "$RP" "$f" > "$TMP/wat" 2>/dev/null || {
     if [ "$v0rc" -ne 0 ]; then VERDICT=v0fail; else VERDICT=wall; fi
     return
   }
-  to "$t" wasmtime "$TMP/wat" > "$TMP/v1" 2>"$TMP/v1e"
+  to "$t" wasmtime "$TMP/wat" > "$TMP/v1" 2>"$TMP/v1e" < /dev/null
   local v1rc=$?
   if [ "$v0rc" -eq 0 ] && [ "$v1rc" -ne 0 ]; then VERDICT=runerr; return; fi
   diff -q "$TMP/v0" "$TMP/v1" >/dev/null 2>&1 || { VERDICT=mismatch; return; }
@@ -154,6 +168,25 @@ for sv in "${suspects[@]:-}"; do
 done
 sort -o "$TMP/matches.txt" "$TMP/matches.txt"  # (re-sorted below after the retry appends)
 echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr XFAIL=$xfail v0fail=$v0fail skip=$skip"
+
+# THE COUNTERS MUST ACCOUNT FOR THE WHOLE CORPUS. Every file lands in exactly one
+# bucket, so the buckets sum to the corpus size — and if they do not, the sweep
+# did not finish and every number above is a partial measurement reported as a
+# total. That is worse than a red build: the baseline diff then lists every
+# unreached file as a REGRESSION, burying whatever really broke under hundreds of
+# files that were simply never run (547 of 932, ~300 phantom regressions,
+# MISMATCH=0 — 2026-08-16). The stdin isolation in run_one fixes THAT cause; this
+# catches the next one, whatever it is.
+seen=$((match + wall + mismatch + runerr + xfail + v0fail + skip))
+corpus=$(find spec -name '*.almd' | wc -l | tr -d ' ')
+if [ "$seen" -ne "$corpus" ]; then
+  echo "::error::output-parity: classified $seen of $corpus files — the sweep did not finish."
+  echo "  Every count above is PARTIAL, and the baseline diff would report the"
+  echo "  $((corpus - seen)) unreached file(s) as regressions. Do not ratchet from this run."
+  echo "  Most likely cause: a fixture consumed this script's stdin (the corpus is piped"
+  echo "  into the loop), or the loop exited early. run_one closes stdin for exactly this."
+  exit 1
+fi
 # A failure class NAMES its files (#978: counts alone leave nothing to act on
 # — a MISMATCH is the silent-miscompile class, the one this gate exists for).
 if [ "$mismatch" -gt 0 ]; then
