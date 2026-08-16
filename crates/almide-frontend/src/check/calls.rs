@@ -112,6 +112,30 @@ impl Checker {
                     let _ = self.infer_expr(callee);
                 }
                 self.arg_spans = args.iter().map(|a| a.span).collect();
+                // SHADOWING FIRST. A local binding or function PARAMETER of Fn
+                // type is called THROUGH that variable, never as a same-named
+                // top-level fn — the rule `lower/calls_target.rs` already
+                // applies, and value position (`infer_expr_g2_ident`) and
+                // argument position (`infer_calls_closures`) already agree on.
+                // Only the call-callee lookup went to `env.functions` first, so
+                // the checker's TypeMap and the emitted call could name
+                // DIFFERENT functions. Bundled stdlib modules are inferred on
+                // the same `Checker` with the user program's globals still
+                // live, so a user `effect fn f` captured the `f` parameter of
+                // `list.__fallible_flat_map` and typed `ok(bs)`'s payload from
+                // the user's return type: `bs + rest` became
+                // `ConcatStr(String, List[B])` and the IR verifier aborted the
+                // compile (almide#1441). `f` is one of the names a caller is
+                // most likely to pick, and the stdlib's own parameter names
+                // must not be part of a program's namespace.
+                let local_fn_ty = self.env.lookup_var(&name)
+                    .map(|t| resolve_ty(t, &self.uf))
+                    .filter(|t| matches!(t, Ty::Fn { .. }));
+                if let Some(t) = local_fn_ty {
+                    if let Some(ret) = self.call_fn_typed_local(&name, &t, &arg_tys) {
+                        return ret;
+                    }
+                }
                 let ret = self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot);
                 let arg_refs: Vec<&ast::Expr> = args.iter().collect();
                 self.validate_mut_args(&name, &arg_refs);
@@ -582,7 +606,30 @@ impl Checker {
     }
 
     // Try resolving `name(...)` as a variant constructor or a callable
-    // variable — the two success paths of `check_unresolved_named_call`.
+     /// Type a call THROUGH a Fn-typed local binding (a `let`, or a function
+    /// PARAMETER). `None` when the name's local is not a function.
+    fn call_fn_typed_local(&mut self, name: &str, ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
+        let Ty::Fn { is_effect, params, ret } = ty else { return None };
+        arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
+            self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
+        });
+        // #1055: calling an `effect (A) -> B` VALUE is an effect call —
+        // it needs the effect permission and yields the effect carrier
+        // `Result[B, String]`, so `h(x)!` propagates exactly like a
+        // named effect-fn call.
+        if *is_effect {
+            if !self.env.can_call_effect {
+                self.emit(super::err(
+                    format!("cannot call effect function value `{}` from a pure context", name),
+                    "Mark the enclosing function as `effect fn`".to_string(),
+                    format!("call to {}()", name)).with_code("E006"));
+            }
+            return Some(Ty::result(ret.as_ref().clone(), Ty::String));
+        }
+        Some(ret.as_ref().clone())
+    }
+
+   // variable — the two success paths of `check_unresolved_named_call`.
     // Returns `None` when neither claims the name, so the caller falls
     // through to the undefined-function diagnostic.
     fn try_unresolved_call_ctor_or_var(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
@@ -595,24 +642,8 @@ impl Checker {
             return Some(Ty::Named(type_name, generic_args));
         }
         let ty = self.env.lookup_var(name).cloned()?;
-        if let Ty::Fn { is_effect, params, ret } = &ty {
-            arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
-                self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
-            });
-            // #1055: calling an `effect (A) -> B` VALUE is an effect call —
-            // it needs the effect permission and yields the effect carrier
-            // `Result[B, String]`, so `h(x)!` propagates exactly like a
-            // named effect-fn call.
-            if *is_effect {
-                if !self.env.can_call_effect {
-                    self.emit(super::err(
-                        format!("cannot call effect function value `{}` from a pure context", name),
-                        "Mark the enclosing function as `effect fn`".to_string(),
-                        format!("call to {}()", name)).with_code("E006"));
-                }
-                return Some(Ty::result(ret.as_ref().clone(), Ty::String));
-            }
-            return Some(ret.as_ref().clone());
+        if let Some(ret) = self.call_fn_typed_local(name, &ty, arg_tys) {
+            return Some(ret);
         }
         // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.
         let rty = resolve_ty(&ty, &self.uf);
