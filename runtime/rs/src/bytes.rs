@@ -869,16 +869,11 @@ pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 // Native implementation bypasses per-iteration Almide-side Vec<u8> clones.
 pub fn almide_rt_bytes_skip_length_prefixed_le(b: &Vec<u8>, pos: i64, count: i64) -> i64 {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // NO ceiling here: `count` bounds the number of ENTRIES walked, not a size to
+    // allocate, and each entry consumes at least its 4-byte prefix — so a huge count
+    // terminates against the buffer, it does not reserve against it. Capping it made
+    // this leg abort where the other answered a position, which is the divergence
+    // inverted rather than removed.
     let n = if count < 0 { 0usize } else { count as usize };
     let buf = b.as_slice();
     for _ in 0..n {
@@ -909,16 +904,6 @@ fn f16_bits_to_f64(bits: u16) -> f32 {
 
 pub fn almide_rt_bytes_read_length_prefixed_strings_le(b: &Vec<u8>, pos: i64, count: i64) -> Vec<String> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
     let n = if count < 0 { 0usize } else { count as usize };
     let buf = b.as_slice();
     let mut out = Vec::with_capacity(n);
