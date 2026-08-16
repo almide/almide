@@ -123,13 +123,30 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
   fi
 }
 declare -a suspects=()
-while IFS= read -r f; do
+# The worklist arrives on fd 3, and every fixture runs with stdin closed to
+# /dev/null. Both halves are load-bearing, and neither is a style choice:
+#
+# A fixture is free to READ stdin — `io.read_n_bytes`, `io.read_all`,
+# `io.read_line`. On the old `done < <(find …)` form that read came out of the
+# SAME descriptor the loop was reading filenames from, so one such fixture
+# swallowed the rest of the worklist and the sweep stopped there. Nothing
+# reported an error: the tail simply never ran, the counters stopped, and every
+# baseline file past the cut looked like it had "stopped byte-matching" — a
+# REGRESSION verdict for work no one had touched (#1473).
+#
+# `spec/wasm_cross/count_domain_nonbytes.almd` is the fixture that hit it, and
+# the fixture is fine. It calls `io.read_n_bytes(i64::MAX)`; before that call
+# was brought under the count-domain rule it aborted on a capacity overflow
+# BEFORE reaching stdin, so the defect here was masked. Fixing the intrinsic is
+# what armed it — which is the shape to remember: this gate must not depend on
+# what the corpus chooses to read.
+while IFS= read -r f <&3; do
   grep -q 'fn main' "$f" || { skip=$((skip+1)); continue; }
   # `// wasm:skip` — a multi-module / harness-incompatible fixture that cannot run
   # STANDALONE (its imports live in sibling files); comparing a broken standalone
   # invocation proves nothing. Same class as the no-main part files.
   head -1 "$f" | grep -q 'wasm:skip' && { skip=$((skip+1)); continue; }
-  run_one "$f" 20
+  run_one "$f" 20 < /dev/null
   case "$VERDICT" in
     match) match=$((match+1)); echo "$f" >> "$TMP/matches.txt" ;;
     # EVERY non-match goes to the solo retry — the load artifact shows up as any
@@ -137,12 +154,15 @@ while IFS= read -r f; do
     # render as wall), not just as runerr. Only the quiet re-run classifies.
     *)     suspects+=("$f:$VERDICT") ;;
   esac
-done < <(find spec -name '*.almd' | sort)
-# Solo retry pass — the machine is quiet now (the sweep is over).
+done 3< <(find spec -name '*.almd' | sort)
+# Solo retry pass — the machine is quiet now (the sweep is over). This loop
+# iterates an ARRAY, so it cannot be truncated the way the sweep was; the
+# redirect is here because a stdin-reading fixture would otherwise block on the
+# terminal when the script is run by hand.
 for sv in "${suspects[@]:-}"; do
   [ -n "$sv" ] || continue
   f="${sv%%:*}"
-  run_one "$f" 60
+  run_one "$f" 60 < /dev/null
   case "$VERDICT" in
     match)    match=$((match+1)); echo "$f" >> "$TMP/matches.txt" ;;
     v0fail)   v0fail=$((v0fail+1)) ;;
