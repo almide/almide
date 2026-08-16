@@ -101,7 +101,7 @@ pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
     // cannot address that much — aborted. Tested by DIVISION because the byte count is
     // `(w - len) * p.len_utf8()`, and that product is what overflows.
     if (w - len) as i64 > ALMIDE_REPEAT_MAX_BYTES / p.len_utf8() as i64 {
-        eprintln!("Error: repeat result too large");
+        eprintln!("Error: out of memory");
         std::process::exit(1);
     }
     format!("{}{}", std::iter::repeat(p).take(w - len).collect::<String>(), s)
@@ -116,7 +116,7 @@ pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
     // cannot address that much — aborted. Tested by DIVISION because the byte count is
     // `(w - len) * p.len_utf8()`, and that product is what overflows.
     if (w - len) as i64 > ALMIDE_REPEAT_MAX_BYTES / p.len_utf8() as i64 {
-        eprintln!("Error: repeat result too large");
+        eprintln!("Error: out of memory");
         std::process::exit(1);
     }
     format!("{}{}", s, std::iter::repeat(p).take(w - len).collect::<String>())

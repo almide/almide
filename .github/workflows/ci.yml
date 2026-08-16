@@ -882,6 +882,9 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      - name: Allocation ceilings (one 2 GiB limit, every spelling agrees)
+        run: bash scripts/check-alloc-ceilings.sh
+
       - name: L1 verdict ledger (edit-locality prediction loop — schema and vocabularies)
         run: bash scripts/check-l1-verdicts.sh
 
