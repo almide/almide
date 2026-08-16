@@ -26,6 +26,11 @@ fn window(pos: i64, width: usize, len: usize) -> Option<usize> {
     (p.checked_add(width)? <= len).then_some(p)
 }
 
+/// The array-read ceiling, in ELEMENTS. 8 bytes each, so this is the same
+/// 2 GiB `ALMIDE_REPEAT_MAX_BYTES` (string.rs) and the same `268435456` the
+/// self-host `list_make.almd` already uses — one limit, one message.
+const ALMIDE_ARRAY_MAX_ELEMS: i64 = 268435456;
+
 pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
 pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
 #[inline(always)] pub fn almide_rt_bytes_get(b: &Vec<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
@@ -115,7 +120,17 @@ macro_rules! u16_le_array_impl {
     ($name:ident, $ty:ty, $from:expr) => {
         pub fn $name(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
             let mut p = pos as usize;
-            let n = count as usize;
+            // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
             let mut out = Vec::with_capacity(n);
             for _ in 0..n {
                 if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0); p += 2; continue; }
@@ -557,7 +572,17 @@ pub fn almide_rt_bytes_append_f64_be(b: &mut Vec<u8>, val: f64) {
 
 pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
@@ -568,7 +593,17 @@ pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
@@ -579,7 +614,17 @@ pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
@@ -590,7 +635,17 @@ pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
@@ -601,7 +656,17 @@ pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_f64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
@@ -668,7 +733,17 @@ pub fn almide_rt_bytes_read_string_at(b: &Vec<u8>, pos: i64, len: i64) -> String
 
 pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
@@ -680,7 +755,17 @@ pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
@@ -692,7 +777,17 @@ pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
@@ -704,7 +799,17 @@ pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
@@ -716,7 +821,17 @@ pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
@@ -728,7 +843,17 @@ pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 2; continue; }
@@ -744,7 +869,17 @@ pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 // Native implementation bypasses per-iteration Almide-side Vec<u8> clones.
 pub fn almide_rt_bytes_skip_length_prefixed_le(b: &Vec<u8>, pos: i64, count: i64) -> i64 {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let buf = b.as_slice();
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > buf.len()) { return p as i64; }
@@ -774,7 +909,17 @@ fn f16_bits_to_f64(bits: u16) -> f32 {
 
 pub fn almide_rt_bytes_read_length_prefixed_strings_le(b: &Vec<u8>, pos: i64, count: i64) -> Vec<String> {
     let mut p = pos as usize;
-    let n = count as usize;
+    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
+    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
+    // `repeat` — same limit, same message, so a caller learns one rule. This
+    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
+    // that many iterations, where the self-host clamped it to 0 and answered an
+    // empty list.
+    if count > ALMIDE_ARRAY_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    let n = if count < 0 { 0usize } else { count as usize };
     let buf = b.as_slice();
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
