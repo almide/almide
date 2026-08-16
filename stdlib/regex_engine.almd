@@ -620,14 +620,28 @@ else {
 }
 
 // Leftmost scan with a FRESH caps buffer per position (v0 re-initializes).
+// Returns the matching START address, not the end: index 0 of `regex.captures`
+// is the WHOLE match, and the end alone cannot name it. The caller re-runs
+// `__rx_alts_c` at that start for the end, so the caps buffer it reads is the
+// winning attempt's rather than whatever the last probed position left behind.
 fn __rx_caps_scan(p: Int, pe: Int, t: Int, ts: Int, te: Int, caps: Int, nslots: Int) -> Int = {
   let _ = __rx_fill_neg(caps, nslots)
   let r = __rx_alts_c(p, pe, t, ts, te, caps, nslots, p)
-  if r >= 0 then r
+  if r >= 0 then t
   else if t >= te then 0 - 1
   else __rx_caps_scan(p, pe, t + __rx_w(t), ts, te, caps, nslots)
 }
 
+// Index 0 is the WHOLE match, 1.. are the groups — the shape every mainstream
+// regex API uses and the one docs/stdlib/regex.md always documented; the
+// groups-only return this replaced made `caps[1]` silently mean the SECOND
+// group to anyone carrying that habit over (almide#1432).
+//
+// `none` now means exactly one thing: the pattern did not match. It previously
+// also came back for a pattern with NO groups, conflating "matched nothing to
+// capture" with "did not match" — with a full match at index 0 that case has a
+// real answer. The buffer is still sized for at least one slot pair so a
+// group-less pattern has somewhere to scan.
 fn regex_captures(pat: String, s: String) -> List[String]? = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -636,16 +650,16 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
   let ncap = __rx_ngroups(p0, pe)
-  if ncap == 0 then none
+  let nslots = if ncap == 0 then 2 else ncap * 2
+  let buf = prim.alloc_list(nslots)
+  let bd = prim.handle(buf) + 12
+  let ms = __rx_caps_scan(p0, pe, t0, t0, te, bd, nslots)
+  if ms < 0 then none
   else {
-    let buf = prim.alloc_list(ncap * 2)
-    let bd = prim.handle(buf) + 12
-    let r = __rx_caps_scan(p0, pe, t0, t0, te, bd, ncap * 2)
-    if r < 0 then none
-    else {
-      let acc: List[String] = []
-      let out = __rx_caps_out(bd, 0, ncap, acc)
-      some(out)
-    }
+    let _ = __rx_fill_neg(bd, nslots)
+    let me = __rx_alts_c(p0, pe, ms, t0, te, bd, nslots, p0)
+    let whole = __rx_sub(ms, me)
+    let acc: List[String] = [whole]
+    some(__rx_caps_out(bd, 0, ncap, acc))
   }
 }
