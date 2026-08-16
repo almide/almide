@@ -49,8 +49,8 @@ globs = [
 
 [[frozen]]
 path = "crates/almide-syntax/src/ast.rs"
-serde_types = 26
-why = "the parser's AST — the tree #1316 explicitly leaves alone"
+serde_types = 27
+why = "the parser's AST — the tree #1316 explicitly leaves alone. 27 since the dialect stamp (`DialectStamp`, a Copy pair of a u32 epoch and an Option<Span>) joined `Program`; it is a property of the parsed file, not a long-lived artifact, so it belongs with the AST rather than in a module of its own"
 
 [[frozen]]
 path = "crates/almide-ir/src/lib.rs"
