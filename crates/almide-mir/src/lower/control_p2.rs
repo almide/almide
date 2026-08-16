@@ -490,7 +490,8 @@ impl LowerCtx {
         // route (`str_heap_bind`/`opt_tuple_bind`/`result_heap_err_bind`) is the exception: its
         // payload BORROWS slot-0, so the subject must stay live THROUGH the arms — its drop is
         // deferred to AFTER the branch-join below.
-        if route.heap_res && !route.subject_drops_after() {
+        let subject_is_borrowed = self.subject_is_named_binding(subject, subj);
+        if route.heap_res && !route.subject_drops_after() && !subject_is_borrowed {
             self.drop_owned_subject(subj);
         }
         self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
@@ -506,14 +507,38 @@ impl LowerCtx {
         // call result), independent of the freed subject, so freeing the subject's slot-0 String is
         // sound (a bare-Var arm already Dup'd it; a call arm only borrowed it). A BORROWED subject
         // (param / tracked var, not in `live_heap_handles`) is owned elsewhere → left untouched.
-        if route.subject_drops_after() {
+        if route.subject_drops_after() && !subject_is_borrowed {
             self.drop_owned_subject(subj);
         }
         Some(dst)
     }
 
+    /// Is this match READING someone else's named binding rather than owning a
+    /// temporary? `live_heap_handles` cannot answer that: its own doc calls it
+    /// "heap handles in binding order, FOR SCOPE-END DROPS", so every `let`-bound
+    /// heap local is in it, and membership alone reads a still-live variable as an
+    /// owned temp.
+    ///
+    /// That is how `sv ?? "z"` twice returned `abc,z` on the wasm leg: the first
+    /// `??` lowers to a synthesized `match sv { some(p) => p, none => d }`
+    /// (#1270), the match dropped its subject, and the drop freed the user's `sv`
+    /// while the second `??` still had to read it. Native was silent because it
+    /// renders `Drop`/`DropListStr` as a comment and lets Rust free at real scope
+    /// end; wasm emits `rc_dec`, so only one leg lost the value — a wrong answer at
+    /// exit 0, on `xs ?? default`, which is the idiom the language reference
+    /// recommends. Every heap payload was affected: `String?` gave `abc,z`,
+    /// `List[Int]?` gave `3,0`, `Option[Option[Int]]` gave `5,9`
+    /// (differential fuzz, seed 510754018596 index 189).
+    ///
+    /// The scope-end pass still drops the binding exactly once, because a subject
+    /// left alone stays in `live_heap_handles`.
+    fn subject_is_named_binding(&self, subject: &IrExpr, subj: ValueId) -> bool {
+        matches!(&subject.kind, IrExprKind::Var { id }
+            if self.value_for(*id).ok() == Some(subj))
+    }
+
     /// Drop the OWNED subject once, if this scope owns it — a BORROWED subject
-    /// (param / tracked var, not in `live_heap_handles`) is owned elsewhere and
+    /// (param, or a named binding the scope end will drop) is owned elsewhere and
     /// left untouched.
     fn drop_owned_subject(&mut self, subj: ValueId) {
         if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {

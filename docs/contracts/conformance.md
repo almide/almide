@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-97 normative sections; 454 distinct executable fixtures.
+97 normative sections; 455 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -40,7 +40,7 @@
 | ALS-E6 | C-234 | `spec/wasm_cross/grouping_unary.almd` (byte-compare)<br>`spec/wasm_cross/tuple_single.almd` (byte-compare) |
 | ALS-E7 | C-235 | `spec/wasm_cross/grouping_unary.almd` (byte-compare) |
 | ALS-E8 | C-236 | `spec/wasm_cross/tuple_ops.almd` (byte-compare) |
-| ALS-E9 | C-237 | `spec/wasm_cross/option_result_ctors.almd` (byte-compare) |
+| ALS-E9 | C-237, C-286 | `spec/wasm_cross/option_result_ctors.almd` (byte-compare)<br>`spec/wasm_cross/unwrap_or_source_survives.almd` (byte-compare) |
 | ALS-E10 | C-238 | `spec/wasm_cross/range_first_class.almd` (byte-compare)<br>`spec/wasm_cross/range_bind_no_materialize.almd` (byte-compare)<br>`spec/wasm_cross/range_bind_huge.almd` (byte-compare) |
 | ALS-E11 | C-239 | `spec/wasm_cross/collection_literals.almd` (byte-compare) |
 | ALS-E12 | C-240 | `spec/wasm_cross/collection_literals.almd` (byte-compare) |
