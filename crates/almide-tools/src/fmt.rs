@@ -486,6 +486,14 @@ fn format_program_inner(program: &Program) -> String {
         }
         *idx += 1;
     };
+    // The dialect stamp sits above everything, which is also where the parser
+    // demands it. Emitted before the module header and before any comment
+    // slot is consumed: the stamp is not a declaration and owns no
+    // comment_map index, so printing it here leaves the parser's positional
+    // comment order (module?, imports…, decls…) exactly as it was.
+    if let Some(stamp) = program.dialect {
+        wln!(out, "@dialect({})", stamp.epoch);
+    }
     // #1323: a legacy `module` header parses into `decls[0]`, but the grammar
     // requires it to PRECEDE every import — so emitting `decls` after `imports`
     // sank it below them and the output no longer parsed. It also owns
