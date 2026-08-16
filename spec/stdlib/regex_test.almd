@@ -86,19 +86,26 @@ test "regex.captures returns some for match" {
 }
 
 // ── capture CONTENTS (previously broken: wasm reused slot 0 by nesting depth) ──
+// Index 0 is the WHOLE match, 1.. are the groups (#1432) — the shape every
+// mainstream regex API uses, and what docs/stdlib/regex.md always showed.
 test "regex.captures contents per lexical group" {
-  assert_eq(regex.captures("(\\d+)-(\\d+)", "12-34"), some(["12", "34"]))
-  assert_eq(regex.captures("(a)(b)(c)", "abc"), some(["a", "b", "c"]))
-  assert_eq(regex.captures("(\\w+)@(\\w+)", "user@host"), some(["user", "host"]))
+  assert_eq(regex.captures("(\\d+)-(\\d+)", "12-34"), some(["12-34", "12", "34"]))
+  assert_eq(regex.captures("(a)(b)(c)", "abc"), some(["abc", "a", "b", "c"]))
+  assert_eq(regex.captures("(\\w+)@(\\w+)", "user@host"), some(["user@host", "user", "host"]))
 }
 
 test "regex.captures optional-miss is empty string" {
-  assert_eq(regex.captures("(x)?(y)", "y"), some(["", "y"]))
-  assert_eq(regex.captures("(a)?b", "b"), some([""]))
+  assert_eq(regex.captures("(x)?(y)", "y"), some(["y", "", "y"]))
+  assert_eq(regex.captures("(a)?b", "b"), some(["b", ""]))
 }
 
-test "regex.captures none when no groups" {
-  assert_eq(regex.captures("\\d+", "12"), none)
+// `none` means exactly one thing: the pattern did not match. A group-less
+// pattern that DOES match answers its whole match (#1432) — before, the two
+// were indistinguishable.
+test "regex.captures none only when nothing matched" {
+  assert_eq(regex.captures("\\d+", "12"), some(["12"]))
+  assert_eq(regex.captures("\\d+", "abc"), none)
+  assert_eq(regex.captures("(\\d+)", "abc"), none)
 }
 
 // ── alternation (was entirely unsupported in wasm) ──
@@ -148,8 +155,10 @@ test "regex.empty alternation arms" {
   assert_eq(regex.find("a|", "bza"), some(""))
   // empty match at pos 0
   assert_eq(regex.full_match("a|", ""), true)
-  assert_eq(regex.captures("(a|)", "b"), some([""]))
-  assert_eq(regex.captures("(|a)", "b"), some([""]))
+  // Both slots are empty: the whole match is the empty match at position 0
+  // (index 0), and the group captured it too (index 1).
+  assert_eq(regex.captures("(a|)", "b"), some(["", ""]))
+  assert_eq(regex.captures("(|a)", "b"), some(["", ""]))
 }
 
 // ── replace / replace_first over EMPTY matches at end-of-string ──
@@ -178,7 +187,7 @@ test "regex brace quantifiers" {
   assert_eq(regex.full_match("\\d{2,4}", "123"), true)
   assert_eq(regex.full_match("\\d{2,4}", "12345"), false)
   assert_eq(regex.find("a{2,3}", "caaaab"), some("aaa"))
-  assert_eq(regex.captures("(\\d{4})-(\\d{2})-(\\d{2})", "on 2026-03-09."), some(["2026", "03", "09"]))
+  assert_eq(regex.captures("(\\d{4})-(\\d{2})-(\\d{2})", "on 2026-03-09."), some(["2026-03-09", "2026", "03", "09"]))
   assert_eq(regex.replace("o{2}", "foo book", "0"), "f0 b0k")
   assert_eq(regex.full_match("(ab){2}", "abab"), true)
   assert_eq(regex.full_match("(ab){2}", "ab"), false)

@@ -3511,3 +3511,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-285"
+spec      = "ALS-D4"
+title     = "regex.captures answers the whole match at index 0, and `none` means only that nothing matched"
+statement = "`regex.captures(pat, s)` answers `some([whole, group1, group2, ...])` — index 0 is the WHOLE match, 1.. are the capture groups in lexical order, and an optional group that did not participate is the empty string — identically on both targets. `none` means exactly one thing: the pattern did not match anywhere in `s`. Two changes from 0.57.x, both toward the shape every mainstream regex API uses (Rust `Captures::get(0)`, Python `m.group(0)`, JS `match[0]`, PCRE) and the one `docs/stdlib/regex.md` had documented since it was written. (1) The whole match was MISSING: both engines returned groups only, so a caller carrying the universal habit read `caps[1]` as the first group and silently got the SECOND — a wrong value, not an error, which is the class this language exists to remove. It was found dogfooding, not by a test: every fixture had been written against the implementation rather than the documented example (almide#1432). (2) A pattern with NO groups returned `none` even when it MATCHED, conflating `matched, nothing to capture` with `did not match`; with a whole match at index 0 that case has a real answer, `some([whole])`, so `none` is now unambiguous. The engines reach it differently and both were changed: native takes the `(start, end)` `rx_find_at` already computed and discarded, while the self-host scan now returns the matching START — the end alone cannot name the whole match — and the caller re-runs the matcher there so the capture buffer it reads belongs to the winning attempt rather than the last position probed."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
+]
