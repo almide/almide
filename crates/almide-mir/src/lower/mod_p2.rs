@@ -602,6 +602,64 @@ pub fn rewrap_never_err_into_result_targets(
             };
         }
 
+        /// A LAMBDA is a target-directed position too, and the one this pass never
+        /// enumerated. Its own `Ty::Fn` ret is the authority — monomorphization already
+        /// trusts it (`list.map(xs, (i) => h(i)!)` specializes
+        /// `list.__fallible_map__Int_Int_String` off exactly that type) — but the lifter
+        /// reads only the BODY, and `unwrap_never_err_call_types` recurses INTO lambda
+        /// bodies, so the tail call came out raw `Int` while the node still said
+        /// `Result[Int, String]`. The lifted fn was then rendered `(result i64)` where the
+        /// `call_indirect` inside the monomorphized twin declares `(result i32)` — a Result
+        /// block pointer: `wasm trap: indirect call type mismatch` at run time for the
+        /// documented `xs |> list.map((x) => f(x)!)!` idiom, and on `flat_map` the same
+        /// mismatch landed somewhere that does not trap and printed empty strings with
+        /// exit 0 (almide#1406). Native is unaffected — the strip is a v1-only pre-pass.
+        /// Since the callee never errs, `ok(call)` is exact: the argument the four
+        /// construction arms already make.
+        fn rewrap_result_typed_lambda_tail(&self, lam_ty: &Ty, body: &mut IrExpr) {
+            let Ty::Fn { ret, .. } = lam_ty else { return };
+            if !matches!(ret.as_ref(), Ty::Applied(TypeConstructorId::Result, _)) {
+                return;
+            }
+            self.rewrap_lambda_return_positions(body, ret.as_ref());
+        }
+
+        /// Wrap every RETURN position of a lambda body holding a raw never-err call,
+        /// retyping the spine ONLY along paths where something was wrapped — a body with
+        /// nothing to wrap must come out byte-identical, since `lift_lambda`'s callee
+        /// reads shape decisions off `body.ty`.
+        fn rewrap_lambda_return_positions(&self, e: &mut IrExpr, ret_ty: &Ty) -> bool {
+            let wrapped = match &mut e.kind {
+                IrExprKind::Block { expr: tail, .. } => tail
+                    .as_deref_mut()
+                    .map(|t| self.rewrap_lambda_return_positions(t, ret_ty))
+                    .unwrap_or(false),
+                IrExprKind::If { then, else_, .. } => {
+                    let a = self.rewrap_lambda_return_positions(then, ret_ty);
+                    let b = self.rewrap_lambda_return_positions(else_, ret_ty);
+                    a || b
+                }
+                IrExprKind::Match { arms, .. } => {
+                    let mut any = false;
+                    for arm in arms.iter_mut() {
+                        any |= self.rewrap_lambda_return_positions(&mut arm.body, ret_ty);
+                    }
+                    any
+                }
+                _ => {
+                    if self.is_raw_never_err_call(e) {
+                        self.wrap(e, ret_ty.clone());
+                        return true;
+                    }
+                    false
+                }
+            };
+            if wrapped {
+                e.ty = ret_ty.clone();
+            }
+            wrapped
+        }
+
         /// Extracted verbatim from [`visit_expr_mut`] (codopsy round-3 sweep, #852): decides
         /// whether a LIST literal's element slot is declared Result, and re-wraps every raw
         /// never-err call sitting in one.
@@ -757,6 +815,9 @@ pub fn rewrap_never_err_into_result_targets(
                 }
                 IrExprKind::Record { name, fields } => {
                     self.rewrap_result_typed_record_fields(&expr.ty, name, fields)
+                }
+                IrExprKind::Lambda { body, .. } => {
+                    self.rewrap_result_typed_lambda_tail(&expr.ty, body)
                 }
                 _ => {}
             }

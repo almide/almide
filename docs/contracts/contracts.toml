@@ -3500,3 +3500,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/callee_shadowing_family.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-284"
+spec      = "ALS-R6"
+title     = "A fallible list HOF driven by a user effect fn callback runs identically on both targets"
+statement = "`xs |> list.map((x) => f(x)!)!` and its `flat_map` sibling — the idiom the language reference recommends — produce the same stdout, stderr and exit code on both targets when the callback calls a USER `effect fn`, including the ADR-0006 first-err short-circuit. A LAMBDA is a target-directed position: its own `Ty::Fn` ret is the authority, and monomorphization already specializes the twin off exactly that type (`list.__fallible_map__Int_Int_String` is named for `(Int) -> Result[Int, String]`). But the v1-only pre-pass that strips the carrier from a NEVER-ERR lifted effect call recurses INTO lambda bodies, and the lambda lifter reads only the BODY — so the tail came out raw `Int` while the enclosing node still said `Result[Int, String]`. The lifted function rendered `(result i64)` where the `call_indirect` inside the monomorphized twin declares `(result i32)`, a Result block pointer. Two observable failures followed on the SAME defect, and the difference between them is only where the reinterpreted value landed: the `map` cells trapped at run time with `wasm trap: indirect call type mismatch`, while `flat_map` did not trap at all — native printed `a1,b,a2,b` and wasm printed four EMPTY strings, both exit 0, the silent-wrong class, on the documented idiom (almide#1406). Native was never affected: the strip is a v1/MIR pre-pass and the codegen leg keeps the carrier uniformly. The re-wrap pass whose stated contract is already `a target position whose declared type is Result must hold a Result block` simply never enumerated `Lambda` among its List/Call/Tuple/Record arms; it does now, and because the callee genuinely never errs, `ok(call)` is exact. WHY THE SUITE DID NOT SEE IT: every prior fixture for the fallible form drives it with a non-effect callee returning Result or with `int.parse` — that cell passes on both legs and is pinned here unchanged — while the effect-fn cell had no coverage at all. There is still NO emit-time signature-agreement check between an `elem` entry and a `call_indirect` type; this contract is the executable evidence in its place, not a proof that the class is closed."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
+]
