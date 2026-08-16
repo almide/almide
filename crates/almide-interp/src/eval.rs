@@ -339,6 +339,10 @@ impl<'a> Interpreter<'a> {
                     params: params.iter().map(|(v, _)| *v).collect(),
                     body: Rc::new((**body).clone()),
                     captured: scope.clone(),
+                    ret_ty: match &expr.ty {
+                        Ty::Fn { ret, .. } => Some((**ret).clone()),
+                        _ => None,
+                    },
                 };
                 Flow::val(Value::Closure(Rc::new(clo)))
             }
