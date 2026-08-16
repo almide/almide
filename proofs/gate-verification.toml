@@ -251,3 +251,8 @@ evidence = "retired-spelling ledger landing (2026-08-16): companion check-retire
 path = "scripts/check-retired-spellings-negative.sh"
 class = "EXERCISED"
 evidence = "retired-spelling ledger landing (2026-08-16): recorded 5-mode exercise on every run — one positive control (the committed ledger must PASS, so a broken harness cannot report vacuous green) plus the four forged-ledger negatives enumerated in the row above. Wired into the checks job directly after the gate it guards."
+
+[[gate]]
+path = "scripts/check-domain-edges.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was DELETED and the gate exited 1 naming that exact cell as UNDECLARED; restoring the row returned exit 0. The reverse direction is enforced by the same run — a row whose cell no longer diverges is reported as stale and also fails, so the ledger cannot decay into a list of things that used to be true."
