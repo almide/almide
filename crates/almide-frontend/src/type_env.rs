@@ -26,6 +26,10 @@ pub struct TypeEnv {
     /// warning can name the replacement instead of leaving the caller to
     /// guess it.
     pub deprecations: std::collections::HashMap<Sym, crate::deprecation::Deprecation>,
+    /// Diagnostics raised while reading declaration attributes (E053).
+    /// Collected on the env because registration has no diagnostics sink of
+    /// its own; drained by the canonicalizer.
+    pub attr_diagnostics: Vec<almide_base::diagnostic::Diagnostic>,
     /// Local variable scopes (stack of scopes)
     pub scopes: Vec<std::collections::HashMap<Sym, Ty>>,
     /// Current function's return type
@@ -175,6 +179,7 @@ impl TypeEnv {
     pub fn new() -> Self {
         TypeEnv {
             deprecations: std::collections::HashMap::new(),
+            attr_diagnostics: Vec::new(),
             types: std::collections::HashMap::new(),
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],

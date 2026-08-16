@@ -322,6 +322,10 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     if let Ok(Some(dep)) = crate::deprecation::parse(attrs) {
         env.deprecations.insert(sym(&key), dep);
     }
+    // An attribute nobody reads is dropped, so a typo silently does nothing.
+    // Collected here rather than at the parser because the vocabulary is a
+    // front-end fact, not a grammar one.
+    crate::attr_vocab::check_attrs(attrs, &mut env.attr_diagnostics);
     // Record visibility so `resolve_module_call` can reject cross-module access to `mod fn` / `local fn`. Only non-Public entries need to be stored — the lookup in the checker treats "missing" as Public (stdlib, impl methods, derived stubs).
     if !matches!(visibility, ast::Visibility::Public) {
         env.fn_visibility.insert(sym(&key), visibility);

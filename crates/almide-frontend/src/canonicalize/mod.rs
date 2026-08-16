@@ -102,6 +102,9 @@ pub fn canonicalize_program<'a>(
     // 5. Carry parse-failure fn names so checker can suppress cascades.
     env.failed_fn_names.extend(program.failed_fn_names.iter().cloned());
 
+    // Attribute diagnostics gathered during registration join the rest.
+    diagnostics.extend(std::mem::take(&mut env.attr_diagnostics));
+
     CanonicalizationResult { env, diagnostics }
 }
 
