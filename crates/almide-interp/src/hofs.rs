@@ -805,6 +805,17 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => v,
             other => return Err(other),
         };
+        // A callback whose own `Ty::Fn` says `Result` but that produced a bare
+        // value: the tail was a never-erring effect call, stripped to its
+        // payload before this crate saw it while the lambda node kept the
+        // carrier. The declared type is the authority — the same one
+        // monomorphization used to name the twin — and since the callee cannot
+        // err, `ok(v)` is exact, not a guessed polarity.
+        let r = match (&r, clo.ret_ty.as_ref()) {
+            (Value::Result(_), _) => r,
+            (_, Some(t)) if t.is_result() => Value::Result(Ok(Box::new(r))),
+            _ => r,
+        };
         match r {
             Value::Result(Ok(v)) => Ok(*v),
             Value::Result(Err(e)) => Err(Flow::val(Value::Result(Err(e)))),

@@ -975,6 +975,9 @@ impl<'a> Interpreter<'a> {
                 // Top-level fn closes only over top-level lets, modeled by the
                 // root scope.
                 captured: self.root_scope(),
+                // No lambda node here; the fn's own ABI already decides its
+                // shape, so this path is left exactly as it was.
+                ret_ty: None,
             };
             return Flow::val(Value::Closure(Rc::new(clo)));
         }
