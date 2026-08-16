@@ -1,0 +1,46 @@
+// @contract: C-054
+// The `count` of a `bytes.read_*_array` is the OUTPUT size, so it obeys the
+// same two rules the rest of the count family already obeys — and sixteen
+// readers had been missed by both.
+//
+//   negative  -> the empty list (the count IS the result size; there is no
+//                collection for it to saturate against)
+//   > ceiling -> `Error: repeat result too large` + exit 1, the SAME limit and
+//                the SAME message C-161 gave `repeat` (2 GiB; 268435456 slots
+//                at 8 bytes)
+//
+// Before this, native read `count as usize`, so a NEGATIVE count became ~1.8e19
+// and the reader looped that many times, while the self-host clamped it to 0 and
+// answered an empty list — one leg answered, one leg did not come back. Above
+// the ceiling the two failed in different forms instead of the unified abort.
+//
+// The precedent was already in the tree, in `stdlib/list_make.almd`, with the
+// identical limit, the identical message, and a note naming the native constant
+// to keep in sync — its comment even records the same two failure shapes
+// ("native allocated and printed a length, wasm trapped out-of-bounds against
+// its 4 GiB address space"). These sixteen readers had simply never been brought
+// under it. Measured: 144 of the 218 divergent cells the domain-edge matrix
+// found were this one rule missing.
+//
+// One reader stands for the family here; the matrix covers all sixteen, and
+// `proofs/domain-edges.toml` is what keeps them covered.
+import bytes
+
+fn arr(n: Int) -> String = int.to_string(list.len(bytes.read_i32_le_array(bytes.from_list([1, 2, 3, 4, 5]), 0, n)))
+
+fn main() -> Unit = {
+  // In-range: 5 bytes hold one i32; the reader pads past EOF, so the count is
+  // the answer.
+  println("three=" + arr(3))
+  println("zero=" + arr(0))
+  // Negative: the empty list, not 1.8e19 iterations.
+  println("neg=" + arr(0 - 1))
+  println("i32min=" + arr(0 - 2147483648))
+  // A large-but-sane count still answers, so the guard cannot be a blanket
+  // refusal. Deliberately NOT the ceiling itself: 268435456 slots is a real
+  // 2 GiB allocation on both legs, and a fixture that costs two of those per
+  // CI run buys nothing the cheap cells do not already prove.
+  println("large=" + arr(4096))
+  // One past the ceiling is the unified abort, not two different failures.
+  println("over=" + arr(268435457))
+}
