@@ -3489,3 +3489,14 @@ evidence  = [
   { path = "spec/wasm_fail/matrix_index_oob_aborts.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_index_domain_family.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-283"
+spec      = "ALS-R6"
+title     = "A call through a Fn-typed local resolves that local, never a same-named top-level fn"
+statement = "A CALL whose callee is a bare identifier resolves a local binding or function PARAMETER of `Fn` type BEFORE the top-level function table, identically on both targets. This is the rule every other position already applied — value position (`infer_expr_g2_ident`), argument position (`infer_calls_closures`: \"the capability rule must key on what the identifier RESOLVES to, never on its spelling\"), and lowering (`lower/calls_target.rs`: \"a local shadows any same-named fn\") — but the checker\'s callee lookup went to `env.functions` first and consulted `lookup_var` only on a MISS, so the type checker\'s TypeMap and the emitted call could name DIFFERENT functions. Two observable halves followed. (1) A valid program was REJECTED: `fn apply(tag: (String) -> String, x: String) -> String = tag(x)` beside a global `fn tag(n: Int) -> String` failed with `error[E005]: argument \'n\' expects Int but got String` — the parameter call typed against the global. (2) The compile ABORTED for a two-line program that names no list combinator at all: bundled stdlib modules are inferred on the same checker with the user program\'s globals still live (`infer_module` snapshots keys, and `restore_keys` only removes keys added AFTER the snapshot), so a user `effect fn f` captured the `f` PARAMETER of `list.__fallible_flat_map[A, B, E](xs, f: fn(A) -> Result[List[B], E])`; `match f(x) { ok(bs) => .. }` typed `bs` from the USER\'s return type, `bs + rest` became `ConcatStr(String, List[B])`, and the IR verifier aborted (almide#1441). The stdlib\'s own parameter names are not part of a user program\'s namespace, and `f` is one of the names a caller is most likely to pick. The diagnostics that would have named the capture are unreachable by construction: bundled-stdlib module diagnostics are appended to `checker.diagnostics` and never read, so the E004/E006 raised inside the stdlib body never surface — the first sign of trouble was the verifier abort."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/callee_shadowing_family.almd", class = "fixture" },
+]
