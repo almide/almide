@@ -414,6 +414,27 @@ fn option_call_name_closure_result_repr(func: &str, arg_tys: &[Ty], result_ty: &
                 Some("option.to_result__custom_e_heap_payload".to_string())
             }
         }
+        // Everything the rows above did not claim falls through to the
+        // REGISTRY's base body, which is the `(o: Int?, msg: String)` form:
+        // its `e` param is a String HANDLE and its err arm copies string
+        // bytes. That body is therefore correct for `E = String` and for
+        // nothing else — but the fall-through was type-blind, so:
+        //   * a SCALAR E (Int/Float/Bool, the sized ints) passed an i64 into
+        //     an i32 handle param and the module failed wasm VALIDATION —
+        //     `almide check` accepted, native built, and the artifact was
+        //     invalid (#1431, the acceptance-gap class);
+        //   * a heap NON-String E (List/Map/Bytes) matched the i32 repr but
+        //     had its block read as string bytes — the same silent corruption
+        //     the custom-E row above names for variants.
+        // Route both to a name the registry does not serve so the unlinked-
+        // callee wall fires: an honest refusal on the wasm leg instead of a
+        // broken artifact. (`Result[<scalar>, <scalar>]` is not renderable on
+        // this leg anyway — the hand-written `match o { some(v) => ok(v),
+        // none => err(e) }` walls on the untracked-subject rule — so there is
+        // no twin to write here yet; the walled-real baseline names it.)
+        "to_result" if !matches!(arg_tys.get(1), Some(Ty::String)) => {
+            Some("option.to_result__unsupported_e".to_string())
+        }
         "unwrap_or_else" if is_heap_ty(result_ty) => {
             Some("option.unwrap_or_else_h".to_string())
         }

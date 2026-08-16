@@ -89,6 +89,22 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         {
             Some(format!("result.{func}_h"))
         }
+        // `filter` is the ONE result combinator that TAKES an E-typed value, so
+        // it is the one whose E instantiation is pinned by an ARGUMENT rather
+        // than by an annotation — measured: every other member either needs an
+        // annotation to name E (and then routes fine) or cannot express a
+        // non-String E at all. The registry body fixes `E = String`
+        // (result_map.almd's `err_val: String`), so no other E repr may link
+        // it: a SCALAR E handed an i64 to that i32 handle param and the module
+        // failed wasm VALIDATION — `almide check` accepted, native built, and
+        // the artifact was invalid (#1431, the acceptance-gap class). The E
+        // test comes FIRST, before the heap-Ok rows below, because every twin
+        // they route to is likewise a String-E form. `_x` is unlinked: an
+        // honest render wall, the same refusal this router already uses for
+        // every wrong-typed link.
+        "filter" if !matches!(arg_tys.get(2), Some(Ty::String)) => {
+            Some("result.filter_x".to_string())
+        }
         // zip reads BOTH results' tags, and the scalar shim is len-as-tag on
         // EACH side — so a heap-Ok SECOND argument misreads exactly like a
         // heap-Ok first: `zip(ok(1.0), ok("abc"))` linked the shim through the
