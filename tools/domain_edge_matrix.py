@@ -241,6 +241,15 @@ def run_leg(almide, src_path, wasm):
 # refusal from a wrong answer is worse than no instrument.
 WALL_MARK = "not yet supported by the verified wasm renderer"
 
+# Modules whose surface is RAW MEMORY, where cross-target agreement is not
+# promised and never was: `prim.load32(garbage)` reads two genuinely different
+# memory models. Their cells are still MEASURED and still counted — hiding them
+# would make the headline number a lie by omission — but they are reported as
+# their own verdict so they cannot be mistaken for defects in a contracted API.
+# 273 of the first full run's 491 divergences were `prim`, and calling those bugs
+# would have buried the 218 that are real.
+RAW_MODULES = {"prim"}
+
 
 def classify(nat, wasm):
     """Compare stdout + exit code ONLY; stderr is read for the wall mark alone.
@@ -259,6 +268,11 @@ def classify(nat, wasm):
     if nrc == wrc and nout == wout:
         return "AGREE"
     return "DIVERGE"
+
+
+def verdict_for(module, nat, wasm):
+    v = classify(nat, wasm)
+    return "RAW" if v == "DIVERGE" and module in RAW_MODULES else v
 
 
 def main():
@@ -285,8 +299,9 @@ def main():
                 src, _ = build_program(sig, idx, value)
                 f = tmp / "probe.almd"
                 f.write_text(src)
-                verdict = classify(run_leg(args.almide, f, False),
-                                   run_leg(args.almide, f, True))
+                verdict = verdict_for(sig["module"],
+                                      run_leg(args.almide, f, False),
+                                      run_leg(args.almide, f, True))
                 cells.append({
                     "module": sig["module"], "fn": sig["fn"], "param": pname,
                     "edge": ename, "value": value, "verdict": verdict,

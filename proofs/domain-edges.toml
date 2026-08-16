@@ -1,0 +1,894 @@
+# Integer-domain edge divergences — MEASURED, not asserted.
+#
+# Every public stdlib fn x every Int parameter x a declared edge set, run on both
+# targets and compared. Regenerate with `scripts/check-domain-edges.sh --update`;
+# the gate diffs BOTH directions, so a new divergence fails and a row that stopped
+# diverging also fails and must be deleted. `count` is a shrink-only ceiling.
+#
+# Measured 7767 cells over the whole stdlib at develop d8e480223:
+#   AGREE 6468   DIVERGE 218   RAW 273   WALL 801   BOMB 7
+#
+# WALL is the wasm renderer honestly declining a shape outside its subset — a
+# contract, not a defect. RAW is the `prim` raw-memory surface, where two genuinely
+# different memory models are not promised to agree; those 273 cells are counted
+# and named rather than hidden, because calling them defects would have buried the
+# 218 that are real.
+#
+# A sample of 14 rows was re-run by hand against both legs before this file was
+# written; all 14 reproduced. Two earlier versions of the instrument did NOT survive
+# that check (they counted walls, then stderr text, as divergences) — the sample is
+# the reason those never reached a ledger.
+
+count = 218
+
+[[divergence]]
+cell   = "bytes.chunks:size:i64_max"
+reason = "VERIFIED — the ceiling-division sum `(total + size - 1)` wraps, the same defect fixed in list.chunk (PR #1445). Sibling found by inventory, not by fuzzing."
+
+[[divergence]]
+cell   = "bytes.chunks:size:i64_max_m1"
+reason = "VERIFIED — the ceiling-division sum `(total + size - 1)` wraps, the same defect fixed in list.chunk (PR #1445). Sibling found by inventory, not by fuzzing."
+
+[[divergence]]
+cell   = "bytes.new:len:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.new:len:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:pos:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_length_prefixed_strings_le:pos:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:len:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:len:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:len:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:len:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:len:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:len:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:pos:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:pos:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:pos:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:pos:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:pos:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_at:pos:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_be:pos:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_be:pos:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_be:pos:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_be:pos:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_string_be:pos:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.repeat:n:i32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.repeat:n:two_pow_32"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.repeat:n:u32_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.skip_length_prefixed_le:pos:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.skip_length_prefixed_le:pos:i64_max"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.skip_length_prefixed_le:pos:i64_max_m1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.skip_length_prefixed_le:pos:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.skip_length_prefixed_le:pos:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "bytes.skip_length_prefixed_le:pos:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "datetime.from_parts:m:i32_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "datetime.from_parts:m:i64_min"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "datetime.from_parts:m:i64_min_p1"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "datetime.from_parts:m:neg_one"
+reason = "UNTRIAGED — measured divergent, no cause recorded yet"
+
+[[divergence]]
+cell   = "datetime.to_iso:ts:i64_max"
+reason = "VERIFIED silent-wrong — the YEAR is truncated on wasm: i64_max gives 292277026596-12-04T15:30:07Z natively and 6596-12-04T15:30:07Z on wasm, both exit 0."
+
+[[divergence]]
+cell   = "datetime.to_iso:ts:i64_max_m1"
+reason = "VERIFIED silent-wrong — the YEAR is truncated on wasm: i64_max gives 292277026596-12-04T15:30:07Z natively and 6596-12-04T15:30:07Z on wasm, both exit 0."
+
+[[divergence]]
+cell   = "datetime.to_iso:ts:i64_min"
+reason = "VERIFIED silent-wrong — the YEAR is truncated on wasm: i64_max gives 292277026596-12-04T15:30:07Z natively and 6596-12-04T15:30:07Z on wasm, both exit 0."
+
+[[divergence]]
+cell   = "datetime.to_iso:ts:i64_min_p1"
+reason = "VERIFIED silent-wrong — the YEAR is truncated on wasm: i64_max gives 292277026596-12-04T15:30:07Z natively and 6596-12-04T15:30:07Z on wasm, both exit 0."
+
+[[divergence]]
+cell   = "io.read_n_bytes:n:i32_min"
+reason = "VERIFIED abort-form divergence — native exits 101 (a raw Rust panic, the form ALS-T6 forbids) where wasm returns 0 bytes."
+
+[[divergence]]
+cell   = "io.read_n_bytes:n:i64_max"
+reason = "VERIFIED abort-form divergence — native exits 101 (a raw Rust panic, the form ALS-T6 forbids) where wasm returns 0 bytes."
+
+[[divergence]]
+cell   = "io.read_n_bytes:n:i64_min"
+reason = "VERIFIED abort-form divergence — native exits 101 (a raw Rust panic, the form ALS-T6 forbids) where wasm returns 0 bytes."
+
+[[divergence]]
+cell   = "io.read_n_bytes:n:i64_min_p1"
+reason = "VERIFIED abort-form divergence — native exits 101 (a raw Rust panic, the form ALS-T6 forbids) where wasm returns 0 bytes."
+
+[[divergence]]
+cell   = "io.read_n_bytes:n:neg_one"
+reason = "VERIFIED abort-form divergence — native exits 101 (a raw Rust panic, the form ALS-T6 forbids) where wasm returns 0 bytes."
+
+[[divergence]]
+cell   = "list.range:end:i32_max"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "list.range:end:i64_max"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "list.range:end:i64_max_m1"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "list.range:end:two_pow_32"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "list.range:end:u32_max"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "list.range:start:i32_min"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "list.range:start:i64_min"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "list.range:start:i64_min_p1"
+reason = "VERIFIED abort-form divergence — native exits 101 (raw panic) where wasm exits 1."
+
+[[divergence]]
+cell   = "math.choose:n:i64_max"
+reason = "VERIFIED silent-wrong — a different NUMBER, both exit 0: choose(i64_max, 3) is 4611686018427387903 natively and 1537228672809129300 on wasm."
+
+[[divergence]]
+cell   = "math.choose:n:two_pow_32"
+reason = "VERIFIED silent-wrong — a different NUMBER, both exit 0: choose(i64_max, 3) is 4611686018427387903 natively and 1537228672809129300 on wasm."
+
+[[divergence]]
+cell   = "math.choose:n:u32_max"
+reason = "VERIFIED silent-wrong — a different NUMBER, both exit 0: choose(i64_max, 3) is 4611686018427387903 natively and 1537228672809129300 on wasm."
+
+[[divergence]]
+cell   = "string.from_codepoint:n:i64_min"
+reason = "VERIFIED silent-wrong — native answers a one-char string (U+0000) where wasm answers the empty string, both exit 0."
+
+[[divergence]]
+cell   = "string.from_codepoint:n:i64_min_p1"
+reason = "VERIFIED silent-wrong — native answers a one-char string (U+0000) where wasm answers the empty string, both exit 0."
+
+[[divergence]]
+cell   = "string.from_codepoint:n:two_pow_32"
+reason = "VERIFIED silent-wrong — native answers a one-char string (U+0000) where wasm answers the empty string, both exit 0."
+
+[[divergence]]
+cell   = "string.pad_end:n:i32_max"
+reason = "Same shape as string.pad_start (unverified individually; the pair shares one implementation)."
+
+[[divergence]]
+cell   = "string.pad_end:n:two_pow_32"
+reason = "Same shape as string.pad_start (unverified individually; the pair shares one implementation)."
+
+[[divergence]]
+cell   = "string.pad_end:n:u32_max"
+reason = "Same shape as string.pad_start (unverified individually; the pair shares one implementation)."
+
+[[divergence]]
+cell   = "string.pad_start:n:i32_max"
+reason = "VERIFIED — native allocates the full 2^32-char result and succeeds; wasm fails. The count clamp of C-054 covers the narrowing, not the allocation."
+
+[[divergence]]
+cell   = "string.pad_start:n:two_pow_32"
+reason = "VERIFIED — native allocates the full 2^32-char result and succeeds; wasm fails. The count clamp of C-054 covers the narrowing, not the allocation."
+
+[[divergence]]
+cell   = "string.pad_start:n:u32_max"
+reason = "VERIFIED — native allocates the full 2^32-char result and succeeds; wasm fails. The count clamp of C-054 covers the narrowing, not the allocation."
