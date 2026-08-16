@@ -9,6 +9,15 @@ import <module>
 // declarations...
 ```
 
+When a function moves or goes away, mark the old one so callers are told how
+to fix themselves — the compiler compares the two signatures and only offers
+`almide fix` the edit when swapping the name is the whole edit:
+
+```almide
+@deprecated(since = 3, use = "string.trim_start")   // renamed
+@deprecated(since = 3, note = "unsound on surrogate pairs")  // removed, no successor
+```
+
 `@dialect(N)` is optional and goes above everything. It records the language
 dialect the file last checked clean against — not a release number: the epoch
 advances only when the language surface changes in a way that can break
