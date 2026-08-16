@@ -48,6 +48,7 @@ impl Parser {
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Parse);
         self.report_invalid_escapes();
         let mut program = Program {
+            dialect: None,
             module: None,
             imports: Vec::new(),
             decls: Vec::new(),
@@ -59,6 +60,47 @@ impl Parser {
         };
 
         let (mut pending, mut gap_blanks) = self.skip_newlines_collect_comments();
+
+        // File-level dialect stamp: `@dialect(N)`, above everything else.
+        // Claimed here rather than left to `parse_attribute` because an
+        // attribute consumed by the declaration parser would bind to whatever
+        // declaration happens to come first — reordering declarations would
+        // silently move the file's stamp. `dialect` is reserved for this
+        // position; anywhere else it is rejected by the checker.
+        if self.check(TokenType::At)
+            && self.peek_at(1).map(|t| t.value.as_str()) == Some("dialect")
+        {
+            let span = self.current_span();
+            match self.parse_attribute() {
+                Ok(attr) => {
+                    let epoch = match attr.args.first().map(|a| &a.value) {
+                        Some(crate::ast::AttrValue::Int { value }) if *value >= 0 => {
+                            Some(*value as u32)
+                        }
+                        _ => None,
+                    };
+                    match epoch {
+                        Some(epoch) => {
+                            program.dialect =
+                                Some(crate::ast::DialectStamp { epoch, span: Some(span) })
+                        }
+                        // Shape errors are the checker's to report (it owns the
+                        // E-code and the hint); the parser only refuses to
+                        // invent a stamp it could not read.
+                        None => self.errors.push(self.string_to_diagnostic(
+                            "`@dialect` takes one non-negative integer epoch, e.g. `@dialect(1)`",
+                        )),
+                    }
+                }
+                Err(msg) => {
+                    let d = self.string_to_diagnostic(&msg);
+                    self.errors.push(d);
+                }
+            }
+            let (p, b) = self.skip_newlines_collect_comments();
+            pending.extend(p);
+            gap_blanks = gap_blanks.max(b);
+        }
 
         // Legacy module declaration
         if self.check(TokenType::Module) {

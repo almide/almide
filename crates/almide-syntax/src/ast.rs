@@ -450,8 +450,34 @@ pub struct ExprComments {
     pub trailing: Vec<String>,
 }
 
+/// A file's DIALECT STAMP — `@dialect(N)`, written above everything else.
+///
+/// `N` is the language-dialect epoch the file was last verified against, NOT
+/// a compiler release: the epoch advances only when the language surface
+/// changes in a way that can break already-written code, so a file's stamp
+/// stays put across the many releases that change nothing a writer can see.
+///
+/// The stamp exists because Almide's users are code generators. A model
+/// writes against whatever dialect it learned; recording that dialect in the
+/// file is what lets the compiler say "this was written for epoch 2, and
+/// here is what moved since" instead of reporting an unexplained error — and
+/// what lets modification-survival rate be measured per dialect rather than
+/// in aggregate. `almide fmt` advances the stamp, forward only, and only
+/// after the file checks clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DialectStamp {
+    pub epoch: u32,
+    #[serde(skip)]
+    pub span: Option<Span>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
+    /// `@dialect(N)` if the file carries one. Absent is legal and silent —
+    /// every file written before the stamp existed is unstamped, and
+    /// demanding one would be the breaking change the stamp exists to avoid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<DialectStamp>,
     pub module: Option<Decl>,
     pub imports: Vec<Decl>,
     pub decls: Vec<Decl>,
