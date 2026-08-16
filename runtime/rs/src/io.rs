@@ -42,19 +42,29 @@ pub fn almide_rt_io_read_byte() -> i64 {
     }
 }
 
+// `read_n_bytes(n)` reads UP TO n bytes and answers what it got. The count is a LIMIT,
+// not a size to reserve — so nothing here is allocated from it.
+//
+// The old body did `vec![0u8; n as usize]` first: a negative n became ~1.8e19 and the
+// allocation aborted the process, and n = i64::MAX asked for 9 exabytes, where the wasm
+// leg — which never reserved — simply answered the empty list. A ceiling would have made
+// the two agree by teaching BOTH to abort; `take` makes them agree by teaching this one
+// not to need the count at all, which is the better answer: `read_n_bytes(i64::MAX)` on
+// empty stdin is honestly the empty list, not an error.
+/// The per-call maximum for `read_n_bytes`, in bytes. NOT an allocation ceiling and not
+/// part of the 2 GiB roster: it is the largest count the wasm leg's host-floor buffer can
+/// take (MEASURED — it allocates at 2^26 and fails at 2^27), and `n` is a limit whose
+/// answer may already be shorter, so clamping it keeps the two legs identical instead of
+/// making one abort. Keep equal to the literal in stdlib/io_read_n_bytes.almd.
+pub const ALMIDE_IO_READ_MAX_BYTES: i64 = 1 << 26;
+
 pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
     use std::io::Read;
-    let n = n as usize;
-    let mut buf = vec![0u8; n];
-    let mut total = 0;
-    while total < n {
-        match std::io::stdin().read(&mut buf[total..]) {
-            Ok(0) => break,
-            Ok(k) => total += k,
-            Err(_) => break,
-        }
-    }
-    buf[..total].iter().map(|&b| b as i64).collect()
+    if n <= 0 { return Vec::new(); }
+    let want = n.min(ALMIDE_IO_READ_MAX_BYTES) as u64;
+    let mut buf: Vec<u8> = Vec::new();
+    let _ = std::io::stdin().take(want).read_to_end(&mut buf);
+    buf.into_iter().map(|b| b as i64).collect()
 }
 
 // `println!`/`print!` write through Rust's own `Stdout` handle, NOT through
