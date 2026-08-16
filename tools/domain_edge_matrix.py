@@ -283,7 +283,7 @@ def main():
     args = ap.parse_args()
 
     sigs = parse_stdlib(args.only)
-    cells, skipped = [], []
+    cells, skipped, retried_away = [], [], []
     tmp = Path(tempfile.mkdtemp(prefix="domain-edges-"))
 
     for sig in sigs:
@@ -302,6 +302,36 @@ def main():
                 verdict = verdict_for(sig["module"],
                                       run_leg(args.almide, f, False),
                                       run_leg(args.almide, f, True))
+                # SOLO RETRY, the `output-parity.sh` discipline: a DIVERGE is
+                # re-measured once, alone, before it is believed.
+                #
+                # The sweep runs thousands of programs back to back and some of
+                # them are DELIBERATELY enormous — the edge set includes u32::MAX
+                # and i64::MAX against parameters that size an allocation, which
+                # is the whole point of this instrument. A cell sitting just
+                # inside the 2 GiB ceiling therefore asks BOTH legs for 2 GiB, and
+                # under memory pressure one of them can lose that race while the
+                # other wins. That is a machine artifact wearing a divergence's
+                # clothes, and it is indistinguishable from the real thing in the
+                # verdict alone.
+                #
+                # Measured: a full sweep run CONCURRENTLY with another heavy job
+                # reported `string.pad_start:n:i32_max` and `pad_end:n:i32_max` as
+                # divergent; re-run on a quiet machine both agree, and so does the
+                # ceiling value itself (2147483648). Two phantom rows out of 7767
+                # is enough to make a shrink-only ledger untrustworthy, because a
+                # phantom that lands once is then declared forever.
+                #
+                # The retry is cheap precisely because DIVERGE is rare, and it can
+                # only ever REMOVE a finding: a cell that diverges twice is kept.
+                if verdict == "DIVERGE":
+                    verdict = verdict_for(sig["module"],
+                                          run_leg(args.almide, f, False),
+                                          run_leg(args.almide, f, True))
+                    if verdict != "DIVERGE":
+                        retried_away.append(
+                            f'{sig["module"]}.{sig["fn"]}:{pname}:{ename} '
+                            f'(first pass DIVERGE, solo re-run {verdict})')
                 cells.append({
                     "module": sig["module"], "fn": sig["fn"], "param": pname,
                     "edge": ename, "value": value, "verdict": verdict,
@@ -311,6 +341,12 @@ def main():
                     print(f'  DIVERGE  {sig["module"]}.{sig["fn"]}  {pname}={ename}'
                           f'  (fuzzer-reachable: {pname not in FUZZER_COUNT_LIKE})',
                           flush=True)
+
+    if retried_away:
+        print(f"\n  {len(retried_away)} cell(s) diverged once and AGREED on the solo re-run —")
+        print("  recorded as load artifacts, not findings:")
+        for r in retried_away:
+            print(f"    {r}")
 
     tally = {}
     for c in cells:
