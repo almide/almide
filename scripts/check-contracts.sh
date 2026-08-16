@@ -78,6 +78,29 @@ err() { fail=1; echo "::error::$*"; }
 #   EV<TAB>id<TAB>path<TAB>class<TAB>name<TAB>n
 # (empty name/n render as the literal "-"; title/statement are presence flags
 # 0|1, since is the literal value or "" when the key is absent)
+# ── SIGPIPE-SAFE MEMBERSHIP ─────────────────────────────────────────────────
+# `printf '%s\n' "$SET" | grep -q "$x"` is a RACE under `set -o pipefail`.
+# `grep -q` exits the instant it matches, closing the pipe; if `printf` has not
+# finished writing, it dies of SIGPIPE and the PIPELINE's status is non-zero even
+# though the element WAS found. The gate then reports a contract as "not in the
+# ledger" — a false failure whose victim is whichever id happened to lose the
+# race, so it names a different contract every time.
+#
+# Measured on this repo's 286-id ledger: an EARLY match (C-001) false-failed
+# 1 run in 400, a LATE match (C-286) never did — exactly the shape the race
+# predicts, since a late match leaves nothing left to write. In practice the gate
+# failed about 1 local run in 6, each time naming a different contract.
+#
+# A gate that is red 15% of the time for no reason is worse than no gate: it
+# teaches everyone to re-run until green, which is also what you do to a REAL
+# failure. `has()` reads from a here-string, so there is no pipe to break.
+has() { # $1=needle  $2=haystack (newline-separated)  [$3=-E for regex]
+  case "${3:-}" in
+    -E) grep -qE -- "$1" <<<"$2" ;;
+    *)  grep -qxF -- "$1" <<<"$2" ;;
+  esac
+}
+
 parse_ledger() {
   awk '
     # Empty optional scalars render as "-": TAB is IFS whitespace, so bash `read`
@@ -128,7 +151,7 @@ while IFS=$'\t' read -r _tag id status doc title stmt since; do
   [ -z "$id" ] && continue
   [ "$doc" = "-" ] && doc=""
   [ "$since" = "-" ] && since=""
-  printf '%s\n' "$id" | grep -qE '^C-[0-9]{3}$' || err "bad contract id '$id' (must match ^C-[0-9]{3}\$)"
+  has '^C-[0-9]{3}$' "$id" -E || err "bad contract id '$id' (must match ^C-[0-9]{3}\$)"
   case "$status" in
     active|flagged-for-revision) ;;
     *) err "$id: status '$status' is not one of {active, flagged-for-revision}" ;;
@@ -137,7 +160,7 @@ while IFS=$'\t' read -r _tag id status doc title stmt since; do
   [ "$stmt"  = "1" ] || err "$id: REQUIRED key 'statement' is missing"
   if [ -z "$since" ]; then
     err "$id: REQUIRED key 'since' is missing (the version the contract became normative)"
-  elif ! printf '%s\n' "$since" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  elif ! has '^[0-9]+\.[0-9]+\.[0-9]+$' "$since" -E; then
     err "$id: since='$since' is not a MAJOR.MINOR.PATCH version"
   fi
   if [ "$doc" != "" ] && [ ! -f "$DOC_DIR/$doc" ]; then
@@ -154,10 +177,10 @@ fi
 while IFS=$'\t' read -r _tag id path class name n; do
   [ -z "$id" ] && continue
   # class enum
-  printf '%s\n' "$class" | grep -qxE "$CLASS_ALT" || err "$id: class '$class' not one of {$(printf '%s' "$CLASSES" | paste -sd, -)}"
+  has "^(${CLASS_ALT})$" "$class" -E || err "$id: class '$class' not one of {$(printf '%s' "$CLASSES" | paste -sd, -)}"
   # fuzz requires n>=1
   if [ "$class" = "fuzz" ]; then
-    if ! printf '%s' "$n" | grep -qE '^[0-9]+$' || [ "${n:-0}" -lt 1 ]; then
+    if ! has '^[0-9]+$' "$n" -E || [ "${n:-0}" -lt 1 ]; then
       err "$id: class='fuzz' evidence ($path) requires n=<int >= 1> (got '$n')"
     fi
   fi
@@ -231,7 +254,7 @@ for f in "$FIXTURE_DIR"/*.almd; do
   for cid in $(printf '%s' "$ids" | tr ',' ' '); do
     cid="$(printf '%s' "$cid" | tr -d '[:space:]')"
     [ -z "$cid" ] && continue
-    if ! printf '%s\n' "$ALL_IDS" | grep -qxF "$cid"; then
+    if ! has "$cid" "$ALL_IDS"; then
       err "$base references $cid which is not in the ledger"
       continue
     fi
@@ -292,7 +315,7 @@ maxnum="$((10#${maxnum:-0}))"
 i=1
 while [ "$i" -le "$maxnum" ]; do
   want="$(printf 'C-%03d' "$i")"
-  printf '%s\n' "$sorted_ids" | grep -qxF "$want" || err "coverage gap: $want is missing (C-001..C-$(printf '%03d' "$maxnum") must be contiguous)"
+  has "$want" "$sorted_ids" || err "coverage gap: $want is missing (C-001..C-$(printf '%03d' "$maxnum") must be contiguous)"
   i=$((i + 1))
 done
 
@@ -364,7 +387,7 @@ if [ -d "$ALS_DIR" ]; then
   # uncited section is exactly where a spec↔implementation divergence hides.
   n_orphan=0
   for sec in $(grep -hoE '^## ALS-[A-Z0-9]+' "$ALS_DIR"/*.md | sed 's/^## //' | sort -u); do
-    if ! printf '%s\n' "$specd" | grep -qxF "$sec"; then
+    if ! has "$sec" "$specd"; then
       echo "::error::ALS section '$sec' is cited by NO contract — every normative section needs >=1 [[contract]] with spec = \"$sec\" (see #565)"
       n_orphan=$((n_orphan + 1))
       fail=1
