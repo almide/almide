@@ -213,7 +213,15 @@ fn lex_word(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool {
         return false;
     }
     let (tok, new_pos) = if is_backtick {
-        lex_backtick_ident(chars, cur.pos, cur.line, cur.col)
+        // A malformed escape (empty body) must NOT become a zero-length Ident:
+        // that token reached the checker as `undefined variable ''` (#1457).
+        // Decline instead, so the main loop lexes the backtick through
+        // `lex_operator` → Unknown and the parser reports it like any other
+        // stray character.
+        match lex_backtick_ident(chars, cur.pos, cur.line, cur.col) {
+            Some(pair) => pair,
+            None => return false,
+        }
     } else {
         lex_ident(chars, cur.pos, cur.line, cur.col)
     };
@@ -921,11 +929,21 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
 /// Lex a backtick-escaped identifier: `protocol`, `type`, etc.
 /// The backticks are consumed but not included in the token value.
 /// The result is always TokenType::Ident regardless of keyword status.
-fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+///
+/// `None` when the escape encloses no identifier character at all — an empty
+/// pair of backticks, or a body the identifier rule cannot start on (a
+/// non-ASCII name). The body is the SAME ASCII set `lex_ident` accepts, so a
+/// non-ASCII name is no more writable escaped than bare; the escape only buys
+/// keyword-ness. An empty name is not a token any later stage can use, so it is
+/// never built (#1457).
+fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> Option<(Token, usize)> {
     let mut pos = start + 1; // skip opening backtick
     let ident_start = pos;
     while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
         pos += 1;
+    }
+    if pos == ident_start {
+        return None;
     }
     let value: String = chars[ident_start..pos].iter().collect();
     // Consume closing backtick if present
@@ -938,7 +956,7 @@ fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> 
         TokenType::Ident
     };
     let end_col = col + (pos - start);
-    (Token { token_type, value, line, col, end_col, raw: None }, pos)
+    Some((Token { token_type, value, line, col, end_col, raw: None }, pos))
 }
 
 /// The keyword table — data, not control flow: one row per spelling
@@ -1027,6 +1045,47 @@ fn peek(chars: &[char], pos: usize) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression (#1457): a backtick escape enclosing no identifier character
+    // used to lex to a ZERO-LENGTH Ident. That token survived every later stage
+    // and surfaced in the checker as `undefined variable ''` — a name no source
+    // text can spell. The lexer must never mint an empty-named identifier; the
+    // malformed escape falls through to Unknown like any other stray character.
+    #[test]
+    fn malformed_backtick_escape_never_yields_an_empty_ident() {
+        // Non-ASCII body, empty body, and an unterminated escape at EOF.
+        for src in ["let `日本語` = 1", "let `` = 1", "let `"] {
+            let tokens = Lexer::tokenize(src);
+            assert!(
+                !tokens.iter().any(|t| {
+                    matches!(t.token_type, TokenType::Ident | TokenType::TypeName)
+                        && t.value.is_empty()
+                }),
+                "empty-named identifier token minted for {src:?}: {:?}",
+                tokens.iter().map(|t| (t.token_type, &t.value)).collect::<Vec<_>>()
+            );
+            assert!(
+                tokens.iter().any(|t| t.token_type == TokenType::Unknown && t.value == "`"),
+                "malformed escape should surface the backtick as Unknown for {src:?}"
+            );
+        }
+    }
+
+    // The escape itself still works — the fix must not cost `type`/`protocol`
+    // their keyword-escaping, which is the whole reason backticks exist.
+    #[test]
+    fn well_formed_backtick_escape_still_lexes_as_a_name() {
+        let tokens = Lexer::tokenize("let `type` = 1");
+        let t = tokens
+            .iter()
+            .find(|t| t.value == "type")
+            .expect("`type` should lex to a name token");
+        assert_eq!(t.token_type, TokenType::Ident, "backtick escape defeats keyword-ness");
+        // An uppercase escaped name keeps its TypeName classification.
+        let tokens = Lexer::tokenize("let `Protocol` = 1");
+        let t = tokens.iter().find(|t| t.value == "Protocol").expect("escaped TypeName");
+        assert_eq!(t.token_type, TokenType::TypeName);
+    }
 
     // Regression: a heredoc whose blank line holds multi-byte Unicode whitespace
     // (U+3000) used to panic in strip_heredoc_indent — the byte-offset dedent

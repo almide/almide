@@ -221,6 +221,12 @@ impl Parser {
         let hint = match (&tok.token_type, tok.value.as_str()) {
             (TokenType::Underscore, _) => "\n  Hint: '_' can only be used in match patterns, not as a variable name.",
             (TokenType::Test, _) => "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file at all (harness-submitted code).",
+            // A backtick lands here only as a MALFORMED escape — the lexer
+            // declines one enclosing no identifier character (#1457). Binding
+            // position never reaches `unknown_char_error`, so the hint that
+            // names the construct has to be repeated here.
+            (TokenType::Unknown, "`") => "\n  Hint: A backtick escape takes ASCII letters, digits and '_', and cannot be empty. It makes a KEYWORD usable as a name (`type`, `protocol`) — it does not make a non-ASCII name writable.",
+            (TokenType::Unknown, _) => "\n  Hint: This character is not Almide syntax. Full-width or invisible Unicode characters often sneak in from copy-paste — delete it, or move it into a string or comment.",
             _ => "",
         };
         Err(format!(
