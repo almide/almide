@@ -331,3 +331,57 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ── Triage: give every divergent cell a MEASURED class ───────────────────────
+#
+# "218 divergent cells" is not a work estimate until each one says HOW it
+# diverges. Three classes need three different responses, and only the first is
+# unambiguously a defect:
+#
+#   SILENT_WRONG  both legs exit 0 and print different answers. The worst class,
+#                 and the one this language exists to remove.
+#   ABORT_FORM    both legs fail, in different forms. ALS-T6 says a domain error
+#                 is one unified abort; a raw panic (exit 101) or a wasm trap
+#                 (134) is the forbidden form, so this is a defect too, but the
+#                 fix is the FORM, not the value.
+#   ONE_SIDED     one leg answers, the other fails. Usually means the domain rule
+#                 itself was never decided — someone has to rule on what
+#                 `string.pad_start(s, 2^32)` MEANS before either leg can be
+#                 called wrong.
+#
+# Run: python3 tools/domain_edge_matrix.py --triage measured.json
+def triage(json_path, almide):
+    import collections
+    cells = json.load(open(json_path))["cells"]
+    div = [c for c in cells if c["verdict"] == "DIVERGE" and c["module"] not in RAW_MODULES]
+    sigs = {}
+    for mod in {c["module"] for c in div}:
+        for s in parse_stdlib(mod):
+            sigs[(s["module"], s["fn"])] = s
+    tmp = Path(tempfile.mkdtemp(prefix="triage-"))
+    out, tally = [], collections.Counter()
+    for c in div:
+        sig = sigs.get((c["module"], c["fn"]))
+        if sig is None:
+            continue
+        idx = next((i for i, (n, _t) in enumerate(sig["params"]) if n == c["param"]), None)
+        if idx is None:
+            continue
+        src, _ = build_program(sig, idx, c["value"])
+        if src is None:
+            continue
+        f = tmp / "p.almd"
+        f.write_text(src)
+        nrc, nout, _ = run_leg(almide, f, False)
+        wrc, wout, _ = run_leg(almide, f, True)
+        if nrc == 0 and wrc == 0:
+            cls = "SILENT_WRONG"
+        elif nrc != 0 and wrc != 0:
+            cls = "ABORT_FORM"
+        else:
+            cls = "ONE_SIDED"
+        tally[cls] += 1
+        out.append({**c, "klass": cls, "native": [nrc, nout.strip()[:60]],
+                    "wasm": [wrc, wout.strip()[:60]]})
+    return out, tally
