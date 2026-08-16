@@ -150,7 +150,7 @@ pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
 // honest where `end - start` would wrap, and the ceiling is `list_repeat`'s.
 pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
     if end.saturating_sub(start).max(0) > ALMIDE_LIST_REPEAT_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
+        eprintln!("Error: out of memory");
         std::process::exit(1);
     }
     (start..end).collect()

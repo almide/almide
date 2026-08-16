@@ -1,0 +1,65 @@
+// @contract: C-161
+// THE ALLOCATION RULE, finally applied to the four bytes allocators that sat
+// outside it:
+//
+//   a size the process should not attempt is the SAME abort on both legs, at the
+//   SAME threshold — 2 GiB, sized below the wasm 4 GiB address space precisely so
+//   that no size exists which one leg can satisfy and the other cannot.
+//
+// The ceiling VALUE is shared and machine-checked; the abort MESSAGE follows the
+// operation's own vocabulary, because one line does not fit both:
+//
+//   plain allocation (new / pad / range / chunks) -> `Error: out of memory`,
+//       C-197's line, the same one the wasm render's $oom prints. Calling a 4 GiB
+//       `bytes.new` a "repeat result" would be nonsense — nothing is repeated.
+//   the repeat family (repeat)                    -> `Error: repeat result too large`,
+//       C-161's line: an oversized repeat is a sizing mistake, not a machine limit.
+//
+// Getting this backwards is how the first cut of this change hijacked C-197: its
+// own fixture, `bytes.new(i64::MAX)`, started answering the ceiling's line, so the
+// contract stayed declared while its evidence quietly began testing something else.
+//
+// `bytes.new`, `bytes.repeat`, `bytes.pad_left` and `bytes.pad_right` each had a
+// ceiling-shaped hole:
+//
+//   bytes.new(4294967295)     native allocated 4 GiB and printed a length;
+//                             wasm hit its own limit and aborted.
+//   pad_left(b, -1, v)        native `target_len as usize` made the target
+//                             ~1.8e19, so `len >= target` was false and the pad
+//                             allocation aborted the process — where the other
+//                             leg read the same negative target as "already long
+//                             enough" and returned the input unchanged.
+//   bytes.chunks(b, i64::MAX) the chunk COUNT came from `(total + size - 1) / size`,
+//                             whose sum overflows; the allocation was then sized
+//                             from the wrapped count. It is one chunk. This is the
+//                             identical ceiling-division defect `list.chunk` had,
+//                             in a module that was never checked for it.
+//
+// And the ceiling itself is now machine-checked. It was ONE limit written four
+// times in four units — bytes, bytes, /8 for list slots, /8 for f64 — each site
+// carrying a "keep in sync with X" comment. That comment was the entire mechanism,
+// and it was in place for the whole period `bytes.new` diverged.
+// `scripts/check-alloc-ceilings.sh` converts every spelling to bytes and fails if
+// they stop agreeing, and fails a NEW allocator that invents its own threshold
+// instead of sharing this one.
+import bytes
+
+fn main() -> Unit = {
+  let b = bytes.from_list([1, 2])
+  // Negative target: the input, unchanged. Was an allocation abort on native.
+  println("pad_neg=" + int.to_string(bytes.len(bytes.pad_left(b, 0 - 1, 9))))
+  println("pad_min=" + int.to_string(bytes.len(bytes.pad_right(b, 0 - 9223372036854775807, 9))))
+  // In range: the pad still happens.
+  println("pad_ok=" + int.to_string(bytes.len(bytes.pad_right(b, 5, 9))))
+  // new: in range answers, over the ceiling is C-197's abort.
+  println("new_ok=" + int.to_string(bytes.len(bytes.new(8))))
+  // repeat: the ceiling is on the PRODUCT, tested by division — `blen * n` is
+  // the multiplication that overflows, so a guard computed from it tests nothing.
+  println("rep_ok=" + int.to_string(bytes.len(bytes.repeat(b, 3))))
+  // chunks: a size past the buffer is ONE chunk, not a wrapped count.
+  println("chunks_max=" + int.to_string(list.len(bytes.chunks(bytes.from_list([1, 2, 3]), 9223372036854775807))))
+  println("chunks_ok=" + int.to_string(list.len(bytes.chunks(bytes.from_list([1, 2, 3]), 2))))
+  // The abort, last, so every value above is observed first. `bytes.new` is a
+  // plain allocation, so this is `Error: out of memory`, not the repeat line.
+  println("new_over=" + int.to_string(bytes.len(bytes.new(4294967295))))
+}

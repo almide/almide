@@ -57,7 +57,7 @@ fn __pad_start_do(s: String, n: Int, pad: String) -> String = {
   // overflows, so a guard computed from the product tests the wrapped value. Without it
   // `pad_end("a", u32::MAX, "x")` allocated 4 GiB on one leg and aborted on the other.
   // Same limit as string.repeat (ALMIDE_REPEAT_MAX_BYTES); see scripts/check-alloc-ceilings.sh.
-  if pclen > 0 and n > 2147483648 / pclen then prim.die(prim.handle("Error: repeat result too large\n")) else ()
+  if pclen > 0 and n > 2147483648 / pclen then prim.die(prim.handle("Error: out of memory\n")) else ()
   let padbytes = n * pclen
   let total = padbytes + slen
   let buf = prim.alloc_str(total)
@@ -78,7 +78,7 @@ fn __pad_end_do(s: String, n: Int, pad: String) -> String = {
   // overflows, so a guard computed from the product tests the wrapped value. Without it
   // `pad_end("a", u32::MAX, "x")` allocated 4 GiB on one leg and aborted on the other.
   // Same limit as string.repeat (ALMIDE_REPEAT_MAX_BYTES); see scripts/check-alloc-ceilings.sh.
-  if pclen > 0 and n > 2147483648 / pclen then prim.die(prim.handle("Error: repeat result too large\n")) else ()
+  if pclen > 0 and n > 2147483648 / pclen then prim.die(prim.handle("Error: out of memory\n")) else ()
   let padbytes = n * pclen
   let total = slen + padbytes
   let buf = prim.alloc_str(total)

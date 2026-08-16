@@ -13,9 +13,11 @@
 //    sign the difference is bounded by i64::MAX and cannot overflow, and only a span
 //    straddling zero can — where either half exceeding the ceiling already settles it.
 //
-//    Read where the ceiling came from: `list_repeat` carries it TWELVE LINES BELOW
-//    `list_range` in the same file, with the same limit and the same message. Adjacency
-//    is not a mechanism.
+//    Read where the ceiling came from: `list_repeat` carries the same LIMIT twelve
+//    lines below `list_range` in the same file. Adjacency is not a mechanism.
+//    The MESSAGE differs by operation: a range is a plain allocation, so it takes
+//    C-197's `Error: out of memory`, while `repeat` keeps C-161's more specific
+//    `Error: repeat result too large`. The ceiling value is what is shared.
 //
 // 2. string.pad_start / pad_end. The pad byte count is `n * pclen`, and that product is
 //    what overflows, so the ceiling is tested by DIVISION — a guard computed from the

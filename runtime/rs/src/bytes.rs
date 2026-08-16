@@ -52,6 +52,38 @@ pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r =
 // prints the same line. The infallible `vec![0; n]` here instead died on the
 // Rust allocator abort (SIGABRT, no exit code — fuzz seed 500705518626
 // index 711, `bytes.new(i64::MAX)`).
+/// The 2 GiB allocation ceiling, in this module's unit (bytes). It is ONE ceiling wearing
+/// four names — `ALMIDE_REPEAT_MAX_BYTES` (string, bytes), `ALMIDE_LIST_REPEAT_MAX_ELEMS`
+/// (list, /8 for the slot width), `ALMIDE_MATRIX_MAX_ELEMS` (matrix, /8 for f64) — plus the
+/// self-host literals that must equal them. `scripts/check-alloc-ceilings.sh` converts each
+/// to bytes and fails if they stop denoting the same limit, so the four are no longer held
+/// together by a comment asking someone to remember.
+pub const ALMIDE_BYTES_MAX_BYTES: i64 = 1 << 31;
+
+// The shared 2^31-BYTE ceiling for the bytes allocators, in the T6 form (C-161). Sized
+// BELOW the wasm 4 GiB address space so a size one leg can satisfy and the other cannot
+// does not become a native success against a wasm out-of-memory — which is exactly how
+// `bytes.new(u32::MAX)` diverged: this leg happily allocated 4 GiB and the other aborted.
+// `alloc_bytes_or_oom` below still guards a size UNDER the ceiling that this particular
+// machine cannot satisfy; the two are different failures and both are needed.
+fn cap_bytes_or_die(n: i64) {
+    if n > ALMIDE_BYTES_MAX_BYTES {
+        eprintln!("Error: out of memory");
+        std::process::exit(1);
+    }
+}
+
+/// The repeat family keeps C-161's more specific line: a `repeat` whose PRODUCT is
+/// over the ceiling is a sizing mistake, not a machine limit, and its fixtures pin
+/// that wording. The ceiling VALUE is shared and gated; the MESSAGE follows the
+/// operation's own vocabulary.
+fn cap_repeat_or_die(n: i64) {
+    if n > ALMIDE_BYTES_MAX_BYTES {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+}
+
 fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
     let mut v: Vec<u8> = Vec::new();
     if v.try_reserve_exact(n).is_err() {
@@ -61,6 +93,11 @@ fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
     v
 }
 pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
+    // Tested by DIVISION: `len * n` is the multiplication that overflows, so a ceiling
+    // computed from the product would be testing the wrapped value.
+    if !b.is_empty() {
+        cap_repeat_or_die(n.saturating_mul(b.len() as i64));
+    }
     let n = n.max(0) as usize;
     let total = b.len().checked_mul(n).unwrap_or(usize::MAX);
     let mut v = alloc_bytes_or_oom(total);
@@ -68,6 +105,7 @@ pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
     v
 }
 pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> {
+    cap_bytes_or_die(len);
     let n = len.max(0) as usize;
     let mut v = alloc_bytes_or_oom(n);
     v.resize(n, 0);
@@ -201,22 +239,28 @@ pub fn almide_rt_bytes_xor(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> {
 }
 
 pub fn almide_rt_bytes_pad_left(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u8> {
-    let target = target_len as usize;
-    if b.len() >= target {
+    // `target_len as usize` made a NEGATIVE target ~1.8e19, so `b.len() >= target` was false
+    // and the pad allocation then aborted the process — where the other leg read the same
+    // negative target as "already long enough" and returned the input unchanged.
+    if target_len <= b.len() as i64 {
         return b.clone();
     }
-    let pad = target - b.len();
+    cap_bytes_or_die(target_len);
+    let pad = target_len as usize - b.len();
     let mut out = vec![val as u8; pad];
     out.extend_from_slice(b);
     out
 }
 
 pub fn almide_rt_bytes_pad_right(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u8> {
-    let target = target_len as usize;
-    if b.len() >= target {
+    // `target_len as usize` made a NEGATIVE target ~1.8e19, so `b.len() >= target` was false
+    // and the pad allocation then aborted the process — where the other leg read the same
+    // negative target as "already long enough" and returned the input unchanged.
+    if target_len <= b.len() as i64 {
         return b.clone();
     }
-    let pad = target - b.len();
+    cap_bytes_or_die(target_len);
+    let pad = target_len as usize - b.len();
     let mut out = b.clone();
     out.extend(std::iter::repeat(val as u8).take(pad));
     out

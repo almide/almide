@@ -33,7 +33,7 @@ fn list_range(start: Int, end: Int) -> List[Int] = {
   let count = __range_count(start, end)
   // The SAME ceiling `list_repeat` takes twelve lines below — which is where this rule
   // was already written down, and where `list_range` never joined it.
-  if count < 0 or count > 268435456 then prim.die(prim.handle("Error: repeat result too large\n")) else ()
+  if count < 0 or count > 268435456 then prim.die(prim.handle("Error: out of memory\n")) else ()
   let buf = prim.alloc_list(count)
   let _x = __range_fill(prim.handle(buf), start, count, 0)
   buf
