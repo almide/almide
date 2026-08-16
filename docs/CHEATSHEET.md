@@ -4,9 +4,18 @@ File extension: `.almd`
 
 ## File structure
 ```
+@dialect(3)          // optional: the language dialect this file was verified against
 import <module>
 // declarations...
 ```
+
+`@dialect(N)` is optional and goes above everything. It records the language
+dialect the file last checked clean against — not a release number: the epoch
+advances only when the language surface changes in a way that can break
+already-written code (`proofs/dialect-epochs.toml` lists what each one broke).
+A stamp older than the compiler is silent; a stamp NEWER is `E051`, because
+nothing here has verified that file. Write or advance it with
+`almide check <file> --stamp`, which only ever moves it forward.
 
 ## Project layout (multi-file)
 For projects > 1 file, create a package:
