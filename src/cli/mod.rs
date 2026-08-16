@@ -5,6 +5,7 @@ mod build;
 mod compile;
 mod emit;
 mod check;
+mod dialect_stamp;
 mod commands;
 pub mod test_report;
 mod install;

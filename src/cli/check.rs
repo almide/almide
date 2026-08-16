@@ -128,7 +128,7 @@ fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
     ));
 }
 
-pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool) {
+pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool) {
     // Arm the accounting BEFORE the first source is read; a phase counter that
     // starts mid-pipeline reports a front end with no lexer.
     if timings {
@@ -180,7 +180,38 @@ pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool) {
         report_timings(&r, t.elapsed_secs());
     }
 
+    // Reaching here means the file checked clean, which is exactly the
+    // verification a `@dialect` stamp records — so this is the only place
+    // allowed to write one.
+    if stamp {
+        write_dialect_stamp(file, &source_text);
+    }
+
     err(&format!("No errors found"));
+}
+
+/// `--stamp`: advance the file's dialect stamp after a clean check.
+fn write_dialect_stamp(file: &str, source_text: &str) {
+    use super::dialect_stamp::{plan, StampOutcome};
+    let current = almide_lang::dialect::CURRENT_DIALECT;
+    match plan(source_text, current) {
+        StampOutcome::AlreadyCurrent => {}
+        StampOutcome::Ahead { epoch } => {
+            err(&format!(
+                "{file}: left the @dialect({epoch}) stamp alone — it is ahead of this compiler's dialect {current}"
+            ));
+        }
+        StampOutcome::Write { from, to, source } => {
+            if let Err(e) = std::fs::write(file, &source) {
+                err(&format!("{file}: could not write the dialect stamp: {e}"));
+                std::process::exit(1);
+            }
+            match from {
+                Some(f) => err(&format!("{file}: dialect stamp {f} -> {to}")),
+                None => err(&format!("{file}: dialect stamp {to} (added)")),
+            }
+        }
+    }
 }
 
 /// `cmd_check_json`'s parse step.
