@@ -586,11 +586,18 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
         // err path a wrapped Result block, ok path a raw Option block — which
         // no consumer can discriminate: wasm swallowed a failed int.parse and
         // continued with a garbage value where native aborted.
-        if matches!(
-            &func.ret_ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
-        ) {
-            wrap_option_return_positions(&mut body, &func.ret_ty, &result_ty);
+        // #1431 reached the SCALAR members too — but "the existing machinery
+        // downstream" is the PROPAGATION rewrite, so it only covers a body
+        // that HAS a `!` to piggyback on. A body made can-err by a bare
+        // `err(..)` has none, and its raw tail survived to the renderer. The
+        // retype therefore takes exactly the bodies the rewrite will not
+        // reach; see `has_propagation_site` for why taking the others costs
+        // `effect_tco` its loop conversion. Option stays unconditional — that
+        // is the #1410 path, already proven.
+        let opt_ret = matches!(&func.ret_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _));
+        if opt_ret || !has_propagation_site(&body) {
+            wrap_return_positions_in_ok(&mut body, &func.ret_ty, &result_ty);
         }
         Some(body)
     } else {
@@ -598,36 +605,93 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
     }
 }
 
+/// Does this body contain a `!` propagation site? That is the question the
+/// #1431 defect turns on. "The scalar members' raw ok tails are handled by the
+/// existing machinery downstream" means the PROPAGATION rewrite, which wraps
+/// the tail it threads — so it only runs for a fn made can-err by a `!`. A fn
+/// made can-err by a bare `err(..)` binding has no propagation to piggyback on:
+/// its root was retyped to the carrier while its tail stayed a raw scalar, the
+/// callee returned i64 where every consumer read an i32 Result block, and the
+/// module failed wasm VALIDATION.
+///
+/// So the retype wraps exactly the bodies the rewrite will not reach. Wrapping
+/// the others is not free: `checked`/`carried` in spec/wasm_cross/effect_tco
+/// are auto-wrap members whose tail self-recursion loop-converts, and wrapping
+/// their arms retyped the `if` spine so the tco rewrite declined and the wasm
+/// leg trapped with `call stack exhausted` at 2e6 depth where native printed
+/// its three sums.
+fn has_propagation_site(expr: &IrExpr) -> bool {
+    struct TryFinder(bool);
+    impl almide_ir::visit::IrVisitor for TryFinder {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if matches!(expr.kind, IrExprKind::Try { .. }) {
+                self.0 = true;
+            }
+            if !self.0 {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut f = TryFinder(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut f, expr);
+    f.0
+}
+
 /// Wrap every RETURN-position value of `expr` whose type is the declared
-/// Option in `ok(...)`, retyping the spine to the Result carrier as it goes.
-/// Return positions only — Block tails, If arms, Match arms — never operand
-/// or argument positions, so nothing an expression CONSUMES changes shape.
-/// `ResultOk`/`ResultErr` values are already the carrier and are left alone.
-fn wrap_option_return_positions(expr: &mut IrExpr, opt_ty: &Ty, result_ty: &Ty) {
+/// return type in `ok(...)`, retyping the spine to the Result carrier as it
+/// goes. Return positions only — Block tails, If arms, Match arms — never
+/// operand or argument positions, so nothing an expression CONSUMES changes
+/// shape. `ResultOk`/`ResultErr` values are already the carrier, and a CALL
+/// gets its shape from the callee's own ABI; both are left alone.
+///
+/// Returns whether anything was wrapped, and the spine is retyped ONLY along
+/// the paths where something was: a body whose every return position is a call
+/// (`effect fn checked(n) = if n < 0 then fail(..) else checked(n - 1)`) must
+/// come out BYTE-IDENTICAL to before, or the tail-call loop conversion declines
+/// on the retyped spine and the fn runs O(n) stack — spec/wasm_cross/effect_tco
+/// trapped with `call stack exhausted` on the wasm leg while native printed its
+/// three sums.
+fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) -> bool {
     match &mut expr.kind {
         IrExprKind::Block { expr: tail, .. } => {
-            if let Some(t) = tail.as_deref_mut() {
-                wrap_option_return_positions(t, opt_ty, result_ty);
+            let wrapped = tail
+                .as_deref_mut()
+                .map(|t| wrap_return_positions_in_ok(t, decl_ty, result_ty))
+                .unwrap_or(false);
+            if wrapped {
+                expr.ty = result_ty.clone();
             }
-            expr.ty = result_ty.clone();
+            wrapped
         }
         IrExprKind::If { then, else_, .. } => {
-            wrap_option_return_positions(then, opt_ty, result_ty);
-            wrap_option_return_positions(else_, opt_ty, result_ty);
-            expr.ty = result_ty.clone();
+            let a = wrap_return_positions_in_ok(then, decl_ty, result_ty);
+            let b = wrap_return_positions_in_ok(else_, decl_ty, result_ty);
+            if a || b {
+                expr.ty = result_ty.clone();
+            }
+            a || b
         }
         IrExprKind::Match { arms, .. } => {
+            let mut any = false;
             for arm in arms.iter_mut() {
-                wrap_option_return_positions(&mut arm.body, opt_ty, result_ty);
+                any |= wrap_return_positions_in_ok(&mut arm.body, decl_ty, result_ty);
             }
-            expr.ty = result_ty.clone();
+            if any {
+                expr.ty = result_ty.clone();
+            }
+            any
         }
-        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => {}
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => false,
+        // A CALL in return position already yields the CARRIER — an effect fn's
+        // own ABI wraps its exits, so wrapping the call site again would build
+        // `ok(ok(..))`. The callee's ABI is the single decider for a call's
+        // shape; this retype only speaks for the values THIS body produces.
+        IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => false,
         _ => {
             // A VALUE in return position. Wrap it when it produces the declared
-            // Option; anything else (a Never-typed die, an already-Result
+            // type; anything else (a Never-typed die, an already-Result
             // propagation) is left for the existing machinery.
-            if expr.ty == *opt_ty {
+            if expr.ty == *decl_ty {
                 let inner = std::mem::replace(
                     expr,
                     IrExpr {
@@ -643,6 +707,9 @@ fn wrap_option_return_positions(expr: &mut IrExpr, opt_ty: &Ty, result_ty: &Ty) 
                     kind: IrExprKind::ResultOk { expr: Box::new(inner) },
                     ty: result_ty.clone(),
                 };
+                true
+            } else {
+                false
             }
         }
     }
