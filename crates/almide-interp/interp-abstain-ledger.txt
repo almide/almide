@@ -16,6 +16,7 @@ bytes_array_count_domain  out-of-interp-scope capability: prim.alloc_list
 bytes_f16_offset_overflow  out-of-interp-scope capability: prim.alloc_list_f64
 bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr
 bytes_set_value_semantics  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+bytes_string_window_domain  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 chunk_str  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 codec_decode_errors  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 codec_float_int  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
