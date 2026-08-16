@@ -40,9 +40,20 @@ impl Parser {
     pub(crate) fn unknown_char_error(&mut self, value: &str, line: usize, col: usize) -> String {
         let ch = value.chars().next().unwrap_or('\u{FFFD}');
         let msg = format!("Unexpected character '{}' (U+{:04X})", ch, ch as u32);
-        let hint = "This character is not Almide syntax. Full-width or invisible Unicode \
-                    characters often sneak in from copy-paste — delete it, or move it into \
-                    a string or comment.";
+        // A backtick reaches this arm only as a MALFORMED escape: the lexer
+        // declines an escape enclosing no identifier character, rather than
+        // building a zero-length Ident (#1457). The generic copy-paste hint
+        // would send the reader looking for an invisible character, so name the
+        // construct that actually failed.
+        let hint = if ch == '`' {
+            "A backtick escape wraps a name that would otherwise be a keyword — \
+             `type`, `protocol`. It takes ASCII letters, digits and '_', and cannot \
+             be empty, so it does not make a non-ASCII name writable either."
+        } else {
+            "This character is not Almide syntax. Full-width or invisible Unicode \
+             characters often sneak in from copy-paste — delete it, or move it into \
+             a string or comment."
+        };
         let diag = self.diag_error(msg.clone(), hint, "unknown-char");
         self.errors.push(diag);
         format!("{} at line {}:{}", msg, line, col)
