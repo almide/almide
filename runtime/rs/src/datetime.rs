@@ -96,12 +96,17 @@ fn civil_from_epoch(ts: i64) -> (i64, i64, i64) {
     (y, m as i64, d as i64)
 }
 
+// Hinnant's civil-from-days, in i64 THROUGHOUT. The `as u64` casts this replaces were
+// safe for a valid 1..=12 month — yoe is 0..399 there — but they are an UNSIGNED step in
+// the middle of a signed calendar, and `from_parts(2020, -1, 1, …)` turned the month into
+// 18446744073709551615: `153 * (m - 3)` then wrapped, and this leg answered 1540840320
+// where the self-host, which had always been i64, answered 1572566400. Neither number
+// means anything for month -1; the point is that they must be the SAME nothing.
 fn epoch_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64;
-    let m = m as u64;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d as u64 - 1;
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    (era * 146097 + doe as i64 - 719468) * 86400
+    (era * 146097 + doe - 719468) * 86400
 }

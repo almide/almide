@@ -3,8 +3,16 @@
 // allocate a 20-byte String and store each ASCII byte (zero-padded digit or separator) at its fixed
 // offset — the proven int_to_string / base64 digit-writing discipline. Components come from the
 // already-self-hosted datetime.year/month/day (datetime_calendar) and hour/minute/second
-// (datetime_arith) — all CROSS-file, so no intra-file link cycle. SCOPE: {:04} matches v0 for years
-// 0..9999 (a 5-digit year would overflow the fixed buffer — the same documented edge as to_string).
+// (datetime_arith) — all CROSS-file, so no intra-file link cycle.
+//
+// The year field is VARIABLE width, exactly as Rust's `{:04}` is: at least four columns,
+// zero-padded, and the sign counts as one of them. This file used to declare `SCOPE: years
+// 0..9999` and write a fixed 20-byte buffer, which for anything outside that range did not
+// fail — it wrote GARBAGE. `to_iso(i64::MAX)` answered `292277026596-...` natively and the
+// low four digits `6596-...` here; `to_iso(i64::MIN)` answered a correct negative year
+// natively and the bytes `.*+)` here, because `48 + digit` with a negative digit is not an
+// ASCII character at all — a String containing non-UTF-8 bytes, produced silently, exit 0.
+// A documented scope that produces a malformed value outside itself is not a scope.
 // Write n (>= 0) as `width` zero-padded decimal digits ending at pos+width-1 (least-significant
 // last). Returns Int (the __itos_fill discipline: a Unit return would elide the call).
 fn __iso_pad(pos: Int, width: Int, n: Int) -> Int = if width <= 0 then 0
@@ -14,6 +22,9 @@ else {
   __iso_pad(pos, width - 1, n / 10)
 }
 
+// Decimal digit count of n (>= 0); __iso_digits(0) = 1.
+fn __iso_digits(n: Int) -> Int = if n < 10 then 1 else 1 + __iso_digits(n / 10)
+
 fn datetime_to_iso(ts: Int) -> String = {
   let y = datetime.year(ts)
   let mo = datetime.month(ts)
@@ -21,25 +32,35 @@ fn datetime_to_iso(ts: Int) -> String = {
   let h = datetime.hour(ts)
   let mi = datetime.minute(ts)
   let s = datetime.second(ts)
-  let out = prim.alloc_str(20)
+  // `{:04}`: four columns minimum, zero-padded, the sign occupying one of them.
+  // `-5` is `-005`; a 12-digit year takes all twelve. The tail after the year is a
+  // constant 16 bytes ("-MM-DDTHH:MM:SSZ"), so only the head varies.
+  let neg = y < 0
+  let mag = if neg then 0 - y else y
+  let sign = if neg then 1 else 0
+  let dw = __iso_digits(mag) + sign
+  let yw = if dw > 4 then dw else 4
+  let out = prim.alloc_str(yw + 16)
   let base = prim.handle(out) + 12
-  let _y = __iso_pad(base, 4, y)
-  prim.store8(base + 4, 45)
+  if neg then prim.store8(base, 45) else ()
+  // '-' when the year is negative; the magnitude fills the remaining columns
+  let _y = __iso_pad(base + sign, yw - sign, mag)
+  prim.store8(base + yw, 45)
   // '-'
-  let _mo = __iso_pad(base + 5, 2, mo)
-  prim.store8(base + 7, 45)
+  let _mo = __iso_pad(base + yw + 1, 2, mo)
+  prim.store8(base + yw + 3, 45)
   // '-'
-  let _d = __iso_pad(base + 8, 2, d)
-  prim.store8(base + 10, 84)
+  let _d = __iso_pad(base + yw + 4, 2, d)
+  prim.store8(base + yw + 6, 84)
   // 'T'
-  let _h = __iso_pad(base + 11, 2, h)
-  prim.store8(base + 13, 58)
+  let _h = __iso_pad(base + yw + 7, 2, h)
+  prim.store8(base + yw + 9, 58)
   // ':'
-  let _mi = __iso_pad(base + 14, 2, mi)
-  prim.store8(base + 16, 58)
+  let _mi = __iso_pad(base + yw + 10, 2, mi)
+  prim.store8(base + yw + 12, 58)
   // ':'
-  let _s = __iso_pad(base + 17, 2, s)
-  prim.store8(base + 19, 90)
+  let _s = __iso_pad(base + yw + 13, 2, s)
+  prim.store8(base + yw + 15, 90)
   // 'Z'
   out
 }

@@ -69,7 +69,13 @@ pub fn almide_rt_string_from_bytes(bytes: &[i64]) -> String {
     String::from_utf8_lossy(&v).into_owned()
 }
 pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { s.chars().next().map(|c| c as i64) }
-pub fn almide_rt_string_from_codepoint(cp: i64) -> String { char::from_u32(cp as u32).map(|c| c.to_string()).unwrap_or_default() }
+// `try_from` BEFORE `from_u32`: the old `cp as u32` truncated, so 2^32 — which is not a
+// codepoint — became 0, which is, and this leg answered a one-byte NUL string where the
+// self-host answered "". The `unwrap_or_default` was already the right intent; the cast
+// in front of it was silently converting invalid input into valid input.
+pub fn almide_rt_string_from_codepoint(cp: i64) -> String {
+    u32::try_from(cp).ok().and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default()
+}
 
 pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
     // CODEPOINT indices, clamped to [0, char_count]; the `end = i64::MAX`
