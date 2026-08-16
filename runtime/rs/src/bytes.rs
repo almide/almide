@@ -398,11 +398,10 @@ pub fn almide_rt_bytes_read_bool(b: &Vec<u8>, pos: i64) -> bool {
     b.get(pos as usize).map(|&x| x != 0).unwrap_or(false)
 }
 pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> String {
-    let p = pos as usize;
-    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return String::new(); }
-    let slen = u32::from_be_bytes(b[p..p+4].try_into().unwrap()) as usize;
-    if p + 4 + slen > b.len() { return String::new(); }
-    String::from_utf8_lossy(&b[p+4..p+4+slen]).into_owned()
+    let Some(p) = window(pos, 4, b.len()) else { return String::new(); };
+    let slen = u32::from_be_bytes(b[p..p + 4].try_into().unwrap()) as usize;
+    let Some(q) = window(pos + 4, slen, b.len()) else { return String::new(); };
+    String::from_utf8_lossy(&b[q..q + slen]).into_owned()
 }
 // An EMPTY buffer has no data region, so both return NULL (which every bridge
 // consumer already treats as "move nothing"): `Vec::as_ptr` on an empty Vec is a
@@ -530,11 +529,10 @@ pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>
 /// Returns `(pos, None)` without advancing when either the prefix or the body
 /// runs off the end.
 pub fn almide_rt_bytes_read_string_be_at(b: &Vec<u8>, pos: i64) -> (i64, Option<String>) {
-    let p = pos as usize;
-    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return (pos, None); }
+    let Some(p) = window(pos, 4, b.len()) else { return (pos, None); };
     let slen = u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as usize;
-    if p + 4 + slen > b.len() { return (pos, None); }
-    let s = String::from_utf8_lossy(&b[p+4..p+4+slen]).into_owned();
+    let Some(q) = window(pos + 4, slen, b.len()) else { return (pos, None); };
+    let s = String::from_utf8_lossy(&b[q..q + slen]).into_owned();
     (pos + 4 + slen as i64, Some(s))
 }
 
@@ -722,10 +720,14 @@ pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
 
 // Read `len` bytes from position `pos` as UTF-8.
 // Invalid UTF-8 sequences are replaced (via String::from_utf8_lossy).
+// The two sign tests are written out rather than left to `as usize`. This leg was already
+// correct, but only by accident of the cast: a negative `pos` became ~1.8e19 and the
+// checked_add then failed. That is a guard whose correctness lives in a cast three lines
+// away — the reader cannot see the rule, and neither could the other leg, which read the
+// same window with a plain `pos + len > blen` and returned the cap field as text.
 pub fn almide_rt_bytes_read_string_at(b: &Vec<u8>, pos: i64, len: i64) -> String {
-    let p = pos as usize;
-    let n = len as usize;
-    if p.checked_add(n).is_none_or(|__e| __e > b.len()) { return String::new(); }
+    let Ok(n) = usize::try_from(len) else { return String::new(); };
+    let Some(p) = window(pos, n, b.len()) else { return String::new(); };
     String::from_utf8_lossy(&b[p..p + n]).into_owned()
 }
 
@@ -867,21 +869,20 @@ pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 // Skip `count` length-prefixed entries starting at `pos`.
 // Each entry = [u32 len little-endian][len bytes]. Returns next position.
 // Native implementation bypasses per-iteration Almide-side Vec<u8> clones.
+// A negative `count` is ZERO entries, not `count as usize` = ~1.8e19 of them. The cast made
+// this leg skip to EOF where the self-host returned `pos` unchanged; the self-host's own
+// comment had named the divergence and left it standing. A negative `pos` likewise reads
+// nothing rather than round-tripping through a huge usize.
 pub fn almide_rt_bytes_skip_length_prefixed_le(b: &Vec<u8>, pos: i64, count: i64) -> i64 {
-    let mut p = pos as usize;
-    // NO ceiling here: `count` bounds the number of ENTRIES walked, not a size to
-    // allocate, and each entry consumes at least its 4-byte prefix — so a huge count
-    // terminates against the buffer, it does not reserve against it. Capping it made
-    // this leg abort where the other answered a position, which is the divergence
-    // inverted rather than removed.
-    let n = if count < 0 { 0usize } else { count as usize };
+    if count <= 0 { return pos; }
     let buf = b.as_slice();
-    for _ in 0..n {
-        if p.checked_add(4).is_none_or(|__e| __e > buf.len()) { return p as i64; }
-        let len = u32::from_le_bytes([buf[p], buf[p+1], buf[p+2], buf[p+3]]) as usize;
-        p = p.saturating_add(4).saturating_add(len);
+    let mut p = pos;
+    for _ in 0..count {
+        let Some(q) = window(p, 4, buf.len()) else { return p; };
+        let len = u32::from_le_bytes([buf[q], buf[q+1], buf[q+2], buf[q+3]]) as i64;
+        p = q as i64 + 4 + len;
     }
-    p as i64
+    p
 }
 
 // IEEE-754 half precision → f32. Hardware-free reference impl.
@@ -902,18 +903,24 @@ fn f16_bits_to_f64(bits: u16) -> f32 {
     }
 }
 
+// Same two rules as `skip_length_prefixed_le`: a negative `pos` or `count` reads nothing.
+// The reserve is additionally capped by what the buffer COULD hold — each entry costs at
+// least its 4-byte prefix — because `Vec::with_capacity(count as usize)` turned a negative
+// count into an immediate allocation abort on this leg while the self-host answered `[]`.
 pub fn almide_rt_bytes_read_length_prefixed_strings_le(b: &Vec<u8>, pos: i64, count: i64) -> Vec<String> {
-    let mut p = pos as usize;
-    let n = if count < 0 { 0usize } else { count as usize };
+    if count <= 0 { return Vec::new(); }
     let buf = b.as_slice();
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        if p.checked_add(4).is_none_or(|__e| __e > buf.len()) { break; }
-        let len = u32::from_le_bytes([buf[p], buf[p+1], buf[p+2], buf[p+3]]) as usize;
-        p += 4;
-        if p.checked_add(len).is_none_or(|__e| __e > buf.len()) { break; }
-        out.push(String::from_utf8_lossy(&buf[p..p+len]).into_owned());
-        p += len;
+    let mut p = pos;
+    // Each entry costs at least its 4-byte prefix, so the buffer caps how many can
+    // exist. `Vec::with_capacity(count as usize)` alone turned a huge count into an
+    // allocation abort on this leg while the other answered `[]`.
+    let mut out = Vec::with_capacity((count as usize).min(buf.len() / 4 + 1));
+    for _ in 0..count {
+        let Some(q) = window(p, 4, buf.len()) else { break; };
+        let len = u32::from_le_bytes([buf[q], buf[q+1], buf[q+2], buf[q+3]]) as usize;
+        let Some(r) = window(q as i64 + 4, len, buf.len()) else { break; };
+        out.push(String::from_utf8_lossy(&buf[r..r + len]).into_owned());
+        p = (r + len) as i64;
     }
     out
 }
