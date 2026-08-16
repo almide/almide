@@ -3522,3 +3522,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-286"
+spec      = "ALS-E9"
+title     = "`??` reads its source; the Option survives the elimination and stays readable"
+statement = "`xs ?? default` READS the Option it eliminates. The source is not consumed, so the same binding may be eliminated any number of times, and remains readable afterwards by any other spelling (`match`, a further `??`), with identical results on both targets. It used to be consumed on the wasm leg for every HEAP payload. A heap `??` lowers to a synthesized `match e { some(p) => p, none => d }` (#1270), and `try_lower_variant_value_match` dropped its subject; the ownership test was membership in `live_heap_handles`, whose own documentation calls it `heap handles in binding order, FOR SCOPE-END DROPS` — so every `let`-bound heap local is in it, and a still-live user variable was read as an owned temporary. The first `??` therefore FREED the binding while later readers still needed it. The payload arm was never the problem: it already emitted `Op::Dup`. Only one leg lost the value, which is why it went unseen: the native renderer emits `Drop`/`DropListStr` as a COMMENT and leaves the free to Rust's own scope end, while the wasm renderer emits `rc_dec` and the free is real — so both legs exited 0 and printed different answers. Measured across the family: `String?` gave `abc,z` against `abc,abc`, `List[Int]?` gave `3,0` against `3,3`, `Option[Option[Int]]` gave `5,9,9` against `5,5,5`, and a `match` reading the source after one `??` saw the payload already freed. This is `xs ?? default` — the fallback idiom docs/CHEATSHEET.md recommends — so the blast radius was every heap Option in the language, not a corner. Found by the differential fuzz (seed 510754018596 index 189, a mutation of spec/wasm_cross/option_result_ctors.almd) in its nested-Option cell only; the fixture pins the whole family because the defect lived in the match's subject handling and never cared which payload type it carried. A HAND-WRITTEN two-arm `match` over the same binding was always correct — that asymmetry is what localized the defect to the synthesized rewrite rather than to matching, and it is pinned here as a counter-cell. The scope-end pass still drops the binding exactly once: a subject left alone stays in `live_heap_handles`, so the single-use shape neither double-frees nor leaks, and that cell is pinned too."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_or_source_survives.almd", class = "fixture" },
+]
