@@ -23,6 +23,11 @@
 [[class]]
 name = "HEAP_BOUNDARY"
 patterns = [
+  # C-197's interp face: an over-cap bound-range materialization is a
+  # MACHINE-DEPENDENT observable (both backends take the defined OOM abort at
+  # their own limits), so no interp answer is ever a faithful vote — 
+  # architectural, not bounded work.
+  "capability: range materialization beyond the interp cap",
   "capability: prim.handle",
   "capability: prim.alloc_value",
   "capability: prim.alloc_map",

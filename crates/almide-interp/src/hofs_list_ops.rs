@@ -201,6 +201,12 @@ impl<'a> Interpreter<'a> {
         match args.first() {
             Some(v) => match v.as_iter_slice().map(<[Value]>::len).or_else(|| v.as_iter_items().map(|i| i.len())) {
                 Some(n) => Flow::val(Value::Int(n as i64)),
+                // A Range that as_iter_items refuses is the OVER-CAP span
+                // (C-197): both backends materialize and take the defined OOM
+                // abort, so any answer here is a wrong vote — abstain.
+                None if matches!(v, Value::Range { .. }) => Flow::Unsupported(
+                    "range materialization beyond the interp cap (both backends take the C-197 resource path)".into(),
+                ),
                 None => Flow::Abort("internal: list.len on non-list".into()),
             },
             None => Flow::Abort("internal: list.len no arg".into()),
@@ -210,6 +216,9 @@ impl<'a> Interpreter<'a> {
     fn list_is_empty(&mut self, args: &[Value]) -> Flow {
         match args.first().and_then(|v| v.as_iter_slice().map(<[Value]>::is_empty).or_else(|| v.as_iter_items().map(|i| i.is_empty()))) {
             Some(b) => Flow::val(Value::Bool(b)),
+            None if matches!(args.first(), Some(Value::Range { .. })) => Flow::Unsupported(
+                "range materialization beyond the interp cap (both backends take the C-197 resource path)".into(),
+            ),
             None => Flow::Abort("internal: list.is_empty on non-list".into()),
         }
     }

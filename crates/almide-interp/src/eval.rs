@@ -696,7 +696,21 @@ impl<'a> Interpreter<'a> {
             // building the block. Bounds match `Value::List` above: the codegen OOB
             // contract is abort + exit 1.
             Value::Range { start, end, inclusive } => {
-                let len = if inclusive { end - start + 1 } else { end - start };
+                let len = if inclusive {
+                    (end.saturating_sub(start)).saturating_add(1)
+                } else {
+                    end.saturating_sub(start)
+                };
+                // An over-cap span is the C-197 resource edge: both backends
+                // MATERIALIZE an indexed bound range and take the defined OOM
+                // abort there, so a lazily computed element would be a wrong
+                // third vote — abstain (same cap as `as_iter_items`).
+                if len > 16 * 1024 * 1024 {
+                    return Flow::Unsupported(
+                        "indexed range beyond the interp materialization cap                          (both backends take the C-197 resource path)"
+                            .into(),
+                    );
+                }
                 if i < 0 || len <= 0 || i >= len {
                     Flow::Abort("index out of bounds".into())
                 } else {
