@@ -115,12 +115,28 @@ fn path_fn(func: &str, args: &[Value]) -> Option<Flow> {
 }
 
 /// `bytes.*` — the subset with a pure list-of-int model. A `Bytes` value is a
-/// `List[Int]` in the interp, so `from_list` is the identity and `to_string_lossy`
+/// `List[Int]` in the interp, so `to_list` is the identity and `to_string_lossy`
 /// decodes. The mutating and raw-pointer surface stays out of scope.
 fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-        // `Bytes` IS the `List[Int]`, so both directions are the identity.
-        "from_list" | "to_list" => Flow::val(args.first()?.clone()),
+        // `to_list` is the identity — every stored element is already a
+        // truncated octet. `from_list` is NOT: the native runtime maps each
+        // element `x as u8` (almide_rt_bytes_from_list), so an out-of-range
+        // element must truncate HERE too — the identity kept `-128` in the
+        // model, and every read voted `-128` where both targets print `128`
+        // (#1505, the 0x80-as-signed wrong vote).
+        "from_list" => {
+            let items = args.first()?.as_iter_items()?;
+            let out: Vec<Value> = items
+                .iter()
+                .map(|v| match v {
+                    Value::Int(n) => Value::Int((*n as u8) as i64),
+                    other => other.clone(),
+                })
+                .collect();
+            Flow::val(Value::List(std::rc::Rc::new(out)))
+        }
+        "to_list" => Flow::val(args.first()?.clone()),
         "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
         // C-197: an unsatisfiable size is the defined abort on every leg —
         // the infallible `vec![_; n]` panicked with a capacity overflow on
@@ -846,4 +862,30 @@ fn string_fn_structural(func: &str, args: &[Value]) -> Option<Flow> {
         _ => return None,
     };
     Some(f)
+}
+
+#[cfg(test)]
+mod bytes_model_tests {
+    use super::*;
+
+    /// #1505: `bytes.from_list` must truncate each element to an octet the
+    /// way the native runtime's `x as u8` does — the identity model kept
+    /// `-128`/`300` in the list and every later read voted a value both
+    /// targets never print (0x80 came back `-128` where they print `128`).
+    #[test]
+    fn from_list_truncates_to_octets_like_the_native_cast() {
+        let src = Value::List(std::rc::Rc::new(vec![
+            Value::Int(1),
+            Value::Int(128),
+            Value::Int(255),
+            Value::Int(-128),
+            Value::Int(300),
+        ]));
+        let Some(Flow::Value(Value::List(out))) = bytes_fn("from_list", &[src]) else {
+            panic!("from_list did not evaluate");
+        };
+        let got: Vec<i64> =
+            out.iter().map(|v| match v { Value::Int(n) => *n, _ => panic!("non-int") }).collect();
+        assert_eq!(got, vec![1, 128, 255, 128, 44]);
+    }
 }
