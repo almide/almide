@@ -3,6 +3,8 @@
 // copies rc_inc explicitly — the __lc_copy_rc convention), correct for ANY element
 // layout (no deep copy, no layout assumption). The list keeps owning the originals;
 // the result's own typed drop releases exactly the acquired refs.
+import prim
+
 fn __hshare_elem(h: Int, i: Int) -> List[Int] = {
   let v: List[Int] = prim.load_handle(h + 12 + i * 8)
   v
@@ -23,6 +25,9 @@ else {
   __take_h_fill(dh, sh, n, i + 1)
 }
 
+// list.drop over SHARED heap elements — the take_hshare mirror (#877): the kept
+// tail's elements are rc_inc-SHARED into a fresh block; n<0 → the native
+// `skip(n as usize)` wraps huge → drops ALL (empty result), n>len → empty.
 fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -36,9 +41,6 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   out
 }
 
-// list.drop over SHARED heap elements — the take_hshare mirror (#877): the kept
-// tail's elements are rc_inc-SHARED into a fresh block; n<0 → the native
-// `skip(n as usize)` wraps huge → drops ALL (empty result), n>len → empty.
 fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -50,6 +52,10 @@ fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   out
 }
 
+// list.slice over SHARED heap elements — the take/drop mirror completing the
+// family: the [start, end) window's elements are rc_inc-SHARED into a fresh
+// block. Bounds clamp to [0, len] and an inverted window is empty, matching
+// `list_slice`'s scalar convention.
 fn __drop_h_fill(dh: Int, sh: Int, start: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let e = prim.load64(sh + 12 + (start + i) * 8)
@@ -58,26 +64,24 @@ else {
   __drop_h_fill(dh, sh, start, n, i + 1)
 }
 
-// list.slice over SHARED heap elements — the take/drop mirror completing the
-// family: the [start, end) window's elements are rc_inc-SHARED into a fresh
-// block. Bounds clamp to [0, len] and an inverted window is empty, matching
-// `list_slice`'s scalar convention.
+// list.unique / list.dedup over FLAT-BLOCK heap elements (List[List[Int]] /
+// List[(Int, Int)] — compound_eq): SLOT-WISE structural equality (length + raw
+// i64 slots — exact for inline-scalar blocks), kept elements rc_inc-SHARED into an
+// over-allocated block whose len is patched to the kept count (the alloc_set
+// convention; cap keeps the free-list exact).
 fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let s0 = if start < 0 then 0 else if start > len then len else start
-  let e0 = if end < 0 then 0 else if end > len then len else end
+  let s0 = if start < 0 then 0
+  else if start > len then len else start
+  let e0 = if end < 0 then 0
+  else if end > len then len else end
   let k = if e0 > s0 then e0 - s0 else 0
   let out: List[List[Int]] = prim.alloc_list_str(k)
   let _x = __drop_h_fill(prim.handle(out), h, s0, k, 0)
   out
 }
 
-// list.unique / list.dedup over FLAT-BLOCK heap elements (List[List[Int]] /
-// List[(Int, Int)] — compound_eq): SLOT-WISE structural equality (length + raw
-// i64 slots — exact for inline-scalar blocks), kept elements rc_inc-SHARED into an
-// over-allocated block whose len is patched to the kept count (the alloc_set
-// convention; cap keeps the free-list exact).
 fn __uh_eq_at(ah: Int, bh: Int, n: Int, i: Int) -> Bool = if i >= n then true
 else if prim.load64(ah + 12 + i * 8) != prim.load64(bh + 12 + i * 8) then false
 else __uh_eq_at(ah, bh, n, i + 1)
@@ -89,6 +93,8 @@ fn __uh_eq(ah: Int, bh: Int) -> Bool = {
   else __uh_eq_at(ah, bh, la, 0)
 }
 
+// Store `e` into out[k] (rc-shared) UNLESS already seen — the __ivh_set_append
+// shape (const-result arms); the caller advances k branchlessly by `1 - seen`.
 fn __uh_seen(oh: Int, k: Int, eh: Int, i: Int) -> Int = if i >= k then 0
 else {
   let hit = __uh_eq(prim.load64(oh + 12 + i * 8), eh)
@@ -96,8 +102,6 @@ else {
   else __uh_seen(oh, k, eh, i + 1)
 }
 
-// Store `e` into out[k] (rc-shared) UNLESS already seen — the __ivh_set_append
-// shape (const-result arms); the caller advances k branchlessly by `1 - seen`.
 fn __uh_acquire(e: Int) -> Int = {
   prim.rc_inc(e)
   0
@@ -140,6 +144,8 @@ else {
   __dh_fill(sh, oh, n, i + 1, k + 1 - last_eq)
 }
 
+// list.contains / list.index_of over FLAT-BLOCK heap elements — the same slot-wise
+// `__uh_eq` structural equality, borrowing (no allocation, no copy: search only).
 fn list_dedup_hshare(xs: List[List[Int]]) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -150,8 +156,6 @@ fn list_dedup_hshare(xs: List[List[Int]]) -> List[List[Int]] = {
   out
 }
 
-// list.contains / list.index_of over FLAT-BLOCK heap elements — the same slot-wise
-// `__uh_eq` structural equality, borrowing (no allocation, no copy: search only).
 fn __lch_idx(h: Int, x: Int, n: Int, i: Int) -> Int = if i >= n then 0 - 1
 else if __uh_eq(prim.load64(h + 12 + i * 8), x) then i
 else __lch_idx(h, x, n, i + 1)
@@ -167,6 +171,9 @@ fn __lih_none() -> Int? = none
 
 fn __lih_some(i: Int) -> Int? = some(i)
 
+// `list.get/first/last` over a FLAT heap element (List[scalar] / scalar tuple): the
+// Some payload SHARES the element (rc_inc via the Some-ctor Dup; the option's drop
+// releases it — balanced like get_or_hshare). OOB → none.
 fn list_index_of_hshare(xs: List[List[Int]], x: List[Int]) -> Int? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -174,9 +181,6 @@ fn list_index_of_hshare(xs: List[List[Int]], x: List[Int]) -> Int? = {
   if idx < 0 then __lih_none() else __lih_some(idx)
 }
 
-// `list.get/first/last` over a FLAT heap element (List[scalar] / scalar tuple): the
-// Some payload SHARES the element (rc_inc via the Some-ctor Dup; the option's drop
-// releases it — balanced like get_or_hshare). OOB → none.
 fn list_get_hshare(xs: List[List[Int]], i: Int) -> List[Int]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
