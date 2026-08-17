@@ -206,6 +206,23 @@ impl Parser {
         {
             return "`head :: tail` (cons pattern) is Haskell/OCaml/Elm syntax. Almide list patterns use [] / [a, b] literals only. For head/tail recursion, use `list.first(xs)` and `list.drop(xs, 1)` on the non-empty arm.".to_string();
         }
+        // Rust/OCaml or-pattern `A | B =>` → the parser saw `|` where a `=>`
+        // was expected. One arm per pattern is the Almide form (#1461).
+        if *expected == TokenType::FatArrow && got.token_type == TokenType::Pipe {
+            return "`A | B =>` (or-pattern) is not supported in Almide match arms. Write one arm per pattern — `Red => expr, Green => expr` — extracting a shared body into a helper fn if it is long.".to_string();
+        }
+        // Rust `pat @ name` as-pattern → `@` where a `=>` was expected. Almide
+        // has no as-binding; bind the whole value and destructure inside (#1461).
+        if *expected == TokenType::FatArrow && got.token_type == TokenType::At {
+            return "`pattern @ name` (as-pattern) is not supported in Almide. Bind the whole value with a variable arm (`whole => ...`) and match again inside the body, or destructure what you need there.".to_string();
+        }
+        // Rust/Swift range pattern `1..<5 =>` / `1...5 =>` → a range operator
+        // where a `=>` was expected. Match arms take literals only (#1461).
+        if *expected == TokenType::FatArrow
+            && matches!(got.token_type, TokenType::DotDotLt | TokenType::DotDotDot)
+        {
+            return "range patterns (`1..<5 =>`, `1...5 =>`) are not supported in Almide match arms. Use a guard: `n if n >= 1 and n < 5 => expr`.".to_string();
+        }
         if let Some(result) = self.check_hint(Some(expected.clone()), super::hints::HintScope::Expression) {
             result.hint
         } else {
