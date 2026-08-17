@@ -58,6 +58,21 @@ else {
   __drop_h_fill(dh, sh, start, n, i + 1)
 }
 
+// list.slice over SHARED heap elements — the take/drop mirror completing the
+// family: the [start, end) window's elements are rc_inc-SHARED into a fresh
+// block. Bounds clamp to [0, len] and an inverted window is empty, matching
+// `list_slice`'s scalar convention.
+fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let s0 = if start < 0 then 0 else if start > len then len else start
+  let e0 = if end < 0 then 0 else if end > len then len else end
+  let k = if e0 > s0 then e0 - s0 else 0
+  let out: List[List[Int]] = prim.alloc_list_str(k)
+  let _x = __drop_h_fill(prim.handle(out), h, s0, k, 0)
+  out
+}
+
 // list.unique / list.dedup over FLAT-BLOCK heap elements (List[List[Int]] /
 // List[(Int, Int)] — compound_eq): SLOT-WISE structural equality (length + raw
 // i64 slots — exact for inline-scalar blocks), kept elements rc_inc-SHARED into an
