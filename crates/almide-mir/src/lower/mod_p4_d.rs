@@ -67,6 +67,16 @@ fn list_call_name_preserving_combinators(func: &str, result_ty: &Ty) -> Option<S
     if args.len() == 1 && matches!(args[0], Ty::String) {
         return Some(format!("list.{func}_str"));
     }
+    // Float elements: unique/dedup COMPARE — the generic twin's raw i64 slot
+    // eq diverges from native's f64 `==` at -0.0 == 0.0 and NaN != NaN (the
+    // #924 2026-08-16 finding). Route to the prim.feq twins; the other
+    // preserving combinators never compare, so the generic copy is exact.
+    if args.len() == 1
+        && matches!(args[0], Ty::Float)
+        && matches!(func, "unique" | "dedup")
+    {
+        return Some(format!("list.{func}_float"));
+    }
     // A NON-String heap element (a custom variant / record / Value handle):
     // the `_str` deep-copy would read the block's length word as a byte
     // count (garbage handles — the closures_and_variants UAF). `filter`
@@ -188,6 +198,16 @@ fn list_accessor_heap_share_name(func: &str, args: &[Ty]) -> Option<String> {
     if args.len() == 1 && matches!(args[0], Ty::String) {
         return Some(format!("list.{func}_str"));
     }
+    // Float elements: unique/dedup COMPARE — the generic twin's raw i64 slot
+    // eq diverges from native's f64 `==` at -0.0 == 0.0 and NaN != NaN (the
+    // #924 2026-08-16 finding). Route to the prim.feq twins; the other
+    // preserving combinators never compare, so the generic copy is exact.
+    if args.len() == 1
+        && matches!(args[0], Ty::Float)
+        && matches!(func, "unique" | "dedup")
+    {
+        return Some(format!("list.{func}_float"));
+    }
     // Any remaining heap-element shape (find over Value/List/Map/Set; get/first/last
     // over a non-String heap List element) has no covering arm above — route to a
     // deliberately UNREGISTERED `_x` name. The bare `list.{func}` name is NOT a safe
@@ -279,6 +299,11 @@ fn list_call_name_search(func: &str, arg_tys: &[Ty]) -> Option<String> {
         return None;
     }
     let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() else { return None };
+    // Float search is an EQUALITY compare — same two divergent cells as
+    // unique/dedup (#924): route to the prim.feq twins before the heap gate.
+    if a.len() == 1 && matches!(a[0], Ty::Float) {
+        return Some(format!("list.{func}_float"));
+    }
     if a.len() != 1 || !is_heap_ty(&a[0]) {
         return None;
     }

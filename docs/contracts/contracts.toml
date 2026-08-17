@@ -3566,3 +3566,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_enumerate_rich.almd", class = "fixture" },
 ]
+
+
+[[contract]]
+id        = "C-289"
+spec      = "ALS-M10"
+title     = "The Float equality family compares with f64 equality on both targets"
+statement = "list.unique, list.dedup, list.contains and list.index_of over List[Float] decide equality with f64 `==` (prim.feq) on both targets: -0.0 equals 0.0 (unique/dedup collapse them, contains/index_of find one through the other) and NaN equals nothing including itself (every NaN survives unique/dedup; contains([NaN], NaN) is false). The generic scalar self-hosts compared raw i64 slot BITS, so the wasm leg kept -0.0 and 0.0 apart and collapsed bit-identical NaNs — the 2026-08-16 nightly fuzz OutputDivergence (seed 510794570102 index 892, the list.unique cell), which the constant folder masked for literal inputs by evaluating natively at compile time on both legs. The Float element class now routes to prim.feq twins (list.{unique,dedup,contains,index_of}_float) before the generic scalar fallthrough."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_float_equality_family.almd", class = "fixture" },
+]

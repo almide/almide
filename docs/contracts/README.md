@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-288 contracts
+289 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -316,4 +316,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-286 | `??` reads its source; the Option survives the elimination and stays readable | 0.57.1 | active | fixture | 1 |
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
 | C-288 | list.enumerate over a rich-variant list executes on both targets | 0.57.1 | active | fixture | 1 |
+| C-289 | The Float equality family compares with f64 equality on both targets | 0.57.1 | active | fixture | 1 |
 
