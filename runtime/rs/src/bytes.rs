@@ -29,7 +29,6 @@ fn window(pos: i64, width: usize, len: usize) -> Option<usize> {
 /// The array-read ceiling, in ELEMENTS. 8 bytes each, so this is the same
 /// 2 GiB `ALMIDE_REPEAT_MAX_BYTES` (string.rs) and the same `268435456` the
 /// self-host `list_make.almd` already uses — one limit, one message.
-const ALMIDE_ARRAY_MAX_ELEMS: i64 = 268435456;
 
 pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
 pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
@@ -52,13 +51,6 @@ pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r =
 // prints the same line. The infallible `vec![0; n]` here instead died on the
 // Rust allocator abort (SIGABRT, no exit code — fuzz seed 500705518626
 // index 711, `bytes.new(i64::MAX)`).
-/// The 2 GiB allocation ceiling, in this module's unit (bytes). It is ONE ceiling wearing
-/// four names — `ALMIDE_REPEAT_MAX_BYTES` (string, bytes), `ALMIDE_LIST_REPEAT_MAX_ELEMS`
-/// (list, /8 for the slot width), `ALMIDE_MATRIX_MAX_ELEMS` (matrix, /8 for f64) — plus the
-/// self-host literals that must equal them. `scripts/check-alloc-ceilings.sh` converts each
-/// to bytes and fails if they stop denoting the same limit, so the four are no longer held
-/// together by a comment asking someone to remember.
-pub const ALMIDE_BYTES_MAX_BYTES: i64 = 1 << 31;
 
 // The shared 2^31-BYTE ceiling for the bytes allocators, in the T6 form (C-161). Sized
 // BELOW the wasm 4 GiB address space so a size one leg can satisfy and the other cannot
@@ -66,22 +58,19 @@ pub const ALMIDE_BYTES_MAX_BYTES: i64 = 1 << 31;
 // `bytes.new(u32::MAX)` diverged: this leg happily allocated 4 GiB and the other aborted.
 // `alloc_bytes_or_oom` below still guards a size UNDER the ceiling that this particular
 // machine cannot satisfy; the two are different failures and both are needed.
-fn cap_bytes_or_die(n: i64) {
-    if n > ALMIDE_BYTES_MAX_BYTES {
+/// try_reserve-backed output buffer for the bulk readers: a count the machine
+/// cannot satisfy is the C-197 abort — never a raw capacity-overflow panic and
+/// never a CHOSEN ceiling (ratified A, 2026-08-17; the nine-compiler survey in
+/// ../almide-references/RESEARCH-allocation-ceilings.md found zero precedent
+/// for a chosen cross-target cap — the cohort unifies the failure form and
+/// lets the threshold stay structural per target).
+fn alloc_elems_or_oom<T>(n: usize) -> Vec<T> {
+    let mut v: Vec<T> = Vec::new();
+    if v.try_reserve_exact(n).is_err() {
         eprintln!("Error: out of memory");
         std::process::exit(1);
     }
-}
-
-/// The repeat family keeps C-161's more specific line: a `repeat` whose PRODUCT is
-/// over the ceiling is a sizing mistake, not a machine limit, and its fixtures pin
-/// that wording. The ceiling VALUE is shared and gated; the MESSAGE follows the
-/// operation's own vocabulary.
-fn cap_repeat_or_die(n: i64) {
-    if n > ALMIDE_BYTES_MAX_BYTES {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    v
 }
 
 fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
@@ -93,11 +82,6 @@ fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
     v
 }
 pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
-    // Tested by DIVISION: `len * n` is the multiplication that overflows, so a ceiling
-    // computed from the product would be testing the wrapped value.
-    if !b.is_empty() {
-        cap_repeat_or_die(n.saturating_mul(b.len() as i64));
-    }
     let n = n.max(0) as usize;
     let total = b.len().checked_mul(n).unwrap_or(usize::MAX);
     let mut v = alloc_bytes_or_oom(total);
@@ -105,7 +89,6 @@ pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
     v
 }
 pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> {
-    cap_bytes_or_die(len);
     let n = len.max(0) as usize;
     let mut v = alloc_bytes_or_oom(n);
     v.resize(n, 0);
@@ -158,18 +141,14 @@ macro_rules! u16_le_array_impl {
     ($name:ident, $ty:ty, $from:expr) => {
         pub fn $name(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
             let mut p = pos as usize;
-            // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-            let mut out = Vec::with_capacity(n);
+            let mut out = alloc_elems_or_oom(n);
             for _ in 0..n {
                 if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0); p += 2; continue; }
                 let v: $ty = $from([b[p], b[p+1]]);
@@ -245,9 +224,12 @@ pub fn almide_rt_bytes_pad_left(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u
     if target_len <= b.len() as i64 {
         return b.clone();
     }
-    cap_bytes_or_die(target_len);
-    let pad = target_len as usize - b.len();
-    let mut out = vec![val as u8; pad];
+    // No chosen ceiling (ratified A, 2026-08-17): the try_reserve inside
+    // alloc_bytes_or_oom carries an unsatisfiable target to the C-197 abort;
+    // the wasm leg fails identically at its own i32 floor bound.
+    let target = target_len as usize;
+    let mut out = alloc_bytes_or_oom(target);
+    out.resize(target - b.len(), val as u8);
     out.extend_from_slice(b);
     out
 }
@@ -259,10 +241,13 @@ pub fn almide_rt_bytes_pad_right(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<
     if target_len <= b.len() as i64 {
         return b.clone();
     }
-    cap_bytes_or_die(target_len);
-    let pad = target_len as usize - b.len();
-    let mut out = b.clone();
-    out.extend(std::iter::repeat(val as u8).take(pad));
+    // No chosen ceiling (ratified A, 2026-08-17): the try_reserve inside
+    // alloc_bytes_or_oom carries an unsatisfiable target to the C-197 abort;
+    // the wasm leg fails identically at its own i32 floor bound.
+    let target = target_len as usize;
+    let mut out = alloc_bytes_or_oom(target);
+    out.extend_from_slice(b);
+    out.resize(target, val as u8);
     out
 }
 
@@ -614,18 +599,14 @@ pub fn almide_rt_bytes_append_f64_be(b: &mut Vec<u8>, val: f64) {
 
 pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
@@ -635,18 +616,14 @@ pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(i32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
@@ -656,18 +633,14 @@ pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
         out.push(i64::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
@@ -677,18 +650,14 @@ pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
         out.push(f32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64);
@@ -698,18 +667,14 @@ pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 }
 pub fn almide_rt_bytes_read_f64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
         out.push(f64::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
@@ -779,18 +744,14 @@ pub fn almide_rt_bytes_read_string_at(b: &Vec<u8>, pos: i64, len: i64) -> String
 
 pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(i32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
@@ -801,18 +762,14 @@ pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
         out.push(i64::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
@@ -823,18 +780,14 @@ pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(u32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
@@ -845,18 +798,14 @@ pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
         out.push(f64::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
@@ -867,18 +816,14 @@ pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
         out.push(f32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64);
@@ -889,18 +834,14 @@ pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
     let mut p = pos as usize;
-    // `count` is the OUTPUT size, so it is clamped on the full i64 BEFORE any
-    // narrowing (C-054) and capped by the shared ceiling C-161 already gives
-    // `repeat` — same limit, same message, so a caller learns one rule. This
-    // read `count as usize`, which turns a NEGATIVE count into ~1.8e19 and ran
-    // that many iterations, where the self-host clamped it to 0 and answered an
-    // empty list.
-    if count > ALMIDE_ARRAY_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
-    }
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
+    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
+    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
+    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
+    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
+    // divergence C-197 declares.
     let n = if count < 0 { 0usize } else { count as usize };
-    let mut out = Vec::with_capacity(n);
+    let mut out = alloc_elems_or_oom(n);
     for _ in 0..n {
         if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 2; continue; }
         let bits = u16::from_le_bytes([b[p], b[p+1]]);

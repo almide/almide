@@ -13,11 +13,12 @@
 //    sign the difference is bounded by i64::MAX and cannot overflow, and only a span
 //    straddling zero can — where either half exceeding the ceiling already settles it.
 //
-//    Read where the ceiling came from: `list_repeat` carries the same LIMIT twelve
-//    lines below `list_range` in the same file. Adjacency is not a mechanism.
-//    The MESSAGE differs by operation: a range is a plain allocation, so it takes
-//    C-197's `Error: out of memory`, while `repeat` keeps C-161's more specific
-//    `Error: repeat result too large`. The ceiling value is what is shared.
+//    Under the ratified A (2026-08-17) `list.range` has NO chosen ceiling: each
+//    leg ranges to its own structural bound and takes C-197's `Error: out of
+//    memory` beyond it. What this fixture pins is the part that IS portable —
+//    the count arithmetic cannot wrap (a span like (i64::MIN, 3) is the abort
+//    on BOTH legs, where 0.57.0's native died on a raw capacity-overflow panic,
+//    exit 101), and in-range spans answer identically.
 //
 // 2. string.pad_start / pad_end. The pad byte count is `n * pclen`, and that product is
 //    what overflows, so the ceiling is tested by DIVISION — a guard computed from the
@@ -57,6 +58,7 @@ fn main() -> Unit = {
   println("io_neg=" + int.to_string(list.len(io.read_n_bytes(0 - 1))))
   println("io_max=" + int.to_string(list.len(io.read_n_bytes(9223372036854775807))))
   println("io_2p32=" + int.to_string(list.len(io.read_n_bytes(4294967296))))
-  // ── the aborts, last, so every value above is observed first.
+  // ── the abort, last, so every value above is observed first. This span exceeds
+  // BOTH legs' structural bounds, so the C-197 abort is portable for it.
   println("r_wide=" + int.to_string(list.len(list.range(0 - 9223372036854775807 - 1, 3))))
 }

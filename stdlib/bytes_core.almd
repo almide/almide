@@ -45,13 +45,14 @@ else {
 }
 
 // bytes.new(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
+// No stdlib allocation guard (ratified A, 2026-08-17): measured on 0.57.0, this
+// leg's floor turns every unsatisfiable size — 2.5 GiB in a full heap, u32::MAX,
+// i64::MAX — into the defined `Error: out of memory`, never a trap. A 2^31 guard
+// briefly shipped here and cut the 2-4 GiB sizes 0.57.0 satisfied on this leg.
+// Native allocates to its own bound via try_reserve with the same message; the
+// gap between the two bounds is C-197's contracted divergence. Same rule for
+// pad_left/pad_right/repeat below.
 fn bytes_new(len: Int) -> Bytes = {
-  // The shared 2^31-BYTE ceiling every bytes allocation takes, in the T6 form on both
-  // targets (C-161, the same rule list.repeat and string.repeat already take). It is sized
-  // BELOW the wasm 4 GiB address space so a size one leg can satisfy and the other cannot
-  // does not become a native success against a wasm out-of-memory. Keep in sync with
-  // ALMIDE_REPEAT_MAX_BYTES in runtime/rs/src/string.rs.
-  if len > 2147483648 then prim.die(prim.handle("Error: out of memory\n")) else ()
   let n = if len > 0 then len else 0
   let b = prim.alloc_bytes(n)
   let _x = __zerofill(prim.handle(b) + 12, n, 0)
@@ -100,16 +101,6 @@ else {
 fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
   let blen = prim.load32(prim.handle(b) + 4)
   let n = if count > 0 then count else 0
-  // The ceiling is on the RESULT SIZE, so it is tested by DIVISION rather than on the
-  // product: `blen * n` is the very multiplication that overflows, and a guard computed
-  // from the overflowed value tests nothing. blen is a u32-derived length, so `blen > 0`
-  // is the only case with a product to bound.
-  // The shared 2^31-BYTE ceiling every bytes allocation takes, in the T6 form on both
-  // targets (C-161, the same rule list.repeat and string.repeat already take). It is sized
-  // BELOW the wasm 4 GiB address space so a size one leg can satisfy and the other cannot
-  // does not become a native success against a wasm out-of-memory. Keep in sync with
-  // ALMIDE_REPEAT_MAX_BYTES in runtime/rs/src/string.rs.
-  if blen > 0 and n > 2147483648 / blen then prim.die(prim.handle("Error: repeat result too large\n")) else ()
   let out = prim.alloc_bytes(blen * n)
   let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
   out
@@ -225,12 +216,6 @@ else {
 // bytes.pad_left(b, target_len, val) -> b prefixed with `val` bytes up to target_len (no-op if longer).
 fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
-  // The shared 2^31-BYTE ceiling every bytes allocation takes, in the T6 form on both
-  // targets (C-161, the same rule list.repeat and string.repeat already take). It is sized
-  // BELOW the wasm 4 GiB address space so a size one leg can satisfy and the other cannot
-  // does not become a native success against a wasm out-of-memory. Keep in sync with
-  // ALMIDE_REPEAT_MAX_BYTES in runtime/rs/src/string.rs.
-  if target_len > 2147483648 then prim.die(prim.handle("Error: out of memory\n")) else ()
   let t = if target_len > n then target_len else n
   let pad = t - n
   let out = prim.alloc_bytes(t)
@@ -243,12 +228,6 @@ fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
 // bytes.pad_right(b, target_len, val) -> b suffixed with `val` bytes up to target_len (no-op if longer).
 fn bytes_pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
-  // The shared 2^31-BYTE ceiling every bytes allocation takes, in the T6 form on both
-  // targets (C-161, the same rule list.repeat and string.repeat already take). It is sized
-  // BELOW the wasm 4 GiB address space so a size one leg can satisfy and the other cannot
-  // does not become a native success against a wasm out-of-memory. Keep in sync with
-  // ALMIDE_REPEAT_MAX_BYTES in runtime/rs/src/string.rs.
-  if target_len > 2147483648 then prim.die(prim.handle("Error: out of memory\n")) else ()
   let t = if target_len > n then target_len else n
   let pad = t - n
   let out = prim.alloc_bytes(t)
