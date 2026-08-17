@@ -5,7 +5,7 @@
 //   key = bits ^ ((bits >>_s 63) >>_u 1)
 // (arithmetic shift broadcasts the sign, logical shift drops the sign bit, XOR flips the lower 63
 // bits of a negative) and the keys are compared as signed i64 = totalOrder. The STORED elements stay
-// the original f64 bits — only the comparison key is transformed. Selection sort; List[Float] only.
+// the original f64 bits — only the comparison key is transformed. Stable bottom-up mergesort (#1459); List[Float] only.
 fn __ftotal_sf(b: Int) -> Int = {
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
@@ -14,24 +14,37 @@ fn __ftotal_sf(b: Int) -> Int = {
 
 fn __sortf_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 
-fn __sortf_min(h: Int, n: Int, j: Int, best: Int) -> Int = if j >= n then best
+// ── stable bottom-up mergesort by the monotone totalOrder key (#1459):
+// O(n log n) in place of the O(n^2) selection scan. The key transform is
+// applied per comparison; the stored slots stay the original f64 bits.
+fn __sortf_mrun(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
-  let e = __sortf_load(h, j)
-  let be = __sortf_load(h, best)
-  let ek = __ftotal_sf(e)
-  let bk = __ftotal_sf(be)
-  let nb = if ek < bk then j else best
-  __sortf_min(h, n, j + 1, nb)
+  let takel = if j >= hi then true
+    else if i >= mid then false
+    else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
+  if takel then {
+    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, i))
+    __sortf_mrun(srch, dsth, mid, hi, i + 1, j, k + 1)
+  } else {
+    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, j))
+    __sortf_mrun(srch, dsth, mid, hi, i, j + 1, k + 1)
+  }
 }
 
-fn __sortf_sel(h: Int, n: Int, i: Int) -> Int = if i >= n then 0
+fn __sortf_mpass(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {
-  let mi = __sortf_min(h, n, i + 1, i)
-  let a = __sortf_load(h, i)
-  let b = __sortf_load(h, mi)
-  prim.store64(h + 12 + i * 8, b)
-  prim.store64(h + 12 + mi * 8, a)
-  __sortf_sel(h, n, i + 1)
+  let m0 = lo + width
+  let mid = if m0 > n then n else m0
+  let h0 = lo + width * 2
+  let hi = if h0 > n then n else h0
+  let _r = __sortf_mrun(srch, dsth, mid, hi, lo, mid, lo)
+  __sortf_mpass(srch, dsth, n, width, lo + width * 2)
+}
+
+fn __sortf_mrounds(curh: Int, othh: Int, n: Int, width: Int) -> Int = if width >= n then curh
+else {
+  let _p = __sortf_mpass(curh, othh, n, width, 0)
+  __sortf_mrounds(othh, curh, n, width * 2)
 }
 
 fn __sortf_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
@@ -47,6 +60,9 @@ fn list_sort_float(xs: List[Float]) -> List[Float] = {
   let buf = prim.alloc_list_f64(n)
   let bh = prim.handle(buf)
   let _c = __sortf_copy(h, bh, n, 0)
-  let _s = __sortf_sel(bh, n, 0)
+  let tmp = prim.alloc_list_f64(n)
+  let th = prim.handle(tmp)
+  let fin = __sortf_mrounds(bh, th, n, 1)
+  let _cb = if fin == bh then 0 else __sortf_copy(fin, bh, n, 0)
   buf
 }
