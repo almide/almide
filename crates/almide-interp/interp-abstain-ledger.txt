@@ -41,8 +41,6 @@ heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
 hex_two_module_link  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 host_floor_string_alloc  out-of-interp-scope capability: prim.alloc_list
-int_pow_negative_exponent  out-of-interp-scope capability: prim.die
-int_rotate_nonpositive_width  out-of-interp-scope capability: prim.die
 io_write_ordering  out-of-interp-scope capability: prim.fd_write
 json_gltf_walk  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 json_number_unicode  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
@@ -52,7 +50,6 @@ json_stringify_pretty  out-of-interp-scope capability: prim.alloc_value
 json_value  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 let_unwrap_propagation  out-of-interp-scope capability: prim.alloc_value
 list_chunk_windows  out-of-interp-scope capability: prim.alloc_list_str
-list_chunk_zero  out-of-interp-scope capability: prim.die
 list_comprehensive  out-of-interp-scope capability: prim.alloc_list
 list_count_index_truncation  out-of-interp-scope capability: prim.alloc_list_str
 list_flatten_borrow  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
@@ -63,14 +60,12 @@ list_set_value  out-of-interp-scope capability: prim.alloc_value
 list_slice_oob  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 list_update_heap  out-of-interp-scope capability: prim.alloc_value
 list_window_zero  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-list_windows_zero  out-of-interp-scope capability: prim.die
-map_core_trio  out-of-interp-scope capability: HOF map.find
-map_filter  out-of-interp-scope capability: HOF map.filter
+map_core_trio  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 map_fold_heap_acc  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 map_index_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 map_insertion_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 map_set_ops  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_set_typechange  out-of-interp-scope capability: HOF map.map
+map_set_typechange  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 map_wide_int_key  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
