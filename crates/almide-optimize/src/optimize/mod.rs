@@ -18,17 +18,34 @@ use almide_ir::*;
 /// Run all optimization passes on an IR program.
 /// Requires use-counts to be computed (done by `lower_program`).
 pub fn optimize_program(program: &mut IrProgram) {
-    // Pass 1: constant folding (bottom-up rewrite)
-    constant_fold(program);
+    // ALMIDE_DISABLE_OPT skips the PERF passes — fold, DCE, propagate — so the
+    // perf ratchet can grow an ablation leg (#1466/#1487: the measured delta
+    // IS the optimizer's contribution). Three passes are exempt on purpose,
+    // because they are not optimizations: optional-chain and branch-lift are
+    // lowering ENABLERS the v1 wasm renderer depends on, and the unsigned
+    // re-fold is CORRECTNESS (a literal pair under a UInt64 `/`/`%` reaching
+    // the emitters folds SIGNED on the native leg — the #872 divergence).
+    // Ablation must never change what a program PRINTS (verified: the full
+    // 403-file suite passes byte-identical under ablation). It may cost a
+    // file its wasm-leg lowering — dead code that DCE deletes can contain a
+    // walling shape, which then walls honestly and falls back (measured: 12
+    // fallbacks normally, 13 ablated) — which is the correct trade for a
+    // measurement mode: an honest wall, never a changed answer.
+    let ablate = std::env::var_os("ALMIDE_DISABLE_OPT").is_some();
 
-    // Recompute use-counts after folding may have eliminated references
-    compute_use_counts(program);
+    if !ablate {
+        // Pass 1: constant folding (bottom-up rewrite)
+        constant_fold(program);
 
-    // Pass 2: dead code elimination
-    dce::eliminate_dead_code(program);
+        // Recompute use-counts after folding may have eliminated references
+        compute_use_counts(program);
 
-    // Pass 3: constant propagation (replace vars bound to literals with the literal)
-    propagate::constant_propagate(program);
+        // Pass 2: dead code elimination
+        dce::eliminate_dead_code(program);
+
+        // Pass 3: constant propagation (replace vars bound to literals with the literal)
+        propagate::constant_propagate(program);
+    }
 
     // Pass 3b: RE-FOLD the unsigned 64-bit lane (#872). Propagation is what
     // first puts two literals under a `UInt64` `/`/`%` (`let big: UInt64 =
@@ -45,7 +62,9 @@ pub fn optimize_program(program: &mut IrProgram) {
     compute_use_counts(program);
 
     // Pass 4: dead code elimination again (propagation may create new dead bindings)
-    dce::eliminate_dead_code(program);
+    if !ablate {
+        dce::eliminate_dead_code(program);
+    }
 
     // Pass 5a: optional-chain desugar — `p?.f` → a call to a synthesized tail-match
     // helper (`optional_chain_synth_N`), the shape both backends prove out in every
