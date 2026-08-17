@@ -3581,7 +3581,7 @@ evidence  = [
 
 
 [[contract]]
-id        = "C-290"
+id        = "C-291"
 spec      = "ALS-M10"
 title     = "Each error-channel operator agrees with its defining function on both targets"
 statement = "ADR-0005's desugar table is executable: `x ?? d` equals `option.unwrap_or_else(x, () => d)` / `result.unwrap_or_else(r, (_) => d)` per operand family, `r?` equals `result.to_option(r)`, and `o?.f` equals `option.map(o, (v) => v.f)` — over ok/err and some/none operands, pairwise equal and byte-identical native == wasm. Until #1107 D1 the table was prose only, so an operator lowering could drift from its own definition with no fixture noticing. (The fixture's first draft itself demonstrated why the pin matters: `?? 0 - 1` parses as `(?? 0) - 1` — the postfix tier binds tighter than `-` — so the operator column silently read 6 where the function column read 7; the committed fixture parenthesizes the fallback, and E038 exists for exactly that reading trap.)"

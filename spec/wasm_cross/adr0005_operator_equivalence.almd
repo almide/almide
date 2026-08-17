@@ -1,4 +1,4 @@
-// @contract: C-290
+// @contract: C-291
 // ADR-0005 D1 (#1107): each error-channel operator IS its defining function.
 // The spec's desugar table (docs/specs/result-option-effect.md) states four
 // equivalences; this fixture evaluates BOTH spellings of each over ok/err
