@@ -12,7 +12,8 @@
 //!    compiler (via `with_code("EXXX")` in source) has a matching
 //!    `docs/diagnostics/EXXX.md`, and vice versa.
 //!
-//! Non-goals (deferred — see `docs/roadmap/active/llms-txt-autogen.md`):
+//! Non-goals (deferred; the roadmap doc this used to cite was never written —
+//! almide#1483 tracks the wider LLM-surface gate):
 //! - Full regeneration of llms.txt from templates + sources.
 //! - Parsing CHEATSHEET.md / DESIGN.md for idiom sections.
 //! - CLI reference extraction from clap.
@@ -26,7 +27,7 @@ const DIAGNOSTICS_DIR: &str = "docs/diagnostics";
 pub fn cmd_docs_gen(check: bool) {
     if !check {
         err(&format!("error: `almide docs-gen` currently only supports `--check`."));
-        err(&format!("       Full regeneration is planned — see docs/roadmap/active/llms-txt-autogen.md"));
+        err(&format!("       Full regeneration is deferred — almide#1483 tracks the LLM-surface gate."));
         std::process::exit(2);
     }
 

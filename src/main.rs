@@ -281,7 +281,7 @@ enum Commands {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
     },
-    /// Agent/LLM semantic queries (outline, doc, peek-def, find-refs)
+    /// Agent/LLM semantic queries (outline, doc, stdlib-snapshot)
     Ide {
         #[command(subcommand)]
         cmd: IdeCommand,

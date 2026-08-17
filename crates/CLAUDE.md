@@ -30,7 +30,10 @@ almide-optimize       Monomorphization, DCE, constant propagation
 almide-codegen        Nanopass pipeline, TOML templates, walker（WGSL は on-hold — attribute パースのみ）
 almide-mir            v1 Middle IR: ownership/layout SoT, WASM (WAT) + native renderers
 almide-interp         Pre-codegen IR tree-walker — 3rd cross-target oracle / executable spec
-almide-tools          Formatter, module interface, language server
+almide-tools          Formatter, module interface (.almdi). NOT the LSP — that
+                      lives in src/cli/lsp*.rs at the workspace root, and
+                      lsp-types is a root Cargo.toml dependency, so a
+                      crates/-scoped survey will not find it
 ```
 
 `almide-interp` is a *sibling consumer* of the linked IR, not part of the
