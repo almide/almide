@@ -477,6 +477,28 @@ fn compare_runs(
                 .into(),
         };
     }
+    // A leg the harness (or the OS) KILLED without an exit code, having
+    // printed nothing, carries NO semantic verdict — it neither terminated
+    // nor aborted. When the sibling leg also failed, the pair is the
+    // C-196/C-197 resource family with the slower leg still grinding at the
+    // cut (seed=20260818 idx=965: unbounded recursion — wasm trapped 134 in
+    // 0.1s, native ground 119s to the kill; idx=1340: an i64::MIN..<n push
+    // loop — wasm hit the defined OOM abort, native was OS-killed).
+    // Comparing a kill against an abort manufactured both round-2 false
+    // findings. A None-exit leg whose sibling SUCCEEDED stays a finding
+    // (the native-hang doctrine: a clean sibling IS termination evidence),
+    // and a killed leg that already printed output falls through too —
+    // divergent prefix output is real evidence.
+    let killed_silent =
+        |r: &super::runner::ProcResult| r.exit_code.is_none() && !r.timed_out && r.stdout.is_empty();
+    if (killed_silent(native) && !wasm.success()) || (killed_silent(wasm) && !native.success()) {
+        return Outcome::Skipped {
+            reason: "one leg was killed without a code or output while the other \
+                     failed — the resource-limit family (C-196/C-197) with the \
+                     slower leg cut mid-grind; a kill is not a semantic verdict"
+                .into(),
+        };
+    }
     // ── The BY-CONSTRUCTION oracle (#1332) ──
     //
     // This runs BEFORE the differential comparison for one reason: it is
