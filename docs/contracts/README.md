@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-290 contracts
+291 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -317,5 +317,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
 | C-288 | list.enumerate over a rich-variant list executes on both targets | 0.57.1 | active | fixture | 1 |
 | C-289 | The Float equality family compares with f64 equality on both targets | 0.57.1 | active | fixture | 1 |
+| C-290 | Each error-channel operator agrees with its defining function on both targets | 0.57.1 | active | fixture | 1 |
 | C-290 | fs text readers refuse invalid UTF-8 identically on both targets; the bytes readers keep the raw bytes | 0.57.2 | active | fixture | 1 |
 

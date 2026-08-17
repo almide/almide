@@ -699,11 +699,23 @@ impl Checker {
                 } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
                     return self.fresh_var();
                 } else {
+                    // ADR-0005 D2 (#1107): the Result misuse gets its own
+                    // code and the canonical unwrap ladder as the hint —
+                    // `?.` is Option-only by definition (`o?.f ≡
+                    // option.map(o, (v) => v.f)`).
+                    let hint = if resolved.is_result() {
+                        "'?.' is Option-only. For a Result, convert first: `r?` turns \
+                         Result into Option (err → none), so `r?.field` becomes \
+                         `(r?)?.field`; or unwrap with `?? fallback` / `match` / `!` \
+                         (effect fn) and access the field directly."
+                    } else {
+                        "Use '?.' only on Option[T] values"
+                    };
                     self.emit(super::err(
                         format!("operator '?.' requires Option type but got {}", resolved.display()),
-                        "Use '?.' only on Option[T] values",
+                        hint,
                         "operator ?.",
-                    ));
+                    ).with_code("E055"));
                     return Ty::Unknown;
                 };
                 // Resolve field type from inner_ty
