@@ -545,11 +545,17 @@ else {
 fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
-  let need = rows * cols * 4
-  if offset + need > len then __mx_const(rows, cols, 0.0)
+  // #1503: a negative dimension clamps to the empty matrix (the C-034 rule
+  // the constructors follow) and a negative offset is OOB by definition —
+  // unclamped, the allocs below took a negative size and the legs died in
+  // undefined forms instead of the family's OOB→zeros edge.
+  let r = if rows < 0 then 0 else rows
+  let c = if cols < 0 then 0 else cols
+  let need = r * c * 4
+  if offset < 0 or offset + need > len then __mx_const(r, c, 0.0)
   else {
-    let out: List[List[Float]] = prim.alloc_list_str(rows)
-    let _x = __mx_f32_rows(prim.handle(out), hd, offset, rows, cols, 0)
+    let out: List[List[Float]] = prim.alloc_list_str(r)
+    let _x = __mx_f32_rows(prim.handle(out), hd, offset, r, c, 0)
     out
   }
 }
@@ -601,9 +607,12 @@ fn matrix_select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
   let off = if offset < 0 then 0 else offset
+  // #1503: a negative cols clamps to 0 like the loaders — the per-row
+  // alloc took the raw negative otherwise.
+  let c = if cols < 0 then 0 else cols
   let n = list.len(row_ids)
   let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_f32_sel_rows(prim.handle(out), hd, off, len, row_ids, cols, 0)
+  let _x = __mx_f32_sel_rows(prim.handle(out), hd, off, len, row_ids, c, 0)
   out
 }
 
@@ -633,11 +642,14 @@ fn __mx_f16_decode(bits: Int) -> Float = {
 fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
-  let need = rows * cols * 2
-  if offset + need > len then __mx_const(rows, cols, 0.0)
+  // #1503: same clamp discipline as from_bytes_f32_le above.
+  let r = if rows < 0 then 0 else rows
+  let c = if cols < 0 then 0 else cols
+  let need = r * c * 2
+  if offset < 0 or offset + need > len then __mx_const(r, c, 0.0)
   else {
-    let out: List[List[Float]] = prim.alloc_list_str(rows)
-    let _x = __mx_f16_rows(prim.handle(out), hd, offset, rows, cols, 0)
+    let out: List[List[Float]] = prim.alloc_list_str(r)
+    let _x = __mx_f16_rows(prim.handle(out), hd, offset, r, c, 0)
     out
   }
 }

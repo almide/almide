@@ -242,10 +242,14 @@ else {
 fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
   let bh = prim.handle(data)
   let len = prim.load32(bh + 4)
-  if offset + rows * cols * 8 > len then __mxe_zeros(rows, cols)
+  // #1503: negative dims clamp to the empty matrix, negative offset is OOB —
+  // same discipline as the f32/f16 loaders.
+  let r = if rows < 0 then 0 else rows
+  let c = if cols < 0 then 0 else cols
+  if offset < 0 or offset + r * c * 8 > len then __mxe_zeros(r, c)
   else {
-    let out: List[List[Float]] = prim.alloc_list_str(rows)
-    let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, rows, cols, 0)
+    let out: List[List[Float]] = prim.alloc_list_str(r)
+    let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)
     out
   }
 }

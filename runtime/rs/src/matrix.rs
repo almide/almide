@@ -217,15 +217,20 @@ pub fn almide_rt_matrix_from_lists(rows: &[Vec<f64>]) -> AlmideMatrix {
 }
 
 pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
-    let r = rows as usize;
-    let c = cols as usize;
-    let off = offset as usize;
+    // #1503: a negative dimension clamps to the empty matrix (the C-034 /
+    // C-161 rule the constructors already follow) and a negative offset is
+    // out of bounds by definition — the raw `as usize` casts turned either
+    // into a multi-exabyte size and died in the forbidden T6 form (capacity
+    // overflow, exit 101). `almide_rt_matrix_dims` also enforces the element
+    // ceiling, and the bounds compare is overflow-safe in u128.
+    let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 4;
     let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if off + need > data.len() {
+    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
         for _ in 0..r { result.push(vec![0.0f64; c]); }
         return result.into();
     }
+    let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
         let mut row: Vec<f64> = Vec::with_capacity(c);
@@ -244,15 +249,20 @@ pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64
     // IEEE-754 half-precision → f32 → f64, inlined to keep the matrix.rs
     // file a single contiguous block of `pub fn almide_rt_matrix_*` functions
     // (simplifies the runtime-stripping logic in src/cli/mod.rs).
-    let r = rows as usize;
-    let c = cols as usize;
-    let off = offset as usize;
+    // #1503: a negative dimension clamps to the empty matrix (the C-034 /
+    // C-161 rule the constructors already follow) and a negative offset is
+    // out of bounds by definition — the raw `as usize` casts turned either
+    // into a multi-exabyte size and died in the forbidden T6 form (capacity
+    // overflow, exit 101). `almide_rt_matrix_dims` also enforces the element
+    // ceiling, and the bounds compare is overflow-safe in u128.
+    let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 2;
     let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if off + need > data.len() {
+    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
         for _ in 0..r { result.push(vec![0.0f64; c]); }
         return result.into();
     }
+    let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
         let mut row: Vec<f64> = Vec::with_capacity(c);
