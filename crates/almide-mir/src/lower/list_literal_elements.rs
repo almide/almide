@@ -33,7 +33,7 @@ impl LowerCtx {
     /// that does not lower to a single handle declines, leaving the caller's
     /// wall in place.
     fn lower_list_index_element(&mut self, e: &IrExpr) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
+        use crate::PrimKind;
         let IrExprKind::IndexAccess { object, index } = &e.kind else { return None };
         if !crate::lower::is_heap_ty(&e.ty) {
             return None;
@@ -62,13 +62,14 @@ impl LowerCtx {
         };
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![container] });
-        let eight = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
-        let scaled = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: scaled, op: IntOp::Mul, a: idx, b: eight });
-        let base = self.load_addr(h, 12);
+        // BOUNDS-CHECKED element address (`$elem_addr_chk` — len-checked,
+        // native-identical "Error: index out of bounds" + exit 1). The manual
+        // `h + 12 + i*8` this replaces read raw memory on an OOB index: an
+        // empty `src` in `keep + [src[i]]` loaded a garbage handle, Dup'd it,
+        // and printed a fully-populated list before dying elsewhere, while
+        // native aborted at the read (xtarget-fuzz seed=20260817 index=11180).
         let addr = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base, b: scaled });
+        self.ops.push(Op::Prim { kind: PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
         let borrowed = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(borrowed), args: vec![addr] });
         let owned = self.fresh_value();
