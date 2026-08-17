@@ -656,11 +656,7 @@ fn dispatch_fmt(files: Vec<String>, check: bool, json: bool, dry_run: bool, no_i
 
 /// `dispatch`'s `Commands::Add` arm. Extracted verbatim.
 fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>) {
-    let (name, git_url, tag) = if let Some(git_url) = git {
-        (pkg, git_url, tag)
-    } else {
-        project_fetch::resolve_package_spec(&pkg)
-    };
+    let (name, git_url, tag) = project_fetch::resolve_add_target(pkg, git, tag);
     project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
     let dep = project::Dependency {
