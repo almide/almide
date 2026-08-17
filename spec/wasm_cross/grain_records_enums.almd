@@ -1,0 +1,42 @@
+// grain records.re + enums.re — record_get_multilevel (x.baz.bar chains),
+// enum_inline_record_1 (record-variant construction, permuted-field literal,
+// structural equality true/false, tuple-ctor sibling), record_spread_1
+// semantics via manual copy (the copy is independent of the source),
+// enum_recursive_data_definition (mutually recursive generic ADTs).
+type Rec1 = { foo: Int, bar: Int }
+type Rec2 = { baz: Rec1 }
+type E = | ERec { x: Int, y: Int } | ETup(Int, Int, Int)
+type Tree[A] = | Node(A, Forest[A])
+type Forest[A] = | FNil | FCons(Tree[A], Forest[A])
+
+fn forest_len(f: Forest[String]) -> Int = match f {
+  FNil => 0,
+  FCons(_, rest) => 1 + forest_len(rest),
+}
+
+// NB: `FCons(Node(s, _), _)` — the nested single-ctor pattern — is a
+// recorded finding (native E0004 after check accepts); matched in two steps.
+fn forest_first(f: Forest[String]) -> String = match f {
+  FCons(t, _) => match t { Node(s, _) => s },
+  FNil => "-",
+}
+
+fn main() -> Unit = {
+  let x = Rec2 { baz: Rec1 { foo: 4, bar: 9 } }
+  println(int.to_string(x.baz.bar))
+  println(int.to_string(x.baz.foo + x.baz.bar))
+  let r = ERec { x: 1, y: 2 }
+  let r2 = ERec { y: 12, x: 11 }
+  println(match r2 { ERec { x, y } => "${int.to_string(x)},${int.to_string(y)}", _ => "-" })
+  // NB: variant-record equality against a literal is a pinned wall —
+  // walls/variant_record_equality.almd.
+  println(match ETup(1, 2, 3) { ETup(_, b, _) => int.to_string(b), _ => "-" })
+  // spread semantics by hand: the copy is independent
+  let a = Rec1 { foo: 1, bar: 2 }
+  let b = Rec1 { foo: a.foo, bar: 3 }
+  println("${int.to_string(a.foo)}${int.to_string(a.bar)} ${int.to_string(b.foo)}${int.to_string(b.bar)}")
+  // mutually recursive generic ADTs
+  let forest = FCons(Node("tree 1", FCons(Node("tree 2", FNil), FNil)), FNil)
+  println(int.to_string(forest_len(forest)))
+  println(forest_first(forest))
+}

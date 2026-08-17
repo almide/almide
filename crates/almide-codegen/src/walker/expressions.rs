@@ -180,10 +180,16 @@ fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
     } else {
         subj
     };
-    let arms_raw = arms.iter()
+    let mut arms_raw = arms.iter()
         .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty))
         .collect::<Vec<_>>()
         .join("\n");
+    // #610 refinement backstop: guard-lowered box patterns don't count toward
+    // rustc's exhaustiveness, so a checker-verified-total match needs a dead
+    // catch-all or the native build dies as E0004.
+    if super::statements::match_needs_unreachable_backstop(ctx, arms, &subject.ty) {
+        arms_raw.push_str("\n_ => unreachable!(\"checker-verified exhaustive match: box-pattern refinement fell through\"),");
+    }
     let arms_str = indent_lines(&arms_raw, 4);
     let fallback = format!("match {} {{\n{}\n}}", &subj, &arms_str);
     ctx.templates.render_with("match_expr", None, &[], &[("subject", subj.as_str()), ("arms", arms_str.as_str())])

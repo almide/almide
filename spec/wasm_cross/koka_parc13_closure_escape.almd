@@ -1,0 +1,15 @@
+// koka parc13: a closure capturing a parameter ESCAPES its defining frame —
+// the environment must own the capture (scalar and heap flavors), and
+// calling it twice must not double-consume.
+fn make_thunk(x: Int) -> () -> Int = () => x
+
+fn make_heap_thunk(s: String) -> () -> String = () => s + "!"
+
+fn main() -> Unit = {
+  let t = make_thunk(11)
+  println(int.to_string(t()))
+  println(int.to_string(t()))
+  let h = make_heap_thunk("cap" + "tured")
+  println(h())
+  println(h())
+}

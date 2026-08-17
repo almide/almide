@@ -1,0 +1,18 @@
+// koka unicode2: precomposed vs combining-mark spellings of the "same" text
+// must count DIFFERENTLY (Almide's string.len is codepoints), and slicing
+// around a combining mark must keep byte boundaries honest on both targets.
+fn main() -> Unit = {
+  let pre = "mañana"
+  let comb = "man\u{0303}ana"
+  println(int.to_string(string.len(pre)))
+  println(int.to_string(string.len(comb)))
+  println(if pre == comb then "eq" else "ne")
+  println(string.slice(pre, 2, 4))
+  println(string.slice(comb, 2, 5))
+  let marks = "x\u{0307}\u{0323}xyz"
+  println(int.to_string(string.len(marks)))
+  println(string.get(marks, 1) ?? "?")
+  println(string.get(marks, 3) ?? "?")
+  println(string.to_upper(pre))
+  println(string.to_upper(comb))
+}

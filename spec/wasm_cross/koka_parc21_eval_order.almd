@@ -1,0 +1,18 @@
+// koka parc21: argument evaluation order must survive drop insertion — a
+// 2-arg call whose operands PRINT must print left-to-right, including when
+// the callee ignores one argument (the borrowed-arg shape).
+fn bo(a: Int, b: Int) -> Int = a
+
+fn print_ret(x: Int) -> Int = {
+  println(int.to_string(x))
+  x
+}
+
+fn main() -> Unit = {
+  println(int.to_string(bo(3, 4)))
+  let r = bo(print_ret(3), print_ret(4))
+  println(int.to_string(r))
+  // same with a heap operand pair (drops must not reorder the prints)
+  let s = string.len("ab") + bo(print_ret(10), print_ret(20))
+  println(int.to_string(s))
+}

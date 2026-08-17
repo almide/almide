@@ -1,0 +1,13 @@
+// @wall: Eq over Named(E, [])
+// grain enums.re enum_inline_record_1: structural equality of a
+// record-variant VALUE against a literal (`r == ERec { x: 1, y: 2 }`) has
+// no Eq lowering for the Named type, and the enclosing if cannot take the
+// both-arms linearization because its arms carry effects. Construction,
+// permuted-field literals, and pattern matching over the same type all
+// vote (grain_records_enums.almd).
+type E = | ERec { x: Int, y: Int }
+fn main() -> Unit = {
+  let r = ERec { x: 1, y: 2 }
+  let e1 = if r == ERec { x: 1, y: 2 } then "eq" else "ne"
+  println(e1)
+}

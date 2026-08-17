@@ -255,17 +255,45 @@ fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, enum_hint: Option<&st
 
 // ── Match arm rendering ──
 
-pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty) -> String {
-    // #413: a top-level variant pattern belongs to the match SUBJECT's enum, so
-    // pass that enum's (mangled) name as a hint — it disambiguates a constructor
-    // name shared across packages, which the global ctor→enum map collapses.
-    let enum_hint = match subject_ty {
-        // Only when the subject is a known variant enum — never a struct/opaque
-        // type (whose patterns must not be qualified `Type::field`).
+/// #413: a top-level variant pattern belongs to the match SUBJECT's enum, so
+/// pass that enum's (mangled) name as a hint — it disambiguates a constructor
+/// name shared across packages, which the global ctor→enum map collapses.
+/// Only when the subject is a known variant enum — never a struct/opaque
+/// type (whose patterns must not be qualified `Type::field`).
+fn subject_enum_hint<'t>(ctx: &RenderContext, subject_ty: &'t almide_lang::types::Ty) -> Option<&'t str> {
+    match subject_ty {
         almide_lang::types::Ty::Named(n, _) if ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
             => Some(n.as_str()),
         _ => None,
-    };
+    }
+}
+
+/// True when this match needs the refinement BACKSTOP arm: some arm was
+/// guard-lowered by the #610 box-pattern rewrite — a `matches!` shape-guard
+/// no longer counts toward rustc's exhaustiveness — and no remaining arm is
+/// an unguarded irrefutable row. The checker already proved the SOURCE match
+/// exhaustive, so the appended `_ => unreachable!()` is dead by construction;
+/// without it a TOTAL nested pattern (e.g. through a single-constructor
+/// payload type, `FCons(Node(s, _), _)`) died at the native build as rustc
+/// E0004 (grain/koka port findings, 2026-08-17).
+pub fn match_needs_unreachable_backstop(
+    ctx: &RenderContext,
+    arms: &[IrMatchArm],
+    subject_ty: &almide_lang::types::Ty,
+) -> bool {
+    let enum_hint = subject_enum_hint(ctx, subject_ty);
+    if !arms.iter().any(|a| unbox_arm_pattern(ctx, &a.pattern, enum_hint).is_some()) {
+        return false;
+    }
+    let has_irrefutable = arms.iter().any(|a| {
+        a.guard.is_none()
+            && matches!(a.pattern, IrPattern::Wildcard | IrPattern::Bind { .. })
+    });
+    !has_irrefutable
+}
+
+pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty) -> String {
+    let enum_hint = subject_enum_hint(ctx, subject_ty);
     // #610: a boxed-nested constructor pattern is rewritten to a flat pattern + a
     // `matches!` shape-guard + `let-else` box move-outs in the body. None when the
     // arm has no boxed-nested position (the common case → identical to before).

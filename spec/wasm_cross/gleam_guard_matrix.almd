@@ -1,0 +1,57 @@
+// gleam test/language/clause_guard_test.gleam (~40 cases compressed).
+// Every value is routed through a constructor fn so no constant folder can
+// pre-decide a guard (the suite's own discipline). Covers: bare-var guards,
+// the full int/float comparison matrix in guard position, and/or tables,
+// variant equality against a CONSTRUCTED literal inside a guard, arithmetic
+// precedence inside guards, tuple access in guards, and guard-scope
+// non-pollution (gleam-lang/gleam#5283).
+fn t() -> Bool = true
+fn f() -> Bool = false
+fn zero() -> Int = 0
+fn fzero() -> Float = 0.0
+
+fn g(c: Bool) -> Int = match 0 { _ if c => 0, _ => 1 }
+
+fn main() -> Unit = {
+  let tv = t()
+  let fv = f()
+  let iz = zero()
+  let io = zero() + 1
+  let fz = fzero()
+  let fo = fzero() + 1.0
+  // var guards
+  println("${int.to_string(g(tv))}${int.to_string(g(fv))}")
+  // int comparisons: == != > >= < <= (match then nomatch)
+  let ints = [
+    g(iz == iz), g(iz == io), g(iz != io), g(iz != iz),
+    g(io > iz), g(iz > iz), g(io >= iz), g(iz >= iz), g(iz >= io),
+    g(iz < io), g(iz < iz), g(iz <= io), g(iz <= iz), g(io <= iz),
+  ]
+  println(list.join(list.map(ints, (v) => int.to_string(v)), ""))
+  // float comparisons
+  let floats = [
+    g(fo > fz), g(fz > fz), g(fo >= fz), g(fz >= fz), g(fz >= fo),
+    g(fz < fo), g(fz < fz), g(fz <= fo), g(fz <= fz), g(fo <= fz),
+  ]
+  println(list.join(list.map(floats, (v) => int.to_string(v)), ""))
+  // and/or truth tables
+  let tbl = [
+    g(tv and tv), g(tv and fv), g(fv and tv), g(fv and fv),
+    g(tv or tv), g(tv or fv), g(fv or tv), g(fv or fv),
+  ]
+  println(list.join(list.map(tbl, (v) => int.to_string(v)), ""))
+  // variant equality vs constructed literal, in guard position
+  let okv: Result[Int, String] = ok(zero() + 1)
+  let errv: Result[Int, String] = err("one")
+  println("${int.to_string(g(okv == okv))}${int.to_string(g(okv == errv))}${int.to_string(g(okv != errv))}${int.to_string(g(okv == ok(1)))}${int.to_string(g(errv == err("one")))}${int.to_string(g(errv == err("two")))}")
+  // arithmetic precedence inside guards
+  println("${int.to_string(g(1 + 1 == 2))}${int.to_string(g(47 % 5 == 2))}${int.to_string(g(3 * 5 + 1 == 16))}${int.to_string(g(1 + 3 * 5 == 16))}${int.to_string(g(1 - 15 / 5 == 0 - 2))}${int.to_string(g(15 / 5 - 1 == 2))}")
+  // tuple access in a guard
+  let pair = (tv, fv)
+  println("${int.to_string(g(pair.0))}${int.to_string(g(pair.1))}")
+  // #5283: a guard's binding must not pollute the outer scope
+  let a = match 1337 { n if n == 1347 => 1, _ => 2 }
+  let b = match 1337 { n => { let _ = n
+    2 } }
+  println(if a == b then "clean" else "polluted")
+}
