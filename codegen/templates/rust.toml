@@ -443,11 +443,18 @@ template = "(*{name})"
 [clone_expr]
 template = "{expr}.clone()"
 
+# Materialized ranges guard their reserve (C-197): a span the machine cannot
+# satisfy is the defined "Error: out of memory" abort, never collect()'s raw
+# `capacity overflow` panic (xtarget-fuzz seed=20260819 index=2963 - a bound
+# 0..<i64::MAX forced to materialize by list.len/indexing panicked native
+# exit 101 while wasm aborted with the defined line). Mirrors
+# almide_rt_list_range's try_reserve discipline, inlined so the template has
+# no linkage dependency.
 [range_expr]
-template = "({start}..{end}).collect::<Vec<_>>()"
+template = "{{ let __rs: i64 = {start}; let __re: i64 = {end}; let __rn = __re.saturating_sub(__rs).max(0) as usize; let mut __rv: Vec<i64> = Vec::new(); if __rv.try_reserve_exact(__rn).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} __rv.extend(__rs..__re); __rv }}"
 
 [range_inclusive]
-template = "({start}..={end}).collect::<Vec<_>>()"
+template = "{{ let __rs: i64 = {start}; let __re: i64 = {end}; let __rn = if __re >= __rs {{ ((__re as i128) - (__rs as i128) + 1) as usize }} else {{ 0 }}; let mut __rv: Vec<i64> = Vec::new(); if __rv.try_reserve_exact(__rn).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} __rv.extend(__rs..=__re); __rv }}"
 
 [for_tuple_destructure]
 template = "({vars})"
