@@ -21,12 +21,16 @@ impl LowerCtx {
         if func == "read_text_file" || func == "read_bytes_file" {
             // read_bytes_file is the raw-bytes twin: the SAME WASI floor + Result block
             // (the render's $read_text_file reads raw bytes; only the almd-level Ok TYPE
-            // differs), so one PrimKind serves both.
+            // differs) — two PrimKinds, one WAT helper with a `$validate` flag.
             let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.read_text_file path is not a lowerable scalar/handle".into())
             })?;
             let dst = self.fresh_value();
-            self.ops.push(Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(dst), args: vec![path] });
+            // #1506 — the two twins now differ in ONE thing: the text floor validates UTF-8
+            // (native read_to_string refuses invalid bytes with an Err), the bytes floor does not
+            // (native std::fs::read hands them back). Same layout, cap and drop otherwise.
+            let kind = if func == "read_text_file" { PrimKind::ReadTextFile } else { PrimKind::ReadBytesFile };
+            self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![path] });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));

@@ -3578,3 +3578,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_float_equality_family.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-290"
+spec      = "ALS-R5"
+title     = "fs text readers refuse invalid UTF-8 identically on both targets; the bytes readers keep the raw bytes"
+statement = "`fs.read_text` / `fs.read_lines` / `fs.read_text_if_exists` on a file whose bytes are not valid UTF-8 return `err(\"stream did not contain valid UTF-8\")` — native `std::fs::read_to_string`'s InvalidData Display, Rust's own const message, so it is platform-independent — on BOTH targets, for every sequence Rust's `str::from_utf8` rejects (a stray high byte, a truncated multibyte tail, a UTF-16 surrogate U+D800..U+DFFF, an overlong encoding); valid multibyte UTF-8 and ASCII stay `ok`. The bytes readers (`fs.read_bytes` / `fs.read_bytes_raw` and their `_if_exists` twins) hand back the raw bytes unchanged on both legs, as native `std::fs::read` does. Before #1506 the WASI read floor (`$read_text_file`) copied the bytes into a String with NO validation, so the wasm leg returned `ok(<raw bytes>)` where native returned err — a silent wrong Result branch — and the invalid String then trapped in `rc_dec` downstream (`string.chars` over it). The floor now takes a `$validate` flag: `PrimKind::ReadTextFile` (the text readers) runs the `bytes.is_valid_utf8` acceptance table over the read buffer before building Ok and builds the Err on failure; `PrimKind::ReadBytesFile` (the bytes readers, split off from the shared kind for exactly this one difference) skips it. Same layout, capability (FsRead) and drop shape as before."
+since     = "0.57.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_read_text_utf8.almd", class = "fixture" },
+]
