@@ -1,0 +1,9 @@
+// @wall: list.unique_x
+// list.unique over a NON-FLAT heap element (List[String] elements own
+// further heap): the _hshare slot-wise eq is exact only for flat scalar
+// blocks, and a String-bearing element would compare HANDLES — two equal
+// values mis-compare as distinct (the old silent-wrong-dedup class). The
+// router refuses via the unregistered _x name; this fixture pins it (#1481).
+fn f(xs: List[List[String]]) -> List[List[String]] = list.unique(xs)
+
+effect fn main() -> Unit = println(int.to_string(list.len(f([["a"], ["b"]]))))

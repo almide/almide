@@ -324,6 +324,9 @@ jobs:
       - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-fallback.sh
 
+      - name: Wall corpus (#1481 — refused shapes stay refused, with their reasons)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wall-corpus.sh
+
       # Per-FUNCTION parity. The ratchet above measures which spec FILES fall back,
       # so a stdlib fn no test touches is invisible to it — datetime.monotonic_ns
       # had no wasm body at all while that gate read a clean 18/18. ~70s.
