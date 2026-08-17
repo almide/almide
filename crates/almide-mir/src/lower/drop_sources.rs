@@ -192,6 +192,30 @@ fn variant_list_drop_sources(
                  __drop_list_str_{vn_fn}_loop(h, n, i + 1)\n  \
                }}\n"
         ));
+        // `List[(Int, <rich variant V>)]` — the `list.enumerate_h` result shape
+        // (#1496): each element is its own tuple block `[rc][len][cap][Int@12]
+        // [V-handle@20]`. Slot0 is a SCALAR and must not be touched; slot1 is a
+        // rich variant that owns further heap and recurses via `$__drop_<V>` —
+        // the flat `DropListStr` sweep would free the tuple blocks and leak
+        // every element's tree. The `(String, V)` twin above differs only in
+        // the slot-0 rc_dec.
+        out.push_str(&format!(
+            "fn __drop_list_int_{vn_fn}(xs: List[(Int, {vn})]) -> Unit = {{\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_int_{vn_fn}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n\
+             fn __drop_list_int_{vn_fn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{\n    \
+                 let th = prim.load64(h + 12 + i * 8)\n    \
+                 if prim.load32(th + 0) == 1 then {{\n      \
+                   let v: {vn} = prim.load_handle(th + 20)\n      \
+                   __drop_{vn_fn}(v)\n    \
+                 }} else ()\n    \
+                 prim.rc_dec(th)\n    \
+                 __drop_list_int_{vn_fn}_loop(h, n, i + 1)\n  \
+               }}\n"
+        ));
         // (moved below — the map-value sweep now covers ALL variants, split layout)
     }
     out

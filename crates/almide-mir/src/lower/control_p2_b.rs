@@ -340,6 +340,26 @@ impl LowerCtx {
         arg_tys.first().is_some_and(probe) || probe(result_ty)
     }
 
+    /// Is `list.enumerate`'s source a `List[V]` whose element is a RICH named
+    /// variant the drop generator covers? Gates the registered
+    /// `list.enumerate_h` route (#1496): the result's `List[(Int, V)]` drop is
+    /// the generated `$__drop_list_int_<V>` (`list_int_variant_drop`), so
+    /// admission here and drop seeding there ask the SAME `is_rich_variant_ty`
+    /// question — admission never outruns generation. Any other rich element
+    /// keeps the honest `_x` wall.
+    pub(crate) fn enumerate_elem_is_rich_variant(&self, arg_tys: &[Ty]) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() else {
+            return false;
+        };
+        let [elem] = &a[..] else { return false };
+        self.variant_layouts
+            .is_rich_variant_ty(elem, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            })
+            .is_some()
+    }
+
     /// Is the Map KEY type an ALL-Int/Bool-field record (`Color { r, g, b }`)?
     /// Gates the `_srec` string-normalized map family (a Float field's
     /// bits-to-string would split -0.0/NaN from native's f64 eq — excluded).

@@ -63,7 +63,16 @@ pub(super) fn specialize_function(
     // (idempotent no-op here); module-scoped mono relies on this step
     // because its rewriter walks module bodies but does not re-discover
     // intra-fn recursive edges.
-    let spec_name = format!("{}__{}", orig.name, suffix);
+    // A mono suffix is a NAME SEGMENT, not a type spelling: `mangle_ty`
+    // returns a module-qualified `Ty::Named` verbatim (`syntax.Node`), and the
+    // two downstream consumers disagreed about the dot — the call rewriter
+    // kept it while the MIR-side `user_module_fn_name` replaced it, so a
+    // fallible-HOF instance over a dotted type was CALLED as
+    // `..._syntax.Node_String` and DEFINED as `..._syntax_Node_String`, an
+    // unlinked-call wall misread as a registry gap (#1496). Sanitize once,
+    // where the identifier is minted; the (module, fn, suffix) mono key keeps
+    // the dotted spelling, so instance identity is unchanged.
+    let spec_name = format!("{}__{}", orig.name, suffix.replace('.', "_"));
     rename_named_calls(&mut body, orig.name.as_str(), &spec_name);
 
     IrFunction {

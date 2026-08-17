@@ -26,6 +26,28 @@ impl LowerCtx {
         None
     }
 
+    /// `List[(<scalar>, <RICH variant V>)]` — the `list.enumerate_h` result
+    /// (#1496). Slot0 @12 is scalar, slot1 @20 is a variant owning further
+    /// heap, so the exact free is the generated `$__drop_list_int_<V>` —
+    /// `DropListStr`'s flat sweep would free the tuple blocks and leak every
+    /// element's tree. Mirrors `map_named_value_drop` above: admission ⊆
+    /// generation, because `is_rich_variant_ty` asks the same question the
+    /// drop generator's filter does; anything it cannot name returns `None`
+    /// and the caller keeps the honest deferral/wall.
+    pub(crate) fn list_int_variant_drop(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::List, a) = ty else { return None };
+        let [Ty::Tuple(tys)] = &a[..] else { return None };
+        let [k, v] = &tys[..] else { return None };
+        if is_heap_ty(k) {
+            return None;
+        }
+        let vn = self.variant_layouts.is_rich_variant_ty(v, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        })?;
+        Some(format!("list_int_{}", crate::lower::drop_fn_ident(&vn)))
+    }
+
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         // `let r = e!` (Unwrap — effect-fn error propagation) bound to a let/var was a deferred
         // `Const`/`Alloc{Opaque}` = a SILENT MISCOMPILE (`int.parse(s)!` bound 0, `g()!` empty).

@@ -44,6 +44,20 @@ fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
   out
 }
 
+// DEEP-heap enumerate (`list.enumerate(nodes)` over a rich-variant list, #1496):
+// rc_inc is layout-agnostic (a nested-heap handle is ONE i32 whatever it points
+// at — the C-172 pattern), so the share discipline is IDENTICAL to
+// enumerate_str; the split name exists so the caller's result-drop
+// classification keys the deep class (`$__drop_list_int_<V>`, which recurses
+// into slot1 @20 — the flat DropListStr sweep would leak each element's tree).
+fn list_enumerate_h(xs: List[List[Int]]) -> List[(Int, List[Int])] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out: List[(Int, List[Int])] = prim.alloc_list_str(n)
+  let _x = __enum_fill_h(prim.handle(out), h, n, 0)
+  out
+}
+
 fn __zip_fill(dh: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let pair = __pair2(prim.load64(ha + 12 + i * 8), prim.load64(hb + 12 + i * 8))

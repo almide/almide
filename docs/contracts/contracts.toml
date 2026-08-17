@@ -3554,3 +3554,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/heap_result_if_option_aggregate.almd", class = "fixture" },
 ]
+
+
+[[contract]]
+id        = "C-288"
+spec      = "ALS-M10"
+title     = "list.enumerate over a rich-variant list executes on both targets"
+statement = "`list.enumerate(xs)` where `xs: List[V]` and V is a rich named variant (elements owning further heap) returns the same `List[(Int, V)]` on both targets, co-owning the elements (the source list stays readable after the call). Previously any non-String heap element routed to the deliberately unregistered `list.enumerate_h` and the whole function walled — honest, because the pair list's drop had no route recursing into the element and a flat sweep would have leaked every element's tree (#1496). The route is now registered: the rc-share fill is byte-identical to enumerate_str's (a nested-heap handle is one i32 whatever it points at — the C-172 pattern), the result's drop routes to the generated $__drop_list_int_<V> (the (Int, V) twin of $__drop_list_str_<V>), and admission never outruns generation because the router's gate and the drop seeding ask the same is_rich_variant_ty question. An element class the drop generator cannot name (Value, closures, nested lists, rich records) still walls, renamed list.enumerate_x."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_enumerate_rich.almd", class = "fixture" },
+]

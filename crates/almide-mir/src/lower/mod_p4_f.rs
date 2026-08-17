@@ -96,14 +96,14 @@ fn unwrap_or_call_name_option_heap_fallback(arg_tys: &[Ty]) -> Option<String> {
 
 /// Every `list.*` typed-variant route (extracted verbatim, order preserved;
 /// `None` = no typed variant applies → the caller falls to the plain name).
-fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, enum_rich_variant: bool) -> Option<String> {
     // Split (2026-07-20, #781 cog>100 burn-down) into per-theme routers, called in the
     // SAME ORDER the original single if-chain evaluated them (order is load-bearing: e.g.
     // `enumerate` has two historical arms and the FIRST one — source_keyed — is exhaustive
     // for any single-type-arg List, making transform's `enumerate` arm dead by construction,
     // exactly as in the original unified function). Pure text move, no logic change.
     list_call_name_hof_combinators(func, arg_tys, result_ty)
-        .or_else(|| list_call_name_source_keyed(func, arg_tys, result_ty))
+        .or_else(|| list_call_name_source_keyed(func, arg_tys, result_ty, enum_rich_variant))
         .or_else(|| list_call_name_ordering(func, arg_tys, result_ty))
         .or_else(|| list_call_name_transform(func, arg_tys, result_ty))
         .or_else(|| list_call_name_modifiers(func, arg_tys, result_ty))
@@ -227,12 +227,12 @@ fn list_call_name_unique_by(func: &str, arg_tys: &[Ty]) -> Option<String> {
     })
 }
 
-fn list_call_name_source_keyed(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+fn list_call_name_source_keyed(func: &str, arg_tys: &[Ty], result_ty: &Ty, enum_rich_variant: bool) -> Option<String> {
     // Pattern-1 name-router (codopsy8 complexity sweep): the 6 groups below are
     // independent, self-contained classifications (one per `func` name), called in the
     // SAME order via early return — a pure text-move split, no logic change.
     list_call_name_drop_end(func, arg_tys)
-        .or_else(|| list_call_name_enumerate_source(func, arg_tys))
+        .or_else(|| list_call_name_enumerate_source(func, arg_tys, enum_rich_variant))
         .or_else(|| list_call_name_pop(func, arg_tys))
         .or_else(|| list_call_name_zip(func, arg_tys))
         .or_else(|| list_call_name_repeat(func, arg_tys))
@@ -273,9 +273,13 @@ fn list_call_name_drop_end(func: &str, arg_tys: &[Ty]) -> Option<String> {
 /// Extracted from `list_call_name_source_keyed` (codopsy8 complexity sweep, group 2 of 6):
 /// `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;
 /// String → the rc-share pair variant (`DropListIntStr` at the call site frees each
-/// pair's key ref); any other heap element routes to an UNREGISTERED name (walls
-/// cleanly — a flat pair drop would leak a rich element's children). Verbatim.
-fn list_call_name_enumerate_source(func: &str, arg_tys: &[Ty]) -> Option<String> {
+/// pair's key ref); a RICH named variant → the registered `enumerate_h` rc-share
+/// twin, whose result the caller drop-routes to the generated
+/// `$__drop_list_int_<V>` (#1496 — admission ⊆ generation: the caller computes
+/// `enum_rich_variant` from the same layouts the drop generator reads); any
+/// other rich element routes to the UNREGISTERED `_x` name (walls cleanly — a
+/// flat pair drop would leak such an element's children).
+fn list_call_name_enumerate_source(func: &str, arg_tys: &[Ty], enum_rich_variant: bool) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     if func != "enumerate" {
         return None;
@@ -288,7 +292,10 @@ fn list_call_name_enumerate_source(func: &str, arg_tys: &[Ty]) -> Option<String>
             if matches!(a[0], Ty::String) {
                 return Some("list.enumerate_str".to_string());
             }
-            return Some("list.enumerate_h".to_string());
+            if enum_rich_variant {
+                return Some("list.enumerate_h".to_string());
+            }
+            return Some("list.enumerate_x".to_string());
         }
     }
     None
