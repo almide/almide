@@ -9,15 +9,18 @@
 # streak neither grows nor resets — scheduler gaps are not evidence either
 # way).
 #
-# WHAT "success" MEANS HERE (corrected 2026-08-11): the night verdict fails on
-# FINDINGS only. A shard killed by a runner shutdown (exit 143, the documented
-# ~1-in-6 event) costs that shard's coverage and is reported in the night
-# summary, but no longer fails the night — until today the verdict job was
-# SKIPPED whenever any shard died, so a zero-finding night was recorded exactly
-# like a real divergence, and with 4 shards ~half of all nights failed for
-# infrastructure alone. A streak only measures correctness if the thing it
-# counts is correctness; before the fix "90 consecutive" was unreachable by
-# arithmetic (0.48^90), not by any property of the compiler.
+# WHAT "success" MEANS HERE (corrected 2026-08-11, and again 2026-08-17): the
+# night's truth is the NIGHT VERDICT job — it fails on correctness findings
+# (and on a night with no evidence at all), and tolerates a shard killed by a
+# runner shutdown (exit 143, the documented ~1-in-6 event) as reduced
+# coverage. The 2026-08-11 fix made the verdict RUN unconditionally; this
+# meter, however, kept scoring the RUN conclusion — which a killed shard leg
+# still paints red — so infra kills went on breaking the streak the verdict
+# had already absorbed (shard 5 on 2026-08-17: SIGTERM at 295s, findings=0,
+# run red). The meter now scores each run's VERDICT JOB conclusion, exactly
+# like scripts/fuzz-track-record.sh; a run whose verdict job never concluded
+# scores as failure (the aggregation itself died — that IS evidence).
+# A streak only measures correctness if the thing it counts is correctness.
 #
 # With --update, the dated ledger at
 # research/benchmark/fuzz-green/README.md is refreshed (BENCHMARKS.md
@@ -29,9 +32,36 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LEDGER_DIR="$ROOT/research/benchmark/fuzz-green"
 LEDGER="$LEDGER_DIR/README.md"
 
-json=$(gh run list --repo almide/almide --workflow fuzz-nightly.yml --limit 200 \
-    --json conclusion,createdAt \
-    --jq '[.[] | {c: .conclusion, d: (.createdAt | split("T")[0])}]')
+REPO="almide/almide"
+VERDICT_JOB="Night verdict"
+LEGACY_JOB="Generative differential fuzz"
+
+runs=$(gh api "repos/$REPO/actions/workflows/fuzz-nightly.yml/runs?per_page=60" \
+  --jq '.workflow_runs[] | [.id, (.conclusion // .status // "unknown"), .created_at] | @tsv')
+
+# One JSON row per run: the verdict-job conclusion (sharded nights), the
+# single campaign job (legacy nights), else the run conclusion (no verdict
+# ever ran — a whole-run failure, scored as such).
+json="["
+sep=""
+while IFS=$'\t' read -r id run_conc created; do
+  [ -n "$id" ] || continue
+  day="${created%%T*}"
+  jobs=$(gh api "repos/$REPO/actions/runs/$id/jobs?per_page=100" \
+    --jq '[.jobs[] | {name, conclusion}]' 2>/dev/null || echo '[]')
+  v=$(printf '%s' "$jobs" | python3 -c '
+import json, sys
+jobs = json.load(sys.stdin)
+for want in ("'"$VERDICT_JOB"'", "'"$LEGACY_JOB"'"):
+    for j in jobs:
+        if j["name"] == want:
+            print(j["conclusion"] or "unknown"); raise SystemExit
+print("")')
+  [ -n "$v" ] || v="$run_conc"
+  json="$json$sep{\"c\": \"$v\", \"d\": \"$day\"}"
+  sep=","
+done <<< "$runs"
+json="$json]"
 
 read -r STREAK FIRST_GREEN LAST_DAY <<EOF
 $(python3 - "$json" <<'PYEOF'
@@ -68,8 +98,9 @@ if [ "${1:-}" = "--update" ]; then
         echo
         echo "The metric a mission-critical auditor reads: not \"how fast do they fix"
         echo "it\" but \"how long has it stayed unbroken\". A calendar day is CLEAN only"
-        echo "when every Fuzz (nightly) run that day concluded success; any failure"
-        echo "breaks the streak; a day without a run neither grows nor resets it."
+        echo "when every Fuzz (nightly) run that day delivered a NIGHT VERDICT that"
+        echo "concluded success (findings fail it; a reclaimed shard does not); any"
+        echo "failure breaks the streak; a day without a run neither grows nor resets it."
         echo "First milestone: **90 consecutive clean days**."
         echo
         echo "Meter: \`scripts/fuzz-green-streak.sh\` (append a dated row with \`--update\`)."

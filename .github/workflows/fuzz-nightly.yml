@@ -126,6 +126,14 @@ jobs:
     name: Generative differential fuzz (shard ${{ matrix.shard }}, ${{ matrix.arch }})
     needs: build
     runs-on: ${{ matrix.os }}
+    # A reclaimed runner (exit 143) fails its shard LEG, and a failed leg
+    # paints the whole RUN red even after the verdict job absorbed the kill as
+    # reduced coverage — so every "consecutive green nights" reading of the
+    # run list stayed unreachable by arithmetic (shard 5 on 2026-08-17:
+    # SIGTERM at 295s, findings=0, night red). The VERDICT job is the run's
+    # single failure authority: it fails on correctness findings and on a
+    # night with no evidence at all; a shard kill is not a verdict.
+    continue-on-error: true
     # `fail-fast: false` is load-bearing, not hygiene: the whole point of
     # sharding is that one shard dying must not take the night's other shards
     # with it. Keep the shard list and FUZZ_SHARDS in step — the verdict job
@@ -303,6 +311,18 @@ jobs:
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
           echo "slow=$SLOW" >> "$GITHUB_OUTPUT"
           echo "correctness=$((COUNT - SLOW))" >> "$GITHUB_OUTPUT"
+
+      # A night where NO shard uploaded output has no evidence, and green
+      # would be vacuous (the #976 class — with `continue-on-error` on the
+      # shard legs, nothing else would catch it). Fail it as INFRA, distinct
+      # from findings; the streak meter scores this verdict job, so the night
+      # honestly breaks the streak.
+      - name: Fail the night when no shard reported
+        run: |
+          if ! find shards -name fuzz-output.txt -type f | grep -q .; then
+            echo "::error::no shard uploaded output — the night produced no evidence (infra failure, not a clean night)"
+            exit 1
+          fi
 
       - name: Campaign verdict
         run: |
