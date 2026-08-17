@@ -36,6 +36,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     // (#1394). All 13 WASI path-call sites take their dirfd from its result, so
     // the rule has exactly one source.
     let preopen_resolve = preopen_resolve_wat();
+    let utf8_validate = utf8_validate_wat("        ");
     format!(
         r#"  ;; fs.read_text(path) — open the file at $path and read its bytes, returning a fresh
   ;; OWNED `Result[String, String]` in the EXACT `materialize_result_str` cap-as-tag
@@ -179,8 +180,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local.set $plen (local.get $w)))
 {preopen_resolve}
 
-  (func $read_text_file (param $path i32) (result i32)
+  (func $read_text_file (param $path i32) (param $validate i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
+    (local $valid i32) (local $vi i32) (local $vb0 i32) (local $vb1 i32) (local $vw i32) (local $vlo i32) (local $vhi i32) (local $vk i32)
     (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
     (local $nread i32) (local $data i32) (local $str i32) (local $result i32)
     (local $j i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
@@ -239,9 +241,17 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (else
         ;; the actual byte count read (may be < the stat size) is the String length.
         (local.set $fsize (i32.load (local.get $nread)))
-        ;; build the canonical String + copy the bytes, then wrap it Ok.
-        (local.set $str (call $rtf_str (local.get $data) (local.get $fsize)))
-        (call $rtf_result (local.get $str) (i32.const 0)))))
+{utf8_validate}        (if (result i32) (i32.eqz (local.get $valid))
+          (then
+            ;; #1506 — the text floor refuses invalid UTF-8 exactly like native
+            ;; std::fs::read_to_string: Err with its InvalidData message. The bytes floor
+            ;; ($validate = 0) never takes this arm.
+            (local.set $msg (call $rtf_str (i32.const {FS_ERR_UTF8_ADDR}) (i32.const {FS_ERR_UTF8_LEN})))
+            (call $rtf_result (local.get $msg) (i32.const 1)))
+          (else
+            ;; build the canonical String + copy the bytes, then wrap it Ok.
+            (local.set $str (call $rtf_str (local.get $data) (local.get $fsize)))
+            (call $rtf_result (local.get $str) (i32.const 0)))))))
 
   ;; helper: copy $len bytes at $src into a fresh canonical String `[rc][len][cap][bytes…]`.
   ;; THE single host-floor String constructor — every WASI exit that turns raw host bytes
@@ -959,6 +969,64 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
 /// "Invalid cross-device link" vs "Cross-device link") are deliberately NOT mapped —
 /// a host-specific string in a portable `.wasm` would trade one divergence for a
 /// worse one.
+/// The UTF-8 acceptance check `$read_text_file` runs over its read buffer when its
+/// `$validate` operand is 1 (#1506, C-290) — INLINE, like [`fs_errno_msg_wat`]:
+/// §4.1 forbids a new hand-written WAT function, and the loop has exactly one
+/// site. Sets `$valid` to 1/0 over the `$fsize` bytes at `$data`, using Rust's
+/// exact `str::from_utf8` table (the one stdlib/bytes_core.almd's
+/// `bytes.is_valid_utf8` replicates): a lead byte fixes the sequence width AND a
+/// tighter range on the SECOND byte (rejecting overlongs, UTF-16 surrogates
+/// U+D800..U+DFFF and codepoints > U+10FFFF); later bytes are plain
+/// continuations 0x80..0xBF; a truncated tail is invalid. `$validate = 0` (the
+/// bytes floor, `PrimKind::ReadBytesFile`) skips the loop and leaves `$valid = 1`.
+fn utf8_validate_wat(indent: &str) -> String {
+    let i = indent;
+    format!(
+        "{i};; #1506 — UTF-8 acceptance over the read buffer (text floor only). Inline: §4.1.\n\
+         {i}(local.set $valid (i32.const 1))\n\
+         {i}(if (local.get $validate) (then\n\
+         {i}  (local.set $vi (i32.const 0))\n\
+         {i}  (block $vdone (loop $vnext\n\
+         {i}    (br_if $vdone (i32.ge_u (local.get $vi) (local.get $fsize)))\n\
+         {i}    (local.set $vb0 (i32.load8_u (i32.add (local.get $data) (local.get $vi))))\n\
+         {i}    ;; ASCII: one byte, next.\n\
+         {i}    (if (i32.lt_u (local.get $vb0) (i32.const 128))\n\
+         {i}      (then (local.set $vi (i32.add (local.get $vi) (i32.const 1))) (br $vnext)))\n\
+         {i}    ;; a multibyte lead is 0xC2..=0xF4; anything else (a stray continuation, C0/C1, F5+) is invalid.\n\
+         {i}    (if (i32.or (i32.lt_u (local.get $vb0) (i32.const 194)) (i32.gt_u (local.get $vb0) (i32.const 244)))\n\
+         {i}      (then (local.set $valid (i32.const 0)) (br $vdone)))\n\
+         {i}    ;; width: C2..DF = 2, E0..EF = 3, F0..F4 = 4\n\
+         {i}    (local.set $vw (select (i32.const 2)\n\
+         {i}                            (select (i32.const 3) (i32.const 4) (i32.lt_u (local.get $vb0) (i32.const 240)))\n\
+         {i}                            (i32.lt_u (local.get $vb0) (i32.const 224))))\n\
+         {i}    ;; a truncated tail is invalid\n\
+         {i}    (if (i32.gt_u (i32.add (local.get $vi) (local.get $vw)) (local.get $fsize))\n\
+         {i}      (then (local.set $valid (i32.const 0)) (br $vdone)))\n\
+         {i}    ;; second byte: 80..BF, tightened per lead — E0: A0..BF (no overlong 3-byte),\n\
+         {i}    ;; ED: 80..9F (no surrogate), F0: 90..BF (no overlong 4-byte), F4: 80..8F (<= U+10FFFF)\n\
+         {i}    (local.set $vlo (i32.const 128))\n\
+         {i}    (local.set $vhi (i32.const 191))\n\
+         {i}    (if (i32.eq (local.get $vb0) (i32.const 224)) (then (local.set $vlo (i32.const 160))))\n\
+         {i}    (if (i32.eq (local.get $vb0) (i32.const 237)) (then (local.set $vhi (i32.const 159))))\n\
+         {i}    (if (i32.eq (local.get $vb0) (i32.const 240)) (then (local.set $vlo (i32.const 144))))\n\
+         {i}    (if (i32.eq (local.get $vb0) (i32.const 244)) (then (local.set $vhi (i32.const 143))))\n\
+         {i}    (local.set $vb1 (i32.load8_u (i32.add (local.get $data) (i32.add (local.get $vi) (i32.const 1)))))\n\
+         {i}    (if (i32.or (i32.lt_u (local.get $vb1) (local.get $vlo)) (i32.gt_u (local.get $vb1) (local.get $vhi)))\n\
+         {i}      (then (local.set $valid (i32.const 0)) (br $vdone)))\n\
+         {i}    ;; bytes 3..w are plain continuations (10xxxxxx)\n\
+         {i}    (local.set $vk (i32.const 2))\n\
+         {i}    (block $vcdone (loop $vcnext\n\
+         {i}      (br_if $vcdone (i32.ge_u (local.get $vk) (local.get $vw)))\n\
+         {i}      (local.set $vb1 (i32.load8_u (i32.add (local.get $data) (i32.add (local.get $vi) (local.get $vk)))))\n\
+         {i}      (if (i32.ne (i32.and (local.get $vb1) (i32.const 192)) (i32.const 128))\n\
+         {i}        (then (local.set $valid (i32.const 0)) (br $vdone)))\n\
+         {i}      (local.set $vk (i32.add (local.get $vk) (i32.const 1)))\n\
+         {i}      (br $vcnext)))\n\
+         {i}    (local.set $vi (i32.add (local.get $vi) (local.get $vw)))\n\
+         {i}    (br $vnext)))))\n"
+    )
+}
+
 fn fs_errno_msg_wat(indent: &str, def_addr: u32, def_len: u32, def_text: &str) -> String {
     let mut out = format!(
         "{indent};; errno → the EXACT native std::io Display text, INLINE (§4.1: no new wat func).\n\

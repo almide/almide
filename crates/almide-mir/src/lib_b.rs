@@ -171,8 +171,16 @@ pub enum PrimKind {
     /// it is caps-verified ONLY if it declares FsRead — never accept-but-unsafe. Its dst is
     /// a heap Ptr (like `ArgsGetList`), so the ownership certificate emits an `i` (alloc) for
     /// it, balanced by the caller's scope-end drop (the flat `DropListStr` over the one owned
-    /// payload String).
+    /// payload String). #1506 — the render VALIDATES the bytes as UTF-8 (Rust's exact
+    /// `str::from_utf8` table, the one `bytes.is_valid_utf8` replicates) and builds
+    /// `Err("stream did not contain valid UTF-8")` on failure, byte-matching native
+    /// `std::fs::read_to_string`; a String never carries invalid UTF-8 out of this floor.
     ReadTextFile,
+    /// [`ReadTextFile`]'s raw-bytes twin (`prim.read_bytes_file`, reached by the self-hosted
+    /// `fs.read_bytes_raw` / `fs.read_bytes` / `_if_exists` kin): the SAME WASI floor, Result
+    /// block, capability and drop shape, MINUS the UTF-8 validation — native `std::fs::read`
+    /// hands back whatever bytes are on disk, so this must too (#1506).
+    ReadBytesFile,
     /// The WASI `path_open(O_DIRECTORY)` + `fd_readdir` directory-listing sequence, packaged
     /// as ONE high-level HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle), dst
     /// = a fresh OWNED `Result[List[String], String]`. Opens the directory at `path` (same

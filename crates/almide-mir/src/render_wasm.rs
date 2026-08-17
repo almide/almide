@@ -85,6 +85,10 @@ const FS_ERR_ISDIR_LEN: u32 = 28;
 // fd_write accepts 0 bytes with no errno (#1385's latent short-write arm).
 const FS_ERR_WRITEZERO_ADDR: u32 = 400; // "failed to write whole buffer" — 400..428
 const FS_ERR_WRITEZERO_LEN: u32 = 28;
+// native `read_to_string`'s InvalidData Display — Rust's own const message (platform-
+// independent). The text floor's UTF-8 refusal (#1506) copies it into the Err String.
+const FS_ERR_UTF8_ADDR: u32 = 432; // "stream did not contain valid UTF-8" — 432..466
+const FS_ERR_UTF8_LEN: u32 = 34;
 // The bump allocator's DEFAULT start — also the mutable-global slot region's base
 // (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
 // module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots

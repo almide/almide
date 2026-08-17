@@ -208,6 +208,7 @@ fn prim_result_is_ptr(kind: &PrimKind) -> bool {
             | PrimKind::ReadLine
             | PrimKind::ReadNBytes
             | PrimKind::ReadTextFile
+            | PrimKind::ReadBytesFile
             | PrimKind::ReadDir
             | PrimKind::WriteTextFile
             | PrimKind::MakeDir
