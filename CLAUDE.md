@@ -34,6 +34,16 @@ Correct flow:
 2. Wait for `develop` CI to be green
 3. PR `develop → main`, merge (requires green CI — do not force-merge releases)
 4. `git tag vX.Y.Z <merge-commit>` and `git push origin vX.Y.Z`
+   - **Release blockers gate the final tag** (#1482): the workflow refuses a
+     final release while an issue labeled `I-unsound` / `I-miscompile` /
+     `I-divergence` / `regression` is open — the closed set in
+     [docs/project/ISSUE-TAXONOMY.md](./docs/project/ISSUE-TAXONOMY.md).
+     Check ahead with `bash scripts/count-release-blockers.sh`.
+   - **RC channel** (#1484): for a release carrying language-surface or
+     compiler-behaviour changes, tag `vX.Y.Z-rc1` first — it publishes as a
+     GitHub PRERELEASE (excluded from "latest"; the blocker gate prints but
+     does not fail) and buys a soak window. Tag the final `vX.Y.Z` once the
+     soak is clean; the length is a per-release human call.
 5. **Let the workflow create the release.** It auto-generates notes from commits.
 6. If you want custom notes, edit after the workflow completes: `gh release edit vX.Y.Z --notes "..."`
 7. **Seal the release evidence** (audit freeze): `bash scripts/release-seal.sh gen vX.Y.Z`,
