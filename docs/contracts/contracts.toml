@@ -3542,3 +3542,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_source_survives.almd", class = "fixture" },
 ]
+
+
+[[contract]]
+id        = "C-287"
+spec      = "ALS-M10"
+title     = "A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads"
+statement = "`fn f(...) -> R? = if cond then none else some(<payload>)` (and the `match` spelling) computes the taken arm and returns ONE owned Option on both targets, for a RECORD-literal payload (all-scalar `Match { id, len }` included) and a LIST-literal payload (scalar and heap elements). The none side always lowered (`materialize_opt_str_none` / `Init::OptNone`); the some side's if-arm router lagged the bind-position payload router — the record arm demanded a recursive drop so an all-scalar record fell through to a heap path with no Record case, and no List arm existed at all — so the whole enclosing function walled and native-only ran (#1495, the almide/dfa scanner-return shape). The arm router now mirrors the bind router's cells: a record routes by its own drop need (recursive `$__drop_<R>` when it has heap fields, the flat Some(string) shape when it does not), a scalar list builds via the shared slot builder, a heap-element list frees its residual temps within the arm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/heap_result_if_option_aggregate.almd", class = "fixture" },
+]
