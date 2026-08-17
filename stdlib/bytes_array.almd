@@ -2,6 +2,15 @@
 // `pos` into a fresh List[Int]. Each element reuses the corresponding self-hosted scalar read (which
 // already yields 0 for an out-of-range slot), so the array is always `count` long with 0-padding —
 // exactly v0's per-element loop. `b` is borrowed; the result List[Int] is owned.
+//
+// There is NO stdlib allocation guard here (ratified A, 2026-08-17). Measured on
+// 0.57.0: this leg's own floor already turns every unsatisfiable count — 5e8,
+// u32::MAX, i64::MAX alike — into the defined `Error: out of memory` abort, never
+// a raw trap. A 2^28 guard briefly shipped in this spot and it was WRONG twice
+// over: redundant below the floor's real bound, and a regression above it, cutting
+// counts (3e8 slots ≈ 2.4 GB) that 0.57.0 satisfied on this very leg. Native
+// likewise allocates to its own bound via try_reserve. Success on one leg where
+// the other's bound is smaller is the contracted divergence C-197 declares.
 fn __arr_u16le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
   let v = bytes.read_u16_le(b, pos + i * 2)

@@ -67,20 +67,22 @@ impl NanoPass for AutoParallelPass {
         // Collect mutable variable IDs from var_table
         let mutable_vars = collect_mutable_var_ids(&program);
 
+        // `mem::take` (the pass_clone idiom) — `rewrite_expr` takes the body
+        // by value, so cloning it first cost a whole-AST copy per function.
         for func in &mut program.functions {
-            func.body = rewrite_expr(func.body.clone(), &effect_fns, &mutable_vars);
+            func.body = rewrite_expr(std::mem::take(&mut func.body), &effect_fns, &mutable_vars);
         }
         for tl in &mut program.top_lets {
-            tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mutable_vars);
+            tl.value = rewrite_expr(std::mem::take(&mut tl.value), &effect_fns, &mutable_vars);
         }
         // Post-unification every VarId lives in `program.var_table`;
         // `mutable_vars` already covers module-local bindings too.
         for module in &mut program.modules {
             for func in &mut module.functions {
-                func.body = rewrite_expr(func.body.clone(), &effect_fns, &mutable_vars);
+                func.body = rewrite_expr(std::mem::take(&mut func.body), &effect_fns, &mutable_vars);
             }
             for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mutable_vars);
+                tl.value = rewrite_expr(std::mem::take(&mut tl.value), &effect_fns, &mutable_vars);
             }
         }
         PassResult { program, changed: true }

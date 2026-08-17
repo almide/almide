@@ -7,8 +7,11 @@ use almide_ir::*;
 
 // ── VarId collection ────────────────────────────────────────────
 
+/// Duplicates are fine here: the only consumer (`specialize_function`
+/// Phase 2) already skips repeats via `remap.contains_key`, and the old
+/// `out.contains` linear scan made collection O(n²) per specialized fn.
 pub(super) fn collect_var_id(id: VarId, out: &mut Vec<VarId>) {
-    if !out.contains(&id) { out.push(id); }
+    out.push(id);
 }
 
 pub(super) fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {

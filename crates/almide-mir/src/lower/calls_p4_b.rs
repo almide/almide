@@ -1,5 +1,33 @@
 impl LowerCtx {
 
+    /// `() == ()` / `!=` over Unit: the type has ONE inhabitant, so equality is a
+    /// compile-time constant (Eq → 1, Neq → 0) — there is no operand read to emit.
+    /// Restricted to CALL-FREE operands: folding `f() == ()` would elide f's
+    /// effects (record_elided_calls feeds the caps CLASSIFIER, not the render);
+    /// a call-bearing operand falls through to the existing walls, loud.
+    pub(crate) fn lower_scalar_binop_eq_unit(
+        &mut self,
+        op: &almide_ir::BinOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        if !matches!(op, BinOp::Eq | BinOp::Neq) {
+            return None;
+        }
+        if !matches!(left.ty, Ty::Unit) || !matches!(right.ty, Ty::Unit) {
+            return None;
+        }
+        if crate::lower::expr_contains_call(left) || crate::lower::expr_contains_call(right)
+        {
+            return None;
+        }
+        let dst = self.fresh_value();
+        let value = if matches!(op, BinOp::Eq) { 1 } else { 0 };
+        self.ops.push(Op::ConstInt { dst, value });
+        Some(dst)
+    }
+
     /// Extracted from `Self::lower_scalar_binop_eq_family` (eighth-round split, cog
     /// reduction): the String/Value deep-equality sub-chain, verbatim.
     fn lower_scalar_binop_eq_string_value(
@@ -685,7 +713,7 @@ impl LowerCtx {
                 repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
                 init: crate::Init::DynListStr { len: len_v },
             });
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.store_str(list, byte_addr_of_slot, piece)` — store the String `piece`'s handle
@@ -749,7 +777,7 @@ impl LowerCtx {
         if func == "args_get_list" {
             let dst = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(dst), args: vec![] });
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.args_get_list_full()` — the argv[0]-INCLUSIVE twin (process.args =
@@ -758,7 +786,7 @@ impl LowerCtx {
         if func == "args_get_list_full" {
             let dst = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::ArgsGetListFull, dst: Some(dst), args: vec![] });
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `prim.env_get(name)` — the WASI environ lookup floor (env.get). ONE BORROWED
@@ -779,7 +807,7 @@ impl LowerCtx {
             };
             let dst = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::EnvGet, dst: Some(dst), args: vec![key] });
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
         }
         // `env_get` with a wrong arg count (the ONLY name in this group with an extra

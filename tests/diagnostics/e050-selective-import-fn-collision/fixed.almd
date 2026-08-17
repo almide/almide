@@ -1,0 +1,8 @@
+import json.{parse, stringify}
+
+fn parse_len(s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = {
+  let v = parse("[1]") ?? value.null()
+  println("${parse_len(stringify(v))}")
+}

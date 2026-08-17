@@ -335,7 +335,7 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
 /// fall-through. Reached only with a heap key AND a heap value; the `(key_heap,
 /// val_heap)` match is kept so each arm reads exactly as it did in the one body.
 fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
-    use almide_lang::types::constructor::TypeConstructorId;
+    
     let MapRoute { func, result_ty, val_is_string, val_is_flat_list, val_is_fn, .. } = r;
     match (r.key_heap, r.val_heap) {
     // `Map[String, List[scalar]]` — the implemented subset of the heap-value
@@ -462,7 +462,7 @@ fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
 /// fall-through. Reached only with a heap key AND a heap value; the `(key_heap,
 /// val_heap)` match is kept so each arm reads exactly as it did in the one body.
 fn map_heap_val_named_and_typechange_route(r: MapRoute<'_>) -> Option<MapName> {
-    use almide_lang::types::constructor::TypeConstructorId;
+    
     let MapRoute { func, arg_tys, result_ty, key_is_string, key_scalar_rec: map_key_scalar_rec, .. } = r;
     match (r.key_heap, r.val_heap) {
     // `map.from_list` over a NAMED-value map (`["o": Point{..}]` / `["a":

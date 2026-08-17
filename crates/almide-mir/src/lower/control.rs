@@ -15,7 +15,7 @@ use almide_lang::types::Ty;
 /// auto-`Dup`s in `lower_heap_result_arm`; a consuming re-use `Dup`s in
 /// `lower_owned_heap_field` — so the borrow is never released at rc 0. A `Wildcard` arm is the
 /// unconditional catch-all.
-enum VariantArmKind {
+pub(in crate::lower) enum VariantArmKind {
     Ctor { tag: i64, binds: Vec<(usize, VarId, bool, Ty)> },
     Wildcard,
     /// A BINDER catch-all (`e => err(e)` — the regrouped compute fall-through): matches any
@@ -264,14 +264,14 @@ impl LowerCtx {
         {
             use almide_lang::types::constructor::TypeConstructorId;
             if matches!(&subject.ty, Ty::Applied(TypeConstructorId::Option, _)) {
-                self.materialized_options.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             } else if crate::lower::is_result_ty(&subject.ty) {
-                self.materialized_results.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
                 if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
         }
@@ -281,7 +281,7 @@ impl LowerCtx {
     /// reduction): the self-host Option-call subject block, verbatim.
     fn seed_match_subject_option_call_shape(&mut self, subject: &IrExpr, v: ValueId) {
         if is_self_host_option_call(subject) {
-            self.materialized_options.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::Option);
             // An `Option[heap]` (e.g. `Option[(Int,Int)]` from option.zip) OWNS its
             // payload — track it as a nested-ownership list so the variant-match binds the
             // Some payload by `LoadHandle` (the borrowed element handle, not the whole
@@ -289,7 +289,7 @@ impl LowerCtx {
             // owned payload, no leak). Without this the heap-payload bind gate fails →
             // the match linearizes and reads the Option's own slots as the payload.
             if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(v);
+                self.value_drops.entry(v).or_default().flat_elems = true;
             }
             // `map.find`'s `Option[(String, <scalar>)]` payload OWNS a HEAP slot (the
             // String) inside the tuple — the flat `heap_elem_lists`/`DropListStr` route
@@ -310,7 +310,7 @@ impl LowerCtx {
                             && matches!(tys[0], Ty::String)
                             && !is_heap_ty(&tys[1])
                         {
-                            self.variant_drop_handles.insert(v, "opt_str_int".to_string());
+                            self.value_drops.entry(v).or_default().named_route = Some("opt_str_int".to_string());
                         }
                     }
                 }
@@ -321,42 +321,14 @@ impl LowerCtx {
     /// Extracted from `Self::seed_match_subject_read_shape` (second-round split, cog
     /// reduction): the self-host Result-call subject blocks, verbatim.
     fn seed_match_subject_result_call_shape(&mut self, subject: &IrExpr, v: ValueId) {
-        if is_self_host_result_call(subject) {
-            self.materialized_results.insert(v);
-        }
-        // A self-host HEAP-Ok Result call (result.zip → Result[(Int,Int), String]) — track
-        // it in the cap-as-tag set (so the match reads tag @16 + binds the @12 payload
-        // handle) AND, since it owns a heap payload (the Err String / the Ok tuple), in
-        // heap_elem_lists (so the heap-payload bind gates open AND the scope-end drop is
-        // the recursive DropListStr). Without it the match linearizes → garbage.
-        if is_self_host_result_str_call(subject) {
-            self.materialized_results_str.insert(v);
-            if crate::lower::is_result_listval_ty(&subject.ty) {
-                self.value_result_lists.insert(v);
-            } else if crate::lower::is_list_str_result_ty(&subject.ty) {
-                // `Result[List[String], String]` (fs.list_dir) — the Ok payload is a
-                // List[String]; route the scope-end drop to the RECURSIVE DropResultListStr
-                // (frees each element String + the list block), NOT the flat DropListStr
-                // (heap_elem_lists) which would leak them.
-                self.list_str_result_results.insert(v);
-            } else if crate::lower::is_res_map_si_ty(&subject.ty)
-                || crate::lower::is_res_list_map_si_ty(&subject.ty)
-            {
-                // `Result[Map[String, <scalar>], String]` / the chunked List-of-maps
-                // sibling (fs.fold_lines msi): the TAG-AWARE `$__drop_res_msi` /
-                // `$__drop_res_lmsi` (Ok → the skv key sweep). `heap_elem_lists`
-                // ALSO inserted so the heap-payload bind gates open (the map.find
-                // dual-insert precedent); `variant_drop_handles` wins the drop.
-                let route = if crate::lower::is_res_map_si_ty(&subject.ty) {
-                    "res_msi"
-                } else {
-                    "res_lmsi"
-                };
-                self.variant_drop_handles.insert(v, route.to_string());
-                self.heap_elem_lists.insert(v);
-            } else if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(v);
-            }
+        // #1414 seed-once: the read shape AND drop route come from the ONE
+        // type-keyed entry point (`seed_variant_value_shape`) — the same
+        // function the bind path and the `??` merge/ANF paths consult, so the
+        // per-position refinement drift class (the bind-side list-payload
+        // leak) is structurally closed. The name check still gates WHETHER
+        // the call's result is a real materialized block.
+        if is_self_host_result_call(subject) || is_self_host_result_str_call(subject) {
+            self.seed_variant_value_shape(v, &subject.ty);
         }
     }
 
@@ -437,12 +409,12 @@ impl LowerCtx {
         ) = &subject.ty
         {
             if a.len() == 1 {
-                self.materialized_options.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if let Some(rn) = self.record_or_anon_drop_type_name(&a[0]) {
-                    self.variant_drop_handles.insert(v, format!("optrec:{rn}"));
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().named_route = Some(format!("optrec:{rn}"));
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 } else if is_heap_ty(&a[0]) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
         }
@@ -461,31 +433,31 @@ impl LowerCtx {
             // (DropListStr). The match MUST agree: track materialized_results_str (read
             // tag @16) + heap_elem_lists (the err-arm String bind gate AND the flat
             // DropListStr the construction uses for the List[Int]/String Ok payload).
-            self.materialized_results_str.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::ResultHeapOk);
             // A `Result[(String, Int), String]` (toml parse_key_part) needs the
             // RECURSIVE DropResultStrInt (frees the Ok tuple's String + block) — a
             // flat DropListStr would rc_dec the @12 tuple HANDLE only, leaking its
             // String. Other heap-Ok shapes keep the flat heap_elem_lists/DropListStr.
             if crate::lower::is_str_int_result_ty(&subject.ty) {
-                self.str_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().str_int_result = true;
             } else if crate::lower::is_value_int_result_ty(&subject.ty) {
-                self.value_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().value_int_result = true;
             } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
-                self.list_str_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().list_str_int_result = true;
             } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
-                self.list_value_int_result_results.insert(v);
+                self.value_drops.entry(v).or_default().list_value_int_result = true;
             } else {
-                self.heap_elem_lists.insert(v);
+                self.value_drops.entry(v).or_default().flat_elems = true;
             }
         } else {
-            self.materialized_results.insert(v);
+            self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
             if let Ty::Applied(
                 almide_lang::types::constructor::TypeConstructorId::Result,
                 a,
             ) = &subject.ty
             {
                 if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
         }

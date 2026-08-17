@@ -23,6 +23,7 @@ impl Parser {
                 line: 0,
                 col: 0,
                 end_col: 0,
+                raw: None,
             };
             &EOF_TOKEN
         }
@@ -205,6 +206,23 @@ impl Parser {
         {
             return "`head :: tail` (cons pattern) is Haskell/OCaml/Elm syntax. Almide list patterns use [] / [a, b] literals only. For head/tail recursion, use `list.first(xs)` and `list.drop(xs, 1)` on the non-empty arm.".to_string();
         }
+        // Rust/OCaml or-pattern `A | B =>` → the parser saw `|` where a `=>`
+        // was expected. One arm per pattern is the Almide form (#1461).
+        if *expected == TokenType::FatArrow && got.token_type == TokenType::Pipe {
+            return "`A | B =>` (or-pattern) is not supported in Almide match arms. Write one arm per pattern — `Red => expr, Green => expr` — extracting a shared body into a helper fn if it is long.".to_string();
+        }
+        // Rust `pat @ name` as-pattern → `@` where a `=>` was expected. Almide
+        // has no as-binding; bind the whole value and destructure inside (#1461).
+        if *expected == TokenType::FatArrow && got.token_type == TokenType::At {
+            return "`pattern @ name` (as-pattern) is not supported in Almide. Bind the whole value with a variable arm (`whole => ...`) and match again inside the body, or destructure what you need there.".to_string();
+        }
+        // Rust/Swift range pattern `1..<5 =>` / `1...5 =>` → a range operator
+        // where a `=>` was expected. Match arms take literals only (#1461).
+        if *expected == TokenType::FatArrow
+            && matches!(got.token_type, TokenType::DotDotLt | TokenType::DotDotDot)
+        {
+            return "range patterns (`1..<5 =>`, `1...5 =>`) are not supported in Almide match arms. Use a guard: `n if n >= 1 and n < 5 => expr`.".to_string();
+        }
         if let Some(result) = self.check_hint(Some(expected.clone()), super::hints::HintScope::Expression) {
             result.hint
         } else {
@@ -220,6 +238,12 @@ impl Parser {
         let hint = match (&tok.token_type, tok.value.as_str()) {
             (TokenType::Underscore, _) => "\n  Hint: '_' can only be used in match patterns, not as a variable name.",
             (TokenType::Test, _) => "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file at all (harness-submitted code).",
+            // A backtick lands here only as a MALFORMED escape — the lexer
+            // declines one enclosing no identifier character (#1457). Binding
+            // position never reaches `unknown_char_error`, so the hint that
+            // names the construct has to be repeated here.
+            (TokenType::Unknown, "`") => "\n  Hint: A backtick escape takes ASCII letters, digits and '_', and cannot be empty. It makes a KEYWORD usable as a name (`type`, `protocol`) — it does not make a non-ASCII name writable.",
+            (TokenType::Unknown, _) => "\n  Hint: This character is not Almide syntax. Full-width or invisible Unicode characters often sneak in from copy-paste — delete it, or move it into a string or comment.",
             _ => "",
         };
         Err(format!(

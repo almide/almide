@@ -48,16 +48,18 @@ impl Parser {
             }
             TokenType::Float => {
                 let v: f64 = tok.value.replace('_', "").parse().unwrap_or(0.0);
-                ExprKind::Float { value: v }
+                // A Float token's `value` IS its source spelling (the lexer
+                // never decodes numbers), so it doubles as `raw`.
+                ExprKind::Float { value: v, raw: Some(tok.value.clone()) }
             }
-            TokenType::String => ExprKind::String { value: tok.value.clone() },
+            TokenType::String => ExprKind::String { value: tok.value.clone(), raw: tok.raw.clone() },
             TokenType::InterpolatedString => {
                 self.advance();
                 let parts = match self.parse_interpolation_parts(&tok.value, tok.line, tok.col) {
                     Ok(p) => p,
                     Err(e) => return Some(Err(e)),
                 };
-                return Some(Ok(Expr::new(self.next_id(), span, ExprKind::InterpolatedString { parts })));
+                return Some(Ok(Expr::new(self.next_id(), span, ExprKind::InterpolatedString { parts, raw: tok.raw.clone() })));
             }
             TokenType::True => ExprKind::Bool { value: true },
             TokenType::False => ExprKind::Bool { value: false },
@@ -154,6 +156,13 @@ impl Parser {
             let diag = self.diag_error(msg, hint, "assignment-in-expr");
             self.errors.push(diag);
             return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
+        }
+
+        // A character the lexer could not tokenize (full-width punctuation,
+        // invisible Unicode, ...). Dedicated wording — "(got Unknown '。')"
+        // reads like a compiler bug, not a source bug (#1308).
+        if tok.token_type == TokenType::Unknown {
+            return Err(self.unknown_char_error(&tok.value.clone(), tok.line, tok.col));
         }
 
         Err(format!(

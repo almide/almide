@@ -22,7 +22,7 @@ pub enum TokenType {
     Module, Import, Type, Protocol, For, In, Fn, Let, Var, Mut,
     If, Then, Else, Match, Ok, Err, Some, None, Todo,
     True, False, Not, And, Or,
-    Strict, Pub, Effect, Test,
+    Pub, Effect, Test,
     Guard, Break, Continue, While, Local, Mod, Fan,
     // Delimiters
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
@@ -56,6 +56,9 @@ pub enum TokenType {
     At,        // @
     // Whitespace / structure
     Comment, Newline, EOF,
+    // A character no lexer rule matched (e.g. a stray full-width character
+    // outside a string). Must surface as a parse error — never dropped (#1308).
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +68,17 @@ pub struct Token {
     pub line: usize,
     pub col: usize,
     pub end_col: usize,
+    /// The token's VERBATIM source text, delimiters included, for tokens whose
+    /// `value` is a DECODED form — the string family (`"…"`, `'…'`, `r"…"`,
+    /// `"""…"""`). `None` everywhere else, where `value` already is the source
+    /// text (identifiers, numbers, operators).
+    ///
+    /// Two consumers need the spelling, not the value: `almide fmt`, which must
+    /// reprint `"\u{3042}"` as written instead of collapsing it to `あ` (#1263),
+    /// and the escape validator below, which cannot tell an escape that the
+    /// decoder rejected from text that was never an escape once the value has
+    /// been built (#1264).
+    pub raw: Option<std::string::String>,
 }
 
 // ── Lexer ───────────────────────────────────────────────────────
@@ -73,7 +87,15 @@ pub struct Lexer;
 
 impl Lexer {
     pub fn tokenize(src: &str) -> Vec<Token> {
+        // #1311 front-end phase accounting. `note_source` sits OUTSIDE the span
+        // so its newline scan is not billed to `lex`; both are no-ops unless
+        // `almide check --timings` armed the accounting.
+        almide_base::profile::note_source(src);
+        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Lex);
         let mut tokens = Vec::new();
+        // Strip a leading UTF-8 BOM (editor/Windows artifact). Without this it
+        // would lex as an Unknown token and fail the whole file (#1308).
+        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
         // Normalize CRLF → LF (Windows compatibility)
         let normalized;
         let src = if src.contains('\r') {
@@ -94,7 +116,7 @@ impl Lexer {
             cur.pos += len; cur.col += len;
         }
 
-        tokens.push(Token { token_type: TokenType::EOF, value: String::new(), line: cur.line, col: cur.col, end_col: cur.col });
+        tokens.push(Token { token_type: TokenType::EOF, value: String::new(), line: cur.line, col: cur.col, end_col: cur.col, raw: None });
         tokens
     }
 }
@@ -111,7 +133,7 @@ fn lex_trivia(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool
         return true;
     }
     if ch == '\n' {
-        tokens.push(Token { token_type: TokenType::Newline, value: String::new(), line: cur.line, col: cur.col, end_col: cur.col + 1 });
+        tokens.push(Token { token_type: TokenType::Newline, value: String::new(), line: cur.line, col: cur.col, end_col: cur.col + 1, raw: None });
         cur.pos += 1; cur.line += 1; cur.col = 1;
         return true;
     }
@@ -123,9 +145,25 @@ fn lex_trivia(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool
         tokens.push(tok);
         return true;
     }
-    // Block comment /* ... */ — nestable, fully skipped (not a token)
+    // Block comment /* ... */ — nestable, lexed VERBATIM into a Comment token
+    // (#1318: it used to be fully skipped, so fmt could never reprint it and
+    // silently deleted every block comment). The parser drops the ones sitting
+    // inline mid-expression (Parser::new's trivia filter), keeping the grammar
+    // unchanged; own-line and end-of-line block comments ride the same
+    // comment_map rails as `//` comments.
     if ch == '/' && peek(chars, cur.pos + 1) == Some('*') {
+        let start = cur.pos;
+        let (start_line, start_col) = (cur.line, cur.col);
         let (p, l, c) = skip_block_comment(chars, cur.pos, cur.line, cur.col);
+        let text: String = chars[start..p].iter().collect();
+        tokens.push(Token {
+            token_type: TokenType::Comment,
+            value: text,
+            line: start_line,
+            col: start_col,
+            end_col: c,
+            raw: None,
+        });
         cur.pos = p; cur.line = l; cur.col = c;
         return true;
     }
@@ -175,7 +213,15 @@ fn lex_word(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool {
         return false;
     }
     let (tok, new_pos) = if is_backtick {
-        lex_backtick_ident(chars, cur.pos, cur.line, cur.col)
+        // A malformed escape (empty body) must NOT become a zero-length Ident:
+        // that token reached the checker as `undefined variable ''` (#1457).
+        // Decline instead, so the main loop lexes the backtick through
+        // `lex_operator` → Unknown and the parser reports it like any other
+        // stray character.
+        match lex_backtick_ident(chars, cur.pos, cur.line, cur.col) {
+            Some(pair) => pair,
+            None => return false,
+        }
     } else {
         lex_ident(chars, cur.pos, cur.line, cur.col)
     };
@@ -192,7 +238,7 @@ fn lex_line_comment(chars: &[char], start: usize, line: usize, col: usize) -> (T
     while pos < chars.len() && chars[pos] != '\n' { pos += 1; }
     let text: String = chars[start..pos].iter().collect();
     let end_col = col + (pos - start);
-    (Token { token_type: TokenType::Comment, value: text, line, col, end_col }, pos)
+    (Token { token_type: TokenType::Comment, value: text, line, col, end_col, raw: None }, pos)
 }
 
 // ── Block comment skipping ──────────────────────────────────────
@@ -237,7 +283,8 @@ fn lex_raw_string(chars: &[char], start: usize, line: usize, col: usize) -> (Tok
         }
         let value: String = chars[content_start..pos].iter().collect();
         if pos + 2 < chars.len() { pos += 3; cl += 3; } // skip closing """
-        let tok = Token { token_type: TokenType::String, value, line, col, end_col: cl };
+        let raw = Some(chars[start..pos].iter().collect::<String>());
+        let tok = Token { token_type: TokenType::String, value, line, col, end_col: cl, raw };
         (tok, pos, ln, cl)
     } else {
         // Single-quote r"..."
@@ -249,7 +296,8 @@ fn lex_raw_string(chars: &[char], start: usize, line: usize, col: usize) -> (Tok
         }
         let value: String = chars[content_start..pos].iter().collect();
         if pos < chars.len() { pos += 1; cl += 1; } // skip closing "
-        let tok = Token { token_type: TokenType::String, value, line, col, end_col: cl };
+        let raw = Some(chars[start..pos].iter().collect::<String>());
+        let tok = Token { token_type: TokenType::String, value, line, col, end_col: cl, raw };
         (tok, pos, ln, cl)
     }
 }
@@ -276,7 +324,8 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
     let len = pos - start;
     let end_col = col + len;
-    (Token { token_type: tt, value, line, col, end_col }, pos, line, end_col)
+    let raw = Some(chars[start..pos].iter().collect::<String>());
+    (Token { token_type: tt, value, line, col, end_col, raw }, pos, line, end_col)
 }
 
 /// Single-quote string: `'...'` — no interpolation.
@@ -310,12 +359,13 @@ fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize
 
     let len = pos - start;
     let end_col = col + len;
-    (Token { token_type: TokenType::String, value, line, col, end_col }, pos, line, end_col)
+    let raw = Some(chars[start..pos].iter().collect::<String>());
+    (Token { token_type: TokenType::String, value, line, col, end_col, raw }, pos, line, end_col)
 }
 
 fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     let mut pos = start + 3; // skip opening """
-    let mut raw = String::new();
+    let mut body = String::new();
     let mut has_interpolation = false;
     let mut pair_starts: Vec<usize> = Vec::new();
     let mut cur_line = line;
@@ -329,17 +379,18 @@ fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token,
         } else {
             cur_col += 1;
         }
-        pos = lex_string_char(chars, pos, &mut raw, &mut has_interpolation, &mut pair_starts);
+        pos = lex_string_char(chars, pos, &mut body, &mut has_interpolation, &mut pair_starts);
     }
     if pos + 2 < chars.len() {
         cur_col += 3; // closing """
         pos += 3;
     }
 
-    let raw = if has_interpolation { raw } else { strip_escape_pairs(raw, &pair_starts) };
-    let value = strip_heredoc_indent(&raw);
+    let body = if has_interpolation { body } else { strip_escape_pairs(body, &pair_starts) };
+    let value = strip_heredoc_indent(&body);
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
-    (Token { token_type: tt, value, line, col, end_col: cur_col }, pos, cur_line, cur_col)
+    let raw = Some(chars[start..pos].iter().collect::<String>());
+    (Token { token_type: tt, value, line, col, end_col: cur_col, raw }, pos, cur_line, cur_col)
 }
 
 /// Process one character (or escape / interpolation) inside a string body.
@@ -380,6 +431,200 @@ fn lex_escape(chars: &[char], pos: usize, buf: &mut String, pair_starts: &mut Ve
         '$' => { pair_starts.push(buf.len()); buf.push('\\'); buf.push('$'); pos + 2 }
         other => { buf.push('\\'); buf.push(other); pos + 2 }
     }
+}
+
+// ── Escape validation (#1264) ───────────────────────────────────
+//
+// The decoders above are TOTAL by construction: every byte that is not a
+// recognized escape is copied through verbatim, so `"bad:\q"` produced the
+// two characters `\` `q` and `"\u{110000}"` produced the ten characters of
+// its own spelling — silently, with no diagnostic, in a language whose
+// integer literals refuse to silently wrap (E024). This module re-walks a
+// literal's RAW source text and names every escape the decoders declined,
+// so the parser can reject it instead. Decoding is unchanged: this is a
+// pure observer, and it shares `lex_numeric_escape` with the decoder so the
+// two can never disagree about what "well-formed" means.
+
+/// Why an escape was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EscapeIssueKind {
+    /// The character after `\` starts no escape this literal form defines.
+    Unknown,
+    /// `\u{...}` parsed, but the codepoint is not a Unicode scalar value
+    /// (above U+10FFFF, or in the UTF-16 surrogate range D800..DFFF).
+    OutOfRange,
+}
+
+/// One rejected escape, located relative to the literal's opening delimiter.
+#[derive(Debug, Clone)]
+pub struct EscapeIssue {
+    pub kind: EscapeIssueKind,
+    /// The offending source text, e.g. `\q` or `\u{110000}`.
+    pub text: std::string::String,
+    /// Newlines between the literal's first character and the escape.
+    pub line_offset: usize,
+    /// Characters since the last newline (from the literal's first character
+    /// when `line_offset == 0`).
+    pub col_offset: usize,
+}
+
+/// The escapes each literal form's decoder defines. `\$` is double-quote-only
+/// (a single-quoted string has no interpolation, so `$` is already literal);
+/// `\'` is single-quote-only for the mirror-image reason.
+const DQUOTE_ESCAPES: &[char] = &['n', 't', 'r', '\\', '"', '$'];
+const SQUOTE_ESCAPES: &[char] = &['n', 't', 'r', '\\', '\''];
+
+/// Every escape in `raw` (a string token's VERBATIM source text, delimiters
+/// included) that the decoder declined. Raw strings (`r"…"`, `r"""…"""`) have
+/// no escape layer at all and yield nothing.
+pub fn validate_literal_escapes(raw: &str) -> Vec<EscapeIssue> {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut issues = Vec::new();
+    scan_literal_escapes(&chars, &mut issues, 0, 0);
+    issues
+}
+
+/// Walk one literal's characters, appending issues. `base_line`/`base_col`
+/// offset the reported position so a literal nested inside an interpolation
+/// hole still points at its own source position.
+fn scan_literal_escapes(chars: &[char], issues: &mut Vec<EscapeIssue>, base_line: usize, base_col: usize) {
+    // Raw strings carry no escape layer — `r"\q"` IS backslash-q.
+    if chars.first() == Some(&'r') {
+        return;
+    }
+    let (body_start, valid, interpolating) = match chars.first() {
+        Some('"') if chars.len() >= 3 && chars[1] == '"' && chars[2] == '"' => (3, DQUOTE_ESCAPES, true),
+        Some('"') => (1, DQUOTE_ESCAPES, true),
+        Some('\'') => (1, SQUOTE_ESCAPES, false),
+        _ => return,
+    };
+    let mut pos = body_start;
+    let mut line = base_line;
+    let mut col = base_col + body_start;
+    while pos < chars.len() {
+        let ch = chars[pos];
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+            pos += 1;
+            continue;
+        }
+        // An interpolation hole is Almide code, not literal text. Skip it the
+        // way the lexer's own scan does (brace depth, nested literals captured
+        // atomically) — and validate the nested literals, since the sub-parser
+        // that re-lexes them drops its own diagnostics on the floor.
+        if interpolating && ch == '$' && chars.get(pos + 1) == Some(&'{') {
+            let (new_pos, new_line, new_col) = skip_interpolation_for_validation(chars, pos, line, col, issues);
+            pos = new_pos;
+            line = new_line;
+            col = new_col;
+            continue;
+        }
+        if ch != '\\' || pos + 1 >= chars.len() {
+            pos += 1;
+            col += 1;
+            continue;
+        }
+        let (end, issue) = classify_escape(chars, pos, valid);
+        if let Some(kind) = issue {
+            issues.push(EscapeIssue {
+                kind,
+                text: chars[pos..end.min(chars.len())].iter().collect(),
+                line_offset: line,
+                col_offset: col,
+            });
+        }
+        col += end.min(chars.len()) - pos;
+        pos = end;
+    }
+}
+
+/// Classify the escape starting at `chars[pos] == '\\'`. Returns the position
+/// just past it and `None` when the decoder accepts it.
+fn classify_escape(chars: &[char], pos: usize, valid: &[char]) -> (usize, Option<EscapeIssueKind>) {
+    let next = chars[pos + 1];
+    if next == 'x' || next == 'u' {
+        if let Some((_, new_pos)) = lex_numeric_escape(chars, pos) {
+            return (new_pos, None);
+        }
+        let (end, out_of_range) = numeric_escape_extent(chars, pos);
+        let kind = if out_of_range { EscapeIssueKind::OutOfRange } else { EscapeIssueKind::Unknown };
+        return (end, Some(kind));
+    }
+    if valid.contains(&next) {
+        return (pos + 2, None);
+    }
+    (pos + 2, Some(EscapeIssueKind::Unknown))
+}
+
+/// How far a MALFORMED `\x`/`\u{…}` escape reaches, and whether it failed
+/// only because its codepoint is outside the Unicode scalar range. Used to
+/// quote the whole offending spelling instead of just its first two chars.
+fn numeric_escape_extent(chars: &[char], pos: usize) -> (usize, bool) {
+    if chars[pos + 1] == 'x' {
+        return ((pos + 4).min(chars.len()), false);
+    }
+    if chars.get(pos + 2) != Some(&'{') {
+        return (pos + 2, false);
+    }
+    let mut i = pos + 3;
+    let mut code: u32 = 0;
+    let mut digits = 0usize;
+    let mut hex_only = true;
+    while let Some(&c) = chars.get(i) {
+        if c == '}' { break; }
+        match c.to_digit(16) {
+            Some(d) => code = code.saturating_mul(16).saturating_add(d),
+            None => hex_only = false,
+        }
+        digits += 1;
+        i += 1;
+        if digits > 8 { break; }
+    }
+    let closed = chars.get(i) == Some(&'}');
+    let end = if closed { i + 1 } else { i };
+    let out_of_range = closed && hex_only && digits > 0 && digits <= 6;
+    (end, out_of_range)
+}
+
+/// Skip a `${…}` hole during validation, recursing into nested string
+/// literals. Returns the position/line/col just past the closing `}`.
+fn skip_interpolation_for_validation(
+    chars: &[char],
+    start: usize,
+    mut line: usize,
+    mut col: usize,
+    issues: &mut Vec<EscapeIssue>,
+) -> (usize, usize, usize) {
+    let mut pos = start + 2;
+    col += 2;
+    let mut depth = 1usize;
+    while pos < chars.len() && depth > 0 {
+        let c = chars[pos];
+        // `\"`-delimited nested literal (the outer-string escape habit the
+        // lexer normalizes) — step over the pair so the scan below does not
+        // start a literal in the middle of the delimiter.
+        if c == '\\' && pos + 1 < chars.len() {
+            col += 2;
+            pos += 2;
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            let mut sink = String::new();
+            let end = scan_nested_string_literal(chars, pos, &mut sink);
+            scan_literal_escapes(&chars[pos..end], issues, line, col);
+            for &ch in &chars[pos..end] {
+                if ch == '\n' { line += 1; col = 0; } else { col += 1; }
+            }
+            pos = end;
+            continue;
+        }
+        if c == '{' { depth += 1; }
+        if c == '}' { depth -= 1; }
+        if c == '\n' { line += 1; col = 0; } else { col += 1; }
+        pos += 1;
+    }
+    (pos, line, col)
 }
 
 /// Remove the recorded escape-pair backslashes from a non-interpolated
@@ -514,7 +759,7 @@ fn scan_habit_quoted_literal(chars: &[char], pos: usize, buf: &mut String) -> us
 /// the parser's `${...}` splitter (`parse_interpolation_expr_part`) — the
 /// two scans MUST agree on where a nested literal ends, or the splitter
 /// re-introduces the brace-blindness the lexer just fixed (#1073).
-pub(crate) fn scan_nested_string_literal(chars: &[char], pos: usize, buf: &mut String) -> usize {
+pub fn scan_nested_string_literal(chars: &[char], pos: usize, buf: &mut String) -> usize {
     let quote = chars[pos];
     buf.push(quote);
     let mut pos = pos + 1;
@@ -605,7 +850,7 @@ fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     let raw: String = chars[start..pos].iter().collect();
     let tt = if is_float { TokenType::Float } else { TokenType::Int };
     let end_col = col + (pos - start);
-    (Token { token_type: tt, value: raw, line, col, end_col }, pos)
+    (Token { token_type: tt, value: raw, line, col, end_col, raw: None }, pos)
 }
 
 /// Lexes a radix-prefixed integer literal (`0x…`/`0b…`/`0o…`), starting at
@@ -633,7 +878,7 @@ fn lex_radix_number(
     }
     let raw: String = chars[start..pos].iter().collect();
     let end_col = col + (pos - start);
-    Some((Token { token_type: TokenType::Int, value: raw, line, col, end_col }, pos))
+    Some((Token { token_type: TokenType::Int, value: raw, line, col, end_col, raw: None }, pos))
 }
 
 /// Scans the float tail — an optional fraction (`.` + digit run) and an
@@ -678,17 +923,27 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
     });
 
     let end_col = col + (pos - start);
-    (Token { token_type, value, line, col, end_col }, pos)
+    (Token { token_type, value, line, col, end_col, raw: None }, pos)
 }
 
 /// Lex a backtick-escaped identifier: `protocol`, `type`, etc.
 /// The backticks are consumed but not included in the token value.
 /// The result is always TokenType::Ident regardless of keyword status.
-fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+///
+/// `None` when the escape encloses no identifier character at all — an empty
+/// pair of backticks, or a body the identifier rule cannot start on (a
+/// non-ASCII name). The body is the SAME ASCII set `lex_ident` accepts, so a
+/// non-ASCII name is no more writable escaped than bare; the escape only buys
+/// keyword-ness. An empty name is not a token any later stage can use, so it is
+/// never built (#1457).
+fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> Option<(Token, usize)> {
     let mut pos = start + 1; // skip opening backtick
     let ident_start = pos;
     while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
         pos += 1;
+    }
+    if pos == ident_start {
+        return None;
     }
     let value: String = chars[ident_start..pos].iter().collect();
     // Consume closing backtick if present
@@ -701,7 +956,7 @@ fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> 
         TokenType::Ident
     };
     let end_col = col + (pos - start);
-    (Token { token_type, value, line, col, end_col }, pos)
+    Some((Token { token_type, value, line, col, end_col, raw: None }, pos))
 }
 
 /// The keyword table — data, not control flow: one row per spelling
@@ -721,7 +976,7 @@ const KEYWORDS: &[(&str, TokenType)] = &[
     ("todo", TokenType::Todo),
     ("true", TokenType::True), ("false", TokenType::False),
     ("not", TokenType::Not), ("and", TokenType::And),
-    ("or", TokenType::Or), ("strict", TokenType::Strict),
+    ("or", TokenType::Or),
     ("pub", TokenType::Pub), ("effect", TokenType::Effect),
     ("test", TokenType::Test),
     ("guard", TokenType::Guard), ("break", TokenType::Break),
@@ -772,12 +1027,15 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
     for (pat, tt, val) in OPERATORS {
         let len = pat.len(); // operator patterns are ASCII: bytes == chars
         if chars[pos..].len() >= len && pat.chars().zip(&chars[pos..]).all(|(p, &c)| p == c) {
-            let tok = Token { token_type: *tt, value: (*val).to_string(), line, col, end_col: col + len };
+            let tok = Token { token_type: *tt, value: (*val).to_string(), line, col, end_col: col + len, raw: None };
             return (tok, len);
         }
     }
-    // Unknown char: skip it (an EOF-typed placeholder, exactly the old wildcard arm).
-    (Token { token_type: TokenType::EOF, value: String::new(), line, col, end_col: col + 1 }, 1)
+    // Unknown char: emit an Unknown token carrying the character. The old arm
+    // returned an EOF-typed placeholder, which made the parser stop at the
+    // first stray non-ASCII character and silently drop the rest of the file
+    // with every gate green (#1308).
+    (Token { token_type: TokenType::Unknown, value: chars[pos].to_string(), line, col, end_col: col + 1, raw: None }, 1)
 }
 
 fn peek(chars: &[char], pos: usize) -> Option<char> {
@@ -787,6 +1045,47 @@ fn peek(chars: &[char], pos: usize) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression (#1457): a backtick escape enclosing no identifier character
+    // used to lex to a ZERO-LENGTH Ident. That token survived every later stage
+    // and surfaced in the checker as `undefined variable ''` — a name no source
+    // text can spell. The lexer must never mint an empty-named identifier; the
+    // malformed escape falls through to Unknown like any other stray character.
+    #[test]
+    fn malformed_backtick_escape_never_yields_an_empty_ident() {
+        // Non-ASCII body, empty body, and an unterminated escape at EOF.
+        for src in ["let `日本語` = 1", "let `` = 1", "let `"] {
+            let tokens = Lexer::tokenize(src);
+            assert!(
+                !tokens.iter().any(|t| {
+                    matches!(t.token_type, TokenType::Ident | TokenType::TypeName)
+                        && t.value.is_empty()
+                }),
+                "empty-named identifier token minted for {src:?}: {:?}",
+                tokens.iter().map(|t| (t.token_type, &t.value)).collect::<Vec<_>>()
+            );
+            assert!(
+                tokens.iter().any(|t| t.token_type == TokenType::Unknown && t.value == "`"),
+                "malformed escape should surface the backtick as Unknown for {src:?}"
+            );
+        }
+    }
+
+    // The escape itself still works — the fix must not cost `type`/`protocol`
+    // their keyword-escaping, which is the whole reason backticks exist.
+    #[test]
+    fn well_formed_backtick_escape_still_lexes_as_a_name() {
+        let tokens = Lexer::tokenize("let `type` = 1");
+        let t = tokens
+            .iter()
+            .find(|t| t.value == "type")
+            .expect("`type` should lex to a name token");
+        assert_eq!(t.token_type, TokenType::Ident, "backtick escape defeats keyword-ness");
+        // An uppercase escaped name keeps its TypeName classification.
+        let tokens = Lexer::tokenize("let `Protocol` = 1");
+        let t = tokens.iter().find(|t| t.value == "Protocol").expect("escaped TypeName");
+        assert_eq!(t.token_type, TokenType::TypeName);
+    }
 
     // Regression: a heredoc whose blank line holds multi-byte Unicode whitespace
     // (U+3000) used to panic in strip_heredoc_indent — the byte-offset dedent
@@ -878,6 +1177,8 @@ mod tests {
 
     // Malformed numeric escapes fall through to literal passthrough so existing
     // text (e.g. `\users`, `\xyz`, a surrogate) is preserved unchanged.
+    // DECODING is unchanged by #1264 — the escapes below are rejected by the
+    // validator (E047), not re-decoded.
     #[test]
     fn malformed_numeric_escapes_pass_through() {
         assert_eq!(lex_string_value("let x = \"\\users\"\n"), "\\users");
@@ -885,5 +1186,94 @@ mod tests {
         assert_eq!(lex_string_value("let x = \"\\u{}\"\n"), "\\u{}");
         // U+D800 is a surrogate — not a valid scalar, so it stays literal.
         assert_eq!(lex_string_value("let x = \"\\u{d800}\"\n"), "\\u{d800}");
+    }
+
+    // ── #1264: escape validation ────────────────────────────────
+
+    fn issues(raw: &str) -> Vec<(EscapeIssueKind, String)> {
+        validate_literal_escapes(raw)
+            .into_iter()
+            .map(|i| (i.kind, i.text))
+            .collect()
+    }
+
+    #[test]
+    fn every_defined_escape_validates_clean() {
+        for raw in [
+            r#""a\nb\tc\rd""#,
+            r#""back\\slash""#,
+            r#""quote\"inside""#,
+            r#""dollar\${notahole}""#,
+            r#""\x00 \x1b \xFF""#,
+            r#""\u{0} \u{3042} \u{10FFFF}""#,
+            r#"'sq \n \t \r \\ \' \x41 \u{1F600}'"#,
+            "\"\"\"\n  heredoc \\t body\n  \"\"\"",
+        ] {
+            assert!(issues(raw).is_empty(), "unexpected issue in {raw:?}: {:?}", issues(raw));
+        }
+    }
+
+    #[test]
+    fn unknown_escapes_are_reported_with_their_spelling() {
+        assert_eq!(issues(r#""bad:\q""#), vec![(EscapeIssueKind::Unknown, "\\q".to_string())]);
+        // `\d`/`\w`/`\s` — the regex habit. A regex pattern is an ordinary
+        // string, so it must double its backslashes (or be a raw string).
+        assert_eq!(issues(r#""\d+""#), vec![(EscapeIssueKind::Unknown, "\\d".to_string())]);
+        assert!(issues(r#""\\d+""#).is_empty(), "a doubled backslash is one literal backslash");
+        // `\0` is C's NUL spelling, not Almide's — it silently produced two
+        // characters (found live in tools/stdlib-crawler/main.almd).
+        assert_eq!(issues(r#""\0""#), vec![(EscapeIssueKind::Unknown, "\\0".to_string())]);
+        // Quote-form asymmetry: `\$` is double-quote-only, `\'` single-only.
+        assert_eq!(issues(r#"'\$'"#), vec![(EscapeIssueKind::Unknown, "\\$".to_string())]);
+        assert_eq!(issues(r#""\'""#), vec![(EscapeIssueKind::Unknown, "\\'".to_string())]);
+    }
+
+    #[test]
+    fn out_of_range_codepoints_are_their_own_class() {
+        assert_eq!(
+            issues(r#""\u{110000}""#),
+            vec![(EscapeIssueKind::OutOfRange, "\\u{110000}".to_string())]
+        );
+        assert_eq!(
+            issues(r#""\u{D800}""#),
+            vec![(EscapeIssueKind::OutOfRange, "\\u{D800}".to_string())]
+        );
+        // Malformed SHAPE (no digits, no brace, non-hex) is "unknown", not
+        // "out of range" — there is no codepoint to name.
+        assert_eq!(issues(r#""\u{}""#), vec![(EscapeIssueKind::Unknown, "\\u{}".to_string())]);
+        assert_eq!(issues(r#""\uABCD""#), vec![(EscapeIssueKind::Unknown, "\\u".to_string())]);
+        assert_eq!(issues(r#""\xZZ""#)[0].0, EscapeIssueKind::Unknown);
+    }
+
+    #[test]
+    fn raw_strings_have_no_escape_layer() {
+        assert!(issues(r#"r"\q \d \u{110000}""#).is_empty());
+        assert!(issues("r\"\"\"\\q\"\"\"").is_empty());
+    }
+
+    #[test]
+    fn interpolation_holes_are_code_and_their_nested_literals_are_checked() {
+        // `x + 1` is not literal text — no escape rules apply inside a hole.
+        assert!(issues(r#""a${x + 1}b""#).is_empty());
+        // A nested literal inside a hole IS a literal: the sub-parser that
+        // re-lexes it throws its own diagnostics away, so this pass owns it.
+        assert_eq!(
+            issues(r#""${ f("bad\q") }""#),
+            vec![(EscapeIssueKind::Unknown, "\\q".to_string())]
+        );
+    }
+
+    #[test]
+    fn issue_position_is_relative_to_the_literal() {
+        let found = validate_literal_escapes(r#""ab\q""#);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line_offset, 0);
+        // 1 for the opening quote + 2 for `ab`.
+        assert_eq!(found[0].col_offset, 3);
+
+        let found = validate_literal_escapes("\"\"\"\nok\nbad \\q\n\"\"\"");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line_offset, 2);
+        assert_eq!(found[0].col_offset, 4);
     }
 }

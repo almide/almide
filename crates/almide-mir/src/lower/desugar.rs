@@ -360,7 +360,7 @@ pub fn desugar_sort_by_cached_keys(body: &IrExpr) -> Option<IrExpr> {
                     // trap, fuzz seed-20260718 index 866) and a Float key would sort by
                     // i64 BIT patterns (wrong order for negatives). Non-Int keys fall
                     // through to the mod_p4 sort_by route: Float → sort_by_float,
-                    // String → the honest `sort_by_str_key_x` wall.
+                    // String → sort_by_str_key (`_rc` when the elements are heap).
                     && matches!(&args[1].ty, Ty::Fn { ret, .. } if **ret == Ty::Int));
             if !hit {
                 return;
@@ -492,6 +492,7 @@ fn desugar_all_try_match_branch_passes(
     (if unit_main { desugar_unit_main_err_arms(cur) } else { None })
         .or_else(|| desugar_sort_by_cached_keys(cur))
         .or_else(|| desugar_to_option_calls(cur))
+        .or_else(|| desugar_result_combinator_to_match(cur))
         .or_else(|| desugar_offtype_testing_asserts(cur))
         // The heap-if call-arg hoist and the mutable-global projection-arg
         // hoist run in the LOWERING's pre-slots (mod_c.rs) — they must run on

@@ -4,9 +4,27 @@ File extension: `.almd`
 
 ## File structure
 ```
+@dialect(3)          // optional: the language dialect this file was verified against
 import <module>
 // declarations...
 ```
+
+When a function moves or goes away, mark the old one so callers are told how
+to fix themselves — the compiler compares the two signatures and only offers
+`almide fix` the edit when swapping the name is the whole edit:
+
+```almide
+@deprecated(since = 3, use = "string.trim_start")   // renamed
+@deprecated(since = 3, note = "unsound on surrogate pairs")  // removed, no successor
+```
+
+`@dialect(N)` is optional and goes above everything. It records the language
+dialect the file last checked clean against — not a release number: the epoch
+advances only when the language surface changes in a way that can break
+already-written code (`proofs/dialect-epochs.toml` lists what each one broke).
+A stamp older than the compiler is silent; a stamp NEWER is `E051`, because
+nothing here has verified that file. Write or advance it with
+`almide check <file> --stamp`, which only ever moves it forward.
 
 ## Project layout (multi-file)
 For projects > 1 file, create a package:
@@ -140,6 +158,19 @@ fn parse_opt(s: String) -> Int?!               // Result[Option[Int], String]
 ```
 fn parse(text: String) -> Ast = _                     // hole (type-checked stub)
 fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
+```
+Both take whatever type the context demands, so the rest of the program keeps
+type-checking, and both PANIC if execution reaches them (native: exit 101 —
+`not yet implemented: hole at line N` / `not yet implemented: <your message>`).
+This is a NATIVE-ONLY workflow: the wasm MIR has no arm for either node, so a
+program that still contains one walls (`almide run --target wasm` exits 1,
+"this program shape is not yet supported by the verified wasm renderer").
+Fill the hole before you build for wasm.
+
+`_` in a **call argument** is a different thing and is rejected (E046):
+```
+let v = add(_, 10)          // ✗ E046 — not partial application, no `_` sections
+let add10 = (x) => add(x, 10)   // ✓ name the missing value with a lambda
 ```
 
 ### Mutable parameters
@@ -431,8 +462,17 @@ let stats = fs.fold_lines(path, map.new(), (acc, line) =>
 var count = 0
 fs.for_each_line(path, (line) => { count = count + 1 })!
 
+// ✓ FALLIBLE body: the callback's `!` instantiates the fallible form here too
+//   (first-err short-circuit, ADR-0006) — the callback is never called again
+//   after the failing line. Same name, one extra `!`.
+let totals = fs.fold_lines(path, map.new(), (acc, line) => add_row(acc, line)!)!
+
 // ✗ avoid for large files: fs.read_lines(path)! |> list.fold(...)
 ```
+
+The partitioned walkers (`fs.fold_lines_range` / `fs.fold_lines_chunked`) have
+NO fallible form — a partitioned walk has no defined first err — so an erring
+chunk body handles its own error.
 
 `result.collect` / `collect_map` are REMOVED (ADR-0007 — the name promised Rust's first-err short-circuit and did the opposite). Collect every error with partition:
 
@@ -442,6 +482,16 @@ if list.is_empty(errs) then ok(oks) else err(errs)   // Result[List[T], List[E]]
 ```
 
 ### Error-handling doctrine (ADR-0004)
+
+**Choosing `E` is a layer assignment, not a taste call.** `E = String` is the
+**erasure** layer — the *reporting* channel, read by humans and models; it is
+the default. A variant `E` is the **refinement** layer — the *branching*
+channel, where the program changes behaviour on the content — and it is worth
+its cost only inside a **closed domain**: a module or package that takes care
+of that error itself. Crossing out of that domain, the variant is **demoted**
+back to String, and the demotion is always visible as a `map_err` (there is no
+conversion hook, so it cannot happen silently). Full rule:
+[docs/specs/result-option-effect.md §8.0](./specs/result-option-effect.md).
 
 **Never branch on the text of an error message** (`string.contains(e, …)`,
 `e == "No such file"`) — the text is a report, not an API, and E035 warns.
@@ -491,17 +541,25 @@ guard not fs.exists(path) else {
 All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in Almide.
 
 ```
-// Parallel map: first Err (in list order) propagates
-let results = fan.map(urls, (u) => http.get(u))!         // Result[List[B], String]
+// Dynamic mappers — a list + one callback returning Result (the mapper matrix
+// covers every A→B pairing with A, B in {Int, Float, String}):
+let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: first Err (list order) propagates
+let winner  = fan.any(mirrors, (m) => fetch(m)) ?? fb     // Result[B, String]: first Ok in LIST order; an Err skips that element
+let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, String]]: EVERY element's Result, Errs captured
+// The callback may be an EFFECT fn, in either spelling — an inline lambda that
+// calls one, or a bare effect-fn value. Same rule as the block heads' arms.
+let checked = fan.map(paths, read_meta)                   // read_meta: an `effect fn`, passed by name
 
-// Block heads — arms are single function calls separated by `;` or newline
-let first = fan.any { fetch_a(); fetch_b() } ?? fallback  // first Ok in SOURCE order
-let all   = fan.settle { job_a(); job_b() }               // List[Result[T, String]]
-let win   = fan.race { solve_fast(); solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
+// Block heads — arms are parallel siblings separated by `,` or newline
+// (`;` between arms is an error: it means sequencing, and stays legal only
+//  INSIDE a block arm — `{ let x = f(); g(x) }`)
+let first = fan.any { fetch_a(), fetch_b() } ?? fallback  // first Ok in SOURCE order
+let all   = fan.settle { job_a(), job_b() }               // TUPLE of per-arm Results (heterogeneous arms allowed)
+let win   = fan.race { solve_fast(), solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
 
 // Budgets: deterministic compute-time limits, built with compute.* constructors
 let r = fan.bounded(compute.ms(100)) { work(input) } ?? -1   // Err if work exceeds 100ms of deterministic compute
-let w = fan.race(compute.us(50)) { a(); b() } ?? -1          // arms over budget are excluded
+let w = fan.race(compute.us(50)) { a(), b() } ?? -1          // arms over budget are excluded
 
 // Mapper form: race ONE pure lambda over a dynamic list (winner = cheapest, tie → list order)
 let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback        // mapper returns Result: err(...) disqualifies
@@ -760,7 +818,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms
-- `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(); b() }`
+- `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(), b() }`
 - `fan.bounded(100) {...}` / `fan.race(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
 - `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
 - `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`

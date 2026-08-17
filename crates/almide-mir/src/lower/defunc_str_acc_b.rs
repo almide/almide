@@ -82,9 +82,9 @@ impl LowerCtx {
                 return None;
             }
         };
-        self.materialized_options.insert(subj);
+        self.value_shapes.insert(subj, crate::lower::VariantShape::Option);
         if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-            self.heap_elem_lists.insert(subj);
+            self.value_drops.entry(subj).or_default().flat_elems = true;
         }
         let ((some_body, some_bind), none_body) = match self.parse_option_append_arms(arms, subj) {
             Some(parsed) => parsed,
@@ -189,7 +189,7 @@ impl LowerCtx {
         match inner {
             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
             IrPattern::Bind { var, ty }
-                if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                if is_heap_ty(ty) && self.value_drops.get(&subj).is_some_and(|d| d.flat_elems) =>
             {
                 Ok(Some((*var, true)))
             }
@@ -246,30 +246,30 @@ impl LowerCtx {
     /// see docs/roadmap/active/code-health-codopsy.md.
     fn track_heap_ok_result_subj_drop_no_record(&mut self, subj: ValueId, ty: &Ty) {
         if crate::lower::is_result_listval_ty(ty) {
-            self.value_result_lists.insert(subj);
+            self.value_drops.entry(subj).or_default().value_result_list = true;
             return;
         }
         if crate::lower::is_value_result_ty(ty) {
-            self.value_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().value_result = true;
             return;
         }
         if crate::lower::is_str_int_result_ty(ty) {
-            self.str_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().str_int_result = true;
             return;
         }
         if crate::lower::is_value_int_result_ty(ty) {
-            self.value_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().value_int_result = true;
             return;
         }
         if crate::lower::is_list_str_int_result_ty(ty) {
-            self.list_str_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().list_str_int_result = true;
             return;
         }
         if crate::lower::is_list_value_int_result_ty(ty) {
-            self.list_value_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().list_value_int_result = true;
             return;
         }
-        self.heap_elem_lists.insert(subj);
+        self.value_drops.entry(subj).or_default().flat_elems = true;
     }
 
     /// Extracted verbatim from [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep,
@@ -298,9 +298,9 @@ impl LowerCtx {
                 && is_variant_ty(&subject.ty)
                 && !crate::lower::is_result_ty(&subject.ty))
         {
-            self.materialized_options.insert(subj);
+            self.value_shapes.insert(subj, crate::lower::VariantShape::Option);
             if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(subj);
+                self.value_drops.entry(subj).or_default().flat_elems = true;
             }
         }
     }
@@ -319,7 +319,7 @@ impl LowerCtx {
                 && crate::lower::is_result_ty(&subject.ty)
                 && !Self::is_heap_ok_result(&subject.ty))
         {
-            self.materialized_results.insert(subj);
+            self.value_shapes.insert(subj, crate::lower::VariantShape::ResultScalar);
             // Scalar-Ok / heap-Err `Result[Int, String]` (the byte-match fixture's `mkResult`): the
             // len-as-tag read stays @4, but track heap_elem_lists so the Err arm's String payload drops
             // via DropListStr (Ok=len0 frees nothing, Err=len1 frees slot-0's String).
@@ -327,7 +327,7 @@ impl LowerCtx {
                 &subject.ty
             {
                 if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    self.heap_elem_lists.insert(subj);
+                    self.value_drops.entry(subj).or_default().flat_elems = true;
                 }
             }
         }
@@ -347,7 +347,7 @@ impl LowerCtx {
         if is_self_host_result_str_call(subject)
             || (is_named_call && Self::is_heap_ok_result(&subject.ty))
         {
-            self.materialized_results_str.insert(subj);
+            self.value_shapes.insert(subj, crate::lower::VariantShape::ResultHeapOk);
             self.track_heap_ok_result_subj_drop_no_record(subj, &subject.ty);
         }
     }
@@ -365,9 +365,9 @@ impl LowerCtx {
             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
             IrPattern::Bind { var, ty }
                 if is_heap_ty(ty)
-                    && (self.heap_elem_lists.contains(&subj)
-                        || self.value_result_lists.contains(&subj)
-                        || self.value_result_results.contains(&subj)) =>
+                    && (self.value_drops.get(&subj).is_some_and(|d| d.flat_elems)
+                        || self.value_drops.get(&subj).is_some_and(|d| d.value_result_list)
+                        || self.value_drops.get(&subj).is_some_and(|d| d.value_result)) =>
             {
                 Ok(Some((*var, true)))
             }
@@ -494,9 +494,9 @@ impl LowerCtx {
             _ => return rollback(self),
         };
         self.track_variant_match_subject_drop_sets(subject, subj);
-        let is_option = self.materialized_options.contains(&subj);
-        let is_result_str = self.materialized_results_str.contains(&subj);
-        let is_result = self.materialized_results.contains(&subj) || is_result_str;
+        let is_option = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::Option);
+        let is_result_str = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultHeapOk);
+        let is_result = self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultScalar) || is_result_str;
         if !is_option && !is_result {
             return rollback(self);
         }

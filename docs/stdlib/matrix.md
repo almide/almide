@@ -84,6 +84,34 @@ All element-wise unless noted. Both operands of binary ops must have the same sh
 | `matrix.masked_multi_head_attention(...) -> Matrix` | Causal MHA |
 | `matrix.conv1d(input, weight, bias, kernel, stride, padding) -> Matrix` | 1D convolution |
 
+## Quantized loaders
+
+GGUF-style block-quantized weights, decoded straight from the packed bytes.
+
+| Signature | Purpose |
+|---|---|
+| `matrix.from_q1_0_bytes(data, offset, rows, cols) -> Matrix` | Q1_0: 18 B per 128 weights — fp16 scale + 128 sign bits |
+| `matrix.select_rows_q1_0(data, offset, cols, row_ids) -> Matrix` | The row-subset twin (embedding lookup, no full decode) |
+| `matrix.select_rows_q8_0_dq(data, offset, cols, row_ids) -> Matrix` | Q8_0: 34 B per 32 weights — fp16 scale + 32 int8 quants |
+| `matrix.select_rows_f32(data, offset, cols, row_ids) -> Matrix` | Row subset of flat f32 LE bytes |
+
+**A row whose bytes leave the buffer is the all-zero row** (per selected row), a
+negative row id clamps to row 0 and a negative offset clamps to 0 — never a
+panic, never a read past the buffer (C-229).
+
+**The dequantization-zero ruling: an element of zero magnitude is `+0.0`.** A
+quantized element is *magnitude* (the block's fp16 scale) × *direction* (the
+sign bit / int8 quant); when the magnitude is zero the bytes encode no
+direction, so the sign IEEE-754 would return is an artifact of how the
+arithmetic was spelled — `-scale` yields `-0.0` exactly where `0.0 - scale`
+yields `+0.0`. Since `-0.0 == 0.0`, nothing downstream notices, which is what
+makes a stray sign bit worth ruling out rather than shrugging off. Non-zero
+weights keep their exact sign and bits.
+
+The `from_bytes_f16_le` / `_f32_le` / `_f64_le` *decoders* are deliberately
+outside this rule: there a stored `-0.0` is the datum, so its sign is
+information and survives (C-269).
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
 ## Signature index (71 functions)

@@ -122,14 +122,28 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .iter()
             .filter(|f| f.name.as_str() != "main")
             .filter(|f| {
-                !matches!(
+                let declared_result = matches!(
                     &f.ret_ty,
-                    Ty::Applied(
-                        almide_lang::types::constructor::TypeConstructorId::Result
-                            | almide_lang::types::constructor::TypeConstructorId::Option,
-                        _
-                    )
-                ) && (body_has_stmt_position_propagating_unwrap(&f.body)
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
+                );
+                let declared_option = matches!(
+                    &f.ret_ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+                );
+                // #1410: a CAN-ERR declared-Option effect fn is the #841 hybrid this
+                // registry exists to close — its err path returns a wrapped block
+                // (the propagation machinery builds `err(e)`) while its ok tail is
+                // the RAW Option, and no consumer can discriminate the two. It was
+                // excluded here by return TYPE, so the hybrid survived for exactly
+                // this family: wasm swallowed the error and read garbage (8260)
+                // where native aborted. Admitting it gives the true carrier
+                // `Result[Option[T], String]` on both v1 legs. A NEVER-ERR
+                // declared-Option fn stays excluded — its raw-Option ABI is sound
+                // and `strip_declared_option_trys` keeps its call sites free.
+                !declared_result
+                    && (!declared_option
+                        || (f.is_effect && can_err.contains(f.name.as_str())))
+                    && (body_has_stmt_position_propagating_unwrap(&f.body)
                     || body_has_tail_position_option_unwrap(&f.body)
                     || body_has_tail_position_canerr_try(&f.body, &can_err)
                     // #841: EVERY non-Unit CAN-ERR lifted effect fn always-wraps. Its
@@ -150,9 +164,22 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .collect();
     });
     if abi_probe {
-        crate::trace::trace("ALMIDE_ABI_PROBE", || format!(
-            "[abi] can_err={can_err:?} lifted={lifted_effect_fns:?} auto_wrap={:?}",
-            auto_wrap_abi_snapshot()));
+        crate::trace::trace("ALMIDE_ABI_PROBE", || {
+            // SORTED so two probe runs of the same program diff clean: the sets are
+            // HashSets, and their Debug order varies run-to-run — a 394-file corpus
+            // snapshot carried 74 lines of pure order noise before this (2026-08-14).
+            let sorted = |s: &std::collections::HashSet<String>| {
+                let mut v: Vec<&String> = s.iter().collect();
+                v.sort();
+                format!("{v:?}")
+            };
+            format!(
+                "[abi] can_err={} lifted={} auto_wrap={}",
+                sorted(&can_err),
+                sorted(&lifted_effect_fns),
+                sorted(&auto_wrap_abi_snapshot())
+            )
+        });
     }
     DECLARED_OPTION_FNS.with(|s| {
         *s.borrow_mut() = fns
@@ -160,6 +187,17 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .filter(|f| {
                 matches!(&f.ret_ty,
                     Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+                    // #1410: NEVER-ERR only. This registry drives
+                    // `strip_declared_option_trys`, whose premise — "there is no
+                    // err channel, the propagation node is the identity" — is
+                    // only true when the callee cannot err. Stripping a CAN-ERR
+                    // member's `!` deleted the error propagation itself: wasm
+                    // continued past a failed int.parse with a garbage value
+                    // while native aborted. A can-err declared-Option fn now
+                    // rides AUTO_WRAP instead (true carrier
+                    // `Result[Option[T], String]`), so its `!` must survive to
+                    // become the real err/ok match.
+                    && !can_err.contains(f.name.as_str())
             })
             .map(|f| f.name.as_str().to_string())
             .collect();
@@ -357,6 +395,12 @@ pub(crate) struct LowerCtx {
     /// flat fold cannot see). Inside a frame such a reassignment is DEFERRED: the var
     /// keeps its still-live handle and the new value is carried like every `Opaque`.
     in_frame: u32,
+    /// #1400: `let`-bound RANGE vars whose only use is a `for-in` head → the Range
+    /// initializer, kept as IR so the loop can take the counting path. Populated
+    /// once per body by `range_counting_vars`; the bind for one of these emits
+    /// NOTHING (no `list.range` block), and `lower_for_in` reads the stored Range.
+    /// Empty for every body without such a var, so nothing else changes.
+    range_counting_vars: HashMap<VarId, IrExpr>,
     /// Depth of enclosing DEFUNCTIONALIZED HOF bodies (`list.map((x) => …)`) being lowered inline.
     /// When > 0, a SELF-RECURSIVE call in a heap-result body is BOUNDED (the map iterates a finite
     /// list; a `render_el(child, …)` recurses to the tree's depth, not unbounded), so it is ADMITTED —
@@ -419,20 +463,26 @@ pub(crate) struct LowerCtx {
     /// non-self-host Option-returning call) is `Opaque` with len=0 and would MISREAD as
     /// `None`, so it keeps the sound LINEARIZED match. This is the gate that makes the
     /// len-as-tag execution safe without any global materialization invariant.
-    materialized_options: HashSet<ValueId>,
+    /// #1414 shape-at-birth: THE per-value variant shape — one map, one fact
+    /// per value (law 4: the type IS the knowledge, attached when the value is
+    /// seeded). Replaces the three former membership sets
+    /// (materialized_options / materialized_results / materialized_results_str):
+    /// "untracked" is now the ABSENCE of a shape in one place, never a
+    /// disagreement between sets, and a shape overwrite is a plain insert.
+    value_shapes: HashMap<ValueId, crate::lower::VariantShape>,
+    /// #1414 drop dimension: ONE record per value (see `DropFacts`). Replaces
+    /// heap_elem_lists / variant_drop_handles / the *_result_results family /
+    /// list_list_str_lists / str_str_elem_lists.
+    value_drops: HashMap<ValueId, crate::lower::DropFacts>,
     /// MIR values KNOWN to be MATERIALIZED Results (the DynListStr len-as-tag layout: `Ok(int)` =
     /// len 0 with the value in slot 0, `Err(string)` = len 1 owning the message). An `Ok`/`Err`
     /// `match` may EXECUTE (read `len` as the tag — len 0 → Ok, len != 0 → Err — and extract slot
     /// 0) ONLY over a subject in this set; any other Result is a deferred `Opaque` (len 0 → MISREADS
-    /// as Ok) and keeps the sound LINEARIZED match. The Result analogue of `materialized_options`.
-    materialized_results: HashSet<ValueId>,
     /// MIR values KNOWN to be MATERIALIZED HEAP-Ok Results (`Result[String, String]` etc.): a 1-slot
     /// DynListStr (cap 1, len 1 — IDENTICAL block size to every String, so the free-list reuses it)
     /// that ALWAYS owns one String in slot 0's LOW 32 bits (@12 — Ok's value OR Err's message), with
     /// the Ok/Err TAG in slot 0's HIGH 32 bits (@16: 0=Ok, 1=Err). `DropListStr` `i32.wrap`s the slot
     /// to the low-32 handle, so the high-32 tag is inert. An `Ok`/`Err` `match` reads @16 and binds
-    /// the @12 handle as a borrowed String. The heap-Ok-payload analogue of `materialized_results`.
-    materialized_results_str: HashSet<ValueId>,
     /// Lambda-lifted auxiliary functions produced while lowering this function's body
     /// (a non-capturing `let f = (x) => …` or a lambda call-argument lifts its body to a
     /// fresh MirFunction here, bound via `Op::FuncRef`). `lower_function_all` returns these
@@ -497,41 +547,33 @@ pub(crate) struct LowerCtx {
     /// String handles). A scope-end drop of one emits [`Op::DropListStr`] (recursive free),
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
     /// `alloc_list_str` result or a `List[String]`-typed bind is created (Machinery 2).
-    heap_elem_lists: HashSet<ValueId>,
     /// MIR values that are a `List[List[String]]` (the csv `rows` shape: a list whose element slots
     /// hold owned `List[String]` blocks). A scope-end drop emits [`Op::DropListListStr`] (a NESTED
     /// free: each row's cell Strings, then each row block, then the outer block) — a flat
     /// `DropListStr` would only `rc_dec` each inner-list handle, LEAKING the cells. Populated by the
     /// list-of-lists concat (`rows + [cur]`).
-    list_list_str_lists: HashSet<ValueId>,
     /// MIR values that are a `Result[Value, String]` (the `ok(value.array(...))` shape). A scope-end
     /// drop emits [`Op::DropResultValue`] (tag-dispatch: Ok → `$__drop_value`, Err → `rc_dec`) — a
     /// flat `DropListStr` would leak the Ok Value's nested payload.
-    value_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(String, Int), String]` wrapper (toml `parse_key_part`'s
     /// `ok((slice, pos))`). A scope-end drop emits [`Op::DropResultStrInt`] (tag-dispatch: Ok → free
     /// the `(String, Int)` tuple @12 recursively (its String slot only), Err → `rc_dec` the String) —
     /// a flat `DropListStr` would leak the Ok tuple's String + free the tuple block as if it were one.
-    str_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(Value, Int), String]` wrapper (toml `parse_val`'s
     /// `ok((value.…, pos))`). A scope-end drop emits [`Op::DropResultValueInt`] (Ok → free the
     /// (Value, Int) tuple recursively via `$__drop_value_tuple`, Err → `rc_dec` the String) — a flat
     /// `DropListStr` would leak the Value's nested payload.
-    value_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(List[Value], Int), String]` wrapper (toml `collect_array_items`'s
     /// `ok((items, np))`). A scope-end drop emits [`Op::DropResultListValueInt`] (Ok → free the
     /// (List[Value], Int) tuple recursively via `$__drop_list_value_tuple`, Err → `rc_dec` the String).
-    list_value_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(List[String], Int), String]` wrapper (toml `parse_key` /
     /// `parse_table_key`'s `ok((keys, pos))`). A scope-end drop emits [`Op::DropResultListStrInt`]
     /// (Ok → free the (List[String], Int) tuple recursively: each element String, the List block, the
     /// tuple block; Err → `rc_dec` the String) — a flat `DropListStr` would leak the List's Strings.
-    list_str_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[List[String], String]` wrapper (the `fs.list_dir` `ok([name,…])`
     /// shape — NO tuple). A scope-end drop emits [`Op::DropResultListStr`] (Ok → free the List[String]
     /// payload recursively: each element String, then the List block; Err → `rc_dec` the String) — a
     /// flat `DropListStr` would `rc_dec` only the @12 List HANDLE, leaking the element Strings + block.
-    list_str_result_results: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -575,13 +617,11 @@ pub(crate) struct LowerCtx {
     /// element slots hold owned (String, String) TUPLE blocks. A scope-end drop emits
     /// [`Op::DropListStrStr`] (`$__drop_list_str_str`: per tuple, rc_dec BOTH String slots, then the
     /// tuple, then the list). The (String,String) counterpart of `str_value_elem_lists`.
-    str_str_elem_lists: HashSet<ValueId>,
     /// MIR values that are a `value.as_array` Result `Result[List[Value], String]` (the cap-as-tag
     /// 1-slot block whose Ok payload @12 is a `List[Value]`). A scope-end drop emits
     /// [`Op::DropResultListValue`] (`$__drop_result_lv`: Ok → recursive list free, Err → String free)
     /// instead of the flat [`Op::DropListStr`] (which leaks the list's element Values). Read by the
     /// SAME cap@16 match machinery as a str-result (`materialized_results_str`); only the DROP differs.
-    value_result_lists: HashSet<ValueId>,
     /// MIR values KNOWN to be a record/tuple block this brick MATERIALIZED with the uniform
     /// slot layout (`try_lower_scalar_record_construct` / `try_lower_record_construct` /
     /// `try_lower_scalar_tuple_construct` / scalar-tuple/list-slot), plus aggregate-typed
@@ -644,7 +684,6 @@ pub(crate) struct LowerCtx {
     /// child blocks), mapped to their TYPE NAME (so the render calls the generated `$__drop_<ty>`).
     /// `drop_op_for` consults this before the flat/masked drops. Populated by
     /// `try_lower_variant_ctor` for a type that [`VariantLayouts::needs_recursive_drop`] (ADT brick 5b).
-    variant_drop_handles: HashMap<ValueId, String>,
     /// True when THIS function's DECLARED return type is an explicit `Result`/`Option` (e.g.
     /// `effect fn fs.write(...) -> Result[Unit, String]`). Such a return is a REAL inspectable
     /// heap value the caller `match`es on — so a `Result[Unit, _]` TAIL must produce the heap
@@ -665,6 +704,18 @@ pub(crate) struct LowerCtx {
     /// Option handle AS the Result — a confirmed silent wrong-value. Threaded as an explicit
     /// per-fn FACT (the `unit_main` pattern) so the desugar never trusts a tree-local `.ty`.
     ret_is_result_abi: bool,
+    /// The DECLARED `Result[..]` return's [`ResultFamily`] — the carrier-compat
+    /// fact the R2 `!` bind rule reads: the err layout is FAMILY-uniform, so a
+    /// same-family callee carrier IS a valid value of this fn's Result ABI on
+    /// the err path (direct `Op::Return`, no rebox). `None` = no declared
+    /// Result return (lifted/auto-wrapped fns decline the rule for now).
+    decl_ret_family: Option<crate::lower::ResultFamily>,
+    /// The fn's declared return is literally `Unit` — the void convention.
+    /// Gates the R2 rule's ABORT exit (a `!` in a fn with no Result channel
+    /// dies with the message); a non-Unit channel-less fn (a pure fn
+    /// returning a tuple, whose `!` belongs to an enclosing fallible lambda)
+    /// must NOT abort.
+    decl_ret_ty_is_unit: bool,
     /// This fn's effective ERR type: the declared `Result[_, E]`'s `E`, or `String` for a
     /// lifted effect fn (the synthetic `Result[T, String]`); `None` when no Result ABI applies
     /// (a declared `-> Option[..]` fn, a lifted lambda sub-ctx). Gates the tail-`!` pass-through

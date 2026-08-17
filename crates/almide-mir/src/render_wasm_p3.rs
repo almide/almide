@@ -69,6 +69,15 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (func $environ_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_open"
     (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  ;; The PREOPEN-TABLE discovery pair (#1394). WASI has no "root" fd: the host
+  ;; hands the guest a contiguous run of preopened directory fds from 3 up, and
+  ;; only these two calls say what each one actually IS. Without them every path
+  ;; call had to ASSUME fd 3 — right under `wasmtime --dir=/` (one preopen, and
+  ;; it is `/`), silently wrong under any host that preopens more.
+  (import "wasi_snapshot_preview1" "fd_prestat_get"
+    (func $fd_prestat_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_prestat_dir_name"
+    (func $fd_prestat_dir_name (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_read"
     (func $fd_read (param i32 i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_close"
@@ -104,6 +113,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (data (i32.const {FS_ERR_ACCES_ADDR}) "Permission denied (os error 13)")
   (data (i32.const {FS_ERR_NOTDIR_ADDR}) "Not a directory (os error 20)")
   (data (i32.const {FS_ERR_ISDIR_ADDR}) "Is a directory (os error 21)")
+  (data (i32.const {FS_ERR_WRITEZERO_ADDR}) "failed to write whole buffer")
   ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
   (data (i32.const {RDIR_ERR_ADDR}) "directory not found")
   ;; the fs.write path_open/fd_write error message — a CONST byte run the Err arm copies.
@@ -120,6 +130,15 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; envp/envbuf each call — the env.get leak-loop OOM).
   (global $env_envp (mut i32) (i32.const 0))
   (global $env_cnt (mut i32) (i32.const 0))
+  ;; $path_norm's ONE-TIME WASI preopen-dir table (#1394), cached on exactly the
+  ;; same principle as the environ snapshot above: the set of preopens is fixed
+  ;; for the guest's lifetime, and the name buffers come from immortal $alloc8 —
+  ;; a per-call rescan would leak one allocation per fs op (the env.get leak-loop
+  ;; OOM, again). $preopen_tab is ALSO the built flag (0 = not yet scanned), so
+  ;; it is published only after $preopen_cnt beside it is final. Records are
+  ;; `[fd@0][nameptr@4][namelen@8]`, 12 bytes each.
+  (global $preopen_tab (mut i32) (i32.const 0))
+  (global $preopen_cnt (mut i32) (i32.const 0))
   ;; __div_trap(msg,len): write the interned abort line to STDERR and proc_exit(1)
   ;; — the render-path twin of v0-wasm's __div_trap (§13 termination convention).
   ;; Uses the fd_write iovec scratch; never returns.
@@ -329,9 +348,6 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (func $list_get (param $list i32) (param $idx i32) (result i64)
     (i64.load (call $elem_addr (local.get $list) (local.get $idx))))
 
-  (func $list_len (param $list i32) (result i32)
-    (i32.load (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))))
-
   ;; MakeUnique's clone: a RAW byte copy of the whole data region (cap*ELEM_SIZE
   ;; bytes). Both COW'able layouts store cap@8 in ELEM_SIZE units — a DynList's
   ;; data is len*8 <= cap*8, a DynStr/Bytes block's is len BYTES <= cap*8 — so the
@@ -353,99 +369,11 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
       (br $loop)))
     (local.get $dst))
 
-  (func $list_push (param $list i32) (param $val i64) (result i32)
-    (local $len i32)
-    (local.set $len (i32.load (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))))
-    (call $list_set (local.get $list) (local.get $len) (local.get $val))
-    (i32.store (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))
-               (i32.add (local.get $len) (i32.const 1)))
-    (local.get $list))
-
-  ;; append the decimal digits of a non-negative i64 at $cur; return new cursor
-  (func $itoa_append (param $cur i32) (param $v i64) (result i32)
-    (local $n i32)
-    (if (i64.eqz (local.get $v))
-      (then
-        (i32.store8 (local.get $cur) (i32.const {ASCII_ZERO}))
-        (return (i32.add (local.get $cur) (i32.const 1)))))
-    ;; SIGN (#1208's execution pin found this missing: -42 printed as the u64
-    ;; 18446744073709551574): emit '-' and continue on the wrapped negation —
-    ;; for i64::MIN the wrap IS the correct 2^63 magnitude read unsigned, so
-    ;; the u64 digit loop below is exact for every negative including MIN.
-    (if (i64.lt_s (local.get $v) (i64.const 0))
-      (then
-        (i32.store8 (local.get $cur) (i32.const {ASCII_MINUS}))
-        (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-        (local.set $v (i64.sub (i64.const 0) (local.get $v)))))
-    (local.set $n (i32.const 0))
-    (block $ddone (loop $dloop
-      (br_if $ddone (i64.eqz (local.get $v)))
-      (i32.store8 (i32.add (i32.const {ITOA_TMP_ADDR}) (local.get $n))
-                  (i32.add (i32.const {ASCII_ZERO})
-                           (i32.wrap_i64 (i64.rem_u (local.get $v) (i64.const {DECIMAL_BASE})))))
-      (local.set $n (i32.add (local.get $n) (i32.const 1)))
-      (local.set $v (i64.div_u (local.get $v) (i64.const {DECIMAL_BASE})))
-      (br $dloop)))
-    (block $cdone (loop $cloop
-      (br_if $cdone (i32.eqz (local.get $n)))
-      (local.set $n (i32.sub (local.get $n) (i32.const 1)))
-      (i32.store8 (local.get $cur)
-                  (i32.load8_u (i32.add (i32.const {ITOA_TMP_ADDR}) (local.get $n))))
-      (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-      (br $cloop)))
-    (local.get $cur))
-
-  ;; print "<label>=<e0>,<e1>,...\n" to stdout
-  (func $print_list (param $list i32) (param $lblptr i32) (param $lbllen i32)
-    (local $cur i32) (local $i i32) (local $len i32)
-    (local.set $cur (i32.const {SCRATCH_ADDR}))
-    (local.set $i (i32.const 0))
-    (block $lbldone (loop $lblloop
-      (br_if $lbldone (i32.ge_s (local.get $i) (local.get $lbllen)))
-      (i32.store8 (local.get $cur)
-                  (i32.load8_u (i32.add (local.get $lblptr) (local.get $i))))
-      (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $lblloop)))
-    (i32.store8 (local.get $cur) (i32.const {ASCII_EQUALS}))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    (local.set $len (call $list_len (local.get $list)))
-    (local.set $i (i32.const 0))
-    (block $eldone (loop $elloop
-      (br_if $eldone (i32.ge_s (local.get $i) (local.get $len)))
-      ;; SAFETY WALL: appending an element writes up to a comma + 20 digits; if
-      ;; that would cross HEAP_BASE (the line buffer's end), trap rather than
-      ;; overflow the buffer into the heap (the print-buffer-overflow gate).
-      (if (i32.gt_u (i32.add (local.get $cur) (i32.const {MAX_ELEM_PRINT_BYTES}))
-                    (i32.const {HEAP_BASE}))
-        (then (unreachable)))
-      (if (i32.gt_s (local.get $i) (i32.const 0))
-        (then
-          (i32.store8 (local.get $cur) (i32.const {ASCII_COMMA}))
-          (local.set $cur (i32.add (local.get $cur) (i32.const 1)))))
-      (local.set $cur (call $itoa_append (local.get $cur)
-                                         (call $list_get (local.get $list) (local.get $i))))
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $elloop)))
-    (i32.store8 (local.get $cur) (i32.const {ASCII_NEWLINE}))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    (i32.store (i32.const {IOVEC_ADDR}) (i32.const {SCRATCH_ADDR}))
-    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
-               (i32.sub (local.get $cur) (i32.const {SCRATCH_ADDR})))
-    (drop (call $fd_write (i32.const {STDOUT_FD}) (i32.const {IOVEC_ADDR})
-                          (i32.const {IOVS_COUNT}) (i32.const {NWRITTEN_ADDR}))))
-
-  ;; print a scalar integer followed by a newline
-  (func $print_int (param $v i64)
-    (local $cur i32)
-    (local.set $cur (call $itoa_append (i32.const {SCRATCH_ADDR}) (local.get $v)))
-    (i32.store8 (local.get $cur) (i32.const {ASCII_NEWLINE}))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    (i32.store (i32.const {IOVEC_ADDR}) (i32.const {SCRATCH_ADDR}))
-    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
-               (i32.sub (local.get $cur) (i32.const {SCRATCH_ADDR})))
-    (drop (call $fd_write (i32.const {STDOUT_FD}) (i32.const {IOVEC_ADDR})
-                          (i32.const {IOVS_COUNT}) (i32.const {NWRITTEN_ADDR}))))
+  ;; ($list_len / $list_push / $itoa_append / $print_list / $print_int were
+  ;; deleted in #1208's endgame: their only constructors were hand-built MIR in
+  ;; the certificate layer — no frontend lowering reached them, so the bodies
+  ;; were dead-from-source wasm. Real programs print through the self-hosted
+  ;; `print_str` / `int.to_string` over the prim floor.)
 
   ;; env.args() — build a fresh OWNED `List[String]` of the program arguments
   ;; argv[1..] (SKIP argv[0] = program path, mirroring native `env.args`). The
@@ -586,3 +514,4 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
 }
 
 include!("render_wasm_fs_wat.rs");
+include!("render_wasm_fs_preopen.rs");

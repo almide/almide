@@ -18,9 +18,9 @@ pub fn desugar_effect_unwrap(
     body: &IrExpr,
     unit_main: bool,
     ret_is_result: bool,
-    layouts: &crate::lower::VariantLayouts,
+    _layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
-    let mut next_var = max_var_id(body) + 1;
+    let mut next_var = crate::lower::desugar_var_seed();
     desugar_effect_unwrap_inner(body, &mut next_var, unit_main, ret_is_result)
 }
 
@@ -45,7 +45,7 @@ fn desugar_effect_unwrap_inner(
     unit_main: bool,
     ret_is_result: bool,
 ) -> Option<IrExpr> {
-    use almide_ir::{IrMatchArm, IrPattern};
+    
     use almide_lang::types::Ty;
     // A `!` in a FOR-IN ITERABLE HEAD (`for row in list.get(XS, 0)! { … }` — #1168):
     // hoist it FIRST into `let $t = <head>!; for row in $t { … }` (exactly the manual
@@ -102,6 +102,15 @@ fn desugar_effect_unwrap_inner(
             if a.len() != 1 {
                 continue;
             }
+        }
+        // R2 probe: the STMT-position continuation rewrite is exactly what the
+        // one Return rule replaces — skip it so the `!` reaches the rule (or
+        // walls). The pass's OTHER jobs (the tail-position navigation below,
+        // the for-in head hoist above) are NOT position-continuation
+        // machinery and must keep running: they shape non-`!` returns too, and
+        // gating the whole pass walled fns that carry no `!` at all.
+        if crate::lower::bang_return_probe() {
+            continue;
         }
         // The continuation = the rest of the block `{ stmts[i+1..]; tail }`, typed as the whole body
         // (it produces the fn's return). RECURSE so a LATER `!` in the continuation also desugars.
@@ -450,7 +459,7 @@ pub fn desugar_unit_main_err_arms(body: &IrExpr) -> Option<IrExpr> {
             }
         }
     }
-    let mut rw = Rw { next_var: max_var_id(body) + 1, changed: false };
+    let mut rw = Rw { next_var: crate::lower::desugar_var_seed(), changed: false };
     let mut out = body.clone();
     rw.visit_expr_mut(&mut out);
     rw.changed.then_some(out)

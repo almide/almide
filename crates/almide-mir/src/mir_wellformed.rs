@@ -94,3 +94,131 @@ pub(crate) fn check_def_before_use(func: &MirFunction) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// The [`Op::Return`] TERMINAL discipline (law 6). Four rules, each keeping a
+/// downstream consumer simple enough to verify:
+///
+/// 1. `Return` sits inside an `IfThen` arm, never at top level — a top-level
+///    early return IS the tail, and the certificate's divergence marker only
+///    has meaning inside a branch bracket.
+/// 2. Nothing follows a `Return` in its arm (the next op is the arm's closing
+///    `Else`/`EndIf`) — the verifier's diverged flag is consumed by exactly
+///    the next marker, and the renderers never emit dead code after it.
+/// 3. Both arms of one `IfThen` must not both end in `Return` — a both-return
+///    branch is the tail in disguise, and it would leave the merge
+///    continuation (and the fn's tail `ret`) unreachable-but-accounted.
+/// 4. The `Return`'s value presence matches the fn's `ret` presence (the wasm
+///    `(result …)` signature is one or the other for the whole function).
+pub(crate) fn check_return_terminal(func: &MirFunction) -> Result<(), String> {
+    struct Fr {
+        then_returned: bool,
+        in_else: bool,
+    }
+    let mut stack: Vec<Fr> = Vec::new();
+    let mut prev_was_return = false;
+    for (i, op) in func.ops.iter().enumerate() {
+        if prev_was_return && !matches!(op, Op::Else { .. } | Op::EndIf { .. }) {
+            return Err(format!(
+                "INTERNAL mir-wellformed: op {i} ({op:?}) in `{}` follows a `Return` \
+                 inside the same arm — `Return` is terminal",
+                func.name
+            ));
+        }
+        match op {
+            Op::Return { val } => {
+                if stack.is_empty() {
+                    return Err(format!(
+                        "INTERNAL mir-wellformed: op {i} in `{}` is a top-level `Return` \
+                         — the tail already returns; `Return` must sit inside an `IfThen` arm",
+                        func.name
+                    ));
+                }
+                if val.is_some() != func.ret.is_some() {
+                    return Err(format!(
+                        "INTERNAL mir-wellformed: op {i} in `{}`: `Return` value presence \
+                         ({val:?}) does not match the fn's ret ({:?})",
+                        func.name, func.ret
+                    ));
+                }
+                prev_was_return = true;
+                continue;
+            }
+            Op::IfThen { .. } => stack.push(Fr { then_returned: false, in_else: false }),
+            Op::Else { .. } => {
+                if let Some(fr) = stack.last_mut() {
+                    fr.then_returned = prev_was_return;
+                    fr.in_else = true;
+                }
+            }
+            Op::EndIf { .. } => {
+                if let Some(fr) = stack.pop() {
+                    let then_returned = fr.then_returned || (prev_was_return && !fr.in_else);
+                    let else_returned = prev_was_return && fr.in_else;
+                    if then_returned && else_returned {
+                        return Err(format!(
+                            "INTERNAL mir-wellformed: op {i} in `{}`: both arms of one \
+                             `IfThen` end in `Return` — lower the both-return shape as \
+                             the ordinary tail instead",
+                            func.name
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+        prev_was_return = false;
+    }
+    Ok(())
+}
+
+/// Negative controls: proofs the verifier FIRES (the swift
+/// `verifier-fail-*.sil` pattern). A gate that has never been seen
+/// rejecting anything is indistinguishable from `Ok(())`; each test here
+/// hands the checker a minimal violating function and asserts the named
+/// wall comes back.
+#[cfg(test)]
+mod tests {
+    use super::check_def_before_use;
+    use crate::{MirFunction, Op, ValueId};
+
+    fn func(ops: Vec<Op>, ret: Option<ValueId>) -> MirFunction {
+        MirFunction {
+            name: "negctl".to_string(),
+            ops,
+            ret,
+            ..MirFunction::default()
+        }
+    }
+
+    #[test]
+    fn well_formed_function_passes() {
+        let f = func(
+            vec![
+                Op::Const { dst: ValueId(0) },
+                Op::Dup { dst: ValueId(1), src: ValueId(0) },
+            ],
+            Some(ValueId(1)),
+        );
+        assert_eq!(check_def_before_use(&f), Ok(()));
+    }
+
+    #[test]
+    fn read_before_definition_is_a_named_wall() {
+        let f = func(vec![Op::Dup { dst: ValueId(1), src: ValueId(0) }], None);
+        let err = check_def_before_use(&f).expect_err("undefined read must be rejected");
+        assert!(
+            err.contains("INTERNAL mir-wellformed") && err.contains("before any definition"),
+            "wall must be named and cite the violation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn undefined_return_value_is_a_named_wall() {
+        let f = func(vec![Op::Const { dst: ValueId(0) }], Some(ValueId(9)));
+        let err = check_def_before_use(&f).expect_err("undefined return must be rejected");
+        assert!(
+            err.contains("INTERNAL mir-wellformed") && err.contains("no op defines"),
+            "wall must be named and cite the violation, got: {err}"
+        );
+    }
+}

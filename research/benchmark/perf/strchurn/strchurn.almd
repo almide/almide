@@ -1,0 +1,34 @@
+// strchurn — the #1004 allocation-heavy string workload, verbatim from the
+// issue: N ints -> to_string -> join -> split -> len -> sum.
+//
+// Every stage is a materialization: a Vec<String> of N decimal renderings, one
+// big String, a second Vec<String> of N owned pieces, a Vec<i64> of lengths.
+// The row exists to hold the string half of the runtime scoreboard honest —
+// the arithmetic kernels (nbody, spectralnorm) say nothing about it.
+//
+// The Rust reference is rust-ref/strchurn.rs and is SAME-SHAPE and
+// SAME-SEMANTICS on purpose: it collects owned `String`s out of `split` (as
+// `almide_rt_string_split` does) and counts characters with `chars().count()`
+// (as `almide_rt_string_len` does). rust-ref/strchurn_idiomatic.rs is the same
+// program as a Rust programmer would actually write it — borrowed `&str`
+// pieces, `s.len()` — and the delta between the two references is the API's
+// semantic cost, reported separately from codegen. See
+// research/benchmark/perf/string-gap-1004.md.
+import env
+import int
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = match list.get(args, 0) {
+    some(s) => match int.parse(s) {
+      ok(v) => v,
+      err(_) => 1000000,
+    },
+    none => 1000000,
+  }
+  let parts = list.range(0, n) |> list.map((i) => int.to_string(i))
+  let joined = string.join(parts, ",")
+  let back = string.split(joined, ",")
+  let total = back |> list.map((s) => string.len(s)) |> list.sum
+  println("n: ${n} chars: ${string.len(joined)} sum: ${total}")
+}

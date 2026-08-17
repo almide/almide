@@ -14,7 +14,7 @@ import      = "import" dotted_path
               | "as" IDENT )?                             (* alias: import self as app *)
 dotted_path = IDENT ("." IDENT)*                          (* import pkg.submodule *)
 
-decl        = type_decl | fn_decl | protocol_decl | top_let | strict_decl | test_decl
+decl        = type_decl | fn_decl | protocol_decl | top_let | test_decl
 
 type_decl   = ("local" | "mod")? "type" TYPENAME generic_params?
               (":" TYPENAME ("," TYPENAME)*)?             (* conventions: type Name: Eq, Repr *)
@@ -32,7 +32,6 @@ protocol_decl   = "protocol" TYPENAME generic_params? "{" protocol_method* "}"
 protocol_method = "effect"? "fn" fn_name generic_params? "(" params ")" "->" type
 
 top_let     = "pub"? ("local" | "mod")? ("let" | "var") name (":" type)? "=" expr
-strict_decl = "strict" IDENT
 test_decl   = "test" STRING where_clause* block           (* where: table cases / binds / call stubs *)
 generic_params = "[" gparam ("," gparam)* "]"
 gparam      = TYPENAME (":" (TYPENAME ("+" TYPENAME)* | "{" fields "}"))?   (* bounds; structural bound *)

@@ -9,3 +9,4 @@
     include!("tests_part1_b.rs");
     include!("tests_part2.rs");
     include!("tests_part2_b.rs");
+    include!("tests_result_family.rs");

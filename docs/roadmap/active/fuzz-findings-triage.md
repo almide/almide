@@ -676,3 +676,86 @@ rewritten — worth knowing before the diff surprises you.)
 Note the scope: the gate is `spec/ examples/` only. `tools/` is deliberately outside it, and
 formatting the dogfood would collapse its multi-line signatures and pipe chains onto single
 long lines — so the right move there is to leave it alone, not to "fix" it.
+
+## Q1_0 sign-of-zero (#1358, fuzz-nightly run 31667874852)
+
+Seed 506685997636 / index 703 — a mutation of `spec/wasm_cross/matrix_select_rows_oob.almd`
+(C-229). `matrix.select_rows_q1_0` over an all-zero 18-byte block: native `-0`, wasm `0`.
+They compare EQUAL, so nothing downstream notices, which is exactly why it survived a release.
+
+**Root cause: one spelling, two answers.** Native's dequantizer wrote its negative branch as
+`let neg_scale = -scale;`; the self-hosted wasm decoder wrote `0.0 - scale`. For every non-zero
+scale those are bit-identical. At `scale = +0.0` they are not: `-(+0.0)` is `-0.0`,
+`0.0 - 0.0` is `+0.0`.
+
+**Ruling: a dequantized element of zero magnitude is `+0.0`.** A quantized element is
+*magnitude* (the block's fp16 scale) × *direction* (the Q1_0 sign bit / Q8_0 int8 quant). At
+zero magnitude the bytes encode no direction, so the sign IEEE-754 returns is an artifact of
+how the arithmetic was spelled, not of the data — and `+0.0` is the zero the rest of the
+surface already produces (the OOB→zeros row, the non-multiple-cols guard, `vec![0.0; _]`).
+Non-zero weights keep their exact sign and bits. The float DECODERS `from_bytes_f16_le` /
+`_f32_le` / `_f64_le` are explicitly OUTSIDE the rule: there a stored `-0.0` is the datum.
+
+**The sweep found two more divergences in the same decoder, both worse.** Q1_0 and Q8_0 share
+one 2-byte fp16 block scale. Probed across ten raw scales, native `fp16_bits_to_f32` and wasm
+`__q10_scale` were three separate answers apart:
+
+| fp16 input | native (pre-fix) | wasm (pre-fix) |
+|---|---|---|
+| `0x0000` all-zero block, sign bit 0 | `-0.0` | `0.0` |
+| `0x0001` … `0x03FF` (subnormals) | `5.96e-8` … `6.0975e-5` | **`0.0` — flushed** |
+| `0x7C00` / `0xFC00` / `0x7C01` | `inf` / `-inf` / `NaN` | **`65536` / `-65536` / `65600`** |
+
+The subnormal row is a silent MAGNITUDE error on real weights, not a sign one: wasm returned
+the sign bit alone for every `exp == 0` pattern. The `exp == 31` row is worse still — wasm had
+no Inf/NaN branch and fell through to the normal-number formula. Both closed by making
+`__fp16_bits` a faithful mirror of native's decoder (mantissa normalization as a recursion,
+the `0xFF` exponent branch).
+
+**Family sweep — what was checked, and what was already clean.** Zero-block behaviour across
+every quantized loader and byte loader with a wasm leg:
+
+| loader | pre-fix | verdict |
+|---|---|---|
+| `select_rows_q1_0` | native `-0.0` / wasm `+0.0` | **DIVERGENT** — the reported bug |
+| `from_q1_0_bytes` | native `-0.0` / wasm `+0.0` | **DIVERGENT** — the twin decoder, same root, not in the report |
+| `select_rows_q8_0_dq` | `-0.0` on BOTH legs (zero scale × negative quant; ±0 scale × either quant) | agreed, so no fuzzer would find it — but the same rule violation, fixed |
+| `select_rows_f32` | identical, and a stored `-0.0` survives | CLEAN |
+| `from_bytes_f32_le` / `_f16_le` / `_f64_le` | identical, and a stored `-0.0` survives | CLEAN — and correctly so |
+| `linear_q1_0_row_no_bias` / `linear_q8_0_row_no_bias` | native-only (walled on wasm) | no cross-target claim; they expose a dot product, not elements |
+
+`runtime/rs/burn/matrix_burn_p4.rs` carries a third copy of the q1_0 decoder with the same
+`-scale`, but that backend is not in `[lib]` and nothing builds it — left alone deliberately.
+
+**The lesson, and the gate.** The C-229 fixture already covered this input and passed, because
+it asserted MAGNITUDE (`${x}` on a value that reads `0` either way in a list render) and the
+divergence was a sign bit. A fixture for a bit-pattern claim has to observe the bit pattern:
+the zeros are now spelled through `float.to_string`, which prints `-0.0`. The new C-269 fixture
+pins the whole fp16 scale domain through BOTH q1_0 entry points, so the twin decoders cannot
+drift apart again. Verified A/B: on the pre-fix binary both fixtures are red.
+
+## #1375 — one source shape, TWO independent wrong-value mechanisms (2026-08-13)
+
+`json.parse("hi") ?? json.parse("[1,2]")!` printed `true` on wasm and `[1,2]` on native. The
+emitted WAT settled the mechanism in one read: the `??` lowered to the right skeleton (tag at
+`+16`, payload at `+12`, `tag != 0` picks the fallback), but the fallback arm ended
+`(local.set $v13 (call $json.parse …)) (local.get $v13)` — the whole `Result` block handed to
+the merge, with no tag read and no propagation. The heap-arm lowering applies `e! == e`, which
+is the identity in a RESULT-typed arm and NOT in a payload-typed one.
+
+The rule this entry adds: **narrow to the mechanism, then re-run the whole neighbourhood, because
+one surface shape can have more than one.** Rewriting `a ?? f(..)!` to `(match a { ok($p) =>
+ok($p), err(_) => f(..) })!` fixed eleven cells; the twelfth — the same arm spelled as a
+literal `match` — still printed `true`, and the emitted code showed why: that spelling reaches
+`branch_lift`, which hoists the branch into a synthesized NON-effect `fn … -> <payload>`. A `!`
+inside a lifted helper has no channel out, so native emitted `?` in a non-`Result` fn (rustc
+E0277 — loud) while wasm always-wrapped the helper body and the call site bound the wrapper as
+the bare payload (silent). Two mechanisms, one shape, and the second was only visible because
+the neighbourhood was re-measured after the first fix rather than at the start.
+
+Also worth keeping: the ANF that made the fix executable. `(match a { … })!` walls, because
+`desugar_let_unwrap` builds a propagation match whose SUBJECT would then be a match. Binding it
+first (`let $u = match a { … }; let v = $u!`) puts a `Var` in the subject position, which is the
+proven shape — one extra statement, the same single evaluation, call-count invariant. Hoisting
+the fallback itself would have been the wrong ANF: `??` must not evaluate its fallback on the ok
+path, and the fixture pins that with a cell whose unused fallback would fail.

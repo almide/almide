@@ -69,7 +69,13 @@ pub fn almide_rt_string_from_bytes(bytes: &[i64]) -> String {
     String::from_utf8_lossy(&v).into_owned()
 }
 pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { s.chars().next().map(|c| c as i64) }
-pub fn almide_rt_string_from_codepoint(cp: i64) -> String { char::from_u32(cp as u32).map(|c| c.to_string()).unwrap_or_default() }
+// `try_from` BEFORE `from_u32`: the old `cp as u32` truncated, so 2^32 — which is not a
+// codepoint — became 0, which is, and this leg answered a one-byte NUL string where the
+// self-host answered "". The `unwrap_or_default` was already the right intent; the cast
+// in front of it was silently converting invalid input into valid input.
+pub fn almide_rt_string_from_codepoint(cp: i64) -> String {
+    u32::try_from(cp).ok().and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default()
+}
 
 pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
     // CODEPOINT indices, clamped to [0, char_count]; the `end = i64::MAX`
@@ -90,14 +96,42 @@ pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
     let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
-    format!("{}{}", std::iter::repeat(p).take(w - len).collect::<String>(), s)
+    // No chosen ceiling (ratified A, 2026-08-17): the pad byte count is computed
+    // with CHECKED arithmetic — the product is what overflows — and a size this
+    // machine cannot satisfy is the C-197 abort via try_reserve, never a raw
+    // panic. The wasm leg aborts identically at its own i32 floor bound.
+    let need = (w - len)
+        .checked_mul(p.len_utf8())
+        .and_then(|x| x.checked_add(s.len()));
+    let mut out = String::new();
+    if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
+        eprintln!("Error: out of memory");
+        std::process::exit(1);
+    }
+    for _ in 0..(w - len) { out.push(p); }
+    out.push_str(s);
+    out
 }
 
 pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
     let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
-    format!("{}{}", s, std::iter::repeat(p).take(w - len).collect::<String>())
+    // No chosen ceiling (ratified A, 2026-08-17): the pad byte count is computed
+    // with CHECKED arithmetic — the product is what overflows — and a size this
+    // machine cannot satisfy is the C-197 abort via try_reserve, never a raw
+    // panic. The wasm leg aborts identically at its own i32 floor bound.
+    let need = (w - len)
+        .checked_mul(p.len_utf8())
+        .and_then(|x| x.checked_add(s.len()));
+    let mut out = String::new();
+    if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
+        eprintln!("Error: out of memory");
+        std::process::exit(1);
+    }
+    out.push_str(s);
+    for _ in 0..(w - len) { out.push(p); }
+    out
 }
 
 pub fn almide_rt_string_replace_first(s: &str, from: &str, to: &str) -> String {

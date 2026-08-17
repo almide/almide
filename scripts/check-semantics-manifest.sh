@@ -17,13 +17,43 @@ import os, re, subprocess, sys, tempfile, tomllib
 # ratchet: append modules, never remove. Each module generates its OWN
 # spec/stdlib/<module>_semantics_manifest_test.almd, so adding one leaves
 # every already-covered module's committed file byte-identical.
-COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "error", "regex", "bool"]
+COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "error", "regex", "bool", "testing", "args", "mem", "zlib", "path", "base64", "hex", "html", "fs", "http", "net"]
 
 with open("docs/stdlib/semantics-manifest.toml", "rb") as f:
     manifest = tomllib.load(f)
 
+# The unit vocabularies are PINNED (#1244 burn-down: a landed forge set
+# `default_index_unit = "bogus_unit"` and the gate stayed green — a typo'd
+# unit spelling would silently declare nothing). Measured from the manifest
+# on 2026-08-12; a NEW spelling is a deliberate taxonomy change made here
+# and in the manifest in the same PR.
+UNIT_VOCAB = {
+    "address", "bit-pattern", "byte", "byte-count", "byte-offset",
+    "byte-value", "civil-field", "codepoint", "count", "cursor", "day",
+    "element-count", "element-index", "handle", "hour", "millisecond",
+    "minute", "nanosecond", "ordering", "port", "scalar", "second",
+    "status-code", "value",
+}
+DEFAULT_UNIT_VOCAB = {"byte-offset", "byte-value", "codepoint", "second", "value"}
+REQUIRED_ENTRY_FIELDS = ("name", "index_unit", "probe", "expect")
+
 failed = False
 for module in COVERED_MODULES:
+    d = manifest[module].get("default_index_unit")
+    if d is not None and d not in DEFAULT_UNIT_VOCAB:
+        print(f"BAD default_index_unit {d!r} on module {module} — vocabulary: "
+              f"{sorted(DEFAULT_UNIT_VOCAB)}")
+        failed = True
+    for e in manifest[module]["fn"]:
+        for k in REQUIRED_ENTRY_FIELDS:
+            if not e.get(k):
+                print(f"MISSING FIELD {k!r} on a {module} entry ({e.get('name', '?')})")
+                failed = True
+        u = e.get("index_unit")
+        if u is not None and u not in UNIT_VOCAB:
+            print(f"BAD index_unit {u!r} on {module}.{e.get('name', '?')} — "
+                  f"vocabulary: {sorted(UNIT_VOCAB)}")
+            failed = True
     entries = {e["name"]: e for e in manifest[module]["fn"]}
     src = open(f"stdlib/{module}.almd").read()
     int_fns = []

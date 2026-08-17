@@ -83,7 +83,16 @@ fn __gelu_scalar(x: Float) -> Float = {
   // the same limit every SIMD lane has, and tanh is flat long before that.
   let e2 = __fast_exp(2.0 * inner)
   let t = 1.0 - 2.0 / (e2 + 1.0)
-  0.5 * ((1.0 + t) * x)
+  // ASSOCIATION, not just the operands: the native kernel spells this
+  // `0.5 * x * (1.0 + tanh)`, which Rust parses as `(0.5 * x) * (1.0 + tanh)`
+  // — halve FIRST, then double. This transcribed v0's `0.5 * ((1 + t) * x)`
+  // instead, which doubles first, and `2.0 * x` overflows to `inf` for an `x`
+  // near f64::MAX where the native order stays finite: `matrix.gelu` on
+  // 1.7976931348623157e308 answered that value natively and `inf` on wasm,
+  // both exit 0 (differential fuzz, a matrix_softmax_fastexp mutation). All
+  // four native lanes (naive/avx/neon/chunked) agree on the native order, so
+  // the self-host follows it.
+  (0.5 * x) * (1.0 + t)
 }
 
 fn __gelu_row(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
@@ -186,19 +195,25 @@ else {
 // clamped negatives to 0, native rms_norm_heads clamped them to 1, native MHA
 // did not guard at all (`n_heads = i32::MIN` cast to usize and hung), and these
 // self-hosted bodies divided by a zero head count. Wave 5 R2.
-fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, log_theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int = if i_pair >= half then 0
+fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int = if i_pair >= half then 0
 else {
   let j0 = h * head_dim + 2 * i_pair
   let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
   let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
   let two_i_f = int.to_float(2 * i_pair)
-  let inv_freq = __fast_exp(0.0 - (two_i_f / head_dim_f) * log_theta)
+  // 1/pow, NOT fast-exp: the native leg computes `1.0 / libm_pow(theta, e)`
+  // and the deg-6 fast-exp diverges from it in the last ulps at any NON-ZERO
+  // exponent — every fixture before 2026-08-15 used head_dim <= 3, whose only
+  // pair has exponent 0, so the divergence was an unexecuted polarity until
+  // the rope_at burn-down probed head_dim 4 (0.9899501670824986 native vs
+  // 0.9899501671727345 wasm, both exit 0: the silent-wrong class).
+  let inv_freq = 1.0 / math.fpow(theta, two_i_f / head_dim_f)
   let angle = pos_f * inv_freq
   let s = math.sin(angle)
   let c = math.cos(angle)
   prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
   prim.store64(dh + 12 + (j0 + 1) * 8, prim.fbits(x0 * s + x1 * c))
-  __rope_pairs(dh, sh, pos_f, head_dim_f, log_theta, h, head_dim, half, i_pair + 1)
+  __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, i_pair + 1)
 }
 
 fn __mx_head_count(n: Int) -> Int = {
@@ -206,21 +221,70 @@ fn __mx_head_count(n: Int) -> Int = {
   n
 }
 
-fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, log_theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int = if h >= n_heads then 0
-else {
-  let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, log_theta, h, head_dim, half, 0)
-  __rope_heads(dh, sh, pos_f, head_dim_f, log_theta, n_heads, head_dim, half, h + 1)
+// #1419: the head GEOMETRY rule — `n_heads * head_dim` must fit the row.
+// Exceeding it wrote straight past the row block (an OOB memory trap here,
+// a raw slice panic natively: exit 134 vs 101, fuzz seed 508666777783 index
+// 2120). Same abort family and byte-identical message as the native
+// `almide_rt_matrix_head_geometry`; the division form cannot overflow on a
+// huge head count. An empty matrix has no row to violate and stays a no-op.
+fn __mx_head_geometry(nh: Int, head_dim: Int, rows: Int, cols: Int) -> Int = {
+  if rows > 0 and head_dim > 0 and nh > cols / head_dim then prim.die(prim.handle("Error: head geometry exceeds row width\n")) else ()
+  nh
 }
 
-fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, log_theta: Float, cols: Int, rows: Int, p: Int) -> Int = if p >= rows then 0
+fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int = if h >= n_heads then 0
+else {
+  let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
+  __rope_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
+}
+
+fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int = if p >= rows then 0
 else {
   let sh = prim.load64(hx + 12 + p * 8)
   let row = prim.alloc_list_f64(cols)
   let dh = prim.handle(row)
   let _cp = __rope_copy(dh, sh, cols, 0)
-  let _ht = __rope_heads(dh, sh, int.to_float(p), head_dim_f, log_theta, n_heads, head_dim, half, 0)
+  let _ht = __rope_heads(dh, sh, int.to_float(start + p), head_dim_f, theta, n_heads, head_dim, half, 0)
   prim.store_str(ho + 12 + p * 8, row)
-  __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, log_theta, cols, rows, p + 1)
+  __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
+}
+
+// NeoX / HF-convention pair loop: rotates (j, j+half) WITHIN each head — the
+// loader-side weight permutation becomes unnecessary — with the SAME
+// inv_freq = exp(-(2j/head_dim)·log(theta)) the interleaved loop uses (the
+// exponent is 2j/dim in both conventions; only the pairing differs). Op
+// order transcribed from the native almide_rt_matrix_rope_rotate_neox_at.
+fn __rope_neox_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, j: Int) -> Int = if j >= half then 0
+else {
+  let j0 = h * head_dim + j
+  let j1 = h * head_dim + half + j
+  let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
+  let x1 = prim.ffrombits(prim.load64(sh + 12 + j1 * 8))
+  let two_j_f = int.to_float(2 * j)
+  let inv_freq = 1.0 / math.fpow(theta, two_j_f / head_dim_f)
+  let angle = pos_f * inv_freq
+  let s = math.sin(angle)
+  let c = math.cos(angle)
+  prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
+  prim.store64(dh + 12 + j1 * 8, prim.fbits(x0 * s + x1 * c))
+  __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, j + 1)
+}
+
+fn __rope_neox_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int = if h >= n_heads then 0
+else {
+  let _p = __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
+  __rope_neox_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
+}
+
+fn __rope_neox_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int = if p >= rows then 0
+else {
+  let sh = prim.load64(hx + 12 + p * 8)
+  let row = prim.alloc_list_f64(cols)
+  let dh = prim.handle(row)
+  let _cp = __rope_copy(dh, sh, cols, 0)
+  let _ht = __rope_neox_heads(dh, sh, int.to_float(start + p), head_dim_f, theta, n_heads, head_dim, half, 0)
+  prim.store_str(ho + 12 + p * 8, row)
+  __rope_neox_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
 }
 
 // multi_head_attention(q, k, v, n_heads) [+ causal for masked]. Per head h (col range
@@ -233,9 +297,40 @@ fn matrix_rope_rotate(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: 
   let rows = prim.load32(hx + 4)
   let cols = if rows == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
   let half = head_dim / 2
-  let nh = __mx_head_count(n_heads)
+  let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
   let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __rope_rows(prim.handle(out), hx, nh, head_dim, half, int.to_float(head_dim), math.log(theta), cols, rows, 0)
+  let _x = __rope_rows(prim.handle(out), hx, nh, head_dim, half, int.to_float(head_dim), theta, cols, rows, 0, 0)
+  out
+}
+
+// KV-cache variant: row p is treated as absolute position `start_pos + p` (a
+// negative start clamps to 0 — the native `start_pos.max(0)`). Same guards,
+// same copy-through, same per-element math as rope_rotate; only the position
+// origin moves. Self-hosted 2026-08-15 (frontier burn-down, #1423): before
+// this the `_at` spellings were native-only, which is exactly how the #1419
+// defect family escaped every cross-target fixture.
+fn matrix_rope_rotate_at(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: Float, start_pos: Int) -> List[List[Float]] = {
+  let hx = prim.handle(x)
+  let rows = prim.load32(hx + 4)
+  let cols = if rows == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
+  let half = head_dim / 2
+  let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
+  let start = if start_pos < 0 then 0 else start_pos
+  let out: List[List[Float]] = prim.alloc_list_str(rows)
+  let _x = __rope_rows(prim.handle(out), hx, nh, head_dim, half, int.to_float(head_dim), theta, cols, rows, start, 0)
+  out
+}
+
+// NeoX pairing twin of rope_rotate_at — pairs (j, j+half) within each head.
+fn matrix_rope_rotate_neox_at(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: Float, start_pos: Int) -> List[List[Float]] = {
+  let hx = prim.handle(x)
+  let rows = prim.load32(hx + 4)
+  let cols = if rows == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
+  let half = head_dim / 2
+  let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
+  let start = if start_pos < 0 then 0 else start_pos
+  let out: List[List[Float]] = prim.alloc_list_str(rows)
+  let _x = __rope_neox_rows(prim.handle(out), hx, nh, head_dim, half, int.to_float(head_dim), theta, cols, rows, start, 0)
   out
 }
 
@@ -350,13 +445,38 @@ fn matrix_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: Li
 // handle(data)+12+offset. scale recomputed per element (block = k>>7 → identical value).
 fn matrix_masked_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(q, k, v, n_heads, true)
 
-fn __q10_scale(base: Int, block_start: Int) -> Float = {
-  let raw = prim.bor(prim.load8(base + block_start), prim.bshl(prim.load8(base + block_start + 1), 8))
-  let sign = prim.band(prim.bshr_u(raw, 15), 1)
+// The dequantization-zero ruling (#1358, C-229): a dequantized element whose
+// MAGNITUDE is zero is +0.0. A quantized element is magnitude (the block's fp16
+// scale) x direction (the Q1_0 sign bit / Q8_0 int8 quant); at zero magnitude the
+// bytes encode no direction, so the sign IEEE-754 hands back is an artifact of how
+// the arithmetic was spelled, not of the data. Mirrors `dq_zero` in
+// runtime/rs/src/matrix_p2.rs. -0.0 == 0.0, so this maps -0.0 to +0.0 and leaves
+// every other value (NaN included) alone.
+fn __dq_zero(v: Float) -> Float = if v == 0.0 then 0.0 else v
+
+// Normalize an fp16 SUBNORMAL mantissa: shift left until bit 10 is set, dropping
+// one from the exponent per shift — native's `while m & 0x400 == 0` loop in
+// `fp16_bits_to_f32`, as a recursion. `e` enters at 1 - 15 = -14.
+fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int = if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(signbits, prim.bshl(m, 1), e - 1)
+else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
+
+// fp16 bit pattern -> f32 bit pattern, the exact mirror of native's
+// `fp16_bits_to_f32` (runtime/rs/src/matrix_p2.rs) over the WHOLE fp16 domain:
+// subnormals are normalized rather than flushed to zero, exp==31 decodes to
+// Inf/NaN rather than a finite 2^16-scaled value, and a zero magnitude drops its
+// sign bit per the ruling above.
+fn __fp16_bits(raw: Int) -> Int = {
+  let signbits = prim.bshl(prim.band(prim.bshr_u(raw, 15), 1), 31)
   let expv = prim.band(prim.bshr_u(raw, 10), 31)
   let mant = prim.band(raw, 1023)
-  let f32bits = if expv == 0 then prim.bshl(sign, 31) else prim.bor(prim.bor(prim.bshl(sign, 31), prim.bshl(expv + 112, 23)), prim.bshl(mant, 13))
-  prim.bits_to_f32(f32bits)
+  if expv == 0 and mant == 0 then 0
+  else if expv == 0 then __fp16_subnormal_bits(signbits, mant, 0 - 14)
+  else if expv == 31 then prim.bor(prim.bor(signbits, prim.bshl(255, 23)), prim.bshl(mant, 13)) else prim.bor(prim.bor(signbits, prim.bshl(expv + 112, 23)), prim.bshl(mant, 13))
+}
+
+fn __q10_scale(base: Int, block_start: Int) -> Float = {
+  let raw = prim.bor(prim.load8(base + block_start), prim.bshl(prim.load8(base + block_start + 1), 8))
+  prim.bits_to_f32(__fp16_bits(raw))
 }
 
 fn __q10_val(base: Int, k: Int) -> Float = {
@@ -365,7 +485,10 @@ fn __q10_val(base: Int, k: Int) -> Float = {
   let bits_start = block_start + 2
   let byte_idx = bits_start + prim.band(prim.bshr_u(k, 3), 15)
   let bit = prim.band(prim.bshr_u(prim.load8(base + byte_idx), prim.band(k, 7)), 1)
-  if bit == 1 then scale else 0.0 - scale
+  // Every element is +scale or -scale, so canonicalizing the two branch values
+  // settles the ruling for the whole block. (Native does this once per block;
+  // here the scale is already recomputed per element, so this rides along.)
+  if bit == 1 then __dq_zero(scale) else __dq_zero(0.0 - scale)
 }
 
 fn __q10_row(dh: Int, base: Int, row_k0: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
@@ -374,18 +497,30 @@ else {
   __q10_row(dh, base, row_k0, cols, c + 1)
 }
 
-fn __q10_rows(ho: Int, base: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
+// The FULL-MATRIX loader takes the same per-ROW OOB->zeros edge its row-subset
+// twin `__q10_sel_rows` already took (C-229). It had no `limit` at all, so a
+// `rows`/`cols` pair asking for more blocks than the buffer holds read straight
+// past it: native bounds-checks its slice and died with a raw panic (exit 101,
+// the form ALS-T6 forbids) while wasm read whatever linear memory held and
+// answered — `from_q1_0_bytes(bytes.new(18), 0, 4, 128)` was exit 101 against a
+// four-row answer (differential fuzz, a matrix_select_rows_oob mutation).
+fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
 else {
+  let row_bytes = cols / 128 * 18
   let row = prim.alloc_list_f64(cols)
-  let _c = __q10_row(prim.handle(row), base, r * cols, cols, 0)
+  let _c = if base + r * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
+  else __q10_row(prim.handle(row), base, r * cols, cols, 0)
   prim.store_str(ho + 12 + r * 8, row)
-  __q10_rows(ho, base, rows, cols, r + 1)
+  __q10_rows(ho, base, limit, rows, cols, r + 1)
 }
 
 fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
-  let base = prim.handle(data) + 12 + offset
+  let hd = prim.handle(data)
+  let off = if offset < 0 then 0 else offset
+  let base = hd + 12 + off
+  let limit = hd + 12 + prim.load32(hd + 4)
   let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __q10_rows(prim.handle(out), base, rows, cols, 0)
+  let _x = __q10_rows(prim.handle(out), base, limit, rows, cols, 0)
   out
 }
 
@@ -394,21 +529,30 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
 // `rid.max(0)`) decodes its cols weights through the SAME `__q10_row`
 // (row_k0 = rid·cols — the global-k schedule works because cols is a
 // 128-multiple, so a row starts on a block boundary).
-fn __q10_sel_rows(ho: Int, base: Int, ids: List[Int], cols: Int, i: Int) -> Int = if i >= list.len(ids) then 0
+// A row whose 18-byte/128-weight blocks would read past the buffer is the
+// all-zero row (`__q8_zfill`, the shared zero-filler) — the family's defined
+// OOB→zeros edge, per ROW; `limit` is the absolute end of the data block.
+// `offset` clamps to 0 like native's `offset.max(0)`.
+fn __q10_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, i: Int) -> Int = if i >= list.len(ids) then 0
 else {
   let rid0 = list.get(ids, i) ?? 0
   let rid = if rid0 < 0 then 0 else rid0
+  let row_bytes = cols / 128 * 18
   let row = prim.alloc_list_f64(cols)
-  let _c = __q10_row(prim.handle(row), base, rid * cols, cols, 0)
+  let _c = if base + rid * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
+  else __q10_row(prim.handle(row), base, rid * cols, cols, 0)
   prim.store_str(ho + 12 + i * 8, row)
-  __q10_sel_rows(ho, base, ids, cols, i + 1)
+  __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
 }
 
 fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
-  let base = prim.handle(data) + 12 + offset
+  let hd = prim.handle(data)
+  let off = if offset < 0 then 0 else offset
+  let base = hd + 12 + off
+  let limit = hd + 12 + prim.load32(hd + 4)
   let n = list.len(row_ids)
   let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __q10_sel_rows(prim.handle(out), base, row_ids, cols, 0)
+  let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, cols, 0)
   out
 }
 
@@ -428,28 +572,39 @@ else {
   let block_start = row_off + blk * 34
   let scale = __q10_scale(base, block_start)
   let q = __q8_i8(base, block_start + 2 + prim.band(c, 31))
-  prim.store64(dh + 12 + c * 8, prim.fbits(scale * int.to_float(q)))
+  // Q8_0 needs the ruling per ELEMENT, not per block: the product is zero when
+  // EITHER factor is (a zero scale, or a zero quant under a negative scale),
+  // and `a * b` signs by xor.
+  prim.store64(dh + 12 + c * 8, prim.fbits(__dq_zero(scale * int.to_float(q))))
   __q8_row(dh, base, row_off, cols, c + 1)
 }
 
-fn __q8_sel_rows(ho: Int, base: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int = if i >= list.len(ids) then 0
+// A row whose 34-byte/32-weight blocks would read past the buffer is the
+// all-zero row — the same defined edge as the non-multiple-cols guard in the
+// opener; `limit` is the absolute end of the data block. `offset` clamps to 0
+// like native's `offset.max(0)`.
+fn __q8_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int = if i >= list.len(ids) then 0
 else {
   let rid0 = list.get(ids, i) ?? 0
   let rid = if rid0 < 0 then 0 else rid0
   let row = prim.alloc_list_f64(cols)
-  let _c = __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
+  let _c = if base + rid * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
+  else __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
   prim.store_str(ho + 12 + i * 8, row)
-  __q8_sel_rows(ho, base, ids, cols, row_bytes, i + 1)
+  __q8_sel_rows(ho, base, limit, ids, cols, row_bytes, i + 1)
 }
 
 fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
-  let base = prim.handle(data) + 12 + offset
+  let hd = prim.handle(data)
+  let off = if offset < 0 then 0 else offset
+  let base = hd + 12 + off
+  let limit = hd + 12 + prim.load32(hd + 4)
   let n = list.len(row_ids)
   if cols % 32 != 0 then __q8_zeros(n, cols)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(n)
     let row_bytes = cols / 32 * 34
-    let _x = __q8_sel_rows(prim.handle(out), base, row_ids, cols, row_bytes, 0)
+    let _x = __q8_sel_rows(prim.handle(out), base, limit, row_ids, cols, row_bytes, 0)
     out
   }
 }

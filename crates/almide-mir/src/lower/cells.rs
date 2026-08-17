@@ -243,9 +243,9 @@ impl LowerCtx {
                     // the NESTED DropListListStr walk (cell slot -> key-slot sweep ->
                     // map block -> cell block); the flat heap_elem_lists sweep would
                     // dec only the map handle and leak every key.
-                    self.list_list_str_lists.insert(cell);
+                    self.value_drops.entry(cell).or_default().list_list_str = true;
                 } else {
-                    self.heap_elem_lists.insert(cell);
+                    self.value_drops.entry(cell).or_default().flat_elems = true;
                 }
             }
         }

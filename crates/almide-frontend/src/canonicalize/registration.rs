@@ -276,11 +276,13 @@ pub struct FnSigToRegister<'a> {
     pub prefix: Option<&'a str>,
     pub span: Option<&'a ast::Span>,
     pub visibility: ast::Visibility,
+    /// The declaration's attributes, so registration can read `@deprecated`.
+    pub attrs: &'a [ast::Attribute],
 }
 
 pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let FnSigToRegister {
-        name, params, return_type, effect, generics, prefix, span, visibility,
+        name, params, return_type, effect, generics, prefix, span, visibility, attrs,
     } = *decl;
     let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
     let sb = collect_structural_bounds(env, generics);
@@ -317,6 +319,13 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, mut_params });
+    if let Ok(Some(dep)) = crate::deprecation::parse(attrs) {
+        env.deprecations.insert(sym(&key), dep);
+    }
+    // An attribute nobody reads is dropped, so a typo silently does nothing.
+    // Collected here rather than at the parser because the vocabulary is a
+    // front-end fact, not a grammar one.
+    crate::attr_vocab::check_attrs(attrs, &mut env.attr_diagnostics);
     // Record visibility so `resolve_module_call` can reject cross-module access to `mod fn` / `local fn`. Only non-Public entries need to be stored — the lookup in the checker treats "missing" as Public (stdlib, impl methods, derived stubs).
     if !matches!(visibility, ast::Visibility::Public) {
         env.fn_visibility.insert(sym(&key), visibility);
@@ -364,7 +373,7 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
     // the qualified key here instead would change the name LOWERING emits, and
     // the backend resolves a derived method by its bare name plus
     // `module_origin` (#1087).
-    let mut register = |env: &mut TypeEnv, method: &str, sig: FnSig| {
+    let register = |env: &mut TypeEnv, method: &str, sig: FnSig| {
         let key = format!("{}.{}", type_name, method);
         if !env.functions.contains_key(&sym(&key)) {
             env.functions.insert(sym(&key), sig);
@@ -440,7 +449,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     for gn in &gnames { env.types.remove(gn); }
 
     resolved = register_type_decl_opaque_alias(env, name, resolved, &gnames, prefix, visibility);
-    register_type_decl_variant_ctors(env, name, prefix, &mut resolved);
+    register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
     register_type_decl_finalize(env, name, ty, prefix, resolved);
 
@@ -467,7 +476,7 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, 
     resolved
 }
 /// Fix up a `Variant`'s registered name to the DECLARED name, and register each of its constructors. Verbatim text move out of [`register_type_decl`].
-fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Option<&str>, resolved: &mut Ty) {
+fn register_type_decl_variant_ctors(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, prefix: Option<&str>, resolved: &mut Ty) {
     if let Ty::Variant { name: vn, cases } = resolved {
         *vn = sym(name);
         // Push (not overwrite) so a constructor name declared in multiple variant types keeps ALL candidates — needed to detect ambiguity (#413) instead of silently letting the last-registered type win. #413: record each candidate's OWNING MODULE so a shared ctor name can be disambiguated by the current module (`lookup_ctor_in`). type_name stays BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
@@ -477,6 +486,22 @@ fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Optio
         let owner_mod = prefix.map(sym).or(env.alias_owner_module);
         for case in cases.iter() {
             let entry = env.constructors.entry(case.name).or_default();
+            // E019 (#1426): a SECOND type in the SAME module declaring this
+            // case name would make bare resolution registration-order-dependent
+            // — `lookup_ctor_in`'s owned-first find() would silently keep the
+            // older type winning and leave the new case unreachable. Reported
+            // once, on the canonical pass (`infer_module`'s unprefixed alias
+            // pass re-registers the same declarations; skip it like
+            // `register_type_decl_check_duplicate` does).
+            if env.alias_owner_module.is_none() {
+                if let Some((prior, _, _)) = entry.iter().find(|(t, m, _)| *t != sym(name) && *m == owner_mod) {
+                    diagnostics.push(err(
+                        format!("ambiguous constructor '{}': declared in both '{}' and '{}' of the same module", case.name, prior, name),
+                        format!("Rename the case in one of them so '{}' has exactly one meaning here.", case.name),
+                        format!("constructor {}", case.name),
+                    ).with_code("E019"));
+                }
+            }
             if !entry.iter().any(|(t, m, _)| *t == sym(name) && *m == owner_mod) {
                 entry.push((sym(name), owner_mod, case.clone()));
             }
@@ -578,7 +603,7 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
 }
 /// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).
 fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {
-    let ast::Decl::Fn { name, params, return_type, effect, generics, span, visibility, extern_attrs, body, .. } = decl else { unreachable!() };
+    let ast::Decl::Fn { name, params, return_type, effect, generics, span, visibility, extern_attrs, body, attrs, .. } = decl else { unreachable!() };
     // Skip duplicates that come from @extern re-export (name may appear twice by design).
     if extern_attrs.is_empty() {
         let key = prefixed_key(prefix, name);
@@ -606,7 +631,7 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     }
     register_fn_sig(env, &FnSigToRegister {
         name, params, return_type, effect, generics,
-        prefix, span: span.as_ref(), visibility: *visibility,
+        prefix, span: span.as_ref(), visibility: *visibility, attrs,
     });
     // Register in DefTable
     let fn_key = prefixed_key(prefix, name);

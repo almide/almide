@@ -31,6 +31,14 @@ fn fmt_tuple_type() {
 }
 
 #[test]
+fn fmt_one_tuple_keeps_trailing_comma() {
+    // `(e,)` is a 1-tuple, `(e)` is grouping — the comma is load-bearing
+    // (#1265: dropping it changed the program's meaning).
+    let out = roundtrip("module app\nfn one() -> Int = {\n  let t = (5,)\n  t.0\n}");
+    assert!(out.contains("(5,)"), "1-tuple lost its trailing comma:\n{out}");
+}
+
+#[test]
 fn fmt_if_expr() {
     let out = roundtrip("module app\nfn f(x: Int) -> Int = if x > 0 then x else 0 - x");
     assert!(out.contains("if x > 0 then"));
@@ -50,6 +58,33 @@ fn fmt_preserves_module_and_imports() {
     let out = roundtrip("import fs\nimport http\nfn f() -> Int = 1");
     assert!(out.contains("import fs\n"));
     assert!(out.contains("import http\n"));
+}
+
+// #1323, fmt(valid) → invalid: `module` parses into decls[0] but must be
+// emitted BEFORE the imports, or the output no longer parses. Its leading
+// comment block owns comment_map slot 0, so it must not land on the imports.
+#[test]
+fn fmt_module_header_precedes_imports_and_keeps_its_comments() {
+    let out = roundtrip("// file header\nmodule app\nimport fs\nfn f() -> Int = 1\n");
+    assert!(
+        out.starts_with("// file header\nmodule app\n"),
+        "module header (and its comments) must open the file:\n{out}",
+    );
+    let m = out.find("module app").unwrap();
+    let i = out.find("import fs").expect("import kept");
+    assert!(m < i, "module must precede every import:\n{out}");
+    // The output must PARSE CLEANLY — the exact property the bug broke. The
+    // reordered output parsed as `Ok` with a recovered error, so checking
+    // `parser.errors` (not just the Result) is what makes this a real gate.
+    let mut re = Parser::new(Lexer::tokenize(&out));
+    re.parse().expect("formatted output parses");
+    assert!(
+        re.errors.is_empty(),
+        "formatted output has parse errors: {:?}\n{out}",
+        re.errors.iter().map(|d| d.display()).collect::<Vec<_>>(),
+    );
+    let again = roundtrip(&out);
+    assert_eq!(out, again, "fmt must be idempotent on a commented module header");
 }
 
 #[test]

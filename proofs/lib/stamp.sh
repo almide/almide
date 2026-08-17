@@ -22,7 +22,11 @@ stamp_toolchain() {
             if [ "$hash" != "$wshash" ]; then
                 echo "  FATAL: PATH almide ($hash) != workspace build ($wshash)."
                 echo "  The evidence this gate produces would not describe the tree under test."
-                echo "  Run 'make install' (or fix PATH) and re-run."
+                echo "  Most common cause: a 'cargo test' ran after your last 'make install' —"
+                echo "  the test profile relinks target/release/almide with a different feature"
+                echo "  unification, so the hashes diverge even with identical sources."
+                echo "  Fix: make install && make verify-trust  (and do not run cargo"
+                echo "  concurrently with the gate — a mid-gate relink invalidates the stamp)."
                 return 1
             fi
         fi

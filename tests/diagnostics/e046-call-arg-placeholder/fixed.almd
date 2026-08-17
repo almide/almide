@@ -1,0 +1,7 @@
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn main() -> Unit = {
+  let add10 = (x) => add(x, 10)
+  let v = add10(5)
+  println("${v}")
+}

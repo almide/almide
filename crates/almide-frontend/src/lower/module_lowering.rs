@@ -169,23 +169,12 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
     used
 }
 
-/// Verify no inference TypeVars (?N) remain in the IR.
-/// Any remaining TypeVar indicates a type checker bug — the codegen cannot
-/// reliably generate correct code without concrete types.
+/// Replace every inference TypeVar (?N) still in the IR with `Ty::Unknown`.
+/// A surviving TypeVar indicates a type checker bug — codegen cannot reliably
+/// generate correct code without concrete types, so it is erased here rather
+/// than carried into the backends.
 fn resolve_inference_typevars(program: &mut IrProgram) {
     use crate::types::Ty;
-    fn has_typevar(ty: &Ty) -> bool {
-        match ty {
-            Ty::TypeVar(name) => name.starts_with('?'),
-            Ty::Unknown => false,
-            Ty::Applied(_, args) => args.iter().any(has_typevar),
-            Ty::Tuple(elems) => elems.iter().any(has_typevar),
-            Ty::Fn { is_effect: _, params, ret } => params.iter().any(has_typevar) || has_typevar(ret),
-            Ty::Named(_, args) => args.iter().any(has_typevar),
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_typevar(t)),
-            _ => false,
-        }
-    }
     fn resolve_ty(ty: &mut Ty) {
         match ty {
             Ty::TypeVar(name) if name.starts_with('?') => *ty = Ty::Unknown,

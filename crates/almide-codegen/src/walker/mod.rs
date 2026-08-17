@@ -143,18 +143,6 @@ impl<'a> RenderContext<'a> {
         escape_rust_ident(name.as_str(), self.templates)
     }
 
-    /// The thread_local static name for a global var, matching exactly what the
-    /// `render_program` top_let emission declares. Built from the RAW (un-escaped)
-    /// var name: `var_name(id)` raw-escapes Rust keywords (`box` → `r#box`), and
-    /// uppercasing that yields the invalid `R#BOX`, which mismatches the `BOX` the
-    /// declaration emits. Every read/write of a global must route through here.
-    pub(crate) fn global_static_name(&self, id: VarId) -> String {
-        let vi = self.var_table.get(id);
-        match &vi.module_origin {
-            Some(origin) => format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), vi.name.to_uppercase()),
-            None => vi.name.to_uppercase(),
-        }
-    }
 }
 
 // ── Function rendering ──
@@ -356,9 +344,6 @@ fn render_fn_safe_name(
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
     // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
     safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
-    // matches the CALL site exactly (#659).
-    safe_name = escape_rust_ident(&safe_name, ctx.templates);
     // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
     // IR name stays clean; prefix is a rendering concern.
     if let Some(ref origin) = func.module_origin {
@@ -372,7 +357,16 @@ fn render_fn_safe_name(
         } else {
             safe_name.clone()
         };
+        // No keyword escape on this branch: a prefixed symbol is never a Rust
+        // keyword, and the call-emitting paths (render_expr_call,
+        // prefix_intra_module_calls, ...) mangle without escaping — escaping
+        // before prefixing produced `almide_rt_util_r#move` (#1494).
         safe_name = format!("almide_rt_{}_{}", origin, base);
+    } else {
+        // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
+        // matches the CALL site exactly (#659). Only unprefixed names can
+        // collide with a keyword, so the escape lives on this branch (#1494).
+        safe_name = escape_rust_ident(&safe_name, ctx.templates);
     }
     format!("{}{}", safe_name, fn_generics)
 }
@@ -570,27 +564,6 @@ fn prepend_doc_comment(doc: Option<&str>, code: String) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!("{}\n{}", doc_lines, code)
-}
-
-/// Whether an expression contains an integer `/` or `%` anywhere — the ops that
-/// render as the aborting totality macros (`Error: <msg>` + exit 1). Uses the
-/// exhaustive `IrVisitor` walk so new IR nodes are traversed automatically.
-fn contains_aborting_int_div(expr: &IrExpr) -> bool {
-    use almide_ir::visit::{IrVisitor, walk_expr};
-    struct Finder { found: bool }
-    impl IrVisitor for Finder {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if self.found { return; }
-            if matches!(&e.kind, IrExprKind::BinOp { op: BinOp::DivInt | BinOp::ModInt, .. }) {
-                self.found = true;
-                return;
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut f = Finder { found: false };
-    f.visit_expr(expr);
-    f.found
 }
 
 include!("program_render.rs");

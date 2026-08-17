@@ -115,7 +115,7 @@ impl Checker {
 
             ExprKind::None => Ty::option(self.fresh_var()),
 
-            ExprKind::Ident { name, .. } => self.infer_expr_g2_ident(expr),
+            ExprKind::Ident { name: _, .. } => self.infer_expr_g2_ident(expr),
             _ => return None,
         })
     }
@@ -173,16 +173,16 @@ impl Checker {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 base_ty
             }
-            ExprKind::IndexAccess { object, index, .. } => self.infer_expr_g2_index_access(expr),
-            ExprKind::Binary { op, left, right, .. } => self.infer_expr_g2_binary(expr),
+            ExprKind::IndexAccess { object: _, index: _, .. } => self.infer_expr_g2_index_access(expr),
+            ExprKind::Binary { op: _, left: _, right: _, .. } => self.infer_expr_g2_binary(expr),
 
-            ExprKind::Unary { op, operand, .. } => self.infer_expr_g2_unary(expr),
+            ExprKind::Unary { op: _, operand: _, .. } => self.infer_expr_g2_unary(expr),
 
-            ExprKind::If { cond, then, else_, .. } => self.infer_expr_g2_if(expr),
+            ExprKind::If { cond: _, then: _, else_: _, .. } => self.infer_expr_g2_if(expr),
 
-            ExprKind::IfLet { name, scrutinee, then, else_ } => self.infer_expr_g2_if_let(expr),
+            ExprKind::IfLet { name: _, scrutinee: _, then: _, else_: _ } => self.infer_expr_g2_if_let(expr),
 
-            ExprKind::Match { subject, arms, .. } => self.infer_expr_g2_match(expr),
+            ExprKind::Match { subject: _, arms: _, .. } => self.infer_expr_g2_match(expr),
             _ => return None,
         })
     }
@@ -876,8 +876,11 @@ impl Checker {
     fn infer_expr_g2_ident(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Ident { name, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_ident called on the wrong ExprKind") };
                 self.env.used_vars.insert(sym(name));
-                if let Some(ty) = self.env.lookup_var(name).cloned() { self.instantiate_ty(&ty) }
-                else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { self.instantiate_ty(&ty) }
+                // NOTE: no let-polymorphism here — the old `instantiate_ty`
+                // never freshened anything (its mapping was never written), so
+                // it was an identity deep copy of the already-cloned type.
+                if let Some(ty) = self.env.lookup_var(name).cloned() { ty }
+                else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 // Const param: `N: Int` in generic params resolves to its underlying type
                 else if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     *ty
@@ -942,14 +945,22 @@ impl Checker {
                         // new `import <module>\n` line is prepended.
                         // `apply_try_to` handles `end_col == col` as
                         // an insertion point.
-                        diag = diag.with_try_replace(
+                        //
+                        // SUGGESTION, not machine-applicable (#1312):
+                        // 1:1 is a PLACEMENT HEURISTIC, not this
+                        // diagnostic's own span — the import block's real
+                        // position depends on what is already there.
+                        // `almide fix` routes import insertion through
+                        // `auto_imports`, which owns that block.
+                        diag = diag.with_suggested_fix(
                             1, 1, 1,
                             format!("import {}\n", stripped),
                         );
                     } else if let Some(span) = self.current_span {
                         // Typo fuzzy suggestion: replace the
                         // offending identifier with the suggested name.
-                        diag = diag.with_try_replace(
+                        // SUGGESTION: an edit distance picked the name.
+                        diag = diag.with_suggested_fix(
                             span.line, span.col, span.end_col,
                             fix,
                         );

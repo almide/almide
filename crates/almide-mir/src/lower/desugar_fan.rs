@@ -9,7 +9,7 @@
 /// […]; fan.race(ts)`) has no inlinable bodies → left for the call-site purity wall.
 pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
-    use almide_ir::{CallTarget, IrMatchArm, IrPattern};
+    use almide_ir::{CallTarget, IrPattern};
     // A LET-BOUND, never-reassigned thunk-list literal (`let lam: List[() -> R] = [() => …];
     // fan.race(lam)` — the #599 var-bound form): resolve the Var back to its literal elements
     // so the SAME inliners run as for the inline form. Sound: VarIds are shadowing-free
@@ -341,7 +341,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
             }
         }
         fn rewrite_settle_any(&mut self, e: &mut IrExpr) {
-            use almide_ir::{IrMatchArm, IrPattern};
+            
             // `fan.settle([…])` as a bind value / tail — the results list literal.
             // A PURE thunk's body is bare `T` while settle's checked type is
             // `List[Result[T, E]]` (FanLowering's phantom-Result convention) — wrap each
@@ -397,10 +397,10 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
     // Seed above BOTH the body's own vars and the shared counter, and write the
     // counter back. `desugar_heap_branches_inner` threads ONE `next_var` through
     // every rewrite in its loop; this one used to ignore the parameter in both
-    // directions, seeding only from `max_var_id(body) + 1` and never publishing
+    // directions, seeding only from a fresh band chunk and never publishing
     // what it consumed — so a later rewrite in the same loop could hand out an
     // id the per-level Ok binders here already own.
-    let seed = (max_var_id(body) + 1).max(*next_var);
+    let seed = (crate::lower::desugar_var_seed()).max(*next_var);
     let mut v = V { changed: false, next_var: seed, thunk_lets };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
@@ -646,7 +646,7 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut v = V { changed: false, next_var: crate::lower::max_var_id(body) + 1 };
+    let mut v = V { changed: false, next_var: crate::lower::desugar_var_seed() };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)

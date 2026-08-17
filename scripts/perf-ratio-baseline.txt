@@ -1,6 +1,32 @@
 # almide-native / handwritten-rust runtime ratio per benchmark
 # (bench.py --quick medians; see scripts/check-perf-ratio.sh)
 fasta 1.152
-fft 1.272
+# fft re-anchored 2026-08-13 (was 1.272): the row's input generation moved from
+# an 8.4M-iteration append loop to one sized allocation + indexed writes, so the
+# row stopped spending ~8% of its wall clock building its own input (#1338).
+# Transform output is bit-identical across the change.
+fft 1.176
+# The three `listbuild` rows (#1337) are measured but deliberately NOT anchored
+# here: their almide/rust ratio is architecture-dependent (1.58 on an M4 Pro,
+# 0.91 on the ubuntu-latest CI runner, same commit), so no single number can
+# hold on both. `check-perf-ratio.sh` gates the machine-STABLE relation between
+# those rows instead — see the PAIRS/REPORTED comment there.
+#
+# What that ~1.6x IS was measured on 2026-08-13 and it is not materialization
+# and not #1004's representation story: swapping ONLY `almide_rt_libm_sin`/
+# `_cos` (the deterministic software libm the cross-target byte-identity
+# contract requires) for the platform ones in the emitted Rust takes the row
+# from 194.5ms to 105.5ms against a 123.9ms reference — the whole gap is
+# transcendental determinism, and without it the emitted code BEATS the
+# handwritten reference by 1.17x. The build shape is innocent: `list.repeat` +
+# bounds-checked indexed writes measure 75ms against 91ms for
+# `Vec::with_capacity` + push. Evidence:
+# research/benchmark/perf/string-gap-1004.md.
+#
+# `strchurn` (#1004) is reported and not anchored for the same reason the
+# listbuild rows are: 75% of its delta is malloc/memcpy/free of N owned
+# `String`s, so it compares allocators before it compares codegen, and this
+# repo has one architecture's reading. On an M4 Pro it reads 1.12x against the
+# same-shape reference and 1.94x against the idiomatic one.
 nbody 0.997
 spectralnorm 1.001

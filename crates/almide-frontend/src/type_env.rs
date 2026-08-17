@@ -21,6 +21,15 @@ pub struct TypeEnv {
     pub types: std::collections::HashMap<Sym, Ty>,
     /// Function signatures: name -> FnSig
     pub functions: std::collections::HashMap<Sym, almide_lang::types::FnSig>,
+    /// Deprecated functions: same key as `functions`. Populated at
+    /// registration from `@deprecated`; read at every call site so the
+    /// warning can name the replacement instead of leaving the caller to
+    /// guess it.
+    pub deprecations: std::collections::HashMap<Sym, crate::deprecation::Deprecation>,
+    /// Diagnostics raised while reading declaration attributes (E053).
+    /// Collected on the env because registration has no diagnostics sink of
+    /// its own; drained by the canonicalizer.
+    pub attr_diagnostics: Vec<almide_base::diagnostic::Diagnostic>,
     /// Local variable scopes (stack of scopes)
     pub scopes: Vec<std::collections::HashMap<Sym, Ty>>,
     /// Current function's return type
@@ -169,6 +178,8 @@ pub struct TypeEnv {
 impl TypeEnv {
     pub fn new() -> Self {
         TypeEnv {
+            deprecations: std::collections::HashMap::new(),
+            attr_diagnostics: Vec::new(),
             types: std::collections::HashMap::new(),
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],
@@ -411,6 +422,17 @@ impl TypeEnv {
     /// type checking from cascading.
     pub fn lookup_ctor(&self, name: &Sym) -> Option<(Sym, VariantCase)> {
         self.constructors.get(name).and_then(|cands| cands.first().map(|(t, _m, c)| (*t, c.clone())))
+    }
+
+    /// Like `lookup_ctor`, but only among candidates OWNED by `module` — the
+    /// qualified-access question: `mod.Ctor` must resolve inside `mod` alone,
+    /// never to another module's same-named constructor that happened to
+    /// register first (almide#1426, edit-locality hunt V3).
+    pub fn lookup_ctor_owned(&self, name: &Sym, module: &str) -> Option<(Sym, VariantCase)> {
+        let cands = self.constructors.get(name)?;
+        cands.iter()
+            .find(|(_, owner, _)| owner.map_or(false, |o| o.as_str() == module))
+            .map(|(t, _m, c)| (*t, c.clone()))
     }
 
     /// Like `lookup_ctor`, but when the constructor name is ambiguous across

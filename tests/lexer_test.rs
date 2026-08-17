@@ -113,7 +113,6 @@ fn lex_all_keywords() {
         ("err", TokenType::Err),
         ("some", TokenType::Some),
         ("none", TokenType::None),
-        ("strict", TokenType::Strict),
         ("local", TokenType::Local),
         ("mod", TokenType::Mod),
     ];
@@ -141,6 +140,16 @@ fn lex_type_name() {
 fn lex_question_as_separate_token() {
     let toks = tokens("empty?");
     assert_eq!(toks, vec![(TokenType::Ident, "empty".into()), (TokenType::Question, "?".into())]);
+}
+
+/// `strict` was a keyword introducing the `strict <mode>` declaration, which
+/// parsed, checked, and was consumed by nothing (#1321). The declaration was
+/// removed from the language, and with it the keyword: `strict` is an ordinary
+/// identifier again.
+#[test]
+fn lex_strict_is_an_ordinary_identifier() {
+    let toks = tokens("strict");
+    assert_eq!(toks, vec![(TokenType::Ident, "strict".into())]);
 }
 
 #[test]

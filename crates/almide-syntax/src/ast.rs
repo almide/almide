@@ -154,9 +154,21 @@ impl Expr {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExprKind {
     Int { value: serde_json::Value, raw: String },
-    Float { value: f64 },
-    String { value: String },
-    InterpolatedString { parts: Vec<StringPart> },
+    /// `raw` is the literal's VERBATIM source spelling (`1e10`, `1_000.25`,
+    /// `1e999`) when the node came from a parse. `fmt` prints it instead of
+    /// reprinting `value`, which normalized `1e10` to `10000000000.0` and
+    /// `1e999` to the UNPARSEABLE `inf.0` (#1261). `None` on synthesized
+    /// nodes (and after `strip_literal_raw`), where `fmt` falls back to
+    /// rendering the value. NOT serialized: two ASTs are the same program
+    /// when their VALUES match, which is exactly what fmt's post-format
+    /// verifier compares.
+    Float { value: f64, #[serde(skip)] raw: Option<String> },
+    /// `raw` is the whole literal INCLUDING its delimiters, so the quote
+    /// style (`'…'` vs `"…"`), the heredoc form (`"""…"""`), the raw-string
+    /// form (`r"…"`) and every escape spelling (`\u{3042}`, `\x41`) survive
+    /// `fmt` (#1263). Same `None`/serde contract as `Float::raw`.
+    String { value: String, #[serde(skip)] raw: Option<String> },
+    InterpolatedString { parts: Vec<StringPart>, #[serde(skip)] raw: Option<String> },
     Bool { value: bool },
     Ident { name: Sym },
     TypeName { name: Sym },
@@ -392,7 +404,6 @@ pub enum Decl {
     },
     TopLet { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] mutable: bool, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
     Protocol { name: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<ProtocolMethod>, #[serde(skip)] span: Option<Span> },
-    Strict { mode: String, #[serde(skip)] span: Option<Span> },
     Test { name: String, body: Expr, #[serde(default)] where_clauses: Vec<TestWhere>, #[serde(skip)] span: Option<Span> },
     /// `local test where { ... }` — file-scoped test environment
     TestWhereDef { scope: TestWhereScope, clauses: Vec<TestWhere>, #[serde(skip)] span: Option<Span> },
@@ -414,8 +425,59 @@ pub enum TestWhere {
     Case { name: String, bindings: Vec<TestWhere> },
 }
 
+/// Comments attached to one EXPRESSION (#1404 / #1326).
+///
+/// The attachment rule, ruled 2026-08-14: **a comment binds to the node it is
+/// adjacent to, on the side it was written**.
+///
+/// ```text
+/// foo(/* why */ a, b)      // LEADING on `a`  — travels with `a` if it moves
+/// f(1 /* x */, 2)          // TRAILING on `1` — does NOT cross the comma
+/// let y = 1 + // why
+///   2                      // TRAILING on `1` — the operand it follows
+/// ```
+///
+/// The leading half is the ruling as asked; the trailing half is its mirror,
+/// because taking "attach to the FOLLOWING node" literally would move
+/// `/* x */` across the comma and onto `2`, annotating a value its author
+/// never wrote it against. rustfmt and prettier bind the same way.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExprComments {
+    /// Written before the node, on the same line.
+    pub leading: Vec<String>,
+    /// Written after the node — an inline `/* */` or an end-of-line `//` whose
+    /// expression continues on the next line.
+    pub trailing: Vec<String>,
+}
+
+/// A file's DIALECT STAMP — `@dialect(N)`, written above everything else.
+///
+/// `N` is the language-dialect epoch the file was last verified against, NOT
+/// a compiler release: the epoch advances only when the language surface
+/// changes in a way that can break already-written code, so a file's stamp
+/// stays put across the many releases that change nothing a writer can see.
+///
+/// The stamp exists because Almide's users are code generators. A model
+/// writes against whatever dialect it learned; recording that dialect in the
+/// file is what lets the compiler say "this was written for epoch 2, and
+/// here is what moved since" instead of reporting an unexplained error — and
+/// what lets modification-survival rate be measured per dialect rather than
+/// in aggregate. `almide fmt` advances the stamp, forward only, and only
+/// after the file checks clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DialectStamp {
+    pub epoch: u32,
+    #[serde(skip)]
+    pub span: Option<Span>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
+    /// `@dialect(N)` if the file carries one. Absent is legal and silent —
+    /// every file written before the stamp existed is unstamped, and
+    /// demanding one would be the breaking change the stamp exists to avoid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<DialectStamp>,
     pub module: Option<Decl>,
     pub imports: Vec<Decl>,
     pub decls: Vec<Decl>,
@@ -435,6 +497,16 @@ pub struct Program {
     /// suppress cascading "undefined function" diagnostics from call sites.
     #[serde(skip)]
     pub failed_fn_names: std::collections::HashSet<String>,
+    /// #1404: comments bound to an EXPRESSION, keyed by `ExprId`.
+    ///
+    /// A SIDE TABLE rather than a field on `Expr`, deliberately: `Expr` is
+    /// constructed in hundreds of places across the parser and rebuilt by every
+    /// desugar, and a field would have to be threaded (and preserved) through
+    /// all of them — a comment silently dropped by one rebuild is exactly the
+    /// bug class the fmt conservation verifier exists to catch. Keyed by an id
+    /// the node already carries, nothing downstream has to know this exists.
+    #[serde(skip)]
+    pub expr_comments: std::collections::HashMap<ExprId, ExprComments>,
 }
 
 // ── Generic AST visitor ──
@@ -442,6 +514,24 @@ pub struct Program {
 /// Apply `f` to every `Expr` node reachable from a `Program`.
 pub fn visit_exprs_mut(program: &mut Program, f: &mut impl FnMut(&mut Expr)) {
     for decl in program.decls.iter_mut() { visit_decl_exprs_mut(decl, f); }
+}
+
+/// Drop every literal's cached source spelling, so `fmt` renders the tree from
+/// its VALUES again.
+///
+/// Mandatory for any tool that MUTATES a parsed AST and then re-renders it
+/// (`almide fix`'s rewrites, the differential fuzzer's mutators): an
+/// `InterpolatedString`'s `raw` spans its `${…}` holes, so a rewrite landing
+/// inside a hole would be silently dropped by a verbatim reprint. Stripping is
+/// the conservative direction — the worst case is that literals come back
+/// normalized, never that an edit disappears.
+pub fn strip_literal_raw(program: &mut Program) {
+    visit_exprs_mut(program, &mut |e: &mut Expr| match &mut e.kind {
+        ExprKind::Float { raw, .. }
+        | ExprKind::String { raw, .. }
+        | ExprKind::InterpolatedString { raw, .. } => *raw = None,
+        _ => {}
+    });
 }
 
 pub fn visit_decl_exprs_mut(decl: &mut Decl, f: &mut impl FnMut(&mut Expr)) {
@@ -461,7 +551,7 @@ pub fn visit_decl_exprs_mut(decl: &mut Decl, f: &mut impl FnMut(&mut Expr)) {
             for wc in clauses.iter_mut() { visit_test_where_exprs_mut(wc, f); }
         }
         Decl::Module { .. } | Decl::Import { .. } | Decl::Type { .. } |
-        Decl::Protocol { .. } | Decl::Strict { .. } => {}
+        Decl::Protocol { .. } => {}
     }
 }
 
@@ -623,7 +713,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
             visit_expr_mut(lead, f);
             visit_stmts_mut(body, f);
         }
-        ExprKind::InterpolatedString { parts } => visit_string_parts_mut(parts, f),
+        ExprKind::InterpolatedString { parts, .. } => visit_string_parts_mut(parts, f),
 
         // ── No children ──
         ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
@@ -657,5 +747,199 @@ fn visit_block_mut(
     visit_stmts_mut(stmts, f);
     if let Some(e) = tail {
         visit_expr_mut(e, f);
+    }
+}
+
+// ── Read-only AST visitor (#1231) ──
+//
+// Mirror of `visit_expr_mut` for callers that only OBSERVE the tree (counting
+// uses, scanning for a node kind) — before this existed, every such caller had
+// to clone the subtree just to run the mutable walker. Identical traversal
+// order and identical shallow-visit contracts; keep the two families in
+// lockstep. Exhaustive with no wildcard, so a new `ExprKind` fails to compile
+// here until its shape is declared.
+
+fn visit_stmt_exprs(stmt: &Stmt, f: &mut impl FnMut(&Expr)) {
+    match stmt {
+        Stmt::Let { value, .. } | Stmt::Var { value, .. } | Stmt::Assign { value, .. } => visit_expr(value, f),
+        Stmt::LetDestructure { pattern, value, .. } => {
+            visit_pattern_exprs(pattern, f);
+            visit_expr(value, f);
+        }
+        Stmt::IndexAssign { index, value, .. } => { visit_expr(index, f); visit_expr(value, f); }
+        Stmt::FieldAssign { value, .. } => visit_expr(value, f),
+        Stmt::Guard { cond, else_, .. } => { visit_expr(cond, f); visit_expr(else_, f); }
+        Stmt::GuardLet { scrutinee, else_, .. } => { visit_expr(scrutinee, f); visit_expr(else_, f); }
+        Stmt::Expr { expr, .. } => visit_expr(expr, f),
+        Stmt::Comment { .. } | Stmt::Error { .. } => {}
+    }
+}
+
+fn visit_pattern_exprs(pat: &Pattern, f: &mut impl FnMut(&Expr)) {
+    match pat {
+        Pattern::Literal { value } => visit_expr(value, f),
+        Pattern::Constructor { args, .. } => { for a in args.iter() { visit_pattern_exprs(a, f); } }
+        Pattern::RecordPattern { fields, .. } => {
+            for fp in fields.iter() { if let Some(ref p) = fp.pattern { visit_pattern_exprs(p, f); } }
+        }
+        Pattern::Tuple { elements } | Pattern::List { elements } => { for e in elements.iter() { visit_pattern_exprs(e, f); } }
+        Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs(inner, f),
+        Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
+    }
+}
+
+/// Visits each element of an expression slice (List/Tuple/Fan payloads).
+fn visit_exprs_slice(exprs: &[Expr], f: &mut impl FnMut(&Expr)) {
+    for e in exprs.iter() { visit_expr(e, f); }
+}
+
+/// Visits each key/value pair of a map literal.
+fn visit_map_entries(entries: &[(Expr, Expr)], f: &mut impl FnMut(&Expr)) {
+    for (k, v) in entries.iter() { visit_expr(k, f); visit_expr(v, f); }
+}
+
+/// Visits each field value of a record literal (Record/SpreadRecord payloads).
+fn visit_field_inits(fields: &[FieldInit], f: &mut impl FnMut(&Expr)) {
+    for fi in fields.iter() { visit_expr(&fi.value, f); }
+}
+
+/// Visits pattern/guard/body of each match arm.
+fn visit_match_arms(arms: &[MatchArm], f: &mut impl FnMut(&Expr)) {
+    for arm in arms.iter() {
+        visit_pattern_exprs(&arm.pattern, f);
+        if let Some(ref g) = arm.guard { visit_expr(g, f); }
+        visit_expr(&arm.body, f);
+    }
+}
+
+/// Visits a statement list (Block/ForIn/While bodies).
+fn visit_stmts(stmts: &[Stmt], f: &mut impl FnMut(&Expr)) {
+    for s in stmts.iter() { visit_stmt_exprs(s, f); }
+}
+
+/// Visits the embedded expressions of an interpolated string.
+fn visit_string_parts(parts: &[StringPart], f: &mut impl FnMut(&Expr)) {
+    for part in parts.iter() {
+        if let StringPart::Expr { expr: e } = part { visit_expr(e, f); }
+    }
+}
+
+/// Apply `f` to `expr` and then to every child expression — the read-only
+/// mirror of `visit_expr_mut`, same order, same fan-family shallow contract.
+pub fn visit_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
+    f(expr);
+    match &expr.kind {
+        // ── One child ──
+        ExprKind::Member { object: e, .. } | ExprKind::TupleIndex { object: e, .. }
+        | ExprKind::Unary { operand: e, .. } | ExprKind::Lambda { body: e, .. }
+        | ExprKind::Try { expr: e } | ExprKind::Unwrap { expr: e }
+        | ExprKind::ToOption { expr: e } | ExprKind::Paren { expr: e }
+        | ExprKind::Some { expr: e } | ExprKind::Ok { expr: e } | ExprKind::Err { expr: e }
+        | ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::TypeAscription { expr: e, .. } => visit_expr(e, f),
+
+        // ── Two children, left to right ──
+        ExprKind::Binary { left: a, right: b, .. } | ExprKind::Pipe { left: a, right: b }
+        | ExprKind::Compose { left: a, right: b }
+        | ExprKind::UnwrapOr { expr: a, fallback: b }
+        | ExprKind::IndexAccess { object: a, index: b }
+        | ExprKind::Range { start: a, end: b, .. } => {
+            visit_expr(a, f);
+            visit_expr(b, f);
+        }
+
+        // ── Three children ──
+        ExprKind::If { cond: a, then: b, else_: c }
+        | ExprKind::IfLet { scrutinee: a, then: b, else_: c, .. } => {
+            visit_expr(a, f);
+            visit_expr(b, f);
+            visit_expr(c, f);
+        }
+
+        // ── A flat sequence of children ──
+        ExprKind::List { elements: xs } | ExprKind::Tuple { elements: xs }
+        | ExprKind::Fan { exprs: xs } | ExprKind::FanSettle { arms: xs } => {
+            visit_exprs_slice(xs, f)
+        }
+
+        // ── Name-tagged children ──
+        ExprKind::MapLiteral { entries } => visit_map_entries(entries, f),
+        ExprKind::Record { fields, .. } => visit_field_inits(fields, f),
+        ExprKind::SpreadRecord { base, fields } => {
+            visit_expr(base, f);
+            visit_field_inits(fields, f);
+        }
+
+        // ── The fan family: `f` is applied SHALLOWLY to the budget and the
+        //    body/arms (no recursion into their subtrees) — the pre-existing
+        //    contract, kept verbatim.
+        ExprKind::FanBounded { budget, body } => {
+            f(budget);
+            f(body);
+        }
+        ExprKind::FanRace { budget, arms } => {
+            visit_opt_shallow(budget, f);
+            visit_exprs_slice(arms, f);
+        }
+        ExprKind::FanRaceMap { budget, list, mapper } => {
+            visit_opt_shallow(budget, f);
+            f(list);
+            f(mapper);
+        }
+        ExprKind::FanTimeout { deadline, body } => {
+            f(deadline);
+            f(body);
+        }
+
+        // ── Shapes with their own traversal order ──
+        ExprKind::Call { callee, args, named_args, .. } => {
+            visit_expr(callee, f);
+            visit_exprs_slice(args, f);
+            visit_named_args(named_args, f);
+        }
+        ExprKind::Match { subject, arms } => {
+            visit_expr(subject, f);
+            visit_match_arms(arms, f);
+        }
+        ExprKind::Block { stmts, expr: tail } => visit_block(stmts, tail, f),
+        ExprKind::ForIn { iterable: lead, body, .. }
+        | ExprKind::While { cond: lead, body } => {
+            visit_expr(lead, f);
+            visit_stmts(body, f);
+        }
+        ExprKind::InterpolatedString { parts, .. } => visit_string_parts(parts, f),
+
+        // ── No children ──
+        ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
+        ExprKind::Bool { .. } | ExprKind::Ident { .. } | ExprKind::TypeName { .. } |
+        ExprKind::EmptyMap | ExprKind::Hole | ExprKind::Todo { .. } |
+        ExprKind::Break | ExprKind::Continue | ExprKind::Placeholder |
+        ExprKind::Unit | ExprKind::None | ExprKind::Error => {}
+    }
+}
+
+/// An optional child the fan family applies `f` to WITHOUT recursing.
+fn visit_opt_shallow(e: &Option<Box<Expr>>, f: &mut impl FnMut(&Expr)) {
+    if let Some(b) = e {
+        f(b);
+    }
+}
+
+/// A call's named arguments — the name plays no part in the walk.
+fn visit_named_args(args: &[(Sym, Expr)], f: &mut impl FnMut(&Expr)) {
+    for (_, a) in args.iter() {
+        visit_expr(a, f);
+    }
+}
+
+/// A block: every statement, then the tail expression if there is one.
+fn visit_block(
+    stmts: &[Stmt],
+    tail: &Option<Box<Expr>>,
+    f: &mut impl FnMut(&Expr),
+) {
+    visit_stmts(stmts, f);
+    if let Some(e) = tail {
+        visit_expr(e, f);
     }
 }

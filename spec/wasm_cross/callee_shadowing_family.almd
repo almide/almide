@@ -1,0 +1,55 @@
+// @contract: C-283
+// A CALL whose callee is a bare identifier resolves the local first — the rule
+// every other position already applied (value position, argument position, and
+// lowering, which calls a local THROUGH its variable and says so in
+// `lower/calls_target.rs`). Only the checker's callee lookup went to the global
+// function table first, so its TypeMap and the emitted call could name
+// DIFFERENT functions (almide#1441).
+//
+// The user-visible half: `apply` below was REJECTED by v0.57.0 with
+// `error[E005]: argument 'n' expects Int but got String` — the parameter call
+// was typed against the same-named global. The program is valid, and lowering
+// was already calling the parameter.
+//
+// The compiler-fatal half: bundled stdlib modules are inferred on the same
+// checker with the user program's globals still live, so a user fn named `f`
+// captured the `f` PARAMETER of `list.__fallible_flat_map[A,B,E](xs, f: fn(A)
+// -> Result[List[B], E])`. `match f(x) { ok(bs) => .. }` then typed `bs` from
+// the USER's return type, `bs + rest` became `ConcatStr(String, List[B])`, and
+// the IR verifier aborted the compile — for a two-line program that never
+// mentions `flat_map`. `f` is one of the names a caller is most likely to pick,
+// and the stdlib's own parameter names must not be part of a user's namespace.
+// BOUNDARY: the cells below are about a local whose type is `Fn`. A non-function
+// local of the same name, and a TOP-LEVEL `let` holding a closure, both still
+// resolve the top-level fn at call position — identically on both legs, and
+// unchanged here. Those are scoping questions, not cross-target divergences.
+fn tag(n: Int) -> String = "g" + int.to_string(n)
+
+// The param SHADOWS the global, and their signatures disagree — which is what
+// makes the cell discriminating. Same-signature shadowing types identically
+// either way and proves nothing.
+fn apply(tag: (String) -> String, x: String) -> String = tag(x)
+
+// A `let`-bound closure shadows a global just as a parameter does.
+fn via_let(x: String) -> String = {
+  let tag = (s: String) => "<" + s + ">"
+  tag(x)
+}
+
+// An effect global stays callable where nothing shadows it. (The effect
+// fn-TYPED PARAMETER cell belongs to #1055 and still walls on the wasm leg
+// today, so it is not part of this cross fixture — a fixture that cannot run on
+// both legs proves nothing about a cross-target promise.)
+effect fn step(n: Int) -> Int = n * 2
+
+// The stdlib-capture cell: a user effect fn named exactly `f`, the name the
+// fallible list combinators use for their callback parameter.
+effect fn f() -> String = "ok"
+
+effect fn main() -> Unit = {
+  println("param=" + apply((s) => "[" + s + "]", "a"))
+  println("global=" + tag(7))
+  println("let=" + via_let("b"))
+  println("effect_global=" + int.to_string(step(5)!))
+  println("named_f=" + f()!)
+}

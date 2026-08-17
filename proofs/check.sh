@@ -24,7 +24,7 @@ SPINE_FILES=(
   Subset.v OwnershipChecker.v OwnershipLoop.v OwnershipFilter.v CoownLoop.v
   CoownCompose.v ALS.v Translation.v RuntimeModel.v NameTotality.v
   TypeConcretization.v CapabilityBound.v CapabilityReach.v CallModes.v
-  StackBalance.v Termination.v FreeList.v WasmRcDec.v WasmEncode.v WasmExec.v
+  StackBalance.v Termination.v FreeList.v FreeListRc.v WasmRcDec.v WasmEncode.v WasmExec.v
   WasmIsa.v WasmDecode.v CowSafety.v
 )
 
@@ -58,6 +58,34 @@ if [ "$got" -ne "$want" ]; then
   exit 1
 fi
 echo "  ok   $got/$want assumptions audits answered 'Closed under the global context'"
+
+# (d) The audited-theorem COUNT is quoted verbatim in two human-facing trust
+# documents. It was hand-written and nothing checked it: by 2026-08-13 both said
+# "37 audited theorems" while the real count was 73 — stale by 36, and nobody
+# noticed until a PR happened to touch the neighbourhood. A number in a trust
+# document that no gate reads is exactly the claim-drift this spine exists to
+# prevent, so assert it HERE, where the authoritative count is computed.
+#
+# Deliberately a plain equality, not a regeneration: these two files are prose
+# written by hand, and a generator would have to own their whole text. The gate
+# names the file and the fix instead.
+# cwd is proofs/ (the `cd` at the top), so these are siblings.
+COUNT_DOCS=(TRUSTED_BASE.md receipt.sh)
+for doc in "${COUNT_DOCS[@]}"; do
+  quoted="$(grep -oE '[0-9]+ audited theorems' "$doc" | grep -oE '^[0-9]+' | sort -u)"
+  if [ -z "$quoted" ]; then
+    echo "FAIL: $doc no longer quotes an 'N audited theorems' count — the claim was"
+    echo "  deleted rather than updated, so nothing states the spine's size any more."
+    exit 1
+  fi
+  if [ "$(printf '%s\n' "$quoted" | wc -l | tr -d ' ')" -ne 1 ] || [ "$quoted" -ne "$want" ]; then
+    echo "FAIL: $doc claims '$(printf '%s' "$quoted" | tr '\n' '/')' audited theorems"
+    echo "  but the spine has $want. Update the number in that file (and check for a"
+    echo "  SECOND occurrence — the count appears once per document by convention)."
+    exit 1
+  fi
+done
+echo "  ok   both trust documents quote the measured count ($want audited theorems)"
 
 # Detector drill (the gate.sh tamper-drill pattern): compile a scratch module
 # whose theorem DOES rest on an Axiom and prove the grep above would have seen

@@ -1,0 +1,303 @@
+# ALS SYNTAX-ELEMENT COVERAGE LEDGER — Stage 3's element→section direction.
+#
+# Every surface-AST syntax element (ExprKind / Stmt / Decl variants,
+# enumerated by scripts/lib/als-element-enumerate.py — the ledger and the
+# gate share that enumerator) carries a row naming the ALS normative section
+# that specifies it, or the honest UNWRITTEN. The freeze precondition
+# (Stage 3) is UNWRITTEN = 0: a 1.0 cannot freeze semantics nobody wrote
+# down. Gate: scripts/check-als-element-coverage.sh — every enumerated
+# element rowed, stale rows fail, a `section` must resolve to a real
+# `ALS-<id>` header in docs/specs/als/, and the UNWRITTEN count may only
+# SHRINK (ceiling below). First measurement 2026-08-12: 73/73 UNWRITTEN —
+# the existing ALS sections (T1-T7, R-series, ...) are STDLIB-semantics
+# normative text; the syntax-element direction starts honestly at zero.
+#
+# unwritten_ceiling = "0"
+
+[[element]]
+name = "ExprKind::Int"
+section = "ALS-E1"
+
+[[element]]
+name = "ExprKind::Float"
+section = "ALS-E3"
+
+[[element]]
+name = "ExprKind::String"
+section = "ALS-E5"
+
+[[element]]
+name = "ExprKind::InterpolatedString"
+section = "ALS-E16"
+
+[[element]]
+name = "ExprKind::Bool"
+section = "ALS-E2"
+
+[[element]]
+name = "ExprKind::Ident"
+section = "ALS-E17"
+
+[[element]]
+name = "ExprKind::TypeName"
+section = "ALS-E27"
+
+[[element]]
+name = "ExprKind::List"
+section = "ALS-E11"
+
+[[element]]
+name = "ExprKind::MapLiteral"
+section = "ALS-E12"
+
+[[element]]
+name = "ExprKind::EmptyMap"
+section = "ALS-E12"
+
+[[element]]
+name = "ExprKind::Record"
+section = "ALS-E23"
+
+[[element]]
+name = "ExprKind::SpreadRecord"
+section = "ALS-E23"
+
+[[element]]
+name = "ExprKind::Call"
+section = "ALS-E26"
+
+[[element]]
+name = "ExprKind::Member"
+section = "ALS-E23"
+
+[[element]]
+name = "ExprKind::TupleIndex"
+section = "ALS-E8"
+
+[[element]]
+name = "ExprKind::IndexAccess"
+section = "ALS-E11"
+
+[[element]]
+name = "ExprKind::Pipe"
+section = "ALS-E20"
+
+[[element]]
+name = "ExprKind::Compose"
+section = "ALS-E20"
+
+[[element]]
+name = "ExprKind::If"
+section = "ALS-E13"
+
+[[element]]
+name = "ExprKind::IfLet"
+section = "ALS-E21"
+
+[[element]]
+name = "ExprKind::Match"
+section = "ALS-E18"
+
+[[element]]
+name = "ExprKind::Block"
+section = "ALS-E14"
+
+[[element]]
+name = "ExprKind::Fan"
+section = "ALS-R3"
+
+[[element]]
+name = "ExprKind::FanBounded"
+section = "ALS-R3"
+
+[[element]]
+name = "ExprKind::FanRace"
+section = "ALS-R3"
+
+[[element]]
+name = "ExprKind::FanRaceMap"
+section = "ALS-R3"
+
+[[element]]
+name = "ExprKind::FanTimeout"
+section = "ALS-R3"
+
+[[element]]
+name = "ExprKind::FanSettle"
+section = "ALS-R3"
+
+[[element]]
+name = "ExprKind::ForIn"
+section = "ALS-E19"
+
+[[element]]
+name = "ExprKind::While"
+section = "ALS-E15"
+
+[[element]]
+name = "ExprKind::Lambda"
+section = "ALS-E26"
+
+[[element]]
+name = "ExprKind::Hole"
+section = "ALS-E30"
+
+[[element]]
+name = "ExprKind::Todo"
+section = "ALS-E30"
+
+[[element]]
+name = "ExprKind::Try"
+section = "ALS-E25"
+
+[[element]]
+name = "ExprKind::Unwrap"
+section = "ALS-E25"
+
+[[element]]
+name = "ExprKind::UnwrapOr"
+section = "ALS-E25"
+
+[[element]]
+name = "ExprKind::ToOption"
+section = "ALS-E25"
+
+[[element]]
+name = "ExprKind::OptionalChain"
+section = "ALS-E28"
+
+[[element]]
+name = "ExprKind::Binary"
+section = "ALS-E29"
+
+[[element]]
+name = "ExprKind::Unary"
+section = "ALS-E7"
+
+[[element]]
+name = "ExprKind::Paren"
+section = "ALS-E6"
+
+[[element]]
+name = "ExprKind::Tuple"
+section = "ALS-E8"
+
+[[element]]
+name = "ExprKind::Range"
+section = "ALS-E10"
+
+[[element]]
+name = "ExprKind::Break"
+section = "ALS-E24"
+
+[[element]]
+name = "ExprKind::Continue"
+section = "ALS-E24"
+
+[[element]]
+name = "ExprKind::Placeholder"
+section = "ALS-E30"
+
+[[element]]
+name = "ExprKind::Unit"
+section = "ALS-E4"
+
+[[element]]
+name = "ExprKind::None"
+section = "ALS-E9"
+
+[[element]]
+name = "ExprKind::Some"
+section = "ALS-E9"
+
+[[element]]
+name = "ExprKind::Ok"
+section = "ALS-E9"
+
+[[element]]
+name = "ExprKind::Err"
+section = "ALS-E9"
+
+[[element]]
+name = "ExprKind::TypeAscription"
+section = "ALS-E22"
+
+[[element]]
+name = "ExprKind::Error"
+section = "ALS-D2"
+
+[[element]]
+name = "Stmt::Let"
+section = "ALS-S1"
+
+[[element]]
+name = "Stmt::LetDestructure"
+section = "ALS-S2"
+
+[[element]]
+name = "Stmt::Var"
+section = "ALS-S1"
+
+[[element]]
+name = "Stmt::Assign"
+section = "ALS-S1"
+
+[[element]]
+name = "Stmt::IndexAssign"
+section = "ALS-S5"
+
+[[element]]
+name = "Stmt::FieldAssign"
+section = "ALS-S5"
+
+[[element]]
+name = "Stmt::Guard"
+section = "ALS-S6"
+
+[[element]]
+name = "Stmt::GuardLet"
+section = "ALS-S7"
+
+[[element]]
+name = "Stmt::Expr"
+section = "ALS-S3"
+
+[[element]]
+name = "Stmt::Comment"
+section = "ALS-S4"
+
+[[element]]
+name = "Stmt::Error"
+section = "ALS-D2"
+
+[[element]]
+name = "Decl::Module"
+section = "ALS-D1"
+
+[[element]]
+name = "Decl::Import"
+section = "ALS-D1"
+
+[[element]]
+name = "Decl::Type"
+section = "ALS-D1"
+
+[[element]]
+name = "Decl::Fn"
+section = "ALS-D1"
+
+[[element]]
+name = "Decl::TopLet"
+section = "ALS-D1"
+
+[[element]]
+name = "Decl::Protocol"
+section = "ALS-D1"
+
+[[element]]
+name = "Decl::Test"
+section = "ALS-D1"
+
+[[element]]
+name = "Decl::TestWhereDef"
+section = "ALS-D1"

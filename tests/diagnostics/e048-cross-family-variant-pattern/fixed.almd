@@ -1,0 +1,9 @@
+// An Option is matched with `some(..)` / `none`.
+fn first_plus_one(xs: List[Int]) -> Int = match list.get(xs, 0) {
+  some(a) => a + 1,
+  _ => 0,
+}
+
+effect fn main() -> Unit = {
+  println("${first_plus_one([41])}")
+}

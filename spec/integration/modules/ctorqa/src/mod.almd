@@ -1,0 +1,6 @@
+type Signal = | Mark(Int) | Stop
+
+fn describe(s: Signal) -> String = match s {
+  Mark(n) => "a-mark:${n}",
+  Stop => "a-stop",
+}

@@ -58,6 +58,30 @@ impl LowerCtx {
                 self.live_heap_handles.truncate(lhh_mark);
                 self.lifted.truncate(lifted_mark);
             }
+            // The OPTION-polarity mirror (#1270): a heap `??` whose operand is
+            // Option-typed (`sn ?? none` over Option[Option[Int]], `list.get(xs,
+            // i) ?? {…}` over Option[record]) declined the direct route above.
+            // Rewrite to `match expr { some(p) => p, none => fallback }` through
+            // the same speculative bind-position heap-match machinery; a decline
+            // ROLLS BACK to the honest wall below. The record-payload case was
+            // gated off until #1287: the merge bind did not seed the record's
+            // read shape, so a String-field read of the bound var fell to the
+            // container-grain Dup (the record HEADER printed as blanks on wasm).
+            // `lower_bind_heap_match` now seeds materialized_aggregates +
+            // record_masks + the recursive drop route for a record/tuple-valued
+            // merge (measured byte-identical to the user-written match), so the
+            // gate covers every Option payload.
+            if expr.ty.is_option() {
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let rewritten = Self::unwrap_or_as_option_match(value, expr, fallback);
+                if self.lower_bind(var, ty, &rewritten).is_ok() {
+                    return Ok(true);
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                self.lifted.truncate(lifted_mark);
+            }
             // A HEAP-result `??` over an Option/Result operand that `try_lower_option_unwrap_or`
             // declined (e.g. `Option[record]` — no faithful record-payload unwrap-or yet) must
             // NOT fall to the `Alloc{Opaque}` below: that binds an EMPTY heap value the caller
@@ -77,10 +101,10 @@ impl LowerCtx {
     /// The `e ?? d` → `match e { ok(p) => p, err(_) => d }` rewrite, shared shape with
     /// [`Self::lower_tail_heap_unwrap_or`]'s inline version (Result polarity only —
     /// the caller gates).
-    fn unwrap_or_as_result_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
+    pub(crate) fn unwrap_or_as_result_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
         use almide_ir::{IrMatchArm, IrPattern};
         let payload_ty = value.ty.clone();
-        let p = VarId(crate::lower::max_var_id(value) + 1);
+        let p = VarId(crate::lower::desugar_var_seed());
         let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
         let payload = IrExpr {
             kind: IrExprKind::Var { id: p },
@@ -99,6 +123,42 @@ impl LowerCtx {
                     },
                     IrMatchArm {
                         pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: fallback.clone(),
+                    },
+                ],
+            },
+            ty: value.ty.clone(),
+            span: value.span.clone(),
+            def_id: value.def_id,
+        }
+    }
+
+    /// The Option-polarity mirror of [`Self::unwrap_or_as_result_match`] (#1270):
+    /// `e ?? d` → `match e { some(p) => p, none => d }`, same speculative
+    /// discipline (the caller gates on `is_option` and rolls back on decline).
+    pub(crate) fn unwrap_or_as_option_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
+        use almide_ir::{IrMatchArm, IrPattern};
+        let payload_ty = value.ty.clone();
+        let p = VarId(crate::lower::desugar_var_seed());
+        let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
+        let payload = IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty: payload_ty,
+            span: value.span.clone(),
+            def_id: None,
+        };
+        IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(expr.clone()),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Some { inner: Box::new(bind) },
+                        guard: None,
+                        body: payload,
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::None,
                         guard: None,
                         body: fallback.clone(),
                     },
@@ -171,12 +231,18 @@ impl LowerCtx {
             // (A NON-CAPTURING `Lambda` is intercepted ABOVE and LIFTED to a FuncRef; only
             // a capturing one — a real environment — reaches this deferred Opaque arm.)
             | IrExprKind::ClosureCreate { .. }
-            | IrExprKind::Range { .. }
             // A RUNTIME CALL result is a fresh value (its call is elided ⇒ the gate
             // taints the function honestly, like Method/Computed).
             | IrExprKind::RuntimeCall { .. } => {
                 self.lower_bind_heap_fresh(var, ty, value)
             }
+            // `let r = 0..<n` — a RANGE initializer. This sat in the deferred-Opaque
+            // arm above, which is exactly the "deferred EMPTY value observed by a
+            // later read" miscompile this file rejects everywhere else: a `for i in r`
+            // borrowed the empty Opaque and iterated ZERO times (#1272, wasm printed 0
+            // where native printed 3). Materialize the REAL list via the self-hosted
+            // `list.range`, mirroring the call-arg path (`lower_call_arg_range_list`).
+            IrExprKind::Range { .. } => self.lower_bind_heap_range(var, ty, value),
             // `var v = r.x` / `xs[i]` — a HEAP extraction: alias the container
             // (`Op::Dup`), bound here and dropped at scope end (cert `a` + `d`). When
             // the container is NOT a tracked var (`f().x`, nested `a.b.c`), there is no
@@ -296,11 +362,11 @@ impl LowerCtx {
         if self.param_values.contains(&src) && is_scalar_elem_list_ty(ty) {
             self.materialized_lists.insert(dst);
         }
-        if self.heap_elem_lists.contains(&src) {
-            self.heap_elem_lists.insert(dst);
+        if self.value_drops.get(&src).is_some_and(|d| d.flat_elems) {
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
-        if self.str_str_elem_lists.contains(&src) {
-            self.str_str_elem_lists.insert(dst);
+        if self.value_drops.get(&src).is_some_and(|d| d.str_str_elems) {
+            self.value_drops.entry(dst).or_default().str_str_elems = true;
         }
         if self.value_handles.contains(&src) {
             self.value_handles.insert(dst);
@@ -308,8 +374,8 @@ impl LowerCtx {
         if let Some(mask) = self.record_masks.get(&src).cloned() {
             self.record_masks.insert(dst, mask);
         }
-        if let Some(route) = self.variant_drop_handles.get(&src).cloned() {
-            self.variant_drop_handles.insert(dst, route);
+        if let Some(route) = self.value_drops.get(&src).and_then(|d| d.named_route.as_ref()).cloned() {
+            self.value_drops.entry(dst).or_default().named_route = Some(route);
         }
         Ok(())
     }
@@ -393,5 +459,56 @@ impl LowerCtx {
             return Ok(());
         }
         self.lower_bind_heap_fresh_opaque(var, ty, value)
+    }
+
+    /// `let r = start..<end` / `start...end` — materialize the REAL `list.range`
+    /// list (the call-arg path's `lower_call_arg_range_list`, in bind position) and
+    /// seed it exactly like a `let r = list.range(s, e)` module-call bind, so a
+    /// later `for i in r` / `r[i]` reads a populated block. A non-scalar bound
+    /// walls (a deferred Opaque here was the #1272 silent zero-iteration).
+    fn lower_bind_heap_range(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        // #1400: this var's only use is a `for-in` HEAD, so it never needs a block —
+        // `lower_for_in` reads the Range straight out of `range_counting_vars` and
+        // takes the counting loop. Materializing here is what made a range longer
+        // than memory OOM on wasm while native iterated it lazily and printed the
+        // right answer. Emitting nothing is safe BECAUSE of the analysis: no other
+        // reader exists, so there is no empty block for anyone to iterate zero
+        // times (#1272's failure needed a reader of a DEFERRED value).
+        if self.range_counting_vars.contains_key(&var) {
+            return Ok(());
+        }
+        let IrExprKind::Range { start, end, inclusive } = &value.kind else { unreachable!() };
+        let range_mark = self.ops.len();
+        let (s_v, e_v0) = match (self.lower_scalar_value(start), self.lower_scalar_value(end)) {
+            (Some(sv), Some(ev)) => (sv, ev),
+            _ => {
+                self.ops.truncate(range_mark);
+                return Err(LowerError::Unsupported(
+                    "a Range initializer with a non-scalar bound cannot be materialized \
+                     in this brick (a deferred empty value would iterate zero times)"
+                        .into(),
+                ));
+            }
+        };
+        let mut e_v = e_v0;
+        if *inclusive {
+            let one = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: one, value: 1 });
+            let e2 = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: e2, op: crate::IntOp::Add, a: e_v, b: one });
+            e_v = e2;
+        }
+        let repr = repr_of(ty)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: "list.range".to_string(),
+            args: vec![CallArg::Scalar(s_v), CallArg::Scalar(e_v)],
+            result: Some(repr),
+        });
+        self.value_of.insert(var, dst);
+        self.seed_call_module_heap_read_shape(dst, ty, "list", "range", true);
+        self.seed_call_module_heap_drop_route(dst, ty);
+        Ok(())
     }
 }

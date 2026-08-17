@@ -14,38 +14,73 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     let elem_round_add = ELEM_SIZE - 1;
     let elem_round_mask = -(ELEM_SIZE as i32);
     let elem_shift = ELEM_SIZE.trailing_zeros();
+    // The errno → native-Display mapping, once per fs floor, each keeping its OWN
+    // pre-#1385 string as the unmapped-errno fallback (see `fs_errno_msg_wat`).
+    let rtf_errno_map =
+        fs_errno_msg_wat("        ", RTF_NOTFOUND_ADDR, RTF_NOTFOUND_LEN, "file not found");
+    let write_errno_map =
+        fs_errno_msg_wat("        ", WRITE_ERR_ADDR, WRITE_ERR_LEN, "write failed");
+    let write_fd_errno_map =
+        fs_errno_msg_wat("            ", WRITE_ERR_ADDR, WRITE_ERR_LEN, "write failed");
+    let mkdir_errno_map =
+        fs_errno_msg_wat("        ", MKDIR_ERR_ADDR, MKDIR_ERR_LEN, "mkdir failed");
+    let remove_errno_map =
+        fs_errno_msg_wat("        ", REMOVE_ERR_ADDR, REMOVE_ERR_LEN, "remove failed");
+    let rdir_errno_map =
+        fs_errno_msg_wat("        ", RDIR_ERR_ADDR, RDIR_ERR_LEN, "directory not found");
+    let rdir_rd_errno_map =
+        fs_errno_msg_wat("            ", RDIR_ERR_ADDR, RDIR_ERR_LEN, "directory not found");
+    let rename_errno_map =
+        fs_errno_msg_wat("        ", WRITE_ERR_ADDR, WRITE_ERR_LEN, "write failed");
+    // The ONE preopen → dirfd resolution step, spliced into `$path_norm`'s tail
+    // (#1394). All 13 WASI path-call sites take their dirfd from its result, so
+    // the rule has exactly one source.
+    let preopen_resolve = preopen_resolve_wat();
     format!(
         r#"  ;; fs.read_text(path) — open the file at $path and read its bytes, returning a fresh
   ;; OWNED `Result[String, String]` in the EXACT `materialize_result_str` cap-as-tag
   ;; layout: a 1-slot DynListStr `[rc][len@4=1][cap@8=1][@12 String handle][@16 tag]`
   ;; (tag 0 = Ok, 1 = Err), so the caller's `!`/`match`/`DropListStr` machinery handles
   ;; it identically to a self-host-built Result. $path is a borrowed canonical String
-  ;; `[rc][len@4][cap@8][bytes@12…]`. WASI floor: `path_open` (relative to the first
-  ;; preopened dir fd 3, leading '/' stripped — the absolute-path fallback the native
-  ;; emit's __resolve_path uses) gives a file fd; `fd_filestat_get` its byte size;
+  ;; `[rc][len@4][cap@8][bytes@12…]`. WASI floor: `path_open` (relative to the preopen
+  ;; dirfd `$path_norm` resolved the path to, with the matched prefix removed — #1394)
+  ;; gives a file fd; `fd_filestat_get` its byte size;
   ;; `fd_read` the bytes; we copy them into a canonical String and wrap it Ok. On a
   ;; path_open error we wrap the message "file not found" Err. The FOURTH sandbox exit
   ;; (Capability::FsRead) — the result is an owned heap handle the caller's scope-end
   ;; DropListStr balances (frees the @12 payload String + the block).
-  ;; Normalize a fs path for the WASI floor (preopen fd 3 = host "/"). An ABSOLUTE
-  ;; path drops its leading '/' (making it fd-3-relative — the existing convention).
-  ;; A RELATIVE path is resolved against the HOST CWD by prepending "$PWD/" (PWD
-  ;; arrives via the harness's `-S inherit-env=y`; WASI itself has no cwd, so an
-  ;; unprefixed relative path resolved against "/" — every relative fs op silently
-  ;; diverged from native, the fs_stat_test vein). No usable PWD (absent, empty, or
-  ;; not absolute) → the bytes pass through unchanged (the pre-fix behavior).
-  ;; Returns (pdata, plen) of the normalized byte range (multi-value).
-  (func $path_norm (param $path i32) (result i32 i32)
+  ;; Normalize a fs path for the WASI floor, then RESOLVE it to the preopen it
+  ;; actually belongs to. Two steps, one function:
+  ;;   1. NORMALIZE — an ABSOLUTE path is already the guest path. A RELATIVE one
+  ;;      is joined onto the HOST CWD ("$PWD/…"; PWD arrives via the harness's
+  ;;      `-S inherit-env=y`, ALMIDE_CWD wins over it — #874). WASI itself has no
+  ;;      cwd, so an unjoined relative path would resolve against the preopen ROOT
+  ;;      and every relative fs op would silently diverge from native (the
+  ;;      fs_stat_test vein). No usable PWD (absent, empty, or not absolute) → the
+  ;;      bytes pass through unchanged (the pre-fix behavior).
+  ;;   2. RESOLVE — walk the WASI preopen table and pick the LONGEST-PREFIX match
+  ;;      (see `preopen_resolve_wat`, #1394). The dirfd used to be a hard-coded 3
+  ;;      at all 13 path-call sites, which is right only under a host that
+  ;;      preopens exactly one directory and that directory is `/`.
+  ;; Returns (dirfd, pdata, plen) — the fd the path is relative TO, and its
+  ;; remainder byte range (multi-value). EVERY fs floor fn resolves through here,
+  ;; so there is exactly ONE copy of the rule to keep right.
+  (func $path_norm (param $path i32) (result i32 i32 i32)
     (local $pdata i32) (local $plen i32)
     (local $cnt_ptr i32) (local $sz_ptr i32) (local $cnt i32) (local $bufsz i32)
     (local $envp i32) (local $envbuf i32) (local $i i32) (local $entry i32)
     (local $pwd i32) (local $pwdlen i32) (local $buf i32) (local $j i32) (local $w i32)
+    ;; preopen-resolution scratch (#1394)
+    (local $tab i32) (local $pre i32) (local $rec i32) (local $n i32) (local $fd i32)
+    (local $nameptr i32) (local $namelen i32) (local $k i32) (local $ok i32) (local $pi i32)
+    (local $rem i32) (local $remlen i32)
+    (local $best_fd i32) (local $best_len i32) (local $brem i32) (local $bremlen i32)
     (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
     (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then (return (i32.add (local.get $pdata) (i32.const 1))
-                    (i32.sub (local.get $plen) (i32.const 1)))))
+    (block $normed
+    ;; ABSOLUTE — this IS the guest path; fall straight through to resolution.
+    (br_if $normed (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                            (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH}))))
     ;; relative — snapshot the environ (the SAME lazy init as $env_get)
     (if (i32.eqz (global.get $env_envp))
       (then
@@ -106,18 +141,18 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (br_if $done (i32.ne (local.get $pwd) (i32.const 0)))
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br $loop)))
-    ;; no usable PWD → pass through; PWD == "/" → the join IS the raw path
-    (if (i32.or (i32.eqz (local.get $pwd))
-                (i32.eqz (local.get $pwdlen)))
-      (then (return (local.get $pdata) (local.get $plen))))
-    (if (i32.ne (i32.load8_u (local.get $pwd)) (i32.const {ASCII_SLASH}))
-      (then (return (local.get $pdata) (local.get $plen))))
-    (if (i32.eq (local.get $pwdlen) (i32.const 1))
-      (then (return (local.get $pdata) (local.get $plen))))
-    ;; buf = PWD[1..] + "/" + path  (total = pwdlen + plen bytes)
-    (local.set $buf (call $alloc8 (i32.add (local.get $pwdlen) (local.get $plen))))
+    ;; no usable PWD → the path stays relative; a "." preopen (if the host has
+    ;; one) claims it below, otherwise the fd-3 fallback reproduces today exactly.
+    (br_if $normed (i32.eqz (local.get $pwd)))
+    (br_if $normed (i32.eqz (local.get $pwdlen)))
+    (br_if $normed (i32.ne (i32.load8_u (local.get $pwd)) (i32.const {ASCII_SLASH})))
+    ;; buf = PWD + "/" + path — the GUEST-ABSOLUTE join. The leading '/' is KEPT
+    ;; (stripping it is the RESOLVER's job now, not the joiner's), so at most
+    ;; pwdlen + 1 + plen bytes.
+    (local.set $buf (call $alloc8 (i32.add (i32.add (local.get $pwdlen) (i32.const 1))
+                                           (local.get $plen))))
     (local.set $w (i32.const 0))
-    (local.set $j (i32.const 1))
+    (local.set $j (i32.const 0))
     (block $c1 (loop $l1
       (br_if $c1 (i32.ge_u (local.get $j) (local.get $pwdlen)))
       (i32.store8 (i32.add (local.get $buf) (local.get $w))
@@ -125,8 +160,13 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (local.set $w (i32.add (local.get $w) (i32.const 1)))
       (local.set $j (i32.add (local.get $j) (i32.const 1)))
       (br $l1)))
-    (i32.store8 (i32.add (local.get $buf) (local.get $w)) (i32.const {ASCII_SLASH}))
-    (local.set $w (i32.add (local.get $w) (i32.const 1)))
+    ;; PWD "/" already ends in the separator — never emit "//".
+    (if (i32.ne (i32.load8_u (i32.add (local.get $pwd)
+                                      (i32.sub (local.get $pwdlen) (i32.const 1))))
+                (i32.const {ASCII_SLASH}))
+      (then
+        (i32.store8 (i32.add (local.get $buf) (local.get $w)) (i32.const {ASCII_SLASH}))
+        (local.set $w (i32.add (local.get $w) (i32.const 1)))))
     (local.set $j (i32.const 0))
     (block $c2 (loop $l2
       (br_if $c2 (i32.ge_u (local.get $j) (local.get $plen)))
@@ -135,56 +175,68 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (local.set $w (i32.add (local.get $w) (i32.const 1)))
       (local.set $j (i32.add (local.get $j) (i32.const 1)))
       (br $l2)))
-    (local.get $buf) (local.get $w))
+    (local.set $pdata (local.get $buf))
+    (local.set $plen (local.get $w)))
+{preopen_resolve}
 
   (func $read_text_file (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
+    (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
     (local $nread i32) (local $data i32) (local $str i32) (local $result i32)
     (local $j i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
-    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    ;; dirfd + path bytes + length via $path_norm (the preopen the path belongs to,
+    ;; and its remainder relative to that preopen — #1394).
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
-    ;; path_open(dirfd=3, dirflags=0, path_ptr, path_len, oflags=0,
+    (local.set $dirfd)
+    ;; path_open(dirfd, dirflags=0, path_ptr, path_len, oflags=0,
     ;;   rights_base = fd_read(2) | fd_seek(4) = 6, rights_inheriting=0, fdflags=0, fd_out)
     (local.set $fd_out (call $alloc8 (i32.const 4)))
     (local.set $errno
-      (call $path_open (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+      (call $path_open (local.get $dirfd) (i32.const 0) (local.get $pdata) (local.get $plen)
                        (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (local.get $fd_out)))
-    ;; On a path_open error build Err(<native std::io Display>) — the WASI errno maps to
-    ;; the EXACT text native std::fs emits ($fs_errno_msg), so `err(e)` byte-matches.
-    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+    ;; The READ half runs only when path_open succeeded; it may set $errno itself.
+    ;; #1233/#1368 — fd_read's errno used to be DROPPED, and `path_open` SUCCEEDS on a
+    ;; DIRECTORY (the failure surfaces at fd_read as ISDIR). Dropping it fell through to
+    ;; the Ok arm and built `ok("")` from a zero-length read where native
+    ;; (std::fs::read_to_string) returns Err("Is a directory (os error 21)") — a SILENT
+    ;; wrong Result branch across the whole read family (read_text / read_lines /
+    ;; read_bytes[_raw] and their _if_exists twins, which share this one floor).
+    ;; Carrying it into the SHARED mapping below is the errno-carrying read prim C-215
+    ;; named. Note the ORDER: fd_close must not clobber the read errno.
+    (if (i32.eqz (local.get $errno))
       (then
-        ;; errno → the EXACT native std::io Display text, INLINE (§4.1: no new wat func).
-        ;; NOENT(44)/ACCES(2)/NOTDIR(54)/ISDIR(31); anything else keeps "file not found".
-        (local.set $maddr (i32.const {RTF_NOTFOUND_ADDR}))
-        (local.set $mlen (i32.const {RTF_NOTFOUND_LEN}))
-        (if (i32.eq (local.get $errno) (i32.const 44)) (then
-          (local.set $maddr (i32.const {FS_ERR_NOENT_ADDR})) (local.set $mlen (i32.const {FS_ERR_NOENT_LEN}))))
-        (if (i32.eq (local.get $errno) (i32.const 2)) (then
-          (local.set $maddr (i32.const {FS_ERR_ACCES_ADDR})) (local.set $mlen (i32.const {FS_ERR_ACCES_LEN}))))
-        (if (i32.eq (local.get $errno) (i32.const 54)) (then
-          (local.set $maddr (i32.const {FS_ERR_NOTDIR_ADDR})) (local.set $mlen (i32.const {FS_ERR_NOTDIR_LEN}))))
-        (if (i32.eq (local.get $errno) (i32.const 31)) (then
-          (local.set $maddr (i32.const {FS_ERR_ISDIR_ADDR})) (local.set $mlen (i32.const {FS_ERR_ISDIR_LEN}))))
-        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
-        (call $rtf_result (local.get $msg) (i32.const 1)))
-      (else
         (local.set $fd (i32.load (local.get $fd_out)))
         ;; fd_filestat_get → file size (i64 @ stat+32; take the low 32 bits). The stat buffer
         ;; MUST be 8-aligned (the host writes an i64 there) — `$alloc8` guarantees it.
         (local.set $stat (call $alloc8 (i32.const 64)))
         (drop (call $fd_filestat_get (local.get $fd) (local.get $stat)))
-        (local.set $fsize (i32.load (i32.add (local.get $stat) (i32.const 32))))
-        ;; fd_read into a fresh buffer; iov = [buf_ptr, buf_len].
-        (local.set $data (call $alloc8 (i32.add (local.get $fsize) (i32.const 8))))
-        (local.set $iov (call $alloc8 (i32.const 8)))
-        (i32.store (local.get $iov) (local.get $data))
-        (i32.store (i32.add (local.get $iov) (i32.const 4)) (local.get $fsize))
-        (local.set $nread (call $alloc8 (i32.const 4)))
-        (drop (call $fd_read (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nread)))
-        (drop (call $fd_close (local.get $fd)))
+        ;; filetype@16 == 3 is a DIRECTORY. Classify it from the STAT, not from
+        ;; fd_read's errno: the errno a host reports for reading a directory fd is
+        ;; host-specific (wasmtime says BADF, not ISDIR), while the filetype byte is
+        ;; the SAME one fs.is_dir already reads. errno 31 (ISDIR) then renders
+        ;; native's exact "Is a directory (os error 21)" through the mapping below.
+        (if (i32.eq (i32.load8_u (i32.add (local.get $stat) (i32.const 16))) (i32.const 3))
+          (then (local.set $errno (i32.const 31)))
+          (else
+            (local.set $fsize (i32.load (i32.add (local.get $stat) (i32.const 32))))
+            ;; fd_read into a fresh buffer; iov = [buf_ptr, buf_len].
+            (local.set $data (call $alloc8 (i32.add (local.get $fsize) (i32.const 8))))
+            (local.set $iov (call $alloc8 (i32.const 8)))
+            (i32.store (local.get $iov) (local.get $data))
+            (i32.store (i32.add (local.get $iov) (i32.const 4)) (local.get $fsize))
+            (local.set $nread (call $alloc8 (i32.const 4)))
+            (local.set $errno
+              (call $fd_read (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nread)))))
+        (drop (call $fd_close (local.get $fd)))))
+    ;; On a path_open OR fd_read error build Err(<native std::io Display>) — the WASI errno
+    ;; maps to the EXACT text native std::fs emits ($fs_errno_msg), so `err(e)` byte-matches.
+    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+      (then
+{rtf_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+        (call $rtf_result (local.get $msg) (i32.const 1)))
+      (else
         ;; the actual byte count read (may be < the stat size) is the String length.
         (local.set $fsize (i32.load (local.get $nread)))
         ;; build the canonical String + copy the bytes, then wrap it Ok.
@@ -241,67 +293,98 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; fs.write(path, content) — the WASI file-WRITE floor. $path and $content are BORROWED
   ;; canonical Strings. Opens (creating + truncating) the file at $path (path_open with
   ;; oflags=O_CREAT(1)|O_TRUNC(8)=9, rights_base=fd_seek(4)|fd_write(64)|fd_filestat_set_size
-  ;; (0x400000)=0x400044, preopen fd 3, leading '/' stripped — same resolution as
+  ;; (0x400000)=0x400044, against the $path_norm-resolved preopen dirfd — same resolution as
   ;; $read_text_file), writes $content's bytes via fd_write, and closes the fd. Builds a fresh
   ;; OWNED `Result[Unit, String]`: Ok(()) as a 1-slot block with len@4=0 + @12=0 + tag@16=0 (the
   ;; `materialize_result_ok` convention — the scope-end flat $drop_list_str frees nothing at @12),
-  ;; or Err("write failed") via $rtf_result on a path_open error (len@4=1, @12=msg, tag@16=1). The
-  ;; FIFTH host-write sandbox exit (Capability::FsWrite — DISTINCT from FsRead). The result is an
-  ;; owned heap handle the caller's scope-end DropListStr balances.
+  ;; or Err(<native std::io Display>) via $rtf_result (len@4=1, @12=msg, tag@16=1) on a path_open
+  ;; OR fd_write error — the SAME errno → text mapping every fs floor uses (#1385; before it the
+  ;; whole failure space collapsed to "write failed", and fd_write's errno was DROPPED outright,
+  ;; so ENOSPC/EIO/a short write read as Ok). The write is a write_all LOOP, matching native
+  ;; fs::write: a partial fd_write resumes at the unwritten bytes, and an accepted-0-bytes call
+  ;; is native's ErrorKind::WriteZero ("failed to write whole buffer"). The FIFTH host-write
+  ;; sandbox exit (Capability::FsWrite — DISTINCT from FsRead). The result is an owned heap
+  ;; handle the caller's scope-end DropListStr balances.
   (func $write_text_file (param $path i32) (param $content i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
+    (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $iov i32) (local $nwritten i32) (local $obj i32) (local $msg i32)
-    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (local $maddr i32) (local $mlen i32) (local $wbase i32) (local $wrem i32) (local $wgot i32)
+    ;; dirfd + path bytes + length via $path_norm (#1394).
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
-    ;; path_open(dirfd=3, dirflags=0, path_ptr, path_len, oflags=O_CREAT|O_TRUNC=9,
+    (local.set $dirfd)
+    ;; path_open(dirfd, dirflags=0, path_ptr, path_len, oflags=O_CREAT|O_TRUNC=9,
     ;;   rights_base = fd_seek|fd_write|fd_filestat_set_size = 0x400044, rights_inheriting=0,
     ;;   fdflags=0, fd_out)
     (local.set $fd_out (call $alloc8 (i32.const 4)))
     (local.set $errno
-      (call $path_open (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+      (call $path_open (local.get $dirfd) (i32.const 0) (local.get $pdata) (local.get $plen)
                        (i32.const 9) (i64.const 4194372) (i64.const 0) (i32.const 0) (local.get $fd_out)))
-    ;; On a path_open error build Err("write failed").
+    ;; On a path_open error build Err(<native std::io Display>).
     (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
       (then
-        (local.set $msg (call $rtf_str (i32.const {WRITE_ERR_ADDR}) (i32.const {WRITE_ERR_LEN})))
+{write_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
         (call $rtf_result (local.get $msg) (i32.const 1)))
       (else
         (local.set $fd (i32.load (local.get $fd_out)))
-        ;; iov = [content_data_ptr, content_len]; write it, then close.
+        ;; write_all LOOP — iov = [unwritten_ptr, unwritten_len] each pass, because WASI may
+        ;; accept FEWER bytes than offered (native fs::write's write_all resumes identically).
+        ;; $errno is 0 here (path_open succeeded) and is REUSED as the write verdict: a WASI
+        ;; errno, or -1 for "accepted 0 bytes with no errno" = native's ErrorKind::WriteZero.
         (local.set $iov (call $alloc8 (i32.const 8)))
-        (i32.store (local.get $iov) (i32.add (local.get $content) (i32.const {LIST_HEADER})))
-        (i32.store (i32.add (local.get $iov) (i32.const 4))
-                   (i32.load (i32.add (local.get $content) (i32.const {LIST_LEN_OFFSET}))))
         (local.set $nwritten (call $alloc8 (i32.const 4)))
-        (drop (call $fd_write (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nwritten)))
+        (local.set $wbase (i32.add (local.get $content) (i32.const {LIST_HEADER})))
+        (local.set $wrem (i32.load (i32.add (local.get $content) (i32.const {LIST_LEN_OFFSET}))))
+        (block $wdone (loop $wl
+          (br_if $wdone (i32.eqz (local.get $wrem)))
+          (i32.store (local.get $iov) (local.get $wbase))
+          (i32.store (i32.add (local.get $iov) (i32.const 4)) (local.get $wrem))
+          (local.set $errno
+            (call $fd_write (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nwritten)))
+          (br_if $wdone (i32.ne (local.get $errno) (i32.const 0)))
+          (local.set $wgot (i32.load (local.get $nwritten)))
+          (if (i32.eqz (local.get $wgot))
+            (then (local.set $errno (i32.const -1)) (br $wdone)))
+          (local.set $wbase (i32.add (local.get $wbase) (local.get $wgot)))
+          (local.set $wrem (i32.sub (local.get $wrem) (local.get $wgot)))
+          (br $wl)))
         (drop (call $fd_close (local.get $fd)))
-        ;; Build Ok(()) — a 1-slot block with len@4=0 (no owned payload — the
-        ;; `materialize_result_ok` convention). @12 (and its high half @16=tag) zeroed by the
-        ;; i64.store so the flat DropListStr frees nothing and a `match` reads tag 0 = Ok.
-        (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
-        (i64.store (i32.add (local.get $obj) (i32.const {LIST_HEADER})) (i64.const 0))
-        (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
-        (local.get $obj))))
+        (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+          (then
+{write_fd_errno_map}            ;; the accepted-0-bytes sentinel is Rust's OWN const message, not an OS string.
+            (if (i32.eq (local.get $errno) (i32.const -1)) (then
+              (local.set $maddr (i32.const {FS_ERR_WRITEZERO_ADDR}))
+              (local.set $mlen (i32.const {FS_ERR_WRITEZERO_LEN}))))
+            (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+            (call $rtf_result (local.get $msg) (i32.const 1)))
+          (else
+            ;; Build Ok(()) — a 1-slot block with len@4=0 (no owned payload — the
+            ;; `materialize_result_ok` convention). @12 (and its high half @16=tag) zeroed by the
+            ;; i64.store so the flat DropListStr frees nothing and a `match` reads tag 0 = Ok.
+            (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
+            (i64.store (i32.add (local.get $obj) (i32.const {LIST_HEADER})) (i64.const 0))
+            (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
+            (local.get $obj))))))
 
   ;; fs.mkdir_p(path) — the WASI directory-CREATE floor. $path is a BORROWED canonical String.
   ;; Creates the directory at $path RECURSIVELY (each '/'-delimited prefix in turn, so `a/b/c`
-  ;; makes all three), relative to preopen fd 3 (leading '/' stripped — same resolution as
+  ;; makes all three), relative to the $path_norm-resolved preopen dirfd (same resolution as
   ;; $write_text_file). An already-existing dir (errno 20 = EEXIST) counts as success. Builds a
   ;; fresh OWNED `Result[Unit, String]`: Ok(()) as a 1-slot block with len@4=0 + @12=0 + tag@16=0
   ;; (the `materialize_result_ok` convention, IDENTICAL to $write_text_file — the scope-end flat
-  ;; $drop_list_str frees nothing at @12), or Err("mkdir failed") via $rtf_result on a
+  ;; $drop_list_str frees nothing at @12), or Err(<native std::io Display>) via $rtf_result on a
   ;; path_create_directory error (len@4=1, @12=msg, tag@16=1). A mkdir IS a filesystem write
   ;; (Capability::FsWrite — the SAME cap as fs.write). The result is an owned heap handle the
   ;; caller's scope-end DropListStr balances.
   (func $make_dir (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $seg i32) (local $errno i32)
-    (local $obj i32) (local $msg i32)
-    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $seg i32) (local $errno i32)
+    (local $obj i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
+    ;; dirfd + path bytes + length via $path_norm (#1394).
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
+    (local.set $dirfd)
     ;; Create each '/'-delimited prefix. Walk $seg; at each '/' (or the end) create
     ;; path[0..seg] and IGNORE its errno (a missing parent is made by an earlier iteration; an
     ;; existing one returns EEXIST). The full path is created here too (when $seg reaches $plen).
@@ -315,11 +398,13 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
                                (i32.const {ASCII_SLASH})))
         (local.set $seg (i32.add (local.get $seg) (i32.const 1)))
         (br $linner)))
-      (drop (call $path_create_directory (i32.const 3) (local.get $pdata) (local.get $seg)))
+      (drop (call $path_create_directory (local.get $dirfd) (local.get $pdata) (local.get $seg)))
       (br $louter)))
     ;; Final attempt: create the full path, capture errno (EEXIST = 20 here once the loop made it).
-    (local.set $errno (call $path_create_directory (i32.const 3) (local.get $pdata) (local.get $plen)))
-    ;; errno 0 OR 20 (EEXIST) -> Ok(()), else Err("mkdir failed").
+    (local.set $errno
+      (call $path_create_directory (local.get $dirfd) (local.get $pdata) (local.get $plen)))
+    ;; errno 0 OR 20 (EEXIST) -> Ok(()), else Err(<native std::io Display>) — the shared errno
+    ;; mapping, "mkdir failed" only for an errno outside it (#1385).
     (if (result i32)
         (i32.or (i32.eqz (local.get $errno)) (i32.eq (local.get $errno) (i32.const 20)))
       (then
@@ -330,31 +415,33 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
         (local.get $obj))
       (else
-        (local.set $msg (call $rtf_str (i32.const {MKDIR_ERR_ADDR}) (i32.const {MKDIR_ERR_LEN})))
+{mkdir_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
         (call $rtf_result (local.get $msg) (i32.const 1)))))
 
-  ;; fs.exists(path) — the WASI path-stat floor. $path is a BORROWED canonical String. Strips a
-  ;; leading '/' (path relative to preopen fd 3, same resolution as $read_text_file), then queries
-  ;; path_filestat_get(dirfd=3, flags=symlink_follow(1), path, path_len, stat_buf): errno 0 means a
+  ;; fs.exists(path) — the WASI path-stat floor. $path is a BORROWED canonical String, resolved
+  ;; through $path_norm to a (dirfd, path) pair (same resolution as $read_text_file), then queries
+  ;; path_filestat_get(dirfd, flags=symlink_follow(1), path, path_len, stat_buf): errno 0 means a
   ;; file OR directory exists there → return 1, else 0 — matching native Path::exists(). The stat
   ;; buffer is 8-aligned $alloc8 scratch (the host writes i64 fields there). Returns a SCALAR i32
   ;; Bool (the caller i64.extend's it) — NO heap result, so no Capability beyond FsRead.
   ;; fs.stat(path) — the WASI FULL-stat floor. $buf is a CALLER-OWNED 64-byte scratch (the
   ;; self-host's Bytes data region — the host writes the WASI filestat there: filetype@16,
   ;; size@32, mtim@48); $path a BORROWED canonical String. Same resolution as $path_exists
-  ;; (leading '/' stripped, preopen fd 3, symlink_follow). Returns the RAW errno (0 = ok).
+  ;; ($path_norm-resolved preopen dirfd, symlink_follow). Returns the RAW errno (0 = ok).
   (func $path_filestat_q (param $buf i32) (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $scratch i32) (local $errno i32) (local $j i32)
+    (local $pdata i32) (local $plen i32) (local $dirfd i32)
+    (local $scratch i32) (local $errno i32) (local $j i32)
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
+    (local.set $dirfd)
     ;; WASI demands an 8-ALIGNED 64-byte filestat out-buffer, but $buf is the
     ;; self-host's own Bytes data (`handle+12` — 4-aligned at best; it happened to
     ;; be 8-aligned until other rt allocs shifted the bump heap). Stat into an
     ;; aligned scratch, then copy the 64 bytes into $buf.
     (local.set $scratch (i32.and (i32.add (call $alloc8 (i32.const 72)) (i32.const 7)) (i32.const -8)))
     (local.set $errno
-      (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+      (call $path_filestat_get (local.get $dirfd) (i32.const 1) (local.get $pdata) (local.get $plen)
                                (local.get $scratch)))
     (local.set $j (i32.const 0))
     (block $cdone (loop $cloop
@@ -369,13 +456,15 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; buffered path_filestat_get with lookupflags = 0 (the final symlink is NOT followed),
   ;; so a symlink's own filetype (7) lands at @16. Same aligned-scratch copy discipline.
   (func $path_filestat_nf (param $buf i32) (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $scratch i32) (local $errno i32) (local $j i32)
+    (local $pdata i32) (local $plen i32) (local $dirfd i32)
+    (local $scratch i32) (local $errno i32) (local $j i32)
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
+    (local.set $dirfd)
     (local.set $scratch (i32.and (i32.add (call $alloc8 (i32.const 72)) (i32.const 7)) (i32.const -8)))
     (local.set $errno
-      (call $path_filestat_get (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+      (call $path_filestat_get (local.get $dirfd) (i32.const 0) (local.get $pdata) (local.get $plen)
                                (local.get $scratch)))
     (local.set $j (i32.const 0))
     (block $cdone (loop $cloop
@@ -391,20 +480,26 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; so the two normalizations never clobber each other). Builds a fresh OWNED
   ;; `Result[Unit, String]`: Ok(()) with len@4=0 + tag@16=0 (the `materialize_result_ok`
   ;; convention, identical to $make_dir's Ok arm) on errno 0, else Err(<native std::io
-  ;; Display>) via the same errno→text mapping $read_text_file uses (NOENT/ACCES; anything
-  ;; else keeps "write failed"). A rename IS a filesystem write (Capability::FsWrite).
+  ;; Display>) via the SHARED errno→text mapping every fs floor uses ("write failed" only for
+  ;; an errno outside it; the hand-rolled NOENT/ACCES-only half went away with #1385). A
+  ;; rename IS a filesystem write (Capability::FsWrite).
   (func $rename (param $src i32) (param $dst i32) (result i32)
-    (local $sdata i32) (local $slen i32) (local $ddata i32) (local $dlen i32)
+    (local $sdata i32) (local $slen i32) (local $sfd i32)
+    (local $ddata i32) (local $dlen i32) (local $dfd i32)
     (local $errno i32) (local $maddr i32) (local $mlen i32) (local $msg i32) (local $obj i32)
+    ;; The two paths resolve INDEPENDENTLY (#1394): under more than one preopen
+    ;; they can legitimately land on different dirfds, which path_rename takes.
     (call $path_norm (local.get $src))
     (local.set $slen)
     (local.set $sdata)
+    (local.set $sfd)
     (call $path_norm (local.get $dst))
     (local.set $dlen)
     (local.set $ddata)
+    (local.set $dfd)
     (local.set $errno
-      (call $path_rename (i32.const 3) (local.get $sdata) (local.get $slen)
-                         (i32.const 3) (local.get $ddata) (local.get $dlen)))
+      (call $path_rename (local.get $sfd) (local.get $sdata) (local.get $slen)
+                         (local.get $dfd) (local.get $ddata) (local.get $dlen)))
     (if (result i32) (i32.eqz (local.get $errno))
       (then
         (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
@@ -412,24 +507,19 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
         (local.get $obj))
       (else
-        (local.set $maddr (i32.const {WRITE_ERR_ADDR}))
-        (local.set $mlen (i32.const {WRITE_ERR_LEN}))
-        (if (i32.eq (local.get $errno) (i32.const 44)) (then
-          (local.set $maddr (i32.const {FS_ERR_NOENT_ADDR})) (local.set $mlen (i32.const {FS_ERR_NOENT_LEN}))))
-        (if (i32.eq (local.get $errno) (i32.const 2)) (then
-          (local.set $maddr (i32.const {FS_ERR_ACCES_ADDR})) (local.set $mlen (i32.const {FS_ERR_ACCES_LEN}))))
-        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{rename_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
         (call $rtf_result (local.get $msg) (i32.const 1)))))
 
   (func $path_exists (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $stat i32) (local $errno i32)
-    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $stat i32) (local $errno i32)
+    ;; dirfd + path bytes + length via $path_norm (#1394).
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
+    (local.set $dirfd)
     (local.set $stat (call $alloc8 (i32.const 64)))
     (local.set $errno
-      (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+      (call $path_filestat_get (local.get $dirfd) (i32.const 1) (local.get $pdata) (local.get $plen)
                                (local.get $stat)))
     (i32.eqz (local.get $errno)))
 
@@ -501,27 +591,30 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (br $bl)))
     (local.get $list))
 
-  ;; helper: RECURSIVELY remove the tree at byte-path [$pdata, $pdata+$plen) relative to preopen
-  ;; fd 3. Returns 0 on success or the FIRST non-zero errno. If the path opens as a directory it
-  ;; removes every entry — recursing via a re-readdir-from-cookie-0 scan that removes ONE entry per
-  ;; pass (so a removal never invalidates a live readdir cookie) — then path_remove_directory's the
-  ;; emptied directory; otherwise it path_unlink_file's it as a file (matching native remove_dir_all
-  ;; vs remove_file). All removals are issued against the preopen fd 3 with full child paths, so the
-  ;; opened dir fd needs only fd_readdir rights. Used by $remove_all.
-  (func $remove_path (param $pdata i32) (param $plen i32) (result i32)
+  ;; helper: RECURSIVELY remove the tree at byte-path [$pdata, $pdata+$plen) relative to the
+  ;; preopen $dirfd (the one $path_norm resolved the caller's path to — #1394; it used to be a
+  ;; hard-coded 3). Returns 0 on success or the FIRST non-zero errno. If the path opens as a
+  ;; directory it removes every entry — recursing via a re-readdir-from-cookie-0 scan that removes
+  ;; ONE entry per pass (so a removal never invalidates a live readdir cookie) — then
+  ;; path_remove_directory's the emptied directory; otherwise it path_unlink_file's it as a file
+  ;; (matching native remove_dir_all vs remove_file). All removals are issued against $dirfd with
+  ;; full child paths (the recursion carries the SAME dirfd, since a child of a resolved path
+  ;; lives under the same preopen), so the opened dir fd needs only fd_readdir rights. Used by
+  ;; $remove_all.
+  (func $remove_path (param $dirfd i32) (param $pdata i32) (param $plen i32) (result i32)
     (local $fd_out i32) (local $errno i32) (local $fd i32) (local $buf i32) (local $bufused_p i32)
     (local $bufused i32) (local $off i32) (local $namlen i32) (local $nameptr i32)
     (local $child i32) (local $clen i32) (local $i i32) (local $rc i32) (local $found i32)
     (local.set $fd_out (call $alloc8 (i32.const 4)))
-    ;; path_open(dirfd=3, dirflags=0, path, plen, oflags=O_DIRECTORY=2, rights=fd_readdir(16384),
+    ;; path_open(dirfd, dirflags=0, path, plen, oflags=O_DIRECTORY=2, rights=fd_readdir(16384),
     ;;   rights_inheriting=16384, fdflags=0, fd_out)
     (local.set $errno
-      (call $path_open (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+      (call $path_open (local.get $dirfd) (i32.const 0) (local.get $pdata) (local.get $plen)
                        (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (local.get $fd_out)))
     (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
       (then
         ;; not a directory (or missing) — unlink as a file; its errno is the result.
-        (call $path_unlink_file (i32.const 3) (local.get $pdata) (local.get $plen)))
+        (call $path_unlink_file (local.get $dirfd) (local.get $pdata) (local.get $plen)))
       (else
         (local.set $fd (i32.load (local.get $fd_out)))
         (local.set $rc (i32.const 0))
@@ -565,7 +658,8 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
                   (local.set $i (i32.add (local.get $i) (i32.const 1)))
                   (br $c2)))
                 ;; recurse: remove the child. Keep the FIRST non-zero errno.
-                (local.set $errno (call $remove_path (local.get $child) (local.get $clen)))
+                (local.set $errno
+                  (call $remove_path (local.get $dirfd) (local.get $child) (local.get $clen)))
                 (if (i32.and (i32.eqz (local.get $rc)) (i32.ne (local.get $errno) (i32.const 0)))
                   (then (local.set $rc (local.get $errno))))
                 (local.set $found (i32.const 1))
@@ -577,25 +671,31 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
           (br $scan)))
         (drop (call $fd_close (local.get $fd)))
         ;; remove the now-empty directory.
-        (local.set $errno (call $path_remove_directory (i32.const 3) (local.get $pdata) (local.get $plen)))
+        (local.set $errno
+          (call $path_remove_directory (local.get $dirfd) (local.get $pdata) (local.get $plen)))
         (if (i32.and (i32.eqz (local.get $rc)) (i32.ne (local.get $errno) (i32.const 0)))
           (then (local.set $rc (local.get $errno))))
         (local.get $rc))))
 
   ;; fs.remove_all(path) — the WASI recursive-remove floor. $path is a BORROWED canonical String.
-  ;; Strips a leading '/' (preopen-relative, same resolution as $write_text_file), recursively
+  ;; Resolves it to a (dirfd, path) pair (same resolution as $write_text_file), recursively
   ;; removes the tree at $path via $remove_path, and builds a fresh OWNED `Result[Unit, String]`:
   ;; Ok(()) (a 1-slot block, len@4=0 + @12=0 + tag@16=0 — the materialize_result_ok convention,
   ;; IDENTICAL to $make_dir's Ok arm, so the scope-end flat $drop_list_str frees nothing) when
-  ;; $remove_path returns 0, or Err("remove failed") via $rtf_result on any non-zero errno. A
+  ;; $remove_path returns 0, or Err(<native std::io Display>) via $rtf_result on any non-zero
+  ;; errno — the shared mapping, "remove failed" only outside it (#1385). A
   ;; recursive remove IS a filesystem write (Capability::FsWrite — the SAME cap as fs.write). The
   ;; result is an owned heap handle the caller's scope-end DropListStr balances.
   (func $remove_all (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $errno i32) (local $obj i32) (local $msg i32)
+    (local $pdata i32) (local $plen i32) (local $dirfd i32)
+    (local $errno i32) (local $obj i32) (local $msg i32)
+    (local $maddr i32) (local $mlen i32)
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
-    (local.set $errno (call $remove_path (local.get $pdata) (local.get $plen)))
+    (local.set $dirfd)
+    (local.set $errno
+      (call $remove_path (local.get $dirfd) (local.get $pdata) (local.get $plen)))
     (if (result i32) (i32.eqz (local.get $errno))
       (then
         ;; Build Ok(()) — len@4=0, @12/@16 zeroed by the i64.store.
@@ -604,7 +704,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
         (local.get $obj))
       (else
-        (local.set $msg (call $rtf_str (i32.const {REMOVE_ERR_ADDR}) (i32.const {REMOVE_ERR_LEN})))
+{remove_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
         (call $rtf_result (local.get $msg) (i32.const 1)))))
 
   ;; helper: lexicographic LESS-THAN over two canonical String handles $a, $b (byte order =
@@ -631,57 +731,159 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
 
   ;; fs.list_dir(path) — the WASI directory-listing floor. $path is a borrowed canonical String.
   ;; Opens the directory (path_open with oflags=O_DIRECTORY(2), rights=fd_readdir(0x4000),
-  ;; preopen fd 3, leading '/' stripped — same resolution as $read_text_file), reads its entries
-  ;; via fd_readdir into a 4 KiB buffer, parses each dirent (`d_next 8 / d_ino 8 / d_namlen 4 /
-  ;; d_type 4` = 24-byte header, then name[d_namlen]) SKIPPING "." and "..", builds an owned
-  ;; List[String] of the names, SORTS it lexicographically (insertion sort via $str_lt) to match
-  ;; native `names.sort()`, and wraps it Ok via $rtf_result. On a path_open error wraps the
-  ;; "directory not found" message Err. The FIFTH sandbox exit (Capability::FsRead) — the result
-  ;; is an owned Result[List[String], String] the caller's scope-end DropResultListStr balances.
+  ;; against the $path_norm-resolved preopen dirfd — same resolution as $read_text_file), reads ALL of its
+  ;; entries via the RESUMABLE fd_readdir sweep below, parses each dirent (`d_next 8 / d_ino 8 /
+  ;; d_namlen 4 / d_type 4` = 24-byte header, then name[d_namlen]) SKIPPING "." and "..", builds
+  ;; an owned List[String] of the names, SORTS it lexicographically (insertion sort via $str_lt)
+  ;; to match native `names.sort()`, and wraps it Ok via $rtf_result. A path_open OR fd_readdir
+  ;; error becomes Err(<native std::io Display>) through the SHARED errno mapping every fs floor
+  ;; uses — "directory not found" survives only for an errno outside the mapped four (#1385).
+  ;; The FIFTH sandbox exit (Capability::FsRead) — the result is an owned
+  ;; Result[List[String], String] the caller's scope-end DropResultListStr balances.
+  ;;
+  ;; #1384 — `fd_readdir` is a RESUMABLE api and ONE pass is not a listing. A single `cookie=0`
+  ;; pass into a 4 KiB buffer silently TRUNCATED every directory whose dirents did not fit (200
+  ;; short-named entries came back as 130 = (4096-51)/31, 60 long-named ones as 41) and still
+  ;; wrapped the short list `ok(...)`: a silent WRONG VALUE, not a wall and not an err, and
+  ;; indistinguishable from a genuinely smaller directory. The sweep continues from the `d_next`
+  ;; cookie of the last COMPLETE record until a pass returns FEWER bytes than the buffer (WASI's
+  ;; documented end-of-directory signal), concatenating each pass's complete records into a
+  ;; doubling accumulation buffer the two parse passes below then read as one contiguous dirent
+  ;; run. Two traps the loop is written around:
+  ;;   - a pass that EXACTLY fills the buffer is NOT necessarily the end, so `bufused == buflen`
+  ;;     always re-reads (a genuinely final exact fill costs one extra empty pass, never a lost
+  ;;     entry);
+  ;;   - the host truncates the trailing record when a name STRADDLES the buffer end, so only
+  ;;     records whose header AND name both fit are accumulated and the resume cookie is the last
+  ;;     COMPLETE record's `d_next` — a half-read name can never reach $rtf_str.
+  ;; A name too long to ever fit would make a pass yield no complete record at all; that doubles
+  ;; the pass buffer and retries the SAME cookie instead of spinning.
   (func $read_dir (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
+    (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $buf i32) (local $bufbase i32) (local $bufused_p i32) (local $bufused i32)
     (local $off i32) (local $namlen i32) (local $skip i32) (local $count i32)
     (local $list i32) (local $ci i32) (local $name i32) (local $msg i32)
+    (local $maddr i32) (local $mlen i32)
     (local $namebase i32) (local $si i32) (local $sj i32) (local $hi i64) (local $hj i64)
-    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (local $buflen i32) (local $cookie i64) (local $good i32) (local $rderr i32)
+    (local $acc i32) (local $accbase i32) (local $acccap i32) (local $accused i32)
+    (local $newacc i32) (local $cp i32)
+    ;; dirfd + path bytes + length via $path_norm (#1394).
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
-    ;; path_open(dirfd=3, dirflags=1, path, plen, oflags=2 [O_DIRECTORY],
+    (local.set $dirfd)
+    ;; path_open(dirfd, dirflags=1, path, plen, oflags=2 [O_DIRECTORY],
     ;;   rights_base = fd_readdir(0x4000), rights_inheriting=0, fdflags=0, fd_out)
     (local.set $fd_out (call $alloc8 (i32.const 4)))
     (local.set $errno
-      (call $path_open (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+      (call $path_open (local.get $dirfd) (i32.const 1) (local.get $pdata) (local.get $plen)
                        (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (local.get $fd_out)))
     (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
       (then
-        (local.set $msg (call $rtf_str (i32.const {RDIR_ERR_ADDR}) (i32.const {RDIR_ERR_LEN})))
+{rdir_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
         (call $rtf_result (local.get $msg) (i32.const 1)))
       (else
         (local.set $fd (i32.load (local.get $fd_out)))
-        ;; fd_readdir(fd, buf, buf_len, cookie=0, bufused_p) — one pass (4 KiB holds a typical
-        ;; directory; a fuller re-read loop is a future refinement). The 4 KiB buffer is a
-        ;; RECLAIMABLE $list_new block (512 i64 slots = 4096 data bytes after the header) so a
-        ;; list_dir LOOP frees it each call (rc_dec below) instead of leaking immortal $alloc8
-        ;; scratch (which OOMs a tight loop). The WASI write target is `$bufbase = buf + HEADER`,
-        ;; keeping the rc cell @0 intact for the final $rc_dec. fd_out/bufused_p stay $alloc8
-        ;; (4-byte immortal scratch, like read_text_file's out-params — negligible).
+        ;; The 4 KiB PASS buffer and the ACCUMULATION buffer are both RECLAIMABLE $list_new
+        ;; blocks (512 i64 slots = 4096 data bytes after the header) so a list_dir LOOP frees
+        ;; them each call (rc_dec below) instead of leaking immortal $alloc8 scratch (which OOMs
+        ;; a tight loop). The WASI write target is `$bufbase = buf + HEADER`, keeping the rc cell
+        ;; @0 intact for the final $rc_dec. fd_out/bufused_p stay $alloc8 (4-byte immortal
+        ;; scratch, like read_text_file's out-params — negligible).
+        (local.set $buflen (i32.const 4096))
         (local.set $buf (call $list_new (i32.const 0) (i32.const 512)))
         (local.set $bufbase (i32.add (local.get $buf) (i32.const {LIST_HEADER})))
         (local.set $bufused_p (call $alloc8 (i32.const 4)))
-        (drop (call $fd_readdir (local.get $fd) (local.get $bufbase) (i32.const 4096)
-                                (i64.const 0) (local.get $bufused_p)))
-        (local.set $bufused (i32.load (local.get $bufused_p)))
+        (local.set $acccap (i32.const 4096))
+        (local.set $acc (call $list_new (i32.const 0) (i32.const 512)))
+        (local.set $accbase (i32.add (local.get $acc) (i32.const {LIST_HEADER})))
+        (local.set $accused (i32.const 0))
+        (local.set $cookie (i64.const 0))
+        (local.set $rderr (i32.const 0))
+        ;; THE SWEEP — fd_readdir(fd, buf, buf_len, cookie, bufused_p), resumed until the host
+        ;; reports end-of-directory by returning fewer bytes than the buffer holds.
+        (block $sweepdone (loop $sweep
+          ;; the errno is KEPT, not dropped: a real readdir failure must become Err. Dropping it
+          ;; left $bufused reading fresh (zeroed) scratch, so a failed listing returned `ok([])` —
+          ;; the same fall-through-to-Ok shape as the truncation (#1384).
+          (local.set $errno (call $fd_readdir (local.get $fd) (local.get $bufbase)
+                                              (local.get $buflen) (local.get $cookie)
+                                              (local.get $bufused_p)))
+          (if (i32.ne (local.get $errno) (i32.const 0))
+            (then (local.set $rderr (i32.const 1)) (br $sweepdone)))
+          (local.set $bufused (i32.load (local.get $bufused_p)))
+          ;; Scan this pass for COMPLETE records only — header AND name inside $bufused.
+          ;; $good = the bytes they cover; $cookie = the last one's d_next (the resume point).
+          (local.set $off (i32.const 0))
+          (local.set $good (i32.const 0))
+          (block $scandone (loop $scan
+            (br_if $scandone (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
+            (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
+            ;; a d_namlen past the whole buffer can never complete — and would WRAP the add below.
+            (br_if $scandone (i32.gt_u (local.get $namlen) (local.get $buflen)))
+            (br_if $scandone (i32.gt_u (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen))
+                                       (local.get $bufused)))
+            (local.set $cookie (i64.load (i32.add (local.get $bufbase) (local.get $off))))
+            (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen)))
+            (local.set $good (local.get $off))
+            (br $scan)))
+          ;; GROW the accumulation buffer (doubling) until this pass's complete records fit.
+          (if (i32.gt_u (i32.add (local.get $accused) (local.get $good)) (local.get $acccap))
+            (then
+              (block $capdone (loop $caploop
+                (br_if $capdone (i32.ge_u (local.get $acccap)
+                                          (i32.add (local.get $accused) (local.get $good))))
+                (local.set $acccap (i32.shl (local.get $acccap) (i32.const 1)))
+                (br $caploop)))
+              (local.set $newacc (call $list_new (i32.const 0) (i32.shr_u (local.get $acccap) (i32.const 3))))
+              (local.set $cp (i32.const 0))
+              (block $movedone (loop $moveloop
+                (br_if $movedone (i32.ge_u (local.get $cp) (local.get $accused)))
+                (i32.store8 (i32.add (i32.add (local.get $newacc) (i32.const {LIST_HEADER})) (local.get $cp))
+                            (i32.load8_u (i32.add (local.get $accbase) (local.get $cp))))
+                (local.set $cp (i32.add (local.get $cp) (i32.const 1)))
+                (br $moveloop)))
+              (call $rc_dec (local.get $acc))
+              (local.set $acc (local.get $newacc))
+              (local.set $accbase (i32.add (local.get $acc) (i32.const {LIST_HEADER})))))
+          ;; APPEND this pass's complete records.
+          (local.set $cp (i32.const 0))
+          (block $appdone (loop $apploop
+            (br_if $appdone (i32.ge_u (local.get $cp) (local.get $good)))
+            (i32.store8 (i32.add (i32.add (local.get $accbase) (local.get $accused)) (local.get $cp))
+                        (i32.load8_u (i32.add (local.get $bufbase) (local.get $cp))))
+            (local.set $cp (i32.add (local.get $cp) (i32.const 1)))
+            (br $apploop)))
+          (local.set $accused (i32.add (local.get $accused) (local.get $good)))
+          ;; END OF DIRECTORY: a pass that did NOT fill the buffer. An EXACT fill re-reads.
+          (br_if $sweepdone (i32.lt_u (local.get $bufused) (local.get $buflen)))
+          ;; full buffer, not one complete record: a single dirent exceeds the whole buffer.
+          ;; Double it and retry the SAME cookie — without this the sweep would spin forever.
+          (if (i32.eqz (local.get $good))
+            (then
+              (call $rc_dec (local.get $buf))
+              (local.set $buflen (i32.shl (local.get $buflen) (i32.const 1)))
+              (local.set $buf (call $list_new (i32.const 0) (i32.shr_u (local.get $buflen) (i32.const 3))))
+              (local.set $bufbase (i32.add (local.get $buf) (i32.const {LIST_HEADER})))))
+          (br $sweep)))
         (drop (call $fd_close (local.get $fd)))
+        ;; free the pass buffer — every complete record is in $acc now.
+        (call $rc_dec (local.get $buf))
+        (if (local.get $rderr)
+          (then
+            (call $rc_dec (local.get $acc))
+{rdir_rd_errno_map}            (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+            (return (call $rtf_result (local.get $msg) (i32.const 1)))))
         ;; PASS 1 — count entries (skip "." and ".."). 24-byte dirent header; d_namlen @16, name @24.
         (local.set $off (i32.const 0))
         (local.set $count (i32.const 0))
         (block $c1done (loop $c1
-          ;; stop when the next header would exceed bufused (a truncated trailing record).
-          (br_if $c1done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
-          (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
-          (local.set $namebase (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 24)))
+          ;; stop when the next header would exceed accused (never mid-record: the sweep only
+          ;; accumulates COMPLETE dirents).
+          (br_if $c1done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $accused)))
+          (local.set $namlen (i32.load (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 16))))
+          (local.set $namebase (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 24)))
           (local.set $skip (call $is_dot_entry (local.get $namebase) (local.get $namlen)))
           (if (i32.eqz (local.get $skip))
             (then (local.set $count (i32.add (local.get $count) (i32.const 1)))))
@@ -693,9 +895,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (local.set $off (i32.const 0))
         (local.set $ci (i32.const 0))
         (block $c2done (loop $c2
-          (br_if $c2done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
-          (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
-          (local.set $namebase (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 24)))
+          (br_if $c2done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $accused)))
+          (local.set $namlen (i32.load (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 16))))
+          (local.set $namebase (i32.add (i32.add (local.get $accbase) (local.get $off)) (i32.const 24)))
           (if (i32.eqz (call $is_dot_entry (local.get $namebase) (local.get $namlen)))
             (then
               (local.set $name (call $rtf_str (local.get $namebase) (local.get $namlen)))
@@ -703,9 +905,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
               (local.set $ci (i32.add (local.get $ci) (i32.const 1)))))
           (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen)))
           (br $c2)))
-        ;; free the readdir buffer (all names are now copied into the list) — reclaimable, so a
-        ;; list_dir loop reuses it instead of leaking.
-        (call $rc_dec (local.get $buf))
+        ;; free the accumulation buffer (all names are now copied into the list) — reclaimable,
+        ;; so a list_dir loop reuses it instead of leaking.
+        (call $rc_dec (local.get $acc))
         ;; SORT the names lexicographically (insertion sort) — match native names.sort().
         (local.set $si (i32.const 1))
         (block $sdone (loop $sloop
@@ -737,4 +939,43 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
 
 "#
     )
+}
+
+/// The ONE errno → native `std::io` Display mapping, rendered INLINE at every WASI
+/// fs error site (§4.1 forbids a new hand-written WAT function, so the branches are
+/// duplicated in the OUTPUT — but they have exactly one SOURCE, here, which is what
+/// stops the floors drifting apart the way the write side did: `$read_text_file`
+/// carried the mapping while `$write_text_file`/`$make_dir`/`$remove_all`/`$read_dir`
+/// answered a single fixed string for every failure, #1385).
+///
+/// Reads `$errno`, writes `$maddr`/`$mlen`. `def_addr`/`def_len` is the SITE's own
+/// fallback text, kept for an errno outside the mapped set — a BOUNDED divergence,
+/// not a silent one (C-273).
+///
+/// The mapped set is exactly the errnos whose native `std::io` Display is the SAME
+/// on every Unix host: ENOENT 2, EACCES 13, ENOTDIR 20, EISDIR 21 carry those numbers
+/// on both macOS and Linux, so one baked data segment is right on both. ENOTEMPTY
+/// (39 Linux / 66 macOS), ENAMETOOLONG (36 / 63) and EXDEV (whose text differs:
+/// "Invalid cross-device link" vs "Cross-device link") are deliberately NOT mapped —
+/// a host-specific string in a portable `.wasm` would trade one divergence for a
+/// worse one.
+fn fs_errno_msg_wat(indent: &str, def_addr: u32, def_len: u32, def_text: &str) -> String {
+    let mut out = format!(
+        "{indent};; errno → the EXACT native std::io Display text, INLINE (§4.1: no new wat func).\n\
+         {indent};; NOENT(44)/ACCES(2)/NOTDIR(54)/ISDIR(31); anything else keeps \"{def_text}\".\n\
+         {indent}(local.set $maddr (i32.const {def_addr}))\n\
+         {indent}(local.set $mlen (i32.const {def_len}))\n"
+    );
+    for (errno, addr, len) in [
+        (44, FS_ERR_NOENT_ADDR, FS_ERR_NOENT_LEN),
+        (2, FS_ERR_ACCES_ADDR, FS_ERR_ACCES_LEN),
+        (54, FS_ERR_NOTDIR_ADDR, FS_ERR_NOTDIR_LEN),
+        (31, FS_ERR_ISDIR_ADDR, FS_ERR_ISDIR_LEN),
+    ] {
+        out.push_str(&format!(
+            "{indent}(if (i32.eq (local.get $errno) (i32.const {errno})) (then\n\
+             {indent}  (local.set $maddr (i32.const {addr})) (local.set $mlen (i32.const {len}))))\n"
+        ));
+    }
+    out
 }

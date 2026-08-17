@@ -222,7 +222,7 @@ impl LowerCtx {
             IrExprKind::Tuple { elements } if is_value_scalar_pair_ty(&expr.ty) => {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 self.record_masks.remove(&obj);
-                self.variant_drop_handles.insert(obj, "value_tuple".to_string());
+                self.value_drops.entry(obj).or_default().named_route = Some("value_tuple".to_string());
                 self.track_owned_field(obj)
             }
             // An empty Map field — `attrs: [:]` (the svg `el` record). A v1 Map is a List block of
@@ -416,7 +416,7 @@ impl LowerCtx {
             {
                 let obj = self.try_lower_record_construct(expr)?;
                 if let Some(name) = self.record_or_anon_drop_type_name(&expr.ty) {
-                    self.variant_drop_handles.insert(obj, name);
+                    self.value_drops.entry(obj).or_default().named_route = Some(name);
                 }
                 self.track_owned_field(obj)
             }
@@ -445,7 +445,7 @@ impl LowerCtx {
                 let obj = self.try_lower_spread_record_construct(expr)?;
                 if let Some(name) = self.record_or_anon_drop_type_name(&expr.ty) {
                     self.record_masks.remove(&obj);
-                    self.variant_drop_handles.insert(obj, name);
+                    self.value_drops.entry(obj).or_default().named_route = Some(name);
                 }
                 self.track_owned_field(obj)
             }

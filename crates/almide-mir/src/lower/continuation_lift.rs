@@ -98,6 +98,15 @@ fn cl_lift_in_fns(
             }
             j += 1;
         }
+        // An EMPTY chain means the split found nothing to lift, so the outcome
+        // is already decided: restore the original and move on. Falling through
+        // ran `lower_function` over `functions[i]` — a full BRANCH_PASSES pass —
+        // inside `all_clean`, only for the `!chain.is_empty()` test below to
+        // throw the result away (#1232).
+        if chain.is_empty() {
+            functions[i] = original;
+            continue;
+        }
         // Validate: every piece must lower AND certify without poison.
         let dbg = std::env::var_os("ALMIDE_DBG_CONTLIFT").is_some();
         let all_clean = std::iter::once(&functions[i]).chain(chain.iter()).all(|f| {
@@ -117,7 +126,7 @@ fn cl_lift_in_fns(
                 }
             }
         });
-        if all_clean && !chain.is_empty() {
+        if all_clean {
             functions.extend(chain);
         } else {
             // Roll back: the original poisons but stays lowered and

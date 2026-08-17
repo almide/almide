@@ -233,10 +233,16 @@ impl<'a> Interpreter<'a> {
     fn eval_expr_call(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
         Some(match &expr.kind {
             // ── Calls ──
-            IrExprKind::Call { target, args, .. } => self.eval_call(target, args, scope),
+            IrExprKind::Call { target, args, .. } => {
+                let flow = self.eval_call(target, args, scope);
+                lift_to_declared_carrier(&expr.ty, flow)
+            }
             // TailCall is codegen-inserted (TailCallMarkPass, post-cut) but we
             // treat it == Call defensively.
-            IrExprKind::TailCall { target, args } => self.eval_call(target, args, scope),
+            IrExprKind::TailCall { target, args } => {
+                let flow = self.eval_call(target, args, scope);
+                lift_to_declared_carrier(&expr.ty, flow)
+            }
             _ => return None,
         })
     }
@@ -333,6 +339,10 @@ impl<'a> Interpreter<'a> {
                     params: params.iter().map(|(v, _)| *v).collect(),
                     body: Rc::new((**body).clone()),
                     captured: scope.clone(),
+                    ret_ty: match &expr.ty {
+                        Ty::Fn { ret, .. } => Some((**ret).clone()),
+                        _ => None,
+                    },
                 };
                 Flow::val(Value::Closure(Rc::new(clo)))
             }
@@ -435,10 +445,26 @@ impl<'a> Interpreter<'a> {
     fn eval_expr_misc(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
         Some(match &expr.kind {
             // ── Misc ──
-            IrExprKind::Hole => Flow::Abort(
-                "internal: evaluated a Hole (intrinsic-stub body reached as an expr)".into(),
+            // `_` and `todo(..)` ABORT the native leg as a Rust panic — the
+            // message on stderr and exit **101** (ALS-E30). `Flow::Abort` is
+            // this interpreter's model of the R1 abort, which is `Error: <msg>`
+            // and exit **1** — a different observable. Voting Abort here would
+            // therefore cast a WRONG third vote on every hole, and a wrong vote
+            // is worse than an honest skip (crate rule). The interpreter has no
+            // panic model, so it abstains by name.
+            //
+            // The same node is also the synthesized body of an intrinsic stub
+            // (`lower/mod.rs`), which `dispatch.rs` filters out before it can be
+            // evaluated. Both routes are named below, since an abstain that
+            // appears without a hole in the source means that filter broke.
+            IrExprKind::Hole => Flow::Unsupported(
+                "typed hole `_` (native panics with exit 101; no panic model here) \
+                 — or an intrinsic-stub body that escaped dispatch's filter"
+                    .into(),
             ),
-            IrExprKind::Todo { message } => Flow::Abort(message.clone()),
+            IrExprKind::Todo { message } => Flow::Unsupported(format!(
+                "todo({message:?}) (native panics with exit 101; no panic model here)"
+            )),
             // ── The ONE pre-codegen RuntimeCall family: the budget prims.
             // The fan.bounded/race frontend lowering emits these symbols
             // directly (they are the deterministic tier's floor on every
@@ -661,6 +687,20 @@ impl<'a> Interpreter<'a> {
                     Flow::Abort("index out of bounds".into())
                 } else {
                     Flow::val(xs[i as usize].clone())
+                }
+            }
+            // A Range indexes like the list it stands for: `(0..<5)[2] == 2`. Both
+            // backends materialize a `let`-bound range that is indexed (only the
+            // head-ONLY case skips materialization, #1400), so the interp must
+            // agree rather than dissent — it just computes the element instead of
+            // building the block. Bounds match `Value::List` above: the codegen OOB
+            // contract is abort + exit 1.
+            Value::Range { start, end, inclusive } => {
+                let len = if inclusive { end - start + 1 } else { end - start };
+                if i < 0 || len <= 0 || i >= len {
+                    Flow::Abort("index out of bounds".into())
+                } else {
+                    Flow::val(Value::Int(start + i))
                 }
             }
             Value::Str(s) => {
@@ -911,4 +951,35 @@ fn unreachable_post_cut(kind: &IrExprKind) -> ! {
         other => unreachable!("{:?} is not a codegen-inserted node", std::mem::discriminant(other)),
     };
     unreachable!("{} is codegen-inserted ({}); interp runs pre-codegen", node, pass)
+}
+
+/// Put a call's value into the carrier the CHECKER says the call site has.
+///
+/// An `effect fn f() -> T` has ABI return type `Result[T, String]`, and both
+/// backends materialize that carrier; since ADR-0008 removed implicit
+/// propagation, a call in any position yields a Result value. The interpreter
+/// handed the success value back BARE while modelling the failure channel as
+/// `Result(Err(..))` — so `match <effect call> { ok(v) => .., err(e) => .. }`,
+/// one of the sanctioned consumption spellings, saw a plain scalar, matched no
+/// arm, and aborted. A wrong third vote against two agreeing backends, which
+/// this crate rates worse than an honest skip (#1366).
+///
+/// **Driven by the call NODE's type, not by the callee's `is_effect` flag.**
+/// The first attempt keyed off the callee and wrapped inside
+/// `call_function_keeping_frame`; that also caught the lowered stdlib module
+/// bodies, whose call sites want the bare value — seven fixtures started
+/// dissenting with `list.len on non-list` and `if-condition is Result not Bool`.
+/// The checker's type at the site is the authority on what shape belongs there,
+/// so consult it: a site typed `Result[..]` gets the carrier, everything else
+/// is untouched. A value that is ALREADY a Result is the failure the body
+/// propagated with `!`, and must not be buried inside an `Ok`.
+fn lift_to_declared_carrier(ty: &Ty, flow: Flow) -> Flow {
+    if !ty.is_result() {
+        return flow;
+    }
+    match flow {
+        Flow::Value(Value::Result(r)) => Flow::Value(Value::Result(r)),
+        Flow::Value(v) => Flow::Value(Value::Result(Ok(Box::new(v)))),
+        other => other,
+    }
 }

@@ -20,3 +20,8 @@ proofs/.verified-fingerprint
 *.cwasm
 *.rmeta
 spec/**/*.wasm
+.DS_Store
+
+# Lean lake build dirs (local builds only; CI builds from scratch)
+.lake/
+crates/almide-mir/m.wasm

@@ -1,0 +1,13 @@
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index 51e1e2026..652af6dea 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -442,7 +442,7 @@ fn finish_native_fn(
+             Some((_, Some(NativeSigKind::Res)))
+         )
+         && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
+-    let ret_override = if lifted_wrap { Some(NTy::Res) } else { None };
++    let ret_override: Option<NTy> = { let _ = lifted_wrap; None };
+     // Signature: the return type is known only after the body typed `func.ret`.
+     let mut sig = render_native_fn_sig(func, &tys, is_main, ret_override)?;
+     sig.push_str(" {\n");

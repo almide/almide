@@ -181,17 +181,23 @@ fn run_check_json(file: &Path) -> Vec<DiagJson> {
 /// serde-free (matches the emitter side in `diagnostic_render.rs`).
 #[derive(Debug)]
 struct DiagJson {
+    code: Option<String>,
     try_snippet: Option<String>,
     try_replace: Option<(usize, usize, usize)>,
+    /// #1312: the applicability tag that decides whether an unattended
+    /// fixer may apply this. "unspecified" means nothing applies it.
+    applicability: Option<String>,
 }
 
 impl DiagJson {
     fn parse(line: &str) -> Option<Self> {
         if !line.trim_start().starts_with('{') { return None; }
         Some(DiagJson {
+            code: json_string(line, "\"code\":"),
             try_snippet: json_string(line, "\"try\":"),
             try_replace: json_obj_uints(line, "\"try_replace\":", &["line", "col", "end_col"])
                 .map(|v| (v[0], v[1], v[2])),
+            applicability: json_string(line, "\"applicability\":"),
         })
     }
 }
@@ -295,6 +301,15 @@ fn try_snippets_with_replace_span_apply_cleanly() {
         let diagnostics = run_check_json(&broken);
         for d in &diagnostics {
             let (Some(snippet), Some((line, col, end_col))) = (&d.try_snippet, d.try_replace) else { continue };
+            // #1312: a span never travels without an applicability. An
+            // untagged span is what an unattended fixer applies by
+            // accident — the builders make it unrepresentable, and this
+            // asserts it end-to-end, through the JSON wire.
+            assert!(
+                matches!(d.applicability.as_deref(), Some("machine-applicable" | "maybe-incorrect" | "has-placeholders")),
+                "span-anchored fix-it in {} carries applicability {:?} — a span must always be tagged",
+                case.display(), d.applicability
+            );
             let broken_src = std::fs::read_to_string(&broken).unwrap();
             let rewritten = apply_try(&broken_src, line, col, end_col, snippet)
                 .unwrap_or_else(|| panic!(
@@ -319,4 +334,35 @@ fn try_snippets_with_replace_span_apply_cleanly() {
             );
         }
     }
+}
+
+/// #1312 ratchet. `almide fix` applies `machine-applicable` fix-its and
+/// nothing else, so if that population silently emptied — a tag downgraded,
+/// a span dropped — the command would keep passing every other gate while
+/// quietly doing nothing. Pin the floor.
+///
+/// Raising this is progress: it means another diagnostic learned to state
+/// its fix exactly. Lowering it needs a reason in the PR body.
+const MACHINE_APPLICABLE_FIXTURE_FLOOR: usize = 2;
+
+#[test]
+fn machine_applicable_fixits_stay_populated() {
+    let cases = collect_cases();
+    let mut machine: Vec<String> = Vec::new();
+    for case in &cases {
+        for d in run_check_json(&case.join("broken.almd")) {
+            if d.try_replace.is_none() { continue; }
+            if d.applicability.as_deref() != Some("machine-applicable") { continue; }
+            machine.push(format!("{} [{}]",
+                case.file_name().unwrap_or_default().to_string_lossy(),
+                d.code.as_deref().unwrap_or("?")));
+        }
+    }
+    machine.sort();
+    eprintln!("machine-applicable fix-its across fixtures: {}", machine.join(", "));
+    assert!(
+        machine.len() >= MACHINE_APPLICABLE_FIXTURE_FLOOR,
+        "machine-applicable fix-its dropped to {} (floor {}): {:?}",
+        machine.len(), MACHINE_APPLICABLE_FIXTURE_FLOOR, machine
+    );
 }

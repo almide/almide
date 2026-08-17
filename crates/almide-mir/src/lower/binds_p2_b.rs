@@ -591,58 +591,58 @@ impl LowerCtx {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
             // either flat class would leak or double-free one side).
-            self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
-            self.materialized_results_str.insert(dst);
+            self.value_drops.entry(dst).or_default().named_route = Some("res_ilsl".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
         if crate::lower::is_list_list_str_ty(ty) {
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return true;
         }
         if crate::lower::is_list_str_str_ty(ty) {
             // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
             // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
-            self.str_str_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().str_str_elems = true;
             return true;
         }
         if crate::lower::is_list_int_str_ty(ty) {
             // `List[(Int,String)]` (list.enumerate) — recursive `$__drop_list_int_str` (rc_dec
             // each tuple's String); the flat heap_elem_lists DropListStr would leak them.
-            self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_int_str".to_string());
             return true;
         }
         if crate::lower::is_map_ivh_ty(ty) {
             // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
-            self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_ivh".to_string());
             return true;
         }
         if crate::lower::is_map_fn_ty(ty) {
             // `Map[String, <Fn>]` — `$__drop_map_mclo` frees each value via
             // `__drop_closure` (the hval flat rc_dec would leak captured env).
-            self.variant_drop_handles.insert(dst, "map_mclo".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_mclo".to_string());
             return true;
         }
         if crate::lower::is_map_hval_ty(ty) {
             // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
-            self.variant_drop_handles.insert(dst, "map_hval".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_hval".to_string());
             return true;
         }
         if let Some(hname) = self.map_named_value_drop(ty) {
             // `Map[String, <record/variant>]` — the desugared map literal's
             // from_list result (type-driven sweep; see `map_named_value_drop`).
-            self.variant_drop_handles.insert(dst, hname);
+            self.value_drops.entry(dst).or_default().named_route = Some(hname);
             return true;
         }
         if crate::lower::is_map_msv_ty(ty) {
             // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
             // last-ref inner map's String slots (a flat rc_dec would leak them).
-            self.variant_drop_handles.insert(dst, "map_msv".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_msv".to_string());
             return true;
         }
         if crate::lower::is_map_msb_ty(ty) {
             // `Map[String, Map[String, <scalar>]]` — `$__drop_map_msb` key-sweeps each
             // last-ref inner map (the skv split layout owns no heap values).
-            self.variant_drop_handles.insert(dst, "map_msb".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_msb".to_string());
             return true;
         }
         false
@@ -658,36 +658,36 @@ impl LowerCtx {
         if crate::lower::is_map_mlo_ty(ty) {
             // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
             // last-ref value list's Option slots (a flat rc_dec would leak them).
-            self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_mlo".to_string());
             return;
         }
-        if let Some(rname) = (match ty {
+        if let Some(rname) = match ty {
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                 if a.len() == 1 =>
             {
                 self.record_or_anon_drop_type_name(&a[0])
             }
             _ => None,
-        }) {
+        }  {
             // A `List[<recursive-drop record>]` result (`list.unique` over a
             // String-field record via the `__krec_*` twins): route to the generated
             // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the
             // flat per-slot dec freed each element block but LEAKED its String
             // fields (the krec-unique residue).
-            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("list_{rname}"));
             return;
         }
         if crate::lower::is_lenlist_list_ty(ty) {
             // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
             // flat DropListStr would leak each element's owned payload slots.
-            self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_lenlist".to_string());
             return;
         }
         if crate::lower::is_opt_list_str_ty(ty) {
             // `Option[List[String]]` (the heap-acc fold value) — physically a 0/1-element
             // List[List[String]]; the nested DropListListStr sweep is its exact free (the
             // flat DropListStr would leak the stack Strings).
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return;
         }
         if matches!(ty,
@@ -698,11 +698,11 @@ impl LowerCtx {
             // rc_decs exactly the n deep-copied key Strings (scalar value slots
             // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
             // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return;
         }
         if is_heap_elem_list_ty(ty) {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
             return;
         }
         if is_scalar_elem_list_ty(ty) {
@@ -775,7 +775,7 @@ impl LowerCtx {
             // (`{ data: Bytes, state: Cfb8State }` — aes cfb8) routes to its synthesized
             // `__drop_anonrec_<hash>` (so `state` is freed through `__drop_Cfb8State`).
             if let Some(name) = self.record_or_anon_drop_type_name(ty) {
-                self.variant_drop_handles.insert(dst, name);
+                self.value_drops.entry(dst).or_default().named_route = Some(name);
             }
         }
     }

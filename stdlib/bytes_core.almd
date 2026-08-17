@@ -45,6 +45,13 @@ else {
 }
 
 // bytes.new(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
+// No stdlib allocation guard (ratified A, 2026-08-17): measured on 0.57.0, this
+// leg's floor turns every unsatisfiable size — 2.5 GiB in a full heap, u32::MAX,
+// i64::MAX — into the defined `Error: out of memory`, never a trap. A 2^31 guard
+// briefly shipped here and cut the 2-4 GiB sizes 0.57.0 satisfied on this leg.
+// Native allocates to its own bound via try_reserve with the same message; the
+// gap between the two bounds is C-197's contracted divergence. Same rule for
+// pad_left/pad_right/repeat below.
 fn bytes_new(len: Int) -> Bytes = {
   let n = if len > 0 then len else 0
   let b = prim.alloc_bytes(n)

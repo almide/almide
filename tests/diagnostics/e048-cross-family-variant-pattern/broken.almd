@@ -1,0 +1,11 @@
+// `list.get` returns `Int?` (an Option) — `ok(..)` destructures a Result.
+// Before #1341 this bound `a` as Unknown and detonated in codegen as a
+// [COMPILER BUG] banner (native) / an executable-subset wall (wasm).
+fn first_plus_one(xs: List[Int]) -> Int = match list.get(xs, 0) {
+  ok(a) => a + 1,
+  _ => 0,
+}
+
+effect fn main() -> Unit = {
+  println("${first_plus_one([41])}")
+}

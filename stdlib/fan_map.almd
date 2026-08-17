@@ -40,3 +40,48 @@ else match f(list.get(xs, i) ?? "") {
 }
 
 fn fan_map_si(xs: List[String], f: fn(String) -> Result[Int, String]) -> Result[List[Int], String] = __fan_map_si_go(xs, f, 0, [])
+
+// ── (Int → Float) ──
+fn __fan_map_if_go(xs: List[Int], f: fn(Int) -> Result[Float, String], i: Int, acc: List[Float]) -> Result[List[Float], String] = if i >= list.len(xs) then ok(acc)
+else match f(list.get(xs, i) ?? 0) {
+  ok(y) => __fan_map_if_go(xs, f, i + 1, acc + [y]),
+  err(e) => err(e),
+}
+
+fn fan_map_if(xs: List[Int], f: fn(Int) -> Result[Float, String]) -> Result[List[Float], String] = __fan_map_if_go(xs, f, 0, [])
+
+// ── (Float → Int) ──
+fn __fan_map_fi_go(xs: List[Float], f: fn(Float) -> Result[Int, String], i: Int, acc: List[Int]) -> Result[List[Int], String] = if i >= list.len(xs) then ok(acc)
+else match f(list.get(xs, i) ?? 0.0) {
+  ok(y) => __fan_map_fi_go(xs, f, i + 1, acc + [y]),
+  err(e) => err(e),
+}
+
+fn fan_map_fi(xs: List[Float], f: fn(Float) -> Result[Int, String]) -> Result[List[Int], String] = __fan_map_fi_go(xs, f, 0, [])
+
+// ── (Float → Float) ──
+fn __fan_map_ff_go(xs: List[Float], f: fn(Float) -> Result[Float, String], i: Int, acc: List[Float]) -> Result[List[Float], String] = if i >= list.len(xs) then ok(acc)
+else match f(list.get(xs, i) ?? 0.0) {
+  ok(y) => __fan_map_ff_go(xs, f, i + 1, acc + [y]),
+  err(e) => err(e),
+}
+
+fn fan_map_ff(xs: List[Float], f: fn(Float) -> Result[Float, String]) -> Result[List[Float], String] = __fan_map_ff_go(xs, f, 0, [])
+
+// ── (Float → String) ──
+fn __fan_map_fs_go(xs: List[Float], f: fn(Float) -> Result[String, String], i: Int, acc: List[String]) -> Result[List[String], String] = if i >= list.len(xs) then ok(acc)
+else match f(list.get(xs, i) ?? 0.0) {
+  ok(y) => __fan_map_fs_go(xs, f, i + 1, acc + [y]),
+  err(e) => err(e),
+}
+
+fn fan_map_fs(xs: List[Float], f: fn(Float) -> Result[String, String]) -> Result[List[String], String] = __fan_map_fs_go(xs, f, 0, [])
+
+// ── (String → Float) ──
+fn __fan_map_sf_go(xs: List[String], f: fn(String) -> Result[Float, String], i: Int, acc: List[Float]) -> Result[List[Float], String] = if i >= list.len(xs) then ok(acc)
+else match f(list.get(xs, i) ?? "") {
+  ok(y) => __fan_map_sf_go(xs, f, i + 1, acc + [y]),
+  err(e) => err(e),
+}
+
+fn fan_map_sf(xs: List[String], f: fn(String) -> Result[Float, String]) -> Result[List[Float], String] = __fan_map_sf_go(xs, f, 0, [])

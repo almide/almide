@@ -245,9 +245,27 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Vec<(usize, MutLvalue)>, Flow> {
         let mut out = Vec::new();
         for (i, (param, arg)) in func.params.iter().zip(args.iter()).enumerate() {
-            if !param.is_mut {
+            // TWO ways a parameter copies out, and the second is why #1436
+            // existed. BY DECLARATION: a `mut` param, the C-132 lowering.
+            // BY TYPE: a `Bytes` param. The byte-writer family
+            // (`set_*`/`append_*`/`write_*`, and `fill`/`copy_from`/
+            // `copy_within`) is `@intrinsic`s whose mutation lives in the
+            // native `&mut Vec<u8>` signature — invisible to the `.almd`
+            // declaration, so a user fn taking a PLAIN `Bytes` param and
+            // writing into it mutates the CALLER's buffer on both backends
+            // while carrying no `mut` marker for this gate to see. The interp
+            // wrote back into the callee's own frame, the effect died at the
+            // frame boundary, and the third judge voted the UNMODIFIED buffer
+            // — a wrong vote where the module doc demands a skip. Copying a
+            // Bytes param out unconditionally is sound in the other direction
+            // too: a callee that never writes hands back the value it was
+            // given, so the copy-out is a no-op.
+            let by_decl = param.is_mut;
+            let by_type = matches!(param.ty, almide_lang::types::Ty::Bytes);
+            if !by_decl && !by_type {
                 continue;
             }
+            let kind = if by_decl { "mut-parameter" } else { "bytes-parameter" };
             match &arg.kind {
                 almide_ir::IrExprKind::Var { id } => out.push((i, MutLvalue::Var(*id))),
                 almide_ir::IrExprKind::Member { object, field } => match &object.kind {
@@ -256,7 +274,7 @@ impl<'a> Interpreter<'a> {
                     }
                     _ => {
                         return Err(Flow::Unsupported(format!(
-                            "mut-parameter argument through a nested lvalue \
+                            "{kind} argument through a nested lvalue \
                              (`{}` param {i}) — only a Var or one-level record \
                              field copies out (#1022)",
                             func.name.as_str()
@@ -267,13 +285,16 @@ impl<'a> Interpreter<'a> {
                 | almide_ir::IrExprKind::MapAccess { .. }
                 | almide_ir::IrExprKind::TupleIndex { .. } => {
                     return Err(Flow::Unsupported(format!(
-                        "mut-parameter argument through an index lvalue \
+                        "{kind} argument through an index lvalue \
                          (`{}` param {i}) — not yet copied out (#1022)",
                         func.name.as_str()
                     )))
                 }
-                // Unreachable in a checked program (E032 forbids a temporary
-                // to a `mut` param) — defensively skip rather than guess.
+                // A TEMPORARY argument. For a `mut` param this is unreachable
+                // (E032 forbids it); for a by-type `Bytes` param it is legal
+                // (`fill(bytes.new(4))`) and there is simply no caller slot to
+                // copy back into — nothing downstream can observe the buffer,
+                // so skipping is exact rather than a guess.
                 _ => {}
             }
         }
@@ -613,6 +634,16 @@ impl<'a> Interpreter<'a> {
         // argv[0] whose only cross-target observable is NONEMPTINESS (the
         // fixtures assert it, never print it — C-181's argv0 normalization).
         if module.as_str() == "prim" {
+            // The BLOCK HEAP floor (#1226 slice 1, heap.rs). Same tier as argv /
+            // env / fs and for the same reason: these read and MUTATE per-run
+            // interpreter state, which the stateless `bridge::prim_fn` cannot
+            // hold. Only the flat-payload String/Bytes family is served here;
+            // `alloc_value`/`alloc_map`/`alloc_list*`/`alloc_set` carry tagged
+            // sub-structure and still fall through to the honest abstain, so
+            // this stays a CLOSED family the voting gate can arbitrate.
+            if let Some(flow) = self.heap_prim(func.as_str(), &args) {
+                return flow;
+            }
             match func.as_str() {
                 "args_get_list" => {
                     let items: Vec<Value> =
@@ -732,7 +763,32 @@ impl<'a> Interpreter<'a> {
             ));
         }
         let root = self.root_scope();
-        self.call_function(func_def, args, &root)
+        let flow = self.call_function(func_def, args, &root);
+        // #1226 RETURN SYNC. A self-hosted body that allocated a block returns
+        // the block's ADDRESS (`prim.alloc_str` is an Int), so the value has to
+        // be read back out of the arena before it leaves the pool tier —
+        // `base64_encode` is exactly `alloc → handle → store → return out`.
+        //
+        // Driven by the DECLARED return type, never by guessing whether an Int
+        // looks like an address: a fn returning a plain Int (`string.len`) must
+        // not have its result reinterpreted as a handle. That guess is the
+        // wrong-vote trap this whole slice is built to avoid.
+        self.sync_block_return(func_def, flow)
+    }
+
+    /// Read a returned block address back into the value its declared return
+    /// type names. Anything else passes through untouched.
+    fn sync_block_return(&self, func_def: &'a almide_ir::IrFunction, flow: Flow) -> Flow {
+        use almide_lang::types::Ty;
+        let wants_block = matches!(&func_def.ret_ty, Ty::String | Ty::Bytes);
+        if !wants_block {
+            return flow;
+        }
+        let Flow::Value(v) = &flow else { return flow };
+        match self.block_value(v) {
+            Some(rebuilt) => Flow::Value(rebuilt),
+            None => flow,
+        }
     }
 
     /// The lowered Almide body `module.func` resolves to, paired with whether
@@ -764,6 +820,142 @@ impl<'a> Interpreter<'a> {
         self.fns.get(&impl_name).copied().filter(bodied).map(|d| (d, false))
     }
 
+    /// The block-heap prim floor (#1226 slice 1). `None` = "not mine", which
+    /// falls through to the argv/env/fs arms and ultimately to the honest
+    /// abstain, so an unmodelled prim keeps its `Flow::Unsupported` rather than
+    /// getting a guessed value.
+    ///
+    /// Split one fn per family, the way `bridge.rs` splits its scalar floor
+    /// into `prim_bitwise_fn` / `prim_repr_fn` / …: a miss in one falls through
+    /// to the next and ends as the same `None` an unmatched name would give, so
+    /// the chain is equivalent to one flat table with the arms in this order.
+    fn heap_prim(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        self.heap_prim_handle(func, args)
+            .or_else(|| self.heap_prim_alloc(func, args))
+            .or_else(|| self.heap_prim_load(func, args))
+            .or_else(|| self.heap_prim_store(func, args))
+    }
+
+    /// `prim.handle(v)` — the base address of v's block. A value that has not
+    /// been in the arena is materialized ONCE and bound, so the `+ 4` (len) and
+    /// `+ 12` (payload) reads in one body agree on the same block.
+    fn heap_prim_handle(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        use crate::heap::{rc_key, BlockKind};
+        if func != "handle" {
+            return None;
+        }
+        Some(match args.first() {
+            Some(Value::Str(rc)) => {
+                let a = self.heap.bind(rc_key(rc), rc.as_bytes(), BlockKind::Str);
+                self.heap.keep(Rc::clone(rc));
+                Flow::val(Value::Int(a as i64))
+            }
+            // The interp models Bytes as List[Int]; a byte block is that list
+            // narrowed. A non-byte element means a real List block (tagged
+            // sub-structure), which this slice does not model — abstain rather
+            // than truncate.
+            Some(Value::List(rc)) => {
+                let bytes: Option<Vec<u8>> = rc
+                    .iter()
+                    .map(|v| match v {
+                        Value::Int(i) if (0..=255).contains(i) => Some(*i as u8),
+                        _ => None,
+                    })
+                    .collect();
+                match bytes {
+                    Some(b) => {
+                        let a = self.heap.bind(rc_key(rc), &b, BlockKind::Bytes);
+                        self.heap.keep(Rc::clone(rc));
+                        Flow::val(Value::Int(a as i64))
+                    }
+                    None => Flow::Unsupported(
+                        "prim.handle of a List whose elements are not bytes \
+                         (a tagged List block is not in this slice)"
+                            .into(),
+                    ),
+                }
+            }
+            _ => Flow::Unsupported(
+                "prim.handle of a value outside the flat String/Bytes family \
+                 (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry \
+                 tagged sub-structure — #1226 slice 2)"
+                    .into(),
+            ),
+        })
+    }
+
+    /// `prim.alloc_str(n)` / `prim.alloc_bytes(n)` — a zeroed block with n
+    /// payload bytes, returned as the ADDRESS. The body writes through it and
+    /// returns the value; `sync_block_return` is the read-back.
+    fn heap_prim_alloc(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        use crate::heap::BlockKind;
+        let kind = match func {
+            "alloc_str" => BlockKind::Str,
+            "alloc_bytes" => BlockKind::Bytes,
+            _ => return None,
+        };
+        let Some(Value::Int(n)) = args.first().filter(|v| matches!(v, Value::Int(i) if *i >= 0))
+        else {
+            return Some(Flow::Unsupported(format!("prim.{func} with a non-Int size")));
+        };
+        Some(Flow::val(Value::Int(self.heap.alloc(*n as u32, kind) as i64)))
+    }
+
+    /// `prim.load8` / `load32` / `load64`. An out-of-range address ABSTAINS:
+    /// the two backends read real memory there, so a guessed 0 would be a wrong
+    /// third vote on a program whose whole point is the byte it reads.
+    fn heap_prim_load(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        let w = match func {
+            "load8" => 1,
+            "load32" => 4,
+            "load64" => 8,
+            _ => return None,
+        };
+        let Some(a) = heap_addr(args.first()) else {
+            return Some(Flow::Unsupported(format!("prim.{func} with a non-address")));
+        };
+        Some(match self.heap.load(a, w) {
+            Some(v) => Flow::val(Value::Int(v)),
+            None => Flow::Unsupported(format!(
+                "prim.{func} outside this heap's arena — the backends read real \
+                 memory here, so a guessed value would be a wrong vote"
+            )),
+        })
+    }
+
+    /// `prim.store8` / `store32` / `store64`, little-endian like both backends.
+    fn heap_prim_store(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        let w = match func {
+            "store8" => 1,
+            "store32" => 4,
+            "store64" => 8,
+            _ => return None,
+        };
+        let (Some(a), Some(Value::Int(v))) = (heap_addr(args.first()), args.get(1)) else {
+            return Some(Flow::Unsupported(format!("prim.{func} with a non-address")));
+        };
+        Some(match self.heap.store(a, w, *v) {
+            Some(()) => Flow::val(Value::Unit),
+            None => Flow::Unsupported(format!("prim.{func} outside this heap's arena")),
+        })
+    }
+
+    /// The RETURN SYNC: an address the arena handed out, rebuilt as the value
+    /// its block spells. This is the one point where arena bytes become a
+    /// `Value` again, which is what closes the alloc → handle → store → return
+    /// round trip (`base64_encode`). `None` when the Int is not a base this
+    /// heap owns, so an ordinary integer return is untouched.
+    pub(crate) fn block_value(&self, v: &Value) -> Option<Value> {
+        let Value::Int(i) = v else { return None };
+        let (bytes, kind) = self.heap.block_bytes(u32::try_from(*i).ok()?)?;
+        Some(match kind {
+            crate::heap::BlockKind::Str => Value::str(String::from_utf8(bytes).ok()?),
+            crate::heap::BlockKind::Bytes => {
+                Value::list(bytes.into_iter().map(|b| Value::Int(b as i64)).collect())
+            }
+        })
+    }
+
     // ── FnRef ───────────────────────────────────────────────────
 
     /// A named function used as a value (`list.map(xs, double)`). We synthesize
@@ -783,6 +975,9 @@ impl<'a> Interpreter<'a> {
                 // Top-level fn closes only over top-level lets, modeled by the
                 // root scope.
                 captured: self.root_scope(),
+                // No lambda node here; the fn's own ABI already decides its
+                // shape, so this path is left exactly as it was.
+                ret_ty: None,
             };
             return Flow::val(Value::Closure(Rc::new(clo)));
         }
@@ -817,25 +1012,21 @@ pub(crate) enum CtorKind {
 }
 
 impl<'a> Interpreter<'a> {
-    /// Look up a variant constructor by name in the program's type decls.
-    /// Returns `(type_name, ctor_kind)`.
+    /// Look up a variant constructor by name. Returns `(type_name,
+    /// ctor_kind)`. Backed by the `variant_ctors` registry built once in
+    /// `Interpreter::new` — this is on the hot path of every Named call,
+    /// where it used to linearly rescan all type decls.
     pub(crate) fn variant_ctor(&self, name: Sym) -> Option<(Sym, CtorKind)> {
-        use almide_ir::{IrTypeDeclKind, IrVariantKind};
-        for td in &self.program.type_decls {
-            if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                for case in cases {
-                    if case.name == name {
-                        let kind = match case.kind {
-                            IrVariantKind::Unit => CtorKind::Unit,
-                            IrVariantKind::Tuple { .. } => CtorKind::Tuple,
-                            IrVariantKind::Record { .. } => CtorKind::Record,
-                        };
-                        return Some((td.name, kind));
-                    }
-                }
-            }
-        }
-        None
+        self.variant_ctors.get(&name).copied()
+    }
+}
+
+/// A heap prim's address argument: a non-negative Int, else `None` so the
+/// caller abstains instead of reading somewhere arbitrary.
+fn heap_addr(v: Option<&Value>) -> Option<u32> {
+    match v {
+        Some(Value::Int(i)) if *i >= 0 => u32::try_from(*i).ok(),
+        _ => None,
     }
 }
 

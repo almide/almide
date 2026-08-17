@@ -95,7 +95,10 @@ fn append_hint_line(out: &mut String, d: &Diagnostic, color: bool) {
 /// `display`'s `try:` snippet block appender. Extracted verbatim.
 fn append_try_snippet(out: &mut String, d: &Diagnostic, color: bool) {
     if let Some(snippet) = &d.try_snippet {
-        let label = if color { format!("{}try:{}", CYAN, RESET) } else { "try:".to_string() };
+        // #1312: the applicability suffix tells a reader — human or model —
+        // whether the toolchain will apply this or they have to choose.
+        let suffix = d.try_label_suffix();
+        let label = if color { format!("{}try:{}{}", CYAN, RESET, suffix) } else { format!("try:{}", suffix) };
         out.push_str(&format!("\n  {}", label));
         for sline in snippet.lines() {
             out.push_str(&format!("\n      {}", sline));
@@ -153,13 +156,28 @@ pub fn to_json(d: &Diagnostic) -> String {
         Some((l, c, e)) => format!(r#"{{"line":{},"col":{},"end_col":{}}}"#, l, c, e),
         None => "null".to_string(),
     };
+    // #1312: the structured-suggestion view. Additive and forward-compatible
+    // — an array so a diagnostic can grow to several alternatives without a
+    // schema break, while `try` / `try_replace` keep serving the existing
+    // single-fix consumers. `applicability` is the tag a fixer must branch on:
+    // only "machine-applicable" may be applied unattended.
+    let suggestions = match (d.try_replace_span, &d.try_snippet) {
+        (Some((l, c, e)), Some(s)) => format!(
+            r#"[{{"line":{},"col":{},"end_col":{},"replacement":"{}","applicability":"{}"}}]"#,
+            l, c, e,
+            s.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n"),
+            d.try_applicability.as_str(),
+        ),
+        _ => "[]".to_string(),
+    };
     // Manual JSON to avoid serde dependency in this module
     format!(
-        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","here":{},"try":{},"try_replace":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
+        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
         level, code,
         d.message.replace('"', r#"\""#).replace('\n', "\\n"),
         d.hint.replace('"', r#"\""#).replace('\n', "\\n"),
         here_json, try_json, try_replace_json,
+        d.try_applicability.as_str(), suggestions,
         d.context.replace('"', r#"\""#),
         file.replace('"', r#"\""#),
         line, col, end_col, secondary,

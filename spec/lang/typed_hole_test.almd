@@ -1,0 +1,66 @@
+// typed_hole_test — the CONTROL half of the #1325 ruling.
+//
+// `_` in expression position (a typed hole) and `todo("msg")` are a
+// sanctioned sketch-then-fill workflow: they type-check against whatever the
+// context demands and PANIC if execution reaches them. That runtime behaviour
+// is deliberately not exercised here — a test that panics is a failing test.
+// What this file pins is the other half: a program with NO holes in it must be
+// completely unaffected by the machinery, and the lambda that E046 steers a
+// call-argument `_` to must actually work.
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
+
+// ── The E046 steer: what `add(_, 10)` was reaching for, spelled correctly ──
+test "lambda supplies the missing argument" {
+  let add10 = (x) => add(x, 10)
+  assert_eq(add10(5), 15)
+  assert_eq(add10(0), 10)
+  assert_eq(add10(-10), 0)
+}
+
+test "lambda steer works in the pipe position too" {
+  assert_eq(5 |> ((x) => add(x, 10)), 15)
+  assert_eq(5 |> ((x) => add3(x, 10, 100)), 115)
+}
+
+test "lambda steer works as a list.map callback" {
+  let xs = [1, 2, 3]
+  assert_eq(xs |> list.map((x) => add(x, 10)), [11, 12, 13])
+  assert_eq(xs |> list.map((x) => add3(x, 10, 100)), [111, 112, 113])
+}
+
+// ── A hole-free program is untouched: ordinary calls still resolve ──
+test "direct calls are unaffected" {
+  assert_eq(add(1, 2), 3)
+  assert_eq(add3(1, 2, 3), 6)
+  assert_eq(add(add(1, 2), add3(1, 2, 3)), 9)
+}
+
+test "pipe into a named fn is unaffected" {
+  assert_eq(1 |> add(2), 3)
+  assert_eq(1 |> add3(2, 3), 6)
+}
+
+// ── `_` keeps its OTHER, unrelated meanings ──
+test "underscore is still the wildcard match pattern" {
+  let describe = (n: Int) => match n {
+    0 => "zero",
+    1 => "one",
+    _ => "many",
+  }
+  assert_eq(describe(0), "zero")
+  assert_eq(describe(1), "one")
+  assert_eq(describe(7), "many")
+}
+
+test "underscore is still the discard binding name" {
+  let _ = add(1, 2)
+  assert_eq(add(3, 4), 7)
+}
+
+test "underscore is still an ignored lambda parameter" {
+  let always = (_: Int) => 42
+  assert_eq(always(1), 42)
+  assert_eq(always(999), 42)
+}

@@ -285,23 +285,27 @@ pub fn almide_cwd() -> Option<String> {
         .and_then(|d| d.to_str().map(|s| s.to_string()))
 }
 
-/// Run a compiled binary with the given args, returning exit code.
-pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
-    // Belt for the parallel-test ETXTBSY race (the staging rename above is the
-    // root fix): if another thread's stale write handle still overlaps the exec,
-    // back off briefly and retry instead of failing the whole suite.
+/// The launch command for a compiled binary — shared by the inheriting and the
+/// capturing runners so they cannot drift in environment.
+fn binary_command(bin: &std::path::Path, program_args: &[String]) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.env("RUST_MIN_STACK", "8388608");
+    if let Some(cwd) = almide_cwd() {
+        cmd.env("ALMIDE_CWD", cwd);
+    }
+    cmd.args(program_args);
+    cmd
+}
+
+/// Run `attempt` through the ETXTBSY back-off. Belt for the parallel-test race
+/// (the staging rename in `build_native_cached` is the root fix): if another
+/// thread's stale write handle still overlaps the exec, back off briefly and
+/// retry instead of failing the whole suite.
+fn with_exec_retry<T>(mut attempt: impl FnMut() -> std::io::Result<T>) -> Option<T> {
     let mut delay = std::time::Duration::from_millis(20);
     for _ in 0..6 {
-        let mut cmd = Command::new(bin);
-        cmd.env("RUST_MIN_STACK", "8388608");
-        if let Some(cwd) = almide_cwd() {
-            cmd.env("ALMIDE_CWD", cwd);
-        }
-        match cmd
-            .args(program_args)
-            .status()
-        {
-            Ok(status) => return status.code().unwrap_or(1),
+        match attempt() {
+            Ok(v) => return Some(v),
             Err(e) if e.raw_os_error() == Some(26) => {
                 std::thread::sleep(delay);
                 delay *= 2;
@@ -313,14 +317,31 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
         }
     }
     err(&format!("Failed to execute: Text file busy (persisted after retries)"));
-    1
+    None
 }
 
-pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool, native_verified: bool) -> i32 {
-    cmd_run_inner_report(file, program_args, no_check, test_mode, release, native_verified, false)
+/// Run a compiled binary with the given args, returning exit code.
+pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
+    with_exec_retry(|| binary_command(bin, program_args).status())
+        .map_or(1, |s| s.code().unwrap_or(1))
 }
 
-/// [`cmd_run_inner`] + the D5 dual-time report leg (`--time-report`).
+/// [`run_binary`], capturing stdout+stderr instead of inheriting them.
+///
+/// `almide test` needs the bytes to build its structured failure report, and
+/// capturing is what makes a parallel suite's output DETERMINISTIC: each file's
+/// output is printed whole, in sorted file order, instead of interleaving live
+/// with every other worker (agents diff one run against the next).
+pub fn run_binary_captured(bin: &std::path::Path, program_args: &[String]) -> (i32, String) {
+    let Some(out) = with_exec_retry(|| binary_command(bin, program_args).output()) else {
+        return (1, String::new());
+    };
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(1), text)
+}
+
+/// Compile + run one file, with the D5 dual-time report leg (`--time-report`).
 fn cmd_run_inner_report(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool, native_verified: bool, time_report: bool) -> i32 {
     match compile_to_binary_with(file, no_check, test_mode, release, None, native_verified) {
         Ok(bin) => {

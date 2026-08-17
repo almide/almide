@@ -1,0 +1,10 @@
+name = "almide-edit-belt"
+version = "0.1.0"
+defaultTargets = ["AlmideEditBelt", "conformancegen"]
+
+[[lean_lib]]
+name = "AlmideEditBelt"
+
+[[lean_exe]]
+name = "conformancegen"
+root = "Main"

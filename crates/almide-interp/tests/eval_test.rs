@@ -13,12 +13,10 @@
 
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
-use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_interp::{Interpreter, RunStatus};
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_optimize::{mono, optimize};
 
 /// Lower source to a linked `IrProgram` at the interpreter's cut point.
 fn lower(src: &str) -> almide_ir::IrProgram {
@@ -538,6 +536,45 @@ effect fn main() -> Unit = {
     assert_eq!(exit, 1, "stdout=<{}> stderr=<{}>", stdout, stderr);
     assert!(stderr.starts_with("Error:"), "got <{}>", stderr);
     assert!(stdout.is_empty(), "no output should precede the abort, got <{}>", stdout);
+}
+
+/// #1341: a NESTED variant match bound to a `let` under an explicit Result
+/// carrier, then unwrapped with `!`. The bind is heap-typed, so `branch_lift`
+/// hoists the whole match into a synthesized helper fn before the interpreter's
+/// cut point — the arm binders of BOTH levels have to survive that hoist and
+/// still be readable by the arm bodies. This is C-269's third vote, kept here
+/// as a fast standalone check (the fixture leg needs two full backend builds).
+#[test]
+fn nested_variant_match_in_bind_position() {
+    let src = r#"
+fn pair_sum(xs: List[Int]) -> Result[Int, String] = {
+  let r: Result[Int, String] = match list.get(xs, 0) {
+    some(a) => match list.get(xs, 1) {
+      some(b) => ok(a + b),
+      none => err("need a second element"),
+    },
+    none => err("need a first element"),
+  }
+  let total = r!
+  ok(total)
+}
+
+effect fn show(xs: List[Int]) -> Unit = {
+  match pair_sum(xs) {
+    ok(v) => println("sum ${v}"),
+    err(e) => println("sum failed: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show([10, 32])!
+  show([10])!
+  show([])!
+}"#;
+    expect_out(
+        src,
+        "sum 42\nsum failed: need a second element\nsum failed: need a first element\n",
+    );
 }
 
 // ── Fuel ────────────────────────────────────────────────────────
@@ -1069,5 +1106,116 @@ fn try_each_ok_and_first_err() {
     expect_try(
         "  println(su(list.each([\"zz\", \"3\"], (s) => println(\"e\" + int.to_string(int.parse(s)!)))))",
         PARSE_ERR,
+    );
+}
+
+// ── The effect-fn Result carrier (#1366) ─────────────────────────────────────
+//
+// An `effect fn f() -> T` has ABI return type `Result[T, String]`, and BOTH
+// backends materialize that carrier. The interpreter used to hand the success
+// value back BARE while modelling the failure channel as `Result(Err(..))`, so
+// the subject of `match <effect call> { ok(v) => .., err(e) => .. }` was a
+// plain scalar, no arm matched, and the run aborted with "non-exhaustive
+// match" — a WRONG third vote against two agreeing backends on one of
+// ADR-0008's sanctioned consumption spellings, which is worse than an honest
+// skip. Found by the 3-way oracle while building #1341's fixture.
+
+#[test]
+fn matching_an_effect_call_sees_the_ok_carrier() {
+    let (exit, out, err) = run(
+        "effect fn pick(xs: List[Int]) -> Int = {\n\
+         \x20 let r: Result[Int, String] = match list.get(xs, 0) {\n\
+         \x20   some(a) => ok(a + 1),\n\
+         \x20   none => err(\"no first\"),\n\
+         \x20 }\n\
+         \x20 r!\n\
+         }\n\
+         effect fn main() -> Unit = {\n\
+         \x20 match pick([10]) {\n\
+         \x20   ok(v) => println(\"sum \" + int.to_string(v)),\n\
+         \x20   err(e) => println(\"fail \" + e),\n\
+         \x20 }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "sum 11\n"), "stderr: {err}");
+}
+
+#[test]
+fn matching_an_effect_call_sees_the_err_carrier() {
+    let (exit, out, err) = run(
+        "effect fn pick(xs: List[Int]) -> Int = {\n\
+         \x20 let r: Result[Int, String] = match list.get(xs, 0) {\n\
+         \x20   some(a) => ok(a + 1),\n\
+         \x20   none => err(\"no first\"),\n\
+         \x20 }\n\
+         \x20 r!\n\
+         }\n\
+         effect fn main() -> Unit = {\n\
+         \x20 match pick([]) {\n\
+         \x20   ok(v) => println(\"sum \" + int.to_string(v)),\n\
+         \x20   err(e) => println(\"fail \" + e),\n\
+         \x20 }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "fail no first\n"), "stderr: {err}");
+}
+
+/// The carrier must NOT be applied twice. A declared-Result effect fn emits
+/// `Result<T, E>` (spec §3: no double wrap), so `!` on its call still yields
+/// the payload rather than a nested `Ok(Ok(..))`.
+#[test]
+fn a_declared_result_effect_fn_is_not_double_wrapped() {
+    let (exit, out, err) = run(
+        "effect fn twice(n: Int) -> Result[Int, String] =\n\
+         \x20 if n < 0 then err(\"neg\") else ok(n * 2)\n\
+         effect fn main() -> Unit = {\n\
+         \x20 println(int.to_string(twice(21)!))\n\
+         \x20 match twice(3) { ok(v) => println(\"ok \" + int.to_string(v)), err(e) => println(e) }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "42\nok 6\n"), "stderr: {err}");
+}
+/// The NEIGHBOUR of the effect-fn gap, measured rather than assumed: a fallible
+/// LAMBDA (ADR-0009 — its `!` falls into the lambda's own `Result[T, String]`
+/// channel) already hands the carrier back, so `match` over its call was never
+/// broken. `Closure` carries no return type, so the fix above could not have
+/// covered this path even if it had needed covering — pinning it here records
+/// that it does not.
+#[test]
+fn matching_a_fallible_lambda_call_already_sees_the_carrier() {
+    let (exit, out, err) = run(
+        "effect fn main() -> Unit = {\n\
+         \x20 let g = (s: String) => int.parse(s)! * 2\n\
+         \x20 match g(\"21\") {\n\
+         \x20   ok(v) => println(\"ok \" + int.to_string(v)),\n\
+         \x20   err(e) => println(\"err \" + e),\n\
+         \x20 }\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "ok 42\n"), "stderr: {err}");
+}
+
+/// The carrier must not disturb the OTHER sanctioned ways to consume an effect
+/// call's Result. Wrapping the success value changes what every consumption
+/// site sees, so each is exercised rather than read: `!` propagation, `??`
+/// fallback, `?` to Option, the value in an interpolation, and passing the
+/// unwrapped payload as an argument.
+#[test]
+fn every_consumption_site_still_sees_the_payload() {
+    let (exit, out, err) = run(
+        "effect fn half(n: Int) -> Int = if n < 0 then err(\"neg\") else ok(n / 2)\n\
+         fn twice(n: Int) -> Int = n * 2\n\
+         effect fn main() -> Unit = {\n\
+         \x20 println(int.to_string(half(10)!))\n\
+         \x20 println(int.to_string(half(-1) ?? 99))\n\
+         \x20 println(int.to_string(half(8) ?? 99))\n\
+         \x20 println(\"interp \" + int.to_string(half(6)!))\n\
+         \x20 println(int.to_string(twice(half(4)!)))\n\
+         }\n",
+    );
+    assert_eq!(
+        (exit, out.as_str()),
+        (0, "5\n99\n4\ninterp 3\n4\n"),
+        "stderr: {err}"
     );
 }

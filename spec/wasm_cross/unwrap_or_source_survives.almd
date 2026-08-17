@@ -1,0 +1,67 @@
+// @contract: C-286
+// `xs ?? default` READS its source. It does not consume it, so the same Option
+// may be eliminated twice, three times, or read afterwards by any other
+// spelling — identically on both targets.
+//
+// It used to consume it on the wasm leg. A heap `??` lowers to a synthesized
+// `match e { some(p) => p, none => d }` (#1270), and that match dropped its
+// subject. The ownership test was membership in `live_heap_handles`, whose own
+// doc calls it "heap handles in binding order, FOR SCOPE-END DROPS" — so every
+// `let`-bound heap local is in it, and a still-live variable read as an owned
+// temp. The first `??` therefore freed the user's binding while later readers
+// still needed it.
+//
+// Only one leg lost the value: native renders `Drop`/`DropListStr` as a comment
+// and lets Rust free at real scope end, while wasm emits `rc_dec` and the free
+// is real. So both legs exited 0 and printed different answers — on
+// `xs ?? default`, the idiom docs/CHEATSHEET.md recommends. Found by the
+// differential fuzz (seed 510754018596 index 189, a mutation of
+// spec/wasm_cross/option_result_ctors.almd) as the nested-Option cell; the
+// matrix below is the whole family, because the defect was in the match's
+// subject handling and never cared which payload type it was.
+//
+// The counter-cell matters as much as the repeats: a HAND-WRITTEN
+// `match sv { some(x) => x, none => .. }` twice was always correct, which is
+// what localized the defect to the synthesized rewrite rather than to matching.
+effect fn main() -> Unit = {
+  // String payload — was "abc,z": the second read took the fallback.
+  let s: String? = some("abc")
+  let s1: String = s ?? "z"
+  let s2: String = s ?? "z"
+  println("str=" + s1 + "," + s2)
+  // List payload — was "3,0": the second read saw an emptied block.
+  let l: List[Int]? = some([1, 2, 3])
+  let l1: List[Int] = l ?? []
+  let l2: List[Int] = l ?? []
+  println("list=" + int.to_string(list.len(l1)) + "," + int.to_string(list.len(l2)))
+  // Nested Option — the shape the fuzzer hit; was "5,9,9".
+  let n = some(some(5))
+  let n1: Int? = n ?? none
+  let n2: Int? = n ?? none
+  let n3: Int? = n ?? none
+  println("nested=" + int.to_string(n1 ?? 9) + "," + int.to_string(n2 ?? 9) + "," + int.to_string(n3 ?? 9))
+  // The source is still readable by ANOTHER spelling after an elimination —
+  // the container survived before, but its payload had been freed out from
+  // under it, so this printed the fallback on wasm.
+  let m: String? = some("keep")
+  let m1: String = m ?? "z"
+  match m {
+    some(inner) => println("after=" + m1 + "," + inner),
+    none => println("after=" + m1 + ",SOURCE-CONSUMED"),
+  }
+  // Counter-cell: the hand-written match was never affected, and must stay so.
+  let h: String? = some("hw")
+  let h1: String = match h {
+    some(x) => x,
+    none => "z",
+  }
+  let h2: String = match h {
+    some(x) => x,
+    none => "z",
+  }
+  println("handwritten=" + h1 + "," + h2)
+  // A single use must still free exactly once — the fix removes a drop, so the
+  // shape that was already correct has to stay correct rather than leak.
+  let o: String? = some("once")
+  println("single=" + (o ?? "z"))
+}

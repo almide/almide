@@ -2,6 +2,10 @@
 
 > 現在 0.40.2。ここから 1.0 までの全 minor を decade（0.4x / 0.5x / …）単位のアークに割り、
 > 各 minor に「顔となる大機能」を 1 つずつ載せる台帳。open issue 40 件は全てこの台帳のどこかに割付済み。
+>
+> **これは時間軸の文書**。同じ作業を評価軸（速度 / 性能 / 正しさ / LLM writability / DX / エコシステム）
+> から見た勝ち筋と勝利条件は [ALL_AXES.md](ALL_AXES.md) にある。新しい軸の作業は、
+> ALL_AXES で勝利条件を数字で定義してから、ここの decade に割り付ける。
 
 ## 読み方と運用ルール
 
@@ -87,8 +91,8 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | 0.52 | JSON interop の設計決定（#1062）— 追加機構ゼロで決着: wire 型は wire の名前をそのまま鏡映、`as "wire"` は識別子になれないキー限定、外来 tag 形は手書き codec。C-209 = encode は none 省略 / decode は missing・null を none に畳む / `Option[Value]` が 3 状態の脱出口 / underivable shape は宣言時 E023。#1061 の 13 セル全消化 + コンテナ任意ネスト（#1065）。同梱: temp-dir 表面の TMPDIR 規約（C-189 改訂）、wasmtime 47。**出荷済 v0.52.0** | [#1062](https://github.com/almide/almide/issues/1062), [#1064](https://github.com/almide/almide/issues/1064), [#1065](https://github.com/almide/almide/issues/1065) |
 | 0.53 | プラットフォーム conformance（Wasm 3.0 / WASI 監査残件の全消化）— NaN 観測の canonical 化 = deterministic profile 準拠（C-210 + relaxed SIMD/atomics/shared 不使用の命令 gate、native 側含め全ホストアーキで成立）。self-host リンク同名異署名衝突 = invalid-wasm 脱出の wall 化（#1068）。return_call_indirect（C-178 の indirect twin、深度主張の正直化込み）。**Windows ホストの wasm レッグ開通 + push ごとの常設 CI gate**（#1066、fs パス契約 = Go 互換を Go/Rust/wasi-libc 比較つきで明文化）。**出荷済 v0.53.0** | [#1066](https://github.com/almide/almide/issues/1066), [#1068](https://github.com/almide/almide/issues/1068) |
 | 0.54 | pre-optimizer 安全化 → wasm optimizer 接続 + SIMD — QualifiedRef newtype（v1 MIR 上で bare type identity を表現不能に、#433 クラスの型による根絶）と hole-hunt レンズ（実例棚 [#1018](https://github.com/almide/almide/issues/1018)）を前段に据え、その上で nanopass optimizer 群と v128 SIMD を wasm leg へ接続する（optimizer と SIMD はどちらも #929 の同一アーク）。「optimizer より前」という順序制約は Unit 内順序として保存 | [#908](https://github.com/almide/almide/issues/908), [#912](https://github.com/almide/almide/issues/912), [#929](https://github.com/almide/almide/issues/929) |
-| 0.55 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
-| 0.56 | RcCow phase 2 — 対 Rust ギャップをラチェット下に。表現変更は cranelift（0.6x）が対象コードを生成し始める前に完了 | [#1004](https://github.com/almide/almide/issues/1004) |
+| 0.55 | 文字列ワークロード phase 1 — **プロファイル完了(2026-08-13)**。`RcCow` は無関係だった（`String` は Rust の `String` に落ちる。`RcCow` は Bytes/Matrix 専用）。内訳: `string.split` の owned `String` 返り 75%、`string.len` = `chars().count()` 11%、rlib 境界 9%、list 中間 5%。同型・同意味の Rust 参照に対しては 1.12x。`strchurn` 行を perf suite に常設（allocation 支配のため listbuild 同様 reported、anchor はしない）。[内訳と再現手順](../../research/benchmark/perf/string-gap-1004.md) | [#1004](https://github.com/almide/almide/issues/1004) |
+| 0.56 | 文字列ワークロード phase 2 — 残る 75% は「借用文字列型を持たない」という言語設計そのもの。次の判断は表現変更ではなく **`IterChain` 復活 / `list.range` の遅延化**（安価な lambda body・30M 要素で実測 6.6x、本 repo で未取得の最大の勝ち筋）。cranelift（0.6x）が対象コードを生成し始める前に完了 | [#1004](https://github.com/almide/almide/issues/1004) |
 | 0.57 | 10k 行 dogfood プロジェクト完成・公開 — 0.46 着工分の完了、スケール数字（LOC・モジュール数・ビルド時間）を README に | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.58 | hole-hunt findings 焼却完了 — 0.52 のレンズ群が出した findings を 0 に | [#912](https://github.com/almide/almide/issues/912) |
 | 0.59 | MSR の第三者再現性 — dojo ブリッジ CI（タスクサブセットを本 repo の PR ゲートで実行）+ 他言語でも同条件で走らせられる公開ハーネス。指標が土俵になる条件 | — |
@@ -210,6 +214,57 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 - **信頼**: critical profile + qualification dossier が製品として渡せる、reference app が証拠
 - **数字**: build-speed / runtime-perf / safety の三点が README で実測公開
 - **指標**: MSR が第三者再現可能 — dojo ハーネスが公開され、他言語でも同条件で測れる（0.59）
+
+## リサーチ発 issue 割付(2026-08-13)
+
+「2026年に0から作るなら」外部リサーチ(4方面・約120ソース)から後入れ可能と判定した9件 + playground dogfooding 発のバグ1件を登録し、ここで decade に割付ける。ルール「載らない issue を作らない」に従う同時追記。
+
+| Issue | 内容 | Decade | 根拠・接続先 |
+|---|---|---|---|
+| [#1308](https://github.com/almide/almide/issues/1308) | **BUG**: 未知の非ASCII文字が EOF トークン化し、以降のファイルを黙って切り捨てる(check/test/run 全部緑のまま) | **0.5x** | silent-wrong-code 最悪クラス。fuzz(#924)文化の負債。decade 内最優先で返す |
+| [#1309](https://github.com/almide/almide/issues/1309) | fmt の Black 式 AST 等価検証 + 冪等性/コメント保存 CI | 0.5x | fmt リテラル正規化ファミリ(#1261/#1263/#1264)の構造的検出器 |
+| [#1310](https://github.com/almide/almide/issues/1310) | 文法の Lark/EBNF 成果物化(制約デコード用) | 0.5x | 0.59(MSR 公開ハーネス)と 0.92(ALS 文法章)の前駆物 |
+| [#1312](https://github.com/almide/almide/issues/1312) | span+applicability 付き fix-it、almide fix の診断駆動化 | 0.5x | 0.59 の dojo リトライループを直接強化(FeedbackEval 実証) |
+| [#1313](https://github.com/almide/almide/issues/1313) | almide test 失敗出力の構造化(expected/found diff + --json) | 0.5x | 同上 — テスト失敗はコンパイラエラーより修復率が高い実証 |
+| [#1315](https://github.com/almide/almide/issues/1315) | WAT レンダラから DWARF 行テーブル | 0.5x | wasm leg 対等性のデバッグ面。0.65(cranelift DWARF)から独立に前倒し可 |
+| [#1311](https://github.com/almide/almide/issues/1311) | フロントエンド lex/parse/check の行/秒予算ラチェット | 0.6x | 0.69(編集ループ総仕上げ)の計測基盤。Carbon の規律 |
+| [#1314](https://github.com/almide/almide/issues/1314) | snapshot/expect テスト内蔵(--update-snapshots) | 0.6x | 内蔵例のない差別化空白。仕様凍結(0.96)より前に。inline vs .snap は ○× |
+| [#1316](https://github.com/almide/almide/issues/1316) | 新設データ構造の flat index-based レイアウト規律(方針) | 0.6x | 0.61(CLIF spike)の前提規律。0.49 キャッシュ形式実装も拘束する |
+| [#1318](https://github.com/almide/almide/issues/1318) | **BUG**: fmt がブロックコメントを黙って削除(lexer が `/* */` を無トークン化) | 0.5x | #1309 の verifier 構築中に発見。fmt 破壊ファミリの残党 — conservation ゲートの適用範囲拡大とセット |
+| [#1322](https://github.com/almide/almide/issues/1322) | **BUG**: 全ツリー wasm tier で exercise 3 本が失敗 — affine-cipher は native 合格/wasm TRAP の parity 穴、2 本は現行ルールに未追随の腐り | 0.5x | tier 実行(#1308/#1309 検証)中に発見、クリーン develop で A/B 済みの既存負債。wasm leg 対等性(decade テーマ)の管轄 |
+| [#1326](https://github.com/almide/almide/issues/1326) | fmt の inline コメント帰属(式中 `/* */`・継続行前の trailing `//`)— 現状は verifier が拒否で防護 | 0.5x | #1318 修復(#ブロックコメントのトークン化)の残余。黙殺は既に不可能、帰属規則は ○× 待ち |
+
+## 軸ロードマップ発 issue の割付(2026-08-13)
+
+[ALL_AXES.md](ALL_AXES.md)(評価軸から見た勝ち筋)が特定した、台帳に行のなかった 5 件。
+勝利条件は ALL_AXES 側に、実行順序はここに置く。
+
+| Issue | 軸 | 内容 | Decade | 割付の根拠 |
+|---|---|---|---|---|
+| [#1332](https://github.com/almide/almide/issues/1332) | C 正しさ | linked IR 上の生成型差分ファザー(Rustlantis 型、v0 レッグも比較対象に) | **0.5x** | #1322 が実証した構造的穴 — 共有 MIR のバグは 394 fixture を全て緑で通過する。計測器が手術より先の原則で最優先 |
+| [#1334](https://github.com/almide/almide/issues/1334) | A 速度 | スケール非依存ゲート(10k 行 dogfood の p50/p95) | 0.5x | 0.47/0.49 の着工判断がこの数字待ち。#1311 は throughput、これは end-to-end latency |
+| [#1333](https://github.com/almide/almide/issues/1333) | E DX | MCP サーバ + Claude Code plugin 定義 | 0.5x | #1312/#1313 で構造化した診断・テスト出力を露出する側。順序は 1312/1313 の後 |
+| [#1330](https://github.com/almide/almide/issues/1330) | B 性能 | 意味論最適化で handwritten Rust を抜く勝利宣言(≥2 ワークロード、ラチェット付き) | **0.6x** | RcCow(0.55–0.56)で表現が確定してから。数字が動く土台の上で主張しない |
+| [#1331](https://github.com/almide/almide/issues/1331) | B 性能 | fan → WGSL で CPU/GPU 同一出力デモ(オラクル 4 レッグ目) | 0.6x | バックエンドは既存。契約台帳に GPU 等価性の行を足す作業とセット |
+
+### FFT 段階分解(2026-08-13)発の 2 件
+
+カーネル単体が **対 handwritten Rust 0.872×** と判明した一方、総 wall の律速が list materialize に
+集約されることが実測で確定した([ALL_AXES 軸 B](ALL_AXES.md#軸-b-実行時性能--土俵をずらして勝つ))。
+その場で出た 2 件を割り付ける。#1004 は既存行(0.55–0.56)のまま、実測をコメントで追記済み。
+
+| Issue | 内容 | Decade | 割付の根拠 |
+|---|---|---|---|
+| [#1337](https://github.com/almide/almide/issues/1337) | **BUG**: 推奨イディオム `list.range \|> flat_map` が materialize で最遅(append ループの 1.68 倍、対 Rust 2.95 倍) | **0.5x** | CLAUDE.md/CHEATSHEET が in-context の教材である以上、「推奨」と「速い」が一致しないのは perf だけでなく MSR の欠陥。#1004 より先に判定できる |
+| [#1338](https://github.com/almide/almide/issues/1338) | 公開 FFT ベンチが最遅の生成形を使っており、自分の wall の 12% を codegen ではなく list append の計測に使っている | 0.5x | 公開値を動かす判断なので ○× 必要。推奨は(b)= 行を足して両方可視化 |
+| [#1350](https://github.com/almide/almide/issues/1350) | **BUG**: fan mapper のコールバックが「純粋と型付けされるが effect lambda を受理」— native は走り wasm は壁の三すくみ | 0.5x | fan 行列完備化(cd050b8ce)で発見。裁定は ○×(許可して wasm を追うか、純粋を強制するか) |
+| [#1390](https://github.com/almide/almide/issues/1390) | **BUG(観測)**: 同一ソースの2ビルドが異なる codegen を出した — 片方は不正 Rust(branch_lift synth の `?`)と重複 wasm export。hash順序依存の疑い、二重ビルド diff のトリップワイヤを提案 | **0.5x** | 決定性は契約台帳の土台。#1332(生成型ファザー)と同族の計測器仕事 |
+| [#1406](https://github.com/almide/almide/issues/1406) | wasm funcref-effect 経路 — fan mapper の effect コールバックを v1 spine で実行(#1350 裁定(a)の stage 2)。実測済みの壁は funcref ではなく materialized_results 追跡 | 0.5x | クロスターゲット対等性(decade テーマ)そのもの。#1350(stage 1、checker 正直化)の後続 |
+| [#1388](https://github.com/almide/almide/issues/1388) | `fan {}` の並列レコードリテラル化(named fields・field 単位 `!`・settle ブロック統合、serial elision 獲得)— 設計は ○× 済、実装は edition 単位 | **0.9x** | 破壊的変更なので仕様凍結(0.96)前・ALS 動的意味論章(0.94)と同アークで。実利用 2 箇所 |
+
+dojo 側: [almide-dojo#2](https://github.com/almide/almide-dojo/issues/2)(effect 宣言有無の MSR A/B — 文献に存在しない最初の数字)は repo 境界ルールにより Dojo 管轄。0.59 と #585(ポジションペーパー)に給餌する。
+
+リサーチ本体の教訓で台帳の読み替えに関わるもの: **0.47–0.48(クエリ基盤)は「salsa 級細粒度」ではなく「モジュール単位の粗粒度 + resilient parse」が 2026 年の答え**(matklad 2026-02, Pyrefly, rust-analyzer salsa 移行税)。0.46 の実測が出た時点の設計判断でこの読み替えを ○× にかける。
 
 ## 台帳の完全性
 

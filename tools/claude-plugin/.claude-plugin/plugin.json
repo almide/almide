@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "almide",
+  "displayName": "Almide",
+  "description": "Almide compiler tools for agents: MCP tools for check / test / API outline / explain / fmt-check, plus the Almide language server for .almd files.",
+  "version": "0.57.0",
+  "author": {
+    "name": "Almide",
+    "url": "https://github.com/almide"
+  },
+  "homepage": "https://github.com/almide/almide",
+  "repository": "https://github.com/almide/almide",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["almide", "compiler", "language-server", "mcp"],
+  "mcpServers": {
+    "compiler": {
+      "command": "almide",
+      "args": ["mcp"]
+    }
+  },
+  "lspServers": {
+    "almide": {
+      "command": "almide",
+      "args": ["lsp"],
+      "extensionToLanguage": {
+        ".almd": "almide"
+      }
+    }
+  }
+}

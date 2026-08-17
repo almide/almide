@@ -50,6 +50,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__filterrc_fill",
     "__sbfr_init",
     "__sbr_init", // list.sort_by_rc — rc_inc each element handle copied into the result
+    "__sbsr_init", // list.sort_by_str_key_rc — the __sbr_init shape with a String cached key
     "__ivh_set_copy",
     "__hvl_set_copy",
     "__hvl_set_append",

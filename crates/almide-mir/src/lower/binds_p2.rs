@@ -29,9 +29,14 @@ impl LowerCtx {
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         // `let r = e!` (Unwrap — effect-fn error propagation) bound to a let/var was a deferred
         // `Const`/`Alloc{Opaque}` = a SILENT MISCOMPILE (`int.parse(s)!` bound 0, `g()!` empty).
-        // The faithful lowering needs early-return-on-Err (a later brick); until then WALL it —
-        // NEVER bind a silently-wrong value (the ② cardinal rule). Both scalar + heap paths.
+        // The early-return brick HAS now arrived (`Op::Return`, R2): under the probe the ONE
+        // rule lowers it linearly; outside the admitted shapes (and always with the probe off,
+        // where the position desugars still run first) WALL it — NEVER bind a silently-wrong
+        // value (the ② cardinal rule). Both scalar + heap paths.
         if matches!(&value.kind, IrExprKind::Unwrap { .. }) {
+            if self.try_lower_bind_unwrap_return(var, ty, value)? {
+                return Ok(());
+            }
             return Err(LowerError::Unsupported(
                 "unwrap `!` bound to a let/var cannot be faithfully computed (needs early-return \
                  propagation; a Const/Opaque would be a silently wrong value) not in this brick"
@@ -66,6 +71,228 @@ impl LowerCtx {
             return self.lower_bind_scalar(var, ty, value);
         }
         self.lower_bind_heap(var, ty, value)
+    }
+
+    /// THE ONE `!` RULE (return-op-eradication R2, law 6): `let x = f()!` in a
+    /// declared-Result fn lowers to a linear err-check + frame exit + payload
+    /// bind — no continuation nesting, no tail duplication, no loop flag:
+    ///
+    ///   v = lower(f())                      // the callee's Result carrier
+    ///   tag = load32(handle(v) + 4)         // scalar family: len-as-tag
+    ///   IfThen(tag) {                       // err ⇒ this path EXITS the frame
+    ///     drops(live_heap_handles ∖ {v})    // derived from the live walk
+    ///     Return(v)                         // the carrier IS the fn's err value
+    ///   } EndIf
+    ///   x = load64(handle(v) + 12)          // straight-line ok-payload bind
+    ///
+    /// Increment 1 admits: probe ON, declared-Result fn, SCALAR family on BOTH
+    /// sides (the err layout is family-uniform, so the callee's carrier is a
+    /// valid fn-ret value with NO rebox), scalar/Unit payload, matching err
+    /// types. Everything else declines to the wall (the R2 decline matrix).
+    /// The callee lowers through the ordinary `lower_bind` machinery (full
+    /// tracking/seeding) under a [`Self::speculate`] snapshot, so a decline
+    /// leaves no half-emitted ops.
+    pub(crate) fn try_lower_bind_unwrap_return(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !crate::lower::bang_return_probe() {
+            return Ok(false);
+        }
+        let dbg = std::env::var_os("ALMIDE_DBG_BANG").is_some();
+        macro_rules! decline {
+            ($gate:expr) => {{
+                if dbg {
+                    eprintln!("BANG-DECLINE {} :: {}", $gate, self.fn_name);
+                }
+                return Ok(false);
+            }};
+        }
+        let IrExprKind::Unwrap { expr } = &value.kind else { return Ok(false) };
+        // A DECLARED-Result fn admits by its declared family; a LIFTED effect
+        // fn by its synthetic `Result[T, String]` carrier's family — BOTH are
+        // now computed at ctx build (`decl_ret_family` covers the lift; the
+        // first cut hard-coded Scalar here and mislabeled heap-ret lifted fns
+        // into the rebox path — the fs_fold_lines_range wrong-value).
+        let fn_fam = self.decl_ret_family;
+        // A VOID fn (a `main`/test block with no Result channel — the lifted
+        // Unit convention): its err path cannot RETURN a carrier, it ABORTS
+        // with the v0-identical "Error: <msg>\n" line. Same one rule, the
+        // exit action differs — Zig's `DefersToEmit` axis: one walk, a mode
+        // flag for what the exit does.
+        // A VOID fn has NO Result channel at all: not a declared Result, not
+        // an auto-wrapped lift (`decl_ret_family` covers both), and not the
+        // Result ABI flag. Its `!` aborts instead of returning.
+        // A VOID fn has NO Result channel at all: not a declared Result, not
+        // an auto-wrapped lift (`decl_ret_family` covers both), and not the
+        // Result ABI flag. Its `!` aborts instead of returning.
+        //
+        // NARROWED to a SCALAR-family callee: a lifted `effect fn -> <heap>`
+        // builds its carrier through the scalar-family materializer (len@4 as
+        // the tag) while `result_family` types it HeapOk (tag@16) — reading
+        // @16 there took the err branch on an OK carrier and `die`d on string
+        // bytes (bang_fold3). Closing that producer/consumer split is its own
+        // slice; until then a heap-ok callee in a void fn declines.
+        // …and the fn must ACTUALLY return Unit: a pure fn returning a real
+        // value (`fn use_first_class() -> (Int, Int)`) has no Result channel
+        // either, but its `!` is NOT an abort — inside a fallible lambda it
+        // is the lambda's own propagation (fallible_lambda L1: aborting there
+        // killed the process mid-test instead of yielding the `??` fallback).
+        let void_fn = fn_fam.is_none()
+            && !self.ret_is_result_abi
+            && matches!(self.decl_ret_ty_is_unit, true)
+            && crate::lower::result_family(&expr.ty) == crate::lower::ResultFamily::Scalar;
+        if fn_fam.is_none() && !void_fn {
+            decline!("fn-family");
+        }
+        if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
+            decline!("callee-family");
+        }
+        let callee_fam = crate::lower::result_family(&expr.ty);
+        let fn_fam = fn_fam.unwrap_or(callee_fam);
+        // SAME family on both sides: the callee's carrier IS a valid fn-ret
+        // value on the err path (the err layout is family-uniform), returned
+        // with NO rebox. CROSS-family: the err String is extracted @12 (same
+        // offset both families), Dup'd (inc strictly before any release — the
+        // Lean oproj law), the carrier released, and the message reboxed via
+        // `materialize_result_err_str` — whose Err block is the FAMILY
+        // SUPERSET (len@4=1 for len-as-tag readers AND tag@16=1 for
+        // cap-as-tag readers), so ONE constructor serves both directions.
+        let rebox = !void_fn && callee_fam != fn_fam;
+        let rebox_repr = if rebox {
+            match crate::lower::repr_of(&expr.ty) {
+                Ok(r) => Some(r),
+                Err(_) => decline!("rebox-repr"),
+            }
+        } else {
+            None
+        };
+        // The ok-payload bind classes this slice owns: scalar/Unit (value
+        // copy), and for a HeapOk callee a String / flat heap-elem list /
+        // tracked-variant payload (Dup'd — see below). Anything else (records,
+        // Value, maps) declines to the wall for the next slice.
+        let heap_payload_class = if is_heap_ty(ty) {
+            if callee_fam != crate::lower::ResultFamily::HeapOk {
+                decline!("heap-payload-scalar-carrier");
+            }
+            if matches!(ty, Ty::String)
+                || crate::lower::is_heap_elem_list_ty(ty)
+                || matches!(
+                    ty,
+                    Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _)
+                )
+            {
+                true
+            } else {
+                decline!("heap-payload-class");
+            }
+        } else {
+            false
+        };
+        // The err components must agree — the pass-through would type-pun a
+        // mismatched err payload (the collect_map! class; v0 map_err-coerces).
+        if self.unwrap_tail_err_mismatch(expr) {
+            decline!("err-mismatch");
+        }
+        // Lower the callee through the FULL existing bind machinery onto a
+        // synthetic var, under a speculation snapshot: a decline (or a carrier
+        // the rule's ownership story cannot hold — it needs an OWNED live
+        // handle: the err path moves it out, the ok path leaves it to the
+        // scope-end drop) rolls back with no half-emitted ops.
+        let attempt = self.speculate(|ctx| {
+            let tmp = VarId(crate::lower::desugar_var_seed());
+            ctx.lower_bind(tmp, &expr.ty, expr).ok()?;
+            let v = *ctx.value_of.get(&tmp)?;
+            if !ctx.live_heap_handles.contains(&v) {
+                return None;
+            }
+            Some(v)
+        });
+        let Some(v) = attempt else { decline!("callee-lowering") };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
+        // The err tag: Scalar family reads len-as-tag @4; HeapOk reads the
+        // dedicated tag slot @16 (len is pinned to 1 there).
+        let tag_off = match callee_fam {
+            crate::lower::ResultFamily::Scalar => 4,
+            crate::lower::ResultFamily::HeapOk => 16,
+        };
+        let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
+        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        // The exit path never mutates `live_heap_handles` — the surviving ok
+        // continuation still owns everything; the arm only EMITS the drops.
+        if void_fn {
+            // ABORT exit: die with the err message — the v0 unit-main
+            // convention ("Error: <msg>\n" is prefixed by the die runtime's
+            // own line, exactly as build_main_die_line's split form feeds it).
+            // The err String sits @12 in BOTH families; the load is a BORROW
+            // and `prim.die` never returns, so no ownership event is needed
+            // (the process ends — the same accounting the overflow-abort
+            // shape uses).
+            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            // `prim.die` takes the message's ADDRESS (i64), not the i32
+            // handle — the same `Handle`-then-`Die` pair the overflow abort
+            // emits (calls_p4_b.rs:589-591).
+            let mh = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(mh), args: vec![eb] });
+            self.ops.push(Op::Prim { kind: PrimKind::Die, dst: None, args: vec![mh] });
+        } else if let Some(repr) = rebox_repr {
+            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            let e_dup = self.fresh_value();
+            self.ops.push(Op::Dup { dst: e_dup, src: eb });
+            let live: Vec<ValueId> = self.live_heap_handles.clone();
+            for other in live {
+                if other != v {
+                    let op = self.drop_op_for(other);
+                    self.ops.push(op);
+                }
+            }
+            let vop = self.drop_op_for(v);
+            self.ops.push(vop);
+            let new = self.materialize_result_err_str(e_dup, repr);
+            self.ops.push(Op::Return { val: Some(new) });
+        } else {
+            let live: Vec<ValueId> = self.live_heap_handles.clone();
+            for other in live {
+                if other != v {
+                    let op = self.drop_op_for(other);
+                    self.ops.push(op);
+                }
+            }
+            self.ops.push(Op::Return { val: Some(v) });
+        }
+        self.ops.push(Op::EndIf { val: None });
+        // Straight-line ok continuation: bind the payload; the carrier stays
+        // live and the ordinary scope-end (recursive) drop releases it. A
+        // SCALAR payload is a value COPY (load64). A HEAP payload is a BORROW
+        // (LoadHandle) immediately made an OWNED second reference (`Dup` —
+        // inc strictly before any release of the parent, which here is not
+        // until scope end), then seeded with its type's read/drop facts so
+        // downstream reads dispatch and the scope-end drop takes the right
+        // route.
+        if matches!(ty, Ty::Unit) {
+            let d = self.fresh_value();
+            self.ops.push(Op::Const { dst: d });
+            self.value_of.insert(var, d);
+        } else if heap_payload_class {
+            let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            let payload = self.fresh_value();
+            self.ops.push(Op::Dup { dst: payload, src: borrowed });
+            self.live_heap_handles.push(payload);
+            if crate::lower::is_heap_elem_list_ty(ty) {
+                self.value_drops.entry(payload).or_default().flat_elems = true;
+            }
+            self.seed_variant_value_shape(payload, ty);
+            self.value_of.insert(var, payload);
+        } else {
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.value_of.insert(var, payload);
+        }
+        Ok(true)
     }
 
     /// The SCALAR half of [`Self::lower_bind`] (`!is_heap_ty(ty)`): Copy values,
@@ -392,15 +619,23 @@ impl LowerCtx {
         // duplicable: no copy, no ownership). Without this, a bare-Var scalar RHS fell to the
         // deferred `Const` below and silently became 0 (the param-alias zeroing trap).
         //
-        // BUT a MUTABLE `var v = w` must get its OWN local: if it aliased w's local, a later
-        // `v = …` reassignment would `SetLocal` w's slot and SILENTLY CORRUPT w (the sha1
-        // `var a = h0; … a = temp` trap that clobbered h0). Seed a fresh scalar local with a
-        // type-agnostic i64 copy (`v = w + 0` — integer-add of 0 is identity on the i64-uniform
-        // bits of Int/Float/Bool), so reassigning `v` never touches `w`. An immutable `let v = w`
-        // is never reassigned, so the cheaper alias stays.
+        // A SCALAR `let/var v = w` ALWAYS gets its own value, seeded with a type-agnostic
+        // i64 copy (`v = w + 0` — integer-add of 0 is identity on the i64-uniform bits of
+        // Int/Float/Bool). Two mirror-image corruptions forced this, one per direction:
+        //   - a MUTABLE `var v = w` that aliased w's local: a later `v = …` would
+        //     `SetLocal` w's slot and SILENTLY CORRUPT w (the sha1 `var a = h0; … a = temp`
+        //     trap that clobbered h0);
+        //   - an immutable `let v = w` where W ITSELF is loop-carried (#1322): the alias
+        //     denotes w's stable local, so v reads w's POST-assignment value — the affine
+        //     gcd swap `let t = y; y = x % y; x = t` degenerated to x == y (t=0 on every
+        //     leg the v1 spine renders; v0/codegen-v3 was correct). "let is never
+        //     reassigned" was true but aimed at the wrong side of the alias.
+        // The copy anchors the READ at bind position, which is the value semantics both
+        // directions need. A HEAP `let v = w` keeps the alias: heap reassignment inside
+        // loops/arms is walled or deferred, never SetLocal'd in place.
         if let IrExprKind::Var { id } = &value.kind {
             if let Ok(src) = self.value_for(*id) {
-                if self.binding_is_mutable && !is_heap_ty(&value.ty) {
+                if !is_heap_ty(&value.ty) {
                     let zero = self.fresh_value();
                     self.ops.push(Op::ConstInt { dst: zero, value: 0 });
                     let dst = self.fresh_value();

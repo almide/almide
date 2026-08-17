@@ -1,0 +1,29 @@
+# Downstream sync — the grammar mirror cannot lag silently.
+#
+# tokens.toml in almide/almide-grammar is a hand-maintained mirror of the
+# compiler lexer, and every downstream generator (tree-sitter-almide,
+# vscode-almide) consumes it. Nothing failed anywhere when the two drifted —
+# the 2026-08-15 rot audit found `strict` still listed (removed from the
+# language) and `**` unlisted (lexed as the `^` alias). This workflow measures
+# both sides weekly and on demand; see scripts/check-downstream-grammar.sh for
+# the comparison contract.
+#
+# Deliberately NOT a PR gate: a syntax PR in this repo must be able to land
+# before the grammar repo follows. Drift may exist for at most one schedule
+# tick — never silently.
+name: Downstream sync
+
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC
+  workflow_dispatch:
+
+jobs:
+  grammar:
+    name: Grammar mirror (tokens.toml vs lexer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare the lexer inventory against almide-grammar tokens.toml
+        run: bash scripts/check-downstream-grammar.sh

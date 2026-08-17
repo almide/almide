@@ -5,5 +5,7 @@
 /.scratch
 
 # Recorded findings — uploaded as CI artifacts, not committed. Delete to
-# reset; inspect locally after a campaign.
+# reset; inspect locally after a campaign. The glob covers `--out` dirs
+# from side-by-side campaigns (`findings-identity`, …).
 /findings
+/findings-*

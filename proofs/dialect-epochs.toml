@@ -1,0 +1,58 @@
+# =============================================================
+# DIALECT EPOCH LEDGER — what a `@dialect(N)` stamp means
+# =============================================================
+# Almide's users are code generators. A model writes against whatever dialect
+# it learned, and the file records that dialect in a `@dialect(N)` stamp so the
+# compiler can tell a stale dialect from a wrong program — and so
+# modification-survival rate can be measured per dialect instead of in
+# aggregate.
+#
+# An epoch is NOT a release. Almide cut 219 releases in its first 5.3 months
+# and almost none of them changed anything a writer can observe; stamping the
+# release version would rewrite every file's first line every few hours and
+# tell a reader nothing. The epoch advances only when the language surface
+# changes in a way that can BREAK ALREADY-WRITTEN CODE — a spelling removed, a
+# previously-accepted program rejected, a construct's meaning changed.
+#
+# Rules:
+#   - `n` is a positive integer, unique, strictly ascending, gapless.
+#   - Every epoch above 1 lists `breaks`: what a file written for the PREVIOUS
+#     epoch must change. An epoch with no break is not an epoch.
+#   - The highest `n` here is the CURRENT dialect, and it must equal
+#     `CURRENT_DIALECT` in crates/almide-types/src/dialect.rs. The two are
+#     cross-checked by scripts/check-dialect-epochs.sh, so neither can drift.
+#   - Entries are APPEND-ONLY. An epoch that shipped is history; editing it
+#     rewrites what a stamp in an existing file means.
+#
+# What this ledger is not, yet: the join to per-break migration diagnostics.
+# The `breaks` strings are prose today. Making each one a `@deprecated`
+# with a `since` epoch and a use-site repair hint is the next arc — that is
+# what turns a stale stamp from a label into an automatic fix.
+
+[[epoch]]
+n = 1
+since = "0.1.0"
+name = "pre-error-surface"
+summary = "The original dialect: implicit `?` propagation and the `try_*` function family."
+breaks = []
+
+[[epoch]]
+n = 2
+since = "0.54.0"
+name = "explicit-error-surface"
+summary = "The error surface became explicit and the redundant spellings were removed (ADR arc v0.54-v0.56)."
+breaks = [
+  "implicit `?` propagation removed — an un-annotated `let x = f()` where `f` is an effect fn is E041; write `f()!` to propagate",
+  "the user-spelled `try_*` function family removed — use the `T?` / `T!` postfix forms",
+  "a bare effect call in statement position is E042 (must-use) — write `let _ = f()` to discard",
+]
+
+[[epoch]]
+n = 3
+since = "0.57.0"
+name = "resolution-hardening"
+summary = "Two silently-accepted ambiguities became hard errors (the V-eradication campaign)."
+breaks = [
+  "a local fn whose name collides with a selectively-imported fn is E050 — rename one, or drop the selective import",
+  "two cases with the same name in one module are E019 at registration — previously the later registration silently won",
+]

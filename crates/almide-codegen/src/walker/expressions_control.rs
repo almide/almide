@@ -167,9 +167,9 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
     let var_name = if let Some(tuple_vars) = var_tuple {
         let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
-        let vars_s = names.join(", ");
+        let vars_s = super::helpers::tuple_elems_join(&names);
         ctx.templates.render_with("for_tuple_destructure", None, &[], &[("vars", vars_s.as_str())])
-            .unwrap_or_else(|| format!("({})", names.join(", ")))
+            .unwrap_or_else(|| format!("({})", vars_s))
     } else {
         ctx.var_name(*var).to_string()
     };
@@ -252,14 +252,57 @@ fn rewrite_legacy_almd_rec_names(ctx: &RenderContext, out: &mut String) {
     }
 }
 
+/// Substitute an `InlineRust` template's `{name}` placeholders in ONE PASS over
+/// the template.
+///
+/// The obvious loop — `out = out.replace("{a}", rendered_a)` per arg — re-scans
+/// text it has already inserted, so an ARGUMENT whose rendered form contains a
+/// later placeholder gets rewritten by the next iteration. That is reachable
+/// from ordinary source: `list.flat_map(xs, (s) => ["{e1}", s])` lowers to the
+/// array template `[{e0}, {e1}]`, and substituting `{e0}` first inserts the
+/// user's string literal `"{e1}"`, which the `{e1}` pass then overwrote with
+/// `s` — the program printed `s,A,s,B` instead of `{e1},A,{e1},B`. Silent wrong
+/// code, no diagnostic.
+///
+/// Scanning once and emitting fixes the class rather than the instance: inserted
+/// text is never examined again, so no argument can be interpreted as template
+/// syntax whatever a string literal happens to contain. A `{...}` with no
+/// matching arg is emitted verbatim, as before (templates carry unfilled
+/// defaults). Each arg is rendered at most once even when its placeholder
+/// appears twice, which the per-arg loop also guaranteed and which matters here
+/// — re-rendering nested expressions is how a concat chain once went
+/// exponential.
 fn render_expr_inline_rust(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::InlineRust { template, args } = &expr.kind else { unreachable!() };
-    let mut out = template.clone();
-    for (name, arg) in args {
-        let rendered = render_expr(ctx, arg);
-        let placeholder = format!("{{{}}}", name.as_str());
-        out = out.replace(&placeholder, &rendered);
+    let rendered: Vec<(&str, String)> = args.iter()
+        .map(|(name, arg)| (name.as_str(), render_expr(ctx, arg)))
+        .collect();
+
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template.as_str();
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after.find('}').and_then(|close| {
+            let name = &after[..close];
+            rendered.iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, text)| (text.as_str(), close))
+        }) {
+            Some((text, close)) => {
+                out.push_str(text);
+                rest = &after[close + 1..];
+            }
+            // Not a placeholder we can fill (no `}`, or an unknown name):
+            // emit the brace and carry on from just after it.
+            None => {
+                out.push('{');
+                rest = after;
+            }
+        }
     }
+    out.push_str(rest);
+
     rewrite_legacy_almd_rec_names(ctx, &mut out);
     out
 }
@@ -484,6 +527,31 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
             _ => unreachable!(),
         };
         return render_expr(ctx, inner_expr);
+    }
+    // #1296: a NATIVE-runtime call returning `Result[Bytes/Matrix, String]`
+    // unwrapped in place (`bytes.len(zlib.compress_level(d, 9)!)`): the #617
+    // glue wraps the Ok side BEFORE `?` (`(call.map(|__e| RcCow::from(__e)))?`),
+    // so in call-ARGUMENT position rustc back-infers `?`'s source from the
+    // consuming `&Vec<u8>` parameter and E0308s on the RcCow. Emit the RAW
+    // call, unwrap FIRST, then glue the Ok value — `RcCow::from((raw)?)` is
+    // concretely typed end to end, and the arg-position `&` deref-coerces.
+    // Narrow by construction: String-err only (the template's map_err
+    // variants keep their path), non-test (tests use .unwrap()).
+    if !ctx.is_test {
+        if let IrExprKind::RuntimeCall { symbol, args } = &inner.kind {
+            if rc_cow_symbol_is_native_runtime(symbol.as_str()) {
+                if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, rargs) = &inner.ty {
+                    if rargs.len() == 2
+                        && rc_cow_needs_glue(&rargs[0])
+                        && matches!(rargs[1], Ty::String)
+                        && render_runtime_ctor_turbofish(ctx, symbol.as_str(), args, &inner.ty).is_none()
+                    {
+                        let raw = render_runtime_call(ctx, symbol, args);
+                        return rc_cow_result_glue(format!("({raw})?"), &rargs[0]);
+                    }
+                }
+            }
+        }
     }
     let s = render_expr(ctx, inner);
     // In test functions, ? cannot be used (return type is ()).

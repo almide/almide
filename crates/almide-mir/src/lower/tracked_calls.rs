@@ -14,7 +14,16 @@
 fn is_self_host_result_call(subject: &IrExpr) -> bool {
     match &subject.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
-            is_self_host_result_module_fn(module.as_str(), func.as_str())
+            // Phase 2 of result-family-from-type: the NAME says only
+            // "materialized"; the TYPE says which family. This is what
+            // dissolved the #1406 fan.any_map special case (all nine pairings
+            // share one pre-routing name; `result_family` splits them), and
+            // what makes a heap-Ok instantiation of a scalar-listed generic
+            // combinator (`result.map` at `Result[String, String]`) classify
+            // consistently at EVERY site instead of only where the
+            // control_p2_b escape hatch happened to run.
+            crate::lower::is_self_host_materialized_result_fn(module.as_str(), func.as_str())
+                && crate::lower::result_family(&subject.ty) == crate::lower::ResultFamily::Scalar
         }
         _ => false,
     }
@@ -26,7 +35,8 @@ fn is_self_host_result_call(subject: &IrExpr) -> bool {
 fn is_self_host_result_str_call(subject: &IrExpr) -> bool {
     match &subject.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
-            crate::lower::is_self_host_result_str_module_fn(module.as_str(), func.as_str())
+            crate::lower::is_self_host_materialized_result_fn(module.as_str(), func.as_str())
+                && crate::lower::result_family(&subject.ty) == crate::lower::ResultFamily::HeapOk
         }
         _ => false,
     }

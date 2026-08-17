@@ -76,10 +76,16 @@ impl Parser {
         })
     }
 
-    /// Scan a `{ arm; arm; … }` block shared by the fan arm heads. `label`
+    /// Scan a `{ arm, arm, … }` block shared by the fan arm heads. `label`
     /// names the construct in diagnostics ("fan.race"); `ban_hint` is the
     /// statement-ban hint tail (the heads phrase it differently and the
     /// harnesses pin the exact text). At least one arm is required.
+    ///
+    /// Separators: `,` or a newline — arms are PARALLEL SIBLINGS, so they take
+    /// the enumeration separator (match arms, list literals), never `;`, which
+    /// this language reserves for sequencing. A `;` here is a targeted error
+    /// (see `fan_arm_semicolon_error`); INSIDE a block arm it stays legal —
+    /// `{ let x = f(); g(x) }` really is sequential.
     fn parse_fan_arm_block(&mut self, label: &str, ban_hint: &str) -> Result<Vec<Expr>, String> {
         let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
@@ -93,6 +99,9 @@ impl Parser {
             arms.push(self.parse_expr()?);
             self.skip_newlines();
             if self.check(TokenType::Semicolon) {
+                return Err(self.fan_arm_semicolon_error(label));
+            }
+            if self.check(TokenType::Comma) {
                 self.advance();
                 self.skip_newlines();
             }
@@ -102,6 +111,16 @@ impl Parser {
             return Err(format!("{label} must contain at least one arm at line {}:{}", open.line, open.col));
         }
         Ok(arms)
+    }
+
+    /// The `;`-between-arms error, shared by every fan arm block: name the
+    /// rule (siblings vs sequencing), give the mechanical fix.
+    pub(crate) fn fan_arm_semicolon_error(&self, label: &str) -> String {
+        let tok = self.current();
+        format!(
+            "{label} arms are separated by `,` or a newline, not `;`, at line {}:{}\n  Hint: arms run as parallel siblings — `;` is the sequencing separator and stays legal only INSIDE a block arm: {{ let x = f(); g(x) }}",
+            tok.line, tok.col
+        )
     }
 
     /// fan.bounded(budget) { body } — a HEAD with args + block.
@@ -204,7 +223,7 @@ impl Parser {
                 return Ok(self.legacy_fan_call(span, "race", vec![b]));
             }
             return Err(format!(
-                "fan.race requires an arm block at line {}:{}\n  Hint: fan.race {{ a(); b() }} or fan.race(compute.ms(5)) {{ a(); b() }}",
+                "fan.race requires an arm block at line {}:{}\n  Hint: fan.race {{ a(), b() }} or fan.race(compute.ms(5)) {{ a(), b() }}",
                 self.current().line, self.current().col));
         }
         let arms = self.parse_fan_arm_block(
@@ -253,7 +272,7 @@ impl Parser {
             }));
         }
         Err(format!(
-            "fan.race takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }} — arms are expressions separated by `;`, no `() =>` wrappers; a dynamic list races via the mapper form fan.race(xs, (x) => ok(work(x)))"))
+            "fan.race takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.race(compute.ms(5)) {{ exact(p), heuristic(p) }} — arms are expressions separated by `,` or a newline, no `() =>` wrappers; a dynamic list races via the mapper form fan.race(xs, (x) => ok(work(x)))"))
     }
 
     /// fan.settle { arms } — a REAL node (T2-4): the value is a TUPLE of

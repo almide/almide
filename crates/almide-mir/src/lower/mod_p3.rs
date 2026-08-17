@@ -78,16 +78,16 @@ impl LowerCtx {
     /// (`value.as_array`) frees recursively (`value_result_lists`), else a
     /// String Ok (`value.as_string`) frees flat (`heap_elem_lists`).
     fn seed_heap_result_param(&mut self, v: ValueId, ty: &Ty, err_ty: &Ty) {
-        self.materialized_results_str.insert(v);
+        self.value_shapes.insert(v, crate::lower::VariantShape::ResultHeapOk);
         if is_result_listval_ty(ty) {
-            self.value_result_lists.insert(v);
+            self.value_drops.entry(v).or_default().value_result_list = true;
             return;
         }
         if is_value_result_ty(ty) {
-            self.value_result_results.insert(v);
+            self.value_drops.entry(v).or_default().value_result = true;
             return;
         }
-        self.heap_elem_lists.insert(v);
+        self.value_drops.entry(v).or_default().flat_elems = true;
         // A RICH custom-variant Err payload (`Result[String, MathError]` —
         // Overflow(String) owns nested heap): the flat DropListStr would
         // free the variant BLOCK but leak its fields. Route the drop to the
@@ -103,16 +103,16 @@ impl LowerCtx {
         }) {
             return;
         }
-        self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
+        self.value_drops.entry(v).or_default().named_route = Some(format!("reserr:{vn}"));
     }
 
     fn seed_variant_param(&mut self, v: ValueId, ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         match ty {
             Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                self.materialized_options.insert(v);
+                self.value_shapes.insert(v, crate::lower::VariantShape::Option);
                 if is_heap_ty(&a[0]) {
-                    self.heap_elem_lists.insert(v);
+                    self.value_drops.entry(v).or_default().flat_elems = true;
                 }
             }
             Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
@@ -122,9 +122,9 @@ impl LowerCtx {
                     // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
                     // payload is owned by the Result block (DropListStr frees it); mark the nested-
                     // ownership so an `Err(e)` arm binds the borrowed slot-0 handle.
-                    self.materialized_results.insert(v);
+                    self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
                     if is_heap_ty(&a[1]) {
-                        self.heap_elem_lists.insert(v);
+                        self.value_drops.entry(v).or_default().flat_elems = true;
                     }
                 }
             }
@@ -242,6 +242,9 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_to_option_calls(body) {
             return Some(rewritten);
         }
+        if let Some(rewritten) = crate::lower::desugar_result_combinator_to_match(body) {
+            return Some(rewritten);
+        }
         if let Some(rewritten) = crate::lower::desugar_offtype_testing_asserts(body) {
             return Some(rewritten);
         }
@@ -295,6 +298,14 @@ impl LowerCtx {
         // recompute over a rewritten body only adds (never removes) entries, so the gate stays sound.
         for v in crate::lower::loop_reassigned_vars(body) {
             self.loop_reassigned_vars.insert(v);
+        }
+        // #1400: same shape, same place — computed once over the (possibly
+        // tail-duplicated) body. A recompute over a rewritten body can only
+        // SHRINK the set (a new non-head read disqualifies), and shrinking it
+        // just returns a var to today's materializing path, so extending the
+        // map rather than replacing it stays sound.
+        for (v, r) in crate::lower::range_counting_vars(body) {
+            self.range_counting_vars.entry(v).or_insert(r);
         }
         let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),

@@ -60,10 +60,17 @@ regex.split("[,;]", "a,b;c") // => ["a", "b", "c"]
 
 ### `regex.captures(pat: String, s: String) -> Option[List[String]]`
 
-Extract capture groups from the first match.
+Extract the first match and its capture groups. **Index 0 is the whole match**;
+1.. are the groups in lexical order, an unmatched optional group being `""`.
+
+`none` means the pattern did not match — nothing else. A pattern with no groups
+that DOES match answers a one-element list holding its whole match.
 
 ```almd
 regex.captures("(\\w+)@(\\w+)", "user@host") // => some(["user@host", "user", "host"])
+regex.captures("(x)?(y)", "y")               // => some(["y", "", "y"])
+regex.captures("b+", "aabbb!")               // => some(["bbb"])
+regex.captures("(z)", "abc")                 // => none
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->

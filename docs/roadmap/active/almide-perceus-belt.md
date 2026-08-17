@@ -150,10 +150,48 @@ Lean 4 で Perceus ルールの正しさを機械証明し、lean4-rust-backend 
 The belt's Lean theorems certify the IR-level Inc/Dec balance. v0.27.0 made
 the runtime side REAL (free-list push/reuse, the rc==0 double-free sentinel,
 the rc_inc resurrection trap, region resets that clear the free list) — none
-of which is in the proof surface. Candidate next phase: model the allocator
-state machine (alloc/dec/reuse/reset) and prove the sentinel invariants
-("a block on the free list has rc=0", "reuse restores rc=1", "a region reset
-empties the list"), mirroring how ClosureRc.lean grew out of the closure-env
-work. Until then the churn + byte gates are the only guards on the runtime
-half, and emitter-level rc operations (stored-field dups, in-runtime incs)
-remain invisible to the IR verifier by construction.
+of which was in the proof surface at the time.
+
+**This half landed in the Coq trust spine, not the Lean belt** — read
+[`proofs/FreeList.v`](../../../proofs/FreeList.v), not a `.lean` file:
+
+- the allocator state machine (bump frontier, free-list, ghost live set) with
+  reuse-safety — `alloc_not_live`: a VALIDATED allocation is never a currently
+  live block (#909 / A1.2);
+- **a region reset leaves no stale free-list entry** — `RegionSave`/`RegionRestore`
+  preserve the allocator invariant across an ARBITRARY window body, so no
+  free-list entry can point into the reclaimed region and reuse-safety survives
+  the reset (`region_window_reuse_safe`,
+  `region_reset_leaves_no_free_into_the_region`). The naive alternative — keeping
+  the window's free-list — is proven to break the invariant AND to re-hand a live
+  block, on a concrete trace;
+- **PINNED_RC immortality** — a `$alloc8` / `__alloc_pinned` block (WASI scratch,
+  the preopen tables) is never freed, never on the free-list, never returned by
+  `$alloc`, over an arbitrary run, and survives a region reset
+  (`pinned_stays_immortal_forever`, `p_region_reset_preserves_PINV`). This is the
+  invariant C-042 violated.
+
+- **"reuse restores rc=1"** — the COUNT side, in the companion
+  [`proofs/FreeListRc.v`](../../../proofs/FreeListRc.v). It puts the reference
+  count in scope as `RuntimeModel.read_rc` (the same cell `WasmRcDec`/`WasmExec`
+  bind to the emitted bytes) and proves the two halves separately: the ALLOCATOR
+  hands a reused block back carrying no stale count — it arrives at exactly 0
+  (`reuse_hands_back_a_zero_count_block`) — and the constructor's store leaves it
+  at exactly `RC_INITIAL` = 1 (`reuse_restores_rc_1`). The invariant "a free-list
+  block reads 0, a live block reads ≥ 1" survives an arbitrary run
+  (`r_steps_preserve_RINV`) and a region reset
+  (`r_region_reset_preserves_RINV`), which is what makes the `$rc_dec` sentinel a
+  wall: `double_release_traps`. The pair is proven NECESSARY, not decorative —
+  `omitting_the_rc_store_traps_on_the_first_release` runs the trace where the
+  renderer's store is missing and the reused block traps at its first release.
+
+STILL TRUSTED, and only this: that the EMITTER writes the `RC_INITIAL` store at
+every rc-managed `call $alloc` site — a property of the renderer, not of the
+allocator, so no proof about the allocator can reach it. It is gated executably
+by `almide-mir`'s `every_rc_managed_alloc_site_initializes_the_rc_cell`, which
+enumerates all 16 `$alloc` sites in the renderer sources, requires each to
+initialize the rc cell or be a named raw-scratch site (the modelled-and-proven
+`alloc_raw` category: argv/envp buffers, never released), and reads `RC_INITIAL`
+out of the `.v` file so the constant cannot drift. Emitter-level rc operations
+(stored-field dups, in-runtime incs) also remain invisible to the IR verifier by
+construction.

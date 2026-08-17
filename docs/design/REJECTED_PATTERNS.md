@@ -9,13 +9,13 @@
 
 ## 構文
 
-### `??` (nullish coalescing) 演算子
+### ~~`??` (nullish coalescing) 演算子~~ — **撤回済み (ADR-0005)**
 
-**却下理由**: Canonicity 違反。`unwrap_or` が同じ機能を提供:
-- `unwrap_or(opt, default)` — 関数呼び出し
-- `opt.unwrap_or(default)` — UFCS
-
-`??` を追加すると同じ意味に 3 つの書き方ができる。Vocabulary Economy の原則で不要。
+当初は「`unwrap_or` が同じ機能を提供するため Canonicity 違反」として却下した。
+**この判断は ADR-0005 で逆転した**: `??` が正準形であり、desugar 定義
+(`a ?? b ≡ unwrap_or_else`) は [docs/specs/result-option-effect.md §"演算子の定義"](../specs/result-option-effect.md) にある。
+むしろ `unwrap_or` 関数の側が削除予定 (ADR-0005 D4、almide#1107)。
+却下履歴として残す — 「3 つの書き方」問題は演算子を削る方向ではなく、関数を削る方向で解消される。
 
 ### `return` キーワード
 

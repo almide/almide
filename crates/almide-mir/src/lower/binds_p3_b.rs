@@ -359,17 +359,17 @@ impl LowerCtx {
     fn register_list_drop_kind(&mut self, dst: ValueId, kind: ListElemDrop) {
         match kind {
             ListElemDrop::StrStr => {
-                self.str_str_elem_lists.insert(dst);
+                self.value_drops.entry(dst).or_default().str_str_elems = true;
             }
             ListElemDrop::ScalarAggregate | ListElemDrop::CtorFlat => {
-                self.heap_elem_lists.insert(dst);
+                self.value_drops.entry(dst).or_default().flat_elems = true;
             }
             ListElemDrop::ListStr => {
-                self.list_list_str_lists.insert(dst);
+                self.value_drops.entry(dst).or_default().list_list_str = true;
             }
             other => {
                 let name = drop_route_name(other);
-                self.variant_drop_handles.insert(dst, name);
+                self.value_drops.entry(dst).or_default().named_route = Some(name);
             }
         }
     }

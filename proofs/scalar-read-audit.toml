@@ -371,34 +371,6 @@ caller = "emit_variant_unit_chain (IfThen control_p2_d.rs:563), emit_variant_arm
 why = "Field reads guarded by each dispatcher's tag-equality IfThen; the terminal arm runs unguarded only after exhaustive tag elimination (or a Wildcard that reads nothing)."
 
 [[arm]]
-file = "control_p3.rs"
-fn = "field_unwrap_or_operand"
-loads = 1
-verdict = "NOT_SUM_READ"
-why = "Fetches the Option/Result FIELD'S own block handle out of a record/tuple slot (aggregate layout); tag dispatch happens in the consuming lower_*_unwrap_or."
-
-[[arm]]
-file = "control_p3.rs"
-fn = "lower_variant_ctor_unwrap_or"
-loads = 2
-verdict = "TAG_DISPATCHED"
-why = "IfThen(tag@4); payload@12 load in the Some arm only, None arm builds the ctor fallback."
-
-[[arm]]
-file = "control_p3.rs"
-fn = "lower_closure_unwrap_or"
-loads = 2
-verdict = "TAG_DISPATCHED"
-why = "IfThen(tag@4); payload@12 load in the Some arm only."
-
-[[arm]]
-file = "control_p3.rs"
-fn = "lower_scalar_unwrap_or"
-loads = 3
-verdict = "TAG_DISPATCHED"
-why = "IfThen(tag@4) with the documented Result/Option arm swap; payload read placed in the Ok arm (Result) or Some arm (Option) respectively."
-
-[[arm]]
 file = "control_p3_c.rs"
 fn = "aggregate_eq_from_handles"
 loads = 2
@@ -469,3 +441,18 @@ fn = "read_mutable_global_slot"
 loads = 2
 verdict = "NOT_SUM_READ"
 why = "Reads the mutable global's own storage slot (mg_slot_addr) — a fixed-type cell, no sum layout."
+
+[[arm]]
+file = "control_p3.rs"
+fn = "try_lower_option_unwrap_or"
+loads = 2
+verdict = "TAG_DISPATCHED"
+why = "The closure-coalesce payload case (the retired lower_closure_unwrap_or body, moved inside at the #1418 route deletion): IfThen(tag@4); payload@12 LoadHandle in the Some arm only, over a materialized Option the speculate-guarded bind produced."
+
+
+[[arm]]
+file = "binds_p2.rs"
+fn = "try_lower_bind_unwrap_return"
+loads = 5
+verdict = "TAG_DISPATCHED"
+why = "The R2 one-rule `!` bind (return-op-eradication). The FIRST read is always the tag — @4 for the scalar family (len-as-tag), @16 for HeapOk (cap-as-tag) — and the IfThen dispatches on it. Every other load sits strictly INSIDE a dispatched region: the err arm reads the message @12 (rebox path) or @12 for the abort path, both only where the tag said Err; the ok payload (@12, load64 for a scalar or LoadHandle+Dup for a heap payload) sits in the SURVIVING straight-line continuation, reachable only where the tag said Ok. No raw sum read precedes the dispatch."

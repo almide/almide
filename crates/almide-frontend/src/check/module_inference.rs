@@ -9,6 +9,10 @@ impl Checker {
     /// Temporarily registers unprefixed declarations for intra-module resolution,
     /// then cleans them up.
     pub fn infer_module(&mut self, prog: &mut ast::Program, module_name: &str) {
+        // #1311 front-end phase accounting (no-op unless `--timings`). Modules
+        // are the bulk of a real project's check time, so leaving this to
+        // `infer_program` alone would report a checker that costs almost nothing.
+        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
         // Isolate module's constraint solving and type map from the main program
         let saved_constraints = std::mem::take(&mut self.constraints);
         let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
@@ -260,7 +264,7 @@ impl Checker {
         name: &str,
         ret_ty: &Ty,
         body_ty: &Ty,
-        body: &ast::Expr,
+        _body: &ast::Expr,
         is_effect: bool,
     ) {
         let rr = resolve_ty(ret_ty, &self.uf);

@@ -54,6 +54,9 @@ if cur:
     rows.append(cur)
 
 errs = []
+# Non-fatal observations (a drifted line number, #1378) — printed so the column
+# can be refreshed on the next touch, never a reason to red a gate.
+notes = []
 seen = set()
 for r in rows:
     n = r.get("name")
@@ -79,8 +82,27 @@ for r in rows:
             f"{n}: digest {r.get('digest')} != {digest} — the hand-written wasm at "
             f"{site} changed. Re-confirm its evidence and update the row; evidence "
             f"is not inherited across an edit.")
-    if r.get("site") != site:
-        errs.append(f"{n}: site moved to {site} (row says {r.get('site')})")
+    # `site` is compared by FILE ONLY, never by line (#1378).
+    #
+    # `digest` is the assurance field: a whitespace-normalized hash of the unit's
+    # text, so it changes iff the hand-written wasm changes, which is what forces
+    # the row's evidence to be re-confirmed. Comparing the LINE catches nothing
+    # the digest misses — it only detects that unrelated lines above the
+    # occurrence moved. Rows can sit in ordinary production files (the enumerator
+    # deliberately over-includes, so an inline `#[test]` in a production file is
+    # enumerated too), so any edit anywhere above one reds a gate that has nothing
+    # to do with the change. It cost a red CI run and a force-push on #1370, whose
+    # digest was unchanged, and it contradicts this repo's own convention (#1232:
+    # "Line numbers drift; anchor by function name").
+    #
+    # The FILE half is kept and still fails: a unit relocated to another file is a
+    # real move whose evidence deserves re-confirmation. A drifted line is
+    # reported so the column can be refreshed on the next touch, not enforced.
+    row_site = r.get("site") or ""
+    if row_site.rsplit(":", 1)[0] != site.rsplit(":", 1)[0]:
+        errs.append(f"{n}: site moved to {site} (row says {row_site}) — a different FILE")
+    elif row_site != site:
+        notes.append(f"{n}: line drifted, {row_site} -> {site} (not a failure; digest unchanged)")
     if cls in NEEDS_FIXTURE:
         fx = r.get("via", "")
         if not fx:
@@ -104,6 +126,8 @@ for n in sorted(units):
             f"{n}: UNCLASSIFIED — a prelude function at {units[n][0]} with no row. "
             f"Hand-written wasm the oracle cannot see needs its evidence named.")
 
+for note in notes:
+    print(f"  note: {note}")
 if errs:
     print("WAT PRELUDE AUDIT FAIL —", file=sys.stderr)
     for e in errs:

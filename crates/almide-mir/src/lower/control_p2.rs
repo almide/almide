@@ -110,7 +110,7 @@ fn classify_variant_arm(
 /// slot). A raw tuple VAR/param destructure alone walls (no `param_values` entry), so the rewrite to
 /// the @12-handle bind is required, not a plain var destructure. `$p` ids start above subject+arms.
 /// `None` = no tuple payload anywhere (the caller keeps the original arms).
-fn desugar_tuple_payload_arms(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
+fn desugar_tuple_payload_arms(_subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
     let has_tuple_payload = arms.iter().any(|a| {
         matches!(&a.pattern, IrPattern::Some { inner } | IrPattern::Ok { inner }
             if matches!(&**inner, IrPattern::Tuple { .. }))
@@ -118,13 +118,10 @@ fn desugar_tuple_payload_arms(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<V
     if !has_tuple_payload {
         return None;
     }
-    let mut next = arms
-        .iter()
-        .map(|a| crate::lower::max_var_id(&a.body))
-        .max()
-        .unwrap_or(0)
-        .max(crate::lower::max_var_id(subject))
-        + 1;
+    // Band-allocated (the multi-line max-scan shape the 32-site sweep missed —
+    // the same collision class: a pass introducing binds above these arms would
+    // make this scan mint an id another pass already owns).
+    let mut next = crate::lower::desugar_var_seed();
     let mut out: Vec<IrMatchArm> = Vec::with_capacity(arms.len());
     for a in arms {
         let inner_tuple = match &a.pattern {
@@ -193,20 +190,20 @@ impl LowerCtx {
     fn seed_nested_option_result_bind_payload(&mut self, payload: ValueId, bind_ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         if matches!(bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
-            self.materialized_options.insert(payload);
+            self.value_shapes.insert(payload, crate::lower::VariantShape::Option);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
-                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                self.value_drops.entry(payload).or_default().named_route = Some("list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
-                self.heap_elem_lists.insert(payload);
+                self.value_drops.entry(payload).or_default().flat_elems = true;
             }
             return;
         }
         if crate::lower::is_result_ty(bind_ty) {
-            self.materialized_results.insert(payload);
+            self.value_shapes.insert(payload, crate::lower::VariantShape::ResultScalar);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
-                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                self.value_drops.entry(payload).or_default().named_route = Some("list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
-                self.heap_elem_lists.insert(payload);
+                self.value_drops.entry(payload).or_default().flat_elems = true;
             }
         }
     }
@@ -229,8 +226,8 @@ impl LowerCtx {
         // A HEAP-Ok `Result[String, String]` (cap-as-tag, Ok binds a heap String) vs the scalar
         // `Result[Int, String]` (len-as-tag, Ok binds a scalar int).
         let (subj, str_result) = match subject_value {
-            Some(v) if self.materialized_results_str.contains(&v) => (v, true),
-            Some(v) if self.materialized_results.contains(&v) => (v, false),
+            Some(v) if self.value_shapes.get(&v) == Some(&crate::lower::VariantShape::ResultHeapOk) => (v, true),
+            Some(v) if self.value_shapes.get(&v) == Some(&crate::lower::VariantShape::ResultScalar) => (v, false),
             _ => return false,
         };
         if !two_unguarded_arms(arms) {
@@ -360,12 +357,13 @@ impl LowerCtx {
         match inner {
             IrPattern::Bind { var, ty }
                 if is_heap_ty(ty)
-                    && (self.heap_elem_lists.contains(&subj)
-                        || self.value_result_lists.contains(&subj)
-                        || self.value_result_results.contains(&subj)
+                    && (self.value_drops.get(&subj).is_some_and(|d| d.flat_elems)
+                        || self.value_drops.get(&subj).is_some_and(|d| d.value_result_list)
+                        || self.value_drops.get(&subj).is_some_and(|d| d.value_result)
                         || self
-                            .variant_drop_handles
+                            .value_drops
                             .get(&subj)
+                            .and_then(|d| d.named_route.as_ref())
                             .is_some_and(|h| h.starts_with("res_"))) =>
             {
                 Ok(Some((*var, true)))
@@ -492,7 +490,8 @@ impl LowerCtx {
         // route (`str_heap_bind`/`opt_tuple_bind`/`result_heap_err_bind`) is the exception: its
         // payload BORROWS slot-0, so the subject must stay live THROUGH the arms — its drop is
         // deferred to AFTER the branch-join below.
-        if route.heap_res && !route.subject_drops_after() {
+        let subject_is_borrowed = self.subject_is_named_binding(subject, subj);
+        if route.heap_res && !route.subject_drops_after() && !subject_is_borrowed {
             self.drop_owned_subject(subj);
         }
         self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
@@ -508,14 +507,38 @@ impl LowerCtx {
         // call result), independent of the freed subject, so freeing the subject's slot-0 String is
         // sound (a bare-Var arm already Dup'd it; a call arm only borrowed it). A BORROWED subject
         // (param / tracked var, not in `live_heap_handles`) is owned elsewhere → left untouched.
-        if route.subject_drops_after() {
+        if route.subject_drops_after() && !subject_is_borrowed {
             self.drop_owned_subject(subj);
         }
         Some(dst)
     }
 
+    /// Is this match READING someone else's named binding rather than owning a
+    /// temporary? `live_heap_handles` cannot answer that: its own doc calls it
+    /// "heap handles in binding order, FOR SCOPE-END DROPS", so every `let`-bound
+    /// heap local is in it, and membership alone reads a still-live variable as an
+    /// owned temp.
+    ///
+    /// That is how `sv ?? "z"` twice returned `abc,z` on the wasm leg: the first
+    /// `??` lowers to a synthesized `match sv { some(p) => p, none => d }`
+    /// (#1270), the match dropped its subject, and the drop freed the user's `sv`
+    /// while the second `??` still had to read it. Native was silent because it
+    /// renders `Drop`/`DropListStr` as a comment and lets Rust free at real scope
+    /// end; wasm emits `rc_dec`, so only one leg lost the value — a wrong answer at
+    /// exit 0, on `xs ?? default`, which is the idiom the language reference
+    /// recommends. Every heap payload was affected: `String?` gave `abc,z`,
+    /// `List[Int]?` gave `3,0`, `Option[Option[Int]]` gave `5,9`
+    /// (differential fuzz, seed 510754018596 index 189).
+    ///
+    /// The scope-end pass still drops the binding exactly once, because a subject
+    /// left alone stays in `live_heap_handles`.
+    fn subject_is_named_binding(&self, subject: &IrExpr, subj: ValueId) -> bool {
+        matches!(&subject.kind, IrExprKind::Var { id }
+            if self.value_for(*id).ok() == Some(subj))
+    }
+
     /// Drop the OWNED subject once, if this scope owns it — a BORROWED subject
-    /// (param / tracked var, not in `live_heap_handles`) is owned elsewhere and
+    /// (param, or a named binding the scope end will drop) is owned elsewhere and
     /// left untouched.
     fn drop_owned_subject(&mut self, subj: ValueId) {
         if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
@@ -650,13 +673,13 @@ impl LowerCtx {
                 // => emit_seq(items)`). Both bind the @12 handle as a BORROW (drop-subject-after).
                 IrPattern::Bind { var, ty }
                     if is_heap_ty(ty)
-                        && (self.heap_elem_lists.contains(&subj)
+                        && (self.value_drops.get(&subj).is_some_and(|d| d.flat_elems)
                             // `Option[List[String]]` (the heap-acc fold value) — routed to the
                             // nested DropListListStr set; the payload bind discipline is identical
                             // (a borrowed @12 handle, the subject's own recursive drop frees it).
-                            || self.list_list_str_lists.contains(&subj)
-                            || self.value_result_lists.contains(&subj)
-                            || self.value_result_results.contains(&subj)
+                            || self.value_drops.get(&subj).is_some_and(|d| d.list_list_str)
+                            || self.value_drops.get(&subj).is_some_and(|d| d.value_result_list)
+                            || self.value_drops.get(&subj).is_some_and(|d| d.value_result)
                             // A record-Ok `Result[<record>, String]` subject (`resrec:<R>` drop
                             // handle): the `ok(m: record)` payload (AND the `err(e: String)` slot)
                             // binds the @12 handle as a BORROW; the subject's recursive
@@ -666,8 +689,9 @@ impl LowerCtx {
                             // the Some-arm payload binds the @12 variant handle as a BORROW;
                             // the subject's recursive drop frees the payload once after the
                             // arms — the same resrec discipline.
-                            || self.variant_drop_handles
+                            || self.value_drops
                                 .get(&subj)
+                                .and_then(|d| d.named_route.as_ref())
                                 .is_some_and(|h| {
                                     h.starts_with("resrec:")
                                         || h.starts_with("optrec:")
@@ -740,7 +764,7 @@ impl LowerCtx {
             && has_heap_bind
             && is_result
             && !is_result_str
-            && self.heap_elem_lists.contains(&subj);
+            && self.value_drops.get(&subj).is_some_and(|d| d.flat_elems);
         if heap_res && has_heap_bind && !is_result_str && !opt_tuple_bind && !result_heap_err_bind {
             return None;
         }
@@ -760,18 +784,18 @@ impl LowerCtx {
             // that leaks the record's nested heap (HOLE-1). `drop_op_for` checks `variant_drop_handles`
             // FIRST, so this wins over the `else` below; the Ok/Err arm binds the @12 handle as a
             // BORROW and the subject drops once AFTER the arms (`str_heap_bind`).
-            self.variant_drop_handles.insert(subj, format!("resrec:{drop_fn}"));
+            self.value_drops.entry(subj).or_default().named_route = Some(format!("resrec:{drop_fn}"));
             return;
         }
         if crate::lower::is_result_listval_ty(ty) {
-            self.value_result_lists.insert(subj);
+            self.value_drops.entry(subj).or_default().value_result_list = true;
             return;
         }
         if crate::lower::is_value_result_ty(ty) {
             // `Result[Value, String]` (value.get): the Ok payload is a single dynamic Value —
             // its drop is the RECURSIVE `Op::DropResultValue` (Ok → `$__drop_value`), distinct
             // from a String-Ok's flat DropListStr.
-            self.value_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().value_result = true;
             return;
         }
         if crate::lower::is_str_int_result_ty(ty) {
@@ -779,27 +803,27 @@ impl LowerCtx {
             // (String, Int) tuple — its drop is the RECURSIVE `Op::DropResultStrInt` (frees the
             // tuple's String + tuple block), distinct from a flat DropListStr which would leak
             // the tuple's String (it would rc_dec the @12 tuple HANDLE only).
-            self.str_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().str_int_result = true;
             return;
         }
         if crate::lower::is_value_int_result_ty(ty) {
             // `Result[(Value, Int), String]` (toml parse_val): the Ok tuple's Value slot is freed
             // recursively via `Op::DropResultValueInt` (`$__drop_value_tuple`).
-            self.value_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().value_int_result = true;
             return;
         }
         if crate::lower::is_list_str_int_result_ty(ty) {
             // `Result[(List[String], Int), String]` (toml parse_key): the Ok tuple's List slot is
             // freed recursively via `Op::DropResultListStrInt`.
-            self.list_str_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().list_str_int_result = true;
             return;
         }
         if crate::lower::is_list_value_int_result_ty(ty) {
             // `Result[(List[Value], Int), String]` (toml collect_array_items): recursive
             // `Op::DropResultListValueInt` (`$__drop_list_value_tuple`).
-            self.list_value_int_result_results.insert(subj);
+            self.value_drops.entry(subj).or_default().list_value_int_result = true;
             return;
         }
-        self.heap_elem_lists.insert(subj);
+        self.value_drops.entry(subj).or_default().flat_elems = true;
     }
 }

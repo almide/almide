@@ -1,4 +1,4 @@
-use crate::{parse_file, canonicalize, check as check_mod, diagnostic, resolve, project, out, err};
+use crate::{parse_file, canonicalize, check as check_mod, diagnostic, lexer, parser, resolve, project, out, err};
 
 /// `cmd_check`'s combined parse+checker error reporting and
 /// `--deny-warnings` gate. Extracted verbatim — exits the process exactly
@@ -86,7 +86,56 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     (diagnostics, checker)
 }
 
-pub fn cmd_check(file: &str, deny_warnings: bool) {
+/// Render the `--timings` per-phase breakdown (#1311).
+///
+/// TWO LINES, on stderr next to the rest of `check`'s output: a human summary,
+/// and one `almide-timings ` + JSON line for harnesses. The JSON keys are API —
+/// `scripts/check-frontend-phases.sh` ratchets phase SHARES computed from them,
+/// so renaming one silently blinds that gate.
+///
+/// `other` is the front-end work that is none of the three: reading files off
+/// disk, import resolution, canonicalization, and the IR lowering that feeds the
+/// unused-variable warnings. It is reported rather than hidden — a phase
+/// accounting whose residual is unnamed can absorb an arbitrary regression.
+fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
+    use almide_base::profile::PHASE_NAMES;
+    let ms = |ns: u64| ns as f64 / 1e6;
+    let total_ms = total_secs * 1000.0;
+    let accounted: u64 = r.nanos.iter().sum();
+    let other_ms = (total_ms - ms(accounted)).max(0.0);
+    let kls = |ns: u64| if ns == 0 { 0.0 } else { r.lines as f64 / (ns as f64 / 1e9) / 1000.0 };
+
+    let mut human = String::from("timings:");
+    for (i, name) in PHASE_NAMES.iter().enumerate() {
+        human.push_str(&format!(
+            " {} {:.1}ms ({:.1}%, {:.0}k lines/s)",
+            name,
+            ms(r.nanos[i]),
+            if total_ms > 0.0 { ms(r.nanos[i]) / total_ms * 100.0 } else { 0.0 },
+            kls(r.nanos[i]),
+        ));
+    }
+    human.push_str(&format!(
+        " | other {:.1}ms | total {:.1}ms over {} lines in {} sources",
+        other_ms, total_ms, r.lines, r.sources
+    ));
+    err(&human);
+
+    err(&format!(
+        "almide-timings {{\"lex_ns\":{},\"parse_ns\":{},\"check_ns\":{},\"total_ns\":{},\
+         \"lines\":{},\"bytes\":{},\"sources\":{}}}",
+        r.nanos[0], r.nanos[1], r.nanos[2], (total_secs * 1e9) as u64, r.lines, r.bytes, r.sources
+    ));
+}
+
+pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool) {
+    // Arm the accounting BEFORE the first source is read; a phase counter that
+    // starts mid-pipeline reports a front end with no lexer.
+    if timings {
+        almide_base::profile::phase_accounting_on();
+    }
+    let total_timer = almide_base::profile::ProfileTimer::start(timings);
+
     let (mut program, source_text, parse_errors) = parse_file(file);
     let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
 
@@ -124,11 +173,85 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
         }
     }
 
+    // After the last front-end work, before the verdict line. Only on the clean
+    // path on purpose: a check that errored out spent its time in the diagnostic
+    // renderer, and timing that would report the wrong thing.
+    if let (Some(t), Some(r)) = (total_timer.as_ref(), almide_base::profile::phase_report()) {
+        report_timings(&r, t.elapsed_secs());
+    }
+
+    // Reaching here means the file checked clean, which is exactly the
+    // verification a `@dialect` stamp records — so this is the only place
+    // allowed to write one.
+    if stamp {
+        write_dialect_stamp(file, &source_text);
+    }
+
     err(&format!("No errors found"));
 }
 
+/// `--stamp`: advance the file's dialect stamp after a clean check.
+fn write_dialect_stamp(file: &str, source_text: &str) {
+    use super::dialect_stamp::{plan, StampOutcome};
+    let current = almide_lang::dialect::CURRENT_DIALECT;
+    match plan(source_text, current) {
+        StampOutcome::AlreadyCurrent => {}
+        StampOutcome::Ahead { epoch } => {
+            err(&format!(
+                "{file}: left the @dialect({epoch}) stamp alone — it is ahead of this compiler's dialect {current}"
+            ));
+        }
+        StampOutcome::Write { from, to, source } => {
+            if let Err(e) = std::fs::write(file, &source) {
+                err(&format!("{file}: could not write the dialect stamp: {e}"));
+                std::process::exit(1);
+            }
+            match from {
+                Some(f) => err(&format!("{file}: dialect stamp {f} -> {to}")),
+                None => err(&format!("{file}: dialect stamp {to} (added)")),
+            }
+        }
+    }
+}
+
+/// `cmd_check_json`'s parse step.
+///
+/// `Parser::parse` returns `Err` when NO top-level declaration survived
+/// (`parser/entry.rs`) — a whole-file syntax error — and `parse_file` renders
+/// that in human form and exits. So `almide check --json` emitted no JSON at
+/// all for a plain syntax error: the most common thing an LLM gets wrong
+/// reached the caller as prose it had to parse back, which is the failure this
+/// flag exists to prevent. The diagnostics are still on the parser, so the JSON
+/// path takes them from there.
+///
+/// Returns `None` for the program when the file did not parse at all; the
+/// diagnostics are returned in both cases.
+fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diagnostic::Diagnostic>) {
+    // `.json` input is an AST dump, not source — leave it on the shared path.
+    if file.ends_with(".json") {
+        let (program, source, errors) = parse_file(file);
+        return (Some(program), source, errors);
+    }
+    let input = std::fs::read_to_string(file)
+        .unwrap_or_else(|e| { err(&format!("Error reading {}: {}", file, e)); std::process::exit(1); });
+    let tokens = lexer::Lexer::tokenize(&input);
+    let mut p = parser::Parser::new(tokens).with_file(file);
+    let program = p.parse().ok();
+    let errors = std::mem::take(&mut p.errors);
+    (program, input, errors)
+}
+
 pub fn cmd_check_json(file: &str) {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+    let (parsed, source_text, parse_errors) = parse_for_json(file);
+    let Some(mut program) = parsed else {
+        for d in &parse_errors {
+            out(&format!("{}", crate::diagnostic_render::to_json(d)));
+        }
+        // The exit code is deliberately unchanged (1 = this file did not
+        // parse). A harness that gates on it must not silently flip to
+        // success just because the diagnostics got a better shape.
+        std::process::exit(1);
+    };
     let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
 
     // Output each diagnostic as JSON (one per line)

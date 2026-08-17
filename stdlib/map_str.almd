@@ -118,7 +118,13 @@ fn map_set_str(m: Map[String, String], k: String, v: String) -> Map[String, Stri
   let extra = if idx < 0 then 1 else 0
   let rentries = entries + extra
   let rslots = rentries * 2
-  let r = prim.alloc_map_str(rslots)
+  // GEOMETRIC capacity (#1219, see map_core.map_set): epoch-stable alloc sizes let the $alloc
+  // exact-size free-list reuse the block freed by the previous `m = map.set(m, k, v)` rebind.
+  // Slack past `len` is never read (len governs iteration/eq/repr, as filter results show).
+  let scap = prim.load32(sh + 8)
+  let slots = if rslots > scap then (if scap * 2 > rslots then scap * 2 else rslots)
+  else scap
+  let r = prim.alloc_map_str(slots)
   let rh = prim.handle(r)
   let _c = __mset_copy(sh, rh, entries, k, v, 0)
   let _a = __mset_append(rh, entries, idx, k, v)
@@ -239,16 +245,16 @@ fn map_merge_str(a: Map[String, String], b: Map[String, String]) -> Map[String, 
 // map.update — if k is present, replace its value with f(old); else the map is unchanged. f is a
 // one-arity closure (String)->String. Entry count never changes. Deep-copy all keys + the unchanged
 // values; for the matching key store f(old) (created + consumed in __store_fv, no conditional consume).
-fn __store_fv(addr: Int, oldv: String, f: fn(String) -> String) -> Int = {
+fn __store_fv(addr: Int, oldv: String, f: (String) -> String) -> Int = {
   let nv = f(oldv)
   prim.store_str(addr, nv)
   0
 }
 
-fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: fn(String) -> String) -> Int = if eq then __store_fv(addr, oldv, f)
+fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: (String) -> String) -> Int = if eq then __store_fv(addr, oldv, f)
 else __store_copy(addr, oldv)
 
-fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: fn(String) -> String, i: Int) -> Int = if i >= entries then 0
+fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> String, i: Int) -> Int = if i >= entries then 0
 else {
   let kk = prim.load_str(sh + 12 + i * 16)
   let _kc = __store_copy(rh + 12 + i * 16, kk)
@@ -258,7 +264,7 @@ else {
   __mupdate_copy(sh, rh, entries, k, f, i + 1)
 }
 
-fn map_update_str(m: Map[String, String], k: String, f: fn(String) -> String) -> Map[String, String] = {
+fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
   let entries = n / 2
@@ -272,7 +278,7 @@ fn map_update_str(m: Map[String, String], k: String, f: fn(String) -> String) ->
 // ── Higher-order Map[String,String] (closures machinery; the predicate f is a TWO-arity closure
 // f : (Key, Value) -> Bool with String args, heap-widened) ── filter keeps matching entries
 // (deep-copied); all/any/count read.
-fn __mfilter_fill(sh: Int, rh: Int, entries: Int, f: fn(String, String) -> Bool, i: Int, w: Int) -> Int = if i >= entries then w
+fn __mfilter_fill(sh: Int, rh: Int, entries: Int, f: (String, String) -> Bool, i: Int, w: Int) -> Int = if i >= entries then w
 else {
   let k = prim.load_str(sh + 12 + i * 16)
   let v = prim.load_str(sh + 12 + i * 16 + 8)
@@ -286,7 +292,7 @@ else {
   }
 }
 
-fn map_filter_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Map[String, String] = {
+fn map_filter_str(m: Map[String, String], f: (String, String) -> Bool) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
   let entries = n / 2
@@ -297,7 +303,7 @@ fn map_filter_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Map[
   r
 }
 
-fn __mcount_hits(sh: Int, entries: Int, f: fn(String, String) -> Bool, i: Int, acc: Int) -> Int = if i >= entries then acc
+fn __mcount_hits(sh: Int, entries: Int, f: (String, String) -> Bool, i: Int, acc: Int) -> Int = if i >= entries then acc
 else {
   let k = prim.load_str(sh + 12 + i * 16)
   let v = prim.load_str(sh + 12 + i * 16 + 8)
@@ -306,7 +312,7 @@ else {
   else __mcount_hits(sh, entries, f, i + 1, acc)
 }
 
-fn map_all_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Bool = {
+fn map_all_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
   let entries = n / 2
@@ -314,7 +320,7 @@ fn map_all_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Bool = 
   hits >= entries
 }
 
-fn map_any_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Bool = {
+fn map_any_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
   let entries = n / 2
@@ -322,7 +328,7 @@ fn map_any_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Bool = 
   hits > 0
 }
 
-fn map_count_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Int = {
+fn map_count_str(m: Map[String, String], f: (String, String) -> Bool) -> Int = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
   let entries = n / 2
@@ -331,7 +337,7 @@ fn map_count_str(m: Map[String, String], f: fn(String, String) -> Bool) -> Int =
 
 // map.fold — left fold with a THREE-arity closure f : (Acc, Key, Value) -> Acc (Int accumulator;
 // the closure mixes a scalar Acc with two heap String args — the uniform i64 ABI widens the handles).
-fn __mfold_loop(sh: Int, f: fn(Int, String, String) -> Int, entries: Int, i: Int, acc: Int) -> Int = if i >= entries then acc
+fn __mfold_loop(sh: Int, f: (Int, String, String) -> Int, entries: Int, i: Int, acc: Int) -> Int = if i >= entries then acc
 else {
   let k = prim.load_str(sh + 12 + i * 16)
   let v = prim.load_str(sh + 12 + i * 16 + 8)
@@ -339,7 +345,7 @@ else {
   __mfold_loop(sh, f, entries, i + 1, nacc)
 }
 
-fn map_fold_str(m: Map[String, String], init: Int, f: fn(Int, String, String) -> Int) -> Int = {
+fn map_fold_str(m: Map[String, String], init: Int, f: (Int, String, String) -> Int) -> Int = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
   let entries = n / 2

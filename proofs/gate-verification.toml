@@ -1,0 +1,265 @@
+# GATE VERIFICATION LEDGER — who watches the watchmen (Stage 5:「検証ツール
+# 自身の検証」). Every verdict-bearing gate script carries a row classifying
+# HOW we know the gate itself can fail correctly, with a durable evidence
+# pointer. Enforced by scripts/check-gate-verification.sh: every enumerated
+# gate needs exactly one row, stale rows fail, a non-UNVERIFIED row needs
+# `evidence`, and the UNVERIFIED count may only SHRINK (ceiling below).
+#
+# Classes:
+#   KERNEL_PROVEN   — the verdict-bearing core is the Coq-extracted checker
+#                     (or the proof-check itself); the shell is plumbing.
+#   MUTATION_TESTED — a deliberate corruption of the gate's ledger/input was
+#                     demonstrated to FAIL the gate (recorded where).
+#   NEGATIVE_TESTED — a forged/violating input was demonstrated to FAIL.
+#   EXERCISED       — both verdict directions observed in real operation
+#                     (a genuine catch, or a recorded multi-mode exercise).
+#   UNVERIFIED      — no recorded evidence the gate can fail correctly.
+#                     Honest debt: the gate may be decorative and we would
+#                     not know. Burn-down tracked by the ceiling.
+#
+# unverified_ceiling = "2"
+
+[[gate]]
+path = "scripts/check-contracts.sh"
+class = "MUTATION_TESTED"
+evidence = "flight-evidence-gaps.md F1 progress-2 (2026-07-04): spec-resolution mutation test (nonexistent ALS section reference => FAIL) SIGPIPE FLAKE FIXED (2026-08-16): seven membership tests were `printf '%s\\n' \"$SET\" | grep -q \"$x\"`, which is a RACE under this script's `set -o pipefail` — `grep -q` exits the instant it matches and closes the pipe, so a `printf` still writing dies of SIGPIPE and the PIPELINE reports failure even though the element WAS found. The gate then declared a contract \"not in the ledger\", naming whichever id lost the race, so it accused a DIFFERENT contract every time (observed: C-084, C-059, C-087). Measured on the 286-id ledger: an EARLY match false-failed 1 run in 400 and a LATE match never did — exactly the shape the race predicts, since a late match leaves nothing left to write. Locally the gate was red about 1 run in 6. All seven now read from a here-string via a single `has()` helper, so there is no pipe to break: 25 consecutive runs green, 0 red. This is not cosmetic — a verdict-bearing gate that is randomly red teaches everyone to re-run until green, which is also what you do to a real failure, and CI's green history on this gate was therefore luck rather than evidence."
+
+[[gate]]
+path = "scripts/check-scalar-read-audit.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1185 (Stage 1 landing): unclassified/stale/UNGUARDED negative cases demonstrated to fail"
+
+[[gate]]
+path = "scripts/check-wat-prelude-audit.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1209 (Stage 1c landing): 5/5 negative tests (unclassified fn, stale row, digest drift, missing via, UNREACHED)"
+
+[[gate]]
+path = "scripts/check-ratchet-separation.sh"
+class = "NEGATIVE_TESTED"
+evidence = "flight-evidence-gaps.md F5 close (2026-07-03): mixed impl+baseline commit => exit 1, clean => exit 0"
+
+[[gate]]
+path = "scripts/release-seal.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1241 + #1243: forged derived count and unfilled [recorded] field each demonstrated to FAIL check"
+
+[[gate]]
+path = "scripts/fuzz-night-verdict.sh"
+class = "EXERCISED"
+evidence = "PR #1238: slow-only/mixed/legacy 3-mode local exercise; production class-split verdict on run 31515916427 (correctness=1 => red)"
+
+[[gate]]
+path = "proofs/check-wasm-fallback.sh"
+class = "EXERCISED"
+evidence = "2026-08-12: fail direction fired on a stale-binary measurement, pass direction on the #1240 prune (18->17)"
+
+[[gate]]
+path = "proofs/check.sh"
+class = "KERNEL_PROVEN"
+evidence = "the object under check IS the proof: coqchk De-Bruijn re-check + Print Assumptions closed + cross-version 9.1.1/9.2 (TRUSTED_BASE.md)"
+
+[[gate]]
+path = "proofs/gate.sh"
+class = "KERNEL_PROVEN"
+evidence = "verdict core = extracted checker (qualified-by-proof); toolchain stamp FATAL demonstrated live 2026-08-12 (PATH != workspace build)"
+
+[[gate]]
+path = "proofs/corpus-wall.sh"
+class = "KERNEL_PROVEN"
+evidence = "checker-phase ACCEPTs are kernel-proven; flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile (the fail direction caught a real bug)"
+
+[[gate]]
+path = "proofs/output-parity.sh"
+class = "EXERCISED"
+evidence = "flight-evidence-gaps.md F4 close: 5 consecutive full-run greens after the LC_ALL root-cause; regression direction fired throughout the parity war"
+
+[[gate]]
+path = "proofs/build-checker.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5 (coqc/ocamlopt present locally, so the gate RAN): the forge went into the TRUSTED GLUE the proof does not cover — driver.ml's ownership arm rubber-stamped to `true` gave 'FAIL double_free.cert: got exit 0 want 1 (ACCEPT)', and to `false` gave 'FAIL balanced.cert: got exit 1 want 0 (REJECT)'; both the accept and the reject assertions therefore bind. Restored green (26/26)"
+
+[[gate]]
+path = "proofs/coverage.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: the FIRST probe exposed a real hole — `find -perm /111` is GNU-only, so on any BSD/macOS host the gate died at step 2/4 with 'illegal mode string' and never reached the ratchet; fixed portably (same PR) plus a hard error when discovery finds no test binaries (a 0-binary run would still have reported a number). Then the ratchet itself: proofs/coverage-baseline.txt forged 5819 -> 9900 gave 'COVERAGE RATCHET FAIL: TOTAL 70.09% < baseline 99.00%' on a full real measurement, and `coverage.sh --bogus` gave the #990 usage error exit 2. Measured 70.09% is above the real 58.19% floor, so the same measurement is the pass direction"
+
+[[gate]]
+path = "proofs/diff-fuzz.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: no live miscompile was needed — one was PLANTED in the v1 renderer (render_wasm_calls.rs int_binop_instr) and the generative net caught it at N=40 SEED=12345. IntOp::Mul => i64.add gave 'match=9 mismatch=10' with each failing program's source printed for repro; IntOp::Mul => an unassemblable mnemonic gave the other branch, 'RUNERR (v1 traps)'. Unforged: match=19 mismatch=0 runerr=0, OK"
+
+[[gate]]
+path = "proofs/receipt.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: the #984 guard demonstrated on the DERIVED path (no .verified-fingerprint present, so all four verdicts were really re-run). Forging the certified translation table (translation_validation.rs: Op::Dup's pattern -> a name the renderer never emits) rendered 'C-SAFE | PASS / FAIL' while C-PROVEN/C-WALL stayed PASS, and the script exited 1 with 'receipt: a verdict above is FAIL — refusing to exit green (#984)'. Restored; the VTEST cell is green again"
+
+[[gate]]
+path = "proofs/check-stdlib-purity-registry.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: effectful module 'fs' forged into PURE_MODULES demonstrated to fail with the accept-but-unsafe rationale; restored green"
+
+[[gate]]
+path = "proofs/check-wasm-bytes.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: the forge was in the SHIPPING RENDERER, not the proof — rc_inc's `(i32.const 1)` bumped to 2 in render_wasm_p3.rs gave 'FAIL rc_inc: the RENDERER'S bytes do not match WasmEncode.rc_inc_bytes', and deleting rc_dec's double-free sentinel line gave 'FAIL rc_dec: ... do not match WasmExec.rc_dec_bytes — drift'; restored green"
+
+[[gate]]
+path = "proofs/check-wasm-exec.sh"
+class = "MUTATION_TESTED"
+evidence = "#1244 round 5: wabt installed locally, so the gate RAN (not skipped). Two mutations of the module under test each failed it — the cell seed 4->7 gave 'FAIL exec: rc_inc cell 4 -> 5 — wasmtime got 8 want 5', and deleting rc_dec's `(if (i32.eqz $rc) (unreachable))` sentinel gave 'FAIL exec: rc_dec on rc=0 did NOT trap'; restored green"
+
+[[gate]]
+path = "proofs/check-wasm-reachability.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 4: a dropped baseline row (env.set) demonstrated to fail as WASM PARITY REGRESSION naming the fn; restored green (394 parity / 0 frontier)"
+
+[[gate]]
+path = "scripts/check-abstain-classes.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 burn-down PR: the first probe EXPOSED a real hole (a bogus class name sailed through green) — fixed with a pinned vocabulary, then both directions demonstrated (bogus class, unclassified entry)"
+
+[[gate]]
+path = "scripts/check-workflows.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1234 landing PR: forged a workflow with a duplicate `if:` key (the exact 0.57.0 fuzz-nightly incident shape) — the strict loader rejected it with the key named and exit 1; the empty-glob path also fails loud (no find-nothing-exit-0)"
+
+[[gate]]
+path = "scripts/check-browser-determinism.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-embedded-size.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: baseline forged DOWN (measured > ceiling) demonstrated to fail with the raise-in-same-change instruction; restored green"
+
+[[gate]]
+path = "scripts/check-forbidden-impurities.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: a std::time::Instant::now planted in almide-codegen demonstrated to fail naming the exact line; restored green"
+
+[[gate]]
+path = "scripts/check-frees-churn.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 3: corpus-floor direction (1 fixture => FAIL, the #976 vacuous-pass guard) and a REAL cross-leg divergence (an env-reading probe fixture: native sees the var, wasmtime passes no environ => output diverges => FAIL) both demonstrated; restored green"
+
+[[gate]]
+path = "scripts/check-host-determinism.sh"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "scripts/check-libm-determinism.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 burn-down PR: dropped-site (UNCLASSIFIED) and bogus-verdict (BAD VERDICT) both demonstrated with LANDED forgeries — the first probe round was a dud (wrong block/field names) and wrongly suggested a hole; probes must diff-verify they landed"
+
+[[gate]]
+path = "scripts/check-perf-ratio.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok"
+
+[[gate]]
+path = "scripts/check-rt-oracle-registry.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 round 2: the tombstone RE-ARM demonstrated — a recreated emit_wasm/ with a compile_* fn fails on the missing registry; removal returns to the RETIRED tombstone"
+
+[[gate]]
+path = "scripts/check-semantics-manifest.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 burn-down PR: a LANDED bogus-unit forge sailed through green (real hole — unit spellings unvalidated); fixed with measured pinned vocabularies (21 entry units, 5 default units, 4 required fields), then default-unit and entry-unit branches each demonstrated to fail"
+
+[[gate]]
+path = "scripts/check-gate-verification.sh"
+class = "NEGATIVE_TESTED"
+evidence = "bootstrap run (PR that landed this ledger): a mis-pathed row failed as STALE and this script's own missing row failed as UNCLASSIFIED — both fail directions demonstrated before first green"
+
+[[gate]]
+path = "scripts/check-tor-refs.sh"
+class = "NEGATIVE_TESTED"
+evidence = "landing PR: a TOR row retargeted to a nonexistent instrument demonstrated to FAIL before first green"
+
+[[gate]]
+path = "scripts/check-keyed-container-index.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1363 (landing PR): five forged inputs, each diff-verified to have LANDED before the run, each demonstrated to FAIL — (1) a real index rowed linear (map_core indexed->linear:#1219) => 'NOW carries sidecar helper(s): _reindex _probe _idx_put'; (2) a scanning repr rowed indexed (map_str linear->indexed) => 'missing sidecar helper(s)'; (3) a row retargeted off its module (set_core->set_gone) => STALE row AND the orphaned module's NO-row error, so both directions of the row<->module bijection bite; (4) a bogus state word (map_if n/a->indexedish) => 'unknown state'; (5) a new repr module with no row (stdlib/map_forgeprobe.almd) => NO-row error. The FIRST probe round exposed a real weakness: a single `_reindex(` grep would pass a half-reverted index, so the marker set was tightened to all three sidecar helpers before the evidence was recorded. Restored green (19 rowed: 2 indexed, 8 linear, 9 n/a)"
+
+[[gate]]
+path = "scripts/check-als-element-coverage.sh"
+class = "NEGATIVE_TESTED"
+evidence = "landing PR: an unresolvable section (ALS-Z999) and a dropped row (UNCLASSIFIED) each demonstrated to FAIL before first green, with the below-ceiling ratchet demand firing in both"
+
+[[gate]]
+path = "scripts/check-lark-grammar.sh"
+class = "MUTATION_TESTED"
+evidence = "#1310 landing PR: 5 fail directions demonstrated before first green — keyword respelled (fan->fann: parity BOTH ways + 4 corpus under-accepts), EXCLUDED '..=' re-declared in OPERATORS (leak), param type annotation made optional (negative fixture 'param-without-type' ACCEPTED), '++' fixture shown to still PARSE with the compiler (stale-fixture direction, fixture retired), and an .almd-free corpus dir (blind-gate guard)"
+
+[[gate]]
+path = "scripts/check-rustc-warnings.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1228 landing PR: all four fail directions demonstrated before first green — an injected unused import (1 > 0), a raised baseline (0 < 5, ratchet-down demand), a failing cargo invocation, and an empty message stream (0 units < the 40 floor, #976 blindness class)"
+
+[[gate]]
+path = "scripts/check-edit-loop-scale.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1334 (landing PR): two forged inputs demonstrated to FAIL before first green, both restored and re-confirmed green (slope 1.113, ratio 4.424, exit 0). (1) A GENUINELY SUPERLINEAR COMPILER — a shim run via ALMIDE_BIN that performs the real `almide check` and then burns a delay proportional to (project lines)^2 — moved the anchored slope from 1.11-1.15 to 1.486 / 1.567 / 1.643 across three runs, over the 1.302 ceiling, exit 1. This is the fail direction the gate exists for, and the hook that makes it reproducible is documented in the script. The shim's own ~27ms spawn cost also pushed `ratio` UNDER its 3.302 floor, so the two-sided band on the second anchor fired in the same run. (2) A COLLAPSED CORPUS — the ladder's source glob forged down to 39 modules / 3,926 lines — fired all four blindness floors at once (corpus modules under 250, top rung under 25,000 lines, no rung in the 9k-12k headline band, top-rung min 24.8ms under the 40ms spawn-noise floor), exit 1: the #976 'gate went blind and read green forever' direction. NOT demonstrated: a real compiler regression caught in production (the gate is new). — #1311 (per-phase extension) added four more, each a REBUILT compiler rather than a shim because the phase numbers are produced inside the binary, each restored and re-confirmed green (slope 1.1435, ratio 4.3282, slope_check 1.1460, share_lex 0.1317, share_parse 0.1336, share_check 0.7347, exit 0). (3) A UNIFORMLY SLOWER LEXER — a spin loop of 1us per 100 source bytes inside `Lexer::tokenize`, top-rung lex 12.7ms -> 25.9ms — fired ONLY `share_lex 0.2426 OVER ceiling 0.1594`, exit 1, while `slope` 1.1346, `ratio` 4.3148 and `slope_check` 1.1401 ALL read ok: a 2x regression in one phase that the aggregate anchors cannot see, which is the whole claim of the per-phase resolution. (4) A QUADRATIC CHECKER — a spin loop proportional to the module count so far inside `infer_module`, top-rung check 66.0ms -> 120.2ms, phase slope 1.14 -> 1.35 — fired `slope_check 1.3497 OVER ceiling 1.3156` plus `share_lex 0.0845` and `share_parse 0.0858` UNDER their floors, exit 1, while `slope` 1.2821 and `ratio` 5.2907 BOTH stayed inside their bands: the mirror case, and confirmation that the sensitive detector of a big-phase regression is the SMALL phases' share floors (share_check itself read 0.8297, still under its 0.8784 ceiling). (5) DELETED INSTRUMENTATION — both `phase_scope(Phase::Check)` calls removed, so the checker reported 0.000ms — fired the per-phase blindness floor ('a phase that reports ~0 is an instrumentation hole ... it would poison every share it appears in rather than fail one band'), exit 1, NOT a share band. (6) A BINARY THAT ANSWERS `--timings` WITH NOTHING — an ALMIDE_BIN shim stripping the flag — fired 'printed no `almide-timings` line', exit 1, instead of letting the gate report green on the wall-clock half alone."
+
+[[gate]]
+path = "scripts/check-layout-discipline.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1316 (landing PR): nine forged inputs, each run and each demonstrated to FAIL — (1) a type in a [scope] glob file with no row (crates/almide-mir/src/clif_probe.rs) => UNREGISTERED with the remedy text; (2) that row set to FLAT while the struct held `name: String` and `next: Box<ClifProbe>` => 'row says FLAT but the type holds ...', naming BOTH fields and why each is ruled out; (3) a stub deviation note (20 chars) => the one-paragraph demand, and in the same run DEVIATION count 3 over ceiling 2; (4) the probe struct then flattened to three u32s while its row still said DEVIATION => 'reclassify as FLAT and ratchet deviation_ceiling DOWN' (the shrink direction pulls); (5) the row retargeted off its type (ClifProbe->ClifProbeGone) => STALE row AND the orphaned type's UNREGISTERED error, so the row<->type bijection bites both ways; (6) a serde-deriving struct in a NON-frozen file (crates/almide-driver/src/artifact_probe.rs) => UNREGISTERED via the persistent-artifact signal; (7) FROZEN DRIFT measured from real source — that file frozen at serde_types=1 passed green, appending a second serde type gave '2 serde-deriving type(s), ledger says 1'; (8) ceiling raised to 3 with 2 deviations => the below-ceiling ratchet demand; (9) blind-gate guard — SCAN_ROOTS typo'd in the enumerator => 'found only 35 type declaration(s) ... refusing to pass'. All probe files deleted, ledger restored, green (594 type declarations scanned once tests/examples were excluded, 9 frozen files, 6 registered: 4 FLAT / 2 DEVIATION, ceiling 2)"
+
+[[gate]]
+path = "scripts/check-downstream-grammar.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Landing PR (#1422): the gate's FIRST LIVE RUN failed on both real drift directions before any forging — tokens.toml still listed `strict` (removed from the language; STALE direction) and did not list `**` (lexed as the `^` alias, documented only in a comment; LAGS direction) — both fixed in almide-grammar PR #3, after which a fresh-clone run reads green (38 keywords + 42 operators mirrored, 0 stale). Forged confirmations on a local grammar copy, both restored: (1) a fabricated keyword `florble` appended to the flow list => STALE error naming it, exit 1; (2) `fan` renamed to `xfan` => BOTH directions fire in one run (`fan` missing = LAGS, `xfan` = STALE), exit 1. Blind-gate guard: the lexer extraction refuses to pass when `const KEYWORDS`/`const OPERATORS` cannot be found ('the extraction broke, not the grammar'), so a lexer refactor that moves the tables turns the gate loud instead of green-forever. NOT demonstrated: drift in the downstream GENERATORS (tree-sitter-almide, vscode-almide) — this gate pins the fan-out point they consume, not their consumption."
+
+[[gate]]
+path = "scripts/check-l1-verdicts.sh"
+class = "NEGATIVE_TESTED"
+evidence = "survey4-tier12 landing (2026-08-15): companion negative-control script check-l1-verdicts-negative.sh feeds four forged ledgers, each demonstrated to FAIL — (1) msr_measured stripped from every block => missing-field error; (2) verdict=\"maybe\" => closed-vocabulary error; (3) every id forged to LV-001 => ascending-id error; (4) an EMPTY ledger => 'no [[verdict]] blocks' (the #976 find-nothing-exit-0 direction) — while the committed ledger reads green as the positive control. CI-wired directly after the gate's own step, so the proof-it-fires reruns on every push. The gate gained a path-override argument for exactly this harness; the default target is unchanged."
+
+[[gate]]
+path = "scripts/check-l1-verdicts-negative.sh"
+class = "EXERCISED"
+evidence = "survey4-tier12 landing (2026-08-15): both verdict directions observed before first green. Fail direction fired on a REAL harness defect: the forging seds assumed single-space `key = ` while the ledger aligns keys with padding, so forge (2) was a byte-level no-op, the gate passed the 'forged' ledger, and this script correctly reported 'closed vocabulary is not enforced', exit 1 — a genuine catch (of its own harness, not the gate). After matching the aligned keys, the 1-positive + 4-negative exercise reads green, exit 0. Runs in the checks job on every push."
+
+[[gate]]
+path = "scripts/check-conformance-negative.sh"
+class = "EXERCISED"
+evidence = "survey4-tier12 landing (2026-08-15): recorded 4-mode exercise on every run — a pristine corpus copy must PASS conformancegen --check (positive control, so a broken harness cannot report vacuous green), then a flipped byte in gen_00.expected, an appended byte in gen_00.almd, and a deleted gen_47 pair must each FAIL it (Main.lean treats a missing file as '<MISSING FILE>' drift, so silent shrink is covered by construction). All four modes confirmed locally at landing and re-run in the lean-proofs CI job on every push, right after the in-sync check it guards."
+
+[[gate]]
+path = "scripts/check-conformance-mutations.sh"
+class = "EXERCISED"
+evidence = "survey4-tier12 landing (2026-08-15): both verdict directions observed in real operation before first green. FIRST RUN was a genuine catch: mutants m1 (Ok/Err arm swap in render_pattern_constructor) and m4 (statement reversal in expressions.rs render_stmts) SURVIVED => exit 1 — those walker paths are not what the corpus exercises (user-enum ctor patterns and nested-block lambdas sit outside the lambda-almd fragment; Result arms render through the pattern_ok/pattern_err templates, fn bodies through render_fn_body_str). Retargeted at the real paths, the gate reads 5/5 killed, exit 0 (m2 kills via the almide#1428 turbofish, m3 via the almide#1429 ok-lift, m5 via the wasm-only double print — which is why the script hard-refuses to run without a wasm runtime). Nightly + workflow_dispatch (conformance-mutations.yml), deliberately not a PR gate (five compiler rebuilds)."
+
+[[gate]]
+path = "scripts/check-dialect-epochs.sh"
+class = "NEGATIVE_TESTED"
+evidence = "dialect-stamp landing (2026-08-16): companion check-dialect-epochs-negative.sh feeds five forged inputs, each demonstrated to FAIL before first green, with the committed ledger + real constant as the positive control — (1) an EMPTY ledger (the #976 find-nothing-exit-0 direction); (2) a GAPPED epoch sequence 1,2,4, which would let a `@dialect(3)` stamp name an epoch that never existed; (3) an epoch above 1 with an empty `breaks` list, i.e. a release masquerading as a dialect break; (4) CURRENT_DIALECT forged to 7 against a ledger topping out at 3 — the two-hand-maintained-numbers drift this gate exists for, the rustc CURRENT_RUSTC_VERSION pattern; (5) the constant RENAMED so the extraction cannot find it, which must go loud rather than green (blind-gate guard). All five restored and re-confirmed green (3 epochs, constant agrees)."
+
+[[gate]]
+path = "scripts/check-dialect-epochs-negative.sh"
+class = "EXERCISED"
+evidence = "dialect-stamp landing (2026-08-16): recorded 6-mode exercise on every run — one positive control (the committed ledger and constant must PASS, so a broken harness cannot report vacuous green) plus the five forged-input negatives enumerated in the row above. Wired into the checks job directly after the gate it guards, so the proof-it-fires reruns on every push."
+
+[[gate]]
+path = "scripts/check-retired-spellings.sh"
+class = "NEGATIVE_TESTED"
+evidence = "retired-spelling ledger landing (2026-08-16): companion check-retired-spellings-negative.sh feeds four forged ledgers, each demonstrated to FAIL, with the committed ledger as the positive control — (1) an EMPTY ledger (#976 find-nothing-exit-0); (2) a row claiming the LIVE `list.map` is retired, which passes only if the gate is not actually executing its rows; (3) every row's `code` forged to a diagnostic the compiler never emits, proving the ledger stays joined to the diagnostic; (4) the three `kind = \"carrier\"` rows reclassified as `\"spelling\"`, which must fail because a carrier IS defined in stdlib on purpose. The gate itself is unusual in being EXECUTED rather than asserted: it compiles a probe per row and requires the declared code to come out, so deleting an arm of the hardcoded `match` in check/infer.rs — the way this enforcement could previously die unnoticed — now reddens the build. Its own first run caught an over-broad rule in this script (carriers legitimately keep their stdlib definition), which is why `kind` exists."
+
+[[gate]]
+path = "scripts/check-retired-spellings-negative.sh"
+class = "EXERCISED"
+evidence = "retired-spelling ledger landing (2026-08-16): recorded 5-mode exercise on every run — one positive control (the committed ledger must PASS, so a broken harness cannot report vacuous green) plus the four forged-ledger negatives enumerated in the row above. Wired into the checks job directly after the gate it guards."
+
+[[gate]]
+path = "scripts/check-domain-edges.sh"
+class = "NEGATIVE_TESTED"
+evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was DELETED and the gate exited 1 naming that exact cell as UNDECLARED; restoring the row returned exit 0. The reverse direction is enforced by the same run — a row whose cell no longer diverges is reported as stale and also fails, so the ledger cannot decay into a list of things that used to be true. SOLO RETRY (2026-08-16): a DIVERGE is re-measured once, alone, before it is believed, because the sweep deliberately feeds u32::MAX and i64::MAX to parameters that SIZE AN ALLOCATION — so a cell just inside the 2 GiB ceiling asks both legs for 2 GiB, and under memory pressure one can lose that race while the other wins. Measured: a full sweep run concurrently with another heavy job reported `string.pad_start:n:i32_max` and `pad_end:n:i32_max` divergent; on a quiet machine both agree, and so does the ceiling value itself. Two phantoms out of 7767 is enough to poison a SHRINK-ONLY ledger, because a phantom that lands once is declared forever. Negative-tested both directions with forged verdicts: a first-pass DIVERGE whose re-run agrees is dropped and NAMED as a load artifact rather than silently discarded; a DIVERGE on both passes is kept (243 rows survived the sticky variant, 0 dropped). The retry can only ever REMOVE a finding, never add one."
+
+evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was DELETED and the gate exited 1 naming that exact cell as UNDECLARED; restoring the row returned exit 0. The reverse direction is enforced by the same run — a row whose cell no longer diverges is reported as stale and also fails, so the ledger cannot decay into a list of things that used to be true."
+
+[[gate]]
+path = "scripts/check-alloc-ceilings.sh"
+class = "NEGATIVE_TESTED"
+evidence = "alloc-ceiling landing (2026-08-16): four forged trees, each demonstrated to FAIL, with the committed tree as the positive control — (1) ALMIDE_MATRIX_MAX_ELEMS doubled to `1 << 29`, caught as 4294967296 bytes against the shared 2147483648; (2) a self-host `prim.die` threshold moved off by one to 2147483647, caught as an undeclared ceiling value; (3) a native abort rewritten to compare against the bare literal 9999999999, caught as unnamed; (4) ALMIDE_BYTES_MAX_BYTES renamed, caught as missing from the roster. Directions (3) and (4) are the ones that matter for recurrence: they fail a NEW ceiling that is invented rather than shared, which is how this class kept coming back. Every one of these sites previously carried only a `keep in sync with X` comment, and that comment was in place throughout the period when `bytes.new(u32::MAX)` allocated 4 GiB natively and aborted on wasm. A SECOND SECTION covers CROSS-LEG PAIRS — a limit written once per leg that must be the same number, whatever it means. `read_n_bytes`'s per-call maximum is not an allocation ceiling (it is what the wasm host-floor buffer can take, measured at 2^26 with 2^27 failing), but it IS written twice, once as a native constant and once as an .almd literal, and that is the same drift shape wearing different clothes: if the halves part, the two legs read different amounts for the same call and nothing else notices. Negative-tested four more ways, each demonstrated to FAIL with the committed tree as the positive control — (1) the native half halved; (2) the self-host literal changed; (3) the pair constant renamed; (4) the self-host clamp deleted outright, which is the one a reviewer is least likely to catch by eye because the code still reads correctly. SCOPE NARROWED (ratified A, 2026-08-17): the widened plain-allocation caps this gate briefly held together were withdrawn before release — the roster is back to the REPEAT family's released 0.57.0 ceiling (string/list/matrix constants plus the stdlib literals) and the io cross-leg pair. The negative tests above still hold for the remaining roster; the two directions that matter for recurrence (a renamed constant, an invented threshold near an abort) are unchanged."

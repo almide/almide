@@ -233,6 +233,23 @@ fn try_render_wasm_source_impl_rest(
                     almide_lang::types::Ty::Unit => None,
                     t => Some(is_float_ty(t)),
                 };
+                // A wasm export NAME must be unique across the module — a second
+                // `(export "x" …)` makes the artifact unparseable, which every
+                // consumer hits before a single Almide semantic runs. Emitting one
+                // is never a legal outcome, so this is a WALL (a named build-time
+                // refusal), never a silent dedup: the duplicate always means an
+                // upstream generator keyed a helper by SITE instead of by
+                // instantiation (#1357), and a quiet dedup would hide the next one
+                // instead of reporting it. A wall is recoverable; a broken artifact
+                // is exactly what the trust spine exists to make impossible.
+                if exports.iter().any(|(e, _, _, _)| e == &export_name) {
+                    return Err(LowerError::Unsupported(format!(
+                        "duplicate wasm export name `{export_name}` — two functions \
+                         claim it, which is an invalid module. A generated per-type \
+                         helper must be emitted once per INSTANTIATION, never once \
+                         per use site"
+                    )));
+                }
                 exports.push((export_name, n.to_string(), param_floats, ret_float));
             } else {
                 // Name the CAUSE, not just the enclosing construct. The bare
@@ -408,6 +425,32 @@ fn main() -> Unit = {
         assert!(
             wat.contains("__str_append1"),
             "a string self-append loop must call the amortized append"
+        );
+
+        // #1229: the TCO'd MULTI-concat accumulator (`acc + c0 + c1` — a
+        // left-spine chain through a fresh intermediate) must ALSO reach the
+        // amortized append. `match_str_window` alone never fired on it (the
+        // drop/rebind target is the chain HEAD's left operand, not the last
+        // call's), so both links stayed whole-copy `__str_concat`s: O(n²)
+        // bytes, which the 0.57.0 release-gate fuzz read as a hang at
+        // n = 65535 (21.7 s wasm vs instant native, run 31486558420). Two
+        // appends per iteration means TWO `$__str_append1` call sites in the
+        // loop body — pinned structurally, like the rest of this family.
+        let multi_concat_tco = r#"
+local fn build(n: Int, pos: Int, acc: String) -> String = if pos >= n then acc
+else {
+  let c0 = "a"
+  let c1 = "b"
+  build(n, pos + 1, acc + c0 + c1)
+}
+fn main() -> Unit = println(build(3, 0, ""))
+"#;
+        let wat = try_render_wasm_source(multi_concat_tco, &[], false)
+            .expect("the TCO multi-concat accumulator renders");
+        assert!(
+            wat.matches("(call $__str_append1").count() >= 2,
+            "a TCO'd multi-concat string accumulator must chain through the \
+             amortized append (both links), not the whole-copy concat:\n{wat}"
         );
 
         let parser_loop = r#"

@@ -176,18 +176,25 @@ v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.repl
 
 ## ALS-T18 assert の abort 形（非 test 位置）
 
-`test` ブロック外の `assert` 族の失敗は、**stderr 1行 + exit code 1** で停止する
-（T6 の終了規約ファミリ）。生の Rust panic（exit 101）や wasm trap（exit 134）、
-値情報なしの出力は不適合。行の形（表示は ALS-R2 の補間 Display と同一）:
+`test` ブロック外の `assert` 族の失敗は、**stderr の構造化ブロック + exit code 1**
+で停止する（T6 の終了規約ファミリ）。生の Rust panic（exit 101）や wasm trap
+（exit 134）、値情報なしの出力は不適合。ブロックは `  key: value` を1行ずつ並べた
+形（値の表示は ALS-R2 の補間 Display と同一）:
 
-- `assert_eq(l, r)` → `Error: assertion failed: left = <l>, right = <r>`
-- `assert_ne(l, r)` → `Error: assertion failed: both = <l>`
-- `assert(c)` → `Error: assertion failed`
-- `assert(c, msg)` → `Error: assertion failed: <msg>`
+- `assert_eq(l, r)` →
+  `Error: assertion failed\n  at: line <N>\n  expected: <r>\n  found: <l>`
+- `assert_ne(l, r)` →
+  `Error: assertion failed\n  at: line <N>\n  expected: != <l>\n  found: <l>`
+- `assert(c)` → `Error: assertion failed\n  at: line <N>`
+- `assert(c, msg)` → `Error: assertion failed: <msg>\n  at: line <N>`
+
+フィールド順は固定で、**終端子を持たない `found` が必ず最後**（値が複数行に
+またがっても曖昧にならない）。`at:` 行は呼び出しに span が無いときだけ省略され、
+これは共有 frontend lowering の性質なのでターゲット間では常に一致する。
 
 被演算子は**一度だけ評価**される（失敗メッセージは束縛済み temp を再参照する）。
 `test` ブロック内はテストハーネスの報告形式に従う（本節の対象外）。
 実装は frontend lowering の単一脱糖（desugar once）で、native / v0-wasm /
 v1-wasm / interp の全系統が同じ IR を継ぐ。
 Fixtures: `spec/wasm_cross/assert_abort_eq.almd`, `assert_abort_ne.almd`,
-`assert_abort_msg.almd`。Contracts: C-153。
+`assert_abort_msg.almd`, `assert_abort_multiline.almd`。Contracts: C-153。

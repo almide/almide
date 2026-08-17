@@ -1,0 +1,27 @@
+# Release evidence seal — v0.57.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.57.0"
+tag = "v0.57.0"
+tag_commit = "f246ab32ade91f2faac2e9ee81a97413a565ba3f"
+date = "2026-08-11"
+url = "https://github.com/almide/almide/releases/tag/v0.57.0"
+
+[derived]
+cargo_version = "0.57.0"
+contracts_sha256 = "090894fbc12639b645097ddadde8e5c1ea5faef50c48c7ebfa122b3ff0fcf96e"
+contracts_total = "228"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "cb2777c60277ab181960351f36c4515f910b1c30c2afe22325f43864e4e3f5ab"
+abstain_ledger_entries = "119"
+wasm_cross_fixtures = "372"
+rust_toolchain = "1.89.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "manual fuzz dispatch, actions run 31486558420: 4/4 shards survived, ~4,000 programs, 0 correctness findings; the 1 finding (Hang__wasm_run_hung) was triaged to quadratic-slow perf debt (#1229) and recorded as a known limitation in the release notes"
+assets = "6: almide-linux-x86_64, almide-linux-aarch64, almide-macos-x86_64, almide-macos-aarch64, almide-windows-x86_64.exe, SHA256SUMS"
+known_problems = "#1229 quadratic wasm string-accumulator concat — byte-correct output, completes at ~4x the 30s budget on CI hardware; perf-class, disclosed in the release notes and tracked under the fuzz-perf discipline. The env.set wasm cell is HOST_CAPABILITY by design (C-228's ledger row: WASI preview1 has no environ-write)."

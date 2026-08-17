@@ -118,9 +118,23 @@ fn matrix_cols(m: List[List[Float]]) -> Int = {
   if prim.load32(h + 4) == 0 then 0 else prim.load32(prim.load64(h + 12) + 4)
 }
 
+// The index-domain guard (C-282): out of range — negative included — is the
+// same unified abort `xs[i]` raises, byte-identical to the native
+// `almide_rt_matrix_bounds`. A raw index here was an OOB memory trap for a
+// too-large index and a SILENT out-of-block read for a negative one.
+fn __mx_bounds(idx: Int, extent: Int) -> Int = {
+  if idx < 0 or idx >= extent then prim.die(prim.handle("Error: matrix index out of bounds\n")) else ()
+  0
+}
+
 fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float = {
   let h = prim.handle(m)
+  let rows = prim.load32(h + 4)
+  let _gr = __mx_bounds(row, rows)
   let rh = prim.load64(h + 12 + row * 8)
+  // The COL extent is this row's own width — the native twin reads r.len().
+  let cols = prim.load32(rh + 4)
+  let _gc = __mx_bounds(col, cols)
   prim.ffrombits(prim.load64(rh + 12 + col * 8))
 }
 
@@ -559,22 +573,37 @@ else {
 // select_rows_f32(data, offset, cols, row_ids) — the ROW-SUBSET twin of
 // from_bytes_f32_le: each selected row rid decodes cols f32 LE elements at
 // offset + rid·cols·4 (rid clamped to 0 like native's `rid.max(0)`), sharing
-// `__mx_f32_row` — one decoder, two schedules.
-fn __mx_f32_sel_rows(ho: Int, hd: Int, offset: Int, ids: List[Int], c: Int, i: Int) -> Int = if i >= list.len(ids) then 0
+// `__mx_f32_row` — one decoder, two schedules. A row past the buffer is the
+// all-zero row (`__mx_zero_row`) — the same defined OOB→zeros edge the full
+// loader takes, per ROW here because each rid is its own read; an unchecked
+// `prim.load8` past the block read undefined heap bytes while native panicked
+// on the slice (the 2026-08-12 fuzz divergence). `offset` clamps to 0 like
+// native's `offset.max(0)`.
+fn __mx_zero_row(dh: Int, c: Int, j: Int) -> Int = if j >= c then 0
+else {
+  prim.store64(dh + 12 + j * 8, 0)
+  __mx_zero_row(dh, c, j + 1)
+}
+
+fn __mx_f32_sel_rows(ho: Int, hd: Int, offset: Int, len: Int, ids: List[Int], c: Int, i: Int) -> Int = if i >= list.len(ids) then 0
 else {
   let rid0 = list.get(ids, i) ?? 0
   let rid = if rid0 < 0 then 0 else rid0
   let row = prim.alloc_list_f64(c)
-  let _f = __mx_f32_row(prim.handle(row), hd, offset + rid * c * 4, c, 0)
+  let base = offset + rid * c * 4
+  let _f = if base + c * 4 > len then __mx_zero_row(prim.handle(row), c, 0)
+  else __mx_f32_row(prim.handle(row), hd, base, c, 0)
   prim.store_str(ho + 12 + i * 8, row)
-  __mx_f32_sel_rows(ho, hd, offset, ids, c, i + 1)
+  __mx_f32_sel_rows(ho, hd, offset, len, ids, c, i + 1)
 }
 
 fn matrix_select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)
+  let len = prim.load32(hd + 4)
+  let off = if offset < 0 then 0 else offset
   let n = list.len(row_ids)
   let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_f32_sel_rows(prim.handle(out), hd, offset, row_ids, cols, 0)
+  let _x = __mx_f32_sel_rows(prim.handle(out), hd, off, len, row_ids, cols, 0)
   out
 }
 

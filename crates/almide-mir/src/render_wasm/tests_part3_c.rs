@@ -41,6 +41,21 @@
         }
     }
 
+    /// A TEST-LOCAL single-digit printer for the raw-WAT fixtures below: writes
+    /// "<digit>\n" via `$fd_write`, byte-identical to what the deleted bootstrap
+    /// `$print_int` produced for 0..=9. #1208 removed `$print_int` from the
+    /// production prelude (dead-from-source), so the raw-WAT tests that observe
+    /// single-digit facts (freelist reuse, rc cell values) carry their own
+    /// observation channel instead of keeping unreachable wasm alive for it.
+    fn put_digit_wat() -> &'static str {
+        "  (func $put_digit (param $v i64)\n\
+         \u{20}   (i32.store8 (i32.const 512) (i32.add (i32.const 48) (i32.wrap_i64 (local.get $v))))\n\
+         \u{20}   (i32.store8 (i32.const 513) (i32.const 10))\n\
+         \u{20}   (i32.store (i32.const 8) (i32.const 512))\n\
+         \u{20}   (i32.store (i32.const 12) (i32.const 2))\n\
+         \u{20}   (drop (call $fd_write (i32.const 1) (i32.const 8) (i32.const 1) (i32.const 0))))\n"
+    }
+
     #[test]
     fn freelist_reuses_a_freed_block() {
         // A1.2-render: alloc p1, free p1 (-> the free-list), then alloc p2 of the
@@ -50,8 +65,9 @@
         // Prints `1` (p1 == p2, reuse happened) then `2` (p2[1] read back) — if the
         // reused block were corrupted the read-back would be wrong.
         let wat = format!(
-            "{}{}",
+            "{}{}{}",
             preamble(),
+            put_digit_wat(),
             "  (func $main (local $p1 i32) (local $p2 i32)\n\
              \u{20}   (local.set $p1 (call $list_new (i32.const 3) (i32.const 3)))\n\
              \u{20}   (call $rc_dec (local.get $p1))\n\
@@ -59,8 +75,8 @@
              \u{20}   (call $list_set (local.get $p2) (i32.const 0) (i64.const 1))\n\
              \u{20}   (call $list_set (local.get $p2) (i32.const 1) (i64.const 2))\n\
              \u{20}   (call $list_set (local.get $p2) (i32.const 2) (i64.const 3))\n\
-             \u{20}   (call $print_int (i64.extend_i32_s (i32.eq (local.get $p1) (local.get $p2))))\n\
-             \u{20}   (call $print_int (call $list_get (local.get $p2) (i32.const 1))))\n\
+             \u{20}   (call $put_digit (i64.extend_i32_s (i32.eq (local.get $p1) (local.get $p2))))\n\
+             \u{20}   (call $put_digit (call $list_get (local.get $p2) (i32.const 1))))\n\
              \u{20} (func (export \"_start\") (call $main))\n)\n"
         );
         if let Some(out) = build_and_run("reuse", &wat) {
@@ -78,24 +94,26 @@
         // matches the wasm spec" to "wasmtime matches the spec" (a trusted engine, the
         // same trust level as the wat2wasm byte grounding). `$list_new` inits rc to 1.
         let inc = format!(
-            "{}{}",
+            "{}{}{}",
             preamble(),
+            put_digit_wat(),
             "  (func $main (local $b i32)\n\
              \u{20}   (local.set $b (call $list_new (i32.const 0) (i32.const 1)))\n\
              \u{20}   (call $rc_inc (local.get $b))\n\
-             \u{20}   (call $print_int (i64.extend_i32_s (i32.load (local.get $b)))))\n\
+             \u{20}   (call $put_digit (i64.extend_i32_s (i32.load (local.get $b)))))\n\
              \u{20} (func (export \"_start\") (call $main))\n)\n"
         );
         if let Some(out) = build_and_run("rcinc_cell", &inc) {
             assert_eq!(out, "2", "rc_inc: cell 1→2 (rt_inc) — wasmtime must match run_g");
         }
         let dec = format!(
-            "{}{}",
+            "{}{}{}",
             preamble(),
+            put_digit_wat(),
             "  (func $main (local $b i32)\n\
              \u{20}   (local.set $b (call $list_new (i32.const 0) (i32.const 1)))\n\
              \u{20}   (call $rc_dec (local.get $b))\n\
-             \u{20}   (call $print_int (i64.extend_i32_s (i32.load (local.get $b)))))\n\
+             \u{20}   (call $put_digit (i64.extend_i32_s (i32.load (local.get $b)))))\n\
              \u{20} (func (export \"_start\") (call $main))\n)\n"
         );
         if let Some(out) = build_and_run("rcdec_cell", &dec) {
@@ -135,8 +153,14 @@
     }
 
     fn value_semantics_mir() -> MirFunction {
-        // var a = [1,2,3]; var b = a; a[0] = 9; print a; print b
+        // var a = [1,2,3]; var b = a; a[0] = 9; print a[0..2]; print b[0..2].
+        // Observation is element-wise through `put_digit` (the prim-floor digit
+        // printer) — #1208 deleted the bootstrap `RtFn::PrintList`/`$print_list`,
+        // so the cow claim is read back per element: a = 9,2,3 and b = 1,2,3.
         let (a, b) = (ValueId(0), ValueId(1));
+        let (i0, i1, i2) = (ValueId(2), ValueId(3), ValueId(4));
+        let (a0, a1, a2) = (ValueId(5), ValueId(6), ValueId(7));
+        let (b0, b1, b2) = (ValueId(8), ValueId(9), ValueId(10));
         MirFunction {
             name: "main".into(),
             ops: vec![
@@ -148,8 +172,21 @@
                     func: RtFn::ListSet,
                     args: vec![CallArg::Handle(a), CallArg::Imm(0), CallArg::Imm(9)],
                 result: None },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] , result: None },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] , result: None },
+                Op::ConstInt { dst: i0, value: 0 },
+                Op::ConstInt { dst: i1, value: 1 },
+                Op::ConstInt { dst: i2, value: 2 },
+                Op::ListGetScalar { dst: a0, list: a, idx: i0 },
+                call_put_digit(a0),
+                Op::ListGetScalar { dst: a1, list: a, idx: i1 },
+                call_put_digit(a1),
+                Op::ListGetScalar { dst: a2, list: a, idx: i2 },
+                call_put_digit(a2),
+                Op::ListGetScalar { dst: b0, list: b, idx: i0 },
+                call_put_digit(b0),
+                Op::ListGetScalar { dst: b1, list: b, idx: i1 },
+                call_put_digit(b1),
+                Op::ListGetScalar { dst: b2, list: b, idx: i2 },
+                call_put_digit(b2),
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
@@ -186,12 +223,117 @@
         assert!(wat.contains("(unreachable)"), "rc_dec must trap on an already-freed cell");
     }
 
+    /// #909 sentinel 3 — the RENDERER half of "reuse restores rc=1".
+    ///
+    /// `proofs/FreeListRc.v` proves the ALLOCATOR half (a block handed back off
+    /// the free-list carries count 0 — `reuse_hands_back_a_zero_count_block`) and
+    /// the PAIR (`reuse_restores_rc_1`: `$alloc` then the constructor's store
+    /// leaves the block at exactly `RC_INITIAL`). What no proof ABOUT THE
+    /// ALLOCATOR can reach is whether the emitter really writes that store at
+    /// every rc-managed allocation site — the proof file names this gate as the
+    /// thing that closes it, so the boundary is executable, not asserted.
+    ///
+    /// The rule: every `call $alloc` the renderer can emit either initializes the
+    /// rc cell within the next few emitted lines, or is a named RAW-SCRATCH site
+    /// — `FreeListRc.v`'s `alloc_raw` category: allocated, never rc-tracked,
+    /// never released, its payload clobbering its own rc cell (proven harmless
+    /// for ANY value by `scratch_alloc_cannot_corrupt_the_rc_invariant`).
+    #[test]
+    fn every_rc_managed_alloc_site_initializes_the_rc_cell() {
+        // The raw byte-scratch destinations: the argv/envp vectors and their
+        // string buffers ($args_get_list / $env_get / $path_norm). They never
+        // reach `$rc_dec`, so they never reach the free-list.
+        const SCRATCH: &[&str] = &[
+            "$argc_ptr", "$argv ", "$argbuf", "$cnt_ptr", "$sz_ptr", "$envp ", "$envbuf",
+        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        // The constant is READ from the proof, never hand-copied: a renderer that
+        // changed the initial count without changing `FreeListRc.v` fails here
+        // instead of silently orphaning the theorem (the check-wasm-bytes.sh
+        // closed-triangle pattern).
+        let read_coq_int = |file: &str, name: &str| -> i64 {
+            let text = std::fs::read_to_string(root.join(file))
+                .unwrap_or_else(|e| panic!("{file}: {e}"));
+            let line = text
+                .lines()
+                .find(|l| l.starts_with(&format!("Definition {name} ")))
+                .unwrap_or_else(|| panic!("{file} no longer defines {name}"));
+            line.split(":=").nth(1).expect("a := rhs").trim().trim_end_matches('.').trim()
+                .parse()
+                .unwrap_or_else(|e| panic!("{file} {name} is not an integer: {e}"))
+        };
+        assert_eq!(
+            i64::from(RC_INITIAL),
+            read_coq_int("proofs/FreeListRc.v", "RC_INITIAL"),
+            "the renderer's RC_INITIAL and FreeListRc.v's must be the same number"
+        );
+        assert_eq!(
+            i64::from(LIST_RC_OFFSET),
+            read_coq_int("proofs/RuntimeModel.v", "RC_OFFSET"),
+            "the renderer's rc-cell offset and RuntimeModel.v's RC_OFFSET must agree"
+        );
+
+        let mut managed = 0usize;
+        let mut scratch = 0usize;
+        let mut files: Vec<_> = std::fs::read_dir(&src)
+            .expect("renderer sources")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                n.starts_with("render_wasm") && n.ends_with(".rs") && !n.contains("tests")
+            })
+            .collect();
+        files.sort();
+        for path in files {
+            let text = std::fs::read_to_string(&path).expect("read renderer source");
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                // `$alloc8` is the PINNED_RC bump path (sentinel 2) — never
+                // rc-managed, never on the free-list; the trailing space excludes it.
+                if !line.contains("call $alloc ") {
+                    continue;
+                }
+                if SCRATCH.iter().any(|m| line.contains(m)) {
+                    scratch += 1;
+                    continue;
+                }
+                let initialized = lines[i..(i + 4).min(lines.len())]
+                    .iter()
+                    .any(|l| l.contains("LIST_RC_OFFSET") && l.contains("RC_INITIAL"));
+                assert!(
+                    initialized,
+                    "{}:{} allocates through $alloc without initializing the rc cell to \
+                     RC_INITIAL. Either emit the store (FreeListRc.reuse_restores_rc_1 is \
+                     about the PAIR, not about $alloc alone) or, if this is raw scratch \
+                     that is never released, add its destination to SCRATCH here with a \
+                     reason.",
+                    path.display(),
+                    i + 1
+                );
+                managed += 1;
+            }
+        }
+        // Non-vacuity: the four inline `Alloc` arms plus `$list_new`.
+        assert!(
+            managed >= 5,
+            "found only {managed} rc-managed $alloc sites — the scan stopped seeing the \
+             renderer's allocation sites, so this gate would pass on anything"
+        );
+        assert!(scratch >= 7, "found only {scratch} raw-scratch $alloc sites");
+    }
+
     #[test]
     fn wasm_runs_value_semantics_matching_rust() {
         let mir = value_semantics_mir();
         assert_eq!(verify_ownership(&mir), Ok(()));
-        if let Some(out) = build_and_run("valuesem", &render_wasm(&mir)) {
-            assert_eq!(out, "a=9,2,3\nb=1,2,3");
+        let prog = MirProgram {
+            functions: vec![mir, put_digit_fn()],
+            ..Default::default()
+        };
+        if let Some(out) = build_and_run("valuesem", &render_wasm_program(&prog)) {
+            assert_eq!(out, "9\n2\n3\n1\n2\n3");
             // (The rung-1 sketch renderer this test used to poke for a dual-render
             // sanity line was retired in #930. The dual-renderer thesis is carried
             // by the REAL evidence now: the cross-target byte gate runs whole
@@ -201,33 +343,12 @@
         }
     }
 
-    #[test]
-    fn wasm_push_through_alias_keeps_sibling_independent() {
-        // var a = [1]; var b = a; a.push(2); print a; print b → a=[1,2], b=[1]
-        let (a, b) = (ValueId(0), ValueId(1));
-        let mir = MirFunction {
-            name: "main".into(),
-            ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1]) },
-                Op::Dup { dst: b, src: a },
-                Op::MakeUnique { v: a },
-                Op::Call {
-                    dst: Some(a),
-                    func: RtFn::ListPush,
-                    args: vec![CallArg::Handle(a), CallArg::Imm(2)],
-                result: None },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] , result: None },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] , result: None },
-                Op::Drop { v: b },
-                Op::Drop { v: a },
-            ],
-            ..Default::default()
-        };
-        assert_eq!(verify_ownership(&mir), Ok(()));
-        if let Some(out) = build_and_run("push", &render_wasm(&mir)) {
-            assert_eq!(out, "a=1,2\nb=1");
-        }
-    }
+    // (`wasm_push_through_alias_keeps_sibling_independent` was deleted in #1208's
+    // endgame with `RtFn::ListPush`/`$list_push`: no frontend lowering ever
+    // constructed the op — real pushes go through the self-hosted `list.push`,
+    // and push-through-alias independence is corpus-pinned by the cross-target
+    // byte gate (spec/wasm_cross/alias_cow.almd, list_comprehensive.almd,
+    // bytes_push_inplace.almd).)
 
     #[test]
     fn self_hosted_string_from_codepoint_encodes_utf8() {

@@ -427,7 +427,7 @@ impl LowerCtx {
         // alone would leak a heap-IN-nested field on deeper shapes.
         if let Some(name) = self.record_or_anon_drop_type_name(ty) {
             self.record_masks.remove(&dst);
-            self.variant_drop_handles.insert(dst, name);
+            self.value_drops.entry(dst).or_default().named_route = Some(name);
         }
         self.memo_global(var, dst);
         Some(dst)
@@ -459,7 +459,7 @@ impl LowerCtx {
         if !self.live_heap_handles.contains(&dst) {
             self.live_heap_handles.push(dst);
         }
-        self.materialized_options.insert(dst);
+        self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
         self.memo_global(var, dst);
         Some(dst)
     }
@@ -621,7 +621,7 @@ impl LowerCtx {
     /// `optrec:` / `resrec:` / `reserr:` prefixes and the two `list_*_*` names
     /// select a dedicated inline wrapper drop instead.
     fn variant_drop_route(&self, v: ValueId) -> Option<Op> {
-        let ty = self.variant_drop_handles.get(&v)?;
+        let ty = self.value_drops.get(&v).and_then(|d| d.named_route.as_ref())?;
             // `List[(Int, String)]` was routed here as a pseudo-"variant" but has no generated
             // `$__drop_list_int_str` ADT helper (the `DropVariant` render emitted a dangling call →
             // invalid wat). Route it to the dedicated INLINE `DropListIntStr` (frees each tuple's
@@ -676,19 +676,19 @@ impl LowerCtx {
     /// rows' cell Strings), and each Result/Option wrapper before the flat list.
     fn set_drop_route(&self, v: ValueId) -> Option<Op> {
         let routes: [(bool, fn(ValueId) -> Op); 12] = [
-            (self.value_result_lists.contains(&v), |v| Op::DropResultListValue { v }),
-            (self.value_result_results.contains(&v), |v| Op::DropResultValue { v }),
-            (self.str_int_result_results.contains(&v), |v| Op::DropResultStrInt { v }),
-            (self.value_int_result_results.contains(&v), |v| Op::DropResultValueInt { v }),
-            (self.list_value_int_result_results.contains(&v), |v| Op::DropResultListValueInt { v }),
-            (self.list_str_int_result_results.contains(&v), |v| Op::DropResultListStrInt { v }),
-            (self.list_str_result_results.contains(&v), |v| Op::DropResultListStr { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.value_result_list), |v| Op::DropResultListValue { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.value_result), |v| Op::DropResultValue { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.str_int_result), |v| Op::DropResultStrInt { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.value_int_result), |v| Op::DropResultValueInt { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.list_value_int_result), |v| Op::DropResultListValueInt { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.list_str_int_result), |v| Op::DropResultListStrInt { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.list_str_result), |v| Op::DropResultListStr { v }),
             (self.value_elem_lists.contains(&v), |v| Op::DropListValue { v }),
             (self.str_value_elem_lists.contains(&v), |v| Op::DropListStrValue { v }),
-            (self.str_str_elem_lists.contains(&v), |v| Op::DropListStrStr { v }),
-            (self.list_list_str_lists.contains(&v), |v| Op::DropListListStr { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.str_str_elems), |v| Op::DropListStrStr { v }),
+            (self.value_drops.get(&v).is_some_and(|d| d.list_list_str), |v| Op::DropListListStr { v }),
             (
-                self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v),
+                self.value_drops.get(&v).is_some_and(|d| d.flat_elems) || self.record_masks.contains_key(&v),
                 |v| Op::DropListStr { v },
             ),
         ];

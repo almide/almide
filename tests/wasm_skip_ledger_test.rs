@@ -34,10 +34,11 @@ enum SkipReason {
 const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // `@extern` binds a native symbol; there is no wasm equivalent.
     ("spec/integration/extern/extern_test.almd", SkipReason::NativeOnlyApi),
-    // #1106 / C-215: the _if_exists NotFound classification keys on the OS
-    // errno (ErrorKind::NotFound), which the WASI prim floor does not expose;
-    // the temp-dir helper also rides the mkstemp-style unique creators.
-    ("spec/stdlib/fs_if_exists_test.almd", SkipReason::NativeOnlyApi),
+    // (#1106 / C-215 row RETIRED by this PR's errno-carrying read prim: the
+    // WASI floor now DOES expose the errno the _if_exists NotFound
+    // classification keys on, so this file runs the wasm leg. The ledger only
+    // shrinks — and this hand-written skip is exactly what hid #1368, the
+    // read-a-directory-as-ok("") miscompile, from the cross-target gate.)
     // #1110: the wrong-polarity probes ride assert_throws — wasm cannot catch
     // a panic (unreachable trap; the coverage_assert_throws precedent).
     ("spec/stdlib/testing_polarity_test.almd", SkipReason::NoUnwinding),

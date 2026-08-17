@@ -1,0 +1,225 @@
+# Return-op eradication: one desugar for `!`, position zoo deleted
+
+Status: R2 IN PROGRESS (ratified ○ 2026-08-15; R1 landed 3358f26f6+53439f582 —
+op through both renderers, verifier diverged rule, cert marker `x`, kernel
+format v5 `check_xc` all green; probe `ALMIDE_BANG_RETURN=1` gates the 9
+position rows, 2e73deceb).
+
+R2 census (probe ON, full almd suite; baseline 391/12/0):
+- initial: 335/64/**4 failed** — the 4 were the #1434 v0 regression
+  (Err-turbofish, fixed 52326a54e), NOT rule signal.
+- clean (rule increments 1-2 live: scalar bind + stmt positions): **339/64/0**
+  — every probe decline falls back safely; the matrix is the 52 fallback
+  files beyond the baseline 12 (`scratchpad matrix52` snapshot below is in
+  the wall sweep, non-durable — regenerate via ALMIDE_FALLBACK_NAMES=1).
+
+Increment H (3b6ceb7f8): HeapOk×HeapOk admitted — same-family carrier direct
+return (tag@16), heap payload = LoadHandle@12 + Dup + typed seeding (String /
+flat heap-elem list / tracked variant). The Dup-then-lazy-carrier-drop shape
+is verified idiomatic (Lean's `oproj` rule: inc strictly before any parent
+release; ExplicitRC.lean:575-578 + the 421-444 inc-before-dec law). Fn-level
+decline split AFTER H (build-reachable): **20 family-mismatch** (the ResErrStr
+REBOX slice — extract err @12, Dup, drop carrier, construct the FN-family err,
+Return), 10 fn-family (test-block Unit fns — the ABORT shape, not Return),
+3 callee-family (Option `!`), 2 heap-payload-class (records/Value).
+
+Hoist admission table (Lean Do/Basic.lean:805-909, ported design): HOIST from
+if/while conditions, match SUBJECTS, binder-less let RHS, any statement
+subterm — left-to-right, innermost-first, band-allocator temps. HARD-ERROR
+(never silent skip) from: lambda bodies, match ARM bodies, binder-carrying
+let RHS, loop bodies (new statement scope), and `&&`/`||` RIGHT operands
+(Lean's one documented wart: its generic descent silently eagerizes the
+short-circuit — we forbid instead).
+
+### R2 state after the second increment batch (209def816)
+
+probe ON **349/54/0, zero traps**; probe OFF **391/12/0** (baseline exact).
+Slices landed: cross-family rebox (killed all 20 family-mismatch declines),
+tail + bare-root hoist, Unit-fn ABORT exit (die, not Return — the Zig
+`DefersToEmit` mode-flag shape), lambda-root hoist guard, probe narrowed to
+the statement-continuation rewrite only.
+
+THREE REAL BUGS the probe surfaced (all pre-existing, none probe artifacts):
+1. tail-position nested `!` read its payload TAG-BLIND (fixed by the hoist
+   extension — it fires probe-off too);
+2. **#1437** — the lifted heap-ret carrier: `result_family` types it HeapOk
+   (tag@16) while the lift materializes len-as-tag, AND (second pass) the
+   lift's ABI decision itself is derived from a TRIAL LOWERING, so which fns
+   get a Result ABI depends on the propagation machinery's current acceptance
+   set. Contained by declining lifted heap-ret fns; **30 of the remaining 42
+   matrix files sit behind this class**, so #1437 is R2's critical path;
+3. the void-abort predicate fired for any channel-less fn, including a pure
+   fn returning a tuple whose `!` belongs to an enclosing fallible lambda
+   (fallible_lambda L1) — narrowed to declared-`Unit` returns.
+
+Remaining matrix (42): 30 behind #1437, 3 callee-family (Option `!` — the
+Option carrier has no err channel to propagate, needs the none⇒err(msg)
+construction), 1 heap-payload-class (record/Value payloads), the rest walling
+only inside test-block fns.
+
+Wall-reason distribution over the 52 (first-wall per file):
+- 13× bind-rule decline (`unwrap ! bound to a let/var`) — increment-1 gates:
+  heap payload / non-Scalar callee family / auto-wrap fn (admission landed) /
+  err mismatch. Next: split by gate (ALMIDE_DBG_BANG) and open heap payload.
+- 8× `scalar binding outside the value subset` — `!` nested inside a bind
+  value expression: the GENERIC HOIST's class.
+- 7× `effect-unwrap desugar's reach` + 1× call-argument `!` + 1× loop var —
+  hoist + loop classes.
+- 3× heap-result `if` + 1× `match` + 1× Tuple return — downstream shapes,
+  likely melt once the rule owns the err path.
+- 16× wall only inside TEST-block fns (`almide build` shows none; the codec
+  family) — capture via per-file `almide test` when prioritizing.
+Law: rot-eradication law 6 — a diverging arm drops the merge continuation.
+Prior art: the `??` route-zoo deletion (#1418, +148/−1054) — same disease, one
+level up: the recognizer grew a case per fixture; here the desugar table grows
+a row per syntactic position.
+
+## The disease
+
+`!` (effect-unwrap-propagate) is desugared **per syntactic position** — ~9
+passes in the `BRANCH_PASSES` row table (`desugar_branch.rs`) plus the
+stmt/tail pair in `desugar_unwrap.rs`:
+
+| position | pass | what it pays |
+|---|---|---|
+| stmt / let-bind | `desugar_effect_unwrap` | continuation nested into the ok-arm |
+| tail | `desugar_tail_effect_unwrap` | pass-through special case |
+| call-arg | `desugar_callarg_unwrap` | ad-hoc ANF hoist |
+| if-arm | `desugar_if_arm_unwrap` | own traversal |
+| `ok(e!)` | `desugar_unwrap_rewrap_identity` | identity collapse |
+| let continuation | `desugar_let_unwrap` | own traversal |
+| expr-nested scalar | `desugar_stmt_value_nested_unwrap` (#1183) | second ad-hoc hoist |
+| for-loop body | `desugar_loop_unwrap` | loop-carried **error flag** + post-loop dispatch |
+| unit if/match stmt + cont | `desugar_stmt_control_unwrap` | **tail duplication** into every arm |
+
+Root cause, stated in `desugar_unwrap.rs`'s own header: *the v1 MIR has no Op
+for a mid-function early return*. Each position must therefore restructure its
+continuation differently. Every row was added when a fixture walled — the same
+growth signature the `??` route zoo had. ~2,800 lines in the dedicated desugar
+files alone; `Unwrap`/`Try` handling is scattered across 30+ lowering files.
+
+## Research verdict (5-compiler survey, sealed out-of-repo 2026-08-15)
+
+Surveyed: rustc, Zig, Roc, Lean 4, Koka, Grain. Unanimous on the core:
+
+1. **One desugar site, position-independent** — enabled by making the exit a
+   first-class TERMINAL (noreturn) expression. In value position the lowering
+   "assigns nothing and continues unreachable" (rustc `lower_expr_try` is the
+   only `?` site; Zig `tryExpr` emits a block whose error body ends in
+   `ret_node`; Roc desugars `?` once into `match + e_return`).
+2. **Exit-path cleanup is derived, never hand-written per sugar** — walk the
+   live/scope state at the exit site. rustc: 7-line scope walk into a shared
+   DropTree. Zig: `genDefers(inner→outer, mode)` — the exit's *destination*
+   is the walk's outer bound. Grain (RC + structured wasm, our exact
+   profile): `return` = decref every live managed binding *skipping the
+   returned value*, emitted before the return; `break`/`continue` = loop-level
+   bindings only, live map untouched.
+3. **Tail duplication / error flags are the tax for lacking the primitive.**
+   Where the references duplicate a continuation at all it is a *thresholded
+   optimization* (Koka: iff ≤1 non-return branch; Lean: join iff >1 regular
+   exits), never the strategy.
+4. **The no-new-op path is empirically dead.** Lean shipped "sum-type result +
+   single dispatch" for ~5 years and replaced it: variant explosion (result
+   types × exit-kind combinations), mutated-var tuple threading at every exit,
+   code blowup never solved, and they reinvented join points internally anyway.
+5. **Frame-targeted beats block-targeted for `!`.** Zig's `ret_node` names the
+   function frame, so no enclosing block cooperates at any depth, and the
+   error edge is noreturn so no merge/phi negotiation exists. Full join points
+   (Roc/Lean) are the general machinery with real scope-invariant and
+   ownership-contract costs — overkill for `!`, whose error edge always
+   targets the frame. Deferred as a follow-on (see Non-goals).
+
+## The cure: `Op::Return`, one hoist, one rule
+
+### New op
+
+```rust
+/// Frame-targeted early exit: return `val` (None = Unit) to the caller.
+/// TERMINAL — nothing may follow it in the enclosing arm (mir_wellformed).
+Return { val: Option<ValueId> }
+```
+
+Render: wat `return` (valid at any block depth), native `return v;`. Both
+targets already have the instruction; render cost is zero.
+
+### Lowering rule (the ONE `!` rule)
+
+After the hoist (below), every `!` is in let/stmt position:
+
+```
+let x = f()!   ⇒   v = lower(f())
+                   IfThen(err_tag(v)) {
+                     drops(live_heap_handles ∖ {err_carrier})   // derived, not authored
+                     Return(err_carrier)
+                   } EndIf
+                   x = ok_payload(v)                            // straight-line, no nesting
+```
+
+`live_heap_handles` already exists in the lowerer — it IS the scope walk the
+references derive drops from. The continuation stays linear: no nested match,
+no tail duplication, no loop flag. `!` in a loop body needs zero loop
+cooperation (wat `return` exits everything; drops cover the loop's live state).
+
+### The hoist (kills the position dimension)
+
+ONE generic ANF traversal replaces `desugar_callarg_unwrap` +
+`desugar_stmt_value_nested_unwrap` + the if-arm/let variants: hoist every
+expression-nested `Unwrap` to its own bind-position stmt. Position knowledge
+becomes a small table (forbidden binders, delimiter kinds), not passes.
+
+### Verifier (the part only we must prove)
+
+- `lib_c.rs` branch frame gains `diverged: bool`. An arm ending in `Return`:
+  (a) takes no part in `check_branch_agreement` — the join continues from the
+  OTHER arm's state alone; (b) must independently satisfy the frame-exit
+  obligation at the `Return`: every owned object at rc 0 except the returned
+  value, which is accounted moved (`m`) to the caller.
+- Certificate: `Return` emits a `ret` event closing the stream segment; the
+  incs-before-decs discipline is unchanged (drops precede the `Return`).
+- Rocq kernel (`OwnershipChecker.v`): the one-shot-branch acceptance gains the
+  mirrored rule — an arm whose run ends in `ret` is accepted iff it reaches
+  the exit obligation fault-free; agreement is only required between
+  non-diverged arms. Witness corpus gains dedicated fixtures (both-arms-ret,
+  ret-with-live-handle ⇒ reject, ret-in-loop-body).
+
+## Stages
+
+- **R1 — the op, end to end, unused.** `Op::Return` + `mir_wellformed`
+  (terminal: nothing follows in the arm) + both renderers + certificate event
+  + verifier diverged rule + kernel rule + witness fixtures. Gate: full
+  battery green with the op never emitted; kernel certifies the new witnesses.
+- **R2 — the rule behind a probe.** The hoist + the one lowering rule, gated
+  by `ALMIDE_BANG_RETURN=1` (the #1418 readiness-probe recipe). Measure the
+  decline matrix over the full battery + 3-way oracle; drive it to zero with
+  law-4 fixes (typed seeding, ANF retries), byte-A/B against the old path
+  where both accept.
+- **R3 — the deletion.** Matrix empty ⇒ flip default, delete the position
+  rows (`desugar_effect_unwrap`'s nested-match body, `desugar_loop_unwrap`'s
+  error flag, `desugar_stmt_control_unwrap`'s tail duplication, the if-arm /
+  let / nested / callarg variants), keep `desugar_unwrap_rewrap_identity`
+  only if it still pays as an optimization. Same-PR ledger follow-through:
+  scalar-read audit, STAGE-STATUS, TCB claims, walled-real ratchet, caps
+  accounting (Return emits no calls — count-invariant).
+- **R4 — follow-ons (separate issues, not this arc).** #1421 accepting match
+  lowering via the same diverged-arm rule; `guard … else <value>` inside
+  loops (currently an honest wall); loop-as-join generalization; render-stage
+  drop-chain suffix sharing if wasm size regresses.
+
+## Non-goals
+
+- No general join points / labeled breaks in this arc. `!`'s error edge is
+  always frame-targeted; the general machinery costs scope invariants and a
+  join-aware ownership contract we don't need yet. The door stays open (R4).
+- No v0 changes: the v0 leg already lowers `!` to Rust `?`; only the v1 MIR
+  leg gains the op. The 3-way oracle keeps both legs honest.
+
+## Exit criteria
+
+1. `BRANCH_PASSES` contains zero `!`-specific rows; `desugar_unwrap*.rs` is
+   reduced to the hoist + the identity (if kept).
+2. A new `!` position (future syntax) requires ZERO new desugar code — the
+   hoist + one rule absorb it. (The rustc test: `do yeet` reused `?`'s
+   machinery for free.)
+3. Kernel-certified: the witness corpus covers ret-diverged arms both
+   accepting and rejecting; verify-trust green.
+4. Deletion dividend ≥ 1,500 lines net negative across `lower/`.

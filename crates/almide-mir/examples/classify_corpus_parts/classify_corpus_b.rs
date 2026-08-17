@@ -223,7 +223,7 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
 /// split, not an aliasing risk.
 fn for_each_program_expr_mut(
     ir: &mut almide_ir::IrProgram,
-    mut visit: impl FnMut(&mut almide_ir::IrExpr),
+    visit: impl FnMut(&mut almide_ir::IrExpr),
 ) {
     let main =
         ir.functions.iter_mut().map(|f| &mut f.body).chain(ir.top_lets.iter_mut().map(|tl| &mut tl.value));
@@ -457,11 +457,6 @@ struct Tally {
     cert_poisoned_excluded: usize,
     /// Functions whose MIR call-op count EXCEEDS their source call-node count — the
     /// caps-soundness gate for the elided-call effect markers (`record_elided_calls`).
-    /// A marker may only ADD a call-op for a genuinely ELIDED call, so `mir_calls`
-    /// can rise at most TO `ir_calls`; `mir_calls > ir_calls` means a marker
-    /// DOUBLE-COUNTED a call already lowered — which could mask a real elision and
-    /// FALSELY de-taint a Stdout-reaching function. Must stay empty (a wall breach).
-    call_count_breaches: Vec<String>,
     /// In-profile functions whose Stdout-freedom is provable transitively (every
     /// `Op::CallFn` callee is Stdout-free): their empty capability witness is
     /// emitted for the proven checker. accept ⟹ no undeclared Stdout effect.

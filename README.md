@@ -100,7 +100,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 228 contracts — 228 active, 0 flagged-for-revision.**
+> **Ledger: 286 contracts — 286 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
@@ -230,13 +230,38 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | build, cold, `--target wasm` | **299.1 ms** | 3 |
 <!-- build-speed:generated:end -->
 
+#### …and at 10,000 lines (#1334)
+
+The row above is measured on a 268-line file, which does not establish that the edit
+loop is *scale-independent* — a fast check on a small file is also exactly what a
+quadratic compiler produces. So the same command is measured over a ladder of nested
+prefixes of this repo's own stdlib (303 hand-written modules, 30,624 lines; nothing
+synthesized), 40 interleaved runs per rung:
+
+| project size | `almide check` p50 | p95 | µs/line |
+|---:|---:|---:|---:|
+| 2,047 lines | 18.4 ms | 19.5 ms | 2.87 |
+| 5,456 lines | 31.2 ms | 32.3 ms | 3.29 |
+| **10,151 lines** | **52.1 ms** | **53.3 ms** | 3.78 |
+| 20,378 lines | 97.4 ms | 99.5 ms | 4.06 |
+| 30,624 lines | 141.5 ms | 145.1 ms | 4.06 |
+
+arm64 Darwin, almide 0.57.0, 2026-08-13, load average 6.7. **The p95 column is an
+observation, not a promise**: the same commit on the same box at load average 42 read
+p95 332 ms at the 10,151-line rung — 6× — so the CI ratchet
+(`scripts/check-edit-loop-scale.sh`) anchors two dimensionless same-run ratios instead:
+the log-log slope of marginal check time against project lines (**1.13**, where 1.0 is
+linear and 2.0 quadratic; it moved 0.6% across that 7× load swing) and the cost of the
+10k-line rung in units of the empty-project floor (**4.4×**). Reproduce with
+`python3 research/benchmark/editloop/scale.py`.
+
 Runtime-performance numbers are deliberately absent here rather than estimated: the
 benchmarks that would carry them need a harness with enough resolution to be worth
 publishing, and a figure measured with `time -p` on a sub-10ms program is noise. The
 LLM-writability row above and the artifact sizes below are the claims this README currently
 stands behind.
 
-| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), ≤1.27× across the referenced suite — CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)) |
+| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), 1.16–1.18× on fasta and FFT; ~1.6× where the workload is list materialization rather than arithmetic (#1004) — CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)) |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
 reachability DCE prunes unreached runtime helpers inside the renderer itself, but

@@ -93,20 +93,12 @@ impl AnalyzedDoc {
 enum Located {
     Keyword { info: &'static str },
     FnDecl { name: String, params: String, ret: String },
-    TypeDecl { name: String, display: String },
+    TypeDecl { display: String },
     TopLet { name: String, ty: String },
     VariantConstructor { name: String, type_name: String, fields: Vec<String> },
     StdlibCall { module: String, func: String, params: String, ret: String },
     UserIdent { name: String, ty: String },
     Param { name: String, ty: String },
-    Expr { ty: String },
-}
-
-fn span_contains(span: &crate::ast::Span, line: u32, col: u32) -> bool {
-    let sl = span.line as u32;
-    let sc = span.col.saturating_sub(1) as u32;
-    let ec = span.end_col as u32;
-    sl == line + 1 && col >= sc && col < ec
 }
 
 /// Step 1 of `find_node`: language keyword hover info. Extracted verbatim,
@@ -239,7 +231,7 @@ fn find_type_decl(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
                     }
                     _ => format!("type {} = {}", word, format_type_expr(ty)),
                 };
-                return Some(Located::TypeDecl { name: word.to_string(), display: detail });
+                return Some(Located::TypeDecl { display: detail });
             }
         }
     }
@@ -464,6 +456,10 @@ fn lsp_server_capabilities() -> ServerCapabilities {
 
 /// `run_lsp`'s workspace-root derivation from `initialize`'s `root_uri`,
 /// falling back to CWD. Extracted verbatim.
+/// `root_uri` is deprecated upstream in favor of `workspace_folders`, but VS
+/// Code still sends it and the single-root fallback is exactly this field —
+/// keep reading it deliberately until multi-root support is a real need.
+#[allow(deprecated)]
 fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> {
     init.root_uri.as_ref()
         .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))

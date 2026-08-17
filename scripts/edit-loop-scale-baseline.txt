@@ -1,0 +1,105 @@
+# EDIT-LOOP SCALE-INVARIANCE ANCHORS (#1334) — see scripts/check-edit-loop-scale.sh.
+#
+# Both anchors are DIMENSIONLESS same-run ratios, not milliseconds. The
+# milliseconds on this ladder are not anchorable: same commit, same corpus, same
+# M4 Pro, one hour apart on 2026-08-13, the 10,151-line rung read p95 52.9ms at
+# load average 6.0 and p95 332.4ms at load average 42.4. The observations are
+# recorded at the bottom of this file for the record; the two lines the gate
+# reads are `slope` and `ratio`.
+#
+# slope — log-log least-squares slope of MARGINAL `almide check` time against
+#   project lines across the ladder (2k / 5k / 10k / 20k / 30k lines of real
+#   stdlib source), from the MIN of 40 interleaved runs per rung. 1.0 = linear,
+#   2.0 = quadratic. Anchored 2026-08-13 at the MEDIAN of eight 40-run
+#   measurements taken across a 12x load swing on one M4 Pro (load average 3.4
+#   to 42.4):
+#     1.113  1.126  1.130  1.132  1.137  1.142  1.154  1.159   median 1.132
+#   a 4.1% total spread, while p95 on the same ladder moved 6x over the same
+#   swing. The highest reading sits 12% under the +15% ceiling. Budget +15%.
+slope 1.132
+# ratio — min(10,151-line rung) / min(4-line floor rung): what a 10k-line project
+#   costs in units of what an empty one costs. Catches a uniform slowdown of the
+#   per-line work, which `slope` by construction cannot see. Median of the same
+#   eight runs:
+#     4.298 4.351 4.362 4.403 4.424 4.435 4.454 4.690 (the 4.690 is load 42.4)
+#   an 8.9% total spread. Budget +25%.
+ratio 4.403
+#
+# ── PER-PHASE ANCHORS (#1311) ────────────────────────────────────────────────
+# The same ladder, checked with `almide check --timings`, splits the front end
+# into lex / parse / check. Anchored 2026-08-14 at the MEDIAN of EIGHT 40-run
+# measurements on one M4 Pro across a 16x load swing (load average 1.7 to 31.2 —
+# four unloaded, four against 20 synthetic CPU burners). Over that swing the top
+# rung's p95 wall clock moved 3.0x (125.6ms -> 372.3ms) and its check throughput
+# moved 1.11x (524k -> 472k lines/s), which is why neither is here.
+#
+# share_* — each phase's top-rung `min` over the three summed. Zero-sum, so a
+#   regression in one phase moves ALL THREE and the small phases move most in
+#   relative terms: from this split, a check slowdown of ~15% pushes share_lex
+#   through a -10% floor and a lex slowdown of ~12% pushes it through a +10%
+#   ceiling. Budget is +/-20%, wider than the measured spread, because the split
+#   is anchored on an M4 Pro and CI runs ubuntu x86-64 — see the script header.
+#     share_lex    0.1305 0.1307 0.1309 0.1315 0.1341 0.1355 0.1357 0.1360
+#                  median 0.1328, 4.2% spread
+# share_lex moved 0.1328 -> 0.1550 (2026-08-17): the integer-domain arc added a
+# net +1122 lines to the stdlib (rationale comments on every domain guard), and
+# the front-end lexes all of it — CI measured 0.1514 green, then 0.1606/0.1633
+# red against the old ceiling of 0.1594. The share is pinned to the observed
+# mid, not padded: the gate should still catch the NEXT real lex regression.
+share_lex 0.1550
+#     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
+#                  median 0.1355, 3.2% spread
+share_parse 0.1355
+#     share_check  0.7268 0.7269 0.7280 0.7290 0.7349 0.7351 0.7352 0.7352
+#                  median 0.7320, 1.2% spread
+share_check 0.7320
+# slope_check — `slope` localized to the phase that owns it. The aggregate reads
+#   1.15; the split shows lex 1.00 and parse 1.03 flat and the checker carrying
+#   all of the superlinearity. Anchoring it separately means a checker going
+#   quadratic cannot be masked by a lexer that got faster in the same release.
+#   Most machine-portable number in this file — a slope is an exponent, so a
+#   uniform per-phase speed factor cancels out of it.
+#     1.1349 1.1359 1.1363 1.1412 1.1465 1.1472 1.1497 1.1572
+#     median 1.1439, 1.9% spread. Budget +15%, floor 0.85x.
+slope_check 1.144
+# NOT anchored, on purpose: slope_lex (median 1.005) and slope_parse (median
+# 1.030). Over the same swing they read a 10.3% / 10.4% spread — lex and parse are
+# ~12ms against check's 66ms, so subtracting the floor rung leaves a small
+# difference of small numbers. A band loose enough not to flake there would catch
+# nothing the share bands miss: a lexer going quadratic blows share_lex far past
+# its ceiling at the top rung long before its own slope band would fire.
+#
+# ── RECORDED OBSERVATIONS (not gated) ────────────────────────────────────────
+# almide 0.57.0, arm64 Darwin (M4 Pro, 14 cores), 2026-08-13, corpus = 303
+# stdlib modules / 30,624 lines in the top rung, 40 interleaved runs per rung.
+# Median of the three load-6.0-7.6 runs:
+#
+#   modules   lines     min     p50     p95   us/line
+#         0       4    11.4    12.0    12.6      —
+#         9    2047    17.2    18.4    19.5     2.87
+#        51    5456    29.3    31.2    32.3     3.29
+#       134   10151    49.6    52.1    53.3     3.78
+#       213   20378    94.1    97.4    99.5     4.06
+#       303   30624   135.7   141.5   145.1     4.06
+#
+# Against the roadmap's axis A targets (docs/roadmap/ALL_AXES.md): `check` p95 at
+# 10k lines is 53.3ms on an unloaded box, inside the < 100ms target — and 332ms
+# on the same box under load 42.4, outside it. Which is exactly why the target is
+# published as an observation and the ratchet holds the two ratios instead.
+#
+# Per-phase, 2026-08-14, unloaded (load 1.7-2.1), min of 40 interleaved runs.
+# `fe lines` is what the front end actually lexed: the rung's modules plus the
+# auto-imported bundled stdlib (4,142 lines) every check pays.
+#
+#     lines  fe lines      lex    parse    check    other
+#         4      4142     1.19     1.04     2.99     2.20
+#      2047      6185     1.93     1.75     5.84     3.45
+#      5456      9594     3.07     2.90    11.56     6.22
+#     10151     14289     4.55     4.38    20.89    11.72
+#     20411     24549     8.29     8.40    44.48    18.95
+#     30657     34795    11.83    12.13    65.99    27.50
+#
+# Top-rung throughput: lex 2.9M lines/s, parse 2.9M lines/s, check 0.53M lines/s.
+# #1311 cited Carbon's ~10M lines/s lex and ~1M lines/s semantic check on an M4 as
+# the model. On this box Almide is ~3.4x off on lex and ~1.9x off on check — the
+# distance is recorded, not gated, because it is a number about this machine.

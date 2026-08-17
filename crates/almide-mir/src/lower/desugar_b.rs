@@ -288,20 +288,52 @@ pub fn desugar_offtype_testing_asserts(body: &IrExpr) -> Option<IrExpr> {
             if module.as_str() != "testing" {
                 return;
             }
-            let ok_sig = match func.as_str() {
-                // #1110: the negative polarities share their positive twin's
-                // typed sig — an off-type instantiation must wall, not misread.
-                "assert_some" | "assert_none" => matches!(args.first().map(|a| &a.ty),
-                    Some(Ty::Applied(TypeConstructorId::Option, a))
-                        if a.len() == 1 && matches!(a[0], Ty::String)),
-                "assert_ok" | "assert_err" => matches!(args.first().map(|a| &a.ty),
-                    Some(Ty::Applied(TypeConstructorId::Result, a))
-                        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String)),
+            // The payload-class matrix (#1233, the family rule): these asserts
+            // read ONLY the variant TAG (stdlib/testing_assert.almd — no
+            // payload access), so admissibility is a LAYOUT question, not a
+            // payload-type question.
+            //   Option twins: the 0-or-1-element-list layout's len@4 is the
+            //     tag for EVERY payload class — any Option is admissible.
+            //   Result twins: the LAYOUT follows the Ok side (the C-229
+            //     lesson) — a HEAP-Ok Result is cap-as-tag @16 (the plain
+            //     twin's read), a SCALAR-Ok Result is len-as-tag @4 (the
+            //     `_sc` twin's read). Both err classes ride along unread.
+            // Anything outside those cells (a shape with no layout, e.g. an
+            // unresolved generic) still routes `_x` and walls at render.
+            enum Route {
+                Plain,
+                Scalar,
+                Wall,
+            }
+            let route = match func.as_str() {
+                "assert_some" | "assert_none" => match args.first().map(|a| &a.ty) {
+                    Some(Ty::Applied(TypeConstructorId::Option, a)) if a.len() == 1 => {
+                        Route::Plain
+                    }
+                    _ => Route::Wall,
+                },
+                "assert_ok" | "assert_err" => match args.first().map(|a| &a.ty) {
+                    Some(Ty::Applied(TypeConstructorId::Result, a)) if a.len() == 2 => {
+                        if crate::lower::is_heap_ty(&a[0]) {
+                            Route::Plain
+                        } else {
+                            Route::Scalar
+                        }
+                    }
+                    _ => Route::Wall,
+                },
                 _ => return,
             };
-            if !ok_sig {
-                *func = sym(&format!("{}_x", func.as_str()));
-                self.changed = true;
+            match route {
+                Route::Plain => {}
+                Route::Scalar => {
+                    *func = sym(&format!("{}_sc", func.as_str()));
+                    self.changed = true;
+                }
+                Route::Wall => {
+                    *func = sym(&format!("{}_x", func.as_str()));
+                    self.changed = true;
+                }
             }
         }
     }
@@ -587,211 +619,281 @@ pub fn desugar_tuple_unwrap_or(body: &IrExpr) -> Option<IrExpr> {
         e
     }
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut next = crate::lower::desugar_var_seed();
     let out = rewrite(body.clone(), &mut changed, &mut next);
     changed.then_some(out)
 }
 
-/// `option.unwrap_or(option.map(list.find(xs, λ1), λ2), 32)` — the C-127 PIPED
-/// generic chain. The lambda lift is statement-position-sensitive: the SAME chain
-/// written as source `let`s lowers, while the nested-call form walls its HOF
-/// links. ANF the nested heap-result HOF links into `let` bindings at the
-/// fn/Block TAIL, so the lowering sees the proven decomposed form. Trigger: a
-/// tail Module call carrying a heap-result Module-call argument that
-/// (transitively) takes a Lambda. Call COUNT is preserved (desugar-before-both:
-/// the counting gate sees the same calls, merely let-bound).
-pub(crate) fn desugar_hof_chain_anf(body: &IrExpr) -> Option<IrExpr> {
-    use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
-    fn call_carries_lambda(e: &IrExpr) -> bool {
-        let IrExprKind::Call { args, .. } = &e.kind else { return false };
-        args.iter()
-            .any(|a| matches!(a.kind, IrExprKind::Lambda { .. }) || call_carries_lambda(a))
+/// `carrier ?? f(..)!` over a HEAP (handle-carrying) payload — the `??` whose FALLBACK is an
+/// INLINE propagating unwrap (#1375). The fallback arm lands in the heap arm lowering as a bare
+/// `Unwrap`, whose `e! ≡ e` pass-through is the identity ONLY in a Result-typed arm; here the arm
+/// is PAYLOAD-typed, so the pass-through yielded the fallback's whole `Result` BLOCK where the
+/// merge expects the handle — `json.parse("hi") ?? json.parse("[1,2]")!` printed `true` (the
+/// ok-discriminant read through the Json tag slot) instead of `[1,2]`.
+///
+/// Rewrite to the exact identity, which keeps the fallback CONDITIONAL (hoisting `f(..)!` into a
+/// preceding `let` would evaluate — and propagate — it on the ok path too):
+///
+///   `a ?? f(..)!`  ≡  `(match a { ok($p) => ok($p), err(_) => f(..) })!`
+///   `o ?? f(..)!`  ≡  `(match o { some($p) => ok($p), none => f(..) })!`
+///
+/// Both sides evaluate `a`/`o` once and `f(..)` only on the miss path; the `!` moved OUT of the
+/// arm now sits in the proven `let x = e!` / call-arg-hoist position, and the match itself is the
+/// Result-typed shape the arm pass-through is actually valid for. CALL-COUNT-INVARIANT (the two
+/// operand calls appear exactly once before and after), so `mir == ir` holds without re-counting.
+/// SCALAR payloads keep their own proven `??` route untouched — they never reach the heap arm.
+/// The carrier's HIT/MISS pattern pair for a payload bound to `p`, or `None` when the
+/// operand is neither an `Option[<payload>]` nor a `Result[<payload>, _]`. Shared by the
+/// `?? f(..)!` rewrite below and the route-zoo replacement experiment
+/// (`desugar_unwrap_or_to_match`).
+fn carrier_patterns(
+    carrier: &Ty,
+    payload: &Ty,
+    p: almide_ir::VarId,
+) -> Option<(almide_ir::IrPattern, almide_ir::IrPattern)> {
+    use almide_ir::IrPattern;
+    use almide_lang::types::constructor::TypeConstructorId;
+    let bind = IrPattern::Bind { var: p, ty: payload.clone() };
+    match carrier {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && a[0] == *payload => Some((
+            IrPattern::Ok { inner: Box::new(bind) },
+            IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+        )),
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && a[0] == *payload => {
+            Some((IrPattern::Some { inner: Box::new(bind) }, IrPattern::None))
+        }
+        _ => None,
     }
-    fn needs_anf_arg(a: &IrExpr) -> bool {
-        crate::lower::is_heap_ty(&a.ty)
-            && matches!(&a.kind, IrExprKind::Call { target: CallTarget::Module { .. }, .. })
-            && call_carries_lambda(a)
-    }
-    fn anf_arg(a: &IrExpr, next: &mut u32, binds: &mut Vec<IrStmt>) -> IrExpr {
-        let IrExprKind::Call { target, args, type_args } = &a.kind else {
-            return a.clone();
+}
+
+pub fn desugar_unwrap_or_unwrap_fallback(body: &IrExpr) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn rewrite(e: IrExpr, changed: &mut bool, next: &mut u32) -> IrExpr {
+        let e = e.map_children(&mut |c| rewrite(c, changed, next));
+        let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return e };
+        // `Try` is the frontend auto-`?`; both spellings propagate the same way.
+        let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) = &fallback.kind
+        else {
+            return e;
         };
-        let new_args: Vec<IrExpr> = args
-            .iter()
-            .map(|ia| if needs_anf_arg(ia) { anf_arg(ia, next, binds) } else { ia.clone() })
-            .collect();
-        let rebuilt = IrExpr {
-            kind: IrExprKind::Call {
-                target: target.clone(),
-                args: new_args,
-                type_args: type_args.clone(),
-            },
-            ty: a.ty.clone(),
-            span: a.span.clone(),
-            def_id: a.def_id,
-        };
-        let tmp = VarId(*next);
+        // Formerly HEAP payloads only ("the scalar `??` never reaches the
+        // miscompiling arm") — no longer true since the #1418 match-first
+        // inversion: a SCALAR `a ?? f(..)!` whose match form reaches the
+        // value-position machinery hits the same propagation-arm miscompile
+        // class (#1421, invalid wasm). Rewriting BOTH payload classes to the
+        // `(match …)!` statement-propagation form routes every propagating
+        // fallback through the proven `desugar_let_unwrap` rails instead.
+        // The fallback's `!` must yield EXACTLY the `??`'s own payload type, so `ok($p)` in the
+        // hit arm and `f(..)` in the miss arm are the same `Result[payload, _]`.
+        if !matches!(&inner.ty,
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && a[0] == e.ty)
+        {
+            return e;
+        }
+        let p = almide_ir::VarId(*next);
+        let Some((hit, miss)) = carrier_patterns(&expr.ty, &e.ty, p) else { return e };
         *next += 1;
-        binds.push(IrStmt {
-            kind: IrStmtKind::Bind {
-                var: tmp,
-                mutability: Mutability::Let,
-                ty: a.ty.clone(),
-                value: rebuilt,
-            },
-            span: a.span.clone(),
-        });
-        IrExpr {
-            kind: IrExprKind::Var { id: tmp },
-            ty: a.ty.clone(),
-            span: a.span.clone(),
+        *changed = true;
+        let payload = IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty: e.ty.clone(),
+            span: e.span.clone(),
             def_id: None,
-        }
-    }
-    fn rewrite_tail(e: &IrExpr, next: &mut u32, changed: &mut bool) -> IrExpr {
-        match &e.kind {
-            IrExprKind::Block { stmts, expr } => {
-                let new_tail =
-                    expr.as_deref().map(|t| Box::new(rewrite_tail(t, next, changed)));
-                IrExpr {
-                    kind: IrExprKind::Block { stmts: stmts.clone(), expr: new_tail },
-                    ty: e.ty.clone(),
-                    span: e.span.clone(),
-                    def_id: e.def_id,
-                }
-            }
-            IrExprKind::Call { target: CallTarget::Module { .. }, args, .. }
-                if args.iter().any(needs_anf_arg) =>
-            {
-                *changed = true;
-                let IrExprKind::Call { target, args, type_args } = &e.kind else {
-                    unreachable!()
-                };
-                let mut binds = Vec::new();
-                let new_args: Vec<IrExpr> = args
-                    .iter()
-                    .map(|a| {
-                        if needs_anf_arg(a) {
-                            anf_arg(a, next, &mut binds)
-                        } else {
-                            a.clone()
-                        }
-                    })
-                    .collect();
-                let call = IrExpr {
-                    kind: IrExprKind::Call {
-                        target: target.clone(),
-                        args: new_args,
-                        type_args: type_args.clone(),
+        };
+        // The hit arm RE-WRAPS the payload at the fallback's Result type — the carrier's own
+        // err type never has to join with the fallback's.
+        let rewrapped = IrExpr {
+            kind: IrExprKind::ResultOk { expr: Box::new(payload) },
+            ty: inner.ty.clone(),
+            span: e.span.clone(),
+            def_id: None,
+        };
+        let merged = IrExpr {
+            kind: IrExprKind::Match {
+                subject: expr.clone(),
+                arms: vec![
+                    almide_ir::IrMatchArm { pattern: hit, guard: None, body: rewrapped },
+                    almide_ir::IrMatchArm {
+                        pattern: miss,
+                        guard: None,
+                        body: (**inner).clone(),
                     },
-                    ty: e.ty.clone(),
-                    span: e.span.clone(),
-                    def_id: e.def_id,
-                };
-                IrExpr {
-                    kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(call)) },
-                    ty: e.ty.clone(),
-                    span: e.span.clone(),
-                    def_id: e.def_id,
-                }
-            }
-            _ => e.clone(),
-        }
-    }
-    // C-127 TYPE AUTHORITY: `unwrap_or(o: Option[T], d: T)` type-checks with ONE
-    // T, so the chain payload and the default are the SAME type — but an
-    // under-constrained generic chain leaves the payload UNRESOLVED (`Option[B]`),
-    // which is judged heap and routes the whole chain (and its lambda) down the
-    // heap leg — invalid for the scalar values that actually flow. The default's
-    // type is authoritative (the C-127 contract): DEEP-substitute the unresolved
-    // payload spelling with the default's concrete type across the rewritten
-    // tail. A resolved chain has payload == default, so the substitution is the
-    // identity there.
-    fn subst_ty(t: &Ty, from: &Ty, to: &Ty) -> Ty {
-        use almide_lang::types::constructor::TypeConstructorId as TCI;
-        if t == from {
-            return to.clone();
-        }
-        match t {
-            Ty::Applied(c, args) => Ty::Applied(
-                match c {
-                    TCI::List => TCI::List,
-                    other => other.clone(),
-                },
-                args.iter().map(|a| subst_ty(a, from, to)).collect(),
-            ),
-            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|a| subst_ty(a, from, to)).collect()),
-            Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
-                params: params.iter().map(|a| subst_ty(a, from, to)).collect(),
-                ret: Box::new(subst_ty(ret, from, to)),
+                ],
             },
-            _ => t.clone(),
-        }
-    }
-    fn subst_expr(e: &mut IrExpr, from: &Ty, to: &Ty) {
-        use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
-        struct S<'a> {
-            from: &'a Ty,
-            to: &'a Ty,
-        }
-        impl IrMutVisitor for S<'_> {
-            fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-                e.ty = subst_ty(&e.ty, self.from, self.to);
-                if let IrExprKind::Lambda { params, .. } = &mut e.kind {
-                    for (_, t) in params.iter_mut() {
-                        *t = subst_ty(t, self.from, self.to);
-                    }
-                }
-                walk_expr_mut(self, e);
-            }
-            fn visit_stmt_mut(&mut self, s: &mut almide_ir::IrStmt) {
-                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-                    *ty = subst_ty(ty, self.from, self.to);
-                }
-                walk_stmt_mut(self, s);
-            }
-        }
-        S { from, to }.visit_expr_mut(e);
-    }
-    // Pure guard, no recursion — named so the recursive `tail_unwrap_payload`
-    // match arm below reads as one condition instead of three inlined clauses.
-    fn is_unwrap_or_call(module: almide_lang::intern::Sym, func: almide_lang::intern::Sym, arg_count: usize) -> bool {
-        func.as_str() == "unwrap_or" && matches!(module.as_str(), "option" | "result") && arg_count == 2
-    }
-    // Pure extraction, no recursion — the Option/Result payload ty an `unwrap_or`'s
-    // first arg carries, or None outside those two shapes.
-    fn unwrap_or_payload_ty(arg_ty: &Ty) -> Option<Ty> {
-        use almide_lang::types::constructor::TypeConstructorId as TCI;
-        match arg_ty {
-            Ty::Applied(TCI::Option, a) if a.len() == 1 => Some(a[0].clone()),
-            Ty::Applied(TCI::Result, a) if a.len() == 2 => Some(a[0].clone()),
-            _ => None,
-        }
-    }
-    // Find the (unresolved payload, authoritative default) pair at the Block tail.
-    fn tail_unwrap_payload(e: &IrExpr) -> Option<(Ty, Ty)> {
-        match &e.kind {
-            IrExprKind::Block { expr: Some(t), .. } => tail_unwrap_payload(t),
-            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                if is_unwrap_or_call(*module, *func, args.len()) =>
-            {
-                let d_ty = args[1].ty.clone();
-                let payload = unwrap_or_payload_ty(&args[0].ty)?;
-                (payload != d_ty).then_some((payload, d_ty))
-            }
-            _ => None,
+            ty: inner.ty.clone(),
+            span: e.span.clone(),
+            def_id: e.def_id,
+        };
+        IrExpr {
+            kind: IrExprKind::Unwrap { expr: Box::new(merged) },
+            ty: e.ty.clone(),
+            span: e.span.clone(),
+            def_id: e.def_id,
         }
     }
     let mut changed = false;
-    let mut next = crate::lower::max_var_id(body) + 1;
-    let mut out = rewrite_tail(body, &mut next, &mut changed);
-    if changed {
-        // Substitute across the WHOLE rewritten body — the chain links now live in
-        // the hoisted binds, not inside the tail call's own subtree.
-        if let Some((p, d_ty)) = tail_unwrap_payload(&out) {
-            subst_expr(&mut out, &p, &d_ty);
-        }
-    }
+    let mut next = crate::lower::desugar_var_seed();
+    let out = rewrite(body.clone(), &mut changed, &mut next);
     changed.then_some(out)
 }
 
+
+include!("desugar_b_tail.rs");
+
+
+/// Rewrite a `result.map` / `result.map_err` / `result.flat_map` call whose type
+/// instantiation has NO linked typed twin — [`result_call_name`] answers the deliberately
+/// unlinked `_x` — into the equivalent `match` (#1492's combinator leg):
+///
+///   map:      `match r { ok(v) => ok(f(v)),  err(e) => err(e) }`
+///   map_err:  `match r { ok(v) => ok(v),     err(e) => err(f(e)) }`
+///   flat_map: `match r { ok(v) => f(v),      err(e) => err(e) }`
+///
+/// This is the reference-compiler architecture for combinators (rustc lowers `?` to ONE
+/// generic match; Swift's `??` is a library function; Roc desugars `??` to literally this
+/// match in canonicalization): the combinator is not a special payload-class route, it is
+/// the match the user could have written — and the heap-payload match now lowers. The `f`
+/// argument is used exactly ONCE (no duplication); a non-Var subject is ANF-lifted into a
+/// `let`, the optional-chain desugar's discipline. A twin-linked instantiation is left
+/// untouched (its proven typed path stays byte-identical), and a match shape the lowering
+/// still cannot express walls exactly as the `_x` name did — never worse, usually lowered.
+pub fn desugar_result_combinator_to_match(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, CallTarget, IrMatchArm, IrMutVisitor, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    struct S {
+        changed: bool,
+        next_var: u32,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
+                &e.kind
+            else {
+                return;
+            };
+            if module.as_str() != "result" || args.len() != 2 {
+                return;
+            }
+            let fname = func.as_str().to_string();
+            if !matches!(fname.as_str(), "map" | "map_err" | "flat_map") {
+                return;
+            }
+            let Ty::Applied(TypeConstructorId::Result, ra) = &args[0].ty else { return };
+            if ra.len() != 2 {
+                return;
+            }
+            // Only when the router would emit the unlinked `_x`. Asking the SAME router the
+            // lowering uses keeps the twin-availability logic in exactly one place — the
+            // desugar can never disagree with the dispatch about which cells are linked.
+            let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
+            match result_call_name(&fname, &arg_tys, &e.ty) {
+                Some(n) if n.ends_with("_x") => {}
+                _ => return,
+            }
+            let Ty::Applied(TypeConstructorId::Result, oa) = &e.ty else { return };
+            if oa.len() != 2 {
+                return;
+            }
+            let (a_ty, e_ty) = (ra[0].clone(), ra[1].clone());
+            let (b_ty, e2_ty) = (oa[0].clone(), oa[1].clone());
+            let out_ty = e.ty.clone();
+            let span = e.span.clone();
+            let mk = |kind: IrExprKind, ty: Ty| IrExpr {
+                kind,
+                ty,
+                span: span.clone(),
+                def_id: None,
+            };
+            let r_expr = args[0].clone();
+            let f_expr = args[1].clone();
+            let v = VarId(self.next_var);
+            self.next_var += 1;
+            let w = VarId(self.next_var);
+            self.next_var += 1;
+            let call_f = |payload: IrExpr, ret: Ty| {
+                mk(
+                    IrExprKind::Call {
+                        target: CallTarget::Computed { callee: Box::new(f_expr.clone()) },
+                        args: vec![payload],
+                        type_args: Vec::new(),
+                    },
+                    ret,
+                )
+            };
+            let v_read = mk(IrExprKind::Var { id: v }, a_ty.clone());
+            let w_read = mk(IrExprKind::Var { id: w }, e_ty.clone());
+            let (ok_body, err_body) = match fname.as_str() {
+                "map" => (
+                    mk(
+                        IrExprKind::ResultOk {
+                            expr: Box::new(call_f(v_read, b_ty.clone())),
+                        },
+                        out_ty.clone(),
+                    ),
+                    mk(IrExprKind::ResultErr { expr: Box::new(w_read) }, out_ty.clone()),
+                ),
+                "map_err" => (
+                    mk(IrExprKind::ResultOk { expr: Box::new(v_read) }, out_ty.clone()),
+                    mk(
+                        IrExprKind::ResultErr {
+                            expr: Box::new(call_f(w_read, e2_ty.clone())),
+                        },
+                        out_ty.clone(),
+                    ),
+                ),
+                // flat_map: the ok arm IS the whole result of f.
+                _ => (
+                    call_f(v_read, out_ty.clone()),
+                    mk(IrExprKind::ResultErr { expr: Box::new(w_read) }, out_ty.clone()),
+                ),
+            };
+            let arms = vec![
+                IrMatchArm {
+                    pattern: IrPattern::Ok {
+                        inner: Box::new(IrPattern::Bind { var: v, ty: a_ty.clone() }),
+                    },
+                    guard: None,
+                    body: ok_body,
+                },
+                IrMatchArm {
+                    pattern: IrPattern::Err {
+                        inner: Box::new(IrPattern::Bind { var: w, ty: e_ty.clone() }),
+                    },
+                    guard: None,
+                    body: err_body,
+                },
+            ];
+            // ANF-lift a non-Var subject so the match branches on a tracked bind — the
+            // optional-chain desugar's exact discipline.
+            let (stmts, subject) = if matches!(&r_expr.kind, IrExprKind::Var { .. }) {
+                (Vec::new(), Box::new(r_expr))
+            } else {
+                let s_var = VarId(self.next_var);
+                self.next_var += 1;
+                let subj_ty = r_expr.ty.clone();
+                let bind = IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: s_var,
+                        mutability: almide_ir::Mutability::Let,
+                        ty: subj_ty.clone(),
+                        value: r_expr,
+                    },
+                    span: span.clone(),
+                };
+                (vec![bind], Box::new(mk(IrExprKind::Var { id: s_var }, subj_ty)))
+            };
+            let match_expr = mk(IrExprKind::Match { subject, arms }, out_ty.clone());
+            *e = if stmts.is_empty() {
+                match_expr
+            } else {
+                mk(IrExprKind::Block { stmts, expr: Some(Box::new(match_expr)) }, out_ty)
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false, next_var: crate::lower::desugar_var_seed() };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}

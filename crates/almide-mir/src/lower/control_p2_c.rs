@@ -366,7 +366,7 @@ impl LowerCtx {
         // roll its ops back.
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
-        let mut rollback = |s: &mut Self| {
+        let rollback = |s: &mut Self| {
             s.ops.truncate(ops_mark);
             s.live_heap_handles.truncate(lhh_mark);
         };

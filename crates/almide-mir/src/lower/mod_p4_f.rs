@@ -522,15 +522,17 @@ fn list_call_name_sort_by(arg_tys: &[Ty]) -> Option<String> {
             "list.sort_by_float".to_string()
         });
     }
-    // A STRING-key sort_by over SCALAR elements routes to the cached-key
-    // stable twin (byte-lexicographic via string.cmp — #560/C-055). A HEAP
-    // element still walls (`_x`): the copied handles would need the rc_inc
-    // co-own leg the scalar twin doesn't carry.
+    // A STRING-key sort_by routes to the cached-key stable twin
+    // (byte-lexicographic via string.cmp — #560/C-055). A HEAP element takes
+    // the `_rc` sibling, which ACQUIRES each copied handle so the source and
+    // result lists co-own their elements (#1233) — the raw-copy scalar twin
+    // shares without acquiring and the two deep drops double-free.
     if **ret == Ty::String {
-        if !heap_elem {
-            return Some("list.sort_by_str_key".to_string());
-        }
-        return Some("list.sort_by_str_key_x".to_string());
+        return Some(if heap_elem {
+            "list.sort_by_str_key_rc".to_string()
+        } else {
+            "list.sort_by_str_key".to_string()
+        });
     }
     if heap_elem {
         return Some("list.sort_by_rc".to_string());

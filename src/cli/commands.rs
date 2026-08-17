@@ -127,9 +127,13 @@ fn compile_test_files_parallel(test_files: &[String], no_check: bool) -> Vec<(St
     results
 }
 
+use super::test_report::{report_test_failure, test_harness_args, TestRun};
+
 /// `cmd_test`'s Phase 2: execute every compiled test binary in parallel
-/// (bounded by CPU count). Extracted verbatim.
-fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, String>)>, program_args: &std::sync::Arc<Vec<String>>) -> Vec<(String, i32)> {
+/// (bounded by CPU count). Output is CAPTURED, not inherited: it feeds
+/// [`report_test_failure`], and printing each file's output whole in sorted
+/// order makes a parallel run's transcript deterministic.
+fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, String>)>, program_args: &std::sync::Arc<Vec<String>>) -> Vec<TestRun> {
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -144,19 +148,16 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
         let sem_tx = sem_tx.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
-            let code = match compile_result {
-                Ok(bin) => super::run::run_binary(&bin, &args),
-                Err(e) => {
-                    err(&format!("Compile error for {}:\n{}", file, e));
-                    1
-                }
+            let (code, out) = match compile_result {
+                Ok(bin) => super::run::run_binary_captured(&bin, &args),
+                Err(e) => (1, format!("Compile error for {}:\n{}", file, e)),
             };
             let _ = sem_tx.send(());
-            let _ = tx.send((file, code));
+            let _ = tx.send((file, code, out));
         }));
     }
     drop(tx);
-    let mut results: Vec<(String, i32)> = rx.iter().collect();
+    let mut results: Vec<TestRun> = rx.iter().collect();
     for h in handles { let _ = h.join(); }
     results.sort_by(|a, b| a.0.cmp(&b.0));
     results
@@ -165,11 +166,7 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
-    let mut program_args: Vec<String> = Vec::new();
-    if let Some(filter) = run_filter {
-        program_args.push(filter.to_string());
-    }
-    let program_args = std::sync::Arc::new(program_args);
+    let program_args = test_harness_args(run_filter);
 
     // Phase 1: Compile all test files in parallel (bounded by CPU count)
     let compiled = compile_test_files_parallel(&test_files, no_check);
@@ -178,9 +175,9 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let results = run_test_binaries_parallel(compiled, &program_args);
 
     let mut failed = 0;
-    for (file, code) in &results {
+    for (file, code, output) in &results {
         if *code != 0 {
-            err(&format!("FAILED: {}", file));
+            report_test_failure(file, output);
             failed += 1;
         }
     }
@@ -216,7 +213,7 @@ enum WasmTestOutcome {
 /// early-return order exactly.
 fn wasm_test_preflight_outcome(
     test_file: &str,
-    program: &almide_lang::ast::Program,
+    _program: &almide_lang::ast::Program,
     source_text: &str,
     parse_errors: &[crate::diagnostic::Diagnostic],
 ) -> Option<WasmTestOutcome> {
@@ -613,8 +610,8 @@ fn run_wasm_test_phase(test_files: &[String], tmp_dir: &std::sync::Arc<std::path
 
 /// `cmd_test_fast`'s Phase 2: native rustc fallback (authoritative) for
 /// everything the WASM path didn't pass, parallel with per-file scratch
-/// dirs. Extracted verbatim.
-fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize) -> Vec<(String, i32)> {
+/// dirs. Output is captured — see [`run_test_binaries_parallel`].
+fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize) -> Vec<TestRun> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -631,16 +628,16 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
             let worker_dir = std::env::temp_dir()
                 .join("almide-test")
                 .join(tf.replace('/', "_").replace('.', "_"));
-            let code = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => super::run::run_binary(&bin, &args),
-                Err(e) => { err(&format!("Compile error for {}:\n{}", tf, e)); 1 }
+            let (code, out) = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
+                Ok(bin) => super::run::run_binary_captured(&bin, &args),
+                Err(e) => (1, format!("Compile error for {}:\n{}", tf, e)),
             };
             let _ = st.send(());
-            let _ = tx.send((tf, code));
+            let _ = tx.send((tf, code, out));
         }));
     }
     drop(tx);
-    let mut v: Vec<(String, i32)> = rx.iter().collect();
+    let mut v: Vec<TestRun> = rx.iter().collect();
     for h in handles { let _ = h.join(); }
     v.sort_by(|a, b| a.0.cmp(&b.0));
     v
@@ -690,15 +687,13 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
 
     // Phase 2: native rustc fallback (authoritative) for everything the WASM
     // path didn't pass, parallel with per-file scratch dirs.
-    let mut program_args: Vec<String> = Vec::new();
-    if let Some(f) = run_filter { program_args.push(f.to_string()); }
-    let program_args = std::sync::Arc::new(program_args);
+    let program_args = test_harness_args(run_filter);
 
     let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus);
 
     let mut failed = 0;
-    for (file, code) in &native_results {
-        if *code != 0 { err(&format!("FAILED: {}", file)); failed += 1; }
+    for (file, code, output) in &native_results {
+        if *code != 0 { report_test_failure(file, output); failed += 1; }
     }
     // The #1166 divergence class: the wasm leg compiled the file and failed at
     // runtime, but the AUTHORITATIVE native re-run passed — a wasm-only
@@ -707,7 +702,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     // is native's). A trap whose native re-run ALSO failed is a plain FAILED
     // test — no wasm-specific noise for those.
     let native_code: std::collections::HashMap<&String, i32> =
-        native_results.iter().map(|(f, c)| (f, *c)).collect();
+        native_results.iter().map(|(f, c, _)| (f, *c)).collect();
     let diverged: Vec<&(String, String)> = trapped
         .iter()
         .filter(|(f, _)| native_code.get(f).copied() == Some(0))
@@ -766,18 +761,27 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
         files
     };
 
-    let mut program_args: Vec<String> = Vec::new();
-    if let Some(filter) = run_filter {
-        program_args.push(filter.to_string());
-    }
+    let program_args = test_harness_args(run_filter);
 
+    // JSONL, one line per file, in sorted file order — a run is diffable
+    // against the next one. Each failing file also emits its per-assertion
+    // records ({name, file, line, expected, found, diff}); that is the shape
+    // the dojo harness reads, and the reason `--json` captures the child's
+    // output instead of letting it stream to the terminal (#1313).
     for test_file in &test_files {
-        let code = super::cmd_run_inner(test_file, &program_args, false, true, false, false);
-        // Emit JSON per file
+        let (code, output) = match super::run::compile_to_binary(test_file, false, true, false, None) {
+            Ok(bin) => super::run::run_binary_captured(&bin, &program_args),
+            Err(e) => (1, e),
+        };
+        let source = std::fs::read_to_string(test_file).unwrap_or_default();
+        let failures = super::test_report::parse(test_file, &source, &output);
         let status = if code == 0 { "pass" } else { "fail" };
         out(&format!(
-            r#"{{"file":"{}","status":"{}","exit_code":{}}}"#,
-            test_file.replace('"', r#"\""#), status, code
+            r#"{{"file":{},"status":"{}","exit_code":{},"failures":[{}]}}"#,
+            serde_json::Value::from(test_file.as_str()),
+            status,
+            code,
+            failures.iter().map(|f| f.to_json()).collect::<Vec<_>>().join(","),
         ));
     }
 }
@@ -858,8 +862,51 @@ pub enum FmtMode {
     Write,
     /// Compare only: report each file that is not already formatted, exit 1 if any is.
     Check,
+    /// `Check`, reported as one JSON object on stdout (`--json`). Same gate,
+    /// same exit code — the difference is who reads it. Added for the MCP
+    /// server (`almide mcp`), which must not parse the human report.
+    CheckJson,
     /// Print the formatted text; never write, never fail.
     DryRun,
+}
+
+impl FmtMode {
+    /// True for the two comparing modes — neither writes a file.
+    fn is_check(self) -> bool {
+        matches!(self, FmtMode::Check | FmtMode::CheckJson)
+    }
+}
+
+/// `cmd_fmt`'s `--check` verdict. Text mode prints it to stderr and JSON mode
+/// prints it as one object to stdout; both exit 1 on any drift, so a gate
+/// written against either spelling fails identically.
+fn report_fmt_check(mode: FmtMode, total: usize, unformatted: &[String], unreadable: &[String], verify_failed: bool) {
+    let ok = unformatted.is_empty() && unreadable.is_empty() && !verify_failed;
+    if mode == FmtMode::CheckJson {
+        let report = serde_json::json!({
+            "checked": total,
+            "unformatted": unformatted,
+            "unreadable": unreadable,
+            "verify_failed": verify_failed,
+            "ok": ok,
+        });
+        out(&format!("{}", report));
+        if !ok { std::process::exit(1); }
+        return;
+    }
+    if ok {
+        err(&format!("fmt: {} file(s) already formatted", total));
+        return;
+    }
+    for f in unformatted {
+        err(&format!("not formatted: {}", f));
+    }
+    err(&format!(
+        "fmt --check: {} of {} file(s) need formatting — run `almide fmt <path>`",
+        unformatted.len(),
+        total
+    ));
+    std::process::exit(1);
 }
 
 pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
@@ -868,7 +915,8 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
     // `--check` is a gate: a file that differs, and a file that cannot even be parsed,
     // both make the run fail. Under the other modes a parse error stays a skip.
     let mut unformatted: Vec<String> = Vec::new();
-    let mut unreadable = false;
+    let mut unreadable: Vec<String> = Vec::new();
+    let mut verify_failed = false;
 
     for file in files {
         let (mut program, source_text, parse_errors) = parse_file(file);
@@ -880,7 +928,7 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
                 err(&format!("{}", crate::diagnostic_render::display_with_source(e, &source_text)));
             }
             err(&format!("{}: {} parse error(s), skipping", file, parse_errors.len()));
-            unreadable = true;
+            unreadable.push(file.clone());
             continue;
         }
         // Auto-manage imports: add missing, remove unused. `--no-import-edit`
@@ -893,13 +941,25 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
             }
         }
         let formatted = fmt::format_program(&program);
+        // #1309 safety verifier (Black's --safe model): if formatting would
+        // change the file, the output must re-parse, carry the same AST, and
+        // keep every line comment — otherwise the file is left untouched and
+        // the run fails. A formatter that corrupts is worse than none.
+        if formatted != source_text {
+            if let Err(why) = fmt::verify_format(&source_text, &program, &formatted) {
+                err(&format!("{}: fmt verification failed — {}", file, why));
+                err(&format!("{}: file left untouched (formatter bug — please report)", file));
+                verify_failed = true;
+                continue;
+            }
+        }
         match mode {
             FmtMode::Write => {
                 std::fs::write(file, &formatted)
                     .unwrap_or_else(|e| { err(&format!("Failed to write {}: {}", file, e)); std::process::exit(1); });
                 err(&format!("Formatted {}", file));
             }
-            FmtMode::Check => {
+            FmtMode::Check | FmtMode::CheckJson => {
                 if formatted != source_text {
                     unformatted.push(file.clone());
                 }
@@ -908,22 +968,13 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
         }
     }
 
-    if mode != FmtMode::Check {
+    if verify_failed && !mode.is_check() {
+        std::process::exit(1);
+    }
+    if !mode.is_check() {
         return;
     }
-    if unformatted.is_empty() && !unreadable {
-        err(&format!("fmt: {} file(s) already formatted", files.len()));
-        return;
-    }
-    for f in &unformatted {
-        err(&format!("not formatted: {}", f));
-    }
-    err(&format!(
-        "fmt --check: {} of {} file(s) need formatting — run `almide fmt <path>`",
-        unformatted.len(),
-        files.len()
-    ));
-    std::process::exit(1);
+    report_fmt_check(mode, files.len(), &unformatted, &unreadable, verify_failed);
 }
 
 pub fn cmd_clean() {

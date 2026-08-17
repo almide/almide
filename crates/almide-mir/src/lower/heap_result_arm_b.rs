@@ -171,6 +171,9 @@ impl LowerCtx {
             IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(result_ty) => {
                 self.lower_scalar_ok_variant_err_ctor_arm(arm, result_ty)
             }
+            IrExprKind::ResultErr { .. } if self.is_scalar_ok_rec_err_result(result_ty) => {
+                self.lower_scalar_ok_rec_err_ctor_arm(arm, result_ty)
+            }
             IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
                 if self.is_custom_variant_ok_payload_ty(result_ty) =>
             {
@@ -222,6 +225,20 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         let arm_mark = self.live_heap_handles.len();
         let obj = self.try_lower_result_err_variant_ctor(arm, result_ty)?;
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+    }
+
+    /// The scalar-Ok RECORD-Err ctor arm body — the record twin of
+    /// [`Self::lower_scalar_ok_variant_err_ctor_arm`], same per-arm `"im"` frame.
+    fn lower_scalar_ok_rec_err_ctor_arm(
+        &mut self,
+        arm: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let obj = self.try_lower_result_err_record_ctor(arm, result_ty)?;
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)
@@ -459,11 +476,11 @@ impl LowerCtx {
         // WITHIN this arm; the final message `piece` is MOVED into the Err block (not dropped).
         let arm_mark = self.live_heap_handles.len();
         let piece = self.lower_result_err_message_piece(expr)?;
-        // `Err` IS `Some(message)` physically (cap-1/len-1 DynListStr owning the String):
-        // `piece` is MOVED into slot 0 (removed from live_heap_handles), so the per-arm
-        // teardown frees only the interpolation's intermediates, never the moved-in message.
-        self.live_heap_handles.retain(|h| *h != piece);
-        let obj = self.materialize_opt_str_some(piece, repr);
+        // `Err` block via `materialize_result_err_str` (semantic init, MOVE
+        // contract): the piece is consumed into slot 0 and detached from
+        // live_heap_handles INSIDE the materializer, so the per-arm teardown
+        // frees only the interpolation's intermediates, never the moved message.
+        let obj = self.materialize_result_err_str(piece, repr);
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)

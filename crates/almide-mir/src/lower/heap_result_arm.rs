@@ -115,6 +115,25 @@ impl LowerCtx {
             // `!` and lower `e` as the arm (the same identity the tail-position `e!` uses).
             // `Try` is the frontend auto-`?` — in a Result-typed arm both it and a spelled
             // `!` propagate the inner call's same-repr Result verbatim (the pass-through).
+            // …but ONLY in a RESULT-typed arm. When the arm must yield the PAYLOAD (`result_ty`
+            // IS the arm's own type while `e` is the wrapping Result — the `??`-with-inline-`!`
+            // fallback, #1375) `e! ≡ e` is NOT the identity: passing `e` through leaves the whole
+            // Result BLOCK where the merge expects the payload handle, and the reader picks the
+            // ok-discriminant out of it (`json.parse("hi") ?? json.parse("[1,2]")!` printed
+            // `true`). DECLINE — a silent wrong value is never an acceptable arm value; the
+            // caller rolls back to its own wall, and `desugar_unwrap_or_unwrap_fallback` has
+            // already rewritten the `??` spelling to the `(match … )!` form that DOES execute.
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+                if *result_ty == arm.ty && expr.ty != arm.ty =>
+            {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!(
+                        "[heap-if-arm] declined payload-typed `e!` arm (arm ty {:?}, inner ty {:?})",
+                        arm.ty, expr.ty
+                    )
+                });
+                None
+            }
             IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
                 self.lower_heap_result_arm(expr, result_ty)
             }
@@ -161,10 +180,24 @@ impl LowerCtx {
                 Some(obj)
             }
             IrExprKind::Var { id } => {
-                let src = self.value_for(*id).ok()?;
+                // `value_or_global` (not `value_for`): a MODULE-LEVEL heap global arm
+                // (`if c == 100 then DIGIT else …` — dfa's escape_class table) materializes
+                // the global's initializer as a fresh owned copy, exactly as the
+                // owned-heap-field Var arm already does. The copy is a PER-ARM temp
+                // (materialized inside this branch), so it must free within the arm —
+                // a function-scope drop of it would rc_dec an uninitialized local when
+                // the other arm ran. A plain tracked local takes the value_for fast
+                // path inside value_or_global: no live-set change, the frame is a no-op,
+                // and the emitted ops are byte-identical to before.
+                let arm_mark = self.live_heap_handles.len();
+                let src = match self.value_or_global(*id) {
+                    Ok(v) => v,
+                    Err(_) => return None,
+                };
                 let dst = self.fresh_value();
                 self.ops.push(Op::Dup { dst, src });
                 self.ops.push(Op::Consume { v: dst });
+                self.drop_arm_locals(arm_mark);
                 Some(dst)
             }
             _ => None,
@@ -474,7 +507,7 @@ impl LowerCtx {
         let elements = elements.clone();
         let piece = self.try_lower_tuple_construct(&elements)?;
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_str".to_string());
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)
@@ -542,7 +575,7 @@ impl LowerCtx {
         let elements = elements.clone();
         let piece = self.try_lower_tuple_construct(&elements)?;
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles.insert(obj, "opt_str_int".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_int".to_string());
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)

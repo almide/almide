@@ -65,34 +65,45 @@ fn scenario(which: &str) -> MirFunction {
             ],
             ..Default::default()
         },
-        // prints a scalar (reaches Stdout) AND declares Stdout → within bound,
-        // the capability checker must accept.
+        // prints a string (reaches Stdout via PrintStr — the print real lowering
+        // emits, #1208) AND declares Stdout → within bound, the capability
+        // checker must accept.
         "sandboxed" => MirFunction {
             name: "f".into(),
             ops: vec![
-                Op::Const { dst: a },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Str("hi".into()),
+                },
                 Op::Call {
                     dst: None,
-                    func: RtFn::PrintInt,
-                    args: vec![CallArg::Scalar(a)],
+                    func: RtFn::PrintStr,
+                    args: vec![CallArg::Handle(a)],
                     result: None,
                 },
+                Op::Drop { v: a },
             ],
             declared_caps: vec![Capability::Stdout],
             ..Default::default()
         },
-        // prints a scalar (reaches Stdout) but declares NOTHING → an undeclared
+        // prints a string (reaches Stdout) but declares NOTHING → an undeclared
         // host effect, the capability checker must reject.
         "undeclared" => MirFunction {
             name: "f".into(),
             ops: vec![
-                Op::Const { dst: a },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Str("hi".into()),
+                },
                 Op::Call {
                     dst: None,
-                    func: RtFn::PrintInt,
-                    args: vec![CallArg::Scalar(a)],
+                    func: RtFn::PrintStr,
+                    args: vec![CallArg::Handle(a)],
                     result: None,
                 },
+                Op::Drop { v: a },
             ],
             declared_caps: vec![], // declares no capability
             ..Default::default()

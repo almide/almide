@@ -101,6 +101,10 @@ impl Checker {
     }
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         // Expected-type-directed argument inference (#653). The default is strictly-left-to-right bottom-up inference of every argument. The one place that breaks down is an INFERRED lambda param passed to a higher-order function inside a generic body: `list.map(xs, (e) => e.name())` where `xs: List[T]`, `T: Labelled`. Inferred bottom-up, `e` is a fresh var, so `e.name()` cannot see the protocol bound and collapses `e` into a closure type (`Fn() -> String`) -- the later `(T)->U` constraint can no longer undo that, yielding a spurious native E0308. Fix: resolve the callee's signature up front; as we infer args left-to-right we unify each non-lambda arg against its declared param to learn the generic bindings (`A := T`), then, just before inferring a lambda arg whose param slot is a `Fn`, pin the lambda's (unannotated) params to the substituted expected element type (`T`, carrying the bound). The lambda body then resolves `e.name()` via the protocol path. Calls without a `Fn`-param sig are unaffected -- they take the plain bottom-up path below.
+        // A deprecated callee gets its migration instruction here, once per
+        // call site, before any argument inference can bury it under a
+        // cascade of type errors.
+        self.warn_if_deprecated(callee);
         let call_sig = self.lookup_call_sig(callee);
         let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
@@ -112,6 +116,30 @@ impl Checker {
                     let _ = self.infer_expr(callee);
                 }
                 self.arg_spans = args.iter().map(|a| a.span).collect();
+                // SHADOWING FIRST. A local binding or function PARAMETER of Fn
+                // type is called THROUGH that variable, never as a same-named
+                // top-level fn — the rule `lower/calls_target.rs` already
+                // applies, and value position (`infer_expr_g2_ident`) and
+                // argument position (`infer_calls_closures`) already agree on.
+                // Only the call-callee lookup went to `env.functions` first, so
+                // the checker's TypeMap and the emitted call could name
+                // DIFFERENT functions. Bundled stdlib modules are inferred on
+                // the same `Checker` with the user program's globals still
+                // live, so a user `effect fn f` captured the `f` parameter of
+                // `list.__fallible_flat_map` and typed `ok(bs)`'s payload from
+                // the user's return type: `bs + rest` became
+                // `ConcatStr(String, List[B])` and the IR verifier aborted the
+                // compile (almide#1441). `f` is one of the names a caller is
+                // most likely to pick, and the stdlib's own parameter names
+                // must not be part of a program's namespace.
+                let local_fn_ty = self.env.lookup_var(&name)
+                    .map(|t| resolve_ty(t, &self.uf))
+                    .filter(|t| matches!(t, Ty::Fn { .. }));
+                if let Some(t) = local_fn_ty {
+                    if let Some(ret) = self.call_fn_typed_local(&name, &t, &arg_tys) {
+                        return ret;
+                    }
+                }
                 let ret = self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot);
                 let arg_refs: Vec<&ast::Expr> = args.iter().collect();
                 self.validate_mut_args(&name, &arg_refs);
@@ -245,7 +273,9 @@ impl Checker {
             _ => None,
         };
         if let Some(n) = ctor_name {
-            if let Some((_, case)) = self.env.lookup_ctor(&sym(&n)) {
+            // Owned-first (#1426): the payload consulted for literal context
+            // must be the same case the checker resolved the call against.
+            if let Some((_, case)) = self.env.lookup_ctor_in(&sym(&n), self.current_module_prefix.as_deref()) {
                 if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
                     if let Some(ety) = expected.get(i) {
                         let ety = ety.clone();
@@ -580,34 +610,44 @@ impl Checker {
     }
 
     // Try resolving `name(...)` as a variant constructor or a callable
-    // variable — the two success paths of `check_unresolved_named_call`.
+     /// Type a call THROUGH a Fn-typed local binding (a `let`, or a function
+    /// PARAMETER). `None` when the name's local is not a function.
+    fn call_fn_typed_local(&mut self, name: &str, ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
+        let Ty::Fn { is_effect, params, ret } = ty else { return None };
+        arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
+            self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
+        });
+        // #1055: calling an `effect (A) -> B` VALUE is an effect call —
+        // it needs the effect permission and yields the effect carrier
+        // `Result[B, String]`, so `h(x)!` propagates exactly like a
+        // named effect-fn call.
+        if *is_effect {
+            if !self.env.can_call_effect {
+                self.emit(super::err(
+                    format!("cannot call effect function value `{}` from a pure context", name),
+                    "Mark the enclosing function as `effect fn`".to_string(),
+                    format!("call to {}()", name)).with_code("E006"));
+            }
+            return Some(Ty::result(ret.as_ref().clone(), Ty::String));
+        }
+        Some(ret.as_ref().clone())
+    }
+
+   // variable — the two success paths of `check_unresolved_named_call`.
     // Returns `None` when neither claims the name, so the caller falls
     // through to the undefined-function diagnostic.
     fn try_unresolved_call_ctor_or_var(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
-        if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+        // Owned-first + ambiguity report (#1426): the same resolution and the
+        // same E019 the TypeName value path (infer_expr_type_name) applies.
+        if let Some((type_name, case)) = self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref()) {
+            self.report_ambiguous_ctor(name);
             self.check_constructor_args(name, &case, arg_tys);
             let generic_args = self.instantiate_type_generics(type_name.as_str());
             return Some(Ty::Named(type_name, generic_args));
         }
         let ty = self.env.lookup_var(name).cloned()?;
-        if let Ty::Fn { is_effect, params, ret } = &ty {
-            arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
-                self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
-            });
-            // #1055: calling an `effect (A) -> B` VALUE is an effect call —
-            // it needs the effect permission and yields the effect carrier
-            // `Result[B, String]`, so `h(x)!` propagates exactly like a
-            // named effect-fn call.
-            if *is_effect {
-                if !self.env.can_call_effect {
-                    self.emit(super::err(
-                        format!("cannot call effect function value `{}` from a pure context", name),
-                        "Mark the enclosing function as `effect fn`".to_string(),
-                        format!("call to {}()", name)).with_code("E006"));
-                }
-                return Some(Ty::result(ret.as_ref().clone(), Ty::String));
-            }
-            return Some(ret.as_ref().clone());
+        if let Some(ret) = self.call_fn_typed_local(name, &ty, arg_tys) {
+            return Some(ret);
         }
         // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.
         let rty = resolve_ty(&ty, &self.uf);
@@ -690,7 +730,8 @@ impl Checker {
             diag = diag.with_try(rich.to_string());
         } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
             // Almide `Span::end_col` is the column one past the last char (same convention as lexer emit — `end_col = col + token_len`). `apply_try_to` wants the exclusive upper bound, so use `end_col` directly.
-            diag = diag.with_try_replace(span.line, span.col, span.end_col, fix.clone());
+            // SUGGESTION, not machine-applicable (#1312): the replacement comes from an edit distance over the visible names. It compiles, and it may well call the wrong function — that is a choice only the author can make.
+            diag = diag.with_suggested_fix(span.line, span.col, span.end_col, fix.clone());
         } else if let Some(fix) = &fix_name {
             // Fallback: no span available — fall back to the comment-headed display form.
             diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));

@@ -80,7 +80,7 @@ impl LowerCtx {
 
         // SUBSTITUTE the state-param MEMBER projections with two synthetic vars; any OTHER
         // use of the state param declines (a bare `st` / spread would need the record block).
-        let acc_var = VarId(crate::lower::max_var_id(body) + 1);
+        let acc_var = VarId(crate::lower::desugar_var_seed());
         let n_var = VarId(acc_var.0 + 1);
         let body = substitute_state_members(body, state_param, list_fname, acc_var, scalar_fname, n_var)?;
         let (stmts, tail_list, tail_scalar) = parse_record_fold_body(&body, list_fname, scalar_fname)?;
@@ -101,7 +101,7 @@ impl LowerCtx {
             self.lower_record_fold_body_and_tail(stmts, tail_list, tail_scalar)?;
 
         if list_elem_str {
-            self.heap_elem_lists.insert(new_list);
+            self.value_drops.entry(new_list).or_default().flat_elems = true;
         }
         let drop_old = self.drop_op_for(list_slot);
         self.ops.push(drop_old);
@@ -189,7 +189,7 @@ impl LowerCtx {
             init: crate::Init::DynList { len: zero_len },
         });
         if list_elem_str {
-            self.heap_elem_lists.insert(list_slot);
+            self.value_drops.entry(list_slot).or_default().flat_elems = true;
         }
 
         let scalar_slot = self.fresh_value();
@@ -313,7 +313,7 @@ impl LowerCtx {
                             if a.len() == 1 && matches!(a[0], Ty::String))
                         {
                             self.materialized_lists.insert(dst);
-                            self.heap_elem_lists.insert(dst);
+                            self.value_drops.entry(dst).or_default().flat_elems = true;
                         }
                         true
                     }
@@ -371,7 +371,7 @@ impl LowerCtx {
         // literal in the fold's init guarantees the generator collected this record type.
         match self.record_or_anon_drop_type_name(result_ty) {
             Some(name) => {
-                self.variant_drop_handles.insert(dst, name);
+                self.value_drops.entry(dst).or_default().named_route = Some(name);
             }
             None => {
                 self.record_masks.insert(dst, vec![list_idx]);

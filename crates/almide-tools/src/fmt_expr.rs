@@ -1,3 +1,53 @@
+thread_local! {
+    /// #1404: the expression-comment bindings for the program being formatted.
+    ///
+    /// A thread_local rather than a parameter because `fmt_expr` has ~70 call
+    /// sites across this file and `fmt.rs`, and threading a map through all of
+    /// them is exactly the kind of mechanical edit where ONE missed site drops
+    /// a comment silently — the failure this feature exists to prevent. Scoped
+    /// by `with_expr_comments` so it can never outlive one format run, and the
+    /// crate already uses this idiom (`bundled_borrow_at`'s per-fn cache).
+    static EXPR_COMMENTS: std::cell::RefCell<std::collections::HashMap<ExprId, ExprComments>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Run `f` with `map` installed as the active expression-comment table, then
+/// restore. Nested calls are not expected, but restoring rather than clearing
+/// keeps one format run from blanking another's table if they ever are.
+pub(crate) fn with_expr_comments<R>(map: &std::collections::HashMap<ExprId, ExprComments>, f: impl FnOnce() -> R) -> R {
+    let prev = EXPR_COMMENTS.with(|c| c.replace(map.clone()));
+    let r = f();
+    EXPR_COMMENTS.with(|c| *c.borrow_mut() = prev);
+    r
+}
+
+/// The comments bound to `id`, if any.
+fn comments_for(id: ExprId) -> Option<ExprComments> {
+    EXPR_COMMENTS.with(|c| c.borrow().get(&id).cloned())
+}
+
+fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
+    // #1404: a bound comment brackets its node's rendering, on the side it was
+    // written. Both go inline — a leading one before the node, a trailing one
+    // after — because that is where the author put them and fmt is
+    // idempotent-by-contract: re-reading this output must re-attach them to the
+    // same node.
+    let attached = comments_for(expr.id);
+    if let Some(a) = &attached {
+        for c in &a.leading {
+            out.push_str(c);
+            out.push(' ');
+        }
+    }
+    fmt_expr_inner(out, expr, depth);
+    if let Some(a) = &attached {
+        for c in &a.trailing {
+            out.push(' ');
+            out.push_str(c);
+        }
+    }
+}
+
 /// Render an expression.
 ///
 /// Split into five EXHAUSTIVE groups by shape — leaf, wrapper (a fixed prefix or
@@ -10,7 +60,7 @@
 /// it any other way (a wildcard `_` in each group) would have silently shrunk
 /// the formatter's coverage — the one thing this function must not do, since a
 /// missing arm means source that fmt drops.
-fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
+fn fmt_expr_inner(out: &mut String, expr: &Expr, depth: usize) {
     let handled = fmt_expr_leaf(out, expr)
         || fmt_expr_wrapper(out, expr, depth)
         || fmt_expr_infix(out, expr, depth)
@@ -28,8 +78,21 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
 fn fmt_expr_leaf(out: &mut String, expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Int { raw, .. } => out.push_str(raw),
-        ExprKind::Float { value, .. } => fmt_expr_float(out, *value),
-        ExprKind::String { value, .. } => fmt_expr_string(out, value),
+        // A literal that CAME FROM SOURCE reprints its own spelling (#1261,
+        // #1263). Reprinting from the value normalized `1e10` to
+        // `10000000000.0`, dropped the `_` from `1_000.25`, turned
+        // `"\u{3042}"` into a bare `あ`, collapsed heredocs to one quoted
+        // line — and rendered `1e999` as `inf.0`, which does not parse, so
+        // fmt turned a valid file into an invalid one. The value is
+        // untouched: this is a printing change only.
+        ExprKind::Float { value, raw } => match raw {
+            Some(r) => out.push_str(r),
+            None => fmt_expr_float(out, *value),
+        },
+        ExprKind::String { value, raw } => match raw {
+            Some(r) => out.push_str(r),
+            None => fmt_expr_string(out, value),
+        },
         ExprKind::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         ExprKind::Unit => out.push_str("()"),
         ExprKind::None => out.push_str("none"),
@@ -135,10 +198,23 @@ fn fmt_expr_infix(out: &mut String, expr: &Expr, depth: usize) -> bool {
 /// shape-axis as leaf/wrapper/infix.)
 fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
     match &expr.kind {
-        ExprKind::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
+        // Same source-spelling rule as the plain String leaf. An interpolated
+        // heredoc reprints as a heredoc, and `"\u{3042}${x}"` keeps its
+        // escape. Any tool that REWRITES an expression inside a `${…}` hole
+        // must call `ast::strip_literal_raw` first — otherwise the verbatim
+        // reprint would drop the rewrite.
+        ExprKind::InterpolatedString { parts, raw } => match raw {
+            Some(r) => fmt_istring_raw(out, r, parts, depth),
+            None => fmt_istring_parts(out, parts, depth),
+        },
         ExprKind::Tuple { elements, .. } => {
             out.push('(');
             comma_sep(out, elements, |out, e| fmt_expr(out, e, depth));
+            // A 1-tuple's trailing comma is load-bearing: `(e,)` is a tuple,
+            // `(e)` is grouping — dropping it changes the program (#1265).
+            if elements.len() == 1 {
+                out.push(',');
+            }
             out.push(')');
         }
         ExprKind::List { elements, .. } => fmt_list(out, elements, depth),
@@ -483,6 +559,99 @@ fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
             c => out.push(c),
         }
     }
+}
+
+/// Reprint an interpolated literal from its verbatim source spelling, but
+/// RE-FORMAT the code inside each `${…}` hole.
+///
+/// The literal runs must survive byte-for-byte — that is the whole point of
+/// `raw` (quote style, heredoc form, `\u{3042}` escapes: #1261/#1263). A hole
+/// is not a literal run though, it is CODE, and a formatter that stops
+/// normalizing code the moment it sits inside a string has a blind spot
+/// exactly where interpolation-heavy Almide lives (`"${ a  +  b }"` would
+/// stay crooked forever). So the raw is copied verbatim everywhere except at
+/// the holes, which are re-rendered through `fmt_expr`.
+///
+/// **Heredoc and raw-string forms are copied whole.** A heredoc's value is
+/// computed by stripping the COMMON leading indent of its lines, so a hole
+/// that re-renders across lines can change the strip amount — i.e. change the
+/// string's value. Not re-formatting is a cosmetic loss; changing a value is a
+/// miscompile, so the conservative direction wins for those two forms.
+///
+/// The hole scan mirrors `parse_interpolation_parts` exactly: `\\` and `\$`
+/// arrive as undecoded pairs and never open a hole, and a nested string
+/// literal inside a hole is consumed atomically by the lexer's own scanner
+/// (shared, so the two walks can never disagree on where a literal ends). If
+/// the counts still disagree — the parse-error recovery path turns a bad hole
+/// into a `Lit` — the whole raw is copied verbatim: losing a re-format is
+/// safe, splicing an expression into the wrong hole is not.
+fn fmt_istring_raw(out: &mut String, raw: &str, parts: &[StringPart], depth: usize) {
+    if raw.starts_with("\"\"\"") || raw.starts_with('r') {
+        out.push_str(raw);
+        return;
+    }
+    let exprs: Vec<&Expr> = parts
+        .iter()
+        .filter_map(|p| match p {
+            StringPart::Expr { expr } => Some(&**expr),
+            StringPart::Lit { .. } => None,
+        })
+        .collect();
+    let chars: Vec<char> = raw.chars().collect();
+    let mut buf = String::new();
+    let mut i = 0usize;
+    let mut next = 0usize;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && (chars[i + 1] == '\\' || chars[i + 1] == '$') {
+            buf.push(chars[i]);
+            buf.push(chars[i + 1]);
+            i += 2;
+        } else if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+            let Some(expr) = exprs.get(next) else { out.push_str(raw); return };
+            next += 1;
+            i = skip_interpolation_hole(&chars, i);
+            buf.push_str("${");
+            fmt_expr(&mut buf, expr, depth);
+            buf.push('}');
+        } else {
+            buf.push(chars[i]);
+            i += 1;
+        }
+    }
+    if next == exprs.len() { out.push_str(&buf); } else { out.push_str(raw); }
+}
+
+/// Advance past one `${…}` hole, `start` sitting on the `$`. Brace-depth scan
+/// with nested string literals consumed atomically — the same walk the parser
+/// runs in `parse_interpolation_expr_part`.
+///
+/// One difference the parser does not have to care about: it walks the DECODED
+/// template, this walks the RAW, so a nested literal may arrive either bare
+/// (`"${f("ab")}"`) or backslash-escaped (`"${v ?? \"?\"}"`). An escape pair is
+/// therefore skipped WHOLE before the quote test — otherwise the `"` of a `\"`
+/// opens a nested-literal scan that runs off the end of the hole and swallows
+/// the literal's own closing delimiter.
+fn skip_interpolation_hole(chars: &[char], start: usize) -> usize {
+    let mut i = start + 2;
+    let mut depth = 1usize;
+    let mut scratch = String::new();
+    while i < chars.len() && depth > 0 {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if chars[i] == '"' || chars[i] == '\'' {
+            i = almide_lang::lexer::scan_nested_string_literal(chars, i, &mut scratch);
+            continue;
+        }
+        if chars[i] == '{' { depth += 1; }
+        if chars[i] == '}' {
+            depth -= 1;
+            if depth == 0 { break; }
+        }
+        i += 1;
+    }
+    i + 1
 }
 
 fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {

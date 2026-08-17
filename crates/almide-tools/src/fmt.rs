@@ -471,6 +471,12 @@ fn collect_module_refs_stmt(stmt: &Stmt, used: &mut std::collections::HashSet<St
 }
 
 pub fn format_program(program: &Program) -> String {
+    // #1404: install this program's expression-comment bindings for the whole
+    // render, so every nested `fmt_expr` can bracket its node.
+    with_expr_comments(&program.expr_comments, || format_program_inner(program))
+}
+
+fn format_program_inner(program: &Program) -> String {
     let mut out = String::new();
     let cm = &program.comment_map;
     let mut ci = 0;
@@ -480,13 +486,39 @@ pub fn format_program(program: &Program) -> String {
         }
         *idx += 1;
     };
+    // The dialect stamp sits above everything, which is also where the parser
+    // demands it. Emitted before the module header and before any comment
+    // slot is consumed: the stamp is not a declaration and owns no
+    // comment_map index, so printing it here leaves the parser's positional
+    // comment order (module?, imports…, decls…) exactly as it was.
+    if let Some(stamp) = program.dialect {
+        wln!(out, "@dialect({})", stamp.epoch);
+    }
+    // #1323: a legacy `module` header parses into `decls[0]`, but the grammar
+    // requires it to PRECEDE every import — so emitting `decls` after `imports`
+    // sank it below them and the output no longer parsed. It also owns
+    // comment_map slot 0 (the parser's positional order is module?, imports…,
+    // decls…), so the module must consume that slot here; otherwise the first
+    // import reprints the file header and the module is left bare.
+    let module_header = match program.decls.first() {
+        Some(d @ Decl::Module { .. }) => Some(d),
+        _ => None,
+    };
+    let header = usize::from(module_header.is_some());
+    if let Some(module) = module_header {
+        emit_comments(&mut out, &mut ci);
+        fmt_decl(&mut out, module, 0);
+        out.push('\n');
+    }
     for imp in &program.imports {
-        if !out.is_empty() && ci == 0 { out.push('\n'); }
+        // Blank line before the FIRST import only — separating it from the
+        // module header above it, when there is one.
+        if !out.is_empty() && ci == header { out.push('\n'); }
         emit_comments(&mut out, &mut ci);
         fmt_decl(&mut out, imp, 0);
         out.push('\n');
     }
-    for decl in &program.decls {
+    for decl in program.decls.iter().skip(header) {
         // The blank line SEPARATES declarations — so it belongs before every one except the
         // first thing in the file. Emitting it unconditionally opened every import-less file
         // with a blank line (#919: the leading-blank diff on every such spec fixture), which
@@ -505,6 +537,103 @@ pub fn format_program(program: &Program) -> String {
         }
     }
     out
+}
+
+// ── Post-format safety verifier (#1309, Black's `--safe` model) ──────────
+
+/// Verify that formatting preserved the program: the output must (1) still
+/// parse, (2) carry the same AST (`Program`'s `Serialize` skips comments and
+/// positions, so the comparison is pure structure), and (3) keep every
+/// comment — `//` and `/* */` both lex as Comment tokens since #1318.
+/// `program` is the exact value `format_program` rendered — after any
+/// `auto_imports` mutation — so intentional import edits verify clean.
+///
+/// Comments sitting INLINE mid-expression (`f(1 /* x */, 2)`, a `// why`
+/// trailing an operator before a continuation line) are legal to parse but
+/// not yet attachable by fmt — this check makes fmt REFUSE such files
+/// loudly instead of deleting the comment (#1326 tracks attachment).
+pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> Result<(), String> {
+    use almide_lang::lexer::{Lexer, TokenType};
+    use almide_lang::parser::Parser;
+
+    let tokens = Lexer::tokenize(formatted);
+    let mut parser = Parser::new(tokens);
+    let reparsed = match parser.parse() {
+        Ok(p) if parser.errors.is_empty() => p,
+        Ok(_) => {
+            return Err(format!(
+                "formatted output has {} parse error(s), first: {}",
+                parser.errors.len(),
+                parser.errors[0].display()
+            ))
+        }
+        Err(e) => return Err(format!("formatted output no longer parses: {e}")),
+    };
+
+    let before = serde_json::to_value(program).map_err(|e| e.to_string())?;
+    let after = serde_json::to_value(&reparsed).map_err(|e| e.to_string())?;
+    if before != after {
+        return Err(format!(
+            "AST changed by formatting at {}",
+            first_divergence(&before, &after, String::from("$"))
+        ));
+    }
+
+    let count_comments = |s: &str| {
+        Lexer::tokenize(s)
+            .iter()
+            .filter(|t| t.token_type == TokenType::Comment)
+            .count()
+    };
+    let b = count_comments(original_src);
+    let a = count_comments(formatted);
+    if a < b {
+        return Err(format!("{} comment(s) would be lost ({b} → {a})", b - a));
+    }
+    Ok(())
+}
+
+/// The first JSON path where the two ASTs diverge — makes a verifier failure
+/// report point at the construct instead of dumping two trees.
+fn first_divergence(a: &serde_json::Value, b: &serde_json::Value, path: String) -> String {
+    use serde_json::Value::{Array, Object};
+    let show = |v: &serde_json::Value| {
+        let s = v.to_string();
+        if s.chars().count() > 80 {
+            format!("{}…", s.chars().take(80).collect::<String>())
+        } else {
+            s
+        }
+    };
+    match (a, b) {
+        (Object(ma), Object(mb)) => {
+            for (k, va) in ma {
+                match mb.get(k) {
+                    Some(vb) if va != vb => return first_divergence(va, vb, format!("{path}.{k}")),
+                    Option::None => return format!("{path}.{k} (removed)"),
+                    _ => {}
+                }
+            }
+            for k in mb.keys() {
+                if !ma.contains_key(k) {
+                    return format!("{path}.{k} (added)");
+                }
+            }
+            path
+        }
+        (Array(va), Array(vb)) => {
+            for (i, (x, y)) in va.iter().zip(vb).enumerate() {
+                if x != y {
+                    return first_divergence(x, y, format!("{path}[{i}]"));
+                }
+            }
+            if va.len() != vb.len() {
+                return format!("{path} (length {} → {})", va.len(), vb.len());
+            }
+            path
+        }
+        _ => format!("{path}: {} → {}", show(a), show(b)),
+    }
 }
 
 /// Render a generic `@name(args)` attribute back to source. Mirrors
@@ -628,7 +757,6 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(n) = names { w!(out, ".{{{}}}", join_syms(n, ", ")); }
             if let Some(a) = alias { w!(out, " as {a}"); }
         }
-        Decl::Strict { mode, .. } => w!(out, "{i}strict \"{mode}\""),
         Decl::Type { .. } => fmt_decl_type(out, decl, depth),
         Decl::TopLet { .. } => fmt_decl_top_let(out, decl, depth),
         Decl::Fn { .. } => fmt_decl_fn(out, decl, depth),

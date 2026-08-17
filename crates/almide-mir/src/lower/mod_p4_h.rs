@@ -162,8 +162,19 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// C-145 registry miss walled every `or_else` instantiation, and the same miss in
 /// `is_self_host_option_module_fn` left a `match` over a mono-specialized
 /// `option.collect` result UNTRACKED, walling the whole function.
+///
+/// #1144: a carrier name may itself BEGIN with `__` (the ADR-0006
+/// `__fallible_*` family — `fs.__fallible_fold_lines`). The mono suffix is a
+/// `__` strictly INSIDE the name, so the split must start AFTER a leading
+/// `__`; splitting at offset 0 returned the empty string, and every name-keyed
+/// decision (registry routing, read-shape tracking) then missed silently —
+/// walling the whole fn instead of routing it.
 pub(crate) fn base_stdlib_fn_name(func: &str) -> &str {
-    func.split_once("__").map_or(func, |(base, _)| base)
+    let lead = if func.starts_with("__") { 2 } else { 0 };
+    match func[lead..].split_once("__") {
+        Some((base, _)) => &func[..lead + base.len()],
+        None => func,
+    }
 }
 
 pub(crate) fn list_heap_call_name(
@@ -229,6 +240,22 @@ fn list_heap_call_name_special_cases(
     // `_ls` (fold_lines_range, the collect_partition shape). Any other
     // accumulator type routes to an unregistered `_x` name and walls cleanly
     // at render — never a wrong-typed link.
+    // #1144 (C-274): the ADR-0006 fallible carrier the checker rewrites
+    // `fs.fold_lines(p, z, (a, l) => g(a, l)!)` into. It routes on the SAME
+    // accumulator key as the total form — `Map[String, Int]` to the `_msi`
+    // fallible walker (fs_fold_lines.almd), every other accumulator to an
+    // unregistered `_x` name that walls at render rather than mislinking.
+    if module == "fs" && func == "__fallible_fold_lines" {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let msi_acc = matches!(arg_tys.get(1),
+            Some(Ty::Applied(TC::Map, a)) if a.len() == 2
+                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+        return Some(if msi_acc {
+            "fs.__fallible_fold_lines_msi".to_string()
+        } else {
+            "fs.__fallible_fold_lines_x".to_string()
+        });
+    }
     if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range") {
         use almide_lang::types::constructor::TypeConstructorId as TC;
         let init_idx = match func { "fold_lines" => 1, "fold_lines_chunked" => 2, _ => 3 };
@@ -237,10 +264,23 @@ fn list_heap_call_name_special_cases(
                 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
         let ls_acc = matches!(arg_tys.get(init_idx),
             Some(Ty::Applied(TC::List, a)) if a.len() == 1 && matches!(a[0], Ty::String));
+        // The Int accumulator (#1233 — the chunked error-path shape
+        // `fold_lines_chunked(p, w, 0, (acc, line) => acc)`) routes to the
+        // `_i` twin; its `Result[List[Int], String]` payload class rides the
+        // fan.map precedent (cap-as-tag @16, flat DropListStr — a List[scalar]
+        // block frees flat). The remaining family cells (fold_lines int acc,
+        // range int acc, non-String-element lists, …) stay `_x`-walled until
+        // their twins land — never a wrong-typed link.
+        let int_acc = matches!(arg_tys.get(init_idx), Some(Ty::Int));
         return Some(if msi_acc && func != "fold_lines_range" {
             format!("fs.{func}_msi")
-        } else if ls_acc && func == "fold_lines_range" {
+        } else if ls_acc && func != "fold_lines" {
+            // `fold_lines_range` (the original cell) and `fold_lines_chunked`
+            // (#1233) share the `_ls` twin shape; `fold_lines`'s own List[String]
+            // cell has no twin yet and stays `_x`-walled.
             format!("fs.{func}_ls")
+        } else if int_acc && func == "fold_lines_chunked" {
+            format!("fs.{func}_i")
         } else {
             format!("fs.{func}_x")
         });
@@ -373,6 +413,27 @@ fn option_call_name_closure_result_repr(func: &str, arg_tys: &[Ty], result_ty: &
             } else {
                 Some("option.to_result__custom_e_heap_payload".to_string())
             }
+        }
+        // Everything the rows above did not claim falls through to the
+        // REGISTRY's base body, which is the `(o: Int?, msg: String)` form:
+        // its `e` param is a String HANDLE and its err arm copies string
+        // bytes. That body is therefore correct for `E = String` and for
+        // nothing else — but the fall-through was type-blind, so:
+        //   * a SCALAR E (Int/Float/Bool, the sized ints) passed an i64 into
+        //     an i32 handle param and the module failed wasm VALIDATION —
+        //     `almide check` accepted, native built, and the artifact was
+        //     invalid (#1431, the acceptance-gap class);
+        //   * a heap NON-String E (List/Map/Bytes) matched the i32 repr but
+        //     had its block read as string bytes — the same silent corruption
+        //     the custom-E row above names for variants.
+        // Route both to a name the registry does not serve so the unlinked-
+        // callee wall fires: an honest refusal on the wasm leg instead of a
+        // broken artifact. (`Result[<scalar>, <scalar>]` is not renderable on
+        // this leg anyway — the hand-written `match o { some(v) => ok(v),
+        // none => err(e) }` walls on the untracked-subject rule — so there is
+        // no twin to write here yet; the walled-real baseline names it.)
+        "to_result" if !matches!(arg_tys.get(1), Some(Ty::String)) => {
+            Some("option.to_result__unsupported_e".to_string())
         }
         "unwrap_or_else" if is_heap_ty(result_ty) => {
             Some("option.unwrap_or_else_h".to_string())

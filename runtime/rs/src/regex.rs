@@ -382,21 +382,26 @@ pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
     results
 }
 
+/// Index 0 is the WHOLE match, 1.. are the groups — the shape every mainstream
+/// regex API uses (Rust `Captures::get(0)`, Python `m.group(0)`, JS `match[0]`,
+/// PCRE), and the one `docs/stdlib/regex.md` always documented. The groups-only
+/// return this replaced made `caps[1]` silently mean the SECOND group to anyone
+/// carrying the universal habit over (almide#1432).
+///
+/// `None` now means exactly one thing: the pattern did not match. It previously
+/// also came back for a pattern with NO groups, conflating "matched nothing to
+/// capture" with "did not match" — with a full match at index 0 that case has a
+/// real answer, `some([whole])`.
 pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
     let rx = rx_compile(pat);
-    if rx.ncap == 0 { return None; }
     let chars: Vec<char> = s.chars().collect();
-    if let Some((_, _, caps)) = rx_find_at(&rx, &chars, 0) {
-        let result: Vec<String> = caps.iter().map(|c| {
-            match c {
-                Some((start, end)) => chars[*start..*end].iter().collect(),
-                None => String::new(),
-            }
-        }).collect();
-        Some(result)
-    } else {
-        None
-    }
+    let (mstart, mend, caps) = rx_find_at(&rx, &chars, 0)?;
+    let mut result = vec![chars[mstart..mend].iter().collect::<String>()];
+    result.extend(caps.iter().map(|c| match c {
+        Some((start, end)) => chars[*start..*end].iter().collect(),
+        None => String::new(),
+    }));
+    Some(result)
 }
 
 #[cfg(test)]
@@ -419,9 +424,22 @@ mod tests {
         assert_eq!(almide_regex_find(r"a{2,3}", "caaaab"), Some("aaa".to_string()));
         assert_eq!(
             almide_regex_captures(r"(\d{4})-(\d{2})-(\d{2})", "on 2026-03-09."),
-            Some(vec!["2026".to_string(), "03".to_string(), "09".to_string()])
+            Some(vec![
+                "2026-03-09".to_string(),
+                "2026".to_string(),
+                "03".to_string(),
+                "09".to_string(),
+            ])
         );
         assert_eq!(almide_regex_replace(r"o{2}", "foo book", "0"), "f0 b0k");
+        // No groups: `none` means "did not match", so a matching group-less
+        // pattern answers its whole match rather than being indistinguishable
+        // from a miss (almide#1432).
+        assert_eq!(
+            almide_regex_captures(r"b+", "aabbb!"),
+            Some(vec!["bbb".to_string()])
+        );
+        assert_eq!(almide_regex_captures(r"z+", "aabbb!"), None);
         // Grouped repetition
         assert!(almide_regex_full_match(r"(ab){2}", "abab"));
         assert!(!almide_regex_full_match(r"(ab){2}", "ab"));
@@ -471,7 +489,7 @@ mod tests {
         assert_eq!(almide_regex_replace("a|", "abc", "-"), "--b-c-");
         assert_eq!(
             almide_regex_captures("(a|)", "b"),
-            Some(vec![String::new()])
+            Some(vec![String::new(), String::new()])
         );
     }
 }

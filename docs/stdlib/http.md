@@ -20,7 +20,9 @@ http.serve(3000, (req) => http.response(200, "ok"))
 
 ### `http.response(status: Int, body: String) -> HttpResponse`
 
-Create a plain text HTTP response with status code
+Create a plain text HTTP response with status code. Seeds
+`Content-Type: text/plain` — the signature gives the caller no other way to
+name one.
 
 ```almd
 http.response(200, "Hello!")
@@ -36,7 +38,9 @@ http.json(200, json.stringify(data))
 
 ### `http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse`
 
-Create a response with custom headers
+Create a response with EXACTLY the given headers, in map order. Unlike
+`response` / `json` it seeds nothing — pass `"Content-Type"` yourself when you
+want one (ALS-R7, contract C-275).
 
 ```almd
 http.with_headers(200, body, ["Content-Type": "text/html"])
@@ -68,7 +72,9 @@ let text = http.body(resp)
 
 ### `http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse`
 
-Set a header on a response
+Set a header on a response. Field names are case-insensitive (RFC 9110 §5.1),
+so this replaces the existing field's value whatever spelling it was stored
+under — a response never carries two entries for one field name.
 
 ```almd
 http.set_header(resp, "X-Custom", "value")
@@ -76,7 +82,9 @@ http.set_header(resp, "X-Custom", "value")
 
 ### `http.get_header(resp: HttpResponse, key: String) -> Option[String]`
 
-Get a header value from a response
+Get a header value from a response; `none` when the field is absent. The
+lookup is case-insensitive, so `"content-type"` and `"Content-Type"` are the
+same field.
 
 ```almd
 let ct = http.get_header(resp, "Content-Type")

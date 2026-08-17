@@ -51,8 +51,45 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.heap_elem_lists.insert(obj);
-        self.materialized_options.insert(obj);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
+        obj
+    }
+
+    /// `err(<heap message/payload>)` for a SCALAR-or-Unit-Ok Result (`Result[Int, String]`,
+    /// `Result[Unit, String]`, the variant-err classes) — the len-as-tag Err block
+    /// (len@4 = 1, payload handle @12) that `materialize_opt_str_some` has always built
+    /// ("Err IS Some physically"), PLUS the Ok/Err tag at @16 (result-family-from-type
+    /// Phase 1): the 8-byte payload store zero-extends the handle so @16 was always 0;
+    /// writing 1 there makes the block SUPERSET-compatible — len-as-tag readers still
+    /// read len@4 (unchanged), and cap-as-tag readers (@16) now read Err correctly. The
+    /// scalar-Ok twin (`materialize_result_ok`) already leaves @16 = 0 for a Unit Ok
+    /// (payload 0), so after this fn the ctor-built `Result[Unit, String]` blocks are
+    /// BYTE-IDENTICAL to the prim-render family ($write_text_file: Ok len0/@12=0/tag0,
+    /// Err len1/@12=msg/tag1) — the one type-to-layout collision in the system, gone.
+    /// Cert: identical to `materialize_opt_str_some` (Alloc `i` + payload move-in `m`);
+    /// the tag store is an opaque prim op the checker ignores. Tracking: Result-only
+    /// (`materialized_results` + `heap_elem_lists` — the flat DropListStr frees the @12
+    /// message on Err, nothing on a len-0 Ok; NEVER `materialized_options`, the
+    /// binds_p4_b_b.rs:116 both-flags bug class).
+    pub(crate) fn materialize_result_err_str(&mut self, piece: ValueId, repr: crate::Repr) -> ValueId {
+        // ONE semantic `Alloc { init: ResErrStr }` (the result-family-from-type
+        // "desugar once" slice): the wasm render expands it to the len-as-tag Err
+        // block WITH the @16 tag riding the payload slot's high half; the native
+        // leg maps it 1:1 onto `PrimKind::ResMakeErrStr` in native_result_rewrite
+        // (a total single-op match — the fragile producer-window recognition this
+        // materializer kept breaking is retired).
+        //
+        // MOVE contract (the Init's documented ownership): the piece is consumed
+        // into slot 0 — the same `i…m` pair the retired window carried, so the
+        // native leg's kept Alloc/Consume accounting and the wasm block bytes are
+        // both unchanged.
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::ResErrStr { piece } });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultScalar);
         obj
     }
 
@@ -85,8 +122,8 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.variant_drop_handles.insert(obj, format!("optrec:{drop_fn}"));
-        self.materialized_options.insert(obj);
+        self.value_drops.entry(obj).or_default().named_route = Some(format!("optrec:{drop_fn}"));
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
 
@@ -113,8 +150,8 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
         self.ops.push(Op::Consume { v: piece });
         self.live_heap_handles.retain(|h| *h != piece);
-        self.variant_drop_handles.insert(obj, "list_int_str".to_string());
-        self.materialized_options.insert(obj);
+        self.value_drops.entry(obj).or_default().named_route = Some("list_int_str".to_string());
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
 
@@ -125,8 +162,8 @@ impl LowerCtx {
         self.ops.push(Op::ConstInt { dst: zero, value: 0 });
         let obj = self.fresh_value();
         self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: zero } });
-        self.heap_elem_lists.insert(obj);
-        self.materialized_options.insert(obj);
+        self.value_drops.entry(obj).or_default().flat_elems = true;
+        self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
     }
 
@@ -234,6 +271,13 @@ impl LowerCtx {
                 self.try_lower_concat_list(expr)
             }
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                // A registered variant CTOR is NOT a wasm fn — a plain `CallFn "Cls"` renders
+                // as a dangling unlinked call. Build the tagged block inline instead (the
+                // same guard `lower_named_call_heap_field` carries); its decline stays a
+                // decline (never a dangling call).
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+                    return self.try_lower_variant_ctor(expr);
+                }
                 let lowered = self.lower_call_args(args).ok()?;
                 let pr = repr_of(&expr.ty).ok()?;
                 let p = self.fresh_value();
@@ -288,11 +332,11 @@ impl LowerCtx {
         // A Value-Ok Result (`Result[Value, String]`) drops via the recursive `Op::DropResultValue`
         // (Ok → `$__drop_value`); a String-Ok Result via the flat `DropListStr` (rc_dec the String).
         if value_ok {
-            self.value_result_results.insert(obj);
+            self.value_drops.entry(obj).or_default().value_result = true;
         } else {
-            self.heap_elem_lists.insert(obj);
+            self.value_drops.entry(obj).or_default().flat_elems = true;
         }
-        self.materialized_results_str.insert(obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultHeapOk);
         obj
     }
 
@@ -328,8 +372,8 @@ impl LowerCtx {
         let tag = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: tag, value: if is_err { 1 } else { 0 } });
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![off16, tag] });
-        self.variant_drop_handles.insert(obj, format!("resrec:{drop_fn}"));
-        self.materialized_results_str.insert(obj);
+        self.value_drops.entry(obj).or_default().named_route = Some(format!("resrec:{drop_fn}"));
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultHeapOk);
         obj
     }
 }

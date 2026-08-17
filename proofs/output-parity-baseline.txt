@@ -66,6 +66,7 @@ spec/wasm_cross/append_accumulator_heap.almd
 spec/wasm_cross/args_surface.almd
 spec/wasm_cross/assert_abort_eq.almd
 spec/wasm_cross/assert_abort_msg.almd
+spec/wasm_cross/assert_abort_multiline.almd
 spec/wasm_cross/assert_abort_ne.almd
 spec/wasm_cross/assign_alias_rc.almd
 spec/wasm_cross/autotry_construction.almd

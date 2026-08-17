@@ -3,10 +3,47 @@
 
 use almide_lang::ast;
 use almide_lang::ast::ExprKind;
+use almide_base::diagnostic::Applicability;
 use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeConstructorId, VariantPayload};
 use super::types::{resolve_ty, FixHint, IfArm};
 use super::Checker;
+
+/// One `object.field` → stdlib-call rewrite for E013 (`xs.head` →
+/// `list.first(xs)`). `args_tpl` is a tiny `("{0}", 1)`-style mini-language:
+/// `{0}` is substituted with the object's source slice, any trailing text
+/// goes verbatim. `display_suffix` is comment-only info shown when no source
+/// span is available and the snippet degrades to display-only.
+struct MemberRewrite {
+    field: &'static str,
+    fn_name: &'static str,
+    args_tpl: &'static str,
+    display_suffix: &'static str,
+    /// #1312. `MachineApplicable` **only** where the call yields the same
+    /// type the field access denoted — `xs.length` and `list.len(xs)` are
+    /// both `Int`, so the rewrite is a pure re-spelling. The
+    /// Option-returning cells turn `T` into `Option[T]`, which the
+    /// surrounding code did not ask for, so they stay suggestions: applying
+    /// one unattended would move the error instead of closing it.
+    applicability: Applicability,
+}
+
+const LIST_MEMBER_REWRITES: &[MemberRewrite] = &[
+    MemberRewrite { field: "head",   fn_name: "list.first", args_tpl: "({0})",    display_suffix: "  // returns Option[T]", applicability: Applicability::MaybeIncorrect },
+    MemberRewrite { field: "tail",   fn_name: "list.drop",  args_tpl: "({0}, 1)", display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "length", fn_name: "list.len",   args_tpl: "({0})",    display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "len",    fn_name: "list.len",   args_tpl: "({0})",    display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "first",  fn_name: "list.first", args_tpl: "({0})",    display_suffix: "", applicability: Applicability::MaybeIncorrect },
+    MemberRewrite { field: "last",   fn_name: "list.last",  args_tpl: "({0})",    display_suffix: "", applicability: Applicability::MaybeIncorrect },
+    MemberRewrite { field: "size",   fn_name: "list.len",   args_tpl: "({0})",    display_suffix: "", applicability: Applicability::MachineApplicable },
+];
+
+const STRING_MEMBER_REWRITES: &[MemberRewrite] = &[
+    MemberRewrite { field: "length", fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "len",    fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "size",   fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "chars",  fn_name: "string.to_chars", args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
+];
 
 impl Checker {
     pub(crate) fn infer_expr(&mut self, expr: &mut ast::Expr) -> Ty {
@@ -39,7 +76,7 @@ impl Checker {
         // emitted `<lit>f32` would be rustc's "literal out of range for f32".
         // Only such literals are queued (cheap pre-filter); magnitude is
         // sign-symmetric so a negated parent needs no flag.
-        if let ExprKind::Float { value } = &expr.kind {
+        if let ExprKind::Float { value, .. } = &expr.kind {
             if value.is_finite() && (*value as f32).is_infinite() {
                 self.deferred_float_overflow_checks.push(super::FloatOverflowSite {
                     expr_id: expr.id, value: *value, context_ty: None, span: expr.span,
@@ -409,10 +446,11 @@ impl Checker {
                 self.env.import_table.mark_used(mod_name);
                 return Some(let_ty);
             }
-            // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
-            if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
-                let resolved_mod = self.env.import_table.resolve(mod_name)
-                    .unwrap_or(sym(mod_name));
+            // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc.
+            // Owner-filtered (#1426): resolve inside the named module alone.
+            let resolved_mod = self.env.import_table.resolve(mod_name)
+                .unwrap_or(sym(mod_name));
+            if let Some((type_name, case)) = self.env.lookup_ctor_owned(&sym(field), resolved_mod.as_str()) {
                 let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
                 if self.env.types.contains_key(&sym(&qualified)) {
                     self.type_map.insert(object.id, Ty::Unit);
@@ -476,8 +514,12 @@ impl Checker {
                      To unwrap first: `?? fallback`, or `match` on some/none.", f = field, inner = inner_display),
             format!("field access .{}", field),
         ).with_code("E013");
+        // SUGGESTION, not machine-applicable (#1312): `?.` yields
+        // `Option[field]` where the surrounding code asked for the field
+        // itself, so applying it moves the problem one expression out.
+        // Unwrapping (`??`, `match`) is the other legal reading.
         if let (Some(span), Some(obj_src)) = (member_span, object.span.and_then(|s| self.source_slice(s))) {
-            diag = diag.with_try_replace(
+            diag = diag.with_suggested_fix(
                 span.line, span.col, span.end_col,
                 format!("{}?.{}", obj_src, field),
             );
@@ -503,9 +545,11 @@ impl Checker {
             hint,
             format!("field access .{}", field),
         ).with_code("E013");
+        // SUGGESTION: the field name came from an edit distance over the
+        // record's roster — a plausible neighbour, not a known intent.
         if let (Some(close), Some(span)) = (&suggestion, member_span) {
             if let Some(obj_src) = object.span.and_then(|s| self.source_slice(s)) {
-                diag = diag.with_try_replace(
+                diag = diag.with_suggested_fix(
                     span.line, span.col, span.end_col,
                     format!("{}.{}", obj_src, close),
                 );
@@ -524,33 +568,13 @@ impl Checker {
         concrete: &Ty,
         member_span: Option<crate::ast::Span>,
     ) {
-    // (field → (module_fn, args_template, display_suffix))
-    // `args_template` is a tiny `("{0}", 1)`-style mini-
-    // language: `{0}` is substituted with the object's
-    // source slice; any trailing text goes verbatim.
-    // `display_suffix` is comment-only info shown after
-    // the mechanical replacement (e.g. the Option[T]
-    // reminder for `head`).
-    let module_and_subs: Option<(&str, Vec<(&str, &str, &str, &str)>)> = match &concrete {
-        Ty::Applied(TypeConstructorId::List, _) => Some(("list", vec![
-            ("head",   "list.first", "({0})", "  // returns Option[T]"),
-            ("tail",   "list.drop",  "({0}, 1)", ""),
-            ("length", "list.len",   "({0})", ""),
-            ("len",    "list.len",   "({0})", ""),
-            ("first",  "list.first", "({0})", ""),
-            ("last",   "list.last",  "({0})", ""),
-            ("size",   "list.len",   "({0})", ""),
-        ])),
-        Ty::String => Some(("string", vec![
-            ("length", "string.len",      "({0})", ""),
-            ("len",    "string.len",      "({0})", ""),
-            ("size",   "string.len",      "({0})", ""),
-            ("chars",  "string.to_chars", "({0})", ""),
-        ])),
+    let module_and_subs: Option<(&str, &[MemberRewrite])> = match &concrete {
+        Ty::Applied(TypeConstructorId::List, _) => Some(("list", LIST_MEMBER_REWRITES)),
+        Ty::String => Some(("string", STRING_MEMBER_REWRITES)),
         _ => None,
     };
     if let Some((module, subs)) = module_and_subs {
-        let matched = subs.iter().find(|(n, _, _, _)| n == field).cloned();
+        let matched = subs.iter().find(|r| r.field == field.as_str());
         let hint = if matched.is_some() {
             format!(
                 "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
@@ -567,7 +591,7 @@ impl Checker {
             hint,
             format!("field access .{}", field),
         ).with_code("E013");
-        if let Some((_, fn_name, args_tpl, _display_suffix)) = matched {
+        if let Some(rule) = matched {
             // Mechanical rewrite: substitute the object's
             // source text into `args_tpl`. `member_span`
             // now covers the full `object.field` (parser
@@ -579,20 +603,23 @@ impl Checker {
                 .and_then(|s| self.source_slice(s))
                 .and_then(|obj_src| {
                     let span = member_span?;
-                    let args = args_tpl.replace("{0}", &obj_src);
-                    Some((span, format!("{}{}", fn_name, args)))
+                    let args = rule.args_tpl.replace("{0}", &obj_src);
+                    Some((span, format!("{}{}", rule.fn_name, args)))
                 });
             if let Some((span, snippet)) = rewrite {
-                diag = diag.with_try_replace(
-                    span.line, span.col, span.end_col,
-                    snippet,
-                );
+                // #1312: the per-cell applicability decides whether
+                // `almide fix` may apply this unattended.
+                diag = if rule.applicability.is_machine_applicable() {
+                    diag.with_machine_fix(span.line, span.col, span.end_col, snippet)
+                } else {
+                    diag.with_suggested_fix(span.line, span.col, span.end_col, snippet)
+                };
             } else {
                 let display = format!(
                     "{}{}{}",
-                    fn_name,
-                    args_tpl.replace("{0}", "xs"),
-                    _display_suffix,
+                    rule.fn_name,
+                    rule.args_tpl.replace("{0}", "xs"),
+                    rule.display_suffix,
                 );
                 diag = diag.with_try(display);
             }
@@ -610,6 +637,25 @@ impl Checker {
                 let concrete = resolve_ty(&obj_ty, &self.uf);
                 match &concrete {
                     Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(),
+                    // Out of range on a KNOWN tuple: a check-time error, never a
+                    // silent `Unknown` (#1266 — the Unknown sailed through check
+                    // and died at build as a [COMPILER BUG] banner that told the
+                    // user their own type error was ours).
+                    Ty::Tuple(elems) => {
+                        self.emit(
+                            super::err(
+                                format!(
+                                    "tuple index .{index} is out of range for {} (valid: .0 through .{})",
+                                    concrete.display(),
+                                    elems.len() - 1
+                                ),
+                                format!("the tuple has {} element(s)", elems.len()),
+                                "tuple index",
+                            )
+                            .with_code("E045"),
+                        );
+                        Ty::Unknown
+                    }
                     // Object's type is still an open inference var (e.g. a
                     // fresh lambda param yet to be bound by its call site).
                     // Park a fresh result var and resolve it once the
@@ -625,7 +671,22 @@ impl Checker {
                         self.deferred_tuple_indices.push((obj_ty, *index, result.clone()));
                         result
                     }
-                    _ => Ty::Unknown,
+                    // An object that already failed to type keeps its silence —
+                    // the upstream error owns the report, a second one is noise.
+                    Ty::Unknown => Ty::Unknown,
+                    // `.k` on a concrete NON-tuple (`n.0` over Int): the other
+                    // half of #1266, also a check-time error now.
+                    other => {
+                        self.emit(
+                            super::err(
+                                format!("tuple index .{index} on non-tuple type {}", other.display()),
+                                "only tuple values support positional .k access",
+                                "tuple index",
+                            )
+                            .with_code("E045"),
+                        );
+                        Ty::Unknown
+                    }
                 }
     }
 
@@ -718,7 +779,8 @@ impl Checker {
         object_id: almide_lang::ast::ExprId,
         object_span: Option<almide_lang::ast::Span>,
     ) {
-        if mod_name.as_str() != "list" || self.hof_rewritten_calls.contains(&object_id) {
+        let module = mod_name.as_str();
+        if !matches!(module, "list" | "fs") || self.hof_rewritten_calls.contains(&object_id) {
             return;
         }
         let name = field.as_str();
@@ -729,33 +791,52 @@ impl Checker {
                 None => return,
             },
         };
-        if !matches!(
-            core,
-            "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each"
-        ) {
+        // #1144: the fs streaming walkers carry the same carriers, so they need
+        // the same "not a spelling" guard — `fs.__fallible_fold_lines` must be
+        // as unwritable as `list.__fallible_map`.
+        let known = match module {
+            "list" => matches!(
+                core,
+                "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each"
+            ),
+            _ => matches!(core, "fold_lines" | "for_each_line"),
+        };
+        if !known {
             return;
         }
-        let rewrite = if core == "fold" {
-            "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string()
-        } else {
-            format!("list.{}(xs, (x) => f(x)!)!", core)
+        let rewrite = match (module, core) {
+            ("list", "fold") => "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string(),
+            ("list", _) => format!("list.{}(xs, (x) => f(x)!)!", core),
+            (_, "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
+            _ => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
         };
         let (msg, hint) = if internal {
             (
                 format!(
-                    "list.{name} is an internal carrier, not a spelling — source may not name it (ADR-0006)"
+                    "{module}.{name} is an internal carrier, not a spelling — source may not name it (ADR-0006)"
                 ),
-                format!(
-                    "{rewrite}\n        \
-                     `__fallible_{core}` is what the checker instantiates FOR you when the callback \
-                     propagates; writing it by hand is the second spelling `try_{core}`'s \
-                     removal was meant to end."
-                ),
+                // The `list` carriers are what `try_*` left behind, so their
+                // hint names that history; the fs carriers (#1144) never had a
+                // public `try_` name and only ever existed as a desugar target.
+                if module == "list" {
+                    format!(
+                        "{rewrite}\n        \
+                         `__fallible_{core}` is what the checker instantiates FOR you when the callback \
+                         propagates; writing it by hand is the second spelling `try_{core}`'s \
+                         removal was meant to end."
+                    )
+                } else {
+                    format!(
+                        "{rewrite}\n        \
+                         `__fallible_{core}` is the desugar TARGET the checker instantiates FOR you \
+                         when the callback propagates — one blessed spelling per combinator, never two."
+                    )
+                },
             )
         } else {
             (
                 format!(
-                    "list.{name} was removed — the core HOF is fallibility-polymorphic (ADR-0006)"
+                    "{module}.{name} was removed — the core HOF is fallibility-polymorphic (ADR-0006)"
                 ),
                 format!(
                     "{rewrite}\n        \
@@ -764,7 +845,7 @@ impl Checker {
                 ),
             )
         };
-        let mut d = crate::diagnostic::Diagnostic::error(msg, hint, format!("call to list.{name}"))
+        let mut d = crate::diagnostic::Diagnostic::error(msg, hint, format!("call to {module}.{name}"))
             .with_code("E043");
         d.file = self.source_file.clone();
         if let Some(sp) = object_span {

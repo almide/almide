@@ -1,6 +1,5 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
-use crate::ast::ExprKind;
 use crate::intern::{Sym, sym};
 use super::Parser;
 
@@ -187,9 +186,6 @@ impl Parser {
         if self.check(TokenType::Var) {
             return Some(self.parse_top_let(Visibility::Public, true));
         }
-        if self.check(TokenType::Strict) {
-            return Some(self.parse_strict_decl());
-        }
         if self.check(TokenType::Test) {
             return Some(self.parse_test_decl());
         }
@@ -234,6 +230,9 @@ impl Parser {
         let tok = self.current();
         let (line, col, token_type, value) =
             (tok.line, tok.col, tok.token_type.clone(), tok.value.clone());
+        if token_type == TokenType::Unknown {
+            return self.unknown_char_error(&value, line, col);
+        }
         if let Some(result) = self.check_hint(None, super::hints::HintScope::TopLevel) {
             let msg = result.message.as_deref().unwrap_or("Unexpected token at top level");
             return format!("{} at line {}:{}\n  Hint: {}", msg, line, col, result.hint);
@@ -500,13 +499,6 @@ impl Parser {
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
         Ok(ProtocolMethod { name, params, return_type, effect })
-    }
-
-    fn parse_strict_decl(&mut self) -> Result<Decl, String> {
-        let span = self.current_span();
-        self.expect(TokenType::Strict)?;
-        let mode = self.expect_ident()?.to_string();
-        Ok(Decl::Strict { mode, span: Some(span) })
     }
 
     fn parse_test_where_def(&mut self) -> Result<Decl, String> {

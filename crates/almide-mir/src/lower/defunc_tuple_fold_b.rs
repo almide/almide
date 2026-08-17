@@ -110,14 +110,14 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         let DefuncLambda { params, body } = lambda;
         use crate::{IntOp, PrimKind};
-        use almide_lang::types::constructor::TypeConstructorId;
-        use almide_ir::{BinOp, IrPattern, IrStmtKind};
+        
+        use almide_ir::{BinOp, IrPattern};
         let (p_var, found_var) = plan_opt_tuple_fold(params, body, init, result_ty)?;
         let acc_var = params[0].0;
         let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
         let IrExprKind::Block { expr: Some(tail), .. } = &body.kind else { return None };
         // Synthetic vars standing for the tag/payload locals inside projected trees.
-        let base = crate::lower::max_var_id(body).max(crate::lower::max_var_id(init)) + 1;
+        let base = crate::lower::desugar_var_seed();
         let ft = VarId(base);
         let fv = VarId(base + 1);
 
@@ -398,7 +398,7 @@ impl LowerCtx {
         acc: OptFoldAcc,
         slots: OptFoldSlots,
     ) -> Option<()> {
-        let OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } = acc;
+        let OptFoldAcc { acc: acc_var, found: found_var, found_tag: _ft, found_val: fv } = acc;
         let OptFoldSlots { scalar: s0, tag: tloc, val: vloc } = slots;
         use almide_ir::IrPattern;
         match &e.kind {

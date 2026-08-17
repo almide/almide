@@ -27,6 +27,7 @@ mod builtin_calls;
 mod static_dispatch;
 mod solving;
 mod diagnostics;
+mod deprecation_warn;
 mod exhaustiveness;
 
 use almide_lang::ast;
@@ -34,7 +35,7 @@ use almide_base::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
 use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeEnv};
-use types::{TyVarId, Constraint, FixHint, UnionFind, resolve_ty};
+use types::{Constraint, FixHint, UnionFind, resolve_ty};
 
 /// Print a compiler trace line when the named debug channel is switched on.
 ///
@@ -375,7 +376,7 @@ pub(crate) fn float_literal_chain(value: &crate::ast::Expr) -> Option<(crate::as
     let mut cur = value;
     loop {
         match &cur.kind {
-            ExprKind::Float { value: v } => return Some((cur.id, *v)),
+            ExprKind::Float { value: v, .. } => return Some((cur.id, *v)),
             ExprKind::Paren { expr } => cur = expr,
             ExprKind::Unary { op, operand, .. } if op.as_str() == "-" => cur = operand,
             _ => return None,
@@ -576,23 +577,6 @@ impl Checker {
     pub(crate) fn fresh_var(&mut self) -> Ty {
         let id = self.uf.fresh();
         Ty::TypeVar(sym(&format!("?{}", id)))
-    }
-
-    /// Let-polymorphism: instantiate で TypeVar("?N") を fresh var に置換
-    /// 同じ let binding を2回参照する時、各参照で独立した型変数を使う
-    pub(crate) fn instantiate_ty(&mut self, ty: &Ty) -> Ty {
-        let mut mapping: std::collections::HashMap<u32, TyVarId> = std::collections::HashMap::new();
-        self.instantiate_inner(ty, &mut mapping)
-    }
-
-    fn instantiate_inner(&mut self, ty: &Ty, mapping: &mut std::collections::HashMap<u32, TyVarId>) -> Ty {
-        // Inference variables (?N) must NOT be freshened — they need to stay
-        // linked to the original constraint.
-        if matches!(ty, Ty::TypeVar(name) if name.starts_with('?')) {
-            return ty.clone();
-        }
-        // Recursively instantiate all children
-        ty.map_children_mut(&mut |child| self.instantiate_inner(child, mapping))
     }
 
     pub(crate) fn constrain(&mut self, expected: Ty, actual: Ty, context: impl Into<String>) {
@@ -857,6 +841,8 @@ impl Checker {
     /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
     /// Skips import table building and declaration registration — inference only.
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // #1311 front-end phase accounting (no-op unless `--timings`).
+        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
         // ADR-0006 D1 (#1108): record every fn DECLARED `-> T!` before
         // resolution erases the marker, so a named callback argument's
         // fallibility bit is known at HOF call sites.
@@ -899,6 +885,7 @@ impl Checker {
                         prefix: None,
                         span: span.as_ref(),
                         visibility: *visibility,
+                        attrs: &[],
                     },
                 );
             }

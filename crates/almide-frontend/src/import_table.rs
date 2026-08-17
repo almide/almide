@@ -156,7 +156,43 @@ pub fn build_import_table(
         table.accessible.insert(sym(m));
     }
 
+    // E050: a selectively-imported name (`import json.{parse}`) and a local
+    // top-level `fn parse` are one bare name with two resolutions — the
+    // checker preferred the local fn while lowering preferred the import, so
+    // a call type-checked against one function and executed the other
+    // (almide#1425). The collision is a hard error at table-build time, so
+    // neither resolver can ever see the split.
+    check_selective_import_fn_collisions(prog, &table, &mut diagnostics);
+
     (table, diagnostics)
+}
+
+/// E050: reject a top-level `fn` whose bare name is also selectively
+/// imported. `@extern` re-exports keep E012's exemption — the name appearing
+/// twice is their design.
+fn check_selective_import_fn_collisions(
+    prog: &ast::Program,
+    table: &ImportTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for decl in &prog.decls {
+        let ast::Decl::Fn { name, span, extern_attrs, .. } = decl else { continue };
+        if !extern_attrs.is_empty() { continue; }
+        let Some(module) = table.direct.get(&sym(name)) else { continue };
+        let mut diag = Diagnostic::error(
+            format!("local fn '{}' collides with selective import '{}.{{{}}}'", name, module, name),
+            format!(
+                "Rename the local fn, or drop '{}' from the import list and call '{}.{}' qualified. A bare call must have exactly one meaning.",
+                name, module, name
+            ),
+            format!("fn {}", name),
+        ).with_code("E050");
+        if let Some(s) = span {
+            diag.line = Some(s.line);
+            diag.col = Some(s.col);
+        }
+        diagnostics.push(diag);
+    }
 }
 
 /// Process one `import` declaration into `table`/`diagnostics`: canonical-name

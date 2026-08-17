@@ -131,6 +131,35 @@ fn fp16_bits_to_f32(raw: u16) -> f32 {
     f32::from_bits(bits)
 }
 
+// ── The dequantization-zero ruling (#1358, C-229) ──
+//
+// A quantized element is `magnitude × direction`: the block's fp16 scale
+// carries the magnitude, the Q1_0 sign bit / Q8_0 int8 quant the direction.
+// When the element's magnitude is zero the bytes encode NO direction, so the
+// sign IEEE-754 hands back is an artifact of how the arithmetic was SPELLED,
+// not of the data — `-scale` yields -0.0 exactly where `0.0 - scale` yields
+// +0.0, and that is how this file and the self-hosted wasm decoder in
+// stdlib/matrix_activations.almd drifted apart on an all-zero block.
+//
+// RULING: a dequantized element of zero magnitude is `+0.0` — the same zero the
+// rest of the surface already produces (the OOB→zeros row, the
+// non-multiple-cols guard, `vec![0.0; _]`). Non-zero elements are untouched:
+// this only ever rewrites the sign of a zero.
+//
+// This is NOT the question `from_bytes_f16_le`/`_f32_le`/`_f64_le` answer: there
+// a -0.0 is the STORED DATUM and its sign is information, so it survives on both
+// targets. The ruling covers dequantization PRODUCTS only.
+#[inline]
+fn dq_zero(v: f64) -> f64 {
+    // -0.0 == 0.0, so this maps -0.0 → +0.0 and leaves every other value
+    // (including NaN, which compares unequal to 0.0) bit-for-bit alone.
+    if v == 0.0 {
+        0.0
+    } else {
+        v
+    }
+}
+
 pub fn almide_rt_matrix_from_q1_0_bytes(
     data: &Vec<u8>,
     offset: i64,
@@ -146,11 +175,29 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     let off = offset.max(0) as usize;
     let mut flat = Vec::<f64>::with_capacity(total);
     let num_blocks = total / 128;
+    // Per-ROW OOB->zeros, the edge C-229 gave the row-subset twin. This loop had
+    // no bound at all, so a rows/cols pair asking for more blocks than the buffer
+    // holds indexed straight past it and died with a raw slice panic (exit 101,
+    // the form ALS-T6 forbids) where the wasm self-host read its linear memory
+    // and answered. `blocks_per_row` is exact because `cols` is a 128-multiple by
+    // construction, so a row always starts on a block boundary.
+    let blocks_per_row = (cols_u / 128).max(1);
+    let row_bytes = blocks_per_row * 18;
     for b in 0..num_blocks {
         let block_start = off + b * 18;
+        let row_of_block = b / blocks_per_row;
+        if off + row_of_block * row_bytes + row_bytes > data.len() {
+            for _ in 0..128 {
+                flat.push(0.0);
+            }
+            continue;
+        }
         let scale_raw = (data[block_start] as u16) | ((data[block_start + 1] as u16) << 8);
-        let scale = fp16_bits_to_f32(scale_raw) as f64;
-        let neg_scale = -scale;
+        // Every element of this block is one of these two values, so applying
+        // the dequantization-zero ruling to the pair settles the whole block —
+        // per block, not per weight.
+        let scale = dq_zero(fp16_bits_to_f32(scale_raw) as f64);
+        let neg_scale = dq_zero(-scale);
         let bits_start = block_start + 2;
         for i in 0..128usize {
             let byte = data[bits_start + (i >> 3)];
@@ -192,6 +239,7 @@ pub fn almide_rt_matrix_rope_rotate_at(
     let cols = if rows == 0 { 0 } else { x[0].len() };
     let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
+    almide_rt_matrix_head_geometry(n_heads_u, head_dim_u, rows, cols);
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
@@ -203,7 +251,12 @@ pub fn almide_rt_matrix_rope_rotate_at(
     for p in 0..rows {
         let pos_f = (start + p) as f64;
         let row = &x[p];
-        let mut new_row = vec![0.0f64; cols];
+        // #1419: non-pair elements COPY THROUGH (the documented behavior, and
+        // what the self-hosted body always did) — a zeros init silently zeroed
+        // every column past `n_heads * head_dim` while wasm kept the input
+        // (`0.0` vs `1.0`, both legs exit 0: the silent-wrong class). Exact
+        // geometry writes every column, so this is invisible there.
+        let mut new_row = row.to_vec();
         for h in 0..n_heads_u {
             let head_start = h * head_dim_u;
             for i in 0..half {
@@ -404,12 +457,20 @@ pub fn almide_rt_matrix_select_rows_q1_0(
         let r = rid.max(0) as usize;
         let row_off = off + r * n_blocks * 18;
         let mut row = vec![0.0f64; cols_u];
+        // OOB row → the all-zero row (the family's defined edge), never an
+        // unchecked byte index.
+        if row_off + n_blocks * 18 > data.len() {
+            out.push(row);
+            continue;
+        }
         for b in 0..n_blocks {
             let block_start = row_off + b * 18;
             let scale_raw = (data[block_start] as u16)
                 | ((data[block_start + 1] as u16) << 8);
-            let scale = fp16_bits_to_f32(scale_raw) as f64;
-            let neg_scale = -scale;
+            // The dequantization-zero ruling, settled per block: every element
+            // is one of these two values.
+            let scale = dq_zero(fp16_bits_to_f32(scale_raw) as f64);
+            let neg_scale = dq_zero(-scale);
             let bits_start = block_start + 2;
             for local_k in 0..128 {
                 let byte = data[bits_start + (local_k >> 3)];
@@ -662,6 +723,15 @@ pub fn almide_rt_matrix_select_rows_f32(
     let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
     for &rid in row_ids {
         let base = off + (rid.max(0) as usize) * c * 4;
+        // A row past the buffer is the all-zero row — the same defined
+        // OOB→zeros edge `from_bytes_f32_le` (and the decoded-matrix
+        // `select_rows`) contract; an unchecked slice here was a raw panic
+        // while the wasm leg read undefined bytes (the 2026-08-12 fuzz
+        // divergence, run 31515916427).
+        if base + c * 4 > data.len() {
+            out.extend(std::iter::repeat(0.0f64).take(c));
+            continue;
+        }
         for ch in data[base..base + c * 4].chunks_exact(4) {
             out.push(f32::from_le_bytes([ch[0], ch[1], ch[2], ch[3]]) as f64);
         }
@@ -684,6 +754,7 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
     let cols = if rows == 0 { 0 } else { x[0].len() };
     let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
+    almide_rt_matrix_head_geometry(n_heads_u, head_dim_u, rows, cols);
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
@@ -695,7 +766,8 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
     for p in 0..rows {
         let pos_f = (start + p) as f64;
         let row = &x[p];
-        let mut new_row = vec![0.0f64; cols];
+        // #1419: copy through — see rope_rotate_at.
+        let mut new_row = row.to_vec();
         for h in 0..n_heads_u {
             let head_start = h * head_dim_u;
             for j in 0..half {
@@ -925,10 +997,19 @@ pub fn almide_rt_matrix_select_rows_q8_0_dq(
     let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
     for &rid in row_ids {
         let base = off + (rid.max(0) as usize) * row_bytes;
+        // OOB row → the all-zero row (the same defined edge as the
+        // non-multiple-cols guard above), never an unchecked slice.
+        if base + row_bytes > data.len() {
+            out.extend(std::iter::repeat(0.0f64).take(c));
+            continue;
+        }
         for blk in data[base..base + row_bytes].chunks_exact(Q8_BLOCK_BYTES) {
             let d = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]])) as f64;
             for k in 0..Q8_BLOCK {
-                out.push(d * (blk[2 + k] as i8) as f64);
+                // Q8_0 needs the ruling per ELEMENT, not per block: the product
+                // is zero when EITHER factor is (a zero scale, or a zero quant
+                // under a negative scale), and `a * b` signs by xor.
+                out.push(dq_zero(d * (blk[2 + k] as i8) as f64));
             }
         }
     }

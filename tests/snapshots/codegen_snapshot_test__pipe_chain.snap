@@ -77,6 +77,30 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
 pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
 pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().flat_map(f).collect() }
+// FIXED-ARITY twin of `almide_rt_list_flat_map`, for the `|x| … [a, b]` shape
+// the CHEATSHEET's recommended build idiom produces
+// (`list.range |> list.flat_map`). `RustLoweringPass::lower_flat_map_arrays`
+// retargets those call sites here and rewrites the tail list literal to a Rust
+// ARRAY, which is what makes the difference: the `Rc<dyn Fn(A) -> Vec<B>>`
+// signature above forces ONE HEAP ALLOCATION PER ELEMENT for the intermediate
+// list, and at 2^22 elements that single `vec![a, b]` was 44 ms of a 79 ms
+// build — the whole of the 3x gap between the recommended idiom and a
+// hand-written append loop (#1337).
+//
+// `F: Fn` rather than `Rc<dyn Fn>`: it keeps the per-element call STATIC so
+// rustc inlines the body and the arity stays a constant it can unroll (the
+// generated `build.rs` registry derives the un-boxing from this `F: Fn` bound
+// — see `takes_raw_fn_last_arg`). `with_capacity` removes the growth reallocs
+// `flat_map().collect()` cannot avoid, since `FlatMap`'s `size_hint` lower
+// bound is 0.
+//
+// Semantics are identical to `almide_rt_list_flat_map`: same order, same
+// elements, same length. Only the intermediate container is gone.
+pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs: Vec<A>, f: F) -> Vec<B> {
+    let mut out = Vec::with_capacity(xs.len().saturating_mul(N));
+    for x in xs { out.extend(f(x)); }
+    out
+}
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
 pub fn almide_rt_list_find_index<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.into_iter().position(|x| f(x)).map(|i| i as i64) }
@@ -121,7 +145,23 @@ pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
     }
     vec![x; n.max(0) as usize]
 }
-pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> { (start..end).collect() }
+// `list.range` has NO chosen ceiling (ratified A, 2026-08-17): this leg fills to
+// its own structural bound, and a span the machine cannot satisfy is the C-197
+// abort via try_reserve — never a raw `capacity overflow` panic, which is what
+// `(start..end).collect()`'s infallible reserve produced for a span like
+// (i64::MIN, 3). `saturating_sub` keeps the count honest where `end - start`
+// would wrap. The wasm leg fails with the SAME message at its own i32 floor
+// bound; success between the two bounds is the contracted divergence.
+pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
+    let count = end.saturating_sub(start).max(0) as usize;
+    let mut v: Vec<i64> = Vec::new();
+    if v.try_reserve_exact(count).is_err() {
+        eprintln!("Error: out of memory");
+        std::process::exit(1);
+    }
+    v.extend(start..end);
+    v
+}
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
 pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.

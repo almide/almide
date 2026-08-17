@@ -12,6 +12,18 @@ pre-commit:
     contracts:
       glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/gen-claims.sh,README.md}"
       run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+    release-seals:
+      glob: "{proofs/releases/*.toml,scripts/release-seal.sh}"
+      run: bash scripts/release-seal.sh check
+    gate-verification:
+      glob: "{proofs/gate-verification.toml,scripts/check-*.sh,proofs/*.sh}"
+      run: bash scripts/check-gate-verification.sh
+    tor-refs:
+      glob: "{proofs/TOR.md,scripts/check-tor-refs.sh}"
+      run: bash scripts/check-tor-refs.sh
+    als-element-coverage:
+      glob: "{proofs/als-element-coverage.toml,scripts/check-als-element-coverage.sh,scripts/lib/als-element-enumerate.py,crates/almide-syntax/src/ast.rs,docs/specs/als/*.md}"
+      run: bash scripts/check-als-element-coverage.sh
     libm-determinism:
       glob: "{runtime/rs/src/*.rs,crates/almide-kernel/src/*.rs,proofs/libm-determinism-audit.toml,scripts/check-libm-determinism.sh,scripts/lib/libm-call-enumerate.py}"
       run: bash scripts/check-libm-determinism.sh
@@ -26,6 +38,12 @@ pre-commit:
       run: bash scripts/check-wat-prelude-audit.sh
     ratchet-separation:
       run: scripts/check-ratchet-separation.sh
+    workflow-parse:
+      # A schedule-only workflow that cannot parse fails SILENTLY at trigger
+      # time (#1234, the 0.57.0 fuzz-nightly dup-key incident) — strict-parse
+      # every workflow file whenever one changes.
+      glob: "{.github/workflows/*.yml,.github/workflows/*.yaml,scripts/check-workflows.sh}"
+      run: bash scripts/check-workflows.sh
     semantics-manifest:
       # Globbed by PATTERN, not by covered module: the hook named
       # stdlib/string.almd literally, so the next module onto the ratchet
@@ -33,6 +51,12 @@ pre-commit:
       # in the check script is the one place the module list lives.
       glob: "{docs/stdlib/semantics-manifest.toml,stdlib/*.almd,spec/stdlib/*_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
       run: scripts/check-semantics-manifest.sh
+    layout-discipline:
+      # Globbed over ALL compiler/CLI Rust, not over the ledger: #1316 exists
+      # because the discipline has to bite at the moment a NEW long-lived
+      # structure is written, without anyone remembering to ask. 0.2s scan.
+      glob: "{crates/**/*.rs,crates/*/src/*.rs,src/**/*.rs,src/*.rs,proofs/layout-ledger.toml,scripts/check-layout-discipline.sh,scripts/lib/layout-enumerate.py}"
+      run: bash scripts/check-layout-discipline.sh
 
 commit-msg:
   scripts:

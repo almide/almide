@@ -8,6 +8,7 @@
 
 mod branch_lift;
 mod dce;
+mod optional_chain;
 mod propagate;
 
 use almide_ir::*;
@@ -45,6 +46,13 @@ pub fn optimize_program(program: &mut IrProgram) {
 
     // Pass 4: dead code elimination again (propagation may create new dead bindings)
     dce::eliminate_dead_code(program);
+
+    // Pass 5a: optional-chain desugar — `p?.f` → a call to a synthesized tail-match
+    // helper (`optional_chain_synth_N`), the shape both backends prove out in every
+    // position (bind, call argument, `??` operand). Runs AFTER DCE (only surviving
+    // chains synthesize a helper) and BEFORE branch-lift (same shared-cut-point
+    // discipline; the produced call is not a branch, so order is for clarity only).
+    optional_chain::desugar_optional_chains(program);
 
     // Pass 5: branch-lift — hoist heap-typed `let`-bound `if`/`match` into tail
     // helper functions so the v1 trust-spine wasm renderer can lower them (it
@@ -87,7 +95,7 @@ fn constant_fold(program: &mut IrProgram) {
     // cross-module top-let read goes through a synthesized ref in the
     // READER's own region resolved by NAME later, never by a raw foreign id,
     // so per-region scoping loses no legitimate #809 chain.
-    let mut fold_top_let = |tl: &mut IrTopLet,
+    let fold_top_let = |tl: &mut IrTopLet,
                             env: &mut std::collections::HashMap<VarId, IrExprKind>| {
         subst_const_vars(&mut tl.value, env);
         fold_expr(&mut tl.value);

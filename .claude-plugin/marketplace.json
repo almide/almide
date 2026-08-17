@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "almide",
+  "description": "Almide compiler tooling for agents.",
+  "owner": {
+    "name": "Almide",
+    "url": "https://github.com/almide"
+  },
+  "plugins": [
+    {
+      "name": "almide",
+      "source": "./tools/claude-plugin",
+      "description": "MCP tools for the Almide compiler (check / test / API outline / explain / fmt-check) plus the .almd language server.",
+      "category": "development",
+      "tags": ["almide", "compiler", "language-server", "mcp"]
+    }
+  ]
+}

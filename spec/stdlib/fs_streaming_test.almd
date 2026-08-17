@@ -1,4 +1,5 @@
 // @contract: C-220
+// @contract: C-274
 // wasm:skip — this file's accumulator shapes (String/Int/List[String] fold_lines,
 // for_each_line) have no self-host twins yet — only the Map[String, Int] msi pair
 // and fold_lines_range_ls landed (#1134 endgame) — and tmp() rides
@@ -6,6 +7,13 @@
 // remove this skip when the wasm leg lands.
 // Streaming line walkers {fold_lines, for_each_line}: line-by-line over a
 // file with O(longest line) memory, line semantics byte-matching read_lines.
+//
+// The C-274 half at the bottom is the ADR-0006 FALLIBLE callback form
+// (#1144). Its cross-target proof is spec/wasm_cross/fs_fallible_stream_callback.almd
+// (the Map[String,Int] fold_lines cell, which HAS a wasm twin); what lives
+// here is the `for_each_line` cell — native-only for the same reason the
+// plain for_each_line above is, and the Int/String fold accumulators, whose
+// twins have not landed either.
 import fs
 import testing
 
@@ -72,4 +80,91 @@ test "fold_lines drives a Map accumulator (the aggregation shape)" {
   })!
   assert_eq(map.get(counts, "a"), some(2))
   assert_eq(map.get(counts, "b"), some(1))
+}
+
+// ── C-274: the ADR-0006 fallible callback form (#1144) ──
+//
+// Why these cases are top-level fns: inside a `test` block a callback's `!` is
+// plain unwrap and does NOT instantiate the fallible form (the L9 fork), so
+// the blessed spelling only exists in an ordinary fn body — the same reason
+// spec/stdlib/list_fallible_hof_test.almd is written this way.
+// Each invocation appends its line to `log` BEFORE deciding, so the log is the
+// invocation trace: a form that kept calling after the err would show it.
+local effect fn traced_step(log: String, acc: Int, line: String) -> Int = {
+  fs.append(log, line + ";")!
+  if line == "bad" then err("boom") else ok(acc + string.len(line))
+}
+
+local effect fn traced_note(log: String, line: String) -> Unit = {
+  fs.append(log, line + ";")!
+  if line == "bad" then err("boom") else ok(())
+}
+
+local effect fn fold_traced(p: String, log: String) -> Int = fs.fold_lines(p, 0, (acc, line) => traced_step(log, acc, line)!)!
+
+// `each_traced` is a REAL function in the corpus-wall scan (proofs/corpus-wall.sh
+// enumerates functions, not runnable files, so this file's `wasm:skip` does not
+// shield it). It must therefore LOWER — `proofs/walled-real-baseline.txt` is
+// permanently 0 and a new walled-real row is a reviewed regression, not a fix.
+// It does lower: the capability witness admits `fs.__fallible_for_each_line`
+// (crates/almide-mir/src/lower/calls.rs), so the honest refusal lands in the
+// RENDERER on the unlinked twin name — the same layer the total family's `_x`
+// accumulator cells wall at, not in lower_function.
+local effect fn each_traced(p: String, log: String) -> Unit = fs.for_each_line(p, (line) => traced_note(log, line)!)!
+
+// `tmp()` keys its suffix on the clock, so two tests entering it in the same
+// tick share a directory — the generated test binary runs these in PARALLEL
+// threads. Each test below therefore uses its OWN file names: a shared
+// `log.txt` made the trace assertions read another test's partial write and
+// fail intermittently (observed once as `found: "a;"`).
+test "fold_lines with a fallible callback stops at the FIRST err" {
+  let d = tmp()!
+  let p = d + "/fold_firsterr.txt"
+  let log = d + "/fold_firsterr.log"
+  fs.write(p, "a\nbb\nbad\nccc\ndddd\n")!
+  fs.write(log, "")!
+  testing.assert_err(fold_traced(p, log))
+  // The trace is the proof: `ccc` and `dddd` never reached the callback.
+  assert_eq(fs.read_text(log)!, "a;bb;bad;")
+}
+
+test "for_each_line with a fallible callback stops at the FIRST err" {
+  let d = tmp()!
+  let p = d + "/each_firsterr.txt"
+  let log = d + "/each_firsterr.log"
+  fs.write(p, "a\nbb\nbad\nccc\n")!
+  fs.write(log, "")!
+  testing.assert_err(each_traced(p, log))
+  assert_eq(fs.read_text(log)!, "a;bb;bad;")
+}
+
+test "a fallible callback that never errs folds every line" {
+  let d = tmp()!
+  let p = d + "/fold_allok.txt"
+  let log = d + "/fold_allok.log"
+  fs.write(p, "a\nbb\nccc\n")!
+  fs.write(log, "")!
+  assert_eq(fold_traced(p, log), ok(6))
+  assert_eq(fs.read_text(log)!, "a;bb;ccc;")
+}
+
+test "an empty file runs a fallible callback zero times" {
+  let d = tmp()!
+  let p = d + "/fallible_empty.txt"
+  let log = d + "/fallible_empty.log"
+  fs.write(p, "")!
+  fs.write(log, "")!
+  assert_eq(fold_traced(p, log), ok(0))
+  assert_eq(fs.read_text(log)!, "")
+  each_traced(p, log)!
+  assert_eq(fs.read_text(log)!, "")
+}
+
+test "a missing file errs before the fallible callback runs at all" {
+  let d = tmp()!
+  let log = d + "/fallible_missing.log"
+  fs.write(log, "")!
+  testing.assert_err(fold_traced(d + "/nope.txt", log))
+  testing.assert_err(each_traced(d + "/nope.txt", log))
+  assert_eq(fs.read_text(log)!, "")
 }

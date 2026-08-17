@@ -269,12 +269,25 @@ fn collect_module_generics(program: &IrProgram) -> Vec<ModuleGeneric> {
         .collect()
 }
 
+/// The interned flatten spelling (`almide_rt_<module>_<fn>`) per generic,
+/// computed once per round and shared by `Discover` / `Rewriter`.
+fn flatten_spellings(generics: &[ModuleGeneric], module_names: &[String]) -> Vec<Sym> {
+    generics
+        .iter()
+        .map(|g| sym(&format!("almide_rt_{}_{}", module_names[g.mi], g.name)))
+        .collect()
+}
+
 /// One discovery round's call-site scan: every `(module, generic)` call whose
 /// arg types pin the type variables concretely.
 struct Discover<'a> {
     generics: &'a [ModuleGeneric],
     param_types: Vec<Vec<Ty>>,
     module_names: &'a [String],
+    /// Per-generic interned flatten spelling (`almide_rt_<module>_<fn>`),
+    /// precomputed once — the old per-call `format!` ran for every Named
+    /// call × every generic × every discovery round.
+    flat_names: &'a [Sym],
     /// (mi, fi, bindings, suffix)
     out: Vec<(usize, usize, HashMap<String, Ty>, String)>,
 }
@@ -284,7 +297,7 @@ impl almide_ir::visit_mut::IrMutVisitor for Discover<'_> {
         use almide_ir::{CallTarget, IrExprKind};
         almide_ir::visit_mut::walk_expr_mut(self, expr);
         if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind {
-            self.record_flattened_call(name.as_str(), args);
+            self.record_flattened_call(*name, args);
         }
         if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
             &expr.kind
@@ -300,10 +313,9 @@ impl Discover<'_> {
     /// cell): match the exact flatten spelling per generic (module list + fn name
     /// — no string parsing), so the call site instantiates exactly like a
     /// `Module { m, f }` one.
-    fn record_flattened_call(&mut self, name: &str, args: &[almide_ir::IrExpr]) {
-        for (gi, g) in self.generics.iter().enumerate() {
-            let flat = format!("almide_rt_{}_{}", self.module_names[g.mi], g.name);
-            if name != flat {
+    fn record_flattened_call(&mut self, name: Sym, args: &[almide_ir::IrExpr]) {
+        for gi in 0..self.generics.len() {
+            if name != self.flat_names[gi] {
                 continue;
             }
             self.record(gi, args, None);
@@ -361,6 +373,8 @@ struct Rewriter<'a> {
     param_types: &'a [Vec<Ty>],
     rename: &'a HashMap<(String, String, String), String>,
     module_names: &'a [String],
+    /// Per-generic interned flatten spelling — same table as `Discover`.
+    flat_names: &'a [Sym],
 }
 
 impl almide_ir::visit_mut::IrMutVisitor for Rewriter<'_> {
@@ -397,13 +411,12 @@ impl Rewriter<'_> {
     /// flatten spelling (`almide_rt_m_stash__Int`) — the SAME name the module-fn
     /// flattening gives the pushed instance.
     fn rewrite_flattened_call(&self, name: &mut Sym, args: &[almide_ir::IrExpr]) {
-        let n = name.as_str().to_string();
         for (gi, g) in self.generics.iter().enumerate() {
-            let m = self.module_names[g.mi].clone();
-            if n != format!("almide_rt_{}_{}", m, g.name) {
+            if *name != self.flat_names[gi] {
                 continue;
             }
-            if let Some(new_name) = self.specialized_name(gi, &m, args) {
+            let m = &self.module_names[g.mi];
+            if let Some(new_name) = self.specialized_name(gi, m, args) {
                 *name = sym(&format!("almide_rt_{}_{}", m, new_name));
             }
             break;
@@ -411,9 +424,9 @@ impl Rewriter<'_> {
     }
 
     fn rewrite_module_call(&self, m: &str, func: &mut Sym, args: &[almide_ir::IrExpr]) {
-        let f = func.as_str().to_string();
+        let f = *func;
         for (gi, g) in self.generics.iter().enumerate() {
-            if g.name != f || self.module_names[g.mi] != m {
+            if g.name != f.as_str() || self.module_names[g.mi] != m {
                 continue;
             }
             if let Some(new_name) = self.specialized_name(gi, m, args) {
@@ -509,10 +522,12 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     loop {
         let module_names: Vec<String> =
             program.modules.iter().map(|m| m.name.to_string()).collect();
+        let flat_names = flatten_spellings(&generics, &module_names);
         let mut d = Discover {
             generics: &generics,
             param_types: generic_param_types(program, &generics),
             module_names: &module_names,
+            flat_names: &flat_names,
             out: Vec::new(),
         };
         walk_program_exprs(program, &mut d);
@@ -533,11 +548,13 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         let param_types = generic_param_types(program, &generics);
         let module_names: Vec<String> =
             program.modules.iter().map(|m| m.name.to_string()).collect();
+        let flat_names = flatten_spellings(&generics, &module_names);
         let mut rw = Rewriter {
             generics: &generics,
             param_types: &param_types,
             rename: &rename,
             module_names: &module_names,
+            flat_names: &flat_names,
         };
         walk_program_exprs(program, &mut rw);
     }

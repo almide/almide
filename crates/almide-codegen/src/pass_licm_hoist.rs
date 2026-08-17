@@ -228,7 +228,10 @@ fn try_hoist_while(cond: &mut IrExpr, body: &mut [IrStmt], ctx: &mut HoistCtx) {
 
 /// An expression is hoistable if:
 /// 1. All referenced variables are defined OUTSIDE the loop (not in `loop_defined`)
-/// 2. It contains no calls to effect functions (side effects)
+/// 2. It is speculation-safe: no effects AND no possibly-trapping ops
+///    (indexing, non-literal integer div/mod) — hoisting executes it even
+///    when the loop is zero-trip, so a hoisted trap is a new observable
+///    behavior (almide#1424)
 /// 3. It is not trivially cheap (skip Var, Lit*, Unit)
 /// 4. It contains no control flow (loops, continue, break, return)
 fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, pure_fns: &HashSet<Sym>) -> bool {

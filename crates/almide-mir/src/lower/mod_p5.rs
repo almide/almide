@@ -21,9 +21,14 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("value", "as_int")
             | ("value", "as_bool")
             | ("value", "as_float")
-            // fan.any_map (T2-3) builds its Result[scalar, String] through the
-            // ordinary ok()/err() ctor rails of the fan_any self-host — a
-            // `match`/`??`/auto-unwrap over the bound result EXECUTES.
+            // fan.any_map (T2-3) builds its Result[T, String] through the ordinary
+            // ok()/err() ctor rails of the fan_any self-host — a `match`/`??`/
+            // auto-unwrap over the bound result EXECUTES. NOTE (#1406): this row
+            // covers ALL NINE 3×3 pairings — the classify sites see the PRE-routing
+            // name (`fan_any_call_name` suffixes at emit, later) — so this row means
+            // only "the result is materialized"; WHICH family (scalar len-as-tag vs
+            // heap-Ok cap-as-tag for the String-output pairings) is decided by the
+            // RESULT TYPE at the call sites via `is_fan_any_map` + `is_heap_ok_result`.
             | ("fan", "any_map")
             // `fs.file_size` / `fs.modified_at` build their Result[Int, String]
             // through the ordinary ok()/err() ctors over the path_filestat scratch
@@ -31,22 +36,6 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // shape, so a `match`/`!` over the bound result EXECUTES.
             | ("fs", "file_size")
             | ("fs", "modified_at")
-            // `fs.copy` / `fs.append` — Result[Unit, String] built by the ok(())/err(m)
-            // CTORS (fs_copy.almd / fs_append.almd): a NON-heap Ok routes through
-            // `try_lower_result_scalar_ok_ctor` → `materialize_result_ok`, the flat
-            // LEN-AS-TAG block (@4 — NOT the prim pass-through's cap-as-tag @16 that
-            // fs.write's $write_text_file builds). Listing them in the str-result
-            // (@16) family instead made every err read back as ok — the caller read
-            // the len-0 block's untouched @16 field (a silent wrong-branch, caught
-            // by the missing-src copy probe).
-            | ("fs", "copy")
-            | ("fs", "append")
-            // `fs.remove` / `fs.write_bytes` / `fs.write_bytes_raw` — the same
-            // ctor-built len-as-tag Result[Unit, String] (fs_remove.almd /
-            // fs_write_bytes.almd / fs_write_bytes_raw.almd).
-            | ("fs", "remove")
-            | ("fs", "write_bytes")
-            | ("fs", "write_bytes_raw")
     )
 }
 
@@ -124,6 +113,10 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             | ("fs", "fold_lines")
             | ("fs", "fold_lines_chunked")
             | ("fs", "fold_lines_range")
+            // #1144: the fallible carrier's twin builds its Result the same way
+            // (ok()/err() ctors), and additionally FORWARDS the callback's own
+            // err block — same cap-as-tag layout either way.
+            | ("fs", "__fallible_fold_lines")
             // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
             // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
             // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the
@@ -145,6 +138,21 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // identical cap-as-tag Result[Unit, String]: Ok len@4=0 + tag@16=0, Err with
             // @12=msg + tag@16=1), so a `match`/`!` reads tag @16 like fs.write.
             | ("fs", "rename")
+            // `fs.copy` / `fs.append` / `fs.remove` / `fs.write_bytes` /
+            // `fs.write_bytes_raw` — Result[Unit, String] built by the ok(())/err(m)
+            // CTORS (fs_copy.almd et al). Since result-family-from-type Phase 1 the
+            // ctor blocks are BYTE-IDENTICAL to the prim family above: Ok was always
+            // len@4=0 + @12=0 + tag@16=0 (`materialize_result_ok` with a Unit payload),
+            // and `materialize_result_err_str` now writes the Err tag@16=1 the 8-byte
+            // handle store used to leave at 0 — the exact field whose absence made the
+            // earlier str-family listing of fs.copy read every err back as ok (the
+            // silent wrong-branch recorded here before this arc). One type, one layout:
+            // the last name-keyed layout collision in the system is gone.
+            | ("fs", "copy")
+            | ("fs", "append")
+            | ("fs", "remove")
+            | ("fs", "write_bytes")
+            | ("fs", "write_bytes_raw")
             // `fs.remove_all` returns the SAME cap-as-tag `Result[Unit, String]` shape as fs.write
             // ($remove_all builds it identically — Ok with len@4=0 + @12=0 + tag@16=0, Err with
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
@@ -154,6 +162,12 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // builds it with the ordinary `ok(acc)`/`err(e)` ctors — a heap-Ok Result in the exact
             // `materialize_result_str` layout, like `fs.list_dir`'s `Result[List[String], String]`).
             // So a `match`/`!` over it reads tag @16 + binds the @12 payload list handle.
+            // `fan.map` covers ALL NINE 3×3 pairings (the classify sites see the
+            // PRE-routing name; `fan_map_call_name` suffixes at emit) — every
+            // pairing returns Result[List[T], String], a heap-Ok LIST payload in
+            // the same ok()/err() ctor cap-as-tag layout, so one row is exact.
+            // The `map_is`/`map_ss`/`map_si` rows below are kept for the
+            // mono-suffixed direct forms that reach a classify site post-routing.
             | ("fan", "map")
             | ("fan", "map_is")
             | ("fan", "map_ss")
@@ -178,6 +192,117 @@ pub fn is_result_listval_ty(ty: &Ty) -> bool {
     matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, le)
             if le.len() == 1 && is_value_ty(&le[0])))
+}
+
+/// The physical FAMILY of a materialized `Result` block — THE single type→layout
+/// decision (result-family-from-type Phase 2). Mirrors what every reference
+/// compiler does (rustc `layout_of(Ty)`, Swift `TypeLowering` keyed on the type,
+/// Zig `firstParamSRet(cc, return_type)`): the (module, fn) name tables say only
+/// WHETHER a call's result is a real materialized block; WHICH layout it has is
+/// a total function of the type, decided here and nowhere else.
+///
+/// - `HeapOk` — the cap-as-tag layout (payload @12, Ok/Err tag @16): both arms
+///   heap (`Result[String, String]`, `Result[List[T], String]`, the heap-Ok
+///   variant-err class), or `Result[Unit, String]` (one layout per type since
+///   Phase 1 — the ctor and prim producers build the identical block).
+/// - `Scalar` — the len-as-tag layout (@4: Ok = len 0, Err = len 1, payload
+///   @12): scalar Ok (`Int`/`Float`/`Bool`), including the scalar-Ok
+///   variant-err and scalar-scalar classes.
+///
+/// The one-site precedent this generalizes: control_p2_b.rs's heap-Ok escape,
+/// whose comment already stated the law — "TYPE decides the repr, not the
+/// list" (a `result.map` listed len-as-tag returns cap-as-tag for a heap
+/// instantiation). That escape becomes structural here.
+/// #1414 shape-at-birth, DROP dimension: the per-value drop/bind facts —
+/// the faithful packing of the former eleven membership sets into ONE record
+/// per value. The old sets encoded a PRECEDENCE LATTICE (dual inserts were
+/// legal: `variant_drop_handles` wins over `heap_elem_lists`, which also
+/// gates heap-payload binds), so this is a STRUCT of the old memberships,
+/// not a single-valued enum — `drop_op_for` reads the fields in the same
+/// priority order the set checks ran. "Untracked" in this dimension is the
+/// absence of an entry in exactly one map (`LowerCtx::value_drops`).
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct DropFacts {
+    /// The named recursive route (`variant_drop_handles`): a user-ADT name or
+    /// a tagged wrapper spelling (`optrec:`/`resrec:`/`reserr:`/`res_msi`/…).
+    /// Highest precedence.
+    pub(crate) named_route: Option<String>,
+    /// `list_str_result_results` — DropResultListStr.
+    pub(crate) list_str_result: bool,
+    /// `value_result_results` — DropResultValue.
+    pub(crate) value_result: bool,
+    /// `value_result_lists` — DropResultListValue.
+    pub(crate) value_result_list: bool,
+    /// `str_int_result_results` — DropResultStrInt.
+    pub(crate) str_int_result: bool,
+    /// `value_int_result_results` — DropResultValueInt.
+    pub(crate) value_int_result: bool,
+    /// `list_value_int_result_results` — DropResultListValueInt.
+    pub(crate) list_value_int_result: bool,
+    /// `list_str_int_result_results` — DropResultListStrInt.
+    pub(crate) list_str_int_result: bool,
+    /// `list_list_str_lists` — DropListListStr.
+    pub(crate) list_list_str: bool,
+    /// `str_str_elem_lists` — DropListStrStr.
+    pub(crate) str_str_elems: bool,
+    /// `heap_elem_lists` — the flat elementwise DropListStr; ALSO the
+    /// heap-payload bind-admission gate. Lowest drop precedence.
+    pub(crate) flat_elems: bool,
+}
+
+/// #1414 shape-at-birth: the per-value VARIANT read shape — the one fact the
+/// match/`??`/drop machinery needs about a materialized Option/Result block.
+/// Stored in `LowerCtx::value_shapes` (one map, keyed by ValueId); written by
+/// `seed_variant_value_shape` (the single typed seeding entry) and the ctor
+/// materializers. "Untracked" = absent here, nowhere else.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub(crate) enum VariantShape {
+    /// A materialized Option (len-as-tag: len@4 = 0 none / 1 some).
+    Option,
+    /// A scalar-family Result (len-as-tag: len@4 = 0 Ok / 1 Err).
+    ResultScalar,
+    /// A heap-Ok-family Result (cap-as-tag: tag@16).
+    ResultHeapOk,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub(crate) enum ResultFamily {
+    Scalar,
+    HeapOk,
+}
+
+pub(crate) fn result_family(ty: &Ty) -> ResultFamily {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let both_heap = matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1]));
+    if both_heap || is_result_unit_str_ty(ty) {
+        ResultFamily::HeapOk
+    } else {
+        ResultFamily::Scalar
+    }
+}
+
+/// Does `module.func` return a real MATERIALIZED Result block (a self-host built
+/// through the ok()/err() ctor rails, or a prim floor whose render builds the
+/// canonical layout)? The MERGED name set (result-family-from-type Phase 2):
+/// membership means ONLY "materialized" — the layout family comes from
+/// [`result_family`] on the call's TYPE. (The two tables below survive as the
+/// merged set's storage; their split no longer carries family meaning.)
+pub(crate) fn is_self_host_materialized_result_fn(module: &str, func: &str) -> bool {
+    is_self_host_result_module_fn(module, func)
+        || is_self_host_result_str_module_fn(module, func)
+}
+
+/// Is `ty` a `Result[Unit, String]` (the fs.write/fs.copy shape — no Ok payload, a String
+/// Err)? Since result-family-from-type Phase 1 this type has ONE physical layout regardless
+/// of producer (prim render or ok(())/err(m) ctors): Ok = len@4 0 + @12 0 + tag@16 0,
+/// Err = len@4 1 + @12 msg + tag@16 1 — BOTH the len-as-tag read (the `??` scalar route,
+/// inverse sense) and the cap-as-tag read (the str-family `match`/`!` route) are valid on
+/// it, so gates may admit it on whichever route fits the consumer.
+pub fn is_result_unit_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(&a[0], Ty::Unit) && matches!(&a[1], Ty::String))
 }
 
 /// Is `ty` a `Result[String, String]` (the value.as_string shape — both arms a flat String)? The
@@ -376,6 +501,8 @@ pub(crate) fn is_higher_order(args: &[IrExpr]) -> bool {
 /// Returns `Some(rewritten_body)` when the desugar applies, `None` (the body is unchanged) otherwise.
 /// The max `VarId` used anywhere in `body` (0 if none) — so a fresh synthetic var can be
 /// allocated as `max + 1` without a frontend var-table round-trip.
+#[allow(dead_code)] // retired by desugar_var_seed (the band allocator); kept as the
+// documented inventory of every binder position a fresh-var scheme must clear.
 pub(crate) fn max_var_id(body: &IrExpr) -> u32 {
     use almide_ir::visit::IrVisitor;
     use almide_ir::IrPattern;

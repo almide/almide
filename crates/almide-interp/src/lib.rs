@@ -26,6 +26,7 @@ mod eval;
 mod hofs;
 mod inplace;
 mod stdlib_pool;
+mod heap;
 mod vfs;
 mod value;
 
@@ -108,6 +109,12 @@ pub struct Interpreter<'a> {
     /// The sandboxed fs overlay (#1218) — writes land here, never on disk;
     /// reads fall back to the real filesystem read-only. See `vfs.rs`.
     pub(crate) vfs: vfs::Vfs,
+    /// The block heap (#1226): the arena a self-hosted stdlib body's
+    /// `prim.handle`/`prim.load*`/`prim.store*` resolve against. Per
+    /// interpreter, like `vfs` — `cargo test` runs the gates in parallel
+    /// threads, and a shared arena would let one fixture observe another's
+    /// blocks.
+    pub(crate) heap: heap::Heap,
     /// Named record types keyed by their SORTED field-name set, mapping to
     /// `(type name, declaration-order field names)`. Lets the repr recover the
     /// nominal name + declaration order for a record LITERAL whose inferred type
@@ -121,6 +128,12 @@ pub struct Interpreter<'a> {
     /// ambiguous and intentionally NOT indexed (the structural type is then
     /// treated as a true anonymous record).
     pub(crate) named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)>,
+    /// Variant constructor registry: case name → `(type name, ctor kind)`,
+    /// built once from `program.type_decls`. The old per-call linear scan of
+    /// every type decl ran for EVERY Named call (user fn calls included)
+    /// before the fn-table lookup. First declaration wins on a shared case
+    /// name, exactly like the scan it replaces.
+    pub(crate) variant_ctors: HashMap<Sym, (Sym, dispatch::CtorKind)>,
     /// The global scope holding evaluated top-level lets. Every top-level fn
     /// call and `FnRef` closure parents off this so globals are visible from
     /// nested calls (not just from `main`'s body). Seeded once, lazily.
@@ -265,6 +278,27 @@ fn index_named_records(program: &IrProgram) -> HashMap<Vec<Sym>, (Sym, Vec<Sym>)
     named_records
 }
 
+/// Variant constructor registry: case name → `(type name, ctor kind)`.
+/// Mirrors the linear scan `variant_ctor` used to run per Named call:
+/// `program.type_decls` only (module decls were never scanned), in decl
+/// order, first declaration of a shared case name wins (`or_insert`).
+fn index_variant_ctors(program: &IrProgram) -> HashMap<Sym, (Sym, dispatch::CtorKind)> {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    let mut out: HashMap<Sym, (Sym, dispatch::CtorKind)> = HashMap::new();
+    for td in &program.type_decls {
+        let IrTypeDeclKind::Variant { cases, .. } = &td.kind else { continue };
+        for case in cases {
+            let kind = match case.kind {
+                IrVariantKind::Unit => dispatch::CtorKind::Unit,
+                IrVariantKind::Tuple { .. } => dispatch::CtorKind::Tuple,
+                IrVariantKind::Record { .. } => dispatch::CtorKind::Record,
+            };
+            out.entry(case.name).or_insert((td.name, kind));
+        }
+    }
+    out
+}
+
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a IrProgram) -> Self {
         let mut fns = HashMap::new();
@@ -320,14 +354,17 @@ impl<'a> Interpreter<'a> {
             }
         }
         let named_records = index_named_records(program);
+        let variant_ctors = index_variant_ctors(program);
 
         Interpreter {
             program,
             args: Vec::new(),
             vfs: vfs::Vfs::new(),
+            heap: heap::Heap::new(),
             fns,
             module_fns,
             named_records,
+            variant_ctors,
             globals: env::Scope::root(),
             globals_ready: Cell::new(false),
             stdout: String::new(),
@@ -689,45 +726,11 @@ impl<'a> Interpreter<'a> {
         let mut pending: Vec<(Ty, u32)> = Vec::new();
 
         let result = 'tramp: loop {
-            // Per-hop entry charge (the backends charge inside the loop).
-            match &callee {
-                TailCallee::Fn(f) => {
-                    let det_is_user = self.user_fn_names.contains(&f.name);
-                    self.det_in_user.set(det_is_user);
-                    if det_is_user {
-                        self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
-                        if self.det_cut() {
-                            break 'tramp Flow::Value(Value::Int(0));
-                        }
-                    }
-                }
-                TailCallee::Clo(_) => {
-                    self.det_charge();
-                    if self.det_cut() {
-                        break 'tramp Flow::Value(Value::Int(0));
-                    }
-                }
+            if let Some(cut) = self.charge_hop_entry(&callee) {
+                break 'tramp cut;
             }
 
-            // Bind the hop's frame. A closure hop keeps its body Rc alive for
-            // the duration of the spine walk.
-            let (frame, fn_body, clo_body): (env::Scope, Option<&'a IrExpr>, Option<Rc<Closure>>) =
-                match &callee {
-                    TailCallee::Fn(f) => {
-                        let fr = base.child();
-                        for (param, arg) in f.params.iter().zip(args.drain(..)) {
-                            fr.bind(param.var, arg);
-                        }
-                        (fr, Some(&f.body), None)
-                    }
-                    TailCallee::Clo(c) => {
-                        let fr = c.captured.child();
-                        for (param, arg) in c.params.iter().zip(args.drain(..)) {
-                            fr.bind(*param, arg);
-                        }
-                        (fr, None, Some(Rc::clone(c)))
-                    }
-                };
+            let (frame, fn_body, clo_body) = bind_hop_frame(&callee, &mut args, base);
             if first_frame.is_none() {
                 first_frame = Some(frame.clone());
             }
@@ -751,27 +754,57 @@ impl<'a> Interpreter<'a> {
             }
         };
 
-        // A function-body `Return` resolves to the returned value at the fn
-        // boundary; then the pending Try normalizations fold over the value,
-        // innermost-first — exactly what the nested evaluation would compute.
+        let result = self.fold_pending_try(result, &pending);
+        self.det_in_user.set(det_was_user);
+        self.depth.set(self.depth.get() - 1);
+        (result, first_frame.unwrap_or_else(|| base.child()))
+    }
+
+    /// The per-hop entry charge — the backends charge INSIDE the loop, so each
+    /// transfer pays, not just the first call. `Some(flow)` means the
+    /// deterministic meter cut the spine and the trampoline must break with it.
+    fn charge_hop_entry(&self, callee: &TailCallee<'a>) -> Option<Flow> {
+        match callee {
+            TailCallee::Fn(f) => {
+                // Only USER frames burn deterministic fuel; the flag is restored
+                // by the caller so a nested spine cannot leak its own answer.
+                let det_is_user = self.user_fn_names.contains(&f.name);
+                self.det_in_user.set(det_is_user);
+                if !det_is_user {
+                    return None;
+                }
+                self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+            }
+            TailCallee::Clo(_) => self.det_charge(),
+        }
+        self.det_cut().then(|| Flow::Value(Value::Int(0)))
+    }
+
+    /// Fold the spine's pending `Try` normalizations over its final value,
+    /// INNERMOST-FIRST, so `N∘…∘N` is computed rather than approximated. A
+    /// function-body `Return` resolves to the returned value at the fn
+    /// boundary first — and at each level, a `Return(x)` means "that level's fn
+    /// returns x", which is the next level's call VALUE. Anything that is not a
+    /// value (an abort, a fuel cut) stops the fold where it is.
+    fn fold_pending_try(&mut self, result: Flow, pending: &[(Ty, u32)]) -> Flow {
         let mut result = match result {
             Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
             other => other,
         };
-        'fold: for (ty, n) in pending.iter().rev() {
+        for (ty, n) in pending.iter().rev() {
             for _ in 0..*n {
-                let Flow::Value(v) = result else { break 'fold };
-                result = match self.try_unwrap_value(v, ty) {
-                    // `Return(x)` here means "that level's fn returns x" —
-                    // which is the next level's call VALUE.
-                    Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
-                    other => other,
-                };
+                match result {
+                    Flow::Value(v) => {
+                        result = match self.try_unwrap_value(v, ty) {
+                            Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
+                            other => other,
+                        }
+                    }
+                    stop => return stop,
+                }
             }
         }
-        self.det_in_user.set(det_was_user);
-        self.depth.set(self.depth.get() - 1);
-        (result, first_frame.unwrap_or_else(|| base.child()))
+        result
     }
 
     /// Apply a closure value to arguments. Used by the in-interp HOFs and by
@@ -781,6 +814,38 @@ impl<'a> Interpreter<'a> {
     pub(crate) fn apply_closure(&mut self, clo: &Rc<Closure>, args: Vec<Value>) -> Flow {
         let root = self.root_scope();
         self.run_callable(TailCallee::Clo(Rc::clone(clo)), args, &root).0
+    }
+}
+
+/// Bind one trampoline hop's frame and hand back the body to walk.
+///
+/// A named callee's frame is a child of the SPINE's base scope; a closure's is
+/// a child of its own captured environment — that difference is the whole
+/// reason the two arms exist. `args` is drained, so the caller's vector is
+/// reusable for the next hop. The returned `Rc<Closure>` is not decoration: it
+/// keeps a closure hop's body alive for the duration of the spine walk, since
+/// `callee` is overwritten the moment a transfer happens.
+
+fn bind_hop_frame<'a>(
+    callee: &TailCallee<'a>,
+    args: &mut Vec<Value>,
+    base: &env::Scope,
+) -> (env::Scope, Option<&'a IrExpr>, Option<Rc<Closure>>) {
+    match callee {
+        TailCallee::Fn(f) => {
+            let frame = base.child();
+            for (param, arg) in f.params.iter().zip(args.drain(..)) {
+                frame.bind(param.var, arg);
+            }
+            (frame, Some(&f.body), None)
+        }
+        TailCallee::Clo(c) => {
+            let frame = c.captured.child();
+            for (param, arg) in c.params.iter().zip(args.drain(..)) {
+                frame.bind(*param, arg);
+            }
+            (frame, None, Some(Rc::clone(c)))
+        }
     }
 }
 

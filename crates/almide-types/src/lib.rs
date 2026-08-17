@@ -6,6 +6,7 @@ pub mod embedded {
     include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
 }
 
+pub mod dialect;
 pub mod types;
 pub mod stdlib_info;
 pub mod self_host_registry;

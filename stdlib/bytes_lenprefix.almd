@@ -5,11 +5,15 @@
 // result is shorter, exactly v0's `break`). Two passes: count the readable entries
 // (the result list is allocated up-front), then build each owned String and MOVE it
 // into its slot. A negative start reads nothing (v0's usize cast breaks immediately).
+// Both bounds SUBTRACTIVE (see bytes_string.almd's read_string_at for the class): `p + 4 > blen`
+// wraps for a p near i64::MAX and `p + 4 + sl > blen` can wrap on the u32 prefix alone, so each
+// additive form could pass a window that is not in the buffer. `blen - 4 - p` is the remaining
+// budget once p is known in range, and sl is compared against it without forming a sum.
 fn __lps_count(b: Bytes, blen: Int, p: Int, remaining: Int, acc: Int) -> Int = if remaining == 0 then acc
-else if p < 0 or p + 4 > blen then acc
+else if p < 0 or p > blen - 4 then acc
 else {
   let sl = bytes.read_u32_le(b, p)
-  if p + 4 + sl > blen then acc
+  if sl > blen - 4 - p then acc
   else __lps_count(b, blen, p + 4 + sl, remaining - 1, acc + 1)
 }
 

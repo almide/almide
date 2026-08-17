@@ -1,0 +1,64 @@
+// @contract: C-161
+// The three NON-bytes count families the integer-domain matrix still had open —
+// `list.range`, `string.pad_start`/`pad_end`, `io.read_n_bytes` — 19 cells, all of
+// them a count that sized an allocation without being checked first.
+//
+// 1. list.range. `end - start` IS the count, and for a span like (i64::MIN, 3) that
+//    subtraction OVERFLOWS: the count came out negative and the allocation was sized
+//    from the wrapped value — native died on a raw panic (exit 101, the form ALS-T6
+//    forbids) where wasm aborted with `Error: out of memory`.
+//
+//    Rejecting the endpoints outright would be wrong, since `range(1e9, 1e9+1)` is one
+//    element at a large offset, so the cases split by sign: when both endpoints share a
+//    sign the difference is bounded by i64::MAX and cannot overflow, and only a span
+//    straddling zero can — where either half exceeding the ceiling already settles it.
+//
+//    Under the ratified A (2026-08-17) `list.range` has NO chosen ceiling: each
+//    leg ranges to its own structural bound and takes C-197's `Error: out of
+//    memory` beyond it. What this fixture pins is the part that IS portable —
+//    the count arithmetic cannot wrap (a span like (i64::MIN, 3) is the abort
+//    on BOTH legs, where 0.57.0's native died on a raw capacity-overflow panic,
+//    exit 101), and in-range spans answer identically.
+//
+// 2. string.pad_start / pad_end. The pad byte count is `n * pclen`, and that product is
+//    what overflows, so the ceiling is tested by DIVISION — a guard computed from the
+//    product tests the wrapped value. Without it `pad_end("a", u32::MAX, "x")` built a
+//    4 GiB String natively and aborted on wasm.
+//
+// 3. io.read_n_bytes. Two separate defects meeting in the middle: native reserved
+//    `vec![0u8; n as usize]` up front, so a NEGATIVE n asked for ~1.8e19 bytes; and the
+//    wasm host floor takes an i32, so a large n arrived TRUNCATED — i64::MAX became -1
+//    and the read returned nothing at all.
+//
+//    The answer is min(n, what stdin has) — no ceiling, no cap. The self-host reads in
+//    2^26 CHUNKS so the wasm floor is never handed a span it cannot represent or
+//    allocate; the chunk bounds the BUFFER, not the answer.
+//
+//    A cap shipped here briefly and it was wrong: it truncated `read_n_bytes(100 MiB)`
+//    on a 100 MiB stream to 64 MiB, silently, on BOTH legs — for a call 0.57.0 got
+//    right on both. The measurement behind it was taken with FIVE BYTES on stdin, where
+//    a large `n` fails because the floor pre-allocates the REQUESTED size, not because
+//    the data cannot be delivered. Measuring a guard on input that cannot exercise it
+//    is how a cap ends up below every real use of the function.
+import io
+
+fn main() -> Unit = {
+  // ── list.range: the wide span, and the legitimate ones it must not swallow.
+  println("r_ok=" + int.to_string(list.len(list.range(0, 5))))
+  println("r_far=" + int.to_string(list.len(list.range(1000000000, 1000000001))))
+  println("r_neg=" + int.to_string(list.len(list.range(0 - 5, 5))))
+  println("r_empty=" + int.to_string(list.len(list.range(5, 1))))
+  // ── string.pad: in range, multi-byte pad, and the no-op negative width.
+  println("p_ok=" + string.pad_start("a", 4, "x"))
+  println("p_mb=" + string.pad_end("a", 4, "あ"))
+  println("p_neg=" + string.pad_start("ab", 0 - 5, "x"))
+  // ── io.read_n_bytes: stdin is empty under `almide test`, so every count agrees at 0.
+  // What is pinned here is that a huge or negative count does not abort and does not
+  // truncate into a different count.
+  println("io_neg=" + int.to_string(list.len(io.read_n_bytes(0 - 1))))
+  println("io_max=" + int.to_string(list.len(io.read_n_bytes(9223372036854775807))))
+  println("io_2p32=" + int.to_string(list.len(io.read_n_bytes(4294967296))))
+  // ── the abort, last, so every value above is observed first. This span exceeds
+  // BOTH legs' structural bounds, so the C-197 abort is portable for it.
+  println("r_wide=" + int.to_string(list.len(list.range(0 - 9223372036854775807 - 1, 3))))
+}

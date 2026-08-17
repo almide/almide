@@ -54,9 +54,9 @@ impl LowerCtx {
         // (`List[Matrix]` — repeat_kv) needs the nested DropListListStr sweep; a String
         // element the flat per-slot DropListStr.
         if crate::lower::is_list_list_str_ty(&body.ty) {
-            self.list_list_str_lists.insert(acc);
+            self.value_drops.entry(acc).or_default().list_list_str = true;
         } else {
-            self.heap_elem_lists.insert(acc);
+            self.value_drops.entry(acc).or_default().flat_elems = true;
         }
 
         // The loop index (stable mutable i64 local) + the +1 step constant.
@@ -205,7 +205,7 @@ impl LowerCtx {
         } else if crate::lower::is_value_ty(result_elem) {
             self.value_elem_lists.insert(dst);
         } else {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
         // The write-cursor (count of kept elements) — a stable mutable local.
         let cursor = self.fresh_value();
@@ -417,7 +417,7 @@ impl LowerCtx {
                     args: vec![CallArg::Handle(acc), CallArg::Handle(sub)],
                     result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
                 });
-                self.heap_elem_lists.insert(new);
+                self.value_drops.entry(new).or_default().flat_elems = true;
                 let drop_acc = self.drop_op_for(acc);
                 self.ops.push(drop_acc);
                 self.ops.push(Op::SetLocal { local: acc, src: new });

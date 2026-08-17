@@ -19,14 +19,23 @@ effect fn main() -> Unit = {
 
   let n = math.pow(2, size)
 
-  // Generate input signal (interleaved: [re0, im0, re1, im1, ...])
-  var data: List[Float] = []
+  // Generate input signal (interleaved: [re0, im0, re1, im1, ...]).
+  //
+  // ONE SIZED ALLOCATION, then indexed writes — the same shape the Rust
+  // reference's `Vec::with_capacity` + push gives, which is the fairness rule
+  // the suite README states for `nbody_unrolled.rs`. This row's job is to
+  // measure the code generator on a numeric kernel, and the append loop it
+  // used to build with (`data = data + [x]`, ×8.4M) put 12% of the row's wall
+  // clock into list construction: the row published a 1.27x that was part
+  // setup cost (#1338). The shape spread itself is not lost — it is measured
+  // on its own, and gated, by the `listbuild` family (#1337).
+  var data: List[Float] = list.repeat(0.0, 2 * n)
   for i in 0..<n {
     let theta = float.from_int(i) / float.from_int(n) * pi()
     let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
     let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
-    data = data + [float.round(re * 100.0) / 100.0]
-    data = data + [float.round(im * 100.0) / 100.0]
+    data[2 * i] = float.round(re * 100.0) / 100.0
+    data[2 * i + 1] = float.round(im * 100.0) / 100.0
   }
 
   let start = env.millis()

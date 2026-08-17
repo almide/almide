@@ -300,7 +300,8 @@ fn fallible_callback_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
     Some(
         "The callback is FALLIBLE, so its Result stayed INSIDE the container \
          instead of the traversal itself becoming fallible. Only the core list \
-         HOFs (map / filter / flat_map / filter_map / fold / find / each) accept \
+         HOFs (map / filter / flat_map / filter_map / fold / find / each) and \
+         the fs streaming walkers (fs.fold_lines / fs.for_each_line) accept \
          a fallible callback natively today. Either traverse via `list.*` — \
          convert with `set.to_list` first — or handle the error inside the \
          callback (`?? fallback`, or match on ok/err). Transparency for the \
@@ -406,7 +407,7 @@ fn if_arm_unit_leak(exp_str: &str, fix_hint: Option<&FixHint>) -> Option<String>
     // the Unit arm — turns the generic template into a rewrite that
     // names the real variable so the LLM can copy-paste the structure.
     if let Some(FixHint::IfArmAssign { arm, var_name }) = fix_hint {
-        let (unit_arm, good_arm) = match arm {
+        let (unit_arm, _good_arm) = match arm {
             IfArm::Then => ("then", "else"),
             IfArm::Else => ("else", "then"),
         };

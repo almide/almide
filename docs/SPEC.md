@@ -90,15 +90,18 @@ Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
 
 Block comments nest: `/* outer /* inner */ still outer */` is valid.
 
-### 1.5 Keywords (35)
+### 1.5 Keywords (34)
 
 ```
 module  import  type    protocol for     in      fn      let
 var     mut     if      then     else    match   ok      err
 some    none    todo    true     false   not     and     or
-strict  pub     effect  test     guard   break   continue while
+pub     effect  test    guard    break   continue while
 local   mod     fan
 ```
+
+`strict` was removed — the `strict types` / `strict effects` declaration
+enabled no checking, so the word is an ordinary identifier again.
 
 ### 1.6 Operators and Delimiters
 
@@ -165,7 +168,7 @@ text
 Program   ::= ImportDecl* TopDecl*
 
 TopDecl   ::= TypeDecl | ProtocolDecl | FnDecl
-            | TopLetDecl | StrictDecl | TestDecl
+            | TopLetDecl | TestDecl
 
 Stmt      ::= LetStmt | VarStmt | AssignStmt | GuardStmt | Expr
 
@@ -1160,18 +1163,7 @@ almide test --run "pattern"      # filter by name
 
 ---
 
-## 15. Strict Mode
-
-```
-strict types      // require all type annotations
-strict effects    // fully check effect propagation
-```
-
-Declared at the top of a file. Enables stricter compiler checking.
-
----
-
-## 16. Naming Conventions
+## 15. Naming Conventions
 
 ### Predicates
 
@@ -1191,11 +1183,11 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ---
 
-## 17. Standard Library
+## 16. Standard Library
 
 959 functions across 41 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
-### 17.1 Auto-Imported Modules
+### 16.1 Auto-Imported Modules
 
 **string** (41 functions):
 `trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_start`, `pad_end`, `starts_with`, `ends_with`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty`, `is_digit`, `is_alpha`, `is_alphanumeric`, `is_whitespace`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper`, `is_lower`, `codepoint`, `from_codepoint`, `replace_first`, `last_index_of`, `to_float`
@@ -1236,7 +1228,7 @@ Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`,
 Also auto-imported: `bytes`, `matrix`, and the sized numeric modules
 (`int8`/`int16`/`int32`, `uint8`/`uint16`/`uint32`/`uint64`, `float32`).
 
-### 17.2 Import-Required Modules
+### 16.2 Import-Required Modules
 
 **fs** (24 functions, all effect):
 `read_text`, `read_bytes`, `read_lines`, `write`, `write_bytes`, `append`, `mkdir_p`, `exists`, `is_dir`, `is_file`, `remove`, `list_dir`, `copy`, `rename`, `remove_dir`, `metadata`, `glob`, `walk_dir`, `read_dir`, `create_dir`, `symlink`, `read_link`, `canonical`, `temp_dir`
@@ -1268,12 +1260,12 @@ Also auto-imported: `bytes`, `matrix`, and the sized numeric modules
 **http** (26 functions, effect):
 HTTP client operations.
 
-### 17.3 Bundled Modules (Pure Almide, import required)
+### 16.3 Bundled Modules (Pure Almide, import required)
 
 `args`, `path`, `html`, `mem` — plus opt-in codecs `base64`, `hex`, `zlib` and
 `net`. (The former `time`/`encoding`/`hash`/`url`/`csv` modules were removed.)
 
-### 17.4 Built-in Functions
+### 16.4 Built-in Functions
 
 Available everywhere without import:
 
@@ -1289,7 +1281,7 @@ There is no `print` function (use `io.print` for no-newline output). `println` r
 
 ---
 
-## 18. Entry Point
+## 17. Entry Point
 
 ```
 effect fn main(args: List[String]) -> Result[Unit, AppError] = {
@@ -1306,9 +1298,9 @@ effect fn main(args: List[String]) -> Result[Unit, AppError] = {
 
 ---
 
-## 19. Codegen Architecture
+## 18. Codegen Architecture
 
-### 19.1 Multi-Target
+### 18.1 Multi-Target
 
 Almide compiles to multiple targets:
 
@@ -1317,7 +1309,7 @@ Almide compiles to multiple targets:
 | **Rust** | Production | Full ownership analysis, borrow/clone passes |
 | **WASM** | Production | Direct emit (linear memory, WASI) |
 
-### 19.2 Codegen v3 Pipeline
+### 18.2 Codegen v3 Pipeline
 
 Three-layer architecture: IR -> Nanopass -> Templates.
 
@@ -1344,7 +1336,7 @@ Target source code
 
 Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics.
 
-### 19.3 Cross-Target Semantics
+### 18.3 Cross-Target Semantics
 
 | Feature | Rust | WASM |
 |---------|------|------|
@@ -1358,7 +1350,7 @@ Templates are defined in TOML files (`codegen/templates/*.toml`), separating syn
 
 ---
 
-## 20. Prohibitions
+## 19. Prohibitions
 
 | # | Prohibited | Reason |
 |---|---|---|
@@ -1379,13 +1371,13 @@ Templates are defined in TOML files (`codegen/templates/*.toml`), separating syn
 
 ---
 
-## 21. Compiler Diagnostics
+## 20. Compiler Diagnostics
 
-### 21.1 One Error, One Root Cause
+### 20.1 One Error, One Root Cause
 
 Cascading derived errors are suppressed. A single root cause is presented.
 
-### 21.2 Structured Error Output
+### 20.2 Structured Error Output
 
 ```json
 {
@@ -1397,7 +1389,7 @@ Cascading derived errors are suppressed. A single root cause is presented.
 }
 ```
 
-### 21.3 Rejected Syntax Hints
+### 20.3 Rejected Syntax Hints
 
 The compiler recognizes common syntax from other languages and provides actionable hints:
 
@@ -1415,7 +1407,7 @@ The compiler recognizes common syntax from other languages and provides actionab
   Hint: Use 'and' for logical AND.
 ```
 
-### 21.4 Auto-Fix Candidates
+### 20.4 Auto-Fix Candidates
 
 - Missing imports
 - Type conversion candidates
@@ -1423,7 +1415,7 @@ The compiler recognizes common syntax from other languages and provides actionab
 - Missing `effect` modifier
 - Suggest `effect fn` when pure function calls effectful code
 
-### 21.5 Official Formatter
+### 20.5 Official Formatter
 
 ```bash
 almide fmt app.almd
@@ -1436,7 +1428,7 @@ almide fmt app.almd
 
 ---
 
-## 22. Typing Rules
+## 21. Typing Rules
 
 ### Variables
 
@@ -1536,7 +1528,7 @@ G |- _ : T                      G |- todo(msg) : T
 
 ---
 
-## 23. Complete Example
+## 22. Complete Example
 
 ```
 import fs
@@ -1595,7 +1587,7 @@ test "with_description updates correctly" {
 
 ---
 
-## 24. Evaluation Metrics
+## 23. Evaluation Metrics
 
 | Metric | Definition |
 |---|---|

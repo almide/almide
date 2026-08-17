@@ -1,0 +1,12 @@
+diff --git a/crates/almide-codegen/src/walker/mod.rs b/crates/almide-codegen/src/walker/mod.rs
+index 0ed22cff6..4f1102c96 100644
+--- a/crates/almide-codegen/src/walker/mod.rs
++++ b/crates/almide-codegen/src/walker/mod.rs
+@@ -283,6 +283,7 @@ fn render_fn_body_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
+         IrExprKind::Block { stmts, expr } => {
+             let mut parts: Vec<String> = stmts.iter()
+                 .map(|s| terminate_stmt(fn_ctx, render_stmt_fn(fn_ctx, s)))
++                .rev()
+                 .collect();
+             if let Some(e) = expr {
+                 let mut expr_str = render_expr_fn(fn_ctx, e);

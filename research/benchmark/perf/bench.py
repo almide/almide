@@ -50,6 +50,28 @@ SUITE = [
     ("onebrc",       "onebrc/onebrc.almd",               ["onebrc.rs"],                     "10000000", "50000", "bytes", ["native", "rust"]),
     ("binarytrees",  "binarytrees/binarytrees.almd",     [],                                "18",       "10",   "bytes", None),
     ("mandelbrot",   "mandelbrot/mandelbrot.almd",       [],                                "4000",     "200",  "bytes", None),
+    # listbuild (#1337): the SAME materializing workload written three ways.
+    # The rows differ only in the build loop — same arithmetic, same checksum
+    # consumer — so the spread between them is the cost of the SHAPE, and the
+    # `combinator` row is the shape CLAUDE.md/CHEATSHEET recommend. A
+    # recommended idiom slower than the loop it replaces is an MSR bug, not
+    # just a perf bug, so all three are gated against one Rust reference.
+    # Native/rust only: the wasm leg hits the same `data[i] = x` cliff the
+    # fft row documents, at a workload that would not finish.
+    ("listbuild",       "listbuild/listbuild_prealloc.almd",   ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
+    ("listbuild-append","listbuild/listbuild_append.almd",     ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
+    ("listbuild-comb",  "listbuild/listbuild_combinator.almd", ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
+    # strchurn (#1004): the allocation-heavy string row —
+    # to_string -> join -> split -> len -> sum. TWO references on purpose.
+    # `strchurn.rs` is same-shape/same-semantics (owned `String`s out of split,
+    # `chars().count()` for len) and is the comparison that isolates codegen;
+    # `strchurn_idiomatic.rs` is the Rust a person writes (borrowed `&str`,
+    # byte `len()`) and the spread between the two is the stdlib API contract's
+    # cost, not codegen's. The row is REPORTED by check-perf-ratio.sh rather
+    # than anchored — an allocation-dominated ratio does not cancel the machine
+    # (see the REPORTED comment there). string-gap-1004.md has the attribution.
+    ("strchurn",     "strchurn/strchurn.almd", ["strchurn.rs", "strchurn_idiomatic.rs"],
+     "4000000", "1000", "bytes", ["native", "rust"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -64,6 +86,12 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "onebrc": "1000000",
     "binarytrees": "14",
     "mandelbrot": "1000",
+    "listbuild": "23",
+    "listbuild-append": "23",
+    "listbuild-comb": "23",
+    # ~0.12s / ~210 MB RSS for the native leg — over the 0.08s spawn-noise
+    # floor with room, and small enough to stay polite on a CI runner.
+    "strchurn": "2000000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

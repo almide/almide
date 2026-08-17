@@ -377,10 +377,13 @@
             println(list.get(parts, 0) ?? \"DEF\")\n  \
             println(list.get(parts, 5) ?? \"DEF\") }\n";
         let prog = lower_source(src);
-        // STRUCTURAL GUARD: the heap `??` must route to the real call, never the silent Opaque.
+        // STRUCTURAL PIN (inverted at the #1418 route deletion): the heap `??`
+        // lowers through the generic match machinery — NO synthetic
+        // option.unwrap_or_str helper is linked anymore. The behavioral
+        // asserts below are the real detector; this pins the deletion.
         assert!(
-            prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"),
-            "heap `??` must auto-link option.unwrap_or_str (not defer to empty Opaque)"
+            !prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"),
+            "the route-zoo deletion removed the unwrap_or_str auto-link"
         );
         if let Some(out) = build_and_run("heap_unwrap_or_executes", &render_wasm_program(&prog)) {
             assert_eq!(out, "bb\nDEF\na\nDEF");
@@ -402,8 +405,8 @@
             println(\"got=\" + (list.get(parts, 9) ?? \"DEF\")) }\n";
         let prog = lower_source(src);
         assert!(
-            prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"),
-            "heap `??` in a concat operand must route to option.unwrap_or_str (not Opaque)"
+            !prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"),
+            "the route-zoo deletion removed the unwrap_or_str auto-link (concat operand)"
         );
         if let Some(out) = build_and_run("heap_unwrap_or_concat_operand", &render_wasm_program(&prog)) {
             assert_eq!(out, "got=bb\ngot=DEF");
@@ -419,7 +422,7 @@
             let parts = string.split(\"a,bb,ccc\", \",\")\n  \
             println(pick(parts, 1))\n  println(pick(parts, 9)) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"));
+        assert!(!prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"));
         if let Some(out) = build_and_run("heap_unwrap_or_tail", &render_wasm_program(&prog)) {
             assert_eq!(out, "bb\nDEF");
         }

@@ -7,7 +7,7 @@ use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::types::render_type;
 use super::statements::{render_stmt, render_match_arm};
-use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_content, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
+use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_content, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name, escape_rust_str};
 
 /// Render a statement list. Peephole patterns are detected at IR level
 /// by PeepholePass; this just renders the resulting IR nodes.
@@ -262,13 +262,65 @@ fn render_expr_result_ok(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String
     }
 }
 
-/// `ResultErr { expr: inner }` case of `render_expr`.
-fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr) -> String {
+/// `ResultErr { expr: inner }` case of `render_expr`. Mirrors
+/// `render_expr_result_ok`'s turbofish: a bare `Err(e)` leaves the OK type
+/// parameter open, and when nothing in the surrounding context pins it — a
+/// bare `match err("boom") { .. }` subject — rustc fails with E0282 on
+/// otherwise checker-accepted code (almide#1428). The checker resolved the
+/// full Result type (Unit-defaulted ok side), so carry it.
+fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String {
     let inner_str = render_expr(ctx, inner);
+    // Fire ONLY for the #1428 class — an UNANCHORED ok side (Unknown / an
+    // inference var / the checker's Unit default on a bare match subject).
+    // A concretely-resolved ok type means the surrounding context already
+    // pins the constructor, and pinning it AGAIN here regressed the two
+    // shapes that depended on the parameter staying open (#1434, first-bad
+    // b1ef4e70a): a guard's `return (Err(..))?` unifies the open ok side
+    // with the fn's WHOLE Result (pinned, the `?` yields the scalar and
+    // E0308s), and a tuple-payload fallible lambda's inferred return
+    // conflicts with the node-local scalar pin.
+    // The pin fires EXACTLY when the checker itself RESOLVED the ok side to
+    // its Unit default (the bare-match subject, almide#1428 / C-281): the
+    // checker only defaults in genuinely-unanchored positions — an anchored
+    // Unit-default would have failed the check — so `()` is always correct
+    // there. A still-OPEN ok side (`Unknown` / an inference var) must stay
+    // open: rustc anchors it from the surrounding context (a container
+    // literal of `Result<i64,_>` rows — map_higher_order, the fifth #1434
+    // victim), and a concrete non-Unit ok side is already pinned by that
+    // context (pinning it AGAIN node-locally broke the guard-`return (Err)?`
+    // and tuple-payload fallible-lambda shapes — #1434, first-bad b1ef4e70a).
+    let ok_is_checker_default = matches!(
+        ty,
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(&a[0], Ty::Unit)
+    );
+    if !ok_is_checker_default {
+        let construct =
+            if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
+        return ctx
+            .templates
+            .render_with(construct, None, &[], &[("inner", inner_str.as_str())])
+            .or_else(|| {
+                ctx.templates.render_with("err_expr", None, &[], &[("inner", inner_str.as_str())])
+            })
+            .unwrap_or_else(|| format!("Err({})", inner_str));
+    }
+    if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty) {
+        // Payload conversion matches the template chain below: only a
+        // String payload gets the `.to_string()`; a typed error payload
+        // (`Result[T, Int]`, a user error enum) passes through raw —
+        // converting those regressed match_container_literal and
+        // to_result_custom_e when this fix first landed unconditional.
+        let payload = if matches!(&inner.ty, Ty::String) {
+            format!("{}.to_string()", inner_str)
+        } else {
+            inner_str.clone()
+        };
+        return format!("Err::<{}, {}>({})", ok_s, err_s, payload);
+    }
     let construct = if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
     ctx.templates.render_with(construct, None, &[], &[("inner", inner_str.as_str())])
         .or_else(|| ctx.templates.render_with("err_expr", None, &[], &[("inner", inner_str.as_str())]))
-        .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
+        .unwrap_or_else(|| format!("Err({})", inner_str))
 }
 
 /// `Range { start, end, inclusive }` case of `render_expr`.
@@ -282,7 +334,9 @@ fn render_expr_range(ctx: &RenderContext, start: &IrExpr, end: &IrExpr, inclusiv
 
 /// `Tuple { elements }` case of `render_expr`.
 fn render_expr_tuple(ctx: &RenderContext, elements: &[IrExpr]) -> String {
-    let parts = elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>().join(", ");
+    let parts = super::helpers::tuple_elems_join(
+        &elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>(),
+    );
     ctx.templates.render_with("tuple_literal", None, &[], &[("elements", parts.as_str())])
         .unwrap_or_else(|| "tuple(...)".into())
 }
@@ -348,27 +402,31 @@ fn render_expr_empty_map(ctx: &RenderContext, ty: &Ty) -> String {
         .unwrap_or_else(|| format!("AlmideMap::<{}, {}>::new()", key_ty, value_ty))
 }
 
-/// `map.new()` / `set.new()` reaching Rust as a bare generic runtime call can
-/// leave rustc with an uninferrable type parameter when nothing downstream
-/// pins it: const-folding `if true then map.new() else <typed literal>`
-/// collapses the typing context away, and `map.contains` leaves `V` free —
-/// E0282 after `check` accepted (nightly-fuzz seed 1785045556318379299,
-/// index 867). The checker resolved the full container type on the node, so
-/// pin it with a turbofish — the same recipe as the `[:]` EmptyMap literal.
-/// Only a fully concrete type is pinned; anything unresolved falls back to
-/// plain rendering (inference handles it exactly as before).
+/// A runtime constructor whose generic appears in NO parameter type
+/// (`map.new()` / `set.new()` / `list.with_capacity(n)`) reaching Rust as a
+/// bare call can leave rustc with an uninferrable type parameter when nothing
+/// downstream pins it: const-folding `if true then map.new() else <typed
+/// literal>` collapses the typing context away, and an element-agnostic
+/// consumer (`map.contains`, `list.is_empty`) leaves it free — E0282 after
+/// `check` accepted (nightly-fuzz seed 1785045556318379299 index 867 for
+/// `map.new`; #1416, seed 508666777783, for `with_capacity`). The checker
+/// resolved the full container type on the node, so pin it with a turbofish —
+/// the same recipe as the `[:]` EmptyMap literal. Only a fully concrete type
+/// is pinned; anything unresolved falls back to plain rendering (inference
+/// handles it exactly as before).
+///
+/// Family rule (C-277): an arm here for EVERY runtime fn with a return-only
+/// generic — `runtime_ctor_turbofish_family_gate_test.rs` measures both sides
+/// from source and fails on any mismatch.
 fn render_runtime_ctor_turbofish(
     ctx: &RenderContext,
     symbol: &str,
     args: &[IrExpr],
     ty: &Ty,
 ) -> Option<String> {
-    if !args.is_empty() {
-        return None;
-    }
     match (symbol, ty) {
         ("almide_rt_map_new", Ty::Applied(TypeConstructorId::Map, targs))
-            if targs.len() == 2 && targs.iter().all(|t| !t.is_unresolved()) =>
+            if args.is_empty() && targs.len() == 2 && targs.iter().all(|t| !t.is_unresolved()) =>
         {
             Some(format!(
                 "almide_rt_map_new::<{}, {}>()",
@@ -377,11 +435,20 @@ fn render_runtime_ctor_turbofish(
             ))
         }
         ("almide_rt_set_new", Ty::Applied(TypeConstructorId::Set, targs))
-            if targs.len() == 1 && !targs[0].is_unresolved() =>
+            if args.is_empty() && targs.len() == 1 && !targs[0].is_unresolved() =>
         {
             Some(format!(
                 "almide_rt_set_new::<{}>()",
                 render_map_type_arg(ctx, &targs[0])
+            ))
+        }
+        ("almide_rt_list_with_capacity", Ty::Applied(TypeConstructorId::List, targs))
+            if args.len() == 1 && targs.len() == 1 && !targs[0].is_unresolved() =>
+        {
+            Some(format!(
+                "almide_rt_list_with_capacity::<{}>({})",
+                render_map_type_arg(ctx, &targs[0]),
+                render_expr_owned(ctx, &args[0])
             ))
         }
         _ => None,
@@ -592,7 +659,7 @@ fn render_expr_data(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::OptionSome { expr: inner } => render_expr_option_some(ctx, inner),
         IrExprKind::OptionNone => render_expr_option_none(ctx, &expr.ty),
         IrExprKind::ResultOk { expr: inner } => render_expr_result_ok(ctx, inner, &expr.ty),
-        IrExprKind::ResultErr { expr: inner } => render_expr_result_err(ctx, inner),
+        IrExprKind::ResultErr { expr: inner } => render_expr_result_err(ctx, inner, &expr.ty),
 
         // ── Lambda ──
         // A bare (combinator-consumed) lambda leaves its params UNANNOTATED — a
@@ -647,9 +714,24 @@ fn render_expr_wrappers(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::ToVec { expr: inner } => render_expr_to_vec(ctx, inner),
 
         // ── Hole / Todo ──
-        IrExprKind::Hole => template_or(ctx, "hole", &[], "todo!()"),
+        // Typed holes are a SANCTIONED workflow (#1325): `_` in expression
+        // position and `todo("msg")` type-check against whatever the context
+        // demands and panic if execution ever reaches them. The panic text is
+        // the only thing the author gets back, so it names the ALMIDE source
+        // line rather than only the generated `.rs` line rustc prints.
+        IrExprKind::Hole => match expr.span {
+            Some(span) => template_or(
+                ctx, "hole", &[],
+                &format!("todo!(\"hole at line {}\")", span.line),
+            ),
+            None => template_or(ctx, "hole", &[], "todo!()"),
+        },
+        // The message is user text: escape it before it becomes a Rust string
+        // literal. `todo("say \"hi\"")` used to emit `todo!("say "hi"")` and
+        // die at build behind the "codegen produced invalid Rust — this is an
+        // Almide bug" banner (#1325).
         IrExprKind::Todo { message } => {
-            template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", message))
+            template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", escape_rust_str(message)))
         }
 
         // ── Fan (concurrency) — fully template-driven ──

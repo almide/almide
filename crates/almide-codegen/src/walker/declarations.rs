@@ -569,17 +569,6 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
     }
 }
 
-/// Does this type transitively hold a value that doesn't implement `PartialEq`
-/// in the Rust runtime? Returning true means the enclosing struct cannot
-/// derive PartialEq.
-///
-/// `eq_blocked_types` lists user-defined record names that have already
-/// been determined to lack PartialEq (computed in a first pass); referring
-/// to any of those transitively blocks eq as well.
-pub(super) fn ty_blocks_eq(ty: &Ty) -> bool {
-    ty_blocks_eq_with(ty, &HashSet::new())
-}
-
 /// True if `ty` mentions a function type anywhere (directly or nested in a
 /// container/tuple/record). Such a type lowers to `Rc<dyn Fn>` (or a container
 /// thereof), which is neither `Debug` nor `PartialEq`.
@@ -587,6 +576,13 @@ fn ty_has_fn(ty: &Ty) -> bool {
     matches!(ty, Ty::Fn { .. }) || ty.children().iter().any(|c| ty_has_fn(c))
 }
 
+/// Does this type transitively hold a value that doesn't implement `PartialEq`
+/// in the Rust runtime? Returning true means the enclosing struct cannot
+/// derive PartialEq.
+///
+/// `eq_blocked_types` lists user-defined record names that have already
+/// been determined to lack PartialEq (computed in a first pass); referring
+/// to any of those transitively blocks eq as well.
 pub(super) fn ty_blocks_eq_with(ty: &Ty, eq_blocked_types: &HashSet<String>) -> bool {
     match ty {
         // Burn Tensor doesn't implement PartialEq

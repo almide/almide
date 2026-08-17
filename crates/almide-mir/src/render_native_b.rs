@@ -534,13 +534,6 @@ fn render_call_witness(
             used_shims.push(shim("print_str").expect("\"print_str\" is a literal shim() match arm, always Some").2);
             line!("rt_print_str({});", as_str_arg(&code, t));
         }
-        (RtFn::PrintInt, [a]) => {
-            let (code, t) = call_arg(a, tys)?;
-            if t != NTy::I64 {
-                return Err(wall("native: print_int of a non-Int"));
-            }
-            line!("println!(\"{{}}\", {code});");
-        }
         other => {
             return Err(wall(format!(
                 "native: runtime call {other:?} — outside the rung subset"

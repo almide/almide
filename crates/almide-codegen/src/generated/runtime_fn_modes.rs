@@ -6,6 +6,7 @@ pub fn takes_raw_fn_last_arg(name: &str) -> bool {
     matches!(name,
         "almide_rt_fs_fold_lines_chunked" |
         "almide_rt_fs_fold_lines_range" |
+        "almide_rt_list_flat_map_arr" |
         "almide_rt_value_decode_list" |
         "almide_rt_value_decode_option" |
         "almide_rt_value_decode_option_custom" |
@@ -250,8 +251,10 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fs_file_size" => &[false],
         "almide_rt_fs_fold_lines" => &[false, false, false],
         "almide_rt_fs_fold_lines_chunked" => &[false, false, false, false],
+        "almide_rt_fs_fold_lines_effect" => &[false, false, false],
         "almide_rt_fs_fold_lines_range" => &[false, false, false, false, false],
         "almide_rt_fs_for_each_line" => &[false, false],
+        "almide_rt_fs_for_each_line_effect" => &[false, false],
         "almide_rt_fs_glob" => &[false],
         "almide_rt_fs_is_dir" => &[false],
         "almide_rt_fs_is_file" => &[false],
@@ -381,6 +384,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_list_find_index" => &[false, false],
         "almide_rt_list_first" => &[false],
         "almide_rt_list_flat_map" => &[false, false],
+        "almide_rt_list_flat_map_arr" => &[false, false],
         "almide_rt_list_flat_map_effect" => &[false, false],
         "almide_rt_list_flatten" => &[false],
         "almide_rt_list_fold" => &[false, false, false],
@@ -499,6 +503,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_matrix_add" => &[false, false],
         "almide_rt_matrix_append_rows" => &[false, false],
         "almide_rt_matrix_attention_weights" => &[false, false, false],
+        "almide_rt_matrix_bounds" => &[false, false],
         "almide_rt_matrix_broadcast_add_row" => &[false, false],
         "almide_rt_matrix_causal_mask_add" => &[false, false],
         "almide_rt_matrix_cols" => &[false],
@@ -518,6 +523,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_matrix_gelu" => &[false],
         "almide_rt_matrix_get" => &[false, false, false],
         "almide_rt_matrix_head_count" => &[false],
+        "almide_rt_matrix_head_geometry" => &[false, false, false, false],
         "almide_rt_matrix_layer_norm_rows" => &[false, false, false, false],
         "almide_rt_matrix_linear_f32_row_no_bias" => &[false, false, false, false, false],
         "almide_rt_matrix_linear_q1_0_row_no_bias" => &[false, false, false, false, false],

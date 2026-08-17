@@ -103,7 +103,7 @@ impl NanoPass for ConcretizeTypesPass {
 /// `mod type SafeHtml = String` → `aliases["SafeHtml"] = String`.
 /// Erase aliases throughout the IR (WASM target only — Rust codegen
 /// handles newtypes natively) so downstream codegen never sees them.
-fn erase_wasm_type_aliases(program: &mut IrProgram, target: Target) {
+fn erase_wasm_type_aliases(program: &mut IrProgram, _target: Target) {
     let mut aliases: HashMap<String, Ty> = HashMap::new();
     for td in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter())) {
         if let almide_ir::IrTypeDeclKind::Alias { target: alias_target } = &td.kind {

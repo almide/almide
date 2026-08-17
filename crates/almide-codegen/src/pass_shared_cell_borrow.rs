@@ -41,7 +41,7 @@
 
 use std::collections::HashSet;
 use almide_ir::*;
-use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
+use almide_ir::visit::{walk_expr, IrVisitor};
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use almide_base::intern::sym;
 use super::pass::{NanoPass, PassResult, Target};

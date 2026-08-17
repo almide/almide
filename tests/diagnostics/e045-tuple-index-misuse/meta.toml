@@ -1,0 +1,3 @@
+expects_code = "E045"
+expects_error = "tuple index .0 on non-tuple type Int"
+hint_substring = "only tuple values support positional .k access"

@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let ch = "\u{110000}"
+  println(ch)
+}

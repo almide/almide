@@ -34,9 +34,42 @@ impl AlmideHttpResponse {
     pub fn json(status: i64, body: String) -> Self {
         Self { status, body, headers: vec![("Content-Type".into(), "application/json".into())] }
     }
+    /// EXACTLY the caller's headers — no seeded `Content-Type` (#1352). Entries
+    /// are upserted in map order, so the list carries at most one entry per
+    /// case-insensitive field name. Delegates to the same helper the
+    /// `almide_rt_http_with_headers` intrinsic uses, so the struct API and the
+    /// intrinsic cannot drift apart again — they used to disagree, this one
+    /// REPLACING the header list while the intrinsic seeded-then-upserted.
     pub fn with_headers(status: i64, body: String, headers: AlmideMap<String, String>) -> Self {
-        Self { status, body, headers: headers.into_iter().collect() }
+        Self::from_headers(status, body, &headers)
     }
+    fn from_headers(status: i64, body: String, headers: &AlmideMap<String, String>) -> Self {
+        let mut resp = Self { status, body, headers: Vec::new() };
+        for (k, v) in headers.iter() {
+            upsert_header(&mut resp.headers, k, v);
+        }
+        resp
+    }
+}
+
+/// Case-insensitive header upsert — RFC 9110 §5.1: field names are
+/// case-insensitive, and ASCII-only (a field name is a `token`), which is
+/// exactly `eq_ignore_ascii_case`. Replaces the first matching field's VALUE
+/// IN PLACE (the name keeps the spelling it was first stored under, and the
+/// entry does not move), and appends when the field is absent. Shared by
+/// `set_header` and `with_headers` so a response never carries two entries for
+/// one field name and set-then-get always round-trips: before #1352
+/// `set_header` matched case-SENSITIVELY, so setting `content-type` on a
+/// response holding `Content-Type` appended a SECOND entry that the
+/// case-insensitive `get_header` then shadowed — the write vanished.
+fn upsert_header(headers: &mut Vec<(String, String)>, key: &str, value: &str) {
+    for slot in headers.iter_mut() {
+        if slot.0.eq_ignore_ascii_case(key) {
+            slot.1 = value.to_string();
+            return;
+        }
+    }
+    headers.push((key.to_string(), value.to_string()));
 }
 
 // ── Response builders ──
@@ -62,12 +95,7 @@ pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
 }
 
 pub fn almide_rt_http_with_headers(status: i64, body: &str, headers: &AlmideMap<String, String>) -> AlmideHttpResponse {
-    let mut resp = AlmideHttpResponse::new(status, body.to_string());
-    for (k, v) in headers.iter() {
-        resp.headers.retain(|(ek, _)| !ek.eq_ignore_ascii_case(k));
-        resp.headers.push((k.clone(), v.clone()));
-    }
-    resp
+    AlmideHttpResponse::from_headers(status, body.to_string(), headers)
 }
 
 pub fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> AlmideHttpResponse {
@@ -79,8 +107,7 @@ pub fn almide_http_get_body(resp: &AlmideHttpResponse) -> String {
 }
 
 pub fn almide_http_set_header(mut resp: AlmideHttpResponse, key: &str, value: &str) -> AlmideHttpResponse {
-    resp.headers.retain(|(k, _)| k != key);
-    resp.headers.push((key.to_string(), value.to_string()));
+    upsert_header(&mut resp.headers, key, value);
     resp
 }
 

@@ -1,0 +1,12 @@
+// A local `fn parse` beside `import json.{parse}`: one bare name, two
+// resolutions. The checker used to pick the local fn while lowering picked
+// the import, so `parse("hi")` type-checked against one function and
+// EXECUTED the other (almide#1425, edit-locality hunt V2). Hard error E050.
+import json.{parse, stringify}
+
+fn parse(s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = {
+  let n = parse("hi")
+  println("${n}")
+}

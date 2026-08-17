@@ -1,0 +1,36 @@
+// @contract: C-247
+// ALS-E18 (docs/specs/als/expressions.md): the match expression — string
+// literal arms with wildcard, Int arms with binder patterns and guards
+// (first-match-wins order), Option variant patterns some(x)/none, Result
+// patterns ok(x)/err(e) with interpolation in the arm bodies. The negative
+// half (E010 non-exhaustive naming the missing case) is pinned by
+// tests/match_diag_test.rs. Identical observables on both targets.
+effect fn main() -> Unit = {
+  let k = "float"
+  let t = match k {
+    "int" => "i64",
+    "float" => "f64",
+    _ => "unknown",
+  }
+  println(t)
+  let n = 7
+  let c = match n {
+    0 => "zero",
+    x if x < 0 => "neg",
+    x if x % 2 == 0 => "even",
+    _ => "odd",
+  }
+  println(c)
+  let o: Int? = some(5)
+  let v = match o {
+    some(x) => x * 10,
+    none => -1,
+  }
+  println(int.to_string(v))
+  let r: Result[Int, String] = err("bad")
+  let m = match r {
+    ok(x) => "ok:${int.to_string(x)}",
+    err(e) => "err:${e}",
+  }
+  println(m)
+}

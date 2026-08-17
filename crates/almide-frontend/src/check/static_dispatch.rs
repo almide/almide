@@ -185,7 +185,7 @@ impl Checker {
             // LIVE surfaces only. `fan.race` is tombstoned (E027) and naming it here sent a
             // user who merely mistyped toward a function that no longer exists — the same
             // defect class as a tombstone whose migration target is itself removed.
-            "Available: fan.map(xs, f), and the block heads fan.any / fan.settle / fan.race / fan.bounded",
+            "Available: the mappers fan.map(xs, f) / fan.any(xs, f) / fan.settle(xs, f), and the block heads fan.any / fan.settle / fan.race / fan.bounded / fan.timeout",
             format!("call to fan.{}()", field)));
         Some(Ty::Unknown)
     }
@@ -254,8 +254,26 @@ impl Checker {
                 }
                 let result_elem = self.fresh_var();
                 let callback_ret = Ty::result(result_elem.clone(), Ty::String);
+                // #1350: the mapper slot is declared `is_effect: TRUE`. It was
+                // `false` from the landing and that was a DECLARATION bug, not a
+                // permission: unification is effect-agnostic on purpose (#1055), so
+                // the bit never gated anything, and effect callbacks were always
+                // accepted, run, and gated (spec/lang/fan_{map,mapper,value_regression}_test.almd
+                // all pass `effect fn` mappers). Measured 2026-08-14 against 0.57.0,
+                // holding the shape constant and varying only the callback:
+                //   (u) => ok(string.len(u))          pure         -> both legs, ok 2
+                //   (u) => elen(u)   elen: effect fn  pure body    -> both legs, ok 2
+                //   probe            effect fn VALUE               -> both legs, ok 50
+                //   fan.map/settle with an effect fn                -> both legs, identical
+                // The wall #1350 reported ("fan.any_map with an unliftable ...
+                // higher-order argument") came from `http.get`, which has no wasm
+                // implementation and walls IDENTICALLY with no fan in the program at
+                // all — that is #1233's capability ledger, not a mapper-purity
+                // question. So the honest slot is the effect-capable one, matching the
+                // block heads. `is_effect: true` also picks up `effect_slot_accepts`
+                // (#1055), which admits the pure spelling — the pure mapper stays legal.
                 self.constrain(arg_tys[1].clone(),
-                    Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret) },
+                    Ty::Fn { is_effect: true, params: vec![elem_ty], ret: Box::new(callback_ret) },
                     "fan.map callback");
                 Some(Ty::result(Ty::list(resolve_ty(&result_elem, &self.uf)), Ty::String))
             }
@@ -276,7 +294,7 @@ impl Checker {
                 // an actionable migration, not an alias. No coexistence.
                 self.emit(super::err(
                     "fan.race changed signature: the thunk-list form was removed; race is now a deterministic block head",
-                    "New form: `fan.race { a(); b() }` — the winner is the branch that \
+                    "New form: `fan.race { a(), b() }` — the winner is the branch that \
                      completes with the LEAST deterministic computation ((spend, index) \
                      minimum; ties go to source order). An optional per-branch budget is \
                      `fan.race(compute.ms(5)) { … }`. If you meant the first candidate \
@@ -312,8 +330,8 @@ impl Checker {
                 if arg_tys.len() == 1 {
                     self.emit(super::err(
                         "fan.any changed signature: the thunk-list form was removed; any is now a block head",
-                        "New form: `fan.any { a(); b() }` — first Ok in source order. \
-                         The dynamic mapper form `fan.any(xs, f)` is declared for Wave 2.",
+                        "New form: `fan.any { a(), b() }` — first Ok in source order. \
+                         A dynamic list maps via `fan.any(xs, f)` (first Ok in list order).",
                         "call to fan.any()".to_string()).with_code("E027"));
                     return Some(Ty::Unknown);
                 }
@@ -331,13 +349,14 @@ impl Checker {
                     let result_elem = self.fresh_var();
                     let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                     self.constrain(arg_tys[1].clone(),
-                        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret) },
+                        // #1350: effect-capable, same ruling as fan.map above.
+                        Ty::Fn { is_effect: true, params: vec![elem_ty], ret: Box::new(callback_ret) },
                         "fan.any callback");
                     return Some(Ty::result(resolve_ty(&result_elem, &self.uf), Ty::String));
                 }
                 self.emit(super::err(
                     format!("fan.any() expects a block but got {} arguments", arg_tys.len()),
-                    "Usage: fan.any { a(); b() }",
+                    "Usage: fan.any { a(), b() }",
                     "call to fan.any()".to_string()));
                 Some(Ty::Unknown)
             }
@@ -345,9 +364,9 @@ impl Checker {
                 if arg_tys.len() == 1 {
                     self.emit(super::err(
                         "fan.settle changed signature: the thunk-list form was removed; settle is now a block head",
-                        "New form: `fan.settle { a(); b() }` — collects every result in \
-                         source order. The dynamic mapper form `fan.settle(xs, f)` is \
-                         declared for Wave 2.",
+                        "New form: `fan.settle { a(), b() }` — collects every result in \
+                         source order. A dynamic list settles via `fan.settle(xs, f)` \
+                         (every element's Result, Errs captured).",
                         "call to fan.settle()".to_string()).with_code("E027"));
                     return Some(Ty::Unknown);
                 }
@@ -364,7 +383,8 @@ impl Checker {
                     let result_elem = self.fresh_var();
                     let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                     self.constrain(arg_tys[1].clone(),
-                        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
+                        // #1350: effect-capable, same ruling as fan.map above.
+                        Ty::Fn { is_effect: true, params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
                         "fan.settle callback");
                     return Some(Ty::list(Ty::result(
                         resolve_ty(&result_elem, &self.uf),
@@ -373,7 +393,7 @@ impl Checker {
                 }
                 self.emit(super::err(
                     format!("fan.settle() expects a block but got {} arguments", arg_tys.len()),
-                    "Usage: fan.settle { a(); b() }",
+                    "Usage: fan.settle { a(), b() }",
                     "call to fan.settle()".to_string()));
                 Some(Ty::Unknown)
             }
@@ -407,8 +427,10 @@ impl Checker {
             self.env.import_table.mark_used(module);
             s.to_string()
         })?;
-        // Cross-module variant constructor call: binary.ImportFunc(0)
-        if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
+        // Cross-module variant constructor call: binary.ImportFunc(0).
+        // Owner-filtered (#1426): `m.Ctor` resolves inside `m` alone — another
+        // module's same-named ctor registering first must never be consulted.
+        if let Some((type_name, case)) = self.env.lookup_ctor_owned(&sym(field), &m) {
             let qualified = format!("{}.{}", m, type_name.as_str());
             if self.env.types.contains_key(&sym(&qualified)) {
                 self.check_constructor_args(field, &case, arg_tys);

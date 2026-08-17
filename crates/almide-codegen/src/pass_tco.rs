@@ -141,7 +141,7 @@ fn is_self_call(expr: &IrExpr, fn_name: &str) -> bool {
 /// Rewrite binary recursion: f(n) = if n<=1 then n else f(n-1) + f(n-2)
 /// Into: f(n) = { var acc = 0; while n > 1 { acc += f(n-1); n -= step }; acc + base(n) }
 fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
-    let fn_name = func.name.clone();
+    let _fn_name = func.name.clone();
     let param = func.params[0].clone();
     let ret_ty = func.ret_ty.clone();
 

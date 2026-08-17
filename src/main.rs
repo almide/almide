@@ -169,9 +169,25 @@ enum Commands {
         /// Show effect/capability analysis for each function
         #[arg(long)]
         effects: bool,
+        /// Report front-end wall time split by phase (lex / parse / check) plus
+        /// a machine-readable `almide-timings {...}` line (#1311)
+        #[arg(long)]
+        timings: bool,
+        /// On a clean check, advance the file's `@dialect(N)` stamp to this
+        /// compiler's dialect (writing one if absent). Forward only: a stamp
+        /// from a newer compiler is left alone. A successful check IS the
+        /// verification the stamp records, which is why this lives here and
+        /// not in `fmt`.
+        #[arg(long)]
+        stamp: bool,
     },
     /// Start the Language Server Protocol server (for editor integration)
     Lsp,
+    /// Start the Model Context Protocol server on stdio (for agent/LLM clients).
+    /// Exposes check / test / API-outline / explain / fmt-check as typed tools
+    /// with JSON results — the same answers as the CLI, minus the step where a
+    /// model has to parse human-formatted text.
+    Mcp,
     /// Explain a diagnostic code (e.g., almide explain E001)
     Explain {
         /// Diagnostic code such as E001
@@ -184,6 +200,10 @@ enum Commands {
         /// Check formatting without writing (exit non-zero on drift)
         #[arg(long)]
         check: bool,
+        /// Machine-readable `--check`: one JSON object naming the files that
+        /// need formatting (implies --check; still exits non-zero on drift)
+        #[arg(long)]
+        json: bool,
         /// Print the formatted text to stdout without writing
         #[arg(long)]
         dry_run: bool,
@@ -261,7 +281,7 @@ enum Commands {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
     },
-    /// Agent/LLM semantic queries (outline, doc, peek-def, find-refs)
+    /// Agent/LLM semantic queries (outline, doc, stdlib-snapshot)
     Ide {
         #[command(subcommand)]
         cmd: IdeCommand,
@@ -559,7 +579,7 @@ fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json
 /// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
 /// returns early into the caller via its own `bool` return (`true` = already
 /// handled, caller should return).
-fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool) {
+fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool, timings: bool, stamp: bool) {
     if let Some(code) = explain {
         print_error_explanation(&code);
         return;
@@ -570,7 +590,7 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
     } else if json {
         cli::cmd_check_json(&file);
     } else {
-        cli::cmd_check(&file, deny_warnings);
+        cli::cmd_check(&file, deny_warnings, timings, stamp);
     }
 }
 
@@ -600,11 +620,14 @@ fn dispatch_ide(cmd: IdeCommand) {
 /// `parse_file` as-is and report "Is a directory", which the always-zero exit then
 /// swallowed, so a CI job pointed at a tree silently checked nothing (#919). With no
 /// argument at all the `src/` sweep is unchanged.
-fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool, no_import_edit: bool) {
-    let mode = match (check, dry_run) {
-        (true, _) => cli::FmtMode::Check,
-        (false, true) => cli::FmtMode::DryRun,
-        (false, false) => cli::FmtMode::Write,
+fn dispatch_fmt(files: Vec<String>, check: bool, json: bool, dry_run: bool, no_import_edit: bool) {
+    let mode = match (json, check, dry_run) {
+        // `--json` is the machine-readable spelling of the SAME gate: it never
+        // writes, and it exits non-zero on drift exactly like `--check`.
+        (true, _, _) => cli::FmtMode::CheckJson,
+        (false, true, _) => cli::FmtMode::Check,
+        (false, false, true) => cli::FmtMode::DryRun,
+        (false, false, false) => cli::FmtMode::Write,
     };
     let fmt_files = if files.is_empty() {
         let mut found = Vec::new();
@@ -728,11 +751,14 @@ fn dispatch_rest(command: Commands) {
         Commands::Lsp => {
             cli::lsp::run_lsp();
         }
+        Commands::Mcp => {
+            cli::mcp::run_mcp();
+        }
         Commands::Explain { code } => {
             print_error_explanation(&code);
         }
         Commands::Ide { cmd } => dispatch_ide(cmd),
-        Commands::Fmt { files, check, dry_run, no_import_edit } => dispatch_fmt(files, check, dry_run, no_import_edit),
+        Commands::Fmt { files, check, json, dry_run, no_import_edit } => dispatch_fmt(files, check, json, dry_run, no_import_edit),
         Commands::Compile { module, json, dry_run, output } => {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
@@ -806,7 +832,7 @@ fn dispatch(cli: Cli) {
             });
         }
         Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
-        Commands::Check { file, deny_warnings, json, explain, effects } => dispatch_check(file, deny_warnings, json, explain, effects),
+        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp),
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
             cli::cmd_fix(&file, dry_run, json);

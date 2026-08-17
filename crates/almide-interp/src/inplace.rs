@@ -232,6 +232,22 @@ fn encode(enc: Enc, v: &Value) -> Option<Vec<u8>> {
         match enc.width {
             // `val as f32` is the native cast — it ROUNDS, and the rounded
             // value is what lands in the buffer.
+            //
+            // NaN is CANONICALIZED first (C-210). A byte-buffer append is an
+            // OBSERVATION boundary: the raw sign/payload bits are the one place
+            // the byte-identical law leaks host state — x86 arithmetic produces
+            // sign-set NaNs where aarch64 does not — so both backends collapse
+            // NaN to one pattern before the reinterpret hits the buffer
+            // (`stdlib/bytes_append_multi.almd`'s `float.to_bits` /
+            // `__f32_obs_bits` guards; `runtime/rs/src/float.rs`). Writing the
+            // raw bits here voted `RAW-LEAK` against both backends' `canonical`
+            // on x86 — and passed on aarch64 only because the raw pattern there
+            // HAPPENS to equal the canonical one, which is exactly why this went
+            // unseen. Found when #1226's block heap let
+            // `nan_canonical_bytes_write` reach this arm instead of abstaining
+            // at `prim.handle`.
+            4 if f.is_nan() => 0x7FC0_0000u32.to_le_bytes().to_vec(),
+            8 if f.is_nan() => 0x7FF8_0000_0000_0000u64.to_le_bytes().to_vec(),
             4 => (*f as f32).to_le_bytes().to_vec(),
             8 => f.to_le_bytes().to_vec(),
             _ => return None,
@@ -775,6 +791,41 @@ mod tests {
             assert!(writes_back("bytes", f), "bytes.{f} not in the tier table");
             assert!(crate::hofs::is_inplace_mutating_op("bytes", f), "bytes.{f} not intercepted");
         }
+    }
+
+    /// C-210: a byte-buffer append is an OBSERVATION boundary, so NaN is
+    /// collapsed to one canonical pattern before the reinterpret.
+    ///
+    /// The NaN here is built from BITS with the sign set, deliberately: a NaN
+    /// from `0.0 / 0.0` is `0x7FF8…` on aarch64 and `0xFFF8…` on x86, so a test
+    /// using arithmetic would pass on this developer's machine for the wrong
+    /// reason and only fail in CI — which is exactly how the raw-write bug this
+    /// pins survived until #1226's block heap let the fixture reach it.
+    #[test]
+    fn a_nan_append_is_canonical_on_every_host() {
+        let sign_set_nan = f64::from_bits(0xFFF8_0000_0000_0001);
+        assert!(sign_set_nan.is_nan());
+        assert_eq!(
+            write("append_f64_le", &[], vec![Value::Float(sign_set_nan)]),
+            0x7FF8_0000_0000_0000u64.to_le_bytes().map(|b| b as i64),
+            "f64 append must write the canonical NaN, never the raw payload"
+        );
+        assert_eq!(
+            write("append_f32_le", &[], vec![Value::Float(sign_set_nan)]),
+            0x7FC0_0000u32.to_le_bytes().map(|b| b as i64),
+            "f32 append must write the canonical NaN, never the demoted raw payload"
+        );
+        // Big-endian is the same value, byte-reversed — the canonicalization
+        // happens before the order swap, not instead of it.
+        assert_eq!(
+            write("append_f64_be", &[], vec![Value::Float(sign_set_nan)]),
+            0x7FF8_0000_0000_0000u64.to_be_bytes().map(|b| b as i64),
+        );
+        // A NON-NaN float is untouched by the carve-out.
+        assert_eq!(
+            write("append_f64_le", &[], vec![Value::Float(1.5)]),
+            1.5f64.to_le_bytes().map(|b| b as i64)
+        );
     }
 
     /// `almide_rt_bytes_append_*`: `(val as T).to_{le,be}_bytes()`. The cast

@@ -191,6 +191,29 @@ pub enum Init {
     /// sizes would fragment the head-only free-list and grow memory). len=0 still reads as
     /// `None`; the spare slot is unused. Init-agnostic `i` cert (no checker change).
     OptNone,
+    /// A materialized `ok(<scalar>)` — the len-as-tag Result block (`[rc][len@4=0]
+    /// [cap@8][payload@12]`, the Ok tag IS len 0; an 8-byte payload store zeroes @16,
+    /// so the cap-as-tag read of a Unit Ok is also valid). ONE semantic init instead
+    /// of the 6-op Alloc/Handle/add/Store window the materializers used to emit —
+    /// the result-family-from-type "desugar once" slice: the wasm render expands it
+    /// to the identical block bytes, the native leg maps it 1:1 onto
+    /// `PrimKind::ResMakeOk` (a total single-op match in native_result_rewrite —
+    /// the fragile producer-window recognition this variant retires). SCALAR
+    /// payload only (Int/Float/Bool/Unit-as-0), like `OptSome`. Init-agnostic `i`
+    /// cert (no checker change).
+    ResOkScalar { payload: ValueId },
+    /// A materialized `err(<String>)` — the len-as-tag Err block (`len@4=1`,
+    /// `payload@12` = the message handle, `tag@16=1` — the Err tag rides the
+    /// payload slot's high half, so both the len read and the cap-as-tag @16 read
+    /// are valid; see `materialize_result_err_str`). The `piece` is MOVED in: the
+    /// materializer emits the `Op::Consume { piece }` right after this Alloc (the
+    /// same `i…m` accounting the retired 6-op window carried), the wasm fill
+    /// stores the caller's ref without an rc_inc, and the block's flat
+    /// `DropListStr` is the ref's release. The native leg maps the pair onto
+    /// `PrimKind::ResMakeErrStr` + the kept Consume — exactly the shape the old
+    /// producer-window recognition preserved ("the Alloc/Consume pair of the Err
+    /// STRING stays"). Init-agnostic `i` cert.
+    ResErrStr { piece: ValueId },
     /// A DYNAMICALLY-sized, runtime-allocated `List[Int]` of `len` (a ValueId) i64-element
     /// slots — an OWNED, rc=1 block (len = cap = `len`, `LIST_HEADER + len*ELEM_SIZE`
     /// bytes), filled by the caller via `prim.store64`. The list-building sibling of
@@ -563,6 +586,18 @@ pub enum Op {
     LoopBreakUnless { cond: ValueId },
     /// Closes the loop with a back-edge to its top.
     LoopEnd,
+    /// Frame-targeted EARLY EXIT: return `val` (`None` = a Unit fn) to the caller
+    /// NOW, from any structured depth — a wasm `return` / native Rust `return`,
+    /// both valid at any block nesting, so no enclosing marker cooperates.
+    /// TERMINAL: nothing may follow it in its enclosing arm (mir_wellformed), and
+    /// `val`'s presence must match the function's `ret` presence. Ownership: the
+    /// lowering emits the exit-path drops BEFORE this op, so HERE every owned
+    /// object is at count 0 EXCEPT `val`, which MOVES to the caller (the same
+    /// implied boundary `Consume` as the tail `ret` — one `m`). The verifier
+    /// treats an arm ending here as DIVERGED: it takes no part in the branch
+    /// agreement (the join continues from the surviving arm alone) and instead
+    /// satisfies the function-exit obligation at this op (law 6).
+    Return { val: Option<ValueId> },
     /// Reassign a mutable SCALAR local: `local := src` (a stable i64 wasm local re-written
     /// — the loop-carried state). No ownership (scalar copy); `local` was already defined
     /// by its `var` bind, `src` is the freshly computed value.

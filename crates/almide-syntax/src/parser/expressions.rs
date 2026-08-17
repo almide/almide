@@ -128,6 +128,17 @@ impl Parser {
             let span = Some(self.current_span());
             let op_tok = self.current().clone();
             self.advance();
+            // #1326 is NOT handled here, deliberately. `let y = 1 + // why`
+            // then an indented operand: binding that comment TRAILING to `left`
+            // and reprinting it inline produced `1 // why`, which COMMENTS OUT
+            // the rest of the line — the `+ 2` vanished and the expression
+            // reparsed as a bare Int. fmt's conservation verifier caught it
+            // ("AST changed by formatting: binary -> int").
+            //
+            // A `//` comment cannot be reprinted mid-expression at all; it
+            // needs line-aware placement (end of the rendered line), which is a
+            // different mechanism from the inline `/* */` bracket #1404 uses.
+            // Until that exists this stays an honest refusal.
             self.skip_newlines();
 
             // ── Special: |> match { ... } ──
@@ -225,7 +236,10 @@ impl Parser {
                     "run `almide fix` on this file to migrate every range mechanically",
                     "range expression",
                 ).with_code("E031")
-                 .with_try_replace(op_line, op_col, op_end_col, new_spelling);
+                 // Machine-applicable: the retired spelling had exactly one
+                 // meaning and the new one denotes the same range, so the
+                 // rewrite is a re-spelling — nothing is decided for the author.
+                 .with_machine_fix(op_line, op_col, op_end_col, new_spelling);
                 if let Some(f) = &self.file { d.file = Some(f.clone()); }
                 d.line = Some(op_line);
                 d.col = Some(op_col);
@@ -269,6 +283,12 @@ impl Parser {
     }
 
     pub(crate) fn parse_postfix(&mut self) -> Result<Expr, String> {
+        // #1404: this is the tightest bracket around ONE complete operand, so
+        // it is where a removed comment finds its node. Leading comments are
+        // taken at the operand's first token; trailing ones at the position
+        // just past its last, AFTER the postfix chain closes — `f(1) /* x */`
+        // annotates the call, not the callee.
+        let leading = self.take_inline_comments(self.pos, crate::parser::CommentSide::Leading);
         let mut expr = self.parse_primary()?;
         loop {
             // `obj\n  .method()` — the leading-dot half of the chain
@@ -278,7 +298,40 @@ impl Parser {
             expr = next;
             if !consumed { break; }
         }
+        let trailing = self.take_inline_comments(self.pos, crate::parser::CommentSide::Trailing);
+        self.attach_comments(expr.id, leading, trailing);
         Ok(expr)
+    }
+
+    /// Remove and return the recorded comments at filtered position `at` on
+    /// `side`. Removal is what keeps a comment from being attached twice when a
+    /// position is visited more than once (backtracking, speculative parses).
+    fn take_inline_comments(&mut self, at: usize, side: crate::parser::CommentSide) -> Vec<String> {
+        let Some(slot) = self.inline_comments.get_mut(&at) else { return Vec::new() };
+        let mut taken = Vec::new();
+        slot.retain(|(text, s)| {
+            if *s == side {
+                taken.push(text.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if slot.is_empty() {
+            self.inline_comments.remove(&at);
+        }
+        taken
+    }
+
+    /// Bind comments to `id`, merging if the node already has some (a postfix
+    /// chain re-enters with the same operand).
+    fn attach_comments(&mut self, id: ExprId, leading: Vec<String>, trailing: Vec<String>) {
+        if leading.is_empty() && trailing.is_empty() {
+            return;
+        }
+        let slot = self.expr_comments.entry(id).or_default();
+        slot.leading.extend(leading);
+        slot.trailing.extend(trailing);
     }
 
     /// One postfix step applied to `expr`: a `.` chain link, a `[T](args)` call,

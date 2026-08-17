@@ -162,10 +162,6 @@ fn where_override_name(path: &[Sym]) -> String {
     format!("__where_{}", path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"))
 }
 
-fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
-    lower_test_with_where(ctx, name, body, &[])
-}
-
 fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where_clauses: &[ast::TestWhere]) -> IrFunction {
     ctx.push_scope();
     let mut stmts: Vec<IrStmt> = Vec::new();

@@ -332,7 +332,7 @@ fn desugar_optional_chain(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut s = S { changed: false, next_var: crate::lower::max_var_id(body) + 1 };
+    let mut s = S { changed: false, next_var: crate::lower::desugar_var_seed() };
     let mut out = body.clone();
     s.visit_expr_mut(&mut out);
     s.changed.then_some(out)
@@ -446,8 +446,14 @@ fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
 /// - `desugar_heap_if_call_args` — a HEAP-result `if` in argument position → let-decomposed (#881).
 /// - `desugar_mutable_global_projection_args` / `desugar_bytes_index_assign` —
 ///   the two that need the fn's PARAMS to decide.
+/// - `desugar_unwrap_or_unwrap_fallback` — `a ?? f(..)!` over a heap payload → `(match a { … })!` (#1375).
 /// - `desugar_list_slice_calls`, `desugar_optional_chain` — the remaining surface forms.
 fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Option<IrExpr> {
+    // Per-function band reset: every desugar of the same body draws the same
+    // chunk sequence, so the counting pass and the lowering pass re-derive
+    // IDENTICAL trees (desugar-before-both), and the band never grows across
+    // functions. In-lowering mints keep drawing from where the chain stopped.
+    crate::lower::reset_desugar_var_band();
     type Pass = fn(&IrExpr) -> Option<IrExpr>;
     const PASSES: &[Pass] = &[
         desugar_assert_calls,
@@ -457,6 +463,9 @@ fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Opt
         desugar_hof_chain_anf,
         desugar_heap_if_call_args,
         desugar_mutable_global_projection_args,
+        // BEFORE the branch/unwrap desugars: the rewrite moves the fallback's `!` OUT of the
+        // conditional arm into the `let x = e!` position `desugar_let_unwrap` then handles.
+        desugar_unwrap_or_unwrap_fallback,
     ];
     let mut cur: Option<IrExpr> = None;
     for pass in PASSES {
@@ -509,6 +518,38 @@ fn new_lower_ctx(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
         ) || crate::lower::AUTO_WRAP_ABI_FNS
             .with(|s| s.borrow().contains(func.name.as_str())),
+        decl_ret_ty_is_unit: matches!(&func.ret_ty, Ty::Unit),
+        decl_ret_family: match &func.ret_ty {
+            t @ Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _) => {
+                Some(crate::lower::result_family(t))
+            }
+            // A LIFTED effect fn (no declared Result/Option — `effect fn f()
+            // -> T`): its synthetic carrier is `Result[T, String]`, whose
+            // family follows the DECLARED ret's heapness. Heap-ret effect fns
+            // ARE lifted too (lifted_effect_fn_names filters only on
+            // is_effect + non-Result/Option decl), so hard-coding Scalar here
+            // mislabeled every `effect fn -> List[..]` (fs_fold_lines_range's
+            // collect_partition) into the rebox path.
+            // A LIFTED effect fn (`effect fn f() -> T`, no declared
+            // Result/Option): only a SCALAR T admits. A HEAP T's synthetic
+            // carrier is built by the scalar-family materializer (len@4 as
+            // the tag) while `result_family` would type it HeapOk (tag@16) —
+            // a real producer/consumer layout split (found via
+            // fs_fold_lines_range: the @16 read took the err branch on an OK
+            // carrier). `None` here keeps those fns walling until the split
+            // is closed in its own slice.
+            t if !crate::lower::is_heap_ty(t)
+                && !matches!(
+                    t,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+                )
+                && crate::lower::AUTO_WRAP_ABI_FNS
+                    .with(|s| s.borrow().contains(func.name.as_str())) =>
+            {
+                Some(crate::lower::ResultFamily::Scalar)
+            }
+            _ => None,
+        },
         // The fn's effective err type — declared `Result[_, E]`'s E, `String` for the lifted
         // synthetic Result, None for a declared Option (its `!` pass-through is repr-identical).
         decl_fn_err: match &func.ret_ty {
@@ -534,9 +575,143 @@ fn new_lower_ctx(
 /// `mir > ir` breach on every in-profile loop-`!` fn — the #1176 drift).
 pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
     if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(func.name.as_str())) {
-        Some(IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() })
+        let result_ty = Ty::result(func.ret_ty.clone(), Ty::String);
+        let mut body = IrExpr { ty: result_ty.clone(), ..func.body.clone() };
+        // #1410: a DECLARED-OPTION member's ok-path values are wrapped in
+        // `ok(...)` HERE, in the shared retype both the lowering and the
+        // classify count-side apply (the #1176 discipline, by construction).
+        // The scalar members' raw ok tails are handled by the existing
+        // machinery downstream and are left exactly as before; Option is the
+        // family whose raw tail survived to the renderer as the #841 hybrid —
+        // err path a wrapped Result block, ok path a raw Option block — which
+        // no consumer can discriminate: wasm swallowed a failed int.parse and
+        // continued with a garbage value where native aborted.
+        // #1431 reached the SCALAR members too — but "the existing machinery
+        // downstream" is the PROPAGATION rewrite, so it only covers a body
+        // that HAS a `!` to piggyback on. A body made can-err by a bare
+        // `err(..)` has none, and its raw tail survived to the renderer. The
+        // retype therefore takes exactly the bodies the rewrite will not
+        // reach; see `has_propagation_site` for why taking the others costs
+        // `effect_tco` its loop conversion. Option stays unconditional — that
+        // is the #1410 path, already proven.
+        let opt_ret = matches!(&func.ret_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _));
+        if opt_ret || !has_propagation_site(&body) {
+            wrap_return_positions_in_ok(&mut body, &func.ret_ty, &result_ty);
+        }
+        Some(body)
     } else {
         None
+    }
+}
+
+/// Does this body contain a `!` propagation site? That is the question the
+/// #1431 defect turns on. "The scalar members' raw ok tails are handled by the
+/// existing machinery downstream" means the PROPAGATION rewrite, which wraps
+/// the tail it threads — so it only runs for a fn made can-err by a `!`. A fn
+/// made can-err by a bare `err(..)` binding has no propagation to piggyback on:
+/// its root was retyped to the carrier while its tail stayed a raw scalar, the
+/// callee returned i64 where every consumer read an i32 Result block, and the
+/// module failed wasm VALIDATION.
+///
+/// So the retype wraps exactly the bodies the rewrite will not reach. Wrapping
+/// the others is not free: `checked`/`carried` in spec/wasm_cross/effect_tco
+/// are auto-wrap members whose tail self-recursion loop-converts, and wrapping
+/// their arms retyped the `if` spine so the tco rewrite declined and the wasm
+/// leg trapped with `call stack exhausted` at 2e6 depth where native printed
+/// its three sums.
+fn has_propagation_site(expr: &IrExpr) -> bool {
+    struct TryFinder(bool);
+    impl almide_ir::visit::IrVisitor for TryFinder {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if matches!(expr.kind, IrExprKind::Try { .. }) {
+                self.0 = true;
+            }
+            if !self.0 {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut f = TryFinder(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut f, expr);
+    f.0
+}
+
+/// Wrap every RETURN-position value of `expr` whose type is the declared
+/// return type in `ok(...)`, retyping the spine to the Result carrier as it
+/// goes. Return positions only — Block tails, If arms, Match arms — never
+/// operand or argument positions, so nothing an expression CONSUMES changes
+/// shape. `ResultOk`/`ResultErr` values are already the carrier, and a CALL
+/// gets its shape from the callee's own ABI; both are left alone.
+///
+/// Returns whether anything was wrapped, and the spine is retyped ONLY along
+/// the paths where something was: a body whose every return position is a call
+/// (`effect fn checked(n) = if n < 0 then fail(..) else checked(n - 1)`) must
+/// come out BYTE-IDENTICAL to before, or the tail-call loop conversion declines
+/// on the retyped spine and the fn runs O(n) stack — spec/wasm_cross/effect_tco
+/// trapped with `call stack exhausted` on the wasm leg while native printed its
+/// three sums.
+fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) -> bool {
+    match &mut expr.kind {
+        IrExprKind::Block { expr: tail, .. } => {
+            let wrapped = tail
+                .as_deref_mut()
+                .map(|t| wrap_return_positions_in_ok(t, decl_ty, result_ty))
+                .unwrap_or(false);
+            if wrapped {
+                expr.ty = result_ty.clone();
+            }
+            wrapped
+        }
+        IrExprKind::If { then, else_, .. } => {
+            let a = wrap_return_positions_in_ok(then, decl_ty, result_ty);
+            let b = wrap_return_positions_in_ok(else_, decl_ty, result_ty);
+            if a || b {
+                expr.ty = result_ty.clone();
+            }
+            a || b
+        }
+        IrExprKind::Match { arms, .. } => {
+            let mut any = false;
+            for arm in arms.iter_mut() {
+                any |= wrap_return_positions_in_ok(&mut arm.body, decl_ty, result_ty);
+            }
+            if any {
+                expr.ty = result_ty.clone();
+            }
+            any
+        }
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => false,
+        // A CALL in return position already yields the CARRIER — an effect fn's
+        // own ABI wraps its exits, so wrapping the call site again would build
+        // `ok(ok(..))`. The callee's ABI is the single decider for a call's
+        // shape; this retype only speaks for the values THIS body produces.
+        IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => false,
+        _ => {
+            // A VALUE in return position. Wrap it when it produces the declared
+            // type; anything else (a Never-typed die, an already-Result
+            // propagation) is left for the existing machinery.
+            if expr.ty == *decl_ty {
+                let inner = std::mem::replace(
+                    expr,
+                    IrExpr {
+                        kind: IrExprKind::Unit,
+                        ty: Ty::Unit,
+                        span: None,
+                        def_id: None,
+                    },
+                );
+                *expr = IrExpr {
+                    span: inner.span.clone(),
+                    def_id: inner.def_id,
+                    kind: IrExprKind::ResultOk { expr: Box::new(inner) },
+                    ty: result_ty.clone(),
+                };
+                true
+            } else {
+                false
+            }
+        }
     }
 }
 
@@ -676,6 +851,11 @@ fn lower_function_all_impl(
         if let Err(reason) = crate::mir_wellformed::check_def_before_use(f) {
             return Err(LowerError::Unsupported(reason));
         }
+        // The `Return` terminal discipline (law 6) rides the same rail: a
+        // violation is a lowering bug surfaced as a named wall.
+        if let Err(reason) = crate::mir_wellformed::check_return_terminal(f) {
+            return Err(LowerError::Unsupported(reason));
+        }
     }
     Ok(all)
 }
@@ -688,7 +868,7 @@ mod calls;
 
 // The `??`-operand admission gates (free fns in the private `control` module) — re-exported so the
 // `classify_corpus` caps counter consults the SAME predicates the lowering uses (no count drift).
-pub use control::{unwrap_or_named_variant_operand, unwrap_or_operand_admitted};
+
 
 // The in-place `&mut` mutator surface (a free fn in the private `calls` module) — re-exported so
 // `inline_pure_call_globals`'s receiver fence tests the SAME predicate the receiver COW does, and
@@ -707,6 +887,7 @@ include!("repr_sources.rs");
 include!("repr_sources_b.rs");
 include!("repr_sources_c.rs");
 include!("repr_sources_d.rs");
+include!("usage_scan.rs");
 include!("newtype_erase.rs");
 include!("newtype_subst.rs");
 include!("record_defaults.rs");
@@ -728,6 +909,7 @@ include!("mod_p4_d.rs");
 include!("mod_p4_e.rs");
 include!("mod_p4_g.rs");
 include!("mod_p4_h.rs");
+include!("mod_p4_i.rs");
 include!("mod_p5.rs");
 include!("mod_p5_b.rs");
 // The desugar family (formerly one 4.8k-line mod_p6.rs), split by concern:

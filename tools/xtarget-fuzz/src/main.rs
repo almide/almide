@@ -1,9 +1,16 @@
-//! Almide generative differential fuzzer (Stage 3).
+//! Almide generative fuzzer (Stage 3).
 //!
-//! Continuously synthesizes / mutates well-typed Almide programs and
-//! runs them through the native↔WASM differential oracle ladder, hunting
-//! observable divergences, codegen failures, and hangs. Every program is
-//! reproducible from `(seed, index)`.
+//! Continuously synthesizes / mutates well-typed Almide programs and runs
+//! them through the oracle ladder, hunting observable divergences, codegen
+//! failures, and hangs. Every program is reproducible from
+//! `(seed, index, family)`.
+//!
+//! Two kinds of oracle live here. The DIFFERENTIAL one compares native
+//! against wasm (with the interpreter as an abstaining third judge) and is
+//! structurally blind to a bug the two legs share — the #1322 class. The
+//! BY-CONSTRUCTION one (`--family identity`, #1332) generates programs
+//! whose expected output is a literal in their own source, so a leg is
+//! judged alone and unanimity is not a defense.
 //!
 //! Subcommands:
 //!   run     — run a campaign (time budget or fixed program count)
@@ -24,11 +31,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use findings::FindingSink;
-use generator::Engine;
-use oracle::{run_ladder, Outcome, Rung, Toolchain};
+use generator::{Engine, Family};
+use oracle::{run_ladder, FindingKind, Outcome, Rung, Toolchain};
 
 /// Default per-program timeout. Generated programs are tiny and finite;
-/// anything slower than this is hanging.
+/// outrunning this budget makes a leg a SUSPECT, which one confirm re-run
+/// at 10x then classifies: completed = Slow (perf-class), still over =
+/// Hang (#1235 — the 0.57.0 release gate hit exactly this boundary).
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Default campaign duration when `--minutes` is given without a value
@@ -42,6 +51,7 @@ fn main() {
     match cmd {
         "run" => cmd_run(&args[2..]),
         "replay" => cmd_replay(&args[2..]),
+        "ladder" => cmd_ladder(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "stats" => cmd_stats(),
         "-h" | "--help" | "help" => print_usage(),
@@ -55,12 +65,19 @@ fn main() {
 
 fn print_usage() {
     eprintln!(
-        "xtarget-fuzz — Almide generative differential fuzzer\n\n\
+        "xtarget-fuzz — Almide generative fuzzer\n\n\
          USAGE:\n\
-         \x20 xtarget-fuzz run    [--seed N] [--minutes M | --count N] [--jobs J] [--timeout S]\n\
-         \x20 xtarget-fuzz replay --seed N --index I\n\
-         \x20 xtarget-fuzz gen    --seed N --index I\n\
+         \x20 xtarget-fuzz run    [--seed N] [--minutes M | --count N] [--jobs J] [--timeout S] [--family F]\n\
+         \x20 xtarget-fuzz replay --seed N --index I [--family F]\n\
+         \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
+         \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz stats\n\n\
+         --family all|identity|synthesis  (default: all)\n\
+         \x20 `identity` runs ONLY the self-checking family (#1332): programs built\n\
+         \x20 backwards from a known answer, so a leg is judged alone and a bug the\n\
+         \x20 two backends SHARE is still convicted. It is part of the `all` mix too.\n\
+         \x20 A (seed, index) pair only reproduces under the same --family, which is\n\
+         \x20 why every finding's meta.txt records it.\n\n\
          The repo root is autodetected from the binary location; override with --repo PATH.\n\
          Findings are written under <repo>/tools/xtarget-fuzz/findings/ (override with --out DIR)."
     );
@@ -110,6 +127,20 @@ fn resolve_wasmtime() -> PathBuf {
     PathBuf::from("wasmtime")
 }
 
+/// Read `--family`, defaulting to the full mix. An unknown value is a
+/// hard error rather than a silent fallback: silently running `all` when
+/// the operator asked for `identity` would misreport what a campaign
+/// actually covered.
+fn resolve_family(args: &[String]) -> Family {
+    match flag_value(args, "--family") {
+        None => Family::All,
+        Some(s) => Family::parse(s).unwrap_or_else(|| {
+            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis)");
+            std::process::exit(2);
+        }),
+    }
+}
+
 // ── run ──
 
 fn cmd_run(args: &[String]) {
@@ -145,10 +176,13 @@ fn cmd_run(args: &[String]) {
         .map(PathBuf::from)
         .unwrap_or_else(|| repo.join("tools/xtarget-fuzz/findings"));
 
+    let family = resolve_family(args);
+
     eprintln!("xtarget-fuzz campaign");
     eprintln!("  repo     = {}", repo.display());
     eprintln!("  almide   = {}", almide.display());
     eprintln!("  seed     = {seed}");
+    eprintln!("  family   = {}", family.label());
     eprintln!("  jobs     = {jobs}");
     eprintln!("  timeout  = {}s/program", timeout.as_secs());
     match (count, &budget) {
@@ -157,7 +191,7 @@ fn cmd_run(args: &[String]) {
         _ => {}
     }
 
-    let engine = Arc::new(Engine::new(&repo));
+    let engine = Arc::new(Engine::with_family(&repo, family));
     eprintln!(
         "  catalogue= {} stdlib signatures, {} corpus programs\n",
         engine.catalogue_len(),
@@ -165,7 +199,8 @@ fn cmd_run(args: &[String]) {
     );
 
     let sink = Arc::new(
-        FindingSink::new(out_dir.clone()).expect("create findings dir"),
+        FindingSink::new(out_dir.clone(), family.label())
+            .expect("create findings dir"),
     );
 
     // Shared campaign state.
@@ -214,10 +249,17 @@ fn cmd_run(args: &[String]) {
     let elapsed = start.elapsed();
     print_summary(&stats, &sink, elapsed, &out_dir);
 
-    // Non-zero exit if any finding was recorded — the nightly CI gates on
-    // this to open an issue.
-    if sink.count() > 0 {
+    // Exit code carries the finding CLASS split (#1235): correctness
+    // findings exit 1; a campaign whose only findings are perf-class Slow
+    // exits 3, so a local caller can branch on it. (The nightly verdict
+    // does its own split from the finding directory-name prefixes and
+    // fails the night on correctness classes only.)
+    let slow = sink.slow_count();
+    if sink.count() > slow {
         std::process::exit(1);
+    }
+    if slow > 0 {
+        std::process::exit(3);
     }
 }
 
@@ -270,7 +312,17 @@ fn worker_loop(
         }
 
         stats.generated.fetch_add(1, Ordering::Relaxed);
-        let outcome = run_ladder(&tc, &gen.source, &file, &wasm, Some(&reference));
+        if gen.expected_stdout.is_some() {
+            stats.self_checked.fetch_add(1, Ordering::Relaxed);
+        }
+        let outcome = run_ladder(
+            &tc,
+            &gen.source,
+            &file,
+            &wasm,
+            Some(&reference),
+            gen.expected_stdout.as_deref(),
+        );
 
         match outcome {
             Outcome::Clean { native } => {
@@ -322,8 +374,26 @@ fn worker_loop(
                 // whenever it shrank — `repro.almd` and `native.out` /
                 // `wasm.out` must describe the same program, or a triager
                 // reasons about output the repro never produced.
-                let minimized =
-                    minimize::minimize(&tc, &gen.source, finding.kind, &work_dir, Some(&reference));
+                //
+                // Timeout-class findings are NOT minimized: with the #1235
+                // confirm re-run, every shrink candidate that still blows
+                // the budget costs (1 + 10)x the timeout — one pass would
+                // eat the whole shard. Generated programs are small by
+                // construction, so the original stands as the repro.
+                //
+                // An IDENTITY program is shrunk through its PLAN instead
+                // (#1332): deleting a line from an identity program deletes
+                // half of an inverse pair, which changes the value the
+                // program is supposed to print — the text minimizer would
+                // "reproduce" for the wrong reason and turn a miscompile
+                // into a generator artifact.
+                let minimized = if matches!(finding.kind, FindingKind::Hang | FindingKind::Slow) {
+                    minimize::Minimized { source: gen.source.clone(), finding: None }
+                } else if let Some(plan) = &gen.plan {
+                    minimize::minimize_plan(&tc, plan, finding.kind, &work_dir, Some(&reference))
+                } else {
+                    minimize::minimize(&tc, &gen.source, finding.kind, &work_dir, Some(&reference))
+                };
                 let evidence = minimized.finding.as_ref().unwrap_or(&finding);
                 let was_new = sink.record(
                     cfg.seed,
@@ -425,7 +495,7 @@ fn cmd_replay(args: &[String]) {
         .and_then(|s| s.parse().ok())
         .expect("replay requires --index");
 
-    let engine = Engine::new(&repo);
+    let engine = Engine::with_family(&repo, resolve_family(args));
     let gen = engine.generate(seed, index);
     println!("// seed={seed} index={index} origin={:?}\n", gen.origin);
     println!("{}", gen.source);
@@ -443,9 +513,75 @@ fn cmd_replay(args: &[String]) {
         scratch: repo.join("tools/xtarget-fuzz/.scratch/replay-build"),
         timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
     };
-    let outcome = run_ladder(&tc, &gen.source, &file, &wasm, Some(&reference));
+    let outcome = run_ladder(
+        &tc,
+        &gen.source,
+        &file,
+        &wasm,
+        Some(&reference),
+        gen.expected_stdout.as_deref(),
+    );
     eprintln!("\n=== ladder outcome ===");
     print_outcome(&outcome);
+}
+
+// ── ladder ──
+
+/// Run the full oracle ladder on an EXISTING `.almd` file — the triage
+/// instrument (#1235). A recorded finding's `repro.almd` can be re-judged
+/// after a classifier change without going through `(seed, index)` replay,
+/// which silently drifts whenever the mutation corpus changes underneath
+/// the seed. Exits 1 on any finding, 0 otherwise.
+fn cmd_ladder(args: &[String]) {
+    let Some(file_arg) = args.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("usage: xtarget-fuzz ladder <file.almd> [--timeout S]");
+        std::process::exit(2);
+    };
+    let source = match std::fs::read_to_string(file_arg) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("cannot read {file_arg}: {e}");
+            std::process::exit(2);
+        }
+    };
+    let repo = resolve_repo(args);
+    let almide = resolve_almide(&repo, args);
+    let timeout = flag_value(args, "--timeout")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_TIMEOUT_SECS);
+
+    let work_dir = repo.join("tools/xtarget-fuzz/.scratch/ladder");
+    let _ = std::fs::create_dir_all(&work_dir);
+    let file = work_dir.join("ladder.almd");
+    let wasm = work_dir.join("ladder.wasm");
+    let _ = std::fs::write(&file, &source);
+
+    let reference = crate::oracle::InterpOracle::new();
+    let tc = Toolchain {
+        almide,
+        wasmtime: resolve_wasmtime(),
+        scratch: repo.join("tools/xtarget-fuzz/.scratch/ladder-build"),
+        timeout: Duration::from_secs(timeout),
+    };
+    // An identity-family repro carries its own oracle in `// @expect`
+    // header lines, so `ladder <repro.almd>` re-judges it exactly as the
+    // campaign did — no `(seed, index)` and no family flag needed.
+    let expected = generator::identity::expected_from_source(&source);
+    if expected.is_some() {
+        eprintln!("(self-checking program: judging against its declared @expect output)");
+    }
+    let outcome = run_ladder(
+        &tc,
+        &source,
+        &file,
+        &wasm,
+        Some(&reference),
+        expected.as_deref(),
+    );
+    print_outcome(&outcome);
+    if matches!(outcome, Outcome::Finding(_)) {
+        std::process::exit(1);
+    }
 }
 
 // ── gen ──
@@ -458,7 +594,7 @@ fn cmd_gen(args: &[String]) {
     let index: u64 = flag_value(args, "--index")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let engine = Engine::new(&repo);
+    let engine = Engine::with_family(&repo, resolve_family(args));
     let gen = engine.generate(seed, index);
     print!("{}", gen.source);
 }
@@ -469,6 +605,7 @@ fn cmd_stats() {
     let repo = resolve_repo(&[]);
     let engine = Engine::new(&repo);
     println!("repo            = {}", repo.display());
+    println!("family          = {}", engine.family().label());
     println!("catalogue size  = {}", engine.catalogue_len());
     println!("corpus programs = {}", engine.corpus_len());
 }
@@ -487,6 +624,10 @@ struct Stats {
     /// reason histogram feeds the subset burn-down.
     walled: AtomicU64,
     wall_reasons: std::sync::Mutex<std::collections::BTreeMap<String, u64>>,
+    /// Programs judged by the BY-CONSTRUCTION oracle (#1332) rather than
+    /// only differentially. This is the campaign's honest answer to "how
+    /// much of tonight could have caught a bug both backends share".
+    self_checked: AtomicU64,
 }
 
 fn report_progress(
@@ -544,9 +685,25 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
         stats.generator_rejects.load(Ordering::Relaxed)
     );
     eprintln!("  skipped          = {}", stats.skipped.load(Ordering::Relaxed));
+    let oracled = stats.self_checked.load(Ordering::Relaxed);
+    eprintln!(
+        "  self-checked     = {oracled} ({:.0}% — judged by the by-construction oracle, \
+         so a shared-lowering bug is convictable)",
+        if g == 0 { 0.0 } else { oracled as f64 / g as f64 * 100.0 }
+    );
     let walls = stats.walled.load(Ordering::Relaxed);
     eprintln!("  walls (subset)   = {walls}");
-    eprintln!("  unique findings  = {}", sink.count());
+    let slow = sink.slow_count();
+    if slow > 0 {
+        eprintln!(
+            "  unique findings  = {} ({} correctness, {} perf-slow)",
+            sink.count(),
+            sink.count() - slow,
+            slow
+        );
+    } else {
+        eprintln!("  unique findings  = {}", sink.count());
+    }
     eprintln!("  throughput       = {:.1} programs/min", g as f64 / secs * 60.0);
     if walls > 0 {
         let reasons = stats.wall_reasons.lock().unwrap();
@@ -575,10 +732,10 @@ fn print_outcome(outcome: &Outcome) {
         Outcome::Finding(f) => {
             eprintln!("FINDING [{:?}] at rung {:?}: {}", f.kind, f.rung, f.summary);
             if let Some(n) = &f.native {
-                eprintln!("--- native stdout ---\n{}", n.stdout);
+                eprintln!("--- native stdout ({:.1}s) ---\n{}", n.duration_secs, n.stdout);
             }
             if let Some(w) = &f.wasm {
-                eprintln!("--- wasm stdout ---\n{}", w.stdout);
+                eprintln!("--- wasm stdout ({:.1}s) ---\n{}", w.duration_secs, w.stdout);
             }
         }
     }
@@ -622,5 +779,6 @@ fn rung_name(r: Rung) -> &'static str {
         Rung::NativeBuild => "native-build",
         Rung::WasmBuild => "wasm-build",
         Rung::Run => "run",
+        Rung::SelfCheck => "self-check",
     }
 }

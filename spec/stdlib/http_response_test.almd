@@ -48,3 +48,23 @@ test "http.with_headers creates response with custom headers" {
     none => assert(false),
   }
 }
+
+// ALS-R7 / C-275 — the three header rulings, asserted on the native leg too.
+test "http.with_headers seeds nothing the caller did not pass" {
+  let resp = http.with_headers(200, "hi", map.new() |> map.set("X-A", "1"))
+  assert_eq(http.get_header(resp, "Content-Type") ?? "none", "none")
+  assert_eq(http.get_header(resp, "X-A") ?? "none", "1")
+}
+
+test "http header names are case-insensitive" {
+  let resp = http.response(200, "hi")
+  assert_eq(http.get_header(resp, "content-type") ?? "none", "text/plain")
+  assert_eq(http.get_header(resp, "CONTENT-TYPE") ?? "none", "text/plain")
+  assert_eq(http.get_header(resp, "X-Nope") ?? "none", "none")
+}
+
+test "http.set_header round-trips under any spelling" {
+  let resp = http.set_header(http.response(200, "hi"), "content-type", "text/html")
+  assert_eq(http.get_header(resp, "content-type") ?? "none", "text/html")
+  assert_eq(http.get_header(resp, "Content-Type") ?? "none", "text/html")
+}

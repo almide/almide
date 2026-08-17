@@ -129,7 +129,69 @@ else
   echo "::error::tcb markers missing from $SPINE"; exit 2
 fi
 
+# ── Stage-status block in proofs/STAGE-STATUS.md ────────────────────────────
+# The five-stage adoption roadmap's single checkable status artifact: every
+# number measured from committed ledgers (no session prose). Same marker
+# discipline; --check makes drift red.
+STAGES="proofs/STAGE-STATUS.md"
+SSTART="<!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->"
+SEND="<!-- stages:generated:end -->"
+stage_block() {
+  local arms unguarded watfns libms corpus abstains voting contracts keyed
+  local seals gates unverified torrows streak
+  arms=$(grep -c '^\[\[arm\]\]' proofs/scalar-read-audit.toml)
+  unguarded=$(grep -c 'class = "UNGUARDED"' proofs/scalar-read-audit.toml || true)
+  watfns=$(grep -c '^\[\[fn\]\]' proofs/wat-prelude-audit.toml)
+  libms=$(grep -c '^\[\[site\]\]' proofs/libm-determinism-audit.toml)
+  corpus=$(ls spec/wasm_cross/*.almd | wc -l | tr -d ' ')
+  abstains=$(grep -vc '^#\|^$' crates/almide-interp/interp-abstain-ledger.txt)
+  voting=$((corpus - abstains))
+  contracts=$(grep -c '^\[\[contract\]\]' docs/contracts/contracts.toml)
+  keyed=$(grep -c '^spec ' docs/contracts/contracts.toml)
+  seals=$(ls proofs/releases/v*.toml 2>/dev/null | wc -l | tr -d ' ')
+  gates=$(grep -c '^\[\[gate\]\]' proofs/gate-verification.toml)
+  unverified=$(grep -c 'class = "UNVERIFIED"' proofs/gate-verification.toml || true)
+  torrows=$(grep -c '^\*\*TOR-' proofs/TOR.md)
+  # The streak is a dated meter maintained by fuzz-green-streak.sh — quote its
+  # last recorded row (a ledger value, not a re-derivation).
+  streak=$(grep -E '^\| [0-9]{4}-' research/benchmark/fuzz-green/README.md | tail -1 | awk -F'|' '{gsub(/ /,"",$3); print $3}')
+  printf '> **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —\n'
+  printf '> scalar-read %s arms / %s UNGUARDED; WAT prelude %s fns classified;\n' "$arms" "$unguarded" "$watfns"
+  printf '> platform-libm %s sites classified. New entries cannot land unclassified.\n' "$libms"
+  printf '>\n'
+  printf '> **Stage 2 (translation validation): %s/%s fixtures cast a real 3-way vote (%s%%)** —\n' "$voting" "$corpus" "$((voting * 100 / corpus))"
+  printf '> the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).\n'
+  printf '>\n'
+  local els unwritten_els
+  els=$(grep -c '^\[\[element\]\]' proofs/als-element-coverage.toml)
+  unwritten_els=$(grep -c 'section = "UNWRITTEN"' proofs/als-element-coverage.toml || true)
+  printf '> **Stage 3 (semantics freeze): %s/%s contracts spec-keyed; syntax-element coverage\n' "$keyed" "$contracts"
+  printf '> %s/%s sectioned (%s UNWRITTEN, shrink-only — the freeze precondition is 0).**\n' "$((els - unwritten_els))" "$els" "$unwritten_els"
+  printf '>\n'
+  printf '> **Stage 4 (durability): fuzz true-green streak = %s day(s)** (dated meter;\n' "$streak"
+  printf '> the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).\n'
+  printf '>\n'
+  printf '> **Stage 5 (auditability): %s release seal(s); %s verification gates classified\n' "$seals" "$gates"
+  printf '> (%s UNVERIFIED under a shrink-only ceiling); TOR with %s enforced rows;\n' "$unverified" "$torrows"
+  printf '> gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**\n'
+}
+if grep -qxF "$SSTART" "$STAGES"; then
+  sblockfile="$(mktemp)"
+  stage_block > "$sblockfile"
+  stages_rendered="$(awk -v start="$SSTART" -v end="$SEND" -v bf="$sblockfile" '
+    $0 == start { print; while ((getline line < bf) > 0) print line; skip = 1; next }
+    $0 == end   { skip = 0; print; next }
+    !skip { print }
+  ' "$STAGES")"
+else
+  echo "::error::stage markers missing from $STAGES"; exit 2
+fi
+
 if [ "${1:-}" = "--check" ]; then
+  if [ "$stages_rendered" != "$(cat "$STAGES")" ]; then
+    echo "::error::proofs/STAGE-STATUS.md stage block is stale — run: bash scripts/gen-claims.sh"
+    exit 1
+  fi
   if [ "$rendered" != "$(cat "$README")" ]; then
     echo "::error::README.md claims block is stale — run: bash scripts/gen-claims.sh"
     exit 1
@@ -143,3 +205,4 @@ fi
 
 printf '%s\n' "$rendered" > "$README"
 printf '%s\n' "$spine_rendered" > "$SPINE"
+printf '%s\n' "$stages_rendered" > "$STAGES"

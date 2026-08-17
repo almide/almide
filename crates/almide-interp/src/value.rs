@@ -22,6 +22,16 @@ pub struct Closure {
     pub body: Rc<almide_ir::IrExpr>,
     /// Captured environment snapshot (one frame holding all free vars).
     pub captured: crate::env::Scope,
+    /// The lambda node's own declared result type, when one was recorded.
+    ///
+    /// The BODY's type can disagree with it: a never-erring effect call in tail
+    /// position reaches this crate already stripped to its bare payload, while
+    /// the enclosing `Ty::Fn` still says `Result[..]`. Monomorphization treats
+    /// the `Ty::Fn` as the authority (it is what names
+    /// `list.__fallible_map__Int_Int_String`), so the fallible-HOF glue does
+    /// too — see `try_step`. `None` where no lambda node was involved (a
+    /// top-level fn resolved into a closure), which keeps that path unchanged.
+    pub ret_ty: Option<almide_lang::types::Ty>,
 }
 
 impl std::fmt::Debug for Closure {
@@ -377,7 +387,12 @@ impl Value {
                 repr_seq("[", "]", &items)
             }
             Value::Tuple(xs) => repr_seq("(", ")", xs),
-            Value::Set(xs) => repr_seq("[", "]", xs),
+            // Set: the CONSTRUCTOR form `set.from_list([...])`, empty included
+            // (runtime/rs/src/set.rs:108 — element order = insertion order).
+            // The bare `[...]` this arm previously produced was unobservable
+            // until the `set.new`/`set.from_list` glue made Set-repr fixtures
+            // evaluate, and the 3-way harness caught the dissent (#1416 PR).
+            Value::Set(xs) => repr_seq("set.from_list([", "])", xs),
             Value::Map(entries) => {
                 // Map: `["k": v]` insertion order (runtime/rs/src/map.rs:74),
                 // empty map `[:]`.

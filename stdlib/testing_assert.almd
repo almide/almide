@@ -38,3 +38,19 @@ fn testing_assert_err(r: Result[String, String]) -> Unit = {
   let h = prim.handle(r)
   if prim.load32(h + 16) != 0 then () else prim.die(prim.handle("assert_err failed\n"))
 }
+
+// The SCALAR-Ok twins (#1233): a scalar-Ok Result is the len-as-tag layout
+// (len@4: 0 = Ok, 1 = Err — the C-229 lesson: the layout follows the Ok
+// side), so the tag read moves from @16 to @4; nothing else changes (these
+// asserts never read a payload). The heap-Ok classes stay on the plain
+// twins above, whose cap-as-tag @16 read is layout-correct for every heap
+// payload.
+fn testing_assert_ok_sc(r: Result[Int, String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 4) == 0 then () else prim.die(prim.handle("assert_ok failed\n"))
+}
+
+fn testing_assert_err_sc(r: Result[Int, String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 4) != 0 then () else prim.die(prim.handle("assert_err failed\n"))
+}

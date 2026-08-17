@@ -147,6 +147,15 @@ impl LowerCtx {
             IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. } => {
                 self.lower_scalar_literal(expr)
             }
+            // `()` — the Unit value is 0 in the i64-uniform repr (the same
+            // convention `ok(())`'s payload placeholder uses). This is what lets a
+            // `Result[Unit, String] ?? ()` fallback lower on the scalar route
+            // (`fs.remove(p) ?? ()` walled on exactly this missing arm).
+            IrExprKind::Unit => {
+                let z = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                Some(z)
+            }
             // Decomposed (#781): the 340-line operator dispatch is a verbatim
             // text move into `lower_scalar_binop`.
             IrExprKind::BinOp { op, left, right } => {
@@ -319,9 +328,25 @@ impl LowerCtx {
     /// #852): which match-execution strategy a scalar `match` operand gets — custom-variant
     /// tag dispatch, tuple refinement, variant (Option/Result) value-match, or the desugared
     /// if/block chain — in that priority order.
-    fn lower_scalar_match_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+    pub(crate) fn lower_scalar_match_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
         match &expr.kind {
             IrExprKind::Match { subject, arms } if !is_heap_ty(&expr.ty) => {
+                // A PROPAGATING arm (`err(_) => f(..)!`) has NO value — it early-
+                // returns the Err out of the enclosing fn. This VALUE-position
+                // machinery has no diverging-arm concept (no join point, no
+                // orphan-block escape): lowering the arm as a value emitted an
+                // invalid merge (an i32 Result block where the merge expects
+                // i64 — #1421, accepted-but-wrong). DECLINE so the caller walls
+                // honestly; the `(match …)!` statement rewrite
+                // (`desugar_unwrap_or_unwrap_fallback`, now both payload
+                // classes) is the sound route for every known producer of this
+                // shape, and the Koka join-point construction (rot-eradication
+                // R3) is the eventual value-position lowering.
+                if arms.iter().any(|a| {
+                    matches!(a.body.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+                }) {
+                    return None;
+                }
                 // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
                 if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, &expr.ty) {
                     return Some(dst);
@@ -757,6 +782,9 @@ impl LowerCtx {
         left: &IrExpr,
         right: &IrExpr,
     ) -> Option<ValueId> {
+        if let Some(dst) = self.lower_scalar_binop_eq_unit(op, left, right) {
+            return Some(dst);
+        }
         if let Some(dst) = self.lower_scalar_binop_eq_string_value(op, left, right) {
             return Some(dst);
         }

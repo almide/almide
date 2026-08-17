@@ -34,28 +34,6 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
             "test mode: no `main` and no test blocks — nothing to run".into(),
         ));
     }
-    // v0's `__test_runner` re-initializes module globals before EVERY test (native
-    // thread-isolation parity). The v1 `_start` runs `__global_init`/`__mg_init` ONCE —
-    // so the runner main re-ASSIGNS every MUTABLE main-region top-let to its
-    // initializer before each test (the ordinary `lower_mutable_global_assign` path:
-    // take + drop-old + store — no leak, no new runtime). An IMMUTABLE top-let cannot
-    // change between tests and needs no re-init. MODULE top-lets stay walled: their
-    // VarIds live in a different numbering region than the main-region runner, so a
-    // synthesized Assign could collide with an unrelated main-side id (the per-region
-    // globals discipline) — that bridge is the remaining piece of this brick.
-    if ir.modules.iter().any(|m| m.top_lets.iter().any(|tl| tl.mutable)) {
-        // MUTABLE module top-lets stay walled in test mode: the per-test re-init
-        // Assign would have to cross the VarId numbering-region bridge (a
-        // synthesized main-region Assign could collide with an unrelated module
-        // id — the per-region globals discipline). IMMUTABLE literal-init
-        // top-lets cannot change between tests and need no re-init — they lower
-        // through the const-bridge.
-        return Err(LowerError::Unsupported(
-            "test mode: MUTABLE module top-lets need the per-test region bridge, \
-             not in this brick"
-                .into(),
-        ));
-    }
     // A referenced IMPURE-call-initialized module top-let walls the file: the
     // const-bridge drops a call init (mod.rs's expr_has_call), a PURE one is
     // substituted into the reader bodies later (the ceangal/#785 substitution +
@@ -163,10 +141,29 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
             ));
         }
     }
-    let reinit_stmts: Vec<IrStmt> = ir
+    // v0's `__test_runner` re-initializes module globals before EVERY test (native
+    // thread-isolation parity: each `#[test]` gets a fresh thread, so a native test
+    // never sees a sibling's writes). The v1 `_start` runs `__global_init`/`__mg_init`
+    // ONCE — so the runner main re-ASSIGNS every MUTABLE top-let to its initializer
+    // before each test (the ordinary `lower_mutable_global_assign` path: take +
+    // drop-old + store — no leak, no new runtime). An IMMUTABLE top-let cannot change
+    // between tests and needs no re-init.
+    //
+    // MODULE top-lets are included (#1233 — the per-test region bridge): the
+    // `disambiguate_module_global_regions` pass now runs BEFORE this synthesis, so
+    // every module id is program-unique and a main-region `Assign` naming one cannot
+    // collide with an unrelated main-side id. `assign_mutable_global_slots` unions the
+    // same two sources and sorts by raw id, so ordering the re-inits the same way
+    // replays declaration order slot-for-slot, exactly as `__mg_init` does.
+    let mut mutable_tls: Vec<&almide_ir::IrTopLet> = ir
         .top_lets
         .iter()
+        .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
         .filter(|tl| tl.mutable)
+        .collect();
+    mutable_tls.sort_by_key(|tl| tl.var.0);
+    let reinit_stmts: Vec<IrStmt> = mutable_tls
+        .iter()
         .map(|tl| IrStmt {
             kind: IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
             span: None,

@@ -16,17 +16,11 @@
 #                       (assert_throws requires catching a panic; wasm traps
 #                       are uncatchable in-process).
 #
-# COMPILER_FRONTIER (10) — the debt, in leverage order:
-spec/lang/closure_capture_map_test.almd :: COMPILER_FRONTIER :: 1 fn outside the lowering subset (closure-capture map — the defunc closure frontier)
-spec/stdlib/codec_field_matrix_test.almd :: COMPILER_FRONTIER :: bind-position record brick (#1064)
-spec/integration/modules/cross_module_cell_update_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
-spec/integration/modules/cross_module_global_state_loop_test.almd :: COMPILER_FRONTIER :: test mode: MUTABLE module top-lets need the per-test region bridge
-spec/lang/result_zip_test.almd :: COMPILER_FRONTIER :: result.zip_x unlinked (typed self-host twin missing)
-spec/stdlib/stdlib-test.almd :: COMPILER_FRONTIER :: list.sort_by_str_key_x unlinked (typed self-host twin missing)
-spec/stdlib/fs_fold_lines_chunked_test.almd :: COMPILER_FRONTIER :: test-mode heap-result match brick (create_temp_dir now self-hosted; the trio and the fixture's tmp() lower)
-spec/stdlib/fs_fold_lines_range_test.almd :: COMPILER_FRONTIER :: test-mode heap-result match brick (create_temp_dir now self-hosted; the trio and the fixture's tmp() lower)
-spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: non-msi accumulator twins + for_each_line (create_temp_dir now self-hosted)
-spec/stdlib/fs_if_exists_test.almd :: COMPILER_FRONTIER :: C-215 errno-carrying read prim not landed
+# COMPILER_FRONTIER (4) — the debt, in leverage order:
+spec/lang/closure_capture_map_test.almd :: COMPILER_FRONTIER :: defunc closure frontier — measured: 1 of 23 fns walls, `__almd_test_2` ("closure folds records through a captured map via match"), "computed closure call outside the liftable subset". The captured cell is a Map[String, Record] and the closure body MATCHES on map.get before writing back, so the callee is not statically resolvable at the call site — the two SCALAR-cell tests in the same file already render. Needs the closure-env brick (lift a computed callee whose capture set includes a heap cell), not another typed twin.
+spec/stdlib/codec_field_matrix_test.almd :: COMPILER_FRONTIER :: bind-position record brick (#1064) — measured: 1 of 328 fns walls, `__almd_test_12` ("nested containers"), "Record heap bind cannot be faithfully materialized". `let x = Deep { lo: [some(1), none, …], ll: [[1], [2, 3]], … }` reaches binds_p2_b's strict-mode Init::Opaque default-deny: the record literal's NESTED heap container fields have no builder, so the bind would be an empty block the program could read. The other 13 tests render. Needs the record-literal builder for heap-container fields, not a stdlib twin.
+spec/lang/result_zip_test.almd :: COMPILER_FRONTIER :: result.zip_x unlinked — the walling instantiation is `zip(Result[Float, String], Result[String, String]) -> Result[(Float, String), String]`. Not the mechanical twin recipe: the two SIDES carry different tag layouts (scalar Ok is len-as-tag, heap Ok is cap-as-tag @16), so the twin must read each side's tag by its own rule, and the Ok payload is a MIXED tuple whose String element must be co-owned and freed by a recursive drop route that does not exist for `Result[(Float, String), String]`. The all-scalar `result.zip` twin already renders.
+spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: blocked on `for_each_line` over a CAPTURED var, not on the accumulator twins. 2 of the 6 tests (`var seen` + list.push, `var calls` + increment) need a closure whose capture set is mutated inside the callback — the same closure-env brick as closure_capture_map_test. The fold_lines String/Int/List[String] accumulator twins are mechanical (the `_ls` chunked twin landed the same way) but landing all three still leaves those 2 tests walled, so this row does not move until the closure brick does.
 #
 # HOST_CAPABILITY (6):
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener

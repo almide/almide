@@ -42,7 +42,7 @@ COQC="${COQC:-$(command -v coqc)}"
 kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
   local mode=$1 wf=$2 expect=$3 fn want gen
   case "$mode" in
-    ownership)       fn="check_bc" ;;
+    ownership)       fn="check_xc" ;;
     names)           fn="check_names_cert" ;;
     caps)            fn="check_caps_cert" ;;
     caps-transitive) fn="check_prog_cert" ;;

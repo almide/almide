@@ -60,7 +60,7 @@ pub fn canonicalize_program<'a>(
     }
 
     // 2. Register user modules (with prefix)
-    let mut collect_dep_roots = |env: &mut TypeEnv, prog: &ast::Program| {
+    let collect_dep_roots = |env: &mut TypeEnv, prog: &ast::Program| {
         for imp in &prog.imports {
             if let ast::Decl::Import { path, .. } = imp {
                 if let Some(root) = path.first() {
@@ -76,8 +76,19 @@ pub fn canonicalize_program<'a>(
     collect_dep_roots(&mut env, program);
     for (name, mod_prog, is_self) in modules {
         collect_dep_roots(&mut env, mod_prog);
+        // An imported module carrying a future dialect stamp is the same
+        // error as the main file carrying one — it was verified somewhere
+        // this compiler cannot reproduce. Attributed to the module by name so
+        // the reader is not sent to the wrong file.
+        crate::dialect_check::check_dialect_stamp_in(Some(name), mod_prog, &mut diagnostics);
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
     }
+
+    // 2b. The file's dialect stamp, if it carries one. Program-level and
+    // resolution-independent, so it runs before any name is resolved: a file
+    // stamped for a dialect this compiler does not speak should say so rather
+    // than produce a pile of downstream errors about names that moved.
+    crate::dialect_check::check_dialect_stamp(program, &mut diagnostics);
 
     // 3. Build import table for main program
     let self_name = env.self_module_name.map(|s| s.to_string());
@@ -90,6 +101,9 @@ pub fn canonicalize_program<'a>(
 
     // 5. Carry parse-failure fn names so checker can suppress cascades.
     env.failed_fn_names.extend(program.failed_fn_names.iter().cloned());
+
+    // Attribute diagnostics gathered during registration join the rest.
+    diagnostics.extend(std::mem::take(&mut env.attr_diagnostics));
 
     CanonicalizationResult { env, diagnostics }
 }

@@ -612,7 +612,7 @@ impl LowerCtx {
     }
 
     pub(crate) fn lower_scalar_field_access(&mut self, expr: &IrExpr) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
+        
         // Scalar result only (the caller's contract; a heap field defers to the
         // container-grain extraction).
         if is_heap_ty(&expr.ty) {
@@ -665,7 +665,7 @@ impl LowerCtx {
         index: &IrExpr,
         elem_ty: &Ty,
     ) -> Option<ValueId> {
-        use crate::PrimKind;
+        
         // Scalar element only — a heap element (List[String]) needs a borrowing LoadHandle path,
         // handled by the heap-extraction lowering, not here.
         if is_heap_ty(elem_ty) {

@@ -167,8 +167,11 @@ fn resolve_dep_version(dep: &Dependency) -> String {
 /// If almide.lock exists, uses locked commit hashes for reproducibility.
 pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
     let lock_path = project.root.join("almide.lock");
+    // A corrupt lock is an ERROR, never an empty set: swallowing it here used
+    // to silently re-resolve every dependency from the network, defeating the
+    // reproducibility the lock exists for (#1465).
     let locked = if lock_path.exists() {
-        parse_lock_file(&lock_path).unwrap_or_default()
+        parse_lock_file(&lock_path)?
     } else {
         Vec::new()
     };

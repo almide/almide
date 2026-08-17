@@ -16,7 +16,10 @@ impl LowerCtx {
     /// ONCE before the loop (v0 builds the range once). Restricted to the runnable subset:
     /// a LITERAL `start` (so the index local is a fresh, distinct `ConstInt` — safe to
     /// mutate, never aliasing a caller value), a scalar-lowerable `end`, an Int loop var
-    /// (no tuple), no `break`/`continue`, and a heap-reassign-free body (the
+    /// (no tuple), `break`/`continue` only in the statement positions
+    /// [`LowerCtx::lower_while_body_stmts`] recognizes (a conditional `continue`
+    /// becomes the guarded rest, so the implicit STEP below still runs on the
+    /// continue path — #1277), and a heap-reassign-free body (the
     /// `scalar_loop_depth` rule errors otherwise). Returns false (rolled back) when out of
     /// subset; `lower_for_in` then falls back to its sound model-one-iteration form.
     pub(crate) fn try_lower_scalar_for_range(
@@ -72,16 +75,15 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.scalar_loop_depth += 1;
-        let mut ok = true;
-        for stmt in body {
-            if let Err(e) = self.lower_while_body_stmt(stmt) {
+        let ok = match self.lower_while_body_stmts(body) {
+            Ok(()) => true,
+            Err(e) => {
                 crate::trace::trace("ALMIDE_DBG_ELEM", || {
                     format!("[for-range] body stmt declined: {e:?}")
                 });
-                ok = false;
-                break;
+                false
             }
-        }
+        };
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
         if !ok {
@@ -115,7 +117,9 @@ impl LowerCtx {
     /// (`drop_arm_locals`), the markers no-op in the cert (it verifies ONE balanced iteration), the
     /// `i < len` guard runs the body the REAL number of times (0 for an empty list — closing the
     /// model-one-iteration bug that ran a heap-element body ONCE on a garbage handle). GATED to a
-    /// `List[scalar]` / heap-element list, a matching loop-var type, no tuple/break/continue.
+    /// `List[scalar]` / heap-element list, a matching loop-var type, no tuple;
+    /// `break`/`continue` only in the statement positions
+    /// [`LowerCtx::lower_while_body_stmts`] recognizes (#1277).
     pub(crate) fn try_lower_scalar_for_list(
         &mut self,
         var: VarId,
@@ -467,13 +471,7 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.scalar_loop_depth += 1;
-        let mut ok = true;
-        for stmt in body {
-            if self.lower_while_body_stmt(stmt).is_err() {
-                ok = false;
-                break;
-            }
-        }
+        let ok = self.lower_while_body_stmts(body).is_ok();
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
         if !ok {

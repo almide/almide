@@ -447,9 +447,9 @@ fn fan_any_inlines_a_literal_thunk_list() {
     let src = "effect fn okn(n: Int) -> Result[Int, String] = ok(n * 3)\n\
         effect fn failing() -> Result[Int, String] = err(\"boom\")\n\
         effect fn main() -> Unit = {\n\
-        match (fan.any { okn(10); okn(20) }) { ok(v) => println(\"r=\" + int.to_string(v)), err(e) => println(e) }\n\
-        match (fan.any { failing(); okn(7) }) { ok(v) => println(\"any=\" + int.to_string(v)), err(e) => println(e) }\n\
-        match (fan.any { failing(); failing() }) { ok(v) => println(\"ok\"), err(e) => println(\"af=\" + e) } }\n";
+        match (fan.any { okn(10), okn(20) }) { ok(v) => println(\"r=\" + int.to_string(v)), err(e) => println(e) }\n\
+        match (fan.any { failing(), okn(7) }) { ok(v) => println(\"any=\" + int.to_string(v)), err(e) => println(e) }\n\
+        match (fan.any { failing(), failing() }) { ok(v) => println(\"ok\"), err(e) => println(\"af=\" + e) } }\n";
     let prog = lower_source(src);
     if let Some(out) = build_and_run("fan_any_literal", &render_wasm_program(&prog)) {
         assert_eq!(out, "r=30\nany=21\naf=fan.any: all candidates failed");
@@ -673,4 +673,98 @@ fn heap_and_fn_captures_execute_and_free_via_drop_closure() {
     if let Some(out) = build_and_run("heap_fn_captures", &wat) {
         assert_eq!(out, "Hello, world\n20\n108");
     }
+}
+
+#[test]
+fn while_continue_break_executes_on_wasmtime() {
+    // #1277: `continue` in a scalar while body lowers as the GUARDED REST
+    // (`if (1-c) then { rest }` — no branch op), and the conditional `break`
+    // inside that rest emits its `LoopBreakUnless` INSIDE the `IfThen` region
+    // (named `$brk` labels branch out of a nested wasm `if`). Byte-matches v0:
+    // s = 1+2+4+5+6 = 18 (i=3 skipped by continue), i = 7 (break before s += 7).
+    let src = "effect fn main() -> Unit = {\n\
+        var i = 0\n\
+        var s = 0\n\
+        while i < 10 {\n\
+          i = i + 1\n\
+          if i == 3 then continue\n\
+          if i > 6 then break\n\
+          s = s + i\n\
+        }\n\
+        println(int.to_string(s))\n\
+        println(int.to_string(i)) }\n";
+    let prog = lower_source(src);
+    assert!(
+        prog.functions.iter().any(|f| f.name == "main"),
+        "the scalar-loop machinery must admit the #1277 repro (continue = guarded rest)"
+    );
+    if let Some(out) = build_and_run("while_continue_break", &render_wasm_program(&prog)) {
+        assert_eq!(out, "18\n7");
+    }
+}
+
+#[test]
+fn for_range_continue_still_steps_on_wasmtime() {
+    // #1277: `continue` in a for-range body must still run the implicit index
+    // STEP (the step is emitted after the body; the guarded-rest form falls
+    // through to it — a br-to-head would skip it and loop forever).
+    // acc = 0+1+3+4 = 8 (j=2 skipped).
+    let src = "effect fn main() -> Unit = {\n\
+        var acc = 0\n\
+        for j in 0..<5 {\n\
+          if j == 2 then continue\n\
+          acc = acc + j\n\
+        }\n\
+        println(int.to_string(acc)) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "main"));
+    if let Some(out) = build_and_run("for_range_continue", &render_wasm_program(&prog)) {
+        assert_eq!(out, "8");
+    }
+}
+
+#[test]
+fn mid_body_break_is_immediate_on_wasmtime() {
+    // Pins the `desugar_loop_break` positional tightening (#1277 measurement):
+    // a NON-trailing `if c then break` must break IMMEDIATELY (v0/interp
+    // semantics — `last` stays 3), not defer past the rest of the iteration
+    // (the old flag rewrite printed 4). The shape now routes to the scalar
+    // machinery's `LoopBreakUnless` at the statement position.
+    let src = "effect fn main() -> Unit = {\n\
+        var last = 0\n\
+        for k in 0..<10 {\n\
+          if k > 3 then break\n\
+          last = k\n\
+        }\n\
+        println(int.to_string(last)) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "main"));
+    if let Some(out) = build_and_run("mid_body_break_immediate", &render_wasm_program(&prog)) {
+        assert_eq!(out, "3");
+    }
+}
+
+#[test]
+fn continue_outside_recognized_positions_still_walls() {
+    // #1277 scope pin: a `continue` with statements BEFORE it inside the arm is
+    // NOT in the guarded-rest subset — the scalar attempt declines and the
+    // model-one-iteration fallback keeps the LOUD wall (no wrong value). The
+    // walled `main` is absent from the lowered program.
+    let src = "effect fn main() -> Unit = {\n\
+        var i = 0\n\
+        var s = 0\n\
+        while i < 5 {\n\
+          i = i + 1\n\
+          if i == 2 then {\n\
+            s = s + 100\n\
+            continue\n\
+          }\n\
+          s = s + i\n\
+        }\n\
+        println(int.to_string(s)) }\n";
+    let prog = lower_source(src);
+    assert!(
+        !prog.functions.iter().any(|f| f.name == "main"),
+        "a continue outside the recognized statement positions must keep the honest wall"
+    );
 }

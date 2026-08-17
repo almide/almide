@@ -1,0 +1,278 @@
+# Integer-domain edge divergences — MEASURED, not asserted.
+#
+# Every public stdlib fn x every Int parameter x a declared edge set, run on both
+# targets and compared. Regenerate with `scripts/check-domain-edges.sh --update`;
+# the gate diffs BOTH directions, so a new divergence fails and a row that stopped
+# diverging also fails and must be deleted. `count` is a shrink-only ceiling.
+#
+# Measured 2026-08-17 on the A-ratified tree, six modules (bytes, list, string,
+# datetime, io, math), quiet machine, solo-retry instrument:
+#   AGREE 4823   DIVERGE 64   WALL 627   BOMB 2
+#
+# Every one of the 64 divergent rows below is the CONTRACTED divergence (C-197,
+# ratified A): a cell between the two legs' structural allocation bounds, where
+# the narrower leg (wasm32) takes the defined out-of-memory abort and the wider
+# one answers. These are DECLARED, not defects — the count is not a defect
+# ratchet for them. What stays shrink-only is the UNTRIAGED population: a row
+# without a contracted/inherited reason is an open finding, and this file has
+# ZERO of those. datetime/io/math measured 0 divergent — their former rows were
+# fixed (#1455) and are deleted as stale. BOMB 2 are declared timeout outcomes
+# (native filling tens of GB), not findings.
+
+count = 64
+
+[[divergence]]
+cell   = "bytes.new:len:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.new:len:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.pad_left:target_len:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f16_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f32_be_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f32_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f64_be_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_f64_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i16_be_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i16_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i32_be_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i32_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i64_be_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_i64_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u16_be_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u16_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u32_be_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.read_u32_le_array:count:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.repeat:n:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.repeat:n:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.repeat:n:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range:end:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range:end:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range:end:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range:start:i32_min"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "string.pad_end:n:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "string.pad_end:n:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "string.pad_end:n:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "string.pad_start:n:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "string.pad_start:n:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "string.pad_start:n:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"

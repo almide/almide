@@ -438,7 +438,7 @@ pub fn desugar_tuple_variant_match(body: &IrExpr) -> Option<IrExpr> {
             }
         }
     }
-    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)

@@ -1,0 +1,4 @@
+fn sum_digits(n: Int) -> Int =
+  let abs_n = int.abs(n)
+  in if abs_n == 0 then 0
+     else (abs_n % 10) + sum_digits(abs_n / 10)

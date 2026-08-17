@@ -440,7 +440,9 @@ fn lower_call_coerce_args_named(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, n
     lower_call_coerce_assert_macro(ctx, ir_args, name);
     if let Some(sig) = ctx.env.functions.get(name).cloned() {
         lower_call_coerce_from_sig(ctx, ir_args, &sig);
-    } else if let Some((_, case)) = ctx.env.lookup_ctor(&almide_base::intern::sym(name)) {
+    } else if let Some((_, case)) = ctx.env.lookup_ctor_in(&almide_base::intern::sym(name), ctx.current_module.map(|s| s.as_str())) {
+        // Owned-first (#1426): mirror the checker's candidate choice so the
+        // coerced payload is the same case the checker validated.
         lower_call_coerce_from_ctor(ctx, ir_args, &case);
     } else if let Some((module, func)) = name.as_str().split_once('.') {
         if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
@@ -521,15 +523,27 @@ fn strip_result_ok(ty: &Ty) -> Ty {
 /// Build the ALS-T18 abort form for a non-test assert:
 /// ```text
 /// { let __a0 = l; let __a1 = r;
-///   if <cond> then () else { eprintln("Error: assertion failed: …"); process.exit(1) } }
+///   if <cond> then () else { eprintln("Error: assertion failed\n  …"); process.exit(1) } }
 /// ```
 /// Operands bind to temps FIRST so each evaluates exactly once (the failure
 /// message re-references the temps, never re-runs the operand expressions).
-/// The message forms: `assert_eq` → `Error: assertion failed: left = <l>,
-/// right = <r>`; `assert_ne` → `Error: assertion failed: both = <l>`;
-/// `assert(c)` → `Error: assertion failed`; `assert(c, msg)` → `Error:
-/// assertion failed: <msg>`. Display of the operands is the ALS-R2
-/// interpolation form (the same `${…}` rendering).
+///
+/// The message is a STRUCTURED record, one `  key: value` per line — the
+/// FeedbackEval shape (structured expected/found beats prose for repair@1),
+/// and the form `almide test` parses back into a diff:
+/// ```text
+/// Error: assertion failed
+///   at: line <N>
+///   expected: <r>          // `!= <l>` for assert_ne
+///   found: <l>
+/// ```
+/// `assert(c)` carries only the `at:` line; `assert(c, msg)` puts the message
+/// on the header (`Error: assertion failed: <msg>`). `expected` precedes
+/// `found` so that the one field whose value may span lines without a
+/// terminator is LAST. The `at:` line is dropped when the call has no span,
+/// which is a property of the shared frontend lowering — never of the target,
+/// so both legs stay byte-identical (C-153). Display of the operands is the
+/// ALS-R2 interpolation form (the same `${…}` rendering).
 fn desugar_assert_abort(
     ctx: &mut LowerCtx,
     name: &str,
@@ -568,22 +582,37 @@ fn desugar_assert_abort(
         ),
         _ => vars[0].clone(),
     };
+    // `  at: line <N>\n` — the assertion's own source line, baked in as a
+    // literal at desugar time so every consumer (native, v0/v1 wasm, interp)
+    // inherits the same bytes.
+    let at = span
+        .as_ref()
+        .map(|s| format!("\n  at: line {}", s.line))
+        .unwrap_or_default();
     let parts: Vec<IrStringPart> = match name {
         "assert_eq" => vec![
-            IrStringPart::Lit { value: "Error: assertion failed: left = ".into() },
-            IrStringPart::Expr { expr: vars[0].clone() },
-            IrStringPart::Lit { value: ", right = ".into() },
+            IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: ") },
             IrStringPart::Expr { expr: vars[1].clone() },
+            IrStringPart::Lit { value: "\n  found: ".into() },
+            IrStringPart::Expr { expr: vars[0].clone() },
         ],
         "assert_ne" => vec![
-            IrStringPart::Lit { value: "Error: assertion failed: both = ".into() },
+            IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: != ") },
+            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Lit { value: "\n  found: ".into() },
             IrStringPart::Expr { expr: vars[0].clone() },
         ],
-        _ if vars.len() >= 2 => vec![
-            IrStringPart::Lit { value: "Error: assertion failed: ".into() },
-            IrStringPart::Expr { expr: vars[1].clone() },
-        ],
-        _ => vec![IrStringPart::Lit { value: "Error: assertion failed".into() }],
+        _ if vars.len() >= 2 => {
+            let mut p = vec![
+                IrStringPart::Lit { value: "Error: assertion failed: ".into() },
+                IrStringPart::Expr { expr: vars[1].clone() },
+            ];
+            if !at.is_empty() {
+                p.push(IrStringPart::Lit { value: at.clone() });
+            }
+            p
+        }
+        _ => vec![IrStringPart::Lit { value: format!("Error: assertion failed{at}") }],
     };
     let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
     let eprint = ctx.mk(

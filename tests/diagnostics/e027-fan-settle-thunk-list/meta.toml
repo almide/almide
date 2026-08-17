@@ -1,3 +1,3 @@
 expects_code = "E027"
 expects_error = "fan.settle changed signature"
-hint_substring = "fan.settle { a(); b() }"
+hint_substring = "fan.settle { a(), b() }"

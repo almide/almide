@@ -169,6 +169,80 @@ fn main() -> Unit = {
         assert_eq!(oracle.evaluate(NON_TERMINATING), None);
     }
 
+    /// How much of the self-checking identity family (#1332) the THIRD
+    /// judge can actually judge.
+    ///
+    /// This number matters for a specific reason: the interpreter is the
+    /// only judge with a lineage independent of both backends, but it
+    /// abstains freely (69.9% of the cross-target corpus votes today), and
+    /// an abstention is not a verdict. The identity family was chosen
+    /// partly because it sits well inside the interpreter's reach — so on
+    /// this family the campaign gets BOTH an independent second opinion
+    /// and an oracle that needs no second opinion at all.
+    ///
+    /// The floor is deliberately loose: this asserts the family has not
+    /// drifted OUT of interp reach, not a precise rate.
+    #[test]
+    fn the_interpreter_can_judge_most_of_the_identity_family() {
+        use crate::generator::identity;
+        use crate::rng::SplitMix64;
+
+        let oracle = InterpOracle::new();
+        const N: u64 = 60;
+        let mut voted = 0usize;
+        for index in 0..N {
+            let plan = identity::plan(&mut SplitMix64::for_program(0x1332, index));
+            let (src, expected) = identity::render(&plan);
+            if let Some(out) = oracle.evaluate(&src) {
+                voted += 1;
+                // When it DOES vote, it must agree with the construction —
+                // a disagreement here is a real finding in the interpreter
+                // (or in the generator's algebra), not a coverage gap.
+                assert_eq!(out, expected, "interp disagreed with the oracle at index {index}");
+            }
+        }
+        // Printed so the rate is recoverable with `--nocapture` rather than
+        // only when the floor breaks.
+        eprintln!("interp judged {voted}/{N} identity programs");
+        assert!(
+            voted * 2 >= N as usize,
+            "the interpreter judged only {voted}/{N} identity programs — the family \
+             has drifted out of the third judge's reach"
+        );
+    }
+
+    /// The shrinker's soundness, checked by EXECUTION rather than by
+    /// reading the code: every candidate `identity::shrink` proposes must
+    /// still be an identity program, i.e. still print exactly what it
+    /// declares.
+    ///
+    /// This is the property the whole minimization path rests on. If a
+    /// shrink could change the expected value, the minimizer would accept
+    /// candidates that "reproduce" for a reason unrelated to the bug and
+    /// hand back a repro that proves nothing.
+    #[test]
+    fn every_shrink_candidate_is_still_an_identity_program() {
+        use crate::generator::identity;
+        use crate::rng::SplitMix64;
+
+        let oracle = InterpOracle::new();
+        let mut checked = 0usize;
+        for index in 0..12u64 {
+            let plan = identity::plan(&mut SplitMix64::for_program(0xBEEF, index));
+            for candidate in identity::shrink(&plan) {
+                let (src, expected) = identity::render(&candidate);
+                if let Some(out) = oracle.evaluate(&src) {
+                    checked += 1;
+                    assert_eq!(
+                        out, expected,
+                        "a shrink candidate stopped being an identity:\n{src}"
+                    );
+                }
+            }
+        }
+        assert!(checked > 100, "only {checked} candidates were actually run");
+    }
+
     /// A shape the interpreter cannot run must NOT be read as
     /// non-termination: `Unsupported` says nothing about whether the
     /// program halts, and conflating the two would silently suppress real

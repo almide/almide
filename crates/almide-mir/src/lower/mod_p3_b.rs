@@ -443,6 +443,18 @@ impl LowerCtx {
 
     /// The `Expr` (statement-position expression) arm of [`Self::lower_stmt`] — verbatim move (#781).
     pub(crate) fn lower_stmt_expr(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
+        // STMT-position `f()!` under the R2 probe: propagate-and-discard is the
+        // SAME one bind rule with a synthetic discard binding (`let _ = f()!`
+        // semantics — the ok payload is a scalar copy nobody reads). Probe-off
+        // keeps the pre-rule dispatch byte-identical.
+        if crate::lower::bang_return_probe() {
+            if matches!(&expr.kind, IrExprKind::Unwrap { .. }) {
+                let discard = VarId(crate::lower::desugar_var_seed());
+                if self.try_lower_bind_unwrap_return(discard, &expr.ty, expr)? {
+                    return Ok(());
+                }
+            }
+        }
         match &expr.kind {
                 // A Unit `if` statement EXECUTES (only the taken arm's effects run) when
                 // its cond is a scalar; otherwise it falls back to the linearization.

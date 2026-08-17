@@ -1,7 +1,5 @@
-# ====================================================================
-# ALMIDE BEHAVIOR CONTRACT LEDGER — the language's cross-target law book
-# ====================================================================
-#
+# =============================================================# ALMIDE BEHAVIOR CONTRACT LEDGER — the language's cross-target law book
+# =============================================================#
 # Each [[contract]] is a NORMATIVE, observable promise the compiler keeps on
 # BOTH backends (native Rust and wasm32). "Observable" = stdout, stderr, exit
 # code. Native is the oracle; native == wasm is a hard invariant, NOT a "target
@@ -112,7 +110,7 @@ evidence  = [
 id        = "C-004"
 spec      = "ALS-R3"
 title     = "fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
+statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle. The three MAPPER heads (`fan.map/any/settle(xs, f)`) accept an EFFECT callback in both spellings — an inline lambda calling an effect fn, and a bare effect-fn value — and the result is byte-identical on both legs (#1350; the slot's `is_effect: false` was a declaration bug, never a permission, since unification is effect-agnostic by #1055). A callback reaching a stdlib capability with no wasm implementation (`http.get`) walls on the wasm leg, but that is the capability's own gap — it walls identically with no `fan` in the program — not a mapper-purity rule. The converse holds too (#1406): a CAPABILITY-BEARING callback whose capability HAS a wasm implementation (fs) runs byte-identically on both legs, in both spellings — an inline lambda reaching fs directly, and a lambda calling an effect HELPER that wraps fs (the passthrough shape `effect fn helper(p) = fs.read_text(p)`, which seeds no ResultErr and carries no `!`/`?` of its own) — consumed via `??` and via `!` alike. Two compiler facts carry this cell: the can-err ABI seeds a fn whose TAIL position returns a foreign Result (`returns_foreign_result`, so the passthrough keeps the uniform Result-carrier funcref ABI), and the mapper's result-family tracking is TYPE-split at the classify sites (`is_fan_any_map` + `is_heap_ok_result` — the pre-routing name `fan.any_map` covers all nine 3×3 pairings, so the String-output pairings' heap-Ok cap-as-tag family cannot be told apart by name)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -120,6 +118,8 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_inline_lambda.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_pure_thunks.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_var_thunk_list.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_effect_mapper.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_effect_mapper_capability.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -193,7 +193,7 @@ evidence  = [
 id        = "C-010"
 spec      = "ALS-R2"
 title     = "Recursive / generic ADT interpolation repr keyed by instantiation"
-statement = "Self-recursive ADTs/records, mutually-recursive records, and generic records/variants render their repr via per-type `__repr_*` wasm functions that recurse by CALL on the finite value, not by infinite compile-time type expansion. Generic types key the repr fn by INSTANTIATION (`__repr_Tree_Int` vs `__repr_Tree_String`), substituting site type-args through recursive references, so concrete payloads repr identically to native trait dispatch."
+statement = "Self-recursive ADTs/records, mutually-recursive records, and generic records/variants render their repr via per-type `__repr_*` wasm functions that recurse by CALL on the finite value, not by infinite compile-time type expansion. Generic types key the repr fn by INSTANTIATION (`__repr_Tree_Int` vs `__repr_Tree_String`), substituting site type-args through recursive references, so concrete payloads repr identically to native trait dispatch. The instantiation is the ONLY key: each helper — the element repr and its `List`/`Option` walkers alike — is emitted EXACTLY ONCE per instantiation regardless of how many interpolation SITES reference it, so interpolating one value twice changes the output text and nothing else. (Once per site would emit the helper twice, and since a generated helper is a wasm export, that is a duplicate export name — an invalid module, rejected at parse before any Almide semantics run.)"
 since     = "0.24.0"
 status    = "active"
 doc       = "C-008-009-010-repr.md"
@@ -240,6 +240,8 @@ evidence  = [
   { path = "spec/wasm_cross/map_insertion_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_filter.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_fold.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_index_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_core_trio.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -251,6 +253,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/set_insertion_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/set_index_order.almd", class = "fixture" },
 ]
 
 # ── DEEP STRUCTURAL EQUALITY ─────────────────────────────────────────
@@ -629,7 +632,7 @@ evidence  = [
 id        = "C-042"
 spec      = "ALS-R6"
 title     = "fs preopen-dir scan + path resolution is observable-equivalent"
-statement = "The wasm fs runtime scans `fd_prestat_get` at `_start` to build the WASI preopen-dir table, then resolves an absolute path to the longest-prefix preopen fd + relative remainder (incl. `./` normalization), reproducing native std::fs (which has no preopen concept) byte-identically. A write + `./`-normalized read-back of the same path resolves to the same host file under the `/` preopen, CWD-independently."
+statement = "The wasm fs runtime DISCOVERS the WASI preopen-dir table (`fd_prestat_get` + `fd_prestat_dir_name`, scanned from fd 3 upward on the first path op and cached for the process) and resolves a path to the LONGEST-PREFIX preopen fd + relative remainder, matching only at a '/' component boundary; the `/` preopen claims any absolute path, a `.` preopen claims a path that stayed relative, and an unmatched path falls back to fd 3 with one leading '/' stripped. Native std::fs has no preopen concept, and the two are observable-equivalent: a write + `./`-normalized read-back of the same path resolves to the same host file under the `/` preopen, CWD-independently (the `./` folding is the HOST's, on both targets). Until #1394 the dirfd was a hard-coded `3` at all 13 path-call sites — indistinguishable from this rule under one `/` preopen, and a silently wrong host file under more than one."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -779,7 +782,7 @@ evidence  = [
 id        = "C-054"
 spec      = "ALS-T16"
 title     = "List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB"
-statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The `repeat` family (`string.repeat`/`list.repeat`/`bytes.repeat`) clamps SIGNED: a negative count yields the EMPTY string/list/bytes on BOTH targets — previously `string.repeat(s, -2^31)` panicked natively (Rust capacity overflow, raw exit 101) while the wasm leg trapped on the negative alloc size (exit 134): differential-fuzz, neither a T6 form. bytes/list already clamped; string now matches. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent. The same rule binds byte OFFSETS and pad WIDTHS. `bytes.read_*` guards were `p + N > b.len()` computed on `pos as usize`, so a NEGATIVE pos became ~1.8e19 and the addition WRAPPED back into range — the slice index then panicked (exit 101, a forbidden T6 form); every guard in the native runtime is `checked_add` now, and `bytes.read_f16_le`'s wasm self-host gained the negative guard its bytes_core siblings already had (without it `i64::MIN` reached a wrapped address and returned the value at offset 0 where native returned the 0.0 default). `string.pad_start`/`pad_end` took `width as usize` natively, so a NEGATIVE width asked for an astronomical pad and panicked with a capacity overflow where the wasm self-host returned the string unchanged; the width now clamps SIGNED, matching the self-host and the repeat family. `bytes.copy_to_ptr`'s cap is UNSIGNED (native `b.len().min(cap as usize)`), so a negative cap saturates to the whole buffer; the wasm self-host compared it SIGNED and returned the raw negative count. Finally, a `repeat` whose RESULT would exceed a shared 2^31-byte ceiling ABORTS in the T6 form on both (`Error: repeat result too large` + exit 1) instead of failing in two different forms — native a raw allocation failure, wasm an out-of-bounds trap; the C-161 rule applied to the repeat family, with `ALMIDE_REPEAT_MAX_BYTES` (runtime/rs/src/string.rs) and the `string_repeat.almd` guard as two of THREE copies that must stay in sync: the native runner's shim (`render_native.rs` `rt_string_repeat`) is the third, and it HAD drifted to a bare `s.repeat(n as usize)` — a let-bound `string.repeat(s, -1)` (the shape that routes through the shim; a concat-position call links the self-host instead) was a capacity-overflow PANIC at exit 101 on the native leg while wasm printed normally (differential fuzz, seed 1785015406589852000 index 1012). The drift survived because the fixture exercised `repeat 2` and `repeat 0` but never a NEGATIVE count — the statement's central repeat claim was exactly the untested cell. The shim now carries the same clamp + ceiling, and the fixture pins negative counts in BOTH call positions, i64::MIN included. The HEAP-ELEMENT chunk/windows twins (`list_chunk_str`/`__do_windows_str`, the List[String] route in the SAME stdlib file) missed the negative-count clamps their Int variants gained with this contract: `windows(xs, i32::MIN)` computed `total - n + 1` ≈ 2^31 windows and looped two billion times on wasm against native's instant `[]` (differential fuzz, seed 1785165458340124000 index 803, a chunk_str.almd mutation), and a negative chunk count reached an alloc as a negative length. Both twins now carry the Int variants' clamps verbatim, and the chunk_str fixture pins the negative counts on the heap-element route."
+statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The `repeat` family (`string.repeat`/`list.repeat`/`bytes.repeat`) clamps SIGNED: a negative count yields the EMPTY string/list/bytes on BOTH targets — previously `string.repeat(s, -2^31)` panicked natively (Rust capacity overflow, raw exit 101) while the wasm leg trapped on the negative alloc size (exit 134): differential-fuzz, neither a T6 form. bytes/list already clamped; string now matches. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent. The same rule binds byte OFFSETS and pad WIDTHS. `bytes.read_*` guards were `p + N > b.len()` computed on `pos as usize`, so a NEGATIVE pos became ~1.8e19 and the addition WRAPPED back into range — the slice index then panicked (exit 101, a forbidden T6 form); every guard in the native runtime is `checked_add` now, and `bytes.read_f16_le`'s wasm self-host gained the negative guard its bytes_core siblings already had (without it `i64::MIN` reached a wrapped address and returned the value at offset 0 where native returned the 0.0 default). `string.pad_start`/`pad_end` took `width as usize` natively, so a NEGATIVE width asked for an astronomical pad and panicked with a capacity overflow where the wasm self-host returned the string unchanged; the width now clamps SIGNED, matching the self-host and the repeat family. `bytes.copy_to_ptr`'s cap is UNSIGNED (native `b.len().min(cap as usize)`), so a negative cap saturates to the whole buffer; the wasm self-host compared it SIGNED and returned the raw negative count. Finally, a `repeat` whose RESULT would exceed a shared 2^31-byte ceiling ABORTS in the T6 form on both (`Error: repeat result too large` + exit 1) instead of failing in two different forms — native a raw allocation failure, wasm an out-of-bounds trap; the C-161 rule applied to the repeat family, with `ALMIDE_REPEAT_MAX_BYTES` (runtime/rs/src/string.rs) and the `string_repeat.almd` guard as two of THREE copies that must stay in sync: the native runner's shim (`render_native.rs` `rt_string_repeat`) is the third, and it HAD drifted to a bare `s.repeat(n as usize)` — a let-bound `string.repeat(s, -1)` (the shape that routes through the shim; a concat-position call links the self-host instead) was a capacity-overflow PANIC at exit 101 on the native leg while wasm printed normally (differential fuzz, seed 1785015406589852000 index 1012). The drift survived because the fixture exercised `repeat 2` and `repeat 0` but never a NEGATIVE count — the statement's central repeat claim was exactly the untested cell. The shim now carries the same clamp + ceiling, and the fixture pins negative counts in BOTH call positions, i64::MIN included. The HEAP-ELEMENT chunk/windows twins (`list_chunk_str`/`__do_windows_str`, the List[String] route in the SAME stdlib file) missed the negative-count clamps their Int variants gained with this contract: `windows(xs, i32::MIN)` computed `total - n + 1` ≈ 2^31 windows and looped two billion times on wasm against native's instant `[]` (differential fuzz, seed 1785165458340124000 index 803, a chunk_str.almd mutation), and a negative chunk count reached an alloc as a negative length. Both twins now carry the Int variants' clamps verbatim, and the chunk_str fixture pins the negative counts on the heap-element route. The POSITIVE extreme of that same domain was the cell nothing exercised, and it did not fail in the narrowing at all — it failed in the ARITHMETIC that decides the chunk count. Both `chunk` variants computed `(total + n - 1) / n`, the ordinary ceiling-division idiom, whose SUM overflows i64 long before any i32 wrap: at `n = i64::MAX` over a 5-element list the wrap made the count 0, so the wasm leg printed 0 chunks where native printed 1 — both exit 0, the silent-wrong class — and at `i64::MAX - 1` the wrapped count reached the allocator and wasm died `out of memory` against native's 1. Every size at or below 2^32 was already correct, which is why the clamp-focused fixtures never saw it. The count is `total / n + (total % n != 0)` now, total over the whole domain because division and remainder cannot overflow for a positive `n`. Found by the differential fuzz (seed 510721188963 index 2460, a mutation of the chunk_str fixture itself); the `windows` siblings compute `total - n + 1` and were measured unaffected at both extremes. FOUR ARITHMETIC AND FORMAT CELLS closed the same way, and three of them were ONE MISTAKE: an UNSIGNED step in the middle of a signed computation on the native leg, where the self-host had always been i64. `datetime.from_parts` cast the month `as u64`, so month -1 became 18446744073709551615 and `153 * (m - 3)` wrapped — this leg answered 1540840320 against the other's 1572566400. `math.choose` accumulated in u64, so `choose(i64::MAX, 2)` came out 4611686018427387905 here and -4611686018427387903 there; neither is a binomial coefficient, and the requirement is only that they be the SAME non-answer, so the accumulation is now i64 and explicitly wrapping like Almide's Int. `string.from_codepoint` cast `cp as u32` BEFORE `char::from_u32`, so 2^32 — not a codepoint — truncated to 0, which IS one, and the leg answered a one-byte NUL string where the other answered \"\"; the `unwrap_or_default` was already the right intent and the cast in front of it was silently converting invalid input into valid input. The fourth was the reverse shape: `datetime.to_iso`'s self-host wrote a FIXED 20-byte buffer with a 4-digit year, and its own header declared `SCOPE: years 0..9999` — but outside that scope it did not fail, it wrote GARBAGE. `to_iso(i64::MAX)` answered `292277026596-...` natively and the low four digits `6596-...` there, and `to_iso(i64::MIN)` produced the bytes `.*+)` because `48 + digit` with a negative digit is not an ASCII character at all — a String holding non-UTF-8 bytes, produced silently, exit 0. The year field is now variable width exactly as Rust's `{:04}` is (four columns minimum, zero-padded, the sign occupying one). A documented scope that produces a malformed value outside itself is not a scope. THE ARRAY READERS were outside all of it. `bytes.read_*_array`'s `count` is the OUTPUT size, and sixteen readers took it raw: native cast `count as usize`, so a NEGATIVE count became ~1.8e19 and the reader looped that many times, while the self-host clamped to 0 and answered the empty list — one leg answered and the other did not come back. Above the allocation ceiling the two failed in different forms rather than the unified abort. Both legs now apply the same two rules: a negative count is the EMPTY list (the count IS the result size, so there is no collection for it to saturate against, unlike `take`/`drop`), and a count past the ceiling is `Error: repeat result too large` + exit 1 — the SAME limit and the SAME message C-161 gave `repeat`, so a caller learns one rule rather than sixteen. The precedent was already in the tree: `stdlib/list_make.almd` carries the identical limit, the identical message, and a note naming the native constant to keep in sync, and its comment records the same two failure shapes this had. The readers had simply never been brought under it — 144 of the 218 divergent cells the integer-domain matrix (proofs/domain-edges.toml) found were this one rule missing, which is what a per-function hand-maintained surface looks like from the outside. WINDOWED STRING READERS take the same shape one level up: a read answers only when its window lies WHOLLY inside the data region, and otherwise is the empty result — the empty string, the empty list, or the UNCHANGED position for a cursor — never a partial read, a neighbouring field, or an abort. Four readers (`read_string_at`, `read_string_be`, `skip_length_prefixed_le`, `read_length_prefixed_strings_le`) broke it identically, and in both cases the defect was the PHRASING of the guard rather than its intent. The additive form `pos + 4 <= blen` is defeated by its own arithmetic in a wrapping-Int language: `read_string_at(b, -1, 3)` computed -1 + 3 = 2, found it in range, and copied three bytes starting one byte BEFORE the data region — the block's cap field, returned as text, exit 0, no diagnostic on either leg — and a pos near i64::MAX wrapped the sum negative and passed the same way. Every guard is now SUBTRACTIVE (`pos > blen - len`), which cannot wrap once the sign tests have run, and the native leg routes all five readers through the single `window()` helper that already encoded this rule for the writers. The second break was `count as usize`: a negative count became ~1.8e19, so `skip_length_prefixed_le` skipped to EOF where the self-host returned `pos` unchanged, and `read_length_prefixed_strings_le`'s `Vec::with_capacity` died on a raw `capacity overflow` panic (exit 101, the form ALS-T6 forbids) against the other leg's `Error: out of memory`. Note what the tree already knew: `stdlib/bytes_skip.almd` carried a comment naming the native skip-until-EOF a \"non-semantic overflow\" and left it in place. A divergence recorded in a comment is not recorded — only a gate that fails is, which is what proofs/domain-edges.toml is for. RATIFIED CORRECTION (2026-08-17, ○×: A): the array readers' `count` ceiling described above is withdrawn along with the rest of the widened cap — the portable rule for `count` is only that a NEGATIVE count reads nothing. Beyond each leg's structural bound the outcome is C-197's abort at different thresholds, declared in proofs/domain-edges.toml rather than pinned as a byte-identical observable. Measured on 0.57.0: the wasm leg already handled every count edge cleanly (3e8 answered, 5.4e8/u32::MAX/i64::MAX the defined out-of-memory, zero raw traps), so the guard this correction removes was redundant below the floor's real bound and a regression above it."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -787,6 +790,9 @@ evidence  = [
   { path = "spec/wasm_cross/string_count_truncation.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_wide_int_key.almd", class = "fixture" },
   { path = "spec/wasm_cross/chunk_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_domain_arith.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_array_count_domain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_string_window_domain.almd", class = "fixture" },
 ]
 
 # ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────
@@ -794,7 +800,7 @@ evidence  = [
 id        = "C-055"
 spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
-statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. On the v1 leg the cached-keys desugar (`sort_by` → `sort_by_keys` + a materialized key map) admits ONLY Int keys: it types the synthesized keys list as List[Int], so an ungated String key linked the scalar `list.map` (indirect-call type mismatch trap, differential-fuzz seed 20260718 index 866) and a Float key would sort by raw i64 BIT patterns (wrong order for negatives) — String keys wall honestly (`sort_by_str_key_x`), Float keys ride the totalOrder route. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
+statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. On the v1 leg the cached-keys desugar (`sort_by` → `sort_by_keys` + a materialized key map) admits ONLY Int keys: it types the synthesized keys list as List[Int], so an ungated String key linked the scalar `list.map` (indirect-call type mismatch trap, differential-fuzz seed 20260718 index 866) and a Float key would sort by raw i64 BIT patterns (wrong order for negatives) — String keys leave the desugar and take the cached-key `sort_by_str_key` twins instead (C-271), Float keys ride the totalOrder route. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -1165,11 +1171,13 @@ evidence  = [
 id        = "C-088"
 spec      = "ALS-M7"
 title     = "A Rust-keyword function name compiles on both targets"
-statement = "A user function whose name is a Rust keyword (box, move, dyn, unsafe, …) compiles and runs byte-identical native == wasm. The Rust emitter raw-escapes the name (box → r#box) at BOTH its definition and every call site, driven by one shared keyword predicate (is_rust_keyword) — an incomplete per-site list previously left the definition or the call unescaped, producing invalid Rust. WASM identifiers have no keyword conflict."
+statement = "A user function whose name is a Rust keyword (box, move, dyn, unsafe, …) compiles and runs byte-identical native == wasm. The Rust emitter raw-escapes the name (box → r#box) at BOTH its definition and every call site, driven by one shared keyword predicate (is_rust_keyword) — an incomplete per-site list previously left the definition or the call unescaped, producing invalid Rust. WASM identifiers have no keyword conflict. The escape applies only to UNPREFIXED names: a module-origin symbol (almide_rt_<mod>_<fn>) is never a keyword, and escaping before prefixing produced almide_rt_util_r#move — invalid Rust at the definition while every call site stayed unescaped (#1494, the submodule cell)."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/reserved_keyword_fn.almd", class = "fixture" },
+  { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_builds_and_runs_native", class = "fixture" },
+  { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_matches_on_wasm", class = "fixture" },
 ]
 
 [[contract]]
@@ -1713,11 +1721,12 @@ evidence  = [
 id        = "C-132"
 spec      = "ALS-M13"
 title     = "mut parameters of reallocating containers persist to the caller at every call position"
-statement = "A `mut` parameter of a REALLOCATING container (List, String, Bytes) mutated in place inside the callee persists to the caller on wasm exactly as native, at EVERY call position — statement, Bind/Assign RHS, nested expression, loop bodies — and for both bare-var and record-FIELD arguments (`push9(b.items, 7)` writes the buffer back into the field). Value-returning callees return an (orig, buffer) tuple destructured at the call site; Unit callees return the buffer. Previously only Unit callees in statement position were lowered: `let i = push9(v, 7)` pushed into a discarded copy (wasm len=1 vs native len=3, silent len=0 from empty; a real MLP printed loss 0.0), the #705 class."
+statement = "A `mut` parameter of a REALLOCATING container (List, String, Bytes) mutated in place inside the callee persists to the caller on wasm exactly as native, at EVERY call position — statement, Bind/Assign RHS, nested expression, loop bodies — and for both bare-var and record-FIELD arguments (`push9(b.items, 7)` writes the buffer back into the field). Value-returning callees return an (orig, buffer) tuple destructured at the call site; Unit callees return the buffer. Previously only Unit callees in statement position were lowered: `let i = push9(v, 7)` pushed into a discarded copy (wasm len=1 vs native len=3, silent len=0 from empty; a real MLP printed loss 0.0), the #705 class.The SAME persistence holds through a PLAIN (non-`mut`) `Bytes` parameter, reached by a different route: the byte-writer family (`set_*`/`append_*`/`write_*`, plus `fill`/`copy_from`/`copy_within`) is `@intrinsic`s whose mutation lives in the native `&mut Vec<u8>` signature, so the `.almd` declaration carries no `mut` marker while the effect is identical — a callee writing into a `Bytes` param mutates the CALLER's buffer on both targets, and a temporary argument (legal here, since E032 only forbids one for a declared `mut` param) simply has no observable slot. Both backends always agreed; the INTERPRETER did not until 2026-08-15 — its #1022 copy-out fired only on `param.is_mut`, so the write died at the frame boundary and the third judge voted the unmodified buffer, which the first scheduled both-arch fuzz night surfaced as a false `both targets disagree with reference interpreter` (run 31861833115, seed 509789329843 index 150, #1436). The interp now copies a `Bytes` param out by TYPE as well as by declaration."
 since     = "0.28.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_heap_param.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_param_writeback.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1770,7 +1779,7 @@ evidence  = [
 id        = "C-137"
 spec      = "ALS-R6"
 title     = "Relative fs paths resolve against the host CWD on wasm"
-statement = "Every fs operation given a RELATIVE path (`fs.read_text(\"Cargo.toml\")`, `fs.stat(\"spec/x.almd\")`, write/exists/list_dir/…) resolves it against the HOST current working directory on the wasm target, byte-identically to native std::fs. WASI has no cwd, so the wasm runtime normalizes the path first (`$path_norm`): an absolute path drops its leading '/' (fd-3-relative under the `/` preopen — the C-042 resolution), a relative path is prefixed with \"$PWD/\" (the PWD environment variable, inherited by every harness via `-S inherit-env=y`) and then resolved identically. Previously a relative path resolved against the preopen ROOT and failed (NOENT / \"stat failed\") while native succeeded — a silent native⇄wasm divergence that the native test fallback masked. fs.stat additionally stats into an 8-ALIGNED scratch buffer (WASI path_filestat_get demands alignment the self-host's Bytes scratch cannot guarantee) and copies the 64-byte filestat back."
+statement = "Every fs operation given a RELATIVE path (`fs.read_text(\"Cargo.toml\")`, `fs.stat(\"spec/x.almd\")`, write/exists/list_dir/…) resolves it against the HOST current working directory on the wasm target, byte-identically to native std::fs. WASI has no cwd, so the wasm runtime normalizes the path first (`$path_norm`): an absolute path is already the guest path, a relative one is joined onto \"$PWD/\" (the PWD environment variable, inherited by every harness via `-S inherit-env=y`; ALMIDE_CWD wins over it), and the result then goes through the SAME preopen resolution both forms share (C-042). Previously a relative path resolved against the preopen ROOT and failed (NOENT / \"stat failed\") while native succeeded — a silent native⇄wasm divergence that the native test fallback masked. fs.stat additionally stats into an 8-ALIGNED scratch buffer (WASI path_filestat_get demands alignment the self-host's Bytes scratch cannot guarantee) and copies the 64-byte filestat back."
 since     = "0.31.0"
 status    = "active"
 evidence  = [
@@ -1818,13 +1827,14 @@ evidence  = [
 id        = "C-153"
 spec      = "ALS-T18"
 title     = "Non-test assert failures abort in the T6 form on both targets"
-statement = "A failing `assert` / `assert_eq` / `assert_ne` OUTSIDE a test block aborts with ONE stderr line + exit code 1, byte-identical across targets: `Error: assertion failed: left = <l>, right = <r>` (eq), `Error: assertion failed: both = <l>` (ne), `Error: assertion failed[: <msg>]` (assert), operand display per ALS-R2, operands evaluated exactly once (the failure line re-references bound temps). Implemented as ONE frontend-lowering desugar (if + eprintln + process.exit(1)) that native, v0-wasm, v1-wasm, and the interp all inherit. Previously native leaked the raw Rust panic (exit 101 + the panic banner) while wasm printed a value-less line with exit 1 for assert_eq and a BARE TRAP (exit 134) for assert/assert_ne (differential-fuzz seed 20260718 index 10). In passing: the bare `eprintln` builtin — which the desugar rides — was UNLINKED on the v1 leg and ICE'd the v0 emitter; it is now a registered self-host (fd-2 print_str twin) and a shared parametrized v0 runtime fn."
+statement = "A failing `assert` / `assert_eq` / `assert_ne` OUTSIDE a test block aborts with a STRUCTURED stderr block + exit code 1, byte-identical across targets: `Error: assertion failed` followed by one `  key: value` line each — `  at: line <N>`, `  expected: <r>` (`!= <l>` for ne), `  found: <l>`; `assert(c, msg)` puts the message on the header (`Error: assertion failed: <msg>`) and carries only `at:`. Operand display per ALS-R2, operands evaluated exactly once (the failure block re-references bound temps). FIELD ORDER IS PART OF THE PROMISE: `expected` precedes `found` so the one field with no terminator is LAST, which is what lets `almide test` parse a multi-line value back out and render a diff (#1313, FeedbackEval arXiv 2504.06939 — structured expected/found is the feedback shape that repairs). The `at:` line is dropped when the call has no span, a property of the shared frontend lowering and never of the target. Implemented as ONE frontend-lowering desugar (if + eprintln + process.exit(1)) that native, v0-wasm, v1-wasm, and the interp all inherit. It was previously ONE line (`left = <l>, right = <r>`) with no source site; before that native leaked the raw Rust panic (exit 101 + the panic banner) while wasm printed a value-less line with exit 1 for assert_eq and a BARE TRAP (exit 134) for assert/assert_ne (differential-fuzz seed 20260718 index 10). In passing: the bare `eprintln` builtin — which the desugar rides — was UNLINKED on the v1 leg and ICE'd the v0 emitter; it is now a registered self-host (fd-2 print_str twin) and a shared parametrized v0 runtime fn."
 since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/assert_abort_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/assert_abort_ne.almd", class = "fixture" },
   { path = "spec/wasm_cross/assert_abort_msg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assert_abort_multiline.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -2043,13 +2053,14 @@ evidence  = [
 id        = "C-161"
 spec      = "ALS-T6"
 title     = "Matrix constructor dimensions clamp negatives and abort over a shared ceiling"
-statement = "A dimension-taking matrix constructor (`matrix.zeros`/`ones` and their `_f32` aliases) normalizes `(rows, cols)` identically on both targets. A NEGATIVE dimension clamps to 0 — the empty matrix — matching the C-034 signed-clamp rule the `repeat` family already follows; an element count above the shared 2^28 (2 GiB of f64, inside wasm32's address space so both targets accept exactly the same shapes) ABORTS in the T6 form: one `Error: matrix dimensions too large` line on stderr and exit 1. Before, a transformer-shaped program built with `seq = -2147483648` crashed on BOTH targets in DIFFERENT forms — native a raw-vec `capacity overflow` panic (exit 101), wasm an out-of-bounds memory fault in `__mx_rms_rows` (exit 134) — and neither is a permitted observable: the T6 convention forbids a native panic and a wasm `unreachable` alike. The ROW COUNT is bounded ALONE by the same ceiling, not only the r*c product: `zeros(2^31, -7)` has 0 elements after the cols clamp yet still asks for 2^31 ROW slots — a 16 GiB row-pointer array that OOM-killed the wasm leg while native's UNUSED-value allocation was LLVM-elided and ran clean, two verdicts for one program (differential fuzz, 2026-08-10 night); rows over the element ceiling can never yield an in-ceiling matrix anyway, so both targets die in the T6 form, and the fixture keeps its bind deliberately unused so the guard's abort is what pins the call on both. The guard fires before either allocator is asked for anything, so the ceiling costs no memory to enforce; `ALMIDE_MATRIX_MAX_ELEMS` (runtime/rs/src/matrix.rs) and `__mx_max_elems` (stdlib/matrix_core.almd) are the two halves that must stay in sync."
+statement = "A dimension-taking matrix constructor (`matrix.zeros`/`ones` and their `_f32` aliases) normalizes `(rows, cols)` identically on both targets. A NEGATIVE dimension clamps to 0 — the empty matrix — matching the C-034 signed-clamp rule the `repeat` family already follows; an element count above the shared 2^28 (2 GiB of f64, inside wasm32's address space so both targets accept exactly the same shapes) ABORTS in the T6 form: one `Error: matrix dimensions too large` line on stderr and exit 1. Before, a transformer-shaped program built with `seq = -2147483648` crashed on BOTH targets in DIFFERENT forms — native a raw-vec `capacity overflow` panic (exit 101), wasm an out-of-bounds memory fault in `__mx_rms_rows` (exit 134) — and neither is a permitted observable: the T6 convention forbids a native panic and a wasm `unreachable` alike. The ROW COUNT is bounded ALONE by the same ceiling, not only the r*c product: `zeros(2^31, -7)` has 0 elements after the cols clamp yet still asks for 2^31 ROW slots — a 16 GiB row-pointer array that OOM-killed the wasm leg while native's UNUSED-value allocation was LLVM-elided and ran clean, two verdicts for one program (differential fuzz, 2026-08-10 night); rows over the element ceiling can never yield an in-ceiling matrix anyway, so both targets die in the T6 form, and the fixture keeps its bind deliberately unused so the guard's abort is what pins the call on both. The guard fires before either allocator is asked for anything, so the ceiling costs no memory to enforce; `ALMIDE_MATRIX_MAX_ELEMS` (runtime/rs/src/matrix.rs) and `__mx_max_elems` (stdlib/matrix_core.almd) are the two halves that must stay in sync. THREE NON-BYTES COUNT FAMILIES joined it. `list.range`'s count IS `end - start`, and for a span like (i64::MIN, 3) that subtraction OVERFLOWS — the count came out negative and the allocation was sized from the wrapped value, so native died on a raw panic (exit 101, the form ALS-T6 forbids) where wasm aborted with `Error: out of memory`. Rejecting the endpoints outright would be wrong (`range(1e9, 1e9+1)` is one element at a large offset), so the cases split by sign: when both endpoints share a sign the difference is bounded by i64::MAX and cannot overflow, and only a span straddling zero can, where either half exceeding the ceiling already settles it. The ceiling `list_range` needed was already in its own file, TWELVE LINES BELOW, on `list_repeat` — adjacency is not a mechanism. `string.pad_start`/`pad_end` size by `n * pclen`, so the ceiling is tested by DIVISION; without it `pad_end(\"a\", u32::MAX, \"x\")` built a 4 GiB String natively and aborted on wasm. `io.read_n_bytes` had two defects meeting in the middle — native reserved `vec![0u8; n as usize]` up front so a negative n asked for ~1.8e19 bytes, and the wasm host floor takes an i32 so a large n arrived TRUNCATED (i64::MAX became -1 and the read returned nothing at all). Its answer is a CLAMP rather than a ceiling, because `n` is a limit whose result may already be shorter (the latitude POSIX read() takes): both legs read up to min(n, 2^26) bytes, and 64 MiB is MEASURED — the wasm buffer allocates at 2^26 and fails at 2^27 — not chosen. E FOUR BYTES ALLOCATORS were outside it. `bytes.new(4294967295)` allocated 4 GiB natively and printed a length while wasm hit its own limit and aborted; `pad_left`/`pad_right` read a NEGATIVE target_len through `as usize` as ~1.8e19, so `len >= target` was false and the pad allocation aborted the process — where the other leg read the same negative target as \"already long enough\" and returned the input unchanged; and `bytes.chunks` sized its allocation from a chunk COUNT computed as `(total + size - 1) / size`, whose sum overflows for a large size, which is the identical ceiling-division defect `list.chunk` carried, in a module nobody had checked for it. All four now take the shared abort at the shared 2 GiB threshold, and `repeat`'s ceiling is tested by DIVISION rather than on the product, because `blen * n` is the very multiplication that overflows and a guard computed from the wrapped value tests nothing. THE CEILING ITSELF IS NOW MACHINE-CHECKED: it was one limit written four times in four units (bytes for string and bytes, /8 for list slots, /8 for f64 matrix elements), and the only thing holding the four together was a \"keep in sync with X\" comment at each site — a comment that was in place for the entire period `bytes.new` diverged. `scripts/check-alloc-ceilings.sh` converts every spelling to bytes and fails if they stop denoting the same limit; it also fails an allocator that invents its own threshold instead of sharing this one, which is the half that catches the NEXT occurrence rather than this one. Its own recurrence-relevant directions are negative-tested in proofs/gate-verification.toml. THE CEILING'S VALUE IS SHARED; ITS MESSAGE IS NOT. One line does not fit both families, and the first cut of the bytes ceiling proved it by hijacking C-197: `bytes.new(i64::MAX)` — C-197's OWN fixture — started answering `Error: repeat result too large`, so that contract stayed declared while its evidence quietly began exercising this one. Nothing failed; the fixture still agreed across targets, it had simply stopped testing what it was for. The split is now explicit. A plain allocation over the ceiling (`bytes.new`, `pad_left`/`pad_right`, `list.range`, `string.pad_start`/`pad_end`) takes C-197's `Error: out of memory` — the line the wasm render's $oom already prints, and the only accurate one, since calling a 4 GiB `bytes.new` a \"repeat result\" describes nothing that happened. The repeat family keeps this contract's more specific line, because an oversized `repeat` is a sizing mistake rather than a machine limit and its fixtures pin that wording. `scripts/check-alloc-ceilings.sh` enforces the VALUE across every spelling and is deliberately message-agnostic: the number is the thing that must not drift, the wording is the operation's own. CORRECTION (2026-08-17): the `io.read_n_bytes` clamp described above was WRONG and is gone. `read_n_bytes(n)` answers min(n, what stdin has) — no cap. The clamp truncated a 100 MiB read of a 100 MiB stream to 64 MiB, silently, on BOTH legs, for a call 0.57.0 got right on both; the measurement that justified it was taken with FIVE BYTES on stdin, where a large `n` fails only because the wasm floor pre-allocates the REQUESTED size. A guard measured on input that cannot exercise it gets set below every real use. The genuine constraint is the floor's i32 boundary, and the self-host now reads in 2^26 CHUNKS so it never hands the floor a span it cannot represent — the chunk bounds the buffer, not the answer. The two halves of that chunk size are rostered as a cross-leg pair in scripts/check-alloc-ceilings.sh. RATIFIED CORRECTION (2026-08-17, ○×: A) — THE WIDENED CEILING IS WITHDRAWN BEFORE EVER SHIPPING. The passages above describing a shared 2 GiB abort on `bytes.new`/`pad_left`/`pad_right`/`chunks`, `list.range` and `string.pad_start`/`pad_end` no longer hold: those are plain allocations and carry NO chosen ceiling on either leg. A nine-compiler survey (../almide-references/RESEARCH-allocation-ceilings.md) found zero precedent for a chosen cross-target cap — the cohort unifies the failure MECHANISM and MESSAGE and lets the THRESHOLD stay structural per target — and the cap measurably cut work BOTH legs satisfied in 0.57.0 (native and wasm alike handled 2.5 GiB `bytes.new`, `list.range(0, 3e8)`, 2.5e9-column pads; wasm's own floor already turns every unsatisfiable size, u32::MAX and i64::MAX included, into the defined `Error: out of memory` — measured, never a raw trap). Each leg now allocates to its OWN structural bound and takes C-197's abort beyond it; native satisfying what wasm32 cannot is C-197's contracted divergence, declared per cell in proofs/domain-edges.toml. What this contract keeps is exactly its 0.57.0 scope: the REPEAT family's shared ceiling (`string.repeat`, `list.repeat`, matrix constructors) with its `repeat result too large`/dimensions vocabulary — released behavior, and the only chosen cap in the language; whether it too should become structural is queued as its own decision."
 since     = "0.35.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/matrix_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_overflow.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_rows.almd", class = "fixture" },
+  { path = "spec/wasm_cross/count_domain_nonbytes.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -2464,12 +2475,13 @@ evidence  = [
 id        = "C-197"
 spec      = "ALS-T6"
 title     = "Linear-memory exhaustion is a resource limit with a defined abort"
-statement = "Allocation that exceeds a target's memory resources is TARGET-DEPENDENT, and the divergence is contracted rather than silent: wasm32's linear memory is architecturally smaller than native's 64-bit address space, so a program whose completion requires more memory than wasm32 can grow (Wave 4 L5: ~4.29e9 pushes ≈ 34 GB — native completed, wasm32 could not) diverges by RESOURCE, not semantics. What IS promised: (1) the failure shape — exhaustion is the DEFINED abort `Error: out of memory` + exit 1 on BOTH targets: on wasm never an out-of-bounds fault, and on native never a raw Rust allocator SIGABRT (the bytes.new/bytes.repeat constructors reserve fallibly — fuzz seed 500705518626 index 711 was bytes.new(i64::MAX) killing native by signal while wasm exited 1) (the $oom primitive fires on a refused memory.grow, on an i32 frontier overflow in $alloc/$alloc8, on a cap whose byte size would wrap the $list_new multiply, and on a full-i64 length that would wrap the `i32.wrap_i64` block-size math in the DynStr/DynList alloc renders — the `bytes.new(4294967295)` forged-tiny-block case, fuzz seed 424245 index 104, whose zerofill previously ran off the memory end exactly like the L5 layer-2 wrap class that read as a memory-safety bug); (2) the convergent boundary — allocation within both targets' limits stays byte-identical (the fixture). The differential oracle classifies the one-sided memory-exhaustion case as this contracted class, mirroring C-196's stack rule."
+statement = "Allocation that exceeds a target's memory resources is TARGET-DEPENDENT, and the divergence is contracted rather than silent: wasm32's linear memory is architecturally smaller than native's 64-bit address space, so a program whose completion requires more memory than wasm32 can grow (Wave 4 L5: ~4.29e9 pushes ≈ 34 GB — native completed, wasm32 could not) diverges by RESOURCE, not semantics. What IS promised: (1) the failure shape — exhaustion is the DEFINED abort `Error: out of memory` + exit 1 on BOTH targets: on wasm never an out-of-bounds fault, and on native never a raw Rust allocator SIGABRT (the bytes.new/bytes.repeat constructors reserve fallibly — fuzz seed 500705518626 index 711 was bytes.new(i64::MAX) killing native by signal while wasm exited 1) (the $oom primitive fires on a refused memory.grow, on an i32 frontier overflow in $alloc/$alloc8, on a cap whose byte size would wrap the $list_new multiply, and on a full-i64 length that would wrap the `i32.wrap_i64` block-size math in the DynStr/DynList alloc renders — the `bytes.new(4294967295)` forged-tiny-block case, fuzz seed 424245 index 104, whose zerofill previously ran off the memory end exactly like the L5 layer-2 wrap class that read as a memory-safety bug); (2) the convergent boundary — allocation within both targets' limits stays byte-identical (the fixture). The differential oracle classifies the one-sided memory-exhaustion case as this contracted class, mirroring C-196's stack rule. THE CEILING IS CHECKED FIRST, so this abort now covers two ranges rather than one: a request over the shared 2 GiB ceiling takes it immediately (that is where `bytes.new(u32::MAX)` used to diverge — native allocated 4 GiB and printed a length while wasm aborted), and a request UNDER the ceiling that the process still cannot satisfy takes it from the allocator as before. Both print the same line and exit 1 on both targets, which is what this contract has always promised; what changed is that the first range is now decided by a stated constant instead of by whichever leg happened to run out of address space. RATIFIED CORRECTION (2026-08-17, ○×: A): the earlier addendum's 'ceiling checked first' range is gone with the widened cap — this abort again has ONE trigger per leg: the leg's own structural bound (wasm32's floor, native's allocator via try_reserve/checked size arithmetic), same line, exit 1, never a raw panic or trap on either. The contracted divergence this contract has always declared — native satisfying an allocation wasm32 cannot — is now also declared per measured cell in proofs/domain-edges.toml, which is the cohort pattern the nine-compiler survey found universal: unify the failure form, let the threshold stay structural, and DECLARE the gap instead of erasing it."
 since     = "0.41.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/allocation_within_limits.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_new_exhaustion.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_alloc_ceiling_domain.almd", class = "fixture" },
 ]
 
 # ── MATRIX HEAD-COUNT DOMAIN ─
@@ -2697,11 +2709,12 @@ evidence  = [
 id        = "C-215"
 spec      = "ALS-R5"
 title     = "fs content readers: absence is ok(none) via the _if_exists family, classified by the runtime"
-statement = "Each fs content reader (`read_text` / `read_bytes` / `read_lines` / `read_bytes_raw`) has an `_if_exists` twin returning `Result[Option[T], String]` with a three-way behavior matrix: a path that does not exist — a missing PARENT directory included — is `ok(none)` (absence is a value, ADR-0004 D4, the map.get principle); a readable file is `ok(some(content))` with the same content the plain reader returns; every other failure (permission, a directory at the path, IO) is the SAME `err(message)` the plain reader produces. The classification happens in the native runtime on `ErrorKind::NotFound` — it cannot be spelled in Almide, because the String error has already erased the kind (and branching on its text is the E035-linted anti-pattern) and an `fs.exists` pre-check races (TOCTOU). The family is exactly the four content readers, machine-enforced by tests/fs_if_exists_family_gate_test.rs; metadata and directory ops keep their predicate spellings as intentional omissions. The surface is native-only today — the wasm render walls it honestly (the prim floor exposes no errno to classify); the pinned matrix binds the wasm leg on arrival, C-214-style."
+statement = "Each fs content reader (`read_text` / `read_bytes` / `read_lines` / `read_bytes_raw`) has an `_if_exists` twin returning `Result[Option[T], String]` with a three-way behavior matrix: a path that does not exist — a missing PARENT directory included — is `ok(none)` (absence is a value, ADR-0004 D4, the map.get principle); a readable file is `ok(some(content))` with the same content the plain reader returns; every other failure (permission, a directory at the path, IO) is the SAME `err(message)` the plain reader produces. The classification happens in the native runtime on `ErrorKind::NotFound` — it cannot be spelled in Almide, because the String error has already erased the kind (and branching on its text is the E035-linted anti-pattern) and an `fs.exists` pre-check races (TOCTOU). The family is exactly the four content readers, machine-enforced by tests/fs_if_exists_family_gate_test.rs; metadata and directory ops keep their predicate spellings as intentional omissions. The wasm leg runs the same matrix (#1233): the self-host twins classify absence with the `path_filestat` existence probe, and the WASI read floor now CARRIES its failure errno into the shared errno -> native-`std::io`-Display mapping instead of dropping it. That dropped errno was a live divergence, not merely a gap (#1368): `path_open` SUCCEEDS on a directory and only `fd_read` fails, so every reader in the family — and the plain readers under them — returned `ok(\"\")` on wasm where native returns `err(\"Is a directory (os error 21)\")`. A directory is classified from the fd's `filetype` byte (the one `fs.is_dir` reads), because the errno a host reports for reading a directory fd is host-specific."
 since     = "0.53.7"
 status    = "active"
 evidence  = [
   { path = "spec/stdlib/fs_if_exists_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fs_read_directory_errno.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -2755,7 +2768,9 @@ evidence  = [
 id        = "C-220"
 spec      = "ALS-R6"
 title     = "fs streaming line walkers fold/each with read_lines line semantics"
-statement = "The streaming family {`fs.fold_lines`, `fs.for_each_line`} walks a file line-by-line through a buffered reader without materializing a `List[String]` — peak memory is O(longest line), not O(file) (measured: 2.2 GB eager vs 1 MB streaming on a 632 MB input, research/benchmark/perf/README.md). Line semantics byte-match `fs.read_lines`: split on \\n, one trailing \\r stripped per line, no phantom empty line after a trailing newline, a final newline-less line still yielded, and a missing file is the same err(message) the eager reader produces. An empty file folds to `init` with zero callback invocations. One deliberate divergence, inherent to streaming: a mid-file read error surfaces AFTER the callbacks for earlier lines have run — the eager reader fails before yielding anything. The family is exactly {fold_lines, for_each_line, fold_lines_range, fold_lines_chunked} (tests/fs_streaming_family_gate_test.rs). The range cell is the chunk worker's walker — a line is owned by the chunk containing the byte BEFORE its first byte (line 0 by the chunk containing byte 0), so folding a partition of [0, file_size) visits every line exactly once. The chunked cell runs one range worker per chunk on scoped threads INSIDE the runtime (the fan machinery's purity gate keeps effectful bodies sequential, so file parallelism is the fs module's own intrinsic) and returns partials in CHUNK ORDER — merging stays with the caller, so the observable result is deterministic whatever the thread schedule, and the emitted program's Send+Sync bounds make a state-capturing callback a compile error rather than a race. Transforming pipelines belong on fold_lines, the eager List belongs to read_lines, chunk workers accumulate (for_each has no range/chunked cell), and the ADR-0006 fallible callback forms are the tracked follow-up cell. The surface is native-only today — the callback crosses the runtime boundary, and generic HOF closures are the wasm defunctionalization frontier (#1134); the wasm render walls honestly, and the pinned fixture binds the wasm leg on arrival, C-215-style."
+statement = "The streaming family {`fs.fold_lines`, `fs.for_each_line`} walks a file line-by-line through a buffered reader without materializing a `List[String]` — peak memory is O(longest line), not O(file) (measured: 2.2 GB eager vs 1 MB streaming on a 632 MB input, research/benchmark/perf/README.md). Line semantics byte-match `fs.read_lines`: split on \\n, one trailing \\r stripped per line, no phantom empty line after a trailing newline, a final newline-less line still yielded, and a missing file is the same err(message) the eager reader produces. An empty file folds to `init` with zero callback invocations. One deliberate divergence, inherent to streaming: a mid-file read error surfaces AFTER the callbacks for earlier lines have run — the eager reader fails before yielding anything. The family is exactly {fold_lines, for_each_line, fold_lines_range, fold_lines_chunked} (tests/fs_streaming_family_gate_test.rs). The range cell is the chunk worker's walker — a line is owned by the chunk containing the byte BEFORE its first byte (line 0 by the chunk containing byte 0), so folding a partition of [0, file_size) visits every line exactly once. The chunked cell runs one range worker per chunk on scoped threads INSIDE the runtime (the fan machinery's purity gate keeps effectful bodies sequential, so file parallelism is the fs module's own intrinsic) and returns partials in CHUNK ORDER — merging stays with the caller, so the observable result is deterministic whatever the thread schedule, and the emitted program's Send+Sync bounds make a state-capturing callback a compile error rather than a race. Transforming pipelines belong on fold_lines, the eager List belongs to read_lines, and chunk workers accumulate (for_each has no range/chunked cell). The ADR-0006 fallible callback forms are NO LONGER a tracked omission: the two sequential, callback-driven cells {fold_lines, for_each_line} carry them (C-269, #1144) and the two partitioned cells {fold_lines_range, fold_lines_chunked} decline them for a stated reason — a partitioned walk has no defined first err — with tests/fs_streaming_family_gate_test.rs pinning BOTH columns, so the family's ADR-0006 shape is now machine-enforced rather than narrated. The PLAIN surface's wasm reach is still partial — the callback crosses the runtime boundary, and generic HOF closures are the wasm defunctionalization frontier (#1134) — so only the accumulator shapes with self-host twins (the `Map[String, Int]` fold_lines/chunked pair, the `List[String]` range cell, the Int chunked cell) run on wasm; `for_each_line` has no twin at all and walls on both its plain and fallible forms. The wasm render walls honestly, and the pinned fixtures bind the wasm leg on arrival, C-215-style."
+
+statement = "The streaming family {`fs.fold_lines`, `fs.for_each_line`} walks a file line-by-line through a buffered reader without materializing a `List[String]` — peak memory is O(longest line), not O(file) (measured: 2.2 GB eager vs 1 MB streaming on a 632 MB input, research/benchmark/perf/README.md). Line semantics byte-match `fs.read_lines`: split on \\n, one trailing \\r stripped per line, no phantom empty line after a trailing newline, a final newline-less line still yielded, and a missing file is the same err(message) the eager reader produces. An empty file folds to `init` with zero callback invocations. One deliberate divergence, inherent to streaming: a mid-file read error surfaces AFTER the callbacks for earlier lines have run — the eager reader fails before yielding anything. The family is exactly {fold_lines, for_each_line, fold_lines_range, fold_lines_chunked} (tests/fs_streaming_family_gate_test.rs). The range cell is the chunk worker's walker — a line is owned by the chunk containing the byte BEFORE its first byte (line 0 by the chunk containing byte 0), so folding a partition of [0, file_size) visits every line exactly once. The chunked cell runs one range worker per chunk on scoped threads INSIDE the runtime (the fan machinery's purity gate keeps effectful bodies sequential, so file parallelism is the fs module's own intrinsic) and returns partials in CHUNK ORDER — merging stays with the caller, so the observable result is deterministic whatever the thread schedule, and the emitted program's Send+Sync bounds make a state-capturing callback a compile error rather than a race. Transforming pipelines belong on fold_lines, the eager List belongs to read_lines, chunk workers accumulate (for_each has no range/chunked cell), and the ADR-0006 fallible callback forms are the tracked follow-up cell. The wasm leg reaches the surface one TYPED ACCUMULATOR CELL at a time (generic HOF closures are the defunctionalization frontier, #1134): `fold_lines` with a `Map[String, Int]` acc, `fold_lines_chunked` with a `Map[String, Int]` / `Int` / `List[String]` acc, and `fold_lines_range` with a `List[String]` acc all execute on wasm through the self-host twins in fs_fold_lines.almd, byte-identical to native. Every other cell — a String acc, the whole of `for_each_line`, non-String-element list accs — routes to an unregistered `_x` name and walls honestly at render, never a wrong-typed link; the pinned fixtures bind each cell's wasm leg on arrival, C-215-style."
 since     = "0.56.1"
 status    = "active"
 evidence  = [
@@ -2792,12 +2807,13 @@ evidence  = [
 id        = "C-223"
 spec      = "ALS-T6"
 title     = "Matrix transcendentals compute through the vendored musl-libm, not the platform one"
-statement = "A `matrix` entry point whose math reaches a transcendental computes it through the VENDORED musl-libm (`runtime/rs/src/libm.rs`, the StrictMath/fdlibm decision) on BOTH legs — never the host platform's libm. Promised observable: `matrix.pow` over varied values (positive, fractional and negative exponents), the rope inverse-frequency table, and the non-kernel sigmoid print byte-identically native <-> wasm. Before this contract native called `f64::powf`/`f64::exp` directly while the wasm self-host used the vendored algorithm, so `matrix.pow(m, 1.7)` printed `1.5620815356808382` on native and `1.5620815356808384` on wasm (#1197) — live on released 0.56.0 and invisible to every gate: the stdlib matrix tests assert through a 1e-5 `approx_eq` tolerance, and the corpus's earlier matrix fixtures fed `matrix.ones`, whose uniform rows cancel the difference. VARIED input values are therefore part of the promise, not incidental. The platform libm is also non-deterministic ACROSS platforms (glibc / macOS / musl differ in the last ULP), so this contract is equally a native-to-native promise: the same program prints the same bytes wherever it was built. The SIMD activations join this promise (#1197 step 2): `matrix.softmax_rows`, `matrix.gelu` and `matrix.swiglu_gate` compute through the CANONICAL fast-exp — one algorithm, spelled identically by the native SIMD kernel (AVX / NEON / wasm-SIMD lanes and the scalar fallback) and by the wasm self-host (`stdlib/matrix_activations.almd`). Four independent spellings had to be unified for that, each worth a byte and each algebraically invisible: (1) FUSION — a fused multiply-add rounds once where mul+add rounds twice, so the algorithm is deliberately UNFUSED throughout, because wasm has no FMA instruction and relaxed-simd's fma is spec'd as fused-or-unfused; (2) REDUCTION ORDER — one left-to-right sum over the stored exps, never a lane-wise accumulator plus a horizontal combine; (3) SCALING — reciprocal-multiply (`inv = 1/sum`; `v * inv`), never `v / sum`; (4) gelu's two spellings — the identity `1 - 2/(exp(2y)+1)` and the cube association `c * ((x*x)*x)`. A lane-equality test (`fast_exp_determinism`) pins each SIMD lane to the scalar reference bitwise over ~60k inputs; its first version used a coarse grid and passed with a re-introduced fmadd, so the dense sweep is part of the promise, not decoration."
+statement = "A `matrix` entry point whose math reaches a transcendental computes it through the VENDORED musl-libm (`runtime/rs/src/libm.rs`, the StrictMath/fdlibm decision) on BOTH legs — never the host platform's libm. Promised observable: `matrix.pow` over varied values (positive, fractional and negative exponents), the rope inverse-frequency table, and the non-kernel sigmoid print byte-identically native <-> wasm. Before this contract native called `f64::powf`/`f64::exp` directly while the wasm self-host used the vendored algorithm, so `matrix.pow(m, 1.7)` printed `1.5620815356808382` on native and `1.5620815356808384` on wasm (#1197) — live on released 0.56.0 and invisible to every gate: the stdlib matrix tests assert through a 1e-5 `approx_eq` tolerance, and the corpus's earlier matrix fixtures fed `matrix.ones`, whose uniform rows cancel the difference. VARIED input values are therefore part of the promise, not incidental. The platform libm is also non-deterministic ACROSS platforms (glibc / macOS / musl differ in the last ULP), so this contract is equally a native-to-native promise: the same program prints the same bytes wherever it was built. The SIMD activations join this promise (#1197 step 2): `matrix.softmax_rows`, `matrix.gelu` and `matrix.swiglu_gate` compute through the CANONICAL fast-exp — one algorithm, spelled identically by the native SIMD kernel (AVX / NEON / wasm-SIMD lanes and the scalar fallback) and by the wasm self-host (`stdlib/matrix_activations.almd`). Four independent spellings had to be unified for that, each worth a byte and each algebraically invisible: (1) FUSION — a fused multiply-add rounds once where mul+add rounds twice, so the algorithm is deliberately UNFUSED throughout, because wasm has no FMA instruction and relaxed-simd's fma is spec'd as fused-or-unfused; (2) REDUCTION ORDER — one left-to-right sum over the stored exps, never a lane-wise accumulator plus a horizontal combine; (3) SCALING — reciprocal-multiply (`inv = 1/sum`; `v * inv`), never `v / sum`; (4) gelu's two spellings — the identity `1 - 2/(exp(2y)+1)` and the cube association `c * ((x*x)*x)`. A lane-equality test (`fast_exp_determinism`) pins each SIMD lane to the scalar reference bitwise over ~60k inputs; its first version used a coarse grid and passed with a re-introduced fmadd, so the dense sweep is part of the promise, not decoration. The byte-match extends to the ASSOCIATION, not just the operands and the reduction order, and only an operand at the edge of the float range can show it: the native kernel spells gelu's scaling `0.5 * x * (1.0 + tanh)`, which Rust parses as `(0.5 * x) * (1.0 + tanh)` — halve FIRST, then double — while the self-host had transcribed v0's `0.5 * ((1 + t) * x)`, which doubles first. For an `x` near f64::MAX the native order stays finite and the self-host's `2.0 * x` overflows, so `matrix.gelu(1.7976931348623157e308)` answered that value natively and `inf` on wasm, both exit 0 (differential fuzz, a matrix_softmax_fastexp mutation). All four native lanes (naive/avx/neon/chunked) already agreed on the native association; the self-host now follows it."
 since     = "0.56.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/matrix_pow_libm.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_softmax_fastexp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -2848,10 +2864,681 @@ evidence  = [
 id        = "C-228"
 spec      = "ALS-R6"
 title     = "The fs composition family and the matrix row selectors answer identically on both targets"
-statement = "The final fifteen formerly native-only functions reach wasm parity, emptying the COMPILER_FRONTIER burn-down list (26 rows at its creation → 0): `fs.remove` (single-entry semantics — a NON-EMPTY directory errs like remove_dir, a file/empty dir removes, a missing path errs — composed as an emptiness check over read_dir before the recursive floor), `fs.write_bytes`/`fs.write_bytes_raw` (byte-list / Bytes materialized into the write floor), `fs.walk` (recursive read_dir, full paths, dirs included, flat-sorted like native's walk_recursive+sort), `fs.glob` (the same simple `*`-matcher native implements, over the C-137 cwd), `fs.rename` (a NEW WASI floor — path_rename imported, normalized two-path call, the write_text_file-class cap-as-tag Result with native errno text on NOENT/ACCES), `fs.is_symlink` (a NEW no-follow stat floor — lookupflags 0 exposes filetype 7; the follow-mode is_file through a symlink stays true, both pinned), all four `read_*_if_exists` twins (missing → Ok(none), present → Ok(some(payload)) through the Result-Option ctor rails — String, List[String], List[Int] and Bytes payloads all covered), and the three `matrix.select_rows_*` selectors (f32 LE, Q1_0 sign-bit blocks, Q8_0 fp16-scale int8 blocks — the shared decoders the full-matrix loaders use, on a row-subset schedule; the q8 fixture's expectations are hand-derived: 0.5·10=5, 0.5·(-10 as i8)=-5, 2.0·3=6). `env.set` is the one row NOT closed: WASI preview1 has no environ-write syscall and an in-module overlay cannot reach the real environ the C-137 path resolution reads — reclassified HOST_CAPABILITY with that reasoning in the ledger row itself."
+statement = "The final fifteen formerly native-only functions reach wasm parity, emptying the COMPILER_FRONTIER burn-down list (26 rows at its creation → 0): `fs.remove` (single-entry semantics — a NON-EMPTY directory errs like remove_dir, a file/empty dir removes, a missing path errs — composed as an emptiness check over read_dir before the recursive floor), `fs.write_bytes`/`fs.write_bytes_raw` (byte-list / Bytes materialized into the write floor), `fs.walk` (recursive read_dir, full paths, dirs included, flat-sorted like native's walk_recursive+sort), `fs.glob` (the same simple `*`-matcher native implements, over the C-137 cwd), `fs.rename` (a NEW WASI floor — path_rename imported, normalized two-path call, the write_text_file-class cap-as-tag Result with native errno text; the NOENT/ACCES-only half it shipped with was folded into the shared four-errno mapping by C-273), `fs.is_symlink` (a NEW no-follow stat floor — lookupflags 0 exposes filetype 7; the follow-mode is_file through a symlink stays true, both pinned), all four `read_*_if_exists` twins (missing → Ok(none), present → Ok(some(payload)) through the Result-Option ctor rails — String, List[String], List[Int] and Bytes payloads all covered), and the three `matrix.select_rows_*` selectors (f32 LE, Q1_0 sign-bit blocks, Q8_0 fp16-scale int8 blocks — the shared decoders the full-matrix loaders use, on a row-subset schedule; the q8 fixture's expectations are hand-derived: 0.5·10=5, 0.5·(-10 as i8)=-5, 2.0·3=6). `env.set` is the one row NOT closed: WASI preview1 has no environ-write syscall and an in-module overlay cannot reach the real environ the C-137 path resolution reads — reclassified HOST_CAPABILITY with that reasoning in the ledger row itself."
 since     = "0.56.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_composition_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-229"
+spec      = "ALS-R6"
+title     = "A selected row past the byte buffer is the all-zero row on both targets"
+statement = "The three `matrix.select_rows_*` byte-buffer selectors (f32 LE, Q1_0, Q8_0) answer an out-of-range row id with the ALL-ZERO row — the same defined OOB→zeros edge the full-matrix `from_bytes_*` loaders take, applied per selected row — and clamp a negative row id to row 0 and a negative offset to 0, identically on both targets. Found by the generative fuzzer (run 31515916427, a mutation of the C-228 fixture): native panicked on an unchecked slice (`range end index 33 out of range for slice of length 32`) while wasm read undefined heap bytes past the block — a raw-abort/silent-wrong divergence, closed by per-row bounds checks against the buffer length in both implementations. `ALL-ZERO` is a claim about BIT PATTERNS: the zeros are observed through `float.to_string`, which spells the sign that `==` cannot see, and it holds for the IN-RANGE zeros too — the DEQUANTIZATION-ZERO RULING (#1358, fuzz run 31667874852) is that a Q1_0/Q8_0 element of zero magnitude is `+0.0` on both targets. A quantized element is magnitude (the block's fp16 scale) × direction (the sign bit / int8 quant); at zero magnitude the bytes encode no direction, so the sign IEEE-754 returns is an artifact of how the arithmetic was spelled — native's `-scale` produced -0.0 on an all-zero block exactly where wasm's `0.0 - scale` produced +0.0, and every `-0.0 == 0.0` downstream agreed with both. Both entry points are pinned (`select_rows_q1_0` and its full-matrix twin `from_q1_0_bytes`), for Q1_0 per block (every element is ±scale) and for Q8_0 per element (the product is zero from EITHER factor, and `a·b` signs by xor). Non-zero weights keep their exact sign; the float DECODERS `from_bytes_f16_le`/`_f32_le`/`_f64_le` are deliberately excluded, since there a stored -0.0 is the datum — see C-270. The same negative-index rule holds for the whole BYTES accessor family: a negative offset is a NO-OP for every `bytes.set_*` and the type default for every `bytes.read_*`, on both targets, never a panic (#1408). The writers previously cast `pos as usize` and guarded with `p + width <= len`, which WRAPPED past its own check (usize::MAX + 4 = 3), so native died with a raw slice panic where wasm ran clean; the readers already used checked_add and were unaffected. THE OTHER END OF THE SAME DOMAIN, found by the differential fuzz a night later (seed 510754018593 index 222, a spec/wasm_cross/matrix_select_rows.almd mutation): the #1408 fix made NATIVE's writers `checked_add`, but the wasm self-host kept the room test as `pos + N <= n`, and that sum wraps for a `pos` near the TOP of i64 exactly as it did for a negative one. The wrapped negative passed `<= n`, the store went ahead, and `base + pos` landed back inside the buffer: `bytes.set_f32_le(b, i64::MAX, 4.0)` left native's buffer untouched and MUTATED the wasm one, exit 0 on both — a silent write, which is how it surfaced, as a denormal f32 appearing in a row decoded by `matrix.select_rows_f32`. All fourteen widths carried the identical guard and all fourteen are rewritten to SUBTRACT (`pos <= n - N`), which cannot overflow because `n` is a length; a buffer shorter than N makes `n - N` negative, which the existing `pos >= 0` half already rejects. The fixture's matrix now spans BOTH ends — every width at -1, at a large negative, at i64::MAX, at i64::MAX - 1, and at the 2^32 narrowing boundary — because the first fix demonstrated that a per-width hand-written guard drifts back on whichever end nothing measures. The FULL-MATRIX loader was left behind by the row-subset fix: `matrix.from_q1_0_bytes` carried no buffer limit at all, so a rows/cols pair asking for more 18-byte blocks than the buffer holds read straight past it — native bounds-checked its slice and died with a RAW PANIC (exit 101, the form ALS-T6 forbids) where wasm read whatever linear memory held and answered. `from_q1_0_bytes(bytes.new(18), 0, 4, 128)` was exit 101 against a four-row answer (differential fuzz, a matrix_select_rows_oob mutation). Both legs now take the same per-ROW edge the row-subset twin already took: a row whose blocks would fall outside the buffer is the all-zero row, and the in-range shape is unchanged."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_select_rows_oob.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-230"
+spec      = "ALS-R6"
+title     = "The flight reference PID kernel runs identically on both targets"
+statement = "The G-F4 reference application (#776, docs/roadmap/active/flight-reference-app.md): a single-axis PID control law in Q16.16 fixed point — saturation via `int.clamp`, integral anti-windup, pure-arithmetic `pid_step` — driven through a 16-step counted simulation loop against a first-order plant, printing the actuator command per step. The 16-line stdout trace is byte-identical native ⇄ wasm. The app is deliberately flight-subset-shaped: all-scalar Int state in driver `var`s, no allocation in the hot path beyond the per-step `int.to_string`, a literal loop bound, and exactly one declared {Stdout} capability exit — the artifact the qualification pitch runs end to end (`make verify-trust && make receipt`)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/flight_pid_control.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-231"
+spec      = "ALS-E1"
+title     = "Integer and boolean literal forms evaluate identically on both targets"
+statement = "The integer-literal surface of ALS-E1 — decimal with underscore separators, hex/octal/binary radix prefixes, the full i64 range including the negated-MIN literal (the sign folds into the E024 range check, so -9223372036854775808 is writable directly) — and the ALS-E2 boolean literals produce byte-identical observables native <-> wasm, including the i64::MIN decimal round-trip through int.to_string (the $itoa edge pinned by execution in the WAT prelude audit). Out-of-range literals are a check-time E024 on both targets, never a silent wrap. First section pair of the syntax-element direction (proofs/als-element-coverage.toml): the four-part section form (grammar / value norm / rulings / fixture) is the template the remaining 71 rows follow."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/literal_int_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-232"
+spec      = "ALS-E2"
+title     = "Boolean literals and their display form are identical on both targets"
+statement = "ALS-E2: `true` / `false` are reserved-word literals of type Bool whose display form at every observable point (string interpolation, comparison operands) is the lowercase spelling — byte-identical native <-> wasm. Shares the literal-forms fixture with C-231 (the ALS-E1/E2 section pair landed together as the syntax-element direction's template)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/literal_int_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-233"
+spec      = "ALS-E4"
+title     = "The unit literal, its positions, and its reflexive equality are identical on both targets"
+statement = "ALS-E4: `()` is the sole value of type Unit — accepted in expression position, let-binding position, and as the body of a Unit-returning function, with byte-identical observables native <-> wasm. Equality over Unit is reflexively constant (`() == ()` is true, `!=` false): one inhabitant means there is no runtime read, so the v1 lowering folds call-free Unit comparisons to the constant Bool (a call-bearing operand like `f() == ()` is NOT folded — eliding the call's effects would be a miscompile — and falls to the existing walls). This fold retired the Eq-over-Unit wall that previously kept unit equality native-only."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/literal_unit.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-234"
+spec      = "ALS-E6"
+title     = "Parenthesized grouping and the 1-tuple disambiguation behave identically on both targets"
+statement = "ALS-E6: parens override precedence and are otherwise semantically transparent ((1+2)*3 = 9 vs 1+2*3 = 7, byte-identical native <-> wasm), and fmt preserves redundant parens. The disambiguation is normative: (e) is grouping, (e,) is a 1-tuple whose trailing comma fmt round-trips (#1265 fixed in the same PR; regression test fmt_one_tuple_keeps_trailing_comma). The 1-tuple fixture is kept free of string interpolation while #1267 (native scalarization of the 1-tuple repr under interpolation, loud refusal) stands."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/grouping_unary.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_single.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-235"
+spec      = "ALS-E7"
+title     = "Unary operators: `not` negation and prefix minus evaluate identically on both targets"
+statement = "ALS-E7: boolean negation is the keyword `not` (not true -> false, not not b == b); prefix `!` is a compile-time rejection that steers to `not` in BOTH lexer paths (expression statement and interpolation segment — tests/unary_not_diag_test.rs pins the steer, since postfix `!` is unwrap per ADR-0008). Prefix minus applies to literals (folding into the ALS-E1 range check), variables, parenthesized expressions, and floats: -(3+4) = -7, -x, -(1.5) = -1.5 — byte-identical native <-> wasm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/grouping_unary.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-236"
+spec      = "ALS-E8"
+title     = "Tuple construction, destructuring, indexing, and structural equality are identical on both targets"
+statement = "ALS-E8: heterogeneous tuple literals, let-destructure, positional `.k` reads, tuple-typed parameters and returns, nesting, and structural `==` produce byte-identical observables native <-> wasm. The chained-index ruling is normative: `n.0.1` is REJECTED (the lexer reads `0.1` as a float literal — 'Expected a name'), nested reads are written `(n.0).1`. Known loud limitations recorded in the section: `.k` bounds/subject-type not validated at check time (#1266), native 1-tuple x interpolation refusal (#1267) — neither produces a wrong value."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/tuple_ops.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-237"
+spec      = "ALS-E9"
+title     = "Option/Result constructor literals build and eliminate identically on both targets"
+statement = "ALS-E9: `some(e)` / bare `none` / `ok(e)` / `err(e)` under a Result-typed expectation construct the same values on both targets, and `??` eliminates them identically (ok(3) ?? 0 -> 3, err ?? -9 -> -9, some(5) ?? 0 -> 5, none ?? -1 -> -1 — byte-identical native <-> wasm). The negative half is check-time and pinned by tests/ctor_diag_test.rs: `none()` is E001 (none is a value, not a function), and an un-annotated `let o = ok(3)` in an effect fn is the ADR-0008 explicit-propagation rejection. Nested elimination is IN contract since #1270 closed: some(none) ?? none -> inner none -> 9, some(some(5)) ?? none -> some(5) -> 5, byte-identical (the bind rewrites to `match e { some(p) => p, none => d }`, the Option-polarity mirror of the Result rewrite). RECORD-payload elimination is in contract since #1287 closed: `list.get(xs, i) ?? { record }` executes on both targets with String and Int fields read faithfully, and the merge's ownership witness BALANCES (the DropVariant release joins the merge-credit scans, so the kernel-proven checker accepts — the first landing was reverted in #1294 for exactly that bare-Dec rejection)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/option_result_ctors.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-238"
+spec      = "ALS-E10"
+title     = "First-class range values iterate their true bounds on both targets"
+statement = "ALS-E10: a range is a first-class value — `let r = 0..<3` then `for i in r` iterates the same sequence as the inline head, for exclusive `..<`, inclusive `...`, non-zero starts, and call-typed bounds (fixture pins sums 3/15/9/6 byte-identical native <-> wasm). The bind materializes the real list via `list.range`; before this contract the deferred-empty bind made wasm silently iterate ZERO times while native printed the true sum (#1272 — the accept-and-wrong class this ledger exists to extinguish). The retirement half is check-time: `..` and `..=` are E031 with a mechanical `almide fix` steer (tests/range_spelling_diag_test.rs) — a silent re-reading would be an invisible off-by-one in either direction. A range bound by `let` and used ONLY as a `for-in` head is NOT materialized: it takes the same counting loop the inline head takes, so the two legs agree on COST as well as sequence. Before #1400 the wasm leg materialized `list.range` at the bind (the #1272 fix) while native iterated lazily, so `let r = 0..<4294967295` printed the correct sum natively and died `Error: out of memory` on wasm — the same program, one leg. A var read anywhere ELSE (indexed, measured, passed) still materializes, unchanged."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/range_first_class.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_bind_no_materialize.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_bind_huge.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-239"
+spec      = "ALS-E11"
+title     = "Collection literals, indexing, and the empty spellings behave identically on both targets"
+statement = "ALS-E11/E12: list literals (with nesting and `+` concat), direct `xs[i]` element reads (Int and String elements), the square-bracket-colon map literal `[\"k\": v]`, the empty spellings `[]` / `[:]`, and Option-returning `m[k]` reads eliminated by `??` (missing key -> none) produce byte-identical observables native <-> wasm (fixture pins 40/y/2/3/0/3/0/-1). The asymmetry is normative: a list read returns the element DIRECTLY and aborts out-of-bounds with the unified message + exit 1 (C-067's ruling, read side), while a map read returns Option. The curly `{\"k\": v}` spelling is a parse error — a JSON transcription mistake stops at check time."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-240"
+spec      = "ALS-E12"
+title     = "Map literals and empty-map reads behave identically on both targets"
+statement = "ALS-E12: the square-bracket-colon map literal, `[:]` empty map, `m[k]` Option reads with `??` fallback, and deterministic insertion-order preservation (the fixture iterates [\"z\": 1, \"a\": 2, \"m\": 3] and pins z=1 a=2 m=3 — insertion order, not key order) — shares the collection fixture with C-239 (the E11/E12 pair landed together, like the E1/E2 template pair)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-241"
+spec      = "ALS-S1"
+title     = "Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets"
+statement = "ALS-S1 (the first statement-direction section): immutable `let` with SHADOWING (the new binding's initializer sees the old one — let x = 1 then let x = x + 10 gives 11), mutable `var` with sequential and in-loop reassignment (10, 6), and a conditional-expression initializer, byte-identical native <-> wasm. The negative half is check-time and pinned by tests/binding_diag_test.rs: assigning a `let` is E009 whose hint steers to `var`; reassigning a `var` at a different type is E001 (the declared type never silently widens)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/binding_stmts.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-242"
+spec      = "ALS-E13"
+title     = "Conditional expressions evaluate the taken arm only, identically on both targets"
+statement = "ALS-E13: `if cond then arm [else arm]` — statement position without else (Unit), brace arms after `then`, the else-if chain, and the value form all produce byte-identical observables native <-> wasm (fixture pins stmt-then/brace-arm/else-arm/mid/9). `then` is mandatory: the brace-language transcription `if c { }` is a parse error steering to `then` (tests/if_then_diag_test.rs) — the most likely LLM slip stops at check time with the fix named. Only the taken arm's effects fire; the v1 both-arms-linearization wall defends exactly this norm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/if_block_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-243"
+spec      = "ALS-E14"
+title     = "Block expressions yield their tail value identically on both targets"
+statement = "ALS-E14: `{ stmt* tail? }` is an expression whose value is the tail (Unit when absent), usable as a let initializer, an if arm, or a function body, with block-scoped bindings — fixture pins 11 (let-initializer block) and 9 (if-arm blocks) byte-identical native <-> wasm. Shares the fixture with C-242 (the conditional's brace arms ARE block expressions)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/if_block_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-244"
+spec      = "ALS-E15"
+title     = "While loops iterate their condition-tested body identically on both targets"
+statement = "ALS-E15: `while cond { body }` — pre-tested, condition re-evaluated each iteration, Unit-valued, mutable state accumulating across iterations. Fixture pins a counter accumulation (10, terminal 5) and a DATA-DEPENDENT iteration count (Collatz from 16 -> 4 steps) byte-identical native <-> wasm. break/continue are outside this contract: the v1 renderer walls them loudly (#1277) and the Break/Continue coverage rows stay UNWRITTEN until that brick lands — no native-only semantics are normalized."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/while_loops.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-245"
+spec      = "ALS-E16"
+title     = "String interpolation embeds each segment's canonical display identically on both targets"
+statement = "ALS-E16: `${expr}` segments (variable, arithmetic, multiple per literal), the `\\${` literal escape, and per-type display — String verbatim, Int decimal, Bool lowercase, Float canonical (1.5 pinned; the exhaustive float display norm waits on the ALS-E3/#1261 ruling) — byte-identical native <-> wasm (fixture pins hello world / sum=3 / n*7=42 / mix / escaped ${not_interp} / float=1.5 bool=false)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-246"
+spec      = "ALS-E17"
+title     = "Identifiers resolve to their nearest binding; unresolved names are check-time E003 naming the identifier"
+statement = "ALS-E17: an identifier expression resolves to the nearest binding (shadowing per ALS-S1) with identical observables on both targets; an unresolved name is check-time E003 whose diagnostic CONTAINS the failed name (tests/ident_diag_test.rs) — no runtime name-resolution failure exists (a checked name always resolves; NameTotality is the v1 proof obligation for this)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-247"
+spec      = "ALS-E18"
+title     = "Match expressions select the first matching arm identically on both targets; non-exhaustive is check-time E010"
+statement = "ALS-E18: string-literal arms with wildcard, Int binder patterns with guards (first-match-wins pinned: 7 falls through both guards to `_`), Option some(x)/none, and Result ok(x)/err(e) with interpolated arm bodies — byte-identical native <-> wasm (fixture pins f64/odd/50/err:bad). Only the selected arm evaluates. The negative half: a non-exhaustive match is check-time E010 that NAMES the missing case (`missing none`) with an add-arms hint (tests/match_diag_test.rs) — no runtime match failure exists for a checked match."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/match_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-248"
+spec      = "ALS-E19"
+title     = "for-in iterates list-family heads with optional tuple destructuring identically on both targets"
+statement = "ALS-E19: `for pat in iterable { body }` over List[Int] (accumulation 8), List[String] (per-element effect), and List[(Int, Int)] with HEAD DESTRUCTURING `for (i, v) in …` (53 including the S2 components) — byte-identical native <-> wasm. Elements bind in order exactly once; the iterable is evaluated once before the loop; body assignments accumulate across iterations. Range heads are C-238's evidence, map (k, v) iteration is C-240's; break/continue stay outside per #1277 (loud wall)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/for_in_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-249"
+spec      = "ALS-S2"
+title     = "Tuple let-destructuring binds each component positionally, identically on both targets"
+statement = "ALS-S2: `let (a, b) = e` binds each component to the corresponding positional value with the tuple's positional types — pinned in the for-in fixture (p + q participating in the 53 sum) and in tuple_ops.almd (C-236). One norm shared by three positions: let-destructure, fn-parameter tuple destructure, and the for-in head (ALS-E19)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/for_in_forms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_ops.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-250"
+spec      = "ALS-E20"
+title     = "Pipe and composition evaluate as plain application in order, identically on both targets"
+statement = "ALS-E20: `x |> f` is observationally `f(x)` — single (10), chained (11), and through a HOF with a lambda (3); `f >> g` builds a callable applying left-to-right ((double >> inc)(4) = 9) — byte-identical native <-> wasm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/pipe_compose_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-251"
+spec      = "ALS-E21"
+title     = "if let implicitly unwraps an Option scrutinee with a bare binder, identically on both targets"
+statement = "ALS-E21: `if let x = o { .. } else { .. }` — the some path binds the INNER value (some(5) -> 10), the none path takes else (\"empty\"), byte-identical native <-> wasm. The binder is BARE by design: `if let some(x) = o` is a parse error (Swift-style implicit unwrap, not pattern matching — patterns belong to `match`, ALS-E18)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/if_let_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-252"
+spec      = "ALS-S3"
+title     = "Expression statements and comments: Unit calls execute, discards are explicit, comments are invisible"
+statement = "ALS-S3/S4: a Unit-returning call in statement position executes in order; a pure value is discarded only through `let _ = e`; and every comment form (leading line, trailing, multi-line block, before a declaration) is semantically invisible — the fixture threads all forms between two prints and both targets emit exactly first/second. The negative half is check-time E042 (ADR-0008 must-use): a bare statement-position Result is rejected with BOTH escapes spelled in the hint (`expr!` propagates, `let _ = expr` discards without propagating — C-217's pinned semantics), tested by tests/expr_stmt_diag_test.rs."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/expr_stmt_comment.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-253"
+spec      = "ALS-S5"
+title     = "Place assignments and type ascription behave identically on both targets"
+statement = "ALS-S5/E22: list-element `xs[i] = v`, record-field `p.x = v`, and map-key `m[k] = v` (upsert: insert-if-absent, overwrite-if-present — 6 then 100 pinned) all observe the new value on the next read, byte-identical native <-> wasm (fixture pins 21/12/6/100/7); the OOB-write abort stays C-067's ruling. The type-ascription expression `(e: T)` supplies an expected type without changing the value or its runtime representation."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/place_assign_ascription.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-254"
+spec      = "ALS-E22"
+title     = "Type ascription supplies an expected type without changing the value on either target"
+statement = "ALS-E22: `(e: T)` — the value is `e` unchanged ((7: Int) -> 7 pinned byte-identical), the ascription only feeds the checker's expected type and leaves the runtime representation untouched. Shares the place-assignment fixture with C-253 (the S5/E22 pair landed together)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/place_assign_ascription.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-255"
+spec      = "ALS-E23"
+title     = "Record literals, member reads, and spread updates preserve value semantics identically on both targets"
+statement = "ALS-E23: the record literal, Int and String member reads, and the spread update `{ ...p, y: 20 }` (unlisted fields inherited) — with VALUE SEMANTICS pinned: the spread source is unchanged afterward (p.y still 2). Byte-identical native <-> wasm (fixture pins 3/a/21/a/2)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/record_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-256"
+spec      = "ALS-E24"
+title     = "break and continue take effect at their statement position, identically on both targets and the interp"
+statement = "ALS-E24 (#1277/#1306): guarded `continue` skips the rest of the iteration (the for-range STEP still runs — the lowering restructures into the guarded rest, structurally excluding the skipped-step infinite loop), guarded `break` exits immediately AT ITS POSITION — the mid-body shape pins 3, not the deferred-flag 4 that BOTH v1 legs previously agreed on while v0 and the interp said 3. That divergence class is invisible to the 2-way native==wasm gate by construction, which is why this fixture lives in the 3-way-voted spec/wasm_cross set. A break over a heap frame stays a loud wall (an early exit must not skip a per-iteration Drop)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/loop_break_continue.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-257"
+spec      = "ALS-E25"
+title     = "The scalar error operators evaluate identically on both targets"
+statement = "ALS-E25: postfix `!` (unwrap-propagate, effect-fn only), postfix `?` (Result -> Option: err -> none, ok(4) -> some(4)), and `??` fallback, through both polarities of an effect call — byte-identical native <-> wasm (fixture pins 5/-1/4). The deep propagation norms stay with the ADR-0006/0008 contracts (C-216/C-217/C-222). ExprKind::Try is parser-unreachable dead vocabulary (the surface `?` builds ToOption); OptionalChain stays outside this contract behind the untracked-subject wall."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/error_operators.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-258"
+spec      = "ALS-E26"
+title     = "Named calls and lambdas evaluate identically on both targets"
+statement = "ALS-E26: positional named calls, typed/untyped/zero-param lambdas, and inline lambdas in HOF argument position — arguments evaluate left-to-right exactly once, by value; a lambda is a function value behaving identically whether bound-then-called or passed (fixture pins 5/10/42/12 byte-identical native <-> wasm). Arity mismatch is check-time E004."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-259"
+spec      = "ALS-E27"
+title     = "Variant constructor references build values eliminated identically by match on both targets"
+statement = "ALS-E27: a payload constructor call Rgb(1, 2, 3) and a bare nullary reference Green build variant values whose match elimination is byte-identical native <-> wasm (fixture pins 4/20). Exhaustiveness is ALS-E18's E010."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-260"
+spec      = "ALS-D1"
+title     = "The declaration family compiles and runs identically on both targets"
+statement = "ALS-D1: one program threading the declaration family — explicit import (json parse -> stringify round-trip prints [1,2]), a variant type declaration eliminated by match, top-level lets (Int and String) read from a fn body, fn and effect-fn declarations — byte-identical native <-> wasm (fixture pins 300/hi/careful/[1,2]). Protocol resolution stays with C-094/C-126; test blocks are evidenced by the whole spec/lang suite running its wasm leg. The fixture now leads with a `module` header under its comment block — the shape #1323 made un-formattable — so it also pins that a commented module header survives fmt; the multi-module execution evidence stays with the spec/integration/modules suite. `strict` is deliberately OUTSIDE: parsed but consumed by nothing (#1321), its row stays UNWRITTEN."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-261"
+spec      = "ALS-E3"
+title     = "Canonical float values including the negative-zero sign display identically on both targets"
+statement = "ALS-E3 (partial — the fmt-stable half): decimal float literals with digits on both sides of the dot, and float.to_string's canonical display — 1.5, 0.5, the SIGN-PRESERVED -0.0, and the arithmetic result 1.75 — byte-identical native <-> wasm. The FORM half (exponents, underscores, out-of-range literals) is accepted by the parser but OPEN pending #1261's fmt-preservation ruling and is deliberately outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_float_stable.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-262"
+spec      = "ALS-E5"
+title     = "The fmt-stable string escapes and the empty string evaluate identically on both targets"
+statement = "ALS-E5 (partial — the fmt-stable half): `\\t` -> tab, `\\n` -> newline, `\\\\` -> one backslash (spellings AND values fmt-stable, pinned in visible brackets), and the empty string — byte-identical native <-> wasm. The FORM half (unicode escapes, heredocs, delimiter choice) and the silent-pass-through of unknown escapes are OPEN pending #1263/#1264 and deliberately outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_float_stable.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-263"
+spec      = "ALS-D2"
+title     = "Recovery nodes never appear in accepted programs; a broken file still reports past its first error"
+statement = "ALS-D2: ExprKind::Error / Stmt::Error are recovery vocabulary — placeholders that keep diagnostic collection going past a parse error, never present in an accepted program. Both directions are pinned: the whole spec/wasm_cross corpus (300+ accepted, both-target-executed programs) parses with ZERO recovery nodes, and a deliberately broken file reports diagnostics while parsing CONTINUES past the error (the following declaration is still seen). The fixture leg is any accepted program executing identically with zero recovery artifacts."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
+  { path = "tests/parser_recovery_test.rs", name = "accepted_corpus_contains_zero_recovery_nodes", class = "by-construction" },
+  { path = "tests/parser_recovery_test.rs", name = "broken_file_recovers_past_the_error", class = "by-construction" },
+]
+
+[[contract]]
+id        = "C-264"
+spec      = "ALS-E28"
+title     = "Scalar-field optional chains yield some/none identically on both targets"
+statement = "ALS-E28: `p?.x` over a SCALAR record field evaluates to some(v.x) on the some path and none on the none path, byte-identical native <-> wasm (fixture pins 3 and -9 through `??`). The whole chain is Option-typed — `?.` wraps 'read if present', the unwrapping belongs to `??`/match. #1329 un-walled the wasm leg by moving the desugar to the shared optimize cut point so the synthesized tail-match helper is a Named call that lowers in every position (bind, call argument, `??` operand). HEAP-payload fields stay on the older route: the identical user-written helper hits the pre-existing heap-result-match brick (measured, not an OptionalChain defect), so that class is deliberately outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/optional_chain_scalar.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-265"
+spec      = "ALS-S6"
+title     = "The guard statement's pass and raise paths behave identically on both targets"
+statement = "ALS-S6: `guard cond else err(e)` is an EARLY EXIT — on the true path the following statements run and the tail value flows out (10 pinned); on the false path the else's err propagates to the caller, where a `!` or match receives it (\"must be positive\" pinned) — byte-identical native <-> wasm. Both raise spellings (`err(e)` and `err(e)!`) normalize identically since #1336, which found the recognizer accepted only the Unwrap-wrapped leaf: the class was wider than guard (a hand-written `{ let m = ..; if m > 0 then m * 2 else err(e) }` walled the same way). `guard let` is a separate class (frontend-desugared to a tail-position variant match, still walled) and is outside this contract."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/guard_statement.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-266"
+spec      = "ALS-S7"
+title     = "guard let binds the success payload and raises on the failing polarity, identically on both targets"
+statement = "ALS-S7: `guard let x = scrut else err(e)` binds the Ok/Some payload for the rest of the block on the success polarity (int.parse(\"21\") -> 42 pinned) and propagates the else's err to the caller on the failing one (\"not a number\" pinned) — byte-identical native <-> wasm; chained guard lets fold into a single carrier bind (#1340). The wall that stood here was POSITIONAL, not polarity- or pattern-shaped: guard let desugars in the frontend to a BLOCK-NESTED variant match, and auto_wrap_abi_body retypes only the body ROOT to the Result carrier, so the nested match kept its scalar type and fell off the carrier-typed tail path. The fix taught the proven bind-shape normalizer about variant matches — the same machinery ALS-S6 uses."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-267"
+spec      = "ALS-E29"
+title     = "The binary operator surface evaluates identically on both targets, including the signed division rulings"
+statement = "ALS-E29: Int arithmetic with the SIGNED rulings pinned — `/` truncates toward zero (-7 / 3 = -2, not the floor -3) and `%` takes the dividend's sign (-7 % 3 = -1), the C/Rust convention rather than floor division — plus Float addition, the OVERLOADED `+` on String (catdog) and List (length 3), all six comparisons, `==`/`!=` on Int and String, the `and`/`or` keywords (there is no `&&`/`||`; negation is `not`, ALS-E7), and `**` which desugars to a math.pow/math.fpow call credited 1:1 in the caps ledger. Byte-identical native <-> wasm across 14 observation points."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/binary_operators.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-268"
+spec      = "ALS-E30"
+title     = "A `_` in call-argument position is a check-time E046, identically on both targets"
+statement = "ALS-E30: `add(_, 10)` is REJECTED at check time as E046 naming the argument position, and the hint steers to a lambda (`(x) => add(x, 10)`) while explicitly denying partial application — binding the form types as the RETURN, and in pipe position it counts as an extra argument (E004). Before the ruling the checker typed the Placeholder as Unknown and it sailed into codegen, emitting invalid Rust behind the compiler-blaming banner (the #1266 class). Type check precedes the target split, so the diagnostic is identical native <-> wasm — the same structure as the E027 fan.timeout tombstone (C-006). The SIBLING forms in ALS-E30, the typed holes `_` (expression position) and `todo(msg)`, deliberately carry NO cross-target promise: they abort the native leg as a panic (exit 101) while the wasm renderer refuses the whole function at build time regardless of whether the hole is reachable, so no cross-target fixture can exist for them and none is claimed."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e046-call-arg-placeholder/broken.almd", class = "fixture" },
+  { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
+  { path = "tests/typed_hole_diag_test.rs", name = "typed_hole_panics_naming_the_almide_source_line", class = "by-construction" },
+]
+
+# ── NESTED VARIANT MATCH IN BIND POSITION, AND THE CROSS-FAMILY REFUSAL ─
+[[contract]]
+id        = "C-269"
+spec      = "ALS-M1"
+title     = "A nested variant match bound to a let executes identically on both targets; a constructor pattern the subject lacks is a check-time E048 on both"
+statement = "ALS-M1, positive half: a variant `match` whose arm BODY is itself a variant match, bound to a `let` under an explicit `Result[T, E]` carrier and unwrapped with `!`, binds every payload at both nesting levels and produces byte-identical observables native <-> wasm — on the value path and on BOTH failure depths, for a scalar (Int) and a heap (String) payload. The bind is heap-typed, so branch_lift hoists it into a synthesized tail helper; the arm binders must survive that lift carrying their concrete types. NEGATIVE half, the same rule read from the other side: a constructor pattern must name a case the SUBJECT has, and one that does not is rejected at CHECK time as E048 — identically on both targets, since type check precedes the target split. Four cells: `ok`/`err` over an Option, `some`/`none` over a Result (both carry a `try:` naming the same arm position in the right family), a builtin carrier over a USER variant, and a user case borrowed from another variant or aimed at a carrier (both hint the subject's own case list). That refusal is the substance of #1341, whose own diagnosis was WRONG: the reported repro spelled the arms `ok(..)` over a `list.get` subject (an `Int?`), so branch_lift was innocent — `free_vars` already excludes arm binders and the binder was never a helper param — and the program was simply ill-typed. The checker rejected constructor patterns aimed at plain SCALARS only, so the payload bound as `Ty::Unknown`, survived to codegen, and detonated there: a `[COMPILER BUG] internal type resolution failed` banner naming `branch_lift_synth_0` on native and an executable-subset wall on wasm for the family cells, and INVALID GENERATED RUST on native for the foreign-case cell. Compiler-blaming failures for plain type errors (the #1266 misattribution class); E048 replaces them with one named error carrying the fix. Only structurally-known subjects are claimed — a type under inference, or a `Named` opaque alias whose destructure is legal, stays silent."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_variant_match_bind.almd", class = "fixture" },
+  { path = "tests/diagnostic_harness_test.rs", class = "by-construction", name = "broken_files_produce_expected_diagnostics" },
+]
+
+[[contract]]
+id        = "C-270"
+spec      = "ALS-R6"
+title     = "The shared fp16 block scale decodes the whole fp16 domain identically on both targets"
+statement = "Q1_0 and Q8_0 read the same 2-byte fp16 block scale, and native's `fp16_bits_to_f32` (runtime/rs/src/matrix_p2.rs) and wasm's `__fp16_bits`/`__q10_scale` (stdlib/matrix_activations.almd) were THREE separate answers apart on it — all three closed here, pinned across ten raw scales through both q1_0 entry points (`select_rows_q1_0` and `from_q1_0_bytes`). (1) SUBNORMALS: wasm returned the sign bit alone for every exp==0 pattern, flushing 2^-24 … 6.0975e-5 to zero — a silent MAGNITUDE error on real weights, not just a sign one; wasm now normalizes the mantissa the way native's `while m & 0x400 == 0` loop does. (2) exp==31: wasm had no Inf/NaN branch and fell into the normal-number formula, decoding +Inf as the finite 65536 and a NaN pattern as 65600; it now emits the 0xFF exponent, and `float.to_string` already renders inf/-inf/NaN identically on both legs. (3) The SIGN OF ZERO (#1358) — the dequantization-zero ruling recorded on C-229. Non-zero scales are bit-for-bit untouched (1.0, 65504, both smallest-normal and largest-subnormal boundaries pinned with their negated twins). The CONTRAST is pinned in the same fixture: `from_bytes_f16_le`/`_f32_le` are float DECODERS, so a stored -0.0 is the datum and its sign is information — it survives on both targets, and the ruling governs dequantization PRODUCTS only."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_q_fp16_scale_domain.almd", class = "fixture" },
+]
+
+# ── `??` WITH AN INLINE-`!` FALLBACK OVER A HANDLE PAYLOAD ─────────────
+[[contract]]
+id        = "C-271"
+spec      = "ALS-E25"
+title     = "`carrier ?? call!` yields the fallback's PAYLOAD, never its Result block, for a handle-carrying payload on both targets"
+statement = "A `??` whose FALLBACK is an inline propagating unwrap (`a ?? f(..)!`) produces byte-identical observables native <-> wasm when the FALLBACK ARM RUNS and the payload is heap/handle-carrying (a json `Value`, `String`, `List[Int]`, `Bytes`). Thirteen cells: the three reported json payloads (array, object, number), the ok path (the carrier holds a value, so a fallback that would itself fail is never evaluated — `??` stays lazy in its fallback), the `match { ok(p) => p, err(_) => f(..)! }` spelling that reaches the same arm, an Option carrier, `?`-to-Option followed by `??`, a nested `??` supplying the outer fallback, the String / List / Bytes carriers, the BOTH-fail path (the fallback's own error is the enclosing fn's error), and the scalar (Int) control that never took the handle path. Found by `tools/xtarget-fuzz` (--family all --seed 13322026081302 --index 297) as #1375, a SILENT WRONG VALUE on wasm: `json.parse(\"hi\") ?? json.parse(\"[1,2]\")!` printed `true`, which is `stringify` reading the ok DISCRIMINANT `1` out of the fallback's Result block. The heap-arm lowering applied the `e! = e` pass-through — the identity in a RESULT-typed arm, which propagates the Result verbatim — to a PAYLOAD-typed arm, so the whole Result block landed where the merge expects the payload handle. The `match` spelling detonated a second way, via `branch_lift` hoisting a `!`-bearing arm into a non-effect payload-returning helper: rustc E0277 on native, an always-wrapped body read as the bare payload on wasm. `spec/wasm_cross/declaration_forms.almd` carried the shape only on the OK path, where the fallback arm never runs — the fixture that tests what someone already thought of."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_or_unwrap_fallback.almd", class = "fixture" },
+]
+
+# ── fs.list_dir IS THE WHOLE DIRECTORY, AT EVERY READDIR BUFFER BOUNDARY ─
+[[contract]]
+id        = "C-272"
+spec      = "ALS-R6"
+title     = "`fs.list_dir` returns EVERY entry on both targets, whatever the directory's size, sorted by bytes"
+statement = "`fs.list_dir(path)` yields the same `List[String]` native <-> wasm for a directory of ANY size, and the order is contractual: both legs sort the names lexicographically by BYTES (native `names.sort()` over `String` = `str` Ord; wasm's insertion sort over `$str_lt`), so the filesystem's arbitrary readdir order is never observable. WASI's `fd_readdir` is a RESUMABLE api — one pass fills the caller's buffer and reports the bytes written, and the listing continues from the last entry's `d_next` cookie until a pass returns FEWER bytes than the buffer — but the wasm floor (`$read_dir`) did ONE `cookie=0` pass into 4 KiB and parsed whatever landed there. Every directory whose dirents did not fit came back SILENTLY SHORT still wrapped `ok(...)`: a wrong value, not a wall and not an err, indistinguishable from a genuinely smaller directory (#1384 — 200 entries answered 130 = (4096-51)/31, 60 long-named ones answered 41). Six sizes pin the sweep, measured on both legs before and after: empty (0/0) and one (1/1) unchanged; 4096 bytes of dirents EXACTLY (130 entries) already agreed and must keep agreeing, because a pass that exactly fills the buffer is NOT the end and the sweep has to re-read rather than stop; one entry over (131) was 130; a record whose HEADER fits at 4050 but whose NAME runs past 4096 (130) was 129, since the old parser trusted `d_namlen` and read past `bufused`; 200 entries (200) was 130; and 60 x 76-byte names (60) was 41 WITH heap garbage spliced onto the first name — the straddling read, observable in stdout. The same site dropped `fd_readdir`'s errno, so a failed listing read the zeroed `$bufused` scratch and returned `ok([])`; the errno is now kept and a readdir failure becomes the same Err as a failed `path_open`. `$read_dir` was FALLBACK_ONLY in proofs/wat-prelude-audit.toml — no `spec/wasm_cross` fixture reached `fs.list_dir` at all, which is exactly why one pass survived from the beginning; the fixture below upgrades it to CORPUS."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_list_dir_multipass.almd", class = "fixture" },
+]
+
+# ── fs WRITE-SIDE ERROR TEXT ───────────────────────────────────────────
+[[contract]]
+id        = "C-273"
+spec      = "ALS-R6"
+title     = "The fs write-side floors answer with native's std::io Display text, and fd_write's errno is not dropped"
+statement = "Every wasm fs WRITE-side floor answers a failure with the SAME native `std::io` Display text the native leg produces, through the one errno mapping `$read_text_file` already carried. Before #1385 each floor collapsed its whole failure space to one fixed string — `$write_text_file` \"write failed\", `$make_dir` \"mkdir failed\", `$remove_all` \"remove failed\", `$read_dir` \"directory not found\", `$rename` a hand-rolled NOENT/ACCES-only half — so the Result BRANCH agreed cross-target while the PAYLOAD, the half a user actually reads, diverged: eight measured rows, eight divergences. All eight close. Seven are fixture-pinned: `fs.write` onto a directory (`Is a directory (os error 21)`) and through a file component (`Not a directory (os error 20)`), `fs.mkdir_p` through a file component (same), `fs.remove_all` of a missing path and `fs.list_dir` of a missing path and `fs.rename` of a missing source (`No such file or directory (os error 2)`), `fs.list_dir` of a plain file (`Not a directory (os error 20)`). The eighth and ninth — `fs.write` to a mode-444 file and into a mode-555 directory, both `Permission denied (os error 13)` — are MEASURED equal on both legs but NOT fixture-reachable: setting a mode needs `process.exec`, which walls on the wasm leg, so no `spec/wasm_cross` program can build the precondition. The mapped errno set is exactly {NOENT 44, ACCES 2, NOTDIR 54, ISDIR 31} and that boundary is the DELIBERATE, BOUNDED residue of this contract: those four are the errnos whose native number AND Display text are identical on every Unix host, so one baked data segment is correct in a portable `.wasm`. ENOTEMPTY (39 Linux / 66 macOS), ENAMETOOLONG (36 / 63) and EXDEV (same number, different text — `Invalid cross-device link` vs `Cross-device link`) are NOT mapped, and an errno outside the set keeps its floor's generic string; mapping them would trade a visible divergence for a host-specific one baked into a portable artifact. SECOND, latent half: `$write_text_file` built `Ok(())` UNCONDITIONALLY — `fd_write`'s errno was dropped, so ENOSPC / EIO / a short write read as SUCCESS. The sweep that found it could not reach it (every failure it produced was caught by `path_open` first), which is what makes a silent success worth fixing before it is live. The write is now native `fs::write`'s write_all LOOP: a partial `fd_write` resumes at the unwritten bytes, its errno feeds the same mapping, and an accepted-0-bytes call is native's `ErrorKind::WriteZero` (`failed to write whole buffer` — Rust's own const message, not an OS string, so it is platform-independent like the four). The 12800-byte body and the zero-length write in the fixture are the loop's many-iteration and zero-iteration edges. THIRD, the neighbourhood sweep #1368's follow-up did for the read side, done for the write side: `path_create_directory` (the intermediate-prefix drops are by design — the FINAL call's errno subsumes them and is reported), `path_remove_directory` and `path_unlink_file` (both already feed `$remove_path`'s first-error verdict), `path_rename` (captured), `fd_readdir` inside `$remove_path` (its drop cannot manufacture a silent SUCCESS: a pass that reads nothing declares the directory emptied, and `path_remove_directory` then refuses a non-empty one, so the failure still surfaces as an err. It is not a CLEAN error path — a readdir that starts failing mid-walk re-scans the previous pass's stale buffer — but every exit from that shape is an err, and the shape is untouched here), and the `fd_close` drops (native drops its `File` and ignores the close result identically). `fd_seek` / `fd_filestat_set_size` are requested as path_open RIGHTS but never imported or called, so there is nothing to check. The four errno branches live in ONE Rust source (`fs_errno_msg_wat`) rendered inline at each site — §4.1 forbids a new hand-written WAT function, and one source is what stops the floors drifting apart again."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_write_errno.almd", class = "fixture" },
+]
+
+# ── ADR-0006 FALLIBLE CALLBACK FOR THE fs STREAMING WALKERS ────────────
+[[contract]]
+id        = "C-274"
+spec      = "ALS-R7"
+title     = "A fallible callback makes an fs streaming walk fallible, stopping at the first err"
+statement = "ADR-0006's 1-bit fallibility polymorphism reaches the fs streaming walkers (#1144 — the cell C-220 tracked as an omission). A callback whose body propagates (`fs.fold_lines(p, z, (a, l) => step(a, l)!)`, `fs.for_each_line(p, (l) => note(l)!)`) makes the whole call fallible: the checker rewrites the callee to the internal carriers `fs.__fallible_fold_lines` / `fs.__fallible_for_each_line` exactly as `list.map` becomes `list.__fallible_map`, and the carriers are not spellings — naming one in source is E043, now on the same footing as the list family. The NORMATIVE observable is the callback-invocation sequence, not merely the err value: the callback runs through the failing line and is NEVER invoked for any later line (first-err short-circuit), and the callback's own err message rides the caller's err channel unwrapped. Both are byte-identical native <-> wasm for the `Map[String, Int]` accumulator, the shape that has a wasm self-host twin (`fs_fallible_fold_lines_msi`, stdlib/fs_fold_lines.almd); the fixture pins the invocation TRACE (each invocation appends its line to a log read back afterwards) across five shapes — full ok walk, mid-file err, empty file (zero invocations), missing file (the reader's err before any invocation), and an err on the very first line — so an implementation that returned the right err while continuing to call the callback fails, which is precisely the difference between short-circuit and error-collection. Where the walk STOPS READING is deliberately outside the cross-target promise: the native carrier returns out of the BufReader loop at the failing line, leaving the rest of the file unread, while the wasm self-host had already read the file before cutting the first line — the same native-only carve-out C-220 makes for the streaming RSS property. Two cells are REASONED omissions, not gaps: `fold_lines_range` and `fold_lines_chunked` get no fallible form, because a partitioned walk has no defined first err (which chunk errs first is a thread-schedule observable), so an erring chunk body handles its own error. The matrix in tests/fs_streaming_family_gate_test.rs makes both columns executable — it cross-checks the carriers against the frontend's FALLIBLE_HOF_FS dispatch table, so a carrier nothing rewrites to, or a rewrite with no carrier, fails the build. The `for_each_line` cell is native-only, inheriting the PLAIN form's wall (it has no wasm twin at all); spec/stdlib/fs_streaming_test.almd pins its first-err trace on the native leg. That wall is placed, not merely inherited: the capability witness admits `fs.__fallible_for_each_line` even though no wasm twin exists, so `lower_function` stays TOTAL and the honest refusal lands in the RENDERER on the unlinked twin name — the same layer the total family's `_x` accumulator cells wall at. Leaving the carrier unadmitted refused it in lowering instead, which walls the enclosing REAL function and would have forced a row into proofs/walled-real-baseline.txt — a file whose target is permanently 0 (the wall=0 endgame claim, burned down from 217). A missing capability admission is a lowering bug, never a reason to lower that claim. One frontend bug this cell exposed: `base_stdlib_fn_name` split the mono suffix at the FIRST `__`, so a carrier whose name BEGINS with `__` based to the empty string and every name-keyed decision (registry routing, match read-shape tracking) silently missed — the whole function walled instead of routing."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_fallible_stream_callback.almd", class = "fixture" },
+  { path = "spec/stdlib/fs_streaming_test.almd", class = "fixture" },
+  { path = "tests/fs_streaming_family_gate_test.rs", name = "every_streaming_cell_decides_its_fallible_form", class = "fixture" },
+
+# ── http RESPONSE HEADERS ──────────────────────────────────────────────
+[[contract]]
+id        = "C-275"
+spec      = "ALS-R7"
+title     = "The http response-header surface answers identically on both targets, with case-insensitive field names"
+statement = "ALS-R7: header field names are CASE-INSENSITIVE under an ASCII fold (RFC 9110 §5.1 — a field name is a `token`, so the fold matches `eq_ignore_ascii_case` and must not reach for the Unicode string.to_lower), a response carries AT MOST ONE entry per field name because every write upserts the matching entry's value in place, and `with_headers` yields EXACTLY the caller's map — no seeded Content-Type, which only `response` (text/plain) and `json` (application/json) carry because they give the caller no other way to name one, while `redirect` carries only Location. #1352 measured NINE divergent cells here: native seeded a Content-Type in `with_headers` and matched case-insensitively in `get_header` while the self-host seeded nothing and matched with `==`, so a wasm-target program inspecting a response it had just built silently read `none`. The seeding side lost the ruling on REACHABILITY — with the seed, `with_headers` cannot express a response without a Content-Type (there is no remove_header), without it both shapes are reachable — and `set_header`'s case-SENSITIVE match lost on both legs at once: setting `content-type` on a response holding `Content-Type` appended a second entry the case-insensitive lookup then shadowed, so the write vanished natively too."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/http_response_headers.almd", class = "fixture" },
+
+spec      = "ALS-I3"
+title     = "Each test starts from re-initialized mutable module globals, on both targets"
+statement = "ALS-I3: a `test` block observes every MUTABLE module-level `var` at its declared initializer, whatever a preceding test wrote — native gets this from cargo's per-test thread isolation, and the wasm test runner replays each initializer through the ordinary slot-routed Assign (take + drop-old + store) before each test body, so the two legs agree test-for-test. The re-init covers MODULE top-lets as well as main-region ones: `disambiguate_module_global_regions` runs BEFORE the runner synthesis, so every module id is program-unique and a main-region Assign naming one cannot collide (#1233 — before this, any file with a mutable module `var` walled the whole wasm leg and only native ever ran it)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/integration/modules/cross_module_global_state_loop_test.almd", class = "fixture" },
+  { path = "spec/integration/modules/cross_module_cell_update_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-276"
+spec      = "ALS-C9"
+title     = "A String-key `list.sort_by` over HEAP elements orders and co-owns identically on both targets"
+statement = "ALS-C9: `list.sort_by(rows, (r) => <String>)` over a HEAP element type (List[List[String]], List[String], List[R]) is a STABLE sort on the cached key, compared byte-lexicographically (string.cmp — v0's String Ord), with the key fn called exactly once per element and the SOURCE list left readable afterwards; native and wasm agree byte-for-byte. The wasm leg routes the heap instantiation to `list.sort_by_str_key_rc`, whose fill ACQUIRES (rc_inc) each element handle copied into the result so the two lists co-own their elements — the scalar twin's raw copy is right for an Int element and a double-free for a heap one, which is why the heap instantiation previously walled the whole file (`sort_by_str_key_x` unlinked, #1233) and only native ever ran it. The fixture's 20000-round create+sort+drop loop is the balance gate: a missing acquire double-frees and a missing release leaks past page 1, and either traps well before the loop ends."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/sort_by_str_key_heap.almd", class = "fixture" },
+  { path = "crates/almide-mir/src/coown_names.rs", name = "coown_names_documented", class = "by-construction" },
+]
+
+[[contract]]
+id        = "C-277"
+spec      = "ALS-C10"
+title     = "A return-only-generic constructor pinned by unification builds and runs identically on both targets even when const-folding erases the pinning context"
+statement = "A runtime constructor whose type parameter appears in NO argument — `list.with_capacity(n)`, `map.new()`, `set.new()` — that `almide check` ACCEPTED because unification pinned the element from the surrounding context (the other arm of an `if`, a later use) builds and runs identically on native and wasm even when that context is erased before emit (const-folding `if true then list.with_capacity(4) else [1, 2]` deletes the pinning arm) and the consumer is element-agnostic (`list.is_empty`, `map.contains`). The dual of C-058: there the UNDECIDABLE empty collection is a frontend error on both targets; here the DECIDED one must never die at the native build. The native emitter carries the checker's resolved type on the call as a turbofish (`almide_rt_list_with_capacity::<i64>(4)`), because after folding, the call site is the only place the resolution can survive; the wasm leg carries no element type and was never affected. Previously `check` accepted and rustc E0282'd behind the codegen wall (`cannot infer type of the type parameter A`) while wasm built and ran — a build-success asymmetry in the acceptance-gap class (#809, #1416; found by the first both-arch fuzz dispatch, run 31791673611, seed 508666777783, and for map/set by nightly-fuzz seed 1785045556318379299). The family is closed by measurement, not by hand: runtime_ctor_turbofish_family_gate_test.rs recomputes the return-only-generic set from runtime signatures and fails on any member without its emit arm, or any stale arm."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_turbofish_family.almd", class = "fixture" },
+  { path = "tests/runtime_ctor_turbofish_family_gate_test.rs", name = "every_return_only_generic_ctor_has_a_turbofish_arm", class = "by-construction" },
+]
+
+[[contract]]
+id        = "C-278"
+spec      = "ALS-R6"
+title     = "The rope head geometry must fit the row: exceeding aborts identically, the uncovered tail copies through identically"
+statement = "The `matrix.rope_rotate` family relates its head GEOMETRY to the row width by one rule on both targets. EXCEEDS (`n_heads * head_dim > cols`, non-empty matrix): out of domain — abort with `Error: head geometry exceeds row width` + exit 1 on both legs, the same unified-abort family as the head-count domain (C-198). Previously each leg crashed its own way: native a raw slice panic (`index out of bounds: the len is 16 but the index is 16`, exit 101), wasm an OOB memory trap (exit 134) — found by the same-seed re-verification campaign for #1416 (seed 508666777783 index 2120, a mutation of the C-198 fixture; the geometry column was the C-198 audit's unexecuted polarity: every existing fixture used exact geometry). UNDER-COVERS (`n_heads * head_dim < cols`): the columns past the geometry COPY THROUGH — carry the input value — identically; both implementations always documented this and only the self-host did it, native zero-initialized the output row and wrote pairs only, so the tail read 0.0 natively and the input on wasm with both legs exiting 0 (the silent-wrong class; likewise each head's last column under an ODD head_dim). The empty matrix has no row to violate: any geometry is a no-op, never an abort. The guard is the shared `almide_rt_matrix_head_geometry` / `__mx_head_geometry` pair (division form, so a huge head count cannot overflow the product), and `matrix_head_count_domain_test.rs` keeps every rope entry routed through it — the same structural gate that keeps the head-count rule total. `rope_rotate_at`/`rope_rotate_neox_at` share the native guard and copy-through, and since the 2026-08-15 frontier burn-down carry SELF-HOST bodies too — spec/wasm_cross/rope_at_family.almd pins their cells (start_pos 0 == the plain spelling, positive start shifts every row's absolute position, negative start clamps to 0, NeoX pairs (j, j+half) within the head). The same burn-down surfaced and closed an inv_freq divergence: the self-host computed it with the deg-6 fast-exp while native uses `1.0 / libm_pow(theta, e)` — bit-divergent at any non-zero exponent, invisible until head_dim >= 4 because every earlier fixture's only pair had exponent 0. The self-host now computes `1.0 / math.fpow(theta, e)` (the bit-exact vendored-libm pow transcription), and the fixture's dim-4 cells are the pin."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_fail/rope_geometry_exceeds_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_cross/rope_geometry_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/rope_at_family.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-279"
+spec      = "ALS-E19"
+title     = "A zero-trip loop performs none of its body's effects or traps on either target"
+statement = "ALS-E19: a `for` over an empty iterable executes its body zero times, so no call, trap, or abort authored inside the body may be observed — under optimization included. LICM hoisting is licensed only for SPECULATION-SAFE expressions (no effects AND no possibly-trapping ops: indexing, non-literal integer div/mod); 0.57.0's body-inferred purity classified `xs[0]` and `n / d` as pure, hoisted them above a zero-trip loop, and aborted on native (`Error: index out of bounds`, exit 1) while wasm printed `ok: 0` / exit 0 — one source, two behaviors (almide#1424, V1 of the edit-locality hunt, docs/specs/edit-locality.md). The fixture pins both trap classes (a call whose body indexes; a direct non-literal integer division) at `ok: 0` / exit 0 byte-identical on both targets."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/licm_zero_trip_hoist.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-280"
+spec      = "ALS-S3"
+title     = "The kernel-conformance family behaves per the machine-checked λ_almd semantics on both targets"
+statement = "ALS-S3 (statement-position effects, execution order) as pinned by the edit-locality kernel: spec/wasm_cross/kernel_conformance.almd is the almide-surface image of the λ_almd program `kAll` (crates/almide-edit-belt/AlmideEditBelt/Conformance.lean), whose observables — nine stdout lines covering print order, pure ok/err through match, `!` on err reified at the call boundary, `!` on ok under the effect-fn tail lift, and callee effects ordered before the caller continues — are KERNEL-CHECKED theorems (k1_obs..kAll_obs, `:= by rfl` kernel reduction; eval_sound + ev_det make them the unique Ev derivations, kAll_ev; axiom sets pinned by #guard_msgs — the third 0-sorry belt). tests/kernel_conformance_test.rs pins the native stdout to the same nine lines; the wasm_cross harness carries the claim to wasm. Beyond the family, the GENERATED corpus (proofs/kernel-conformance/, 48 typed λ_almd-image programs from Corpus.lean's deterministic generator) extends the claim generator-totally over the fragment with a two-tier standing: totality is kernel-checked (theorem corpus_total — every program evaluates to some observables), while the committed .expected traces are EVALUATOR-PINNED (emitted by the compiled Lean evaluator, the trustCompiler-class seam) and held to Corpus.lean byte-for-byte by the CI conformancegen --check step; tests/kernel_conformance_test.rs runs every program on native and wasm against those traces. The erase/render pair is the one reviewed seam; the tier map is docs/contracts/proven-vs-trusted.md (edit-locality Stage 3; the corpus's first run caught almide#1428 and almide#1429)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/kernel_conformance.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-281"
+spec      = "ALS-E18"
+title     = "Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics"
+statement = "ALS-E18 (match) x the effect-fn tail lift, pinning the two shapes the kernel-conformance corpus caught on its first run: a bare `err(..)` match subject (the checker defaults the unconstrained ok payload to Unit and codegen carries the resolved type as an `Err::<(), String>` turbofish — 0.57.x emitted invalid Rust, E0282, on checker-accepted code, almide#1428) and an effect fn whose tail is the bare parameter (`effect fn ident(x: Int) -> Int = x` — the v1 native renderer's ok-lift retyped the shared param/return ValueId and split the signature from the body, almide#1429; the lift is now a return-type override). Both run the kernel-semantic arms — err arm for the bare err, ok(x) reified at the call boundary for the passthrough, callee effects before the caller's continuation — byte-identical native <-> wasm.The THIRD shape of the same family (almide#1431): an effect fn made can-err by a bare `err(..)` rather than by a `!`, with a SCALAR tail. `effect fn f(..) -> T` returns `Result[T, String]`, so every ok exit must leave the body inside that carrier; the wrap came either from the `!` propagation rewrite (which wraps the tail it threads) or from the shared ABI retype, and the retype wrapped only the Unit tail and the Option family (#1410), leaving the scalar tail to the propagation rewrite — which never runs when nothing propagates. The root was therefore retyped to the carrier while the tail stayed a raw scalar: the callee returned i64 where every consumer read an i32 Result block and the module failed wasm VALIDATION, on code `almide check` accepted and native ran correctly (the acceptance-gap class; reproducible on the released 0.57.0). The retype now wraps every NON-Unit return position, the Unit tail keeping its existing explicit `ok(())` append, and the `!`-triggered cells are pinned alongside so the widened wrap can never double-wrap what propagation already wrapped."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_default_and_passthrough.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_tail_carrier_family.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-282"
+spec      = "ALS-R6"
+title     = "A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead"
+statement = "`matrix.get(m, row, col)` is INDEXING — the matrix analogue of `xs[i]` — so an out-of-range index, NEGATIVE included, is the same unified abort the list index raises: `Error: matrix index out of bounds` on stderr and exit 1, on both targets, for the row against the matrix's row count and for the column against that row's own width. It never invents an element: there is no identity value for `the value at (r, c)`, and handing back 0.0 would be the plausible-but-wrong answer this language exists to avoid. Previously both legs raw-indexed: a too-large index was a Rust slice panic (exit 101) natively against a wasm OOB memory trap (exit 134), and a NEGATIVE index did not fail on the wasm leg at all — `col as usize` wrapped, the load landed outside the row block, and it printed whatever bytes were there with exit 0 (the silent-wrong class). The crash-class half was found by the first scheduled both-arch fuzz night (run 31861833115, seeds 509789329848 index 817 and 509789329844 index 772, both mutations of spec/wasm_cross/rope_at_family.almd); extending the finding across the whole accessor family — as CLAUDE.md requires — is what exposed the silent half. The guard compares as i64 BEFORE any cast, so a negative can never wrap past its own test (the defeated-by-overflow shape of #1408). The FAMILY RULE, and the reason it is not uniform: the two remaining index-taking accessors, `matrix.row_dot` and `matrix.dot_row`, are REDUCTIONS over a row, and a reduction has an identity — they answer 0.0 for an out-of-range or negative row, on both legs, and are pinned that way so this guard work can never silently convert them into aborts. An accessor with no identity aborts; a reduction with one answers it. The column extent is read from the selected row rather than from a matrix-wide width so the rule stays exact for a ragged matrix; no public constructor builds one today (`matrix.from_lists` rejects unequal rows), so that half is exactness by construction rather than a reachable cell."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_fail/matrix_index_oob_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_index_domain_family.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-283"
+spec      = "ALS-R6"
+title     = "A call through a Fn-typed local resolves that local, never a same-named top-level fn"
+statement = "A CALL whose callee is a bare identifier resolves a local binding or function PARAMETER of `Fn` type BEFORE the top-level function table, identically on both targets. This is the rule every other position already applied — value position (`infer_expr_g2_ident`), argument position (`infer_calls_closures`: \"the capability rule must key on what the identifier RESOLVES to, never on its spelling\"), and lowering (`lower/calls_target.rs`: \"a local shadows any same-named fn\") — but the checker\'s callee lookup went to `env.functions` first and consulted `lookup_var` only on a MISS, so the type checker\'s TypeMap and the emitted call could name DIFFERENT functions. Two observable halves followed. (1) A valid program was REJECTED: `fn apply(tag: (String) -> String, x: String) -> String = tag(x)` beside a global `fn tag(n: Int) -> String` failed with `error[E005]: argument \'n\' expects Int but got String` — the parameter call typed against the global. (2) The compile ABORTED for a two-line program that names no list combinator at all: bundled stdlib modules are inferred on the same checker with the user program\'s globals still live (`infer_module` snapshots keys, and `restore_keys` only removes keys added AFTER the snapshot), so a user `effect fn f` captured the `f` PARAMETER of `list.__fallible_flat_map[A, B, E](xs, f: fn(A) -> Result[List[B], E])`; `match f(x) { ok(bs) => .. }` typed `bs` from the USER\'s return type, `bs + rest` became `ConcatStr(String, List[B])`, and the IR verifier aborted (almide#1441). The stdlib\'s own parameter names are not part of a user program\'s namespace, and `f` is one of the names a caller is most likely to pick. The diagnostics that would have named the capture are unreachable by construction: bundled-stdlib module diagnostics are appended to `checker.diagnostics` and never read, so the E004/E006 raised inside the stdlib body never surface — the first sign of trouble was the verifier abort. BOUNDARY, so this contract is not read as promising more than it holds: the rule stated here is about a local whose resolved type is `Fn`. A NON-function local of the same name (`let tag = 5` beside `fn tag(n: Int)`) still resolves the top-level fn at call position, and so does a TOP-LEVEL `let` bound to a closure — both identically on both targets, and both unchanged by this landing. Those are scoping-rule questions, not cross-target divergences; value position already resolves a top-level `let` first, so the call position disagreeing with it is a known asymmetry this contract leaves open."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/callee_shadowing_family.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-284"
+spec      = "ALS-R6"
+title     = "A fallible list HOF driven by a user effect fn callback runs identically on both targets"
+statement = "`xs |> list.map((x) => f(x)!)!` and its `flat_map` sibling — the idiom the language reference recommends — produce the same stdout, stderr and exit code on both targets when the callback calls a USER `effect fn`, including the ADR-0006 first-err short-circuit. A LAMBDA is a target-directed position: its own `Ty::Fn` ret is the authority, and monomorphization already specializes the twin off exactly that type (`list.__fallible_map__Int_Int_String` is named for `(Int) -> Result[Int, String]`). But the v1-only pre-pass that strips the carrier from a NEVER-ERR lifted effect call recurses INTO lambda bodies, and the lambda lifter reads only the BODY — so the tail came out raw `Int` while the enclosing node still said `Result[Int, String]`. The lifted function rendered `(result i64)` where the `call_indirect` inside the monomorphized twin declares `(result i32)`, a Result block pointer. Two observable failures followed on the SAME defect, and the difference between them is only where the reinterpreted value landed: the `map` cells trapped at run time with `wasm trap: indirect call type mismatch`, while `flat_map` did not trap at all — native printed `a1,b,a2,b` and wasm printed four EMPTY strings, both exit 0, the silent-wrong class, on the documented idiom (almide#1406). Native was never affected: the strip is a v1/MIR pre-pass and the codegen leg keeps the carrier uniformly. The re-wrap pass whose stated contract is already `a target position whose declared type is Result must hold a Result block` simply never enumerated `Lambda` among its List/Call/Tuple/Record arms; it does now, and because the callee genuinely never errs, `ok(call)` is exact. WHY THE SUITE DID NOT SEE IT: every prior fixture for the fallible form drives it with a non-effect callee returning Result or with `int.parse` — that cell passes on both legs and is pinned here unchanged — while the effect-fn cell had no coverage at all. The THIRD judge covers this too, and covering it required the same repair: the interpreter's fallible-HOF glue read the callback's applied VALUE and abstained on a bare payload (`__fallible_* callback returned Int`), so the fixture would have entered the interp-abstain ledger — shrinking the executable spec at exactly the shape this contract is about. It now consults the closure's own declared `Ty::Fn` ret, the same authority the MIR side uses, and since the callee cannot err `ok(v)` is exact rather than a guessed polarity. All three legs agree on every cell. There is still NO emit-time signature-agreement check between an `elem` entry and a `call_indirect` type; this contract is the executable evidence in its place, not a proof that the class is closed."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-285"
+spec      = "ALS-D4"
+title     = "regex.captures answers the whole match at index 0, and `none` means only that nothing matched"
+statement = "`regex.captures(pat, s)` answers `some([whole, group1, group2, ...])` — index 0 is the WHOLE match, 1.. are the capture groups in lexical order, and an optional group that did not participate is the empty string — identically on both targets. `none` means exactly one thing: the pattern did not match anywhere in `s`. Two changes from 0.57.x, both toward the shape every mainstream regex API uses (Rust `Captures::get(0)`, Python `m.group(0)`, JS `match[0]`, PCRE) and the one `docs/stdlib/regex.md` had documented since it was written. (1) The whole match was MISSING: both engines returned groups only, so a caller carrying the universal habit read `caps[1]` as the first group and silently got the SECOND — a wrong value, not an error, which is the class this language exists to remove. It was found dogfooding, not by a test: every fixture had been written against the implementation rather than the documented example (almide#1432). (2) A pattern with NO groups returned `none` even when it MATCHED, conflating `matched, nothing to capture` with `did not match`; with a whole match at index 0 that case has a real answer, `some([whole])`, so `none` is now unambiguous. The engines reach it differently and both were changed: native takes the `(start, end)` `rx_find_at` already computed and discarded, while the self-host scan now returns the matching START — the end alone cannot name the whole match — and the caller re-runs the matcher there so the capture buffer it reads belongs to the winning attempt rather than the last position probed."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-286"
+spec      = "ALS-E9"
+title     = "`??` reads its source; the Option survives the elimination and stays readable"
+statement = "`xs ?? default` READS the Option it eliminates. The source is not consumed, so the same binding may be eliminated any number of times, and remains readable afterwards by any other spelling (`match`, a further `??`), with identical results on both targets. It used to be consumed on the wasm leg for every HEAP payload. A heap `??` lowers to a synthesized `match e { some(p) => p, none => d }` (#1270), and `try_lower_variant_value_match` dropped its subject; the ownership test was membership in `live_heap_handles`, whose own documentation calls it `heap handles in binding order, FOR SCOPE-END DROPS` — so every `let`-bound heap local is in it, and a still-live user variable was read as an owned temporary. The first `??` therefore FREED the binding while later readers still needed it. The payload arm was never the problem: it already emitted `Op::Dup`. Only one leg lost the value, which is why it went unseen: the native renderer emits `Drop`/`DropListStr` as a COMMENT and leaves the free to Rust's own scope end, while the wasm renderer emits `rc_dec` and the free is real — so both legs exited 0 and printed different answers. Measured across the family: `String?` gave `abc,z` against `abc,abc`, `List[Int]?` gave `3,0` against `3,3`, `Option[Option[Int]]` gave `5,9,9` against `5,5,5`, and a `match` reading the source after one `??` saw the payload already freed. This is `xs ?? default` — the fallback idiom docs/CHEATSHEET.md recommends — so the blast radius was every heap Option in the language, not a corner. Found by the differential fuzz (seed 510754018596 index 189, a mutation of spec/wasm_cross/option_result_ctors.almd) in its nested-Option cell only; the fixture pins the whole family because the defect lived in the match's subject handling and never cared which payload type it carried. A HAND-WRITTEN two-arm `match` over the same binding was always correct — that asymmetry is what localized the defect to the synthesized rewrite rather than to matching, and it is pinned here as a counter-cell. The scope-end pass still drops the binding exactly once: a subject left alone stays in `live_heap_handles`, so the single-use shape neither double-frees nor leaks, and that cell is pinned too."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_or_source_survives.almd", class = "fixture" },
 ]

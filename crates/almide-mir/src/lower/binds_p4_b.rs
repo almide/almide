@@ -182,8 +182,7 @@ impl LowerCtx {
             _ => self.lower_owned_heap_field(expr)?,
         };
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles
-            .insert(obj, "opt_str_str".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_str".to_string());
         Some(obj)
     }
 
@@ -208,8 +207,7 @@ impl LowerCtx {
             _ => self.lower_owned_heap_field(expr)?,
         };
         let obj = self.materialize_opt_str_some(piece, repr);
-        self.variant_drop_handles
-            .insert(obj, "opt_str_int".to_string());
+        self.value_drops.entry(obj).or_default().named_route = Some("opt_str_int".to_string());
         Some(obj)
     }
 
@@ -535,7 +533,7 @@ impl LowerCtx {
                     repr,
                     init: Init::OptSome { payload },
                 });
-                self.materialized_options.insert(dst);
+                self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
                 Some(dst)
             }
             IrExprKind::OptionNone => {
@@ -548,7 +546,7 @@ impl LowerCtx {
                     repr,
                     init: Init::OptNone,
                 });
-                self.materialized_options.insert(dst);
+                self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
                 // A HEAP-payload Option (`let x: Option[Msg] = none`) ALSO registers the
                 // nested-ownership class so a downstream match ADMITS its Some-arm payload
                 // bind (heap_or_scalar_bind gates on it); DropListStr over len 0 frees only
@@ -557,7 +555,7 @@ impl LowerCtx {
                     ty
                 {
                     if a.len() == 1 && is_heap_ty(&a[0]) {
-                        self.heap_elem_lists.insert(dst);
+                        self.value_drops.entry(dst).or_default().flat_elems = true;
                     }
                 }
                 Some(dst)

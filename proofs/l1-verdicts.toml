@@ -1,0 +1,90 @@
+# =============================================================
+# L1 VERDICT LEDGER — the edit-locality prediction loop (Stage 4)
+# =============================================================
+# The theory (docs/specs/edit-locality.md, crates/almide-edit-belt) makes a
+# falsifiable claim: language changes that strengthen the L1 edit-frame
+# invariant raise MSR, changes that weaken it lower MSR. This ledger is the
+# experiment's lab book. Every semantics-touching change records, at landing:
+#
+#   verdict         preserved | side-condition | violated
+#                   ("violated" may only appear on REJECTED proposals — a
+#                   violated change must not land; recording the rejection
+#                   is the gate doing its job)
+#   msr_prediction  up | neutral | down — the theory's claim, committed
+#                   BEFORE any measurement
+#   msr_measured    pending | confirmed | refuted | inconclusive — filled by
+#                   the join tool in almide-dojo (src/l1_loop.almd) once
+#                   Dojo's daily runs cross the landing date. A refuted
+#                   prediction is a FINDING about the theory: it stays in
+#                   the ledger, never erased or reworded.
+#
+# Schema (flat TOML, one scalar per line — awk/almide-parseable like the
+# contract ledger):
+#   [[verdict]]
+#   id              ^LV-[0-9]{3}$, unique, monotonic
+#   change          one line, what landed
+#   landed          YYYY-MM-DD (develop merge date)
+#   refs            issues / contracts / commits
+#   verdict         see above
+#   mechanism       one line: WHY the verdict holds
+#   msr_prediction  up | neutral | down
+#   prediction_basis one line: the causal path the theory claims
+#   msr_measured    see above
+#
+# History starts at the edit-locality arc (2026-08-15); earlier changes are
+# not backfilled — retroactive predictions are not predictions.
+
+[[verdict]]
+id         = "LV-001"
+change     = "LICM restricted to speculation-safe expressions (no trapping ops hoisted)"
+landed     = "2026-08-15"
+refs       = ["almide#1424", "C-279"]
+verdict    = "preserved"
+mechanism  = "Removes the one optimization path where a body edit flipping inferred purity created a new observable on executions that never enter the edited fn — the frame violation the hunt caught live."
+msr_prediction = "up"
+prediction_basis = "An LLM edit can no longer detonate a distant zero-trip loop; silent cross-target miscompiles also corrupt MSR scoring itself, so removing the class cleans both the metric and the survival rate."
+msr_measured = "pending"
+
+[[verdict]]
+id         = "LV-002"
+change     = "Local fn colliding with a selective import is hard error E050"
+landed     = "2026-08-15"
+refs       = ["almide#1425"]
+verdict    = "preserved"
+mechanism  = "One bare name now has exactly one resolution; adding a definition can never silently re-target an existing call (the checker/lowering split is unreachable)."
+msr_prediction = "up"
+prediction_basis = "The failure mode moves from silently-executing-the-wrong-function (survives compile, fails tests mysteriously) to a named check-time error with a spelled fix — the repairable band of the MSR loop."
+msr_measured = "pending"
+
+[[verdict]]
+id         = "LV-003"
+change     = "Constructor resolution owner-scoped; same-module duplicate case names are E019 at registration"
+landed     = "2026-08-15"
+refs       = ["almide#1426"]
+verdict    = "preserved"
+mechanism  = "Adding a variant elsewhere can never re-bind an existing constructor reference; qualified access never consults other modules' constructors."
+msr_prediction = "up"
+prediction_basis = "Same class as LV-002: registration-order-dependent silent rebinds become impossible, so an LLM adding a type cannot break unrelated match arms."
+msr_measured = "pending"
+
+[[verdict]]
+id         = "LV-004"
+change     = "Err constructor emission carries the checker-resolved Result type (turbofish)"
+landed     = "2026-08-15"
+refs       = ["almide#1428", "C-281"]
+verdict    = "preserved"
+mechanism  = "No observable change on previously-working programs; a checker-ACCEPTED shape (bare err match subject) that died in codegen with a compiler-blaming rustc error now runs per the kernel semantics."
+msr_prediction = "up"
+prediction_basis = "An LLM writing the natural `match err(..)` shape stopped losing the attempt to an unactionable E0282 banner — accepted-means-runs is the diagnostic-locality half of the loop."
+msr_measured = "pending"
+
+[[verdict]]
+id         = "LV-005"
+change     = "v1 native ok-lift carried as a return-type override, not a ret-value retype"
+landed     = "2026-08-15"
+refs       = ["almide#1429", "C-281"]
+verdict    = "preserved"
+mechanism  = "The parameter-passthrough effect tail no longer splits the rendered signature from its body; the lift no longer mutates a ValueId shared with a parameter."
+msr_prediction = "up"
+prediction_basis = "The identity-shaped effect fn is an LLM-common refactoring intermediate; it compiled on the codegen path and failed on the run path, which reads as nondeterminism to a repair loop."
+msr_measured = "pending"

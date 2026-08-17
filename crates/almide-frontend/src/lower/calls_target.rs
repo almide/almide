@@ -130,10 +130,11 @@ fn lower_call_target_module_call(ctx: &mut LowerCtx, object: &ast::Expr, field: 
             || ctx.env.user_modules.contains(module)
             || ctx.env.import_table.aliases.contains_key(module))
         {
-            // Cross-module variant constructor call: binary.ImportFunc(0)
-            if let Some((type_name, _)) = ctx.env.lookup_ctor(field) {
-                let resolved = ctx.env.import_table.aliases.get(module).copied()
-                    .unwrap_or(*module);
+            // Cross-module variant constructor call: binary.ImportFunc(0).
+            // Owner-filtered (#1426), mirroring the checker exactly.
+            let resolved = ctx.env.import_table.aliases.get(module).copied()
+                .unwrap_or(*module);
+            if let Some((type_name, _)) = ctx.env.lookup_ctor_owned(field, resolved.as_str()) {
                 let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
                 if ctx.env.types.contains_key(&sym(&qualified)) {
                     return Some(CallTarget::Named { name: *field });
@@ -334,13 +335,17 @@ fn lower_call_target_cross_module_ufcs(ctx: &mut LowerCtx, object: &ast::Expr, f
         // the suffix scan only matched historical bare names).
         let defining_module = match type_name.as_str().rsplit_once('.') {
             Some((m, _)) => Some(m.to_string()),
-            None => ctx.env.types.keys()
-                .find(|k| {
-                    let s = k.as_str();
-                    s.ends_with(&format!(".{}", type_name.as_str()))
-                        && s.len() > type_name.as_str().len() + 1
-                })
-                .map(|k| k.as_str()[..k.as_str().len() - type_name.as_str().len() - 1].to_string()),
+            None => {
+                // Hoisted out of the `find` closure — the old code rebuilt
+                // the `.<type>` needle for every key in `env.types`.
+                let needle = format!(".{}", type_name.as_str());
+                ctx.env.types.keys()
+                    .find(|k| {
+                        let s = k.as_str();
+                        s.ends_with(&needle) && s.len() > type_name.as_str().len() + 1
+                    })
+                    .map(|k| k.as_str()[..k.as_str().len() - type_name.as_str().len() - 1].to_string())
+            }
         };
         if let Some(module) = defining_module {
             let key = format!("{}.{}", module, field);

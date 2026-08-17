@@ -1,32 +1,31 @@
 name: CI
 
-# Path filtering uses `paths` with ordered negations (last match wins), NOT
-# `paths-ignore`: the blanket docs/** ignore let a PR touching ONLY the
-# contract ledger (docs/contracts/contracts.toml), the ALS normative specs, or
-# the semantics manifest skip this workflow entirely — i.e. skip exactly the
-# gates that exist to check those files (#982). The re-includes below keep the
-# gate inputs in scope while ordinary docs/markdown stay ignored.
+# NO path filtering. This workflow owns all 13 REQUIRED status checks, and a
+# required check that never reports is not a skipped check — it is a PR that
+# can never merge. A docs-only PR sat BLOCKED at 0 of 13 reported until this
+# was removed.
+#
+# What it replaces: an ordered-negation list (`'**'`, then `'!docs/**'`,
+# `'!*.md'`, `'!LICENSE'`, then re-includes for the contract ledger, the ALS
+# normative specs and the semantics manifest). It cost correctness twice, both
+# times for the same reason — it decided which gates to run by GUESSING which
+# files matter:
+#   1. #982: a PR touching ONLY docs/contracts/contracts.toml skipped this
+#      workflow, i.e. skipped exactly the gate that exists to check that file.
+#      The repair was a re-include, added one path at a time, forever.
+#   2. The negations made a whole CLASS of PR unmergeable. The obvious repair —
+#      a companion workflow re-declaring the same job names on the inverse
+#      filter — is worse than the disease: a PR touching both docs and code
+#      matches BOTH filters, so a no-op run and a real run report the same
+#      check name, and a fake green can mask a real red.
+#
+# Running the suite on a README edit costs runner minutes. Getting the guess
+# wrong costs a gate. The trade is not close.
 on:
   push:
     branches: [main, develop]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!*.md'
-      - '!LICENSE'
-      - 'docs/contracts/**'
-      - 'docs/stdlib/semantics-manifest.toml'
-      - 'docs/specs/als/**'
   pull_request:
     branches: [main, develop]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!*.md'
-      - '!LICENSE'
-      - 'docs/contracts/**'
-      - 'docs/stdlib/semantics-manifest.toml'
-      - 'docs/specs/als/**'
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -73,6 +72,13 @@ jobs:
           restore-keys: linux-cargo-${{ env.RUST_TOOLCHAIN }}-
 
       - run: cargo build --release
+
+      # Wired to `build`, not `checks`: the ratchet compiles the workspace, and
+      # `checks` downloads a prebuilt binary with no cargo toolchain. Runs after
+      # the release build so the warning set is measured against the same
+      # compilation the artifact came from (#1379 / #1228).
+      - name: Rustc warning ratchet (a noisy build hides the one warning that matters)
+        run: bash scripts/check-rustc-warnings.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -562,8 +568,29 @@ jobs:
         with:
           node-version: 20
 
+      - name: Cache wasm-pack tarball
+        uses: actions/cache@v6
+        with:
+          path: wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz
+          key: wasm-pack-v0.13.1-x86_64-linux
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        # Pinned + cached + retried (the wasmtime pattern, #1255). The old form
+        # was an unpinned installer script fetched WITHOUT `curl -f` and piped
+        # into `sh` — a rate-limit body would have been EXECUTED, and the flake
+        # class cost a manual rerun on PR #1254. On a cache hit this never
+        # downloads at all; `-f` turns a 429 body into a retry.
+        run: |
+          VERSION=v0.13.1
+          TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xzf "$TARBALL"
+          sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
+          wasm-pack --version
 
       - uses: actions/cache@v6
         with:
@@ -625,8 +652,29 @@ jobs:
         with:
           node-version: 20
 
+      - name: Cache wasm-pack tarball
+        uses: actions/cache@v6
+        with:
+          path: wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz
+          key: wasm-pack-v0.13.1-x86_64-linux
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        # Pinned + cached + retried (the wasmtime pattern, #1255). The old form
+        # was an unpinned installer script fetched WITHOUT `curl -f` and piped
+        # into `sh` — a rate-limit body would have been EXECUTED, and the flake
+        # class cost a manual rerun on PR #1254. On a cache hit this never
+        # downloads at all; `-f` turns a 429 body into a retry.
+        run: |
+          VERSION=v0.13.1
+          TARBALL="wasm-pack-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/rustwasm/wasm-pack/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasm-pack download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xzf "$TARBALL"
+          sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
+          wasm-pack --version
 
       - uses: actions/cache@v6
         with:
@@ -691,17 +739,38 @@ jobs:
           if grep -rn '\bsorry\b' \
               crates/almide-perceus-belt/AlmidePerceusBelt/ \
               crates/almide-race-belt/AlmideRaceBelt/ \
+              crates/almide-edit-belt/AlmideEditBelt/ \
               --include='*.lean'; then
             echo "::error::sorry found in Lean proofs — all theorems must be fully proven"
             exit 1
           fi
           echo "✓ 0 sorry in Lean proofs"
 
+      # Axiom ratchet: every `axiom` in the belts must be on this allowlist.
+      # The only sanctioned one is the trustEvalCompleteness MARKER (: True,
+      # can prove nothing) that makes the evaluator-completeness assumption
+      # enumerable (lean4 trustCompiler pattern). A new axiom = a new trusted
+      # assumption = it must be argued onto this list in its own PR.
+      - name: Axiom ratchet
+        run: |
+          found=$(grep -rnE '^\s*axiom\s+\w+\s*:' \
+              crates/almide-perceus-belt/AlmidePerceusBelt/ \
+              crates/almide-race-belt/AlmideRaceBelt/ \
+              crates/almide-edit-belt/AlmideEditBelt/ \
+              --include='*.lean' || true)
+          unexpected=$(echo "$found" | grep -v 'axiom trustEvalCompleteness : True' | grep -v '^$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "$unexpected"
+            echo "::error::unlisted axiom in Lean proofs — trusted assumptions must be added to the CI allowlist deliberately"
+            exit 1
+          fi
+          echo "✓ axiom audit: only the sanctioned marker axiom present"
+
       - name: Cache elan + Lean toolchain
         uses: actions/cache@v6
         with:
           path: ~/.elan
-          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain') }}
+          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain', 'crates/almide-edit-belt/lean-toolchain') }}
 
       - name: Install elan (retry-resilient)
         # lean-action's internal elan-init has no retry, so a transient GitHub 504
@@ -737,6 +806,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           lake-package-directory: crates/almide-race-belt
+
+      - name: Kernel-check edit-belt proofs (lake build)
+        uses: leanprover/lean-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          lake-package-directory: crates/almide-edit-belt
+
+      - name: Kernel-conformance corpus is in sync with its generator
+        # The committed corpus (proofs/kernel-conformance) is a pure function
+        # of Corpus.lean; editing one without the other is the only way this
+        # can fail. Regenerate with `lake exe conformancegen --write`.
+        run: |
+          cd crates/almide-edit-belt
+          lake exe conformancegen --check ../../proofs/kernel-conformance
+
+      - name: Drift gate fires on corruption (negative controls)
+        # Proof the gate above can actually reject: corrupted/deleted corpus
+        # copies must FAIL --check. A gate only ever seen green is
+        # indistinguishable from `exit 0`.
+        run: bash scripts/check-conformance-negative.sh
 
   # ═══════════════════════════════════════════════
   # Checks
@@ -778,6 +869,9 @@ jobs:
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
 
+      - name: Workflow files parse strictly (a schedule-only workflow that cannot parse fails silently, #1234)
+        run: bash scripts/check-workflows.sh
+
       - name: rt-oracle registry (RETIRED with v0, #782 — prints the tombstone; v1 is gated by spec/wasm_cross + the interp oracle)
         # The step name previously claimed "every compile_* registered +
         # verified tests exist" while the script short-circuits on the deleted
@@ -788,6 +882,41 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      - name: Allocation ceilings (one 2 GiB limit, every spelling agrees)
+        run: bash scripts/check-alloc-ceilings.sh
+
+      - name: L1 verdict ledger (edit-locality prediction loop — schema and vocabularies)
+        run: bash scripts/check-l1-verdicts.sh
+
+      - name: L1 verdict ledger gate fires on malformed input (negative controls)
+        run: bash scripts/check-l1-verdicts-negative.sh
+
+      - name: Release evidence seals (every seal re-measured against its tag — the audit freeze)
+        run: bash scripts/release-seal.sh check
+
+      - name: Retired spellings stay retired (every retirement executed, not asserted)
+        # Compiles a probe per ledger row against the built binary, so the
+        # gate needs it on ALMIDE_BIN like the other compiler-driven checks.
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-retired-spellings.sh
+
+      - name: Retired-spelling gate fires on forged ledgers (negative controls)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-retired-spellings-negative.sh
+
+      - name: Dialect epoch ledger (@dialect(N) means one thing, and the compiler agrees)
+        run: bash scripts/check-dialect-epochs.sh
+
+      - name: Dialect epoch gate fires on forged ledgers and constants (negative controls)
+        run: bash scripts/check-dialect-epochs-negative.sh
+
+      - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
+        run: bash scripts/check-gate-verification.sh
+
+      - name: TOR references (every operational requirement keeps its enforcing instrument)
+        run: bash scripts/check-tor-refs.sh
+
+      - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
+        run: bash scripts/check-als-element-coverage.sh
+
       - name: Scalar-read audit (every raw-load arm classified, zero unguarded — the #1183 class stays extinct)
         run: scripts/check-scalar-read-audit.sh
 
@@ -796,6 +925,9 @@ jobs:
 
       - name: libm determinism (every platform-libm call classified; a reachable undeclared one is the #1197 class)
         run: scripts/check-libm-determinism.sh
+
+      - name: Keyed-container lookup-cost matrix (#1219 — every map/set repr rowed indexed or linear)
+        run: bash scripts/check-keyed-container-index.sh
 
       - name: Embedded payload size ratchet (#878 — the stdlib every embedder downloads)
         run: scripts/check-embedded-size.sh
@@ -811,6 +943,25 @@ jobs:
           bash docs/contracts/generate-readme.sh > docs/contracts/README.md
           git diff --exit-code -- docs/contracts/README.md \
             || { echo "::error::docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"; exit 1; }
+
+      # The three gates below were written but never wired to a job. A gate that
+      # has never run is indistinguishable from one that does not exist, so they
+      # are attached here rather than left as scripts someone remembers to call.
+      # Two things this step must supply that the others in this job do not:
+      # `lark` (the gate's own parser — without it the script exits 1 with an
+      # install hint rather than a verdict), and the binary under the name THIS
+      # gate reads. It resolves `ALMIDE`, not the `ALMIDE_BIN` the rest of the
+      # job passes, and `checks` never builds — it downloads the artifact — so
+      # the default `target/release/almide` probe finds nothing.
+      - name: Grammar stays in sync with the parser (#1365)
+        env:
+          ALMIDE: /tmp/almide-bin/almide
+        run: |
+          python3 -m pip install --quiet lark
+          bash scripts/check-lark-grammar.sh
+
+      - name: Layout discipline for new long-lived structures (#1387 / #1316)
+        run: bash scripts/check-layout-discipline.sh
 
   perf-ratchet:
     name: Perf ratchet (native/Rust ratio, #917)
@@ -835,6 +986,12 @@ jobs:
 
       - name: Native runtime ratio vs handwritten Rust
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
+
+      # Edit-loop cost lives here rather than in `checks`: it needs the same
+      # built binary and the same "measure, don't guess" runner as the ratio
+      # above, and both are the perf tier (#1383 scale, #1396 per-phase).
+      - name: Edit-loop cost stays scale-independent (#1383 / #1396)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-edit-loop-scale.sh
 
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)

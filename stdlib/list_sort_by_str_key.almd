@@ -66,3 +66,30 @@ fn list_sort_by_str_key(xs: List[Int], f: fn(Int) -> String) -> List[Int] = {
   let _b = __sbs_insert(prim.handle(buf), prim.handle(keys), n, 0)
   buf
 }
+
+// HEAP-element variant of the String-key sort (`sort_by(xs, (r) => r.name)` over a
+// List[String]/List[List[…]]/List[R]): the SAME cached-key stable insertion sort,
+// but each element handle copied into the result is ACQUIRED (rc_inc) — the result
+// list CO-OWNS every element, so both lists' recursive drops are balanced. The
+// raw-copy `__sbs_init` above shares without acquiring, and the two deep drops
+// double-free (rc_dec trap in the caller's epilogue). Mirrors list_sort_by_rc /
+// list_sort_by_float_rc; the shuffle + insert phase is shared verbatim (moving raw
+// handles WITHIN the buffer is not an ownership event).
+fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: fn(Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let v = prim.load64(sh + 12 + i * 8)
+  let k = f(v)
+  prim.rc_inc(v)
+  prim.store64(bh + 12 + i * 8, v)
+  prim.store_str(kh + 12 + i * 8, k)
+  __sbsr_init(bh, sh, kh, f, n, i + 1)
+}
+
+fn list_sort_by_str_key_rc(xs: List[Int], f: fn(Int) -> String) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let keys: List[String] = prim.alloc_list_str(n)
+  let _a = __sbsr_init(prim.handle(buf), prim.handle(xs), prim.handle(keys), f, n, 0)
+  let _b = __sbs_insert(prim.handle(buf), prim.handle(keys), n, 0)
+  buf
+}

@@ -33,7 +33,7 @@ fn effect_isolation_pure_can_call_pure() {
 #[test]
 fn effect_isolation_fan_in_pure_fn() {
     let errs = errors(
-        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\nfn f() -> (Int, Int) = fan { a(); b() }"
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\nfn f() -> (Int, Int) = fan { a(), b() }"
     );
     assert!(!errs.is_empty(), "fan in pure fn should error");
     assert!(errs[0].contains("fan") || errs[0].contains("effect"), "error should mention fan or effect, got: {}", errs[0]);
@@ -42,14 +42,14 @@ fn effect_isolation_fan_in_pure_fn() {
 #[test]
 fn effect_isolation_fan_in_effect_fn() {
     has_no_errors(
-        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\neffect fn f() -> Result[Unit, String] = {\n  let _ = fan { a(); b() }\n  ok(())\n}"
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\neffect fn f() -> Result[Unit, String] = {\n  let _ = fan { a(), b() }\n  ok(())\n}"
     );
 }
 
 #[test]
 fn effect_isolation_fan_var_capture_rejected() {
     let errs = errors(
-        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(); a() }\n  ok(())\n}"
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(), a() }\n  ok(())\n}"
     );
     // No error — var x is not captured inside fan
     assert!(errs.is_empty(), "var not captured should be fine, got: {:?}", errs);
@@ -58,7 +58,7 @@ fn effect_isolation_fan_var_capture_rejected() {
 #[test]
 fn effect_isolation_fan_var_capture_error() {
     let errs = errors(
-        "effect fn a(n: Int) -> Result[Int, String] = ok(n)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(x); a(x) }\n  ok(())\n}"
+        "effect fn a(n: Int) -> Result[Int, String] = ok(n)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(x), a(x) }\n  ok(())\n}"
     );
     assert!(!errs.is_empty(), "capturing var in fan should error");
     assert!(errs[0].contains("mutable") || errs[0].contains("var"), "error should mention mutable/var, got: {}", errs[0]);

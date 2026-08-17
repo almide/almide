@@ -55,6 +55,73 @@ every build.
 The per-class regression pins for all five are in
 [`proofs/TRUSTED_BASE.md`](../../proofs/TRUSTED_BASE.md#the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins).
 
+## The edit-locality kernel seam (Stage 3)
+
+The λ_almd kernel (`crates/almide-edit-belt`, the third 0-sorry Lean belt)
+gives the language a machine-checked reference semantics for its core:
+`ev_agree`/`edit_frame`/`ev_det` (L1 with determinism), `typing_modular`,
+`pure_silent`, and `eval_sound` (the executable evaluator agrees with the
+relation). The bridge to the shipping compiler runs through three layers
+with different standings:
+
+- **kernel-checked (proven)** — the hand-written family's observables:
+  `k1_obs`…`kAll_obs` and `corpus_total` are theorems proved `:= by rfl`,
+  i.e. by Lean KERNEL reduction, and their axiom sets are pinned with
+  `#guard_msgs in #print axioms` (`propext` only). `eval_sound` +
+  `ev_det` lift each pinned `evalE` output to THE derivation of `Ev`
+  (`kAll_ev`). For the generated corpus, what is kernel-checked is
+  TOTALITY — every one of the 48 programs evaluates to `some`
+  observables (`corpus_total`).
+- **evaluator-pinned (trusted)** — the VALUES in
+  `proofs/kernel-conformance/*.expected`: they are emitted by the
+  COMPILED Lean evaluator (`lake exe conformancegen --write`), so
+  trusting them means trusting the Lean compiler — the exact seam lean4
+  itself names with its `trustCompiler` axiom. The unproven completeness
+  direction of `evalE` is likewise an enumerable object, not a doc
+  comment: `EvalCompleteness` states it, the marker axiom
+  `trustEvalCompleteness` (kept at `True`) tags any argument that needs
+  it, and the CI axiom ratchet enumerates every `axiom` in the belts.
+- **trusted (reviewed seam)** — the `eraseE`/`eraseChain` + `render*` pair
+  in `Corpus.lean`: two ~40-line functions walking the same surface
+  grammar, one producing the λ_almd term the evaluator scores, one the
+  almide text the compiler eats. Reviewing that they agree
+  constructor-by-constructor IS the trust obligation — reviewed once, not
+  per program. (The hand-written family adds the same seam by hand:
+  `spec/wasm_cross/kernel_conformance.almd` ↔ `kAll`, Rust literal ↔ Lean
+  literal.)
+- **gated** — that both backends produce those observables:
+  `tests/kernel_conformance_test.rs` runs the whole corpus on native and
+  (with a wasm runtime present) on wasm; the `wasm_cross` harness carries
+  the family; the `conformancegen --check` CI step pins the committed
+  corpus to `Corpus.lean` byte-for-byte. All under contract C-280.
+
+Lean's own three-tier vocabulary, which the classification above adopts
+(the correction came from reading lean4's source — Survey 4):
+
+| Lean idiom | Trust level | Why |
+|---|---|---|
+| `decide` / `:= by rfl` | kernel proof | the kernel re-reduces the term itself |
+| `#guard` | untrusted pin, **not a proof** | runs the untrusted elaborator evaluator (lean4 `src/Init/Guard.lean`) |
+| `native_decide` | compiled-evaluator proof **modulo a named axiom** | materializes `Lean.ofReduceBool`/`trustCompiler` so `#print axioms` shows the seam |
+
+The belts use tier 1 for every conformance claim; the `.expected` files
+sit at tier 3's trust level (compiled evaluation) with the seam recorded
+here instead of in an axiom, because the consumer is a shell gate, not a
+Lean proof.
+
+"Backends are refinements of the kernel" is therefore enforced over the
+GENERATED λ_almd-expressible fragment — machine-computed programs,
+machine-proven expected values, machine-diffed backends — with one
+reviewed ~80-line seam. What remains out of reach without rewriting the
+compiler in a prover: a verified surface-core→λ_almd translation and
+per-pass simulation proofs over the Rust implementation itself. Those are
+recorded as the research-grade residual in
+`docs/roadmap/active/edit-locality-theory.md`, and the fragment gate is
+the ratchet that holds until then. Day one of running it, the corpus
+caught two real compiler bugs (almide#1428: checker-accepted program dies
+in codegen; almide#1429: the v1 renderer splits an effect fn's signature
+from its body on a bare-parameter tail) — the gate bites.
+
 ## What each gate actually claims
 
 | Gate | Claim | NOT a claim |
@@ -64,5 +131,6 @@ The per-class regression pins for all five are in
 | `proofs/output-parity.sh` | native and wasm agree, for the baseline set | anything outside that set |
 | `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |
 | the cross-target fuzz | no divergence found in N programs | no divergence exists |
+| the kernel-conformance pin (C-280) | the compiled family's observables equal the kernel-checked λ_almd trace, on both targets; the generated corpus matches the compiled evaluator's traces | that every almide program refines the kernel — only the fragment's image is pinned; corpus `.expected` values are evaluator-pinned (compiled Lean), not kernel-checked |
 
 Reproduce all of it: `make verify-trust`.

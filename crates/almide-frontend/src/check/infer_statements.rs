@@ -372,7 +372,7 @@ impl Checker {
             ast::Pattern::Err { inner } => self.bind_pattern_err(inner, ty),
             ast::Pattern::None => {
                 let resolved = resolve_ty(ty, &self.uf);
-                self.reject_ctor_pattern_on_scalar("none", "an Option", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::None, &resolved);
             }
             ast::Pattern::Literal { .. } => {}
         }
@@ -413,9 +413,36 @@ impl Checker {
             }
             _ => vec![],
         };
+        self.reject_foreign_ctor_case(name, bare_name, &resolved);
         for (i, arg) in args.iter().enumerate() {
             self.bind_pattern(arg, payload_tys.get(i).unwrap_or(&Ty::Unknown));
         }
+    }
+
+    /// A user-CONSTRUCTOR pattern whose case the subject does not have (#1341's
+    /// sibling cell): `match shape { Red(r) => .. }` where `Red` belongs to a
+    /// DIFFERENT variant, or a user ctor aimed at a builtin carrier. Both bound
+    /// their payloads `Ty::Unknown` via the `unwrap_or_default()` above and
+    /// reached codegen, which emitted INVALID RUST on native ("codegen produced
+    /// invalid Rust — this is an Almide bug") and walled on wasm.
+    ///
+    /// Only STRUCTURALLY KNOWN subjects are claimed. A `Ty::Named` that is not a
+    /// resolved variant may still be an opaque alias whose destructure is legal
+    /// (handled above), and a `TypeVar` is inference in progress — both stay
+    /// silent so error recovery is unaffected.
+    fn reject_foreign_ctor_case(&mut self, name: &Sym, bare_name: Sym, resolved: &Ty) {
+        let Some(cases) = foreign_ctor_case_list(bare_name, resolved) else { return };
+        self.emit(
+            super::err(
+                format!(
+                    "pattern `{}(..)` is not a case of `{}`",
+                    name, resolved.display()
+                ),
+                format!("the subject's cases are: {}.", cases.join(" / ")),
+                "match pattern".to_string(),
+            )
+            .with_code("E048"),
+        );
     }
 
     /// `ast::Pattern::RecordPattern` arm of [`Self::bind_pattern`]. Verbatim text move.
@@ -500,11 +527,55 @@ impl Checker {
                 inner_v
             }
             _ => {
-                self.reject_ctor_pattern_on_scalar("some(..)", "an Option", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::Some, &resolved);
                 Ty::Unknown
             }
         };
         self.bind_pattern(inner, &it);
+    }
+
+    /// The single entry point for "this constructor pattern cannot destructure
+    /// this subject". Three distinct slips reach it, so it routes to the one
+    /// that applies and stays silent otherwise (an unresolved subject is
+    /// ordinary error recovery, not a second error to pile on).
+    fn reject_ctor_pattern_mismatch(&mut self, ctor: CtorPat, resolved: &Ty) {
+        if let Some(fix) = ctor.cross_family_fix(resolved) {
+            self.emit(cross_family_pattern_diag(ctor, fix, resolved));
+            return;
+        }
+        if self.reject_ctor_pattern_on_user_variant(ctor, resolved) {
+            return;
+        }
+        self.reject_ctor_pattern_on_scalar(ctor.spelling(), ctor.wants(), resolved);
+    }
+
+    /// A builtin carrier pattern (`some`/`none`/`ok`/`err`) over a USER variant.
+    /// A `Ty::Variant` is never an Option or a Result, so this is always wrong —
+    /// and it used to bind `Ty::Unknown` and reach the same compiler-blaming
+    /// banner #1341 reported. The subject's own case names are the actionable
+    /// part, so the hint lists them. Returns whether it fired: a `Named` type
+    /// that does NOT resolve to a variant may still be an alias for a carrier,
+    /// so only the structurally-resolved variant is claimed here.
+    fn reject_ctor_pattern_on_user_variant(&mut self, ctor: CtorPat, resolved: &Ty) -> bool {
+        let named = self.env.resolve_named(resolved);
+        let Ty::Variant { cases, .. } = &named else { return false };
+        let spellings: Vec<String> = cases.iter().map(|c| c.name.to_string()).collect();
+        self.emit(
+            super::err(
+                format!(
+                    "pattern `{}` destructures {}, but the subject is the variant `{}`",
+                    ctor.spelling(), ctor.wants(), resolved.display()
+                ),
+                format!(
+                    "match a user variant with its OWN cases: {}. `some`/`none` and \
+                     `ok`/`err` destructure only the builtin Option and Result.",
+                    spellings.join(" / ")
+                ),
+                "match pattern".to_string(),
+            )
+            .with_code("E048"),
+        );
+        true
     }
 
     /// A Option/Result CONSTRUCTOR pattern over a plain scalar subject is a
@@ -548,7 +619,7 @@ impl Checker {
                 ok_v
             }
             _ => {
-                self.reject_ctor_pattern_on_scalar("ok(..)", "a Result", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::Ok, &resolved);
                 Ty::Unknown
             }
         };
@@ -567,7 +638,7 @@ impl Checker {
                 err_v
             }
             _ => {
-                self.reject_ctor_pattern_on_scalar("err(..)", "a Result", &resolved);
+                self.reject_ctor_pattern_mismatch(CtorPat::Err, &resolved);
                 Ty::Unknown
             }
         };
@@ -707,4 +778,123 @@ impl Checker {
         }
         None
     }
+}
+
+// ── Builtin variant-constructor patterns (#1341) ────────────────────────
+//
+// `some`/`none` destructure an Option; `ok`/`err` a Result. Almide keeps the
+// two families disjoint (an `Option` is not a `Result`), but until #1341 the
+// checker only rejected a constructor pattern aimed at a plain SCALAR. Aiming
+// one family's pattern at the other family's subject — `match list.get(xs, 0)
+// { ok(a) => … }`, where `list.get` returns `A?` — fell through silently and
+// bound the payload as `Ty::Unknown`. That Unknown survived to codegen and
+// detonated there: a `[COMPILER BUG] internal type resolution failed` banner on
+// native, an "outside the executable subset" wall on wasm. Both blamed the
+// compiler for what is a plain type error in the program, and neither named the
+// one-word fix. Naming it HERE — the only place that sees both the pattern and
+// the subject's type — is the whole fix.
+
+/// One builtin variant-constructor pattern spelling, tagged with the family it
+/// destructures.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CtorPat { Some, None, Ok, Err }
+
+impl CtorPat {
+    /// How the pattern reads in source — what the diagnostic quotes back.
+    fn spelling(self) -> &'static str {
+        match self {
+            CtorPat::Some => "some(..)",
+            CtorPat::None => "none",
+            CtorPat::Ok => "ok(..)",
+            CtorPat::Err => "err(..)",
+        }
+    }
+
+    /// The family this pattern destructures, phrased for the message.
+    fn wants(self) -> &'static str {
+        match self {
+            CtorPat::Some | CtorPat::None => "an Option",
+            CtorPat::Ok | CtorPat::Err => "a Result",
+        }
+    }
+
+    /// The same ARM POSITION in the other family: the payload-carrying success
+    /// arm maps to the other's success arm, the failure arm to its failure arm.
+    /// `err(e)` ↔ `none` is the one asymmetric pair — Option's failure arm
+    /// carries no payload, which the hint calls out.
+    fn twin(self) -> CtorPat {
+        match self {
+            CtorPat::Some => CtorPat::Ok,
+            CtorPat::Ok => CtorPat::Some,
+            CtorPat::None => CtorPat::Err,
+            CtorPat::Err => CtorPat::None,
+        }
+    }
+
+    /// `Some(twin)` when this pattern is aimed at the OTHER variant family's
+    /// subject, `None` when the pairing is anything else (a matching family, a
+    /// scalar, a record, an unresolved type — all handled elsewhere or left to
+    /// error recovery).
+    fn cross_family_fix(self, resolved: &Ty) -> Option<CtorPat> {
+        let subject_is_option = match resolved {
+            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => true,
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => false,
+            _ => return None,
+        };
+        let pattern_is_option = matches!(self, CtorPat::Some | CtorPat::None);
+        (pattern_is_option != subject_is_option).then(|| self.twin())
+    }
+}
+
+/// The case spellings a user-constructor pattern named `bare_name` should have
+/// used, when `resolved` is a structurally-known subject that has no such case;
+/// `None` when the pairing is fine or undecidable. A `Ty::Variant` lists its own
+/// cases; an Option / Result lists the builtin carrier spellings — a user ctor
+/// name can never denote one of those.
+fn foreign_ctor_case_list(bare_name: Sym, resolved: &Ty) -> Option<Vec<String>> {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    match resolved {
+        Ty::Variant { cases, .. } if !cases.iter().any(|c| c.name == bare_name) => {
+            Some(cases.iter().map(|c| c.name.to_string()).collect())
+        }
+        Ty::Applied(TCI::Option, args) if args.len() == 1 => {
+            Some(vec!["some(..)".to_string(), "none".to_string()])
+        }
+        Ty::Applied(TCI::Result, args) if args.len() == 2 => {
+            Some(vec!["ok(..)".to_string(), "err(..)".to_string()])
+        }
+        _ => None,
+    }
+}
+
+/// The E048 diagnostic for a cross-family constructor pattern. `fix` is the
+/// same arm position spelled in the subject's family, and is both the `try:`
+/// snippet and the noun the hint tells the author to write.
+fn cross_family_pattern_diag(
+    ctor: CtorPat,
+    fix: CtorPat,
+    resolved: &Ty,
+) -> crate::diagnostic::Diagnostic {
+    let payload_note = if ctor == CtorPat::Err {
+        " An Option's failure arm carries no error value, so the binder goes away."
+    } else if fix == CtorPat::Err {
+        " A Result's failure arm carries the error value: `err(e)`."
+    } else {
+        ""
+    };
+    super::err(
+        format!(
+            "pattern `{}` destructures {}, but the subject is `{}`",
+            ctor.spelling(), ctor.wants(), resolved.display()
+        ),
+        format!(
+            "Option and Result are separate types: an Option is matched with \
+             `some(..)` / `none`, a Result with `ok(..)` / `err(..)`. Write `{}` \
+             here.{}",
+            fix.spelling(), payload_note
+        ),
+        "match pattern".to_string(),
+    )
+    .with_code("E048")
+    .with_try(fix.spelling())
 }

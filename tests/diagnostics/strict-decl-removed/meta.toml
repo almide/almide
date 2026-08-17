@@ -1,0 +1,2 @@
+expects_error = "'strict' declarations were removed from Almide"
+hint_substring = "delete the line"

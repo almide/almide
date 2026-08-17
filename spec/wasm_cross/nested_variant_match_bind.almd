@@ -1,0 +1,64 @@
+// @contract: C-269
+// #1341's shape: a NESTED variant match bound to a `let` under an explicit
+// Result carrier, then unwrapped with `!`. The outer arm's BODY is itself a
+// variant match, so both nesting levels bind a payload the arm body reads. The
+// bind is heap-typed, so branch_lift hoists it into a synthesized tail helper —
+// the binders must survive that lift carrying their concrete types.
+//
+// #1341 reported this as a [COMPILER BUG] banner; the reported repro spelled the
+// arms `ok(..)` over an `Int?` subject, which is a cross-family type error
+// (E048) rather than a lift bug. Correctly spelled, the shape executes — and
+// this fixture is what keeps it executing, byte-identical native == wasm, on
+// the value path AND on both failure depths, for a scalar and a heap payload.
+//
+// The producers are PURE fns returning an explicit Result (`!` in a pure
+// Result-returning fn is C-247) rather than effect fns: the interp's effect
+// convention returns an effect call's success value BARE, so `match <effect
+// call> { ok(v) => .. }` cannot vote — an unrelated third-oracle gap this
+// fixture deliberately does not ride on.
+fn pair_sum(xs: List[Int]) -> Result[Int, String] = {
+  let r: Result[Int, String] = match list.get(xs, 0) {
+    some(a) => match list.get(xs, 1) {
+      some(b) => ok(a + b),
+      none => err("need a second element"),
+    },
+    none => err("need a first element"),
+  }
+  let total = r!
+  ok(total)
+}
+
+fn pair_join(xs: List[String]) -> Result[String, String] = {
+  let r: Result[String, String] = match list.get(xs, 0) {
+    some(a) => match list.get(xs, 1) {
+      some(b) => ok(a + "-" + b),
+      none => err("need a second word"),
+    },
+    none => err("need a first word"),
+  }
+  let joined = r!
+  ok(joined)
+}
+
+effect fn show_sum(xs: List[Int]) -> Unit = {
+  match pair_sum(xs) {
+    ok(v) => println("sum ${v}"),
+    err(e) => println("sum failed: ${e}"),
+  }
+}
+
+effect fn show_join(xs: List[String]) -> Unit = {
+  match pair_join(xs) {
+    ok(v) => println("join ${v}"),
+    err(e) => println("join failed: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show_sum([10, 32])!
+  show_sum([10])!
+  show_sum([])!
+  show_join(["hello", "world"])!
+  show_join(["hello"])!
+  show_join([])!
+}

@@ -29,17 +29,15 @@
 
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
-use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_ir::IrTypeDeclKind;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use almide_mir::certificate::{
-    name_witness_string, ownership_certificate, program_cap_graph_witness,
+    name_witness_string, program_cap_graph_witness,
     reachable_caps_or_tainted,
 };
 use almide_mir::{Capability, MirFunction, MirProgram, Op};
-use almide_optimize::{mono, optimize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -109,6 +107,28 @@ fn count_eq_calls_depth(
         return 1;
     }
     if let Ty::Applied(TC::List, es) = ty {
+        return count_eq_calls_list(es, registry, variant_layouts, depth);
+    }
+    if let Some(n) = count_eq_calls_map_set(ty) {
+        return n;
+    }
+    if let Some(n) = count_eq_calls_variant(ty, registry, variant_layouts, depth) {
+        return n;
+    }
+    count_eq_calls_compound(ty, registry, variant_layouts, depth)
+}
+
+/// The `List[…]` element tier of [`count_eq_calls_depth`] — extracted verbatim
+/// (codopsy A-maintenance split): the variant/record/Option-record loop-helper
+/// routes, then the single-CallFn element shapes.
+fn count_eq_calls_list(
+    es: &[almide_lang::types::Ty],
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+    depth: u32,
+) -> usize {
+    use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
+    {
         // List[<custom variant>] — the synthesized loop-helper route (engine's
         // List-of-variant arm): the site's helper call + the generated bodies,
         // via the shared count (see synth_eq.rs; the site/list-body calls swap
@@ -149,7 +169,12 @@ fn count_eq_calls_depth(
                         && !variant_layouts.by_type.contains_key(n.as_str())
                         && registry.get(n.as_str()).is_some()
                     {
-                        return 3 + count_eq_calls_depth(&oa[0], registry, variant_layouts, depth + 1);
+                        return 3 + count_eq_calls_depth(
+                            &oa[0],
+                            registry,
+                            variant_layouts,
+                            depth + 1,
+                        );
                     }
                 }
             }
@@ -177,48 +202,75 @@ fn count_eq_calls_depth(
                     || res_scalar_elem),
         );
     }
-    // Map/Set `==` — the implemented repr variants lower to ONE synthetic eq CallFn
-    // (`map.eq_ivh`/`map.eq_hval`/`map.eq_skv`/`set.eq_str`), all pure deep reads.
-    // Mirror EXACTLY the operand shapes calls_p4's eq dispatch admits.
+}
+
+/// The Map/Set tier of [`count_eq_calls_depth`], verbatim: the implemented repr
+/// variants lower to ONE synthetic eq CallFn (`map.eq_ivh`/`map.eq_hval`/
+/// `map.eq_skv`/`set.eq_str`), all pure deep reads. Mirror EXACTLY the operand
+/// shapes calls_p4's eq dispatch admits. `None` = not a Map/Set shape.
+fn count_eq_calls_map_set(ty: &almide_lang::types::Ty) -> Option<usize> {
+    use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
     if almide_mir::lower::is_map_ivh_ty(ty) || almide_mir::lower::is_map_hval_ty(ty) {
-        return 1;
+        return Some(1);
     }
     if let Ty::Applied(TC::Map, kv) = ty {
         if kv.len() == 2 && matches!(kv[0], Ty::String) && !almide_mir::lower::is_heap_ty(&kv[1]) {
-            return 1;
+            return Some(1);
         }
     }
     if let Ty::Applied(TC::Set, es) = ty {
         if es.len() == 1 && matches!(es[0], Ty::String) {
-            return 1;
+            return Some(1);
         }
     }
-    // A custom VARIANT `==` — the tag-dispatched chain statically emits every fielded
-    // case's per-field eq calls (only ONE case runs, but the caps witness is static).
-    // Mirror `custom_variant_type_name`'s three type spellings.
+    None
+}
+
+/// The custom-variant tier of [`count_eq_calls_depth`], verbatim: the
+/// tag-dispatched chain statically emits every fielded case's per-field eq calls
+/// (only ONE case runs, but the caps witness is static). Mirror
+/// `custom_variant_type_name`'s three type spellings. `None` = not a variant.
+fn count_eq_calls_variant(
+    ty: &almide_lang::types::Ty,
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+    depth: u32,
+) -> Option<usize> {
+    use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
     let variant_name: Option<String> = match ty {
         Ty::Named(n, _) => Some(n.as_str().to_string()),
         Ty::Variant { name, .. } => Some(name.as_str().to_string()),
         Ty::Applied(TC::UserDefined(n), _) => Some(n.clone()),
         _ => None,
     };
-    if let Some(name) = variant_name {
-        if let Some(layout) = variant_layouts.by_type.get(&name) {
-            // A RECURSIVE variant routes through the synthesized helper family:
-            // ONE site call + every generated helper body's static calls — the
-            // SAME predicate + count the engine uses (synth_eq.rs), so mir == ir
-            // holds by construction.
-            if almide_mir::lower::variant_layout_recursive(variant_layouts, &name) {
-                return almide_mir::lower::eq_helper_call_count(variant_layouts, ty);
-            }
-            return layout
-                .cases
-                .iter()
-                .flat_map(|c| c.fields.iter())
-                .map(|(_, t)| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
-                .sum();
-        }
+    let name = variant_name?;
+    let layout = variant_layouts.by_type.get(&name)?;
+    // A RECURSIVE variant routes through the synthesized helper family:
+    // ONE site call + every generated helper body's static calls — the
+    // SAME predicate + count the engine uses (synth_eq.rs), so mir == ir
+    // holds by construction.
+    if almide_mir::lower::variant_layout_recursive(variant_layouts, &name) {
+        return Some(almide_mir::lower::eq_helper_call_count(variant_layouts, ty));
     }
+    Some(
+        layout
+            .cases
+            .iter()
+            .flat_map(|c| c.fields.iter())
+            .map(|(_, t)| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
+            .sum(),
+    )
+}
+
+/// The compound tail of [`count_eq_calls_depth`], verbatim: tuple/record/named
+/// field sums and the Option/Result payload recursions.
+fn count_eq_calls_compound(
+    ty: &almide_lang::types::Ty,
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+    depth: u32,
+) -> usize {
+    use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
     match ty {
         Ty::Tuple(elems) => elems
             .iter()
@@ -256,6 +308,150 @@ fn count_eq_calls_depth(
     }
 }
 
+/// The operator-node ir_call credits of [`count_ir_calls`]'s `visit_expr`,
+/// extracted verbatim (codopsy A-maintenance split): each block credits an
+/// operator NODE for exactly the shapes the lowering synthesizes a CallFn for,
+/// so `mir_calls <= ir_calls` holds BY CONSTRUCTION (each comment carries its
+/// own soundness argument, unchanged).
+fn operator_credit(
+    e: &almide_ir::IrExpr,
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+) -> usize {
+    let mut n = 0;
+    // A string concat `a + b` (BinOp::ConcatStr) lowers to ONE synthetic `__str_concat`
+    // CallFn (a mir_call). Count the operator NODE as one ir_call so that synthetic call
+    // has a matching ir_call and `mir_calls <= ir_calls` holds BY CONSTRUCTION — a concat
+    // not yet lowered in some position just leaves mir < ir (honest caps taint), never the
+    // mir > ir over-count that would falsely caps-verify a fn. __str_concat is pure (the
+    // transitive fold sees no Stdout), so the synthetic call adds no real capability.
+    if matches!(
+        &e.kind,
+        almide_ir::IrExprKind::BinOp {
+            op: almide_ir::BinOp::ConcatStr,
+            ..
+        }
+    ) {
+        n += 1;
+    }
+    // A STRING equality `a == b` / `a != b` (BinOp::Eq/Neq over String operands) lowers
+    // to ONE synthetic `string.eq` CallFn (the `!=` negate is a prim, not a call). Count
+    // the operator NODE as one ir_call so the synthetic call has a matching ir_call and
+    // `mir_calls <= ir_calls` holds BY CONSTRUCTION. Gated on a String LEFT operand — an
+    // Int/Bool/Float `==` lowers to a prim compare (no call), so it is NOT counted.
+    // `string.eq` is pure (byte compare, no Stdout), adding no real capability.
+    // ALSO a Value `==`/`!=` (→ `value.eq`) and a List[Int|String|Value] `==`/`!=`
+    // (→ `list.eq_int`/`list.eq_str`/`list.eq_value`) lower to ONE synthetic CallFn — count
+    // the operator NODE for EXACTLY the operand shapes calls_p4 lowers to a call, so each has
+    // a matching ir_call and `mir_calls <= ir_calls` holds BY CONSTRUCTION. All three eq
+    // helpers are pure (deep reads, no Stdout), adding no real capability.
+    if let almide_ir::IrExprKind::BinOp {
+        op: almide_ir::BinOp::Eq | almide_ir::BinOp::Neq,
+        left,
+        ..
+    } = &e.kind
+    {
+        // String/Value/List → 1 call; a tuple/record/variant → the SUM of its
+        // fields' eq calls (recursing); Result general → ok+err; a scalar → 0.
+        // Matches `typed_slot_eq`'s static per-field call emission exactly.
+        n += count_eq_calls(&left.ty, registry, variant_layouts);
+    }
+    // A String ordering `< <= > >=` lowers to ONE `string.cmp` CallFn (then an Int compare
+    // with 0, a prim). Credit the operator node so `mir_calls <= ir_calls` holds. string.cmp
+    // is pure (byte compare, no Stdout).
+    if let almide_ir::IrExprKind::BinOp {
+        op:
+            almide_ir::BinOp::Lt | almide_ir::BinOp::Lte | almide_ir::BinOp::Gt | almide_ir::BinOp::Gte,
+        left,
+        ..
+    } = &e.kind
+    {
+        if matches!(left.ty, almide_lang::types::Ty::String) {
+            n += 1;
+        }
+    }
+    // A STRING-subject `match s { "a" => .., "b" => .., _ => .. }` desugars to a nested
+    // `if string.eq(s, "a") then .. else if string.eq(s, "b") then ..` — ONE synthetic
+    // `string.eq` CallFn PER STRING-LITERAL arm (the catch-all/binder arm emits no call).
+    // Count those arms here so the synthetic calls have matching ir_calls and
+    // `mir_calls <= ir_calls` holds BY CONSTRUCTION. `string.eq` is pure (no Stdout).
+    if let almide_ir::IrExprKind::Match { subject, arms } = &e.kind {
+        if matches!(subject.ty, almide_lang::types::Ty::String) {
+            let lit_arms = arms
+                .iter()
+                .filter(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }))
+                .count();
+            n += lit_arms;
+        }
+    }
+    // A list concat `a + b` (BinOp::ConcatList) lowers to ONE synthetic CallFn — `__list_concat`
+    // (SCALAR-element, byte-copy) or `__list_concat_rc` (HEAP-element String/Value, rc-incrementing
+    // copy). Count the operator NODE as one ir_call for EXACTLY the element shapes the lowering
+    // emits a call for (scalar, or String/Value heap-element); a heap-FIELD aggregate element
+    // (tuple/record) still DEFERS (no MIR call, no count). `mir_calls <= ir_calls` holds BY
+    // CONSTRUCTION. Both concat runtimes are pure (prim memory ops, no Stdout).
+    if let almide_ir::IrExprKind::BinOp {
+        op: almide_ir::BinOp::ConcatList,
+        ..
+    } = &e.kind
+    {
+        // `try_lower_concat_list` emits AT MOST ONE synthetic `__list_concat`/`__list_concat_rc`
+        // per ConcatList node (its operands materialize without their own concat call), and a
+        // ConcatList it cannot lower WALLS the enclosing function (so that function is not
+        // caps-checked). Therefore counting EVERY ConcatList node as one ir_call keeps
+        // `mir_calls <= ir_calls` BY CONSTRUCTION for EVERY admitted element shape — scalar,
+        // String/Value, the (String,String)/(Int,String)/(String,Value) tuples, List[List[String]],
+        // a flat OR rich custom-variant element, and a recursive-drop RECORD element (the wasm
+        // `acc + [{record}]` / `acc + [instr_r.val]` section-parser appends). A non-lowering
+        // ConcatList just leaves mir < ir (honest caps taint), never the mir > ir over-count
+        // that would falsely caps-verify a fn. Both concat runtimes are pure (no Stdout).
+        n += 1;
+    }
+    // The `**` OPERATOR (BinOp::PowFloat / PowInt) lowers to ONE synthetic CallFn —
+    // `math.fpow` (the bit-exact libm pow) for Float, `math.pow` (int squaring) for Int.
+    // Count the operator NODE as one ir_call so that synthetic call has a matching ir_call
+    // and `mir_calls <= ir_calls` holds BY CONSTRUCTION (a `**` not yet lowered in some
+    // position just leaves mir < ir — honest caps taint, never the mir > ir over-count that
+    // would falsely caps-verify a fn). Both callees are PURE (math/math_fpow modules reach
+    // no Stdout), so the synthetic call adds no real capability.
+    if matches!(
+        &e.kind,
+        almide_ir::IrExprKind::BinOp {
+            op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt,
+            ..
+        }
+    ) {
+        n += 1;
+    }
+    // A HEAP `Range` in a call-ARGUMENT position (`f(0..n)`) lowers to ONE synthetic
+    // `list.range` CallFn (the materialized real list). Count the Range ARG node as one
+    // ir_call so `mir_calls <= ir_calls` holds by construction; a Range the lowering
+    // cannot materialize WALLS the function (never mir > ir). A `for i in 0..n` iterable
+    // is NOT a call argument (no count — the loop lowers inline, no CallFn). list.range
+    // is pure (no Stdout).
+    if let almide_ir::IrExprKind::Call { args, .. } = &e.kind {
+        n += args
+            .iter()
+            .filter(|a| {
+                matches!(&a.kind, almide_ir::IrExprKind::Range { .. })
+                    && almide_mir::lower::is_heap_ty(&a.ty)
+            })
+            .count();
+    }
+    n
+}
+
+/// The `??` (UnwrapOr) ir_call credit — ZERO since the route-zoo deletion
+/// (#1418, rot-eradication R1): the `??` lowering rides the generic match
+/// machinery on every path and emits NO synthetic unwrap_or helper CallFn, so
+/// there is nothing to credit. The function survives (returning 0) as the
+/// documented tombstone of the #1079 no-drift discipline: if a future path
+/// re-introduces a synthetic call, its credit goes HERE, keyed on the same
+/// predicate the lowering uses — never a parallel guess.
+fn unwrap_or_credit(_e: &almide_ir::IrExpr) -> usize {
+    0
+}
+
 fn count_ir_calls(
     body: &almide_ir::IrExpr,
     registry: &almide_mir::lower::RecordLayouts,
@@ -289,6 +485,19 @@ fn count_ir_calls(
             {
                 self.n += 1;
             }
+            // A HEAP `Range` BIND initializer (`let r = 0..<n`) materializes ONE
+            // synthetic `list.range` CallFn (#1272 — the deferred-Opaque bind made a
+            // later `for i in r` iterate zero times, so the bind now emits the real
+            // list, mirroring the call-ARG credit below in visit_expr). Credit the
+            // statement so the synthetic call has a matching ir_call and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION; a Range the bind cannot
+            // materialize WALLS (mir < ir only, honest taint). list.range is pure.
+            if matches!(&s.kind, almide_ir::IrStmtKind::Bind { value, .. }
+                if matches!(value.kind, almide_ir::IrExprKind::Range { .. })
+                    && almide_mir::lower::is_heap_ty(&value.ty))
+            {
+                self.n += 1;
+            }
             almide_ir::visit::walk_stmt(self, s);
         }
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
@@ -313,243 +522,8 @@ fn count_ir_calls(
             {
                 self.n += 1;
             }
-            // A string concat `a + b` (BinOp::ConcatStr) lowers to ONE synthetic `__str_concat`
-            // CallFn (a mir_call). Count the operator NODE as one ir_call so that synthetic call
-            // has a matching ir_call and `mir_calls <= ir_calls` holds BY CONSTRUCTION — a concat
-            // not yet lowered in some position just leaves mir < ir (honest caps taint), never the
-            // mir > ir over-count that would falsely caps-verify a fn. __str_concat is pure (the
-            // transitive fold sees no Stdout), so the synthetic call adds no real capability.
-            if matches!(
-                &e.kind,
-                almide_ir::IrExprKind::BinOp {
-                    op: almide_ir::BinOp::ConcatStr,
-                    ..
-                }
-            ) {
-                self.n += 1;
-            }
-            // A STRING equality `a == b` / `a != b` (BinOp::Eq/Neq over String operands) lowers
-            // to ONE synthetic `string.eq` CallFn (the `!=` negate is a prim, not a call). Count
-            // the operator NODE as one ir_call so the synthetic call has a matching ir_call and
-            // `mir_calls <= ir_calls` holds BY CONSTRUCTION. Gated on a String LEFT operand — an
-            // Int/Bool/Float `==` lowers to a prim compare (no call), so it is NOT counted.
-            // `string.eq` is pure (byte compare, no Stdout), adding no real capability.
-            // ALSO a Value `==`/`!=` (→ `value.eq`) and a List[Int|String|Value] `==`/`!=`
-            // (→ `list.eq_int`/`list.eq_str`/`list.eq_value`) lower to ONE synthetic CallFn — count
-            // the operator NODE for EXACTLY the operand shapes calls_p4 lowers to a call, so each has
-            // a matching ir_call and `mir_calls <= ir_calls` holds BY CONSTRUCTION. All three eq
-            // helpers are pure (deep reads, no Stdout), adding no real capability.
-            if let almide_ir::IrExprKind::BinOp {
-                op: almide_ir::BinOp::Eq | almide_ir::BinOp::Neq,
-                left,
-                ..
-            } = &e.kind
-            {
-                // String/Value/List → 1 call; a tuple/record/variant → the SUM of its
-                // fields' eq calls (recursing); Result general → ok+err; a scalar → 0.
-                // Matches `typed_slot_eq`'s static per-field call emission exactly.
-                self.n += count_eq_calls(&left.ty, self.registry, self.variant_layouts);
-            }
-            // A String ordering `< <= > >=` lowers to ONE `string.cmp` CallFn (then an Int compare
-            // with 0, a prim). Credit the operator node so `mir_calls <= ir_calls` holds. string.cmp
-            // is pure (byte compare, no Stdout).
-            if let almide_ir::IrExprKind::BinOp {
-                op:
-                    almide_ir::BinOp::Lt
-                    | almide_ir::BinOp::Lte
-                    | almide_ir::BinOp::Gt
-                    | almide_ir::BinOp::Gte,
-                left,
-                ..
-            } = &e.kind
-            {
-                if matches!(left.ty, almide_lang::types::Ty::String) {
-                    self.n += 1;
-                }
-            }
-            // A STRING-subject `match s { "a" => .., "b" => .., _ => .. }` desugars to a nested
-            // `if string.eq(s, "a") then .. else if string.eq(s, "b") then ..` — ONE synthetic
-            // `string.eq` CallFn PER STRING-LITERAL arm (the catch-all/binder arm emits no call).
-            // Count those arms here so the synthetic calls have matching ir_calls and
-            // `mir_calls <= ir_calls` holds BY CONSTRUCTION. `string.eq` is pure (no Stdout).
-            if let almide_ir::IrExprKind::Match { subject, arms } = &e.kind {
-                if matches!(subject.ty, almide_lang::types::Ty::String) {
-                    let lit_arms = arms
-                        .iter()
-                        .filter(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }))
-                        .count();
-                    self.n += lit_arms;
-                }
-            }
-            // A list concat `a + b` (BinOp::ConcatList) lowers to ONE synthetic CallFn — `__list_concat`
-            // (SCALAR-element, byte-copy) or `__list_concat_rc` (HEAP-element String/Value, rc-incrementing
-            // copy). Count the operator NODE as one ir_call for EXACTLY the element shapes the lowering
-            // emits a call for (scalar, or String/Value heap-element); a heap-FIELD aggregate element
-            // (tuple/record) still DEFERS (no MIR call, no count). `mir_calls <= ir_calls` holds BY
-            // CONSTRUCTION. Both concat runtimes are pure (prim memory ops, no Stdout).
-            if let almide_ir::IrExprKind::BinOp {
-                op: almide_ir::BinOp::ConcatList,
-                ..
-            } = &e.kind
-            {
-                // `try_lower_concat_list` emits AT MOST ONE synthetic `__list_concat`/`__list_concat_rc`
-                // per ConcatList node (its operands materialize without their own concat call), and a
-                // ConcatList it cannot lower WALLS the enclosing function (so that function is not
-                // caps-checked). Therefore counting EVERY ConcatList node as one ir_call keeps
-                // `mir_calls <= ir_calls` BY CONSTRUCTION for EVERY admitted element shape — scalar,
-                // String/Value, the (String,String)/(Int,String)/(String,Value) tuples, List[List[String]],
-                // a flat OR rich custom-variant element, and a recursive-drop RECORD element (the wasm
-                // `acc + [{record}]` / `acc + [instr_r.val]` section-parser appends). A non-lowering
-                // ConcatList just leaves mir < ir (honest caps taint), never the mir > ir over-count
-                // that would falsely caps-verify a fn. Both concat runtimes are pure (no Stdout).
-                let _ = (&self.registry, &self.variant_layouts);
-                self.n += 1;
-            }
-            // The `**` OPERATOR (BinOp::PowFloat / PowInt) lowers to ONE synthetic CallFn —
-            // `math.fpow` (the bit-exact libm pow) for Float, `math.pow` (int squaring) for Int.
-            // Count the operator NODE as one ir_call so that synthetic call has a matching ir_call
-            // and `mir_calls <= ir_calls` holds BY CONSTRUCTION (a `**` not yet lowered in some
-            // position just leaves mir < ir — honest caps taint, never the mir > ir over-count that
-            // would falsely caps-verify a fn). Both callees are PURE (math/math_fpow modules reach
-            // no Stdout), so the synthetic call adds no real capability.
-            if matches!(
-                &e.kind,
-                almide_ir::IrExprKind::BinOp {
-                    op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt,
-                    ..
-                }
-            ) {
-                self.n += 1;
-            }
-            // A HEAP `Range` in a call-ARGUMENT position (`f(0..n)`) lowers to ONE synthetic
-            // `list.range` CallFn (the materialized real list). Count the Range ARG node as one
-            // ir_call so `mir_calls <= ir_calls` holds by construction; a Range the lowering
-            // cannot materialize WALLS the function (never mir > ir). A `for i in 0..n` iterable
-            // is NOT a call argument (no count — the loop lowers inline, no CallFn). list.range
-            // is pure (no Stdout).
-            if let almide_ir::IrExprKind::Call { args, .. } = &e.kind {
-                self.n += args
-                    .iter()
-                    .filter(|a| {
-                        matches!(&a.kind, almide_ir::IrExprKind::Range { .. })
-                            && almide_mir::lower::is_heap_ty(&a.ty)
-                    })
-                    .count();
-            }
-            // A heap-String `??` (`Option[String] ?? default`) lowers to ONE synthetic
-            // `option.unwrap_or_str` CallFn (a mir_call) — but ONLY when its operand can be
-            // materialized as a self-host Option: a Var (possibly a materialized Option, which
-            // lowers) or a direct self-host OPTION call (string.first / list.get / json.as_string
-            // …). Count the operator node EXACTLY in those cases, so `mir_calls <= ir_calls` holds
-            // by construction without over-tainting a `??` over a NON-Option operand (a `Result`
-            // call like `value.as_string(x) ?? "?"`, or a not-yet-self-hosted `json.get_string`),
-            // which does NOT lower to a call (mir+0). A scalar `??` (non-String fallback) is also
-            // excluded (it lowers inline, no call). option.unwrap_or_str is pure (prim +
-            // string.repeat, no Stdout), so the synthetic call adds no real capability.
-            if let almide_ir::IrExprKind::UnwrapOr { expr, fallback } = &e.kind {
-                // The operand must be an OPTION (not a Result — `value.as_string(x) ?? "?"` is a
-                // Result `??`, expr.ty = Result, which the lowering does NOT route to
-                // option.unwrap_or_str, so counting it would falsely taint mir<ir).
-                let operand_is_option = matches!(
-                    &expr.ty,
-                    almide_lang::types::Ty::Applied(
-                        almide_lang::types::constructor::TypeConstructorId::Option,
-                        _
-                    )
-                );
-                let operand_lowers = match &expr.kind {
-                    almide_ir::IrExprKind::Var { .. } => true,
-                    almide_ir::IrExprKind::Call {
-                        target: almide_ir::CallTarget::Module { module, func, .. },
-                        ..
-                    } => {
-                        almide_mir::lower::is_self_host_option_module_fn(module.as_str(), func.as_str())
-                            // The NEW operand-materialization path (`process.env(k) ?? "/tmp"` — an
-                            // IMPURE intrinsic `Option[String]`): it lowers to ONE synthetic
-                            // `option.unwrap_or_str` CallFn, so credit the node +1.
-                            || almide_mir::lower::unwrap_or_operand_admitted(expr)
-                    }
-                    // A USER function returning `Option[String]` (`fn first_char(s) ->
-                    // Option[String]`, `first_char("hi") ?? "<none>"`): the lowering admits it
-                    // through the `is_named_variant_call` operand route and then emits ONE
-                    // `option.unwrap_or_str` — the SAME synthetic call a self-host operand gets.
-                    // Credit it by the SAME shared predicate the lowering uses (#1079: uncredited,
-                    // this was `mir 3 > ir 2`, a caps wall breach on correct output).
-                    almide_ir::IrExprKind::Call {
-                        target: almide_ir::CallTarget::Named { .. },
-                        ..
-                    } => almide_mir::lower::unwrap_or_named_variant_operand(expr),
-                    _ => false,
-                };
-                if matches!(fallback.ty, almide_lang::types::Ty::String)
-                    && operand_is_option
-                    && operand_lowers
-                {
-                    self.n += 1;
-                }
-                // A Value / List[Value] -payload Result `??` (`value.get(o,k) ?? value.null()`,
-                // `value.as_array(v) ?? []`) — the lowering routes it to ONE synthetic
-                // result.value_unwrap_or / result.list_value_unwrap_or CALL (a pure value_core
-                // helper, no Stdout). Count +1 so mir == ir, mirroring the String case.
-                let operand_is_value_result = almide_mir::lower::is_value_result_ty(&expr.ty)
-                    || almide_mir::lower::is_result_listval_ty(&expr.ty)
-                    || almide_mir::lower::is_result_str_str_ty(&expr.ty)
-                    || almide_mir::lower::is_option_value_ty(&expr.ty)
-                    // An Option[List[Value]] / Option[List[String]] `??` (`json.get_array(v,k) ?? []`,
-                    // `list.first_liststr(xs) ?? []`) routes to ONE synthetic option.listvalue_unwrap_or /
-                    // option.liststr_unwrap_or CALL (pure value_core helpers, no Stdout) — count +1 so
-                    // mir == ir, mirroring the Option[Value] case.
-                    || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                    || almide_mir::lower::is_option_liststr_ty(&expr.ty)
-                    // An Option[List[<scalar>]] `??` (`map.get(groups, k) ?? []` — B19's
-                    // group_by class) routes to ONE synthetic option.listint_unwrap_or CALL —
-                    // count +1 so mir == ir (the missing credit was the B19-ship breach the
-                    // corpus gate caught: mir 2 > ir 1 on every listint `??` site).
-                    || almide_mir::lower::is_option_listscalar_ty(&expr.ty);
-                // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits
-                // them) — INCLUDING a str-str Var, which now routes to `result.str_unwrap_or`
-                // (the materialized_results_str Var-gate admission). An Option[Value] operand
-                // is a self-host option CALL (list.get) or a Var.
-                let value_operand_lowers = match &expr.kind {
-                    almide_ir::IrExprKind::Var { .. } => true,
-                    almide_ir::IrExprKind::Call {
-                        target: almide_ir::CallTarget::Module { module, func, .. },
-                        ..
-                    } => {
-                        almide_mir::lower::is_self_host_result_str_module_fn(
-                            module.as_str(),
-                            func.as_str(),
-                        ) || ((almide_mir::lower::is_option_value_ty(&expr.ty)
-                            || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                            || almide_mir::lower::is_option_liststr_ty(&expr.ty)
-                            || almide_mir::lower::is_option_listscalar_ty(&expr.ty))
-                            && almide_mir::lower::is_self_host_option_module_fn(
-                                module.as_str(),
-                                func.as_str(),
-                            ))
-                            // The NEW operand-materialization path (`json.parse(s) ?? json.array([])`
-                            // — a PURE heap-`Result[Value, String]` module call): it lowers to ONE
-                            // synthetic `result.value_unwrap_or` CallFn, so credit the node +1.
-                            || almide_mir::lower::unwrap_or_operand_admitted(expr)
-                    }
-                    // A USER function returning a heap-payload variant (`fn lookup(k) ->
-                    // Result[Value, String]`): admitted by the SAME `is_named_variant_call`
-                    // operand route, then routed to ONE `result.value_unwrap_or` /
-                    // `option.value_unwrap_or` helper — credit it, mirroring the String case
-                    // above (#1079).
-                    almide_ir::IrExprKind::Call {
-                        target: almide_ir::CallTarget::Named { .. },
-                        ..
-                    } => almide_mir::lower::unwrap_or_named_variant_operand(expr),
-                    _ => false,
-                };
-                if operand_is_value_result
-                    && almide_mir::lower::is_heap_ty(&fallback.ty)
-                    && value_operand_lowers
-                {
-                    self.n += 1;
-                }
-            }
+            self.n += operator_credit(e, self.registry, self.variant_layouts);
+            self.n += unwrap_or_credit(e);
             // A STRING INTERPOLATION `"…${e}…"` desugars (the SHARED
             // `almide_mir::lower::desugar_string_interp`) to a synthetic `__str_concat`
             // chain (one per part, +1 empty-seed leaf ⇒ K concats) plus one

@@ -230,7 +230,8 @@ impl Checker {
                     Some((call_span, format!("{}.{}({})", module, close, obj_src)))
                 });
             if let Some((call_span, snippet)) = rewrite {
-                diag = diag.with_try_replace(
+                // SUGGESTION, not machine-applicable (#1312): the method name came from an edit distance over the module's surface, so the rewrite may call a neighbour of what the author meant.
+                diag = diag.with_suggested_fix(
                     call_span.line, call_span.col, call_span.end_col,
                     snippet,
                 );

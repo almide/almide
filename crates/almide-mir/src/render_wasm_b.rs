@@ -194,7 +194,6 @@ fn drop_scratch_locals(func: &MirFunction) -> Vec<String> {
 
 pub fn render_wasm_fn(
     func: &MirFunction,
-    label_off: &BTreeMap<String, (u32, u32)>,
     func_slots: &BTreeMap<String, u32>,
     param_counts: &BTreeMap<String, usize>,
 ) -> String {
@@ -256,7 +255,6 @@ pub fn render_wasm_fn(
     let ctx = RenderFnCtx {
         func,
         tail_calls: &tail_calls,
-        label_off,
         func_slots,
         param_counts,
         reprs: &reprs,
@@ -289,7 +287,6 @@ pub fn render_wasm_fn(
 struct RenderFnCtx<'a> {
     func: &'a MirFunction,
     tail_calls: &'a BTreeSet<usize>,
-    label_off: &'a BTreeMap<String, (u32, u32)>,
     func_slots: &'a BTreeMap<String, u32>,
     param_counts: &'a BTreeMap<String, usize>,
     reprs: &'a BTreeMap<ValueId, Repr>,
@@ -334,7 +331,7 @@ fn render_op_range(
     // stateful reconstruction of the flat marker stream. A scalar `if` is an
     // expression `(local.set $dst (if (result i64) cond (then …val) (else …val)))`;
     // each arm leaves its value on the stack. Only the taken arm executes.
-    let arm_val = |v: &Option<ValueId>| {
+    let _arm_val = |v: &Option<ValueId>| {
         v.map(|v| format!("      (local.get {})\n", local(v))).unwrap_or_default()
     };
     let mut i = start;
@@ -382,6 +379,14 @@ fn render_op_range(
             }
             Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
                 render_if_marker_op(ctx, st, op, body);
+            }
+            // Frame-targeted early exit: a wasm `return` is valid at any block
+            // depth (it exits the whole function, through any open `if`/`loop`
+            // nesting) — the same instruction the T1-1 strict cut emits.
+            Op::Return { val } => {
+                st.fuser.flush_all(body);
+                let v = val.map(|v| format!(" (local.get {})", local(v))).unwrap_or_default();
+                body.push_str(&format!("    (return{v})\n"));
             }
             Op::Charge { .. } | Op::ChargeDyn { .. } => {
                 render_charge_marker_op(ctx, st, op, body);
@@ -614,7 +619,6 @@ fn render_fused_or_plain_op(
                     return true;
                 }
                 body.push_str(&render_op(op, crate::render_wasm::OpTables {
-                    label_off: ctx.label_off,
                     func_slots: ctx.func_slots,
                     param_counts: ctx.param_counts,
                     masks: &ctx.func.heap_slot_masks,
@@ -634,7 +638,6 @@ fn render_fused_or_plain_op(
                     body.push_str(&render_list_access_unchecked(op, ctx.floats));
                 } else {
                     body.push_str(&render_op(op, crate::render_wasm::OpTables {
-                    label_off: ctx.label_off,
                     func_slots: ctx.func_slots,
                     param_counts: ctx.param_counts,
                     masks: &ctx.func.heap_slot_masks,
@@ -778,16 +781,16 @@ fn wasm_ty(repr: Repr) -> &'static str {
     }
 }
 
-/// Every [`ValueId`] an op READS (operands only — never the defined dst),
-/// exhaustively and with multiplicity (`IntBinOp { a: v, b: v }` pushes `v`
-/// twice). The read half of the `op_values` split (#777 F3 item 2): together
-/// with [`defined_value`] and the `SetLocal` redefinition case it partitions
-/// every value an op touches, and `mir_wellformed::check_def_before_use`
-/// asserts that partition against `op_values` on every real op in every
-/// lowered function — corpus-wide, not on hand-built samples.
-///
-/// A `SetLocal`'s `local` is counted as a READ here: the op stores INTO an
-/// existing slot, and def-before-use demands the slot already exist. Its `src`
+// Every [`ValueId`] an op READS (operands only — never the defined dst),
+// exhaustively and with multiplicity (`IntBinOp { a: v, b: v }` pushes `v`
+// twice). The read half of the `op_values` split (#777 F3 item 2): together
+// with [`defined_value`] and the `SetLocal` redefinition case it partitions
+// every value an op touches, and `mir_wellformed::check_def_before_use`
+// asserts that partition against `op_values` on every real op in every
+// lowered function — corpus-wide, not on hand-built samples.
+//
+// A `SetLocal`'s `local` is counted as a READ here: the op stores INTO an
+// existing slot, and def-before-use demands the slot already exist. Its `src`
 
 include!("render_wasm_fuse.rs");
 

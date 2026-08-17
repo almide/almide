@@ -54,7 +54,7 @@ env:
   # ~210 prog/min, up from ~1,000). Deep single-seed runs stay available
   # through the `minutes` dispatch input.
   FUZZ_MINUTES: "5"
-  FUZZ_SHARDS: "4"
+  FUZZ_SHARDS: "8"
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -68,8 +68,21 @@ jobs:
   # artifact download instead of a compile.
   build:
     if: github.server_url == 'https://github.com'
-    name: Build compiler + fuzzer
-    runs-on: ubuntu-latest
+    name: Build compiler + fuzzer (${{ matrix.arch }})
+    # HOST POLARITY (#1411 stage 2). The night runs on BOTH arches because a
+    # whole defect class is arch-conditional: #1403's raw-NaN byte write reads
+    # as the canonical pattern on aarch64 and only x86 can observe it, and the
+    # inverse blindness holds for anything keyed on x86's sign-set NaNs. One
+    # arch is not a subset of the other — each sees bugs the other cannot.
+    # ubuntu-24.04-arm is free for public repos, so the cost is runner-minutes,
+    # not money.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, arch: x86_64 }
+          - { os: ubuntu-24.04-arm, arch: aarch64 }
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -85,8 +98,8 @@ jobs:
             ~/.cargo/git
             target
             tools/xtarget-fuzz/target
-          key: fuzz-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: fuzz-cargo-${{ env.RUST_TOOLCHAIN }}-
+          key: fuzz-cargo-${{ matrix.arch }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: fuzz-cargo-${{ matrix.arch }}-${{ env.RUST_TOOLCHAIN }}-
 
       # The compiler the fuzzer shells out to.
       - name: Build almide
@@ -102,7 +115,7 @@ jobs:
       - name: Upload binaries
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-binaries-${{ github.run_id }}
+          name: fuzz-binaries-${{ github.run_id }}-${{ matrix.arch }}
           path: |
             target/release/almide
             tools/xtarget-fuzz/target/release/xtarget-fuzz
@@ -110,18 +123,31 @@ jobs:
 
   fuzz:
     if: github.server_url == 'https://github.com'
-    name: Generative differential fuzz (shard ${{ matrix.shard }})
+    name: Generative differential fuzz (shard ${{ matrix.shard }}, ${{ matrix.arch }})
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     # `fail-fast: false` is load-bearing, not hygiene: the whole point of
     # sharding is that one shard dying must not take the night's other shards
     # with it. Keep the shard list and FUZZ_SHARDS in step — the verdict job
     # reads FUZZ_SHARDS to report `shards=k/N`, so a mismatch would understate
     # or overstate the night's coverage.
+    #
+    # Shards 1-4 run x86_64, 5-8 aarch64 (#1411 stage 2): shard NUMBERS are
+    # globally unique so the derived seeds (`run_id * 16 + shard`) and the
+    # per-shard artifact names never collide across arches, and the verdict
+    # job's `shards=k/N` accounting keeps meaning "of the whole night".
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        include:
+          - { shard: 1, os: ubuntu-latest, arch: x86_64 }
+          - { shard: 2, os: ubuntu-latest, arch: x86_64 }
+          - { shard: 3, os: ubuntu-latest, arch: x86_64 }
+          - { shard: 4, os: ubuntu-latest, arch: x86_64 }
+          - { shard: 5, os: ubuntu-24.04-arm, arch: aarch64 }
+          - { shard: 6, os: ubuntu-24.04-arm, arch: aarch64 }
+          - { shard: 7, os: ubuntu-24.04-arm, arch: aarch64 }
+          - { shard: 8, os: ubuntu-24.04-arm, arch: aarch64 }
     # Hard ceiling well above the fuzz budget so a hung child can never
     # wedge the runner indefinitely, with room for a dispatch run that raises
     # `minutes`.
@@ -134,7 +160,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v8
         with:
-          name: fuzz-binaries-${{ github.run_id }}
+          name: fuzz-binaries-${{ github.run_id }}-${{ matrix.arch }}
 
       - name: Restore the executable bit
         # `upload-artifact` does not preserve the mode.
@@ -145,8 +171,8 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v47.0.3-${{ matrix.arch }}-linux.tar.xz
+          key: wasmtime-v47.0.3-${{ matrix.arch }}-linux
       - name: Install wasmtime
         # Pinned + cached + retried (matches develop's ci.yml): the exact-release
         # asset download is per-IP rate-limited (a 429 storm burned all retries
@@ -155,7 +181,7 @@ jobs:
         # and the cache key together.
         run: |
           VERSION=v47.0.3
-          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          TARBALL="wasmtime-${VERSION}-${{ matrix.arch }}-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
               curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
@@ -254,6 +280,14 @@ jobs:
       # finding after its kind + minimized summary, so two shards that trip the
       # same bug from different seeds produce the same name. Counting those
       # twice would inflate the night and file a duplicate issue.
+      #
+      # The name's KIND prefix also carries the class split (#1235): `Slow__*`
+      # findings are perf-class — one leg outran the budget but completed,
+      # byte-identical, at the fuzzer's 10x confirm re-run. They are recorded,
+      # uploaded, and issue-tracked under the perf label, but they do NOT fail
+      # the night: the correctness gate is for divergence and nontermination,
+      # and the 0.57.0 release gate showed a quadratic-slow run (#1229) going
+      # red as a phantom "Hang".
       - name: Aggregate findings
         id: agg
         run: |
@@ -265,7 +299,10 @@ jobs:
             done
           fi
           COUNT=$(find night-findings -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          SLOW=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' | wc -l | tr -d ' ')
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "slow=$SLOW" >> "$GITHUB_OUTPUT"
+          echo "correctness=$((COUNT - SLOW))" >> "$GITHUB_OUTPUT"
 
       - name: Campaign verdict
         run: |
@@ -273,6 +310,7 @@ jobs:
             "${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}" \
             "${{ env.FUZZ_SHARDS }}" \
             "${{ steps.agg.outputs.findings }}" \
+            "${{ steps.agg.outputs.slow }}" \
             >> "$GITHUB_STEP_SUMMARY" || true
           exit 0
 
@@ -285,13 +323,14 @@ jobs:
           retention-days: 30
 
       - name: Open / update tracking issue
-        if: steps.agg.outputs.findings != '0'
+        if: steps.agg.outputs.correctness != '0'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COUNT="${{ steps.agg.outputs.findings }}"
+          COUNT="${{ steps.agg.outputs.correctness }}"
           TITLE="Nightly fuzz: $COUNT cross-target finding(s)"
-          SUMMARY=$(find night-findings -name meta.txt -exec cat {} \; \
+          SUMMARY=$(find night-findings -mindepth 1 -maxdepth 1 -type d ! -name 'Slow__*' \
+            -exec cat {}/meta.txt \; \
             | grep -E '^(kind|summary|reproduce)' | head -60 || true)
           BODY=$(cat <<EOF
           The nightly generative differential fuzzer recorded **$COUNT** unique finding(s)
@@ -320,14 +359,56 @@ jobs:
             gh issue create --title "$TITLE" --body "$BODY" --label fuzz
           fi
 
-      # FINDINGS, and only findings, make the night red. Coverage lost to a
-      # reclaimed runner is reported by the verdict as `shards=k/N` and is NOT
-      # fatal — failing on it would put the infra noise the sharding exists to
-      # absorb straight back into the signal, which is how #924 got stuck.
-      - name: Fail the night on findings
-        if: steps.agg.outputs.findings != '0'
+      # Perf-class Slow findings route to their OWN issue under their own
+      # label (#1235): they are real findings — an order-of-magnitude budget
+      # overrun on one leg — but they are perf debt (the #1229 discipline),
+      # not correctness, and mixing them into the correctness issue would
+      # re-red the metric the class split exists to keep honest.
+      - name: Open / update perf (slow) tracking issue
+        if: steps.agg.outputs.slow != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::error::the campaign recorded ${{ steps.agg.outputs.findings }} finding(s) — see the uploaded artifacts and the tracking issue"
+          COUNT="${{ steps.agg.outputs.slow }}"
+          TITLE="Nightly fuzz: $COUNT slow finding(s) (perf-class)"
+          SUMMARY=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' \
+            -exec cat {}/meta.txt \; \
+            | grep -E '^(kind|summary|reproduce)' | head -60 || true)
+          BODY=$(cat <<EOF
+          The nightly fuzzer recorded **$COUNT** perf-class Slow finding(s): a leg
+          outran the per-program budget but completed byte-identical at the 10x
+          confirm re-run. Not correctness — the night stays green — but each is a
+          real order-of-magnitude perf gap (the #1229 class).
+
+          Artifacts are attached to
+          [run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          <details><summary>Finding summaries</summary>
+
+          \`\`\`
+          $SUMMARY
+          \`\`\`
+
+          </details>
+          EOF
+          )
+          EXISTING=$(gh issue list --label fuzz-perf --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh label create fuzz-perf --color D93F0B --description "Perf-class (Slow) findings from the nightly fuzzer" 2>/dev/null || true
+            gh issue create --title "$TITLE" --body "$BODY" --label fuzz-perf
+          fi
+
+      # CORRECTNESS findings, and only those, make the night red. Coverage lost
+      # to a reclaimed runner is reported by the verdict as `shards=k/N` and is
+      # NOT fatal — failing on it would put the infra noise the sharding exists
+      # to absorb straight back into the signal, which is how #924 got stuck.
+      # Slow findings are tracked above and do not fail the night (#1235).
+      - name: Fail the night on correctness findings
+        if: steps.agg.outputs.correctness != '0'
+        run: |
+          echo "::error::the campaign recorded ${{ steps.agg.outputs.correctness }} correctness finding(s) — see the uploaded artifacts and the tracking issue"
           exit 1
 
   coverage-ratchet:

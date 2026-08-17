@@ -1,0 +1,33 @@
+// @contract: C-260, C-263
+// ALS-D1 (docs/specs/als/expressions.md): the declaration family in one
+// program — explicit import (json parse/stringify round-trip), a variant
+// type declaration, top-level lets (Int and String) read from a fn body,
+// fn and effect-fn declarations. Identical observables on both targets.
+// The `module` header leads, under this very comment block: that shape used
+// to be un-formattable (#1323 sank `module` below the imports), so this
+// fixture doubles as the fmt-gated proof that a commented module header
+// survives the formatter.
+module app
+
+import json
+
+type Mode = | Fast | Careful
+
+let LIMIT = 100
+
+let GREETING = "hi"
+
+fn scaled(x: Int) -> Int = x * LIMIT
+
+fn describe(m: Mode) -> String = match m {
+  Fast => "fast",
+  Careful => "careful",
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(scaled(3)))
+  println(GREETING)
+  println(describe(Careful))
+  let s = json.stringify(json.parse("[1,2]") ?? json.parse("[]")!)
+  println(s)
+}

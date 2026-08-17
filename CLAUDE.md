@@ -36,6 +36,10 @@ Correct flow:
 4. `git tag vX.Y.Z <merge-commit>` and `git push origin vX.Y.Z`
 5. **Let the workflow create the release.** It auto-generates notes from commits.
 6. If you want custom notes, edit after the workflow completes: `gh release edit vX.Y.Z --notes "..."`
+7. **Seal the release evidence** (audit freeze): `bash scripts/release-seal.sh gen vX.Y.Z`,
+   fill the `[recorded]` fields (the release-gate fuzz run, the asset inventory), commit
+   `proofs/releases/vX.Y.Z.toml` on `develop`. CI re-measures every `[derived]` field
+   against the tag forever after — the seal is the release's immutable evidence record.
 
 If you already shipped a broken release:
 
@@ -286,7 +290,7 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 - **This repo** = compiler correctness. `spec/` tests, `cargo test`, grammar-lab experiments, lang-bench.
 - **[almide/almide-dojo](https://github.com/almide/almide-dojo)** = LLM writability. Daily MSR measurement, task bank, malicious-hint detection, diagnostics feedback loop.
 - All MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` were removed from this repo (2026-08-08) — the local harness had an empty `results/` since the April 2026 hand-off, so running it would have overwritten Dojo's README number with a locally-measured one. Recover with `git log --diff-filter=D -- research/benchmark/msr/`.
-- Still here and live: `research/benchmark/perf/` (gated by `scripts/check-perf-ratio.sh`), `lang-bench/`, `exercises/` (corpus for `tools/v1_gap_measure.py`), `grammar-lab/`, `spike/`.
+- Still here and live: `research/benchmark/perf/` (gated by `scripts/check-perf-ratio.sh`), `research/benchmark/lang-bench/`, `research/benchmark/exercises/` (corpus for `tools/v1_gap_measure.py`), `research/grammar-lab/`, `research/spike/`.
 - The bridge: Dojo's PR gate will run a task subset as part of this repo's CI (future).
 
 ## Behavior Contracts

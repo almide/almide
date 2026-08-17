@@ -20,31 +20,6 @@ fn heap_handle_locals(ops: &[Op]) -> Vec<ValueId> {
     heap_locals
 }
 
-/// Assign each distinct string label a data-section offset starting at `base`,
-/// emitting one `(data …)` line per label. Deduplicated, so a label used twice
-/// is stored once.
-fn collect_label_data(
-    ops: &[Op],
-    base: u32,
-    label_off: &mut BTreeMap<String, (u32, u32)>,
-    data: &mut String,
-) {
-    let mut cursor = base;
-    for op in ops {
-        let Op::Call { args, .. } = op else { continue };
-        for a in args {
-            let CallArg::Label(label) = a else { continue };
-            if label_off.contains_key(label) {
-                continue;
-            }
-            let len = label.len() as u32;
-            label_off.insert(label.clone(), (cursor, len));
-            data.push_str(&format!("  (data (i32.const {cursor}) {:?})\n", label));
-            cursor += len;
-        }
-    }
-}
-
 /// Rewrite every unresolvable-as-spelled call / drop target that HAS an alias to that
 /// alias, in place. Extracted verbatim from [`try_render_wasm_program`] (codopsy
 /// round-3 sweep, #852).

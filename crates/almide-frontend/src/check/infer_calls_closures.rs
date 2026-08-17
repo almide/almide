@@ -126,6 +126,11 @@ impl Checker {
 
             ExprKind::Paren { expr, .. } => self.infer_expr(expr),
             ExprKind::Break | ExprKind::Continue => Ty::Unit,
+            // Typed holes (#1325): `_` in EXPRESSION position and `todo("msg")`
+            // take whatever type the context demands — that is the whole point
+            // of the sketch-then-fill workflow — and panic if reached at run
+            // time. Do NOT confuse this with `ExprKind::Placeholder`, the
+            // call-ARGUMENT `_`, which is E046 (see `reject_arg_placeholders`).
             ExprKind::Hole | ExprKind::Todo { .. } => self.fresh_var(),
             _ => return None,
         })
@@ -142,6 +147,10 @@ impl Checker {
             ExprKind::Unwrap { .. } => self.infer_expr_g3_unwrap(expr),
             ExprKind::UnwrapOr { .. } => self.infer_expr_g3_unwrap_or(expr),
             ExprKind::ToOption { .. } => self.infer_expr_g3_to_option(expr),
+            // `Placeholder` already reported itself as E046 at its enclosing
+            // Call (`reject_arg_placeholders`) — the parser builds it nowhere
+            // else — so this arm stays silent and only supplies the recovery
+            // type, exactly like a parse `Error`.
             ExprKind::Error | ExprKind::Placeholder => Ty::Unknown,
 
             ExprKind::MapLiteral { entries, .. } => {
@@ -487,6 +496,7 @@ impl Checker {
         // save/restore the previous value.
         let prev_call = self.call_span_hint.take();
         self.call_span_hint = span;
+        self.reject_arg_placeholders(&**callee, args.as_slice(), span);
         let ty = self.infer_call(callee, args, named_args, type_args);
         self.call_span_hint = prev_call;
         // A generic collection constructor whose element type NO argument
@@ -512,6 +522,112 @@ impl Checker {
             self.join_sized_peers(&peers, "assert argument");
         }
         ty
+    }
+
+    /// E046 (#1325): reject `_` in a call ARGUMENT.
+    ///
+    /// `ExprKind::Placeholder` is produced by exactly one parser site —
+    /// `parse_one_call_arg`, a bare `_` in a positional argument slot — and
+    /// nothing downstream can give it a value: lowering turns it into `Unit`,
+    /// so `add(_, 10)` emitted `add((), 10i64)` and died at BUILD behind
+    /// "codegen produced invalid Rust — this is an Almide bug", blaming the
+    /// compiler for a user error (the failure mode #1266 closed for tuple
+    /// indexing). Rejecting it here makes `almide check` the place it is
+    /// caught.
+    ///
+    /// The diagnostic must not imply partial application, because MEASURED it
+    /// is not: `let v = add(_, 10)` typed `v` as add's RETURN type (the emitted
+    /// Rust was `let v: i64 = add((), 10i64)`), and in pipe position the `_`
+    /// counts as an extra positional argument (`5 |> add(_, 10)` is E004,
+    /// "expects 2 argument(s) but got 3"). The steer is a lambda, which is the
+    /// construct that actually expresses "supply this one later".
+    ///
+    /// `_` in EXPRESSION position is `ExprKind::Hole`, a sanctioned typed hole,
+    /// and never reaches here.
+    fn reject_arg_placeholders(
+        &mut self,
+        callee: &ast::Expr,
+        args: &[ast::Expr],
+        call_span: Option<ast::Span>,
+    ) {
+        if !args.iter().any(|a| matches!(a.kind, ExprKind::Placeholder)) { return; }
+        let name = callee_display_name(callee);
+        // One snippet for the whole call: with two `_`s, a per-argument snippet
+        // that rewrote only "its own" would still carry the other `_` and so
+        // would not compile.
+        let snippet = self.placeholder_lambda_snippet(call_span, args)
+            .unwrap_or_else(|| match &name {
+                Some(n) => format!("(x) => {}(x, /* the other arguments */)", n),
+                None => "(x) => f(x, 10)".to_string(),
+            });
+        for (idx, arg) in args.iter().enumerate() {
+            if !matches!(arg.kind, ExprKind::Placeholder) { continue; }
+            let position = match &name {
+                Some(n) => format!("argument {} of {}()", idx + 1, n),
+                None => format!("argument {}", idx + 1),
+            };
+            let mut diag = super::err(
+                format!("placeholder `_` is not valid in a call argument ({position})"),
+                "`_` here is a hole with no value — it does NOT partially apply the call. \
+                 Name the missing value with a lambda instead.",
+                "call argument",
+            )
+            .with_code("E046")
+            .with_try(snippet.clone());
+            // Point at the `_` itself, not at whatever expression `emit`'s
+            // `current_span` happens to hold when the call is inferred.
+            if let (Some(file), Some(span)) = (self.source_file.clone(), arg.span) {
+                diag = diag.at_span(&file, span);
+            }
+            self.emit(diag);
+        }
+    }
+
+    /// Build the `try:` snippet for E046 by lifting the call's own source text
+    /// and rewriting EVERY `_` argument to a lambda parameter — so the steer
+    /// reads `(x) => add(x, 10)` for the user's actual call, and
+    /// `(x1, x2) => mk(x1, x2)` when the call holds two of them (rewriting one
+    /// at a time would leave the other `_` in a snippet that cannot compile).
+    /// `None` when the source text is unavailable (IDE / playground), the call
+    /// spans multiple lines (`Span` is single-line), or any placeholder column
+    /// does not actually hold the `_` we expect.
+    fn placeholder_lambda_snippet(
+        &self,
+        call_span: Option<ast::Span>,
+        args: &[ast::Expr],
+    ) -> Option<String> {
+        let call = call_span?;
+        if call.end_col <= call.col { return None; }
+        let mut offsets: Vec<usize> = Vec::new();
+        for arg in args {
+            if !matches!(arg.kind, ExprKind::Placeholder) { continue; }
+            let ph = arg.span?;
+            if ph.line != call.line || ph.col < call.col || ph.col >= call.end_col {
+                return None;
+            }
+            offsets.push(ph.col - call.col);
+        }
+        if offsets.is_empty() { return None; }
+        offsets.sort_unstable();
+        let names: Vec<String> = if offsets.len() == 1 {
+            vec!["x".to_string()]
+        } else {
+            (1..=offsets.len()).map(|i| format!("x{i}")).collect()
+        };
+        let text = self.source_slice(call)?;
+        let mut out = String::new();
+        let mut next = 0usize;
+        for (i, c) in text.chars().enumerate() {
+            if next < offsets.len() && i == offsets[next] {
+                if c != '_' { return None; }
+                out.push_str(&names[next]);
+                next += 1;
+            } else {
+                out.push(c);
+            }
+        }
+        if next != offsets.len() { return None; }
+        Some(format!("({}) => {}", names.join(", "), out))
     }
 
     /// `ExprKind::Lambda` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
@@ -730,9 +846,22 @@ impl Checker {
         }
         const FALLIBLE_HOF_CORE: &[&str] =
             &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
+        // #1144 (C-220's tracked cell, now C-274): the fs streaming walkers
+        // take the same rule — but only the two SEQUENTIAL, callback-driven
+        // cells. `fold_lines_range` / `fold_lines_chunked` are deliberately
+        // excluded: a partitioned walk has no defined FIRST err (which chunk
+        // errs first is a thread-schedule observable), so there is no stop
+        // point to short-circuit at. The matrix in
+        // tests/fs_streaming_family_gate_test.rs cross-checks this table.
+        const FALLIBLE_HOF_FS: &[&str] = &["fold_lines", "for_each_line"];
         let ExprKind::Member { object, field } = &mut callee.kind else { return };
         let ExprKind::Ident { name: mod_name, .. } = &object.kind else { return };
-        if mod_name.as_str() != "list" || !FALLIBLE_HOF_CORE.contains(&field.as_str()) {
+        let known = match mod_name.as_str() {
+            "list" => FALLIBLE_HOF_CORE.contains(&field.as_str()),
+            "fs" => FALLIBLE_HOF_FS.contains(&field.as_str()),
+            _ => false,
+        };
+        if !known {
             return;
         }
         fn contains_unwrap(e: &mut ast::Expr) -> bool {
@@ -1011,6 +1140,20 @@ impl Checker {
         if let ExprKind::Call { callee, args, .. } = &mut right.kind {
             self.normalize_fallible_hof_callback(callee, args);
         }
+        // E046 (#1325): the pipe RHS is inferred HERE, never through
+        // `infer_expr_g3_call`, so the call-argument `_` needs its own
+        // rejection on this path. Measured: without it `5 |> add3(_, 10)`
+        // (arity 3, so the extra piped arg does NOT trip E004) checked clean
+        // and died at build as "codegen produced invalid Rust".
+        //
+        // `None` for the call span deliberately suppresses the source-derived
+        // `try:` snippet here: the pipe already occupies argument 1, so
+        // `(x) => add3(x, 10)` — what lifting `add3(_, 10)` verbatim would
+        // produce — has the wrong arity and would be a plausible-looking wrong
+        // fix. The generic shape steer is the honest one on this path.
+        if let ExprKind::Call { callee, args, .. } = &right.kind {
+            self.reject_arg_placeholders(&**callee, args.as_slice(), None);
+        }
         let left_ty = self.infer_expr(left);
         // Resolve TypeVars eagerly via UnionFind — earlier pipes in the chain
         // have already been unified (constrain() calls unify_infer immediately),
@@ -1069,4 +1212,22 @@ impl Checker {
         }
     }
 
+}
+
+/// Source spelling of a call's callee, for diagnostics that quote it back
+/// (E046). Covers the two spellings a user writes: a bare name and a
+/// module-qualified / UFCS `a.b`. Anything else (a computed callee, an
+/// indexed element) has no short name worth quoting — the caller falls back
+/// to naming the argument position alone.
+fn callee_display_name(callee: &ast::Expr) -> Option<String> {
+    match &callee.kind {
+        ExprKind::Ident { name } | ExprKind::TypeName { name } => Some(name.to_string()),
+        ExprKind::Member { object, field } => match &object.kind {
+            ExprKind::Ident { name } | ExprKind::TypeName { name } => {
+                Some(format!("{}.{}", name, field))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }

@@ -11,6 +11,19 @@ pub fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallbac
         .unwrap_or_else(|| fallback.to_string())
 }
 
+/// Escape user text so it can be spliced verbatim into a Rust `"…"` literal.
+/// Backslash FIRST (escaping it after the quotes would double-escape the
+/// backslashes this function itself introduced), then the characters that
+/// terminate or re-open a literal.
+pub fn escape_rust_str(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
+        .replace('\r', "\\r")
+}
+
 /// Add statement terminator (`;` in Rust, `;` in TS) if the rendered string doesn't already end with one
 pub fn terminate_stmt(ctx: &RenderContext, rendered: String) -> String {
     let term = template_or(ctx, "stmt_terminator", &[], ";");
@@ -159,6 +172,18 @@ pub fn render_type_box_fn(ctx: &RenderContext, ty: &Ty, bounds: &str) -> String 
     }
 }
 
+/// Join tuple element texts for Rust emission — literals, types, and
+/// patterns alike. A 1-tuple MUST keep a trailing comma: `(x)` is a
+/// parenthesized scalar in Rust, not a tuple, so emitting `let t: (i64) =
+/// (5i64);` silently scalarized `t` and the subsequent `t.0` was rustc
+/// E0610 (#1267).
+pub(crate) fn tuple_elems_join<S: AsRef<str>>(parts: &[S]) -> String {
+    match parts {
+        [single] => format!("{},", single.as_ref()),
+        _ => parts.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "),
+    }
+}
+
 /// True if `ty` mentions a function type anywhere (directly or nested).
 pub(super) fn ty_mentions_fn(ty: &Ty) -> bool {
     match ty {
@@ -193,7 +218,7 @@ pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
                 format!("std::rc::Rc<dyn Fn({}) -> {}>", params_str, ret_str))
         }
         Ty::Tuple(elems) => {
-            let parts = elems.iter().map(&rf).collect::<Vec<_>>().join(", ");
+            let parts = tuple_elems_join(&elems.iter().map(&rf).collect::<Vec<_>>());
             tmpl("type_tuple", &[("elements", parts.as_str())], format!("({})", parts))
         }
         Ty::Applied(TCI::List, args) if args.len() == 1 => {

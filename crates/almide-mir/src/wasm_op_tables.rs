@@ -7,7 +7,7 @@
 /// is an ordinary read. An `IfThen`'s `dst` is the definition, not a read; the
 /// `Else`/`EndIf` `val`s are reads (they feed the enclosing if-result).
 pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
-    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
+    let _args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
         for a in args {
             match a {
                 CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
@@ -22,7 +22,8 @@ pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
             Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                 out.push(*len)
             }
-            Init::OptSome { payload } => out.push(*payload),
+            Init::OptSome { payload } | Init::ResOkScalar { payload } => out.push(*payload),
+            Init::ResErrStr { piece } => out.push(*piece),
             Init::Opaque
             | Init::Empty
             | Init::OptNone
@@ -94,7 +95,8 @@ fn op_reads_flow(op: &Op, out: &mut Vec<ValueId>) {
         }
         Op::Prim { args, .. } => out.extend(args.iter().copied()),
         Op::IfThen { cond, .. } => out.push(*cond),
-        Op::Else { val } | Op::EndIf { val } => {
+        // `Return` READS its returned value exactly like an arm-result marker.
+        Op::Else { val } | Op::EndIf { val } | Op::Return { val } => {
             if let Some(v) = val {
                 out.push(*v);
             }
@@ -126,7 +128,7 @@ fn op_reads_flow(op: &Op, out: &mut Vec<ValueId>) {
 /// generic occurrence walk the render-level peepholes (#806 step 3b) use to
 /// prove a value is single-use before fusing its def into its use site.
 pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
-    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
+    let _args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
         for a in args {
             match a {
                 CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
@@ -142,7 +144,8 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
                 Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                     out.push(*len)
                 }
-                Init::OptSome { payload } => out.push(*payload),
+                Init::OptSome { payload } | Init::ResOkScalar { payload } => out.push(*payload),
+                Init::ResErrStr { piece } => out.push(*piece),
                 Init::Opaque
                 | Init::Empty
                 | Init::OptNone
@@ -232,7 +235,7 @@ fn op_values_flow(op: &Op, out: &mut Vec<ValueId>) {
             out.push(*cond);
             push_opt(out, *dst);
         }
-        Op::Else { val } | Op::EndIf { val } => push_opt(out, *val),
+        Op::Else { val } | Op::EndIf { val } | Op::Return { val } => push_opt(out, *val),
         Op::LoopBreakUnless { cond } => out.push(*cond),
         Op::LoopStart | Op::LoopEnd => {}
         // The data half's families — handled by the caller; listed (not `_`)

@@ -1,0 +1,165 @@
+# result-family-from-type — layout is a function of the type, names only choose code
+
+**Status**: active (phase 0 landed 2026-08-14; this doc is the arc's constitution)
+**Driver**: #1406 and its four documented siblings — one bug class, five incidents.
+**Survey evidence**: `../almide-references/RESEARCH.md` (8-compiler survey, file:line
+citations; kept outside the repo).
+
+## The disease
+
+The MIR lowering decides a call result's physical layout ("family") from
+`(module, func)` NAME tables:
+
+- `is_self_host_result_module_fn` (scalar len-as-tag family, ~27 rows)
+- `is_self_host_result_str_module_fn` (heap-Ok cap-as-tag family, ~37 rows)
+
+Five incidents from this one class, all documented in-tree:
+
+1. **#1406-D7** — classify sites see the PRE-routing name (`fan.any_map` covers
+   nine pairings; `fan_any_call_name` suffixes at emit), so name rows for the
+   routed forms never fire; String-output pairings mis-familied → wall.
+2. **C-145** — mono-suffixed `or_else__…` missed every name-keyed decision until
+   `base_stdlib_fn_name` existed.
+3. **#1144** — a carrier name BEGINNING with `__` split to the empty string;
+   every name-keyed decision silently missed; the whole fn walled.
+4. **fs.copy/append mis-familied** — listed in the str family for a while; every
+   err read back as ok (silent wrong-branch; mod_p5.rs:34-49 records it).
+5. **Permanent point-wise maintenance** — every new stdlib pairing needs table
+   rows; CLAUDE.md's "extend by matrix, never point-wise" rule is structurally
+   violated by the tables' existence.
+
+## The root cause
+
+Layout is not a function of the type. ONE type — `Result[Unit, String]` — has
+TWO physical layouts today:
+
+- **len-as-tag** (@4 = 0/1, payload @12): ctor-built via
+  `materialize_result_ok` — fs.copy, fs.append, fs.remove, fs.write_bytes,
+  fs.write_bytes_raw.
+- **cap-as-tag** (tag @16, payload @12, len@4=0 Ok convention): prim-render
+  built ($write_text_file family) — fs.write, fs.mkdir_p, fs.rename,
+  fs.remove_all.
+
+Because the split is producer-identity, only a name can recover it — that is
+WHY the name tables exist. Every other Result type is already consistent:
+scalar-Ok (`Int`/`Float`) is always len-as-tag; heap-Ok (String/List/Value/…)
+is always cap-as-tag.
+
+## What the surveyed compilers do (one line each)
+
+- rustc: return ABI = `arg_of(sig.output())`; intrinsic name tables (436 arms)
+  choose instructions and are debug-asserted against the type-derived layout.
+- Swift: one cached `TypeLowering*` per type key (no decl/name field); the one
+  name-derived rule (ObjC selector families) folds into the function TYPE at
+  import time.
+- Zig: `firstParamSRet(cc, return_type, target)`; compiler_rt names are built
+  FROM types — name is an output of the type decision, never an input.
+- Roc: interned layout stored on every LIR local; the builtin name registry
+  carries symbol + RC contract, explicitly never layout.
+- Lean 4: type → closed 14-variant IRType; its ONE name-keyed result exception
+  (3 Array fns) is duplicated across 3 passes with unenforced "Keep in sync"
+  comments — the disease at N=3. Almide is at N=64.
+- Koka: `cType :: Type -> CType`; the only name table covers parameter borrows;
+  results are ALWAYS owned +1 (an ABI constant — nothing to track).
+- Grain: uniform tagged word + a 1-bit Managed flag; freeing reads runtime tags.
+
+**The law (8/8): names choose code; types choose layout.**
+
+## The cure, in phases
+
+### Phase 0 — tactical #1406 (LANDED with this doc)
+`returns_foreign_result` can-err seed + `is_fan_any_map`+`is_heap_ok_result`
+type-split at the classify sites + C-004 fixture. Proves the type-split shape
+on the worst offender. The special case dissolves into the general rule in
+Phase 2.
+
+### Phase 1 — make `family = f(Ty)` TRUE: unify `Result[Unit, String]`
+Route the ok(())/err(m) ctor rails for `Result[Unit, String]` through the
+cap-as-tag materialization (the layout fs.write's prim family already uses:
+Ok = len@4=0, @12=0, tag@16=0; Err = len@4=1, @12=msg, tag@16=1). Move the five
+ctor-built names from the scalar table to the str table. Drop routing is
+UNCHANGED (flat `DropListStr` is exact for both arms in this layout — the
+fs.write precedent). After this phase the type→family map is total:
+
+```
+result_family(Result[T, E]) = HeapOk (cap-as-tag @16)  if T is heap or Unit
+                              Scalar (len-as-tag @4)   otherwise (Int/Float/Bool)
+```
+
+Gate: full corpus (418 wasm_cross fixtures, 3-way), ABI probe diff, suites.
+
+### Phase 2 — ONE family function, name tables carry no family
+Introduce `result_family(ty: &Ty) -> ResultFamily` next to
+`is_heap_ok_result` as THE single decision point. Merge the two name tables
+into ONE set meaning only "this call's result is materialized" (union of both
+tables). Rewrite the classify sites (bind: binds_p2_c.rs; subject:
+tracked_calls.rs + control.rs; the control_p2_b.rs:30/73 heap-ok refinement
+dance) to `materialized(name) && family(ty)`. Delete `is_fan_any_map` — the
+general rule covers it. The fs.copy incident becomes UNREPRESENTABLE: no row
+can put a type in the wrong family, because rows no longer carry family.
+
+### Phase 3 — derive "materialized" from the registry (kill the hand table)
+The remaining name set duplicates knowledge the self_host_registry + prim
+floors already own. Derive it: a Module call materializes its Result iff the
+ROUTED name (`list_heap_call_name` — the single router) links in
+`self_host_registry` (ctor-rail layouts are canonical by construction) or is a
+prim floor. Land an executable gate that walks every registry-linked
+Result-returning fn and asserts the classify sites and `result_family` agree —
+the matrix-gate discipline: a gated matrix cannot drift.
+
+### Phase 4 — seed once (Stage-C direction) + close
+The per-value-repr design (Roc's `Local { layout_idx }` — makes "untracked"
+unrepresentable), WITH the seed-once entry point as its first step, is filed as
+#1414 — it is the natural continuation, not part of this arc: the set-insertion
+mechanics it unifies are drop-routing code where a no-behavior-change refactor
+still carries real risk, and the decision logic this arc set out to centralize
+(`result_family` + the merged set) already IS the single point. Update
+ARCHITECTURE.md; move this doc to done/ with the measured deltas.
+
+## Landed state (2026-08-14)
+
+- Phase 0: cd0d01820..f837fa0a5 (can-err seed, type-split, C-004 fixture, this doc).
+- Phase 1: `materialize_result_err_str` (@16 tag on ctor Result-err blocks —
+  superset-compatible: len readers unchanged), the five ctor-built
+  `Result[Unit, String]` fns moved to the str family; `is_result_unit_str_ty`
+  admitted on the `??` scalar route. `Result[Unit, String]` now has ONE layout.
+- Phase 2: `result_family(ty)` + `is_self_host_materialized_result_fn` (merged
+  set); tracked_calls.rs / binds_p2_c.rs / control_p2_b.rs consult them; the
+  #1406 `is_fan_any_map` special case and the control_p2_b heap-ok escape
+  hatch dissolved into the general rule.
+- Phase 3 (first slice): three gate tests in
+  crates/almide-mir/src/lower/tests_result_family.rs pin the family function's
+  totality, the nine-pairings-one-name split, and the name-mangling incident
+  classes (C-145, #1144). Full registry-derivation of the merged set remains
+  this arc's open tail — do it when the registry grows a declared-return-type
+  column; until then the merged set is two storage tables with no family
+  meaning.
+- Stage C: #1414.
+- The `??` route zoo (the same disease one level up — five per-payload-class
+  routes behind a point-wise admission list): CONTAINED 2026-08-15. The
+  terminal scalar route now type-guards (an admitted-but-unroutable operand
+  declines to an honest wall — the silent wrong-branch class is
+  unrepresentable), the admission list is a named single-source predicate
+  (`unwrap_or_heap_ok_route_exists` — route CAPABILITY, not family), and the
+  endgame desugar (`?? → match`, one rewrite, zoo deleted) is implemented
+  behind `ALMIDE_QQ_DESUGAR=all` with a MEASURED residual of 13 fixtures —
+  the acceptance matrix lives in #1418. Two coverage gaps closed on the way:
+  `?? ()` (the Unit-is-0 fallback arm) and user-fn `Result[Unit, String] ??`.
+
+## Option family — surveyed 2026-08-14, NO family disease
+
+`is_self_host_option_module_fn` (mod_p4.rs) was audited for the same bug class
+and is CLEAN: the name table means only "materialized" (exactly what the Result
+tables became in Phase 2) — payload routing is already type-driven at the
+classify sites (`is_heap_elem_list_ty`, the `opt_str_int` tuple route, …), and
+the checked numeric-conversion family is admitted by SHAPE with a drift gate
+(`checked_conversion_family_is_admitted`), which is ahead of where Results
+were. The only shared debt is the registry-derivation tail below.
+
+## Non-goals
+
+- Physical unification of len-as-tag and cap-as-tag into one block shape
+  (Phase 1 only removes the one COLLISION; scalar-Ok stays len-as-tag — that
+  split is type-computable, hence harmless).
+- Options / non-Result variants (same pattern, separate arc after this one).
+- v0 leg changes (v0 rides its own lowering; the 3-way oracle guards it).

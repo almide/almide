@@ -46,7 +46,7 @@ impl LowerCtx {
         let payload = self.lower_scalar_value(expr)?;
         let repr = repr_of(ty).ok()?;
         let dst = self.materialize_result_ok(payload, repr);
-        self.materialized_results.insert(dst);
+        self.value_shapes.insert(dst, crate::lower::VariantShape::ResultScalar);
         Some(dst)
     }
 
@@ -54,7 +54,7 @@ impl LowerCtx {
         let payload = self.lower_scalar_value(expr)?;
         let repr = repr_of(ty).ok()?;
         let dst = self.materialize_result_err_scalar(payload, repr);
-        self.materialized_results.insert(dst);
+        self.value_shapes.insert(dst, crate::lower::VariantShape::ResultScalar);
         Some(dst)
     }
 
@@ -94,8 +94,8 @@ impl LowerCtx {
         {
             let obj = self.try_lower_str_list_literal(expr)?;
             let dst = self.materialize_result_str(obj, repr, true, false);
-            self.heap_elem_lists.remove(&dst);
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.get_mut(&dst).map(|d| d.flat_elems = false);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return Some(dst);
         }
         let piece = self.lower_heap_err_common_piece(expr)?;
@@ -112,15 +112,11 @@ impl LowerCtx {
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 let piece = self.result_err_heap_fallback_piece(expr)?;
-                let dst = self.materialize_opt_str_some(piece, repr);
-                // materialize_opt_str_some registers the OPTION read-shape; this value is
-                // a RESULT (len-as-tag, Err = len 1) — a reader that keeps both entries
-                // resolves it as an Option (`is_result = results ∧ ¬options`) and takes
-                // the Err payload as a Some payload (`err("x") ?? 0` returned the String
-                // HANDLE — result_option_matrix's "if with ??"). Result-only tracking.
-                self.materialized_options.remove(&dst);
-                self.materialized_results.insert(dst);
-                Some(dst)
+                // Result-only tracking + the @16 tag live in the builder (it subsumes
+                // the old opt_str_some + remove-options dance; the both-flags bug
+                // class — `err("x") ?? 0` returning the String HANDLE — is recorded
+                // on `materialize_result_err_str` itself).
+                Some(self.materialize_result_err_str(piece, repr))
             }
             _ => None,
         }

@@ -1,0 +1,86 @@
+// @contract: C-274
+// ADR-0006's fallible callback form for the fs streaming walker (#1144, the
+// cell C-220 tracked). `fs.fold_lines(p, z, (a, l) => step(a, l)!)` is
+// rewritten by the checker to the `__fallible_fold_lines` carrier, so the
+// whole call is fallible and the FIRST err ends the walk.
+//
+// The observable this fixture pins is the CALLBACK-INVOCATION TRACE, not just
+// the err message: every invocation appends its line to a log file BEFORE
+// deciding ok/err, so the log IS the invocation list. A form that returned the
+// right err but kept calling the callback (a fold-over-Result wrapper, say)
+// would print `a;bb;bad;ccc;dddd;` here and fail — which is exactly the
+// difference between first-err short-circuit and error-collection.
+//
+// Where the stream stops: the trace's last entry is the failing line on BOTH
+// legs. The native leg additionally stops READING there (the runtime returns
+// out of the BufReader loop); the wasm self-host already had the file in
+// memory before the first line was cut, so reader position is not a wasm
+// observable — C-220's streaming-RSS carve-out, same boundary.
+//
+// SELF-CONTAINED: its own temp dir (never printed — the suffix differs per
+// run), removed at the end.
+//
+// The reference interpreter ABSTAINS on this fixture (ledgered), and the
+// abstention is not respellable — it was checked, not assumed. TWO independent
+// blockers, both shared with fixtures already in the ledger: `fs.fold_lines`
+// has no interp arm at all (crates/almide-interp has no fs-walker glue), and
+// the `Map[String, Int]` accumulator reaches `prim.alloc_map`, which 14 other
+// ledgered fixtures also sit behind. The Map is not a free choice either — it
+// is the ONE accumulator with a fallible wasm twin, so it is what makes this a
+// cross-target fixture at all. Both cross-target gates do vote on it.
+import fs
+
+effect fn step(log: String, acc: Map[String, Int], line: String) -> Map[String, Int] = {
+  fs.append(log, line + ";")!
+  if line == "bad" then err("boom at ${line}")
+  else ok(map.set(acc, line, string.len(line)))
+}
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("xt_fallible_stream")!
+  let p = dir + "/data.txt"
+  let log = dir + "/log.txt"
+  // ── the ok path: every line folds, the callback never errs ──
+  let _w1 = fs.write(p, "a\nbb\nccc\n")!
+  let _l1 = fs.write(log, "")!
+  let m0: Map[String, Int] = map.new()
+  let all = fs.fold_lines(p, m0, (acc, line) => step(log, acc, line)!)!
+  println("ok_n=${map.len(all)} ok_trace=${fs.read_text(log)!}")
+  // ── the err path: the callback errs on line 3 of 5 ──
+  let _w2 = fs.write(p, "a\nbb\nbad\nccc\ndddd\n")!
+  let _l2 = fs.write(log, "")!
+  let m1: Map[String, Int] = map.new()
+  let r = fs.fold_lines(p, m1, (acc, line) => step(log, acc, line)!)
+  match r {
+    ok(m) => println("err_path=ok ${map.len(m)}"),
+    err(e) => println("err_path=err ${e}"),
+  }
+  // The stop point: `a;bb;bad;` — the callback ran through the failing line
+  // and NOT for `ccc` / `dddd`.
+  println("err_trace=${fs.read_text(log)!}")
+  // ── the empty file: zero invocations, init returned ──
+  let _w3 = fs.write(p, "")!
+  let _l3 = fs.write(log, "")!
+  let m2: Map[String, Int] = map.new()
+  let empty = fs.fold_lines(p, m2, (acc, line) => step(log, acc, line)!)!
+  println("empty_n=${map.len(empty)} empty_trace='${fs.read_text(log)!}'")
+  // ── a missing file: the reader's own err, before any invocation ──
+  let _l4 = fs.write(log, "")!
+  let m3: Map[String, Int] = map.new()
+  let missing = fs.fold_lines(dir + "/absent.txt", m3, (acc, line) => step(log, acc, line)!)
+  match missing {
+    ok(_) => println("missing=ok"),
+    err(_) => println("missing=err"),
+  }
+  println("missing_trace='${fs.read_text(log)!}'")
+  // ── the err is the CALLBACK's message, not a wrapper's ──
+  let _w5 = fs.write(p, "bad\n")!
+  let _l5 = fs.write(log, "")!
+  let m4: Map[String, Int] = map.new()
+  let first = fs.fold_lines(p, m4, (acc, line) => step(log, acc, line)!)
+  match first {
+    ok(_) => println("first_line=ok"),
+    err(e) => println("first_line=err ${e}"),
+  }
+  let _rm = fs.remove_all(dir)!
+}

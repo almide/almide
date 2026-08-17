@@ -147,7 +147,7 @@ impl LowerCtx {
         // A self-host Option fn (`list.get`) returns a real materialized Option —
         // track the bound result so a later `match` over the var EXECUTES.
         if is_self_host_option_module_fn(module, func) {
-            self.materialized_options.insert(dst);
+            self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
         }
         // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
         // the closure-valued map read): the result IS a closure block — track it
@@ -157,19 +157,27 @@ impl LowerCtx {
         if matches!(ty, Ty::Fn { .. }) {
             self.closure_values.insert(dst);
         }
-        // A self-host Result fn (`int.parse`) returns a real materialized Result — track it
-        // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
-        if is_self_host_result_module_fn(module, func) {
-            self.materialized_results.insert(dst);
-            // A VARIANT-Err payload (`option.to_result(o, Missing("cfg"))` →
-            // `Result[Int, LoadError]`, #1114's typed-error route): route the drop —
-            // a RICH variant (heap fields) through the generated `$__drop_res_<V>`
-            // (a flat rc_dec would leak the payload's fields), a FLAT one through
-            // the one-level `DropListStr` — which is ALSO what admits the
-            // `err(e)` payload BIND in the statement-position Result match
-            // (`result_err_bind` keys on exactly these two sets). Without this the
-            // bound subject was tracked but its Err bind declined, and the whole
-            // match fell to the untracked-subject wall.
+        // result-family-from-type Phase 2 + #1414 seed-once: the NAME (merged
+        // set) says only "this call's result is a real materialized block";
+        // the SHAPE — family, read tag, drop route — is seeded by the ONE
+        // type-keyed entry point (`seed_variant_value_shape`). The blocks
+        // below add only the refinements that need &self layout knowledge
+        // (the variant-err classes), which the shared seeder cannot host yet.
+        let materialized = crate::lower::is_self_host_materialized_result_fn(module, func);
+        let family = crate::lower::result_family(ty);
+        if materialized {
+            self.seed_variant_value_shape(dst, ty);
+        }
+        // The one refinement the shared seeder cannot host (it needs &self's
+        // variant/record layouts): a VARIANT-Err payload on the scalar family
+        // (`option.to_result(o, Missing("cfg"))` → `Result[Int, LoadError]`,
+        // #1114's typed-error route) — a RICH variant routes the drop through
+        // the generated `$__drop_res_<V>` (a flat rc_dec would leak the
+        // payload's fields), a FLAT one through the one-level `DropListStr`,
+        // which is ALSO what admits the `err(e)` payload BIND in the
+        // statement-position Result match (`result_err_bind` keys on exactly
+        // these two sets).
+        if materialized && family == crate::lower::ResultFamily::Scalar {
             if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = ty {
                 if a.len() == 2 && !is_heap_ty(&a[0]) {
                     if let Some(vname) = self.custom_variant_type_name(&a[1]) {
@@ -177,38 +185,12 @@ impl LowerCtx {
                             crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
                         });
                         if needs_rec {
-                            self.variant_drop_handles.insert(dst, format!("res_{vname}"));
+                            self.value_drops.entry(dst).or_default().named_route = Some(format!("res_{vname}"));
                         } else {
-                            self.heap_elem_lists.insert(dst);
+                            self.value_drops.entry(dst).or_default().flat_elems = true;
                         }
                     }
                 }
-            }
-        }
-        // A self-host HEAP-Ok Result fn (`value.as_string`/`value.as_array`) — track it in the
-        // cap-as-tag set so a `match` reads tag @16 + binds the @12 payload. The DROP differs
-        // by Ok-arm: a `List[Value]` Ok (`value.as_array`) frees recursively
-        // (`value_result_lists` → `DropResultListValue`), else a String Ok flat (`DropListStr`).
-        if crate::lower::is_self_host_result_str_module_fn(module, func) {
-            self.materialized_results_str.insert(dst);
-            if crate::lower::is_result_listval_ty(ty) {
-                self.value_result_lists.insert(dst);
-            } else if crate::lower::is_value_result_ty(ty) {
-                // `Result[Value, String]` (value.get) — a single dynamic Value Ok, freed
-                // recursively by `Op::DropResultValue` (Ok → `$__drop_value`).
-                self.value_result_results.insert(dst);
-            } else if crate::lower::is_res_map_si_ty(ty)
-                || crate::lower::is_res_list_map_si_ty(ty)
-            {
-                // fs.fold_lines msi / chunked — the tag-aware `$__drop_res_msi` /
-                // `$__drop_res_lmsi` (Ok → the skv key sweep); heap_elem_lists
-                // also inserted for the bind-gate admission (drop precedence:
-                // variant_drop_handles wins).
-                let route = if crate::lower::is_res_map_si_ty(ty) { "res_msi" } else { "res_lmsi" };
-                self.variant_drop_handles.insert(dst, route.to_string());
-                self.heap_elem_lists.insert(dst);
-            } else {
-                self.heap_elem_lists.insert(dst);
             }
         }
     }
@@ -238,46 +220,46 @@ impl LowerCtx {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
             // either flat class would leak or double-free one side).
-            self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
-            self.materialized_results_str.insert(dst);
+            self.value_drops.entry(dst).or_default().named_route = Some("res_ilsl".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
         if crate::lower::is_list_list_str_ty(ty) {
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return true;
         }
         if crate::lower::is_list_str_str_ty(ty) {
             // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
             // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
-            self.str_str_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().str_str_elems = true;
             return true;
         }
         if crate::lower::is_list_int_str_ty(ty) {
             // `List[(Int,String)]` (list.enumerate) — recursive `$__drop_list_int_str`; the flat
             // heap_elem_lists DropListStr would leak each tuple's String (a 10⁴ loop OOMs).
-            self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("list_int_str".to_string());
             return true;
         }
         if crate::lower::is_map_ivh_ty(ty) {
             // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
-            self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_ivh".to_string());
             return true;
         }
         if crate::lower::is_map_fn_ty(ty) {
             // `Map[String, <Fn>]` — `$__drop_map_mclo` frees each value via
             // `__drop_closure` (the hval flat rc_dec would leak captured env).
-            self.variant_drop_handles.insert(dst, "map_mclo".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_mclo".to_string());
             return true;
         }
         if crate::lower::is_map_hval_ty(ty) {
             // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
-            self.variant_drop_handles.insert(dst, "map_hval".to_string());
+            self.value_drops.entry(dst).or_default().named_route = Some("map_hval".to_string());
             return true;
         }
         if let Some(hname) = self.map_named_value_drop(ty) {
             // `Map[String, <record/variant>]` — the desugared map literal's
             // from_list result (type-driven sweep; see `map_named_value_drop`).
-            self.variant_drop_handles.insert(dst, hname);
+            self.value_drops.entry(dst).or_default().named_route = Some(hname);
             return true;
         }
         false
@@ -288,14 +270,14 @@ impl LowerCtx {
     /// (only reached when the first half's chain did not match).
     fn seed_call_module_heap_drop_route_b(&mut self, dst: ValueId, ty: &Ty) {
         if let Some(route) = self.nested_result_drop_route(ty) {
-            self.variant_drop_handles.insert(dst, route);
+            self.value_drops.entry(dst).or_default().named_route = Some(route);
             return;
         }
         if crate::lower::is_opt_list_str_ty(ty) {
             // `Option[List[String]]` (the heap-acc fold value) — physically a 0/1-element
             // List[List[String]]; the nested DropListListStr sweep is its exact free (the
             // flat DropListStr would leak the stack Strings).
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
             return;
         }
         // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
@@ -306,7 +288,7 @@ impl LowerCtx {
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
                 if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]));
         if map_str_scalar || is_heap_elem_list_ty(ty) {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
     }
 
@@ -393,8 +375,8 @@ impl LowerCtx {
         // leaking the inner list's Strings every iteration (a fold loop OOMs) — route
         // its scope-end drop to the nested `DropListListStr` sweep instead.
         if crate::lower::is_opt_list_str_ty(ty) {
-            self.heap_elem_lists.remove(&dst);
-            self.list_list_str_lists.insert(dst);
+            self.value_drops.get_mut(&dst).map(|d| d.flat_elems = false);
+            self.value_drops.entry(dst).or_default().list_list_str = true;
         }
         // A MAP closure result (the map.fold heap-acc's per-iteration acc — the
         // `(a, k, v) => ["fresh": v]` fresh-map closure): the bare
@@ -409,7 +391,7 @@ impl LowerCtx {
             if a.len() == 2 && matches!(a[0], Ty::String)
                 && (!is_heap_ty(&a[1]) || matches!(a[1], Ty::String)))
         {
-            self.heap_elem_lists.insert(dst);
+            self.value_drops.entry(dst).or_default().flat_elems = true;
         }
         Ok(())
     }
@@ -497,6 +479,24 @@ impl LowerCtx {
                     // A List-valued merge binds as a REAL populated block —
                     // register it so later element reads take the executing path.
                     self.materialized_lists.insert(obj);
+                } else if let Some((_, tys)) = self.aggregate_field_tys(ty) {
+                    // A RECORD/TUPLE-valued merge is likewise a REAL same-layout
+                    // block: every arm materializes + Consumes its value (a
+                    // some/ok-arm payload is the variant's real payload block, a
+                    // fallback arm a constructed literal). Seed its READ shape +
+                    // heap-slot MASK + recursive drop route exactly like the
+                    // Named-call bind (`seed_call_named_heap_read_shape`): without
+                    // materialized_aggregates a heap FIELD read of the bound var
+                    // fell to the container-grain Dup — the record HEADER printed
+                    // as the String (the #1287 wasm blanks) — and the bare flat
+                    // scope-end Drop leaked the record's heap fields.
+                    let heap_slots: Vec<usize> =
+                        (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+                    self.materialized_aggregates.insert(obj);
+                    self.record_masks.insert(obj, heap_slots);
+                    if let Some(name) = self.record_or_anon_drop_type_name(ty) {
+                        self.value_drops.entry(obj).or_default().named_route = Some(name);
+                    }
                 }
                 return Ok(());
             }
@@ -621,7 +621,7 @@ impl LowerCtx {
             tys.len() == 2 && crate::lower::is_value_ty(&tys[0]) && !is_heap_ty(&tys[1]);
         let heap_slots: Vec<usize> = (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
         if value_tuple {
-            self.variant_drop_handles.insert(subj, "value_tuple".to_string());
+            self.value_drops.entry(subj).or_default().named_route = Some("value_tuple".to_string());
             self.materialized_aggregates.insert(subj);
         } else if !heap_slots.is_empty() {
             self.record_masks.insert(subj, heap_slots);

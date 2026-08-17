@@ -15,31 +15,47 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::generator::Origin;
-use crate::oracle::{Finding, RunEvidence};
+use crate::oracle::{Finding, FindingKind, RunEvidence};
 
 /// Sink that owns the findings directory and the dedup set. Shared
 /// across worker threads behind a mutex (findings are rare, so the lock
 /// is uncontended in practice).
 pub struct FindingSink {
     dir: PathBuf,
+    /// The campaign's `--family`. Recorded in every `meta.txt`, because
+    /// `(seed, index)` only reproduces a program under the same family —
+    /// a replay without it regenerates a DIFFERENT program and silently
+    /// reports "does not reproduce".
+    family: String,
     seen: Mutex<HashSet<String>>,
     /// Count of *unique* findings written (after dedup).
     written: Mutex<usize>,
+    /// The perf-class subset of `written` (#1235): unique `Slow` findings.
+    /// The campaign's exit code fails on `written - slow` — correctness
+    /// classes only.
+    slow: Mutex<usize>,
 }
 
 impl FindingSink {
-    pub fn new(dir: PathBuf) -> std::io::Result<Self> {
+    pub fn new(dir: PathBuf, family: &str) -> std::io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
         Ok(FindingSink {
             dir,
+            family: family.to_string(),
             seen: Mutex::new(HashSet::new()),
             written: Mutex::new(0),
+            slow: Mutex::new(0),
         })
     }
 
     /// Number of unique findings written so far.
     pub fn count(&self) -> usize {
         *self.written.lock().unwrap()
+    }
+
+    /// Number of unique perf-class (`Slow`) findings written so far.
+    pub fn slow_count(&self) -> usize {
+        *self.slow.lock().unwrap()
     }
 
     /// Record a finding. Returns `true` if it was new (written), `false`
@@ -68,7 +84,10 @@ impl FindingSink {
 
         let _ = std::fs::write(sub.join("repro.almd"), minimized);
         let _ = std::fs::write(sub.join("original.almd"), original);
-        let _ = std::fs::write(sub.join("meta.txt"), render_meta(seed, index, origin, finding));
+        let _ = std::fs::write(
+            sub.join("meta.txt"),
+            render_meta(seed, index, &self.family, origin, finding),
+        );
         if let Some(ev) = &finding.native {
             let _ = std::fs::write(sub.join("native.out"), render_evidence(ev));
         }
@@ -77,6 +96,9 @@ impl FindingSink {
         }
 
         *self.written.lock().unwrap() += 1;
+        if finding.kind == FindingKind::Slow {
+            *self.slow.lock().unwrap() += 1;
+        }
         true
     }
 }
@@ -106,26 +128,37 @@ fn sanitize(key: &str) -> String {
 /// Maximum length of a generated finding-directory name.
 const MAX_DIR_NAME_LEN: usize = 120;
 
-fn render_meta(seed: u64, index: u64, origin: &Origin, f: &Finding) -> String {
+fn render_meta(seed: u64, index: u64, family: &str, origin: &Origin, f: &Finding) -> String {
     let origin_line = match origin {
         Origin::Synthesis => "synthesis".to_string(),
         Origin::Mutation { corpus_file } => format!("mutation of {corpus_file}"),
+        Origin::Identity { blocks } => {
+            format!("identity family, {blocks} blocks (oracle: by construction, #1332)")
+        }
+    };
+    // An identity repro carries its own oracle, so `ladder repro.almd` is
+    // the more robust replay: it does not depend on the corpus (or this
+    // generator) being byte-identical to the campaign's.
+    let ladder_hint = match origin {
+        Origin::Identity { .. } => "\nreproduce2  = xtarget-fuzz ladder <this dir>/repro.almd",
+        _ => "",
     };
     format!(
         "seed        = {seed}\n\
          index       = {index}\n\
+         family      = {family}\n\
          origin      = {origin_line}\n\
          rung        = {:?}\n\
          kind        = {:?}\n\
          summary     = {}\n\
-         reproduce   = xtarget-fuzz replay --seed {seed} --index {index}\n",
+         reproduce   = xtarget-fuzz replay --seed {seed} --index {index} --family {family}{ladder_hint}\n",
         f.rung, f.kind, f.summary
     )
 }
 
 fn render_evidence(ev: &RunEvidence) -> String {
     format!(
-        "exit_code = {:?}\ntimed_out = {}\n\n--- stdout ---\n{}\n--- stderr ---\n{}\n",
-        ev.exit_code, ev.timed_out, ev.stdout, ev.stderr
+        "exit_code = {:?}\ntimed_out = {}\nduration  = {:.1}s\n\n--- stdout ---\n{}\n--- stderr ---\n{}\n",
+        ev.exit_code, ev.timed_out, ev.duration_secs, ev.stdout, ev.stderr
     )
 }

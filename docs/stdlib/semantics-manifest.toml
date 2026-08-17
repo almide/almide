@@ -2280,10 +2280,547 @@ note = """
 Declared, not probed (host-capability): the Int is a pid.
 """
 
+# index_unit vocabulary — testing:
+#   value — the Int is a compared MAGNITUDE, and the comparison is STRICT
+#           (measured 2026-08-13: assert_gt(1, 1) and assert_lt(1, 1) both
+#           fail — native "assert_gt failed: 1 is not > 1" exit 101, wasm
+#           "assert_gt failed" exit 1)
+[testing]
+default_index_unit = "value"
+
+[[testing.fn]]
+name = "assert_gt"
+index_unit = "value"
+setup = [
+  "testing.assert_gt(2, 1)",
+]
+probe = "true"
+expect = "true"
+note = """
+The passing call pins the ARGUMENT ORDER: assert_gt(a, b) passes iff a > b,
+so a reversed implementation would fail this file. Strictness is measured
+out-of-band (an in-file failing call would fail the harness itself, and the
+assert_throws route is HARNESS_LIMITATION on wasm): assert_gt(1, 1) rejects
+on BOTH legs — native panics "assert_gt failed: 1 is not > 1" (exit 101),
+wasm prints "assert_gt failed" (exit 1).
+"""
+
+[[testing.fn]]
+name = "assert_lt"
+index_unit = "value"
+setup = [
+  "testing.assert_lt(1, 2)",
+]
+probe = "true"
+expect = "true"
+note = """
+The mirror of assert_gt: passes iff a < b, strictly — measured out-of-band,
+assert_lt(1, 1) rejects on both legs ("1 is not < 1" natively).
+"""
+
+# index_unit vocabulary — args:
+#   element-index — the Int is a 0-based list position. For the __ scan
+#                   helpers it is the RAW argv position the scan STARTS at;
+#                   for positional_at it is a position in the FILTERED
+#                   positional list (flag arguments removed first)
+[args]
+
+[[args.fn]]
+name = "__flag_at"
+index_unit = "element-index"
+setup = [
+  'let hit = args.__flag_at(["x", "--verbose"], "--verbose", "-v", 0)',
+  'let skipped = args.__flag_at(["--verbose", "x"], "--verbose", "-v", 1)',
+]
+probe = "hit and not skipped"
+expect = "true"
+note = """
+i is the 0-based RAW-argv position the scan starts at: starting at 0 finds
+"--verbose" sitting at position 1 (hit = true), while starting at 1 can
+never see the flag at position 0 (skipped = false) — i is a start index,
+not a match position or a count.
+"""
+
+[[args.fn]]
+name = "__find_prefixed"
+index_unit = "element-index"
+setup = [
+  'let found = args.__find_prefixed(["a", "--out=x"], "--out=", 0) ?? "none"',
+  'let skipped = args.__find_prefixed(["--out=x", "b"], "--out=", 1) ?? "none"',
+]
+probe = 'found + " " + skipped'
+expect = "--out=x none"
+note = """
+The same start-index dimension as __flag_at, and the some() payload is the
+WHOLE matching element ("--out=x"), not the part after the prefix.
+"""
+
+[[args.fn]]
+name = "positional_at"
+index_unit = "element-index"
+probe = 'args.positional_at(0) ?? "none"'
+expect = "none"
+note = """
+The harness runs test files with an empty argv, so in-file the probe can only
+pin the empty case (index 0 of no positionals is none, not a trap). The
+FILTERED-list dimension is measured out-of-band on BOTH legs (2026-08-13,
+`almide run … -- alpha --flag beta`, native and wasm byte-identical):
+positional_at(0) = "alpha" and positional_at(1) = "beta" — the index counts
+POSITIONAL (non-flag) arguments with "--flag" filtered out, 0-based — and
+positional_at(2) is none.
+"""
+
+# index_unit vocabulary — mem (the bytes address discipline, module-sized):
+#   address — the Int is an opaque allocator CHECKPOINT token, produced by
+#             save and consumed by restore — never a byte count, meaningless
+#             to arithmetic on
+[mem]
+
+[[mem.fn]]
+name = "save"
+index_unit = "address"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed in-file: mem.save WALLS the verified wasm renderer today
+("scalar binding outside the value subset" brick), so a calling probe would
+push this generated file off the wasm leg. Measured on the native leg
+(2026-08-13): save() returns 0 and the save/spacer/save monotonicity and
+restore-then-allocate sequences run without corruption — native pins both
+calls as no-ops (runtime/rs/src/mem.rs: RC already reclaims what a restore
+would). The checkpoint is only a live bump-allocator token on the wasm leg,
+where the same discipline is probe-pinned by the bytes.heap_save /
+bytes.heap_restore rows.
+"""
+
+[[mem.fn]]
+name = "restore"
+index_unit = "address"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed in-file (the same wasm wall as save). mark is an opaque
+token a save RETURNED, not a byte count. Measured on the native leg
+(2026-08-13): save / allocate 64 bytes / restore / allocate again returns the
+fresh allocation intact ([5, 6]) — the native no-op pair is safe to call.
+"""
+
+# index_unit vocabulary — zlib:
+#   value — the Int is the COMPRESSION LEVEL knob, 0–9 (0 = stored, 9 = max
+#           effort; out of range CLAMPS, never errors) — not a size and not
+#           a byte count
+[zlib]
+default_index_unit = "value"
+
+[[zlib.fn]]
+name = "compress_level"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed in-file: zlib is HOST_CAPABILITY on the wasm leg
+(measured wall: "zlib.compress_level needs a declared capability not in this
+brick"; spec/stdlib/zlib_test.almd sits in the fallback baseline), so a
+calling probe would push this generated file off the wasm leg. Measured on
+the native leg (2026-08-13, input [1,2,3] repeated 4x = 12 bytes): the level
+is an EFFORT knob, not a size — level 0 STORES (23-byte output, larger than
+the input), level 9 compresses to 13; out of range CLAMPS instead of
+erroring (level -1 produces level 0's 23 bytes, level 10 produces level 9's
+13 — runtime clamp(0, 9)); decompress roundtrips the input byte-identically
+at levels 0, 9 and 10.
+"""
+
+[[zlib.fn]]
+name = "deflate_level"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+The same level dimension and clamp on the RAW deflate stream — measured on
+the native leg (2026-08-13, same 12-byte input): level 0 gives 17 bytes
+where compress_level gives 23 (the 6-byte difference is the zlib
+header + adler32 wrapper deflate omits), level 9 gives 7, level 10 clamps
+to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
+"""
+
+# index_unit vocabulary — fs (every value below verified by executing the probe
+# on BOTH legs, native and wasm, 2026-08-13 — byte-identical):
+#   byte-value — the Int is ONE byte of file content, 0–255. `List[Int]` file
+#                content is a BYTE list, never a codepoint list: the 2-codepoint
+#                text "aé" reads back as 3 elements [97, 195, 169] (raw UTF-8),
+#                and 0 / 255 survive a write_bytes round trip unchanged
+#   byte-count — the Int counts BYTES of file content (file_size: "aé" is 3,
+#                not 2 characters and not a block count)
+#   second     — the Int is a Unix-epoch timestamp in SECONDS (modified_at —
+#                the same scale as env.unix_timestamp, NOT millis)
+[fs]
+default_index_unit = "byte-value"
+
+[[fs.fn]]
+name = "read_bytes"
+index_unit = "byte-value"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_read_bytes_")!',
+  'fs.write(p, "aé")!',
+  "let bs = fs.read_bytes(p)!",
+  "fs.remove(p)!",
+]
+probe = "bs"
+expect = "[97, 195, 169]"
+note = """
+The #419 dimension itself, one module over: "aé" is 2 codepoints and reads
+back as 3 elements — the list counts UTF-8 BYTES, and each element is one
+byte's value (195, 169 are the two bytes of é), not a scalar value.
+"""
+
+[[fs.fn]]
+name = "write_bytes"
+index_unit = "byte-value"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_write_bytes_")!',
+  "fs.write_bytes(p, [0, 65, 255])!",
+  "let bs = fs.read_bytes(p)!",
+  "fs.remove(p)!",
+]
+probe = "bs"
+expect = "[0, 65, 255]"
+note = """
+Each element is written as ONE raw byte over the full 0–255 range: a 0 does
+not terminate the file (the round trip keeps all three), and 255 is a byte
+value, not a sentinel.
+"""
+
+[[fs.fn]]
+name = "read_bytes_if_exists"
+index_unit = "byte-value"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_read_bytes_if_exists_")!',
+  "fs.write_bytes(p, [1, 2])!",
+  "let hit = fs.read_bytes_if_exists(p)!",
+  "fs.remove(p)!",
+  "let miss = fs.read_bytes_if_exists(p)!",
+]
+probe = "(hit ?? []) + (miss ?? [])"
+expect = "[1, 2]"
+note = """
+One expression pins both halves of the Option: the existing file yields
+some([1, 2]) with the same byte-value elements as read_bytes, and the same
+path AFTER removal yields none (which contributes nothing to the concat) —
+a missing file is none, not an empty list and not an Err.
+"""
+
+[[fs.fn]]
+name = "file_size"
+index_unit = "byte-count"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_file_size_")!',
+  'fs.write(p, "aé")!',
+  "let n = fs.file_size(p)!",
+  "fs.remove(p)!",
+]
+probe = "n"
+expect = "3"
+note = """
+BYTES on disk, not characters: the 2-codepoint "aé" is 3. The same unit
+read_bytes returns elements of, so file_size(p) == list.len(read_bytes(p)).
+"""
+
+[[fs.fn]]
+name = "modified_at"
+index_unit = "second"
+setup = [
+  'let p = fs.create_temp_file("almide_manifest_modified_at_")!',
+  "let now = env.unix_timestamp()",
+  "let mt = fs.modified_at(p)!",
+  "fs.remove(p)!",
+]
+probe = "mt > now - 300 and mt < now + 300"
+expect = "true"
+note = """
+SECONDS since the Unix epoch, on the same scale as env.unix_timestamp: the
+±300s window around a just-created file's mtime is unreachable for a
+milliseconds value (~1.7e12 against a ~1.7e9 bound), so the probe separates
+the two scales the way the env second/millisecond rows do — and it is
+tighter, because it also pins the ORIGIN as the epoch rather than some
+platform-specific zero.
+"""
+
+# index_unit vocabulary — http (the module where TWO unrelated Int scales sit
+# one call apart, which is exactly why neither may be spelled "value"):
+#   status-code — the Int is an HTTP RESPONSE STATUS, 3 digits, and it is the
+#                 FIRST parameter of every builder (response / json /
+#                 with_headers) — the body follows it. `status(resp, code)`
+#                 inverts that shape: there the response comes first
+#   port        — the Int is a TCP PORT the server BINDS (serve) — an OS
+#                 resource number, never a status. `serve(200, h)` would bind
+#                 port 200 and `response(8080, b)` would answer with status
+#                 8080; nothing but this declaration separates them
+#
+# Every probe below verified on BOTH legs (native + wasm, 2026-08-13,
+# byte-identical). The with_headers probe deliberately reads only the CALLER's
+# header: the default-Content-Type cell of that builder DIVERGES between the
+# legs (#1352 — native seeds "text/plain", the self-hosted wasm builder starts
+# empty), so pinning it here would encode a bug as a promise.
+[http]
+
+[[http.fn]]
+name = "response"
+index_unit = "status-code"
+setup = [
+  'let r = http.response(200, "hi")',
+]
+probe = 'http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")'
+expect = "hi text/plain"
+note = """
+Pins the ARGUMENT ORDER, which is the whole trap: status first, body second.
+A swapped implementation could not produce the body "hi", and the seeded
+"text/plain" separates response from json below.
+"""
+
+[[http.fn]]
+name = "json"
+index_unit = "status-code"
+setup = [
+  'let r = http.json(201, "{}")',
+]
+probe = 'http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")'
+expect = "{} application/json"
+note = """
+The same (status, body) order as response — the ONLY difference is the seeded
+Content-Type, so a caller who picks json for the header gets no other change.
+201 also shows the status is a free 3-digit code, not a success/failure flag.
+"""
+
+[[http.fn]]
+name = "with_headers"
+index_unit = "status-code"
+setup = [
+  'let r = http.with_headers(202, "wh", ["X-A": "1"])',
+]
+probe = 'http.body(r) + " " + (http.get_header(r, "X-A") ?? "none")'
+expect = "wh 1"
+note = """
+(status, body, headers) — the Int stays FIRST even with a third parameter.
+Reads only the caller's own header: this builder's default-Content-Type cell
+is a live native/wasm divergence (#1352), and the manifest records measured
+agreement, never a bug.
+"""
+
+[[http.fn]]
+name = "status"
+index_unit = "status-code"
+setup = [
+  'let r = http.status(http.response(200, "sb"), 404)',
+]
+probe = 'http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")'
+expect = "sb text/plain"
+note = """
+The order INVERTS here — status(resp, code), response first — and the Int is
+still a status code. The Almide surface exposes no status GETTER, so in-file
+the probe can only pin that overwriting the code leaves body and headers
+untouched. The code itself reaching the wire is measured out-of-band on the
+native leg (2026-08-13): a serve handler returning
+status(response(200, "teapot"), 418) answers `HTTP/1.1 418 OK` with body
+"teapot" — the 418 is the status LINE, and an unmapped code keeps the "OK"
+reason text.
+"""
+
+[[http.fn]]
+name = "serve"
+index_unit = "port"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: serve BLOCKS on a TCP accept loop, so no in-file probe
+can return, and it is HOST_CAPABILITY on the wasm leg
+(proofs/wasm-fallback-baseline.txt names it for
+spec/lang/effect_intrinsic_tail_test.almd) — a calling probe would push this
+generated file off the wasm leg. Measured out-of-band on the native leg
+(2026-08-13): serve(8791, handler) binds 0.0.0.0:8791 and answers a request
+to 127.0.0.1:8791, so the Int is a TCP PORT NUMBER, not a status and not a
+backlog size or a timeout.
+"""
+
+# index_unit vocabulary — net (HOST_CAPABILITY on the wasm leg — net is an OS
+# socket API, named as such in proofs/wasm-fallback-baseline.txt for
+# spec/stdlib/net_test.almd — so every entry is DECLARED with a non-calling
+# probe; a calling probe would push this generated file off the wasm leg. The
+# native semantics below were MEASURED out-of-band on 2026-08-13 with a
+# self-connecting listen/connect/accept program, values quoted per row):
+#   handle      — the Int is an opaque STREAM or LISTENER token. Measured: it
+#                 is a slot index into a per-kind table starting at 0, NOT a
+#                 file descriptor and NOT an address — the first listener and
+#                 the first stream are BOTH 0, so the two namespaces are
+#                 disjoint and a listener handle passed to a stream fn silently
+#                 addresses a different socket. Meaningless to arithmetic on
+#   port        — the Int is a TCP PORT to bind (tcp_listen) or dial
+#                 (tcp_connect), 0–65535 — the same unit as http.serve's
+#   byte-count  — the Int counts BYTES: a read budget, or the number pending
+#   millisecond — the Int is a timeout in MILLISECONDS, never seconds
+[net]
+
+[[net.fn]]
+name = "tcp_connect"
+index_unit = "port"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Int PARAMETER is a TCP port; the
+Ok Int is a stream handle. Measured natively: tcp_connect("127.0.0.1", 8792)
+against a listener on that port returns handle 0 — the first slot of the
+stream table, not an fd.
+"""
+
+[[net.fn]]
+name = "tcp_listen"
+index_unit = "port"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively:
+tcp_listen("127.0.0.1", 8792) returns listener handle 0 and a subsequent
+tcp_connect to 8792 succeeds — the Int is the port actually bound.
+"""
+
+[[net.fn]]
+name = "tcp_accept"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively: accept on listener
+0 returned STREAM handle 1 while the client's own stream was 0 — the argument
+is a LISTENER handle and the result is a STREAM handle, two disjoint
+namespaces that both count from 0.
+"""
+
+[[net.fn]]
+name = "tcp_read"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). len is a BYTE budget, and the read is
+UP TO that many: measured natively, after 5 bytes arrived, tcp_read(s, 2)
+returned exactly [1, 2] and left the rest queued — len is not a message count
+and not a record count.
+"""
+
+[[net.fn]]
+name = "tcp_read_exact"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively, continuing the same
+stream after tcp_read(s, 2): tcp_read_exact(s, 3) returned [3, 4, 5] — len is
+a BYTE count, the read resumes at the stream position (it is not an offset),
+and unlike tcp_read it delivers exactly len bytes or fails.
+"""
+
+[[net.fn]]
+name = "tcp_available"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Measured natively: after a 5-byte
+write arrived, tcp_available(s) returned 5 — the Ok Int counts BYTES pending,
+not messages, and it is the argument tcp_read's len takes.
+"""
+
+[[net.fn]]
+name = "tcp_write"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The only Int is the stream handle —
+the payload is Bytes, and nothing is returned, so no byte COUNT crosses this
+signature (a caller expecting a written-bytes count gets Unit).
+"""
+
+[[net.fn]]
+name = "tcp_read_timeout"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). timeout_ms is MILLISECONDS — the
+second/millisecond confusion this unit exists to prevent. Measured natively
+on a stream with nothing pending: tcp_read_timeout(s, 1, 100) returned
+Err("tcp_read_timeout: Resource temporarily unavailable (os error 35)") and
+the call returned promptly — 100 is a tenth of a second, not 100 seconds.
+"""
+
+[[net.fn]]
+name = "tcp_set_timeout"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The same MILLISECOND scale as
+tcp_read_timeout, applied to the stream instead of to one call. Measured
+natively: tcp_set_timeout(s, 100) is Ok on an open stream.
+"""
+
+[[net.fn]]
+name = "tcp_is_open"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Int is a stream handle, and the
+answer tracks the handle's SLOT, not the peer: measured natively, is_open was
+true before tcp_close(c) and false after.
+"""
+
+[[net.fn]]
+name = "tcp_close"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). Consumes a STREAM handle (the stream
+table), not a listener handle — the same Int 0 means a different socket in
+each table.
+"""
+
+[[net.fn]]
+name = "tcp_close_listener"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The listener-table counterpart of
+tcp_close; the split spelling exists precisely because the handle number alone
+cannot say which table it belongs to.
+"""
+
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
-# regex and bool bear no Int in any swept signature today, so their entry
-# lists are empty — but COVERED_MODULES holds them, so the first Int-bearing
-# fn to land in any of them cannot merge without declaring its unit here.
+# regex, bool, path, base64, hex and html bear no Int in any swept signature
+# today, so their entry lists are empty — but COVERED_MODULES holds them, so the first
+# Int-bearing fn to land in any of them cannot merge without declaring its unit
+# here.
+#
+# path is the strongest case for a zero-Int ratchet: its whole surface is
+# String → String (join / dirname / basename / extension / stem / normalize)
+# plus the SafePath newtype, and the ONE dimension a caller would get wrong —
+# whether a position counts bytes or codepoints — cannot arise until someone
+# adds an Int-bearing fn (a `path.depth`, a `path.split_at`). This section is
+# the tripwire for that day.
+#
+# base64 and hex are total Bytes ⇄ String codecs (encode / encode_url /
+# encode_upper / decode / decode_url): every size is carried by the Bytes or
+# the String itself, so no Int crosses the boundary. The unit that WOULD appear
+# the moment one does is byte-count — a `decoded_len(s)`, an offset-taking
+# streaming variant — and it must be declared here first.
+#
+# html is the SafeHtml newtype algebra (escape / raw / to_string / concat /
+# empty) — a String-in, String-out XSS boundary with no numeric surface at
+# all. Ratcheted so an Int-bearing truncation helper (`html.truncate(h, n)` —
+# codepoints or bytes?) cannot land silently: cutting escaped markup at the
+# wrong unit is exactly the #419 class with a security edge.
 [map]
 default_index_unit = "value"
 fn = []
@@ -2309,5 +2846,21 @@ default_index_unit = "value"
 fn = []
 
 [bool]
+default_index_unit = "value"
+fn = []
+
+[path]
+default_index_unit = "value"
+fn = []
+
+[base64]
+default_index_unit = "value"
+fn = []
+
+[hex]
+default_index_unit = "value"
+fn = []
+
+[html]
 default_index_unit = "value"
 fn = []
