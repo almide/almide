@@ -34,6 +34,12 @@ const FIXTURE_ALLOWLIST: &[&str] = &[
     // E033 (opaque-type construction outside its defining module) needs a
     // two-module import graph the single-file harness can't express.
     "E033",
+    // E054 (fmt verification failed) fires on an INTERNAL formatter defect —
+    // no committed source file can (or should) trigger it deliberately, and
+    // the harness runs `almide check`, which never formats. The verifier
+    // logic is pinned by crates/almide-tools/tests/fmt_corpus_test.rs, which
+    // feeds corrupted outputs straight into verify_format (#1464).
+    "E054",
 ];
 
 fn repo_root() -> PathBuf {

@@ -593,6 +593,26 @@ pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> 
     Ok(())
 }
 
+/// The E054 form of a `verify_format` failure (#1464): the same reason,
+/// carried as a CODED diagnostic so the formatter's best safety net is
+/// visible to the diagnostics machinery — `almide explain E054`, the JSON
+/// consumers, the coverage gates — instead of an anonymous string that only
+/// a human scrolling stderr ever sees.
+pub fn verify_format_diagnostic(file: &str, why: &str) -> almide_base::diagnostic::Diagnostic {
+    let mut d = almide_base::diagnostic::Diagnostic::error(
+        format!("fmt verification failed — {}", why),
+        "Formatting this file would not conserve the program (parse, AST, or \
+         comments), so it was left untouched. This is a FORMATTER bug, not a \
+         source problem — please report it with the file at \
+         https://github.com/almide/almide/issues. Until it is fixed, format \
+         the surrounding files and leave this one as it is.",
+        "fmt --safe verifier",
+    )
+    .with_code("E054");
+    d.file = Some(file.to_string());
+    d
+}
+
 /// The first JSON path where the two ASTs diverge — makes a verifier failure
 /// report point at the construct instead of dumping two trees.
 fn first_divergence(a: &serde_json::Value, b: &serde_json::Value, path: String) -> String {

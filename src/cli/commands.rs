@@ -947,8 +947,9 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
         // the run fails. A formatter that corrupts is worse than none.
         if formatted != source_text {
             if let Err(why) = fmt::verify_format(&source_text, &program, &formatted) {
-                err(&format!("{}: fmt verification failed — {}", file, why));
-                err(&format!("{}: file left untouched (formatter bug — please report)", file));
+                // E054 (#1464): the verifier's refusal is a coded diagnostic,
+                // not an anonymous string — `almide explain E054` owns the story.
+                err(&fmt::verify_format_diagnostic(file, &why).display());
                 verify_failed = true;
                 continue;
             }
