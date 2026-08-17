@@ -42,6 +42,14 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // The stability surface
     "deprecated",
     "dialect",
+    // Fusion-rule declarations. Read by TWO build-time generators sharing
+    // buildscript/fusion_parse.rs::extract_rewrites — forward,
+    // crates/almide-egg-lab/build.rs emits egg::rewrite! rules; reverse,
+    // crates/almide-codegen/build.rs emits the committed desugar fallback
+    // (generated/matrix_desugar_gen.rs). Both are text scanners over
+    // stdlib/matrix.almd, not AST-attribute consumers, which is why a
+    // `attr == "rewrite"` grep over crates/ finds nothing (almide#1450).
+    "rewrite",
 ];
 
 /// Attributes the grammar accepts and NO code reads.
@@ -51,13 +59,12 @@ pub const KNOWN_ATTRS: &[&str] = &[
 /// because "accepted and inert" is exactly the state this module exists to
 /// make impossible to hold accidentally.
 ///
-/// `@rewrite` (7 uses in `stdlib/matrix.almd`) reads as a declaration of a
-/// fusion rule; the rules are in fact implemented imperatively in
-/// `MatrixFusionPass`, and nothing parses the attribute. Found by this
-/// check's first run over the corpus (almide#1450). Either the pass grows a
-/// reader or the attributes come out; until one happens, this row is the
-/// honest record.
-pub const DECLARED_BUT_UNREAD: &[&str] = &["rewrite"];
+/// Currently empty. `@rewrite` sat here from this check's first corpus run
+/// until almide#1450 corrected the record: the attribute has been read since
+/// 6d2bee82f retired `MatrixFusionPass` for the egg saturation driver, and
+/// 0fbfb6c29 added the reverse desugar generator — both at build time, so no
+/// runtime code ever matches on the name.
+pub const DECLARED_BUT_UNREAD: &[&str] = &[];
 
 /// Closest known attribute by edit distance, for the did-you-mean. `None`
 /// when nothing is close enough to be worth suggesting — a wrong suggestion
