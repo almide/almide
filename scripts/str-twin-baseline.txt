@@ -1,0 +1,4 @@
+# The stdlib `_str`-twin count (#1460): shrink-only, held by
+# scripts/check-str-twin-ratchet.sh. Lower on removal; raising needs the
+# #1460 mob decision or a justified bump in the same PR.
+118

@@ -947,6 +947,9 @@ jobs:
       - name: Intrinsic boundary (#1468 — every @intrinsic target has a provider)
         run: bash scripts/check-intrinsic-boundary.sh
 
+      - name: _str twin ratchet (#1460 — the suffix bill is frozen while the protocol decision pends)
+        run: bash scripts/check-str-twin-ratchet.sh
+
       - name: Contract README up to date (regenerate and diff)
         run: |
           bash docs/contracts/generate-readme.sh > docs/contracts/README.md
