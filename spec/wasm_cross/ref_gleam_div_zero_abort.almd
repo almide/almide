@@ -1,3 +1,4 @@
+// @contract: C-292
 // Trap corner in isolation: division by zero via non-literal operands
 // (defeating the constant folder, per gleam's discipline). All three
 // targets must abort with the SAME message after the SAME output.

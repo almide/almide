@@ -1,3 +1,4 @@
+// @contract: C-292
 // grain functions.re — curried_func (call-of-call), letrec_2 (mutual
 // recursion referencing a later definition, order-independent), named and
 // default arguments (labeled_args1..5, default_args1..5: reorder, omit,
@@ -8,13 +9,17 @@
 fn add(a: Int) -> (Int) -> Int = (b) => a + b
 
 fn y_first(n: Int) -> Int = x_later(n + 1)
+
 fn x_later(n: Int) -> Int = if n > 3 then n else x_later(n + 2)
 
 fn concat(a: String, b: String) -> String = a + b
+
 fn concat_d(b: String, a: String = "1") -> String = a + b
 
-fn tagged(tag: String, v: Int) -> Int = { println(tag)
-  v }
+fn tagged(tag: String, v: Int) -> Int = {
+  println(tag)
+  v
+}
 
 fn use2(a: Int, b: Int) -> Int = a * 10 + b
 

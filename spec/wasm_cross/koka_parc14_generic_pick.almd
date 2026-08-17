@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka parc14 (+parc7/8): two same-typed generic params, exactly ONE
 // consumed per branch — the other must be dropped, not leaked. Instantiated
 // at Int (no drop), String and List[Int] (drop required). Plus the scalar

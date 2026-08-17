@@ -1,3 +1,4 @@
+// @contract: C-292
 // Map determinism: insertion/overwrite/removal then iteration — entry order
 // must agree across all three targets (keyed-container discipline).
 fn main() -> Unit = {
@@ -14,7 +15,9 @@ fn main() -> Unit = {
     j = j - 1
   }
   println(int.to_string(map.len(m)))
-  let lines = map.fold(m, [], (acc, k, v) => acc + ["${k}=${int.to_string(v)}"])
+  let lines = map.fold(m, [], (acc, k, v) => acc + [
+    "${k}=${int.to_string(v)}"
+  ])
   println(list.join(lines, ","))
   let ent = map.entries(m)
   println(int.to_string(list.len(ent)))

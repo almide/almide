@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam#2400 + anonymous_function: a parameter that shadows the enclosing
 // function's name, called in tail position (self-tail-call rewrite trap);
 // closures stored in record fields and called through field access.

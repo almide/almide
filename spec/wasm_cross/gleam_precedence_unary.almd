@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam test/language/precedence_test.gleam (11 cases): the mixed-operator
 // matrix ending in the unary-minus torture rows — every operand of
 // `-a + -b / -c * -d - -e * -f` negated, both as literals and through vars

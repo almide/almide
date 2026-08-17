@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka parc5/6/11/12 + parc2: match on a LOCALLY-built list (the scrutinee
 // is fresh, its drop belongs to the match); one arm returns the whole
 // scrutinee (parc11 — the dup-at-return shape); match on x+1 with a literal

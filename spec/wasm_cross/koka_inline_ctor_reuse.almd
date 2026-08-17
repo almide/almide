@@ -1,7 +1,9 @@
+// @contract: C-292
 // koka inline1/2/3: extract from nested ctors across TWO variant types and
 // rebuild swapped — the cross-type cell-reuse shape (A(y, B(z)) -> A(z, B(y))).
 // Flat rows keep each match exhaustive without relying on nested-only analysis.
 type Alpha = | A(Int, Beta) | A2
+
 type Beta = | B(Int) | B2
 
 fn swap_ab(x: Alpha) -> Alpha = match x {

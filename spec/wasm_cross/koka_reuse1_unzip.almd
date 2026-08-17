@@ -1,25 +1,27 @@
+// @contract: C-292
 // koka reuse1 + parc23: unzip a list of pairs through a recursive
 // accumulator (each iteration reuses/rebuilds cons cells), then the
 // rotate that moves a head from one list to the other in a pair-of-lists
 // carrier — the canonical reuse shapes.
 type P2 = | Pair2(List[Int], List[Int])
 
-fn unzip_iter(ys: List[(Int, Int)], acc1: List[Int], acc2: List[Int]) -> P2 =
-  if list.len(ys) == 0 then Pair2(acc1, acc2)
-  else {
-    let hd = list.get(ys, 0) ?? (0, 0)
-    match hd {
-      (x, y) => unzip_iter(list.slice(ys, 1, list.len(ys)), acc1 + [x], acc2 + [y]),
-    }
+fn unzip_iter(ys: List[(Int, Int)], acc1: List[Int], acc2: List[Int]) -> P2 = if list.len(ys) == 0 then Pair2(acc1, acc2)
+else {
+  let hd = list.get(ys, 0) ?? (0, 0)
+  match hd {
+    (x, y) => unzip_iter(list.slice(ys, 1, list.len(ys)), acc1 + [x], acc2 + [y])
   }
+}
 
 fn rotate(p: P2) -> P2 = match p {
   Pair2(ys, acc) => if list.len(ys) == 0 then Pair2([], [])
-  else Pair2(list.slice(ys, 1, list.len(ys)), [list.get(ys, 0) ?? 0] + acc),
+  else Pair2(list.slice(ys, 1, list.len(ys)), [
+    list.get(ys, 0) ?? 0
+  ] + acc)
 }
 
 fn show(p: P2) -> String = match p {
-  Pair2(a, b) => "(${list.join(list.map(a, (v) => int.to_string(v)), ",")})(${list.join(list.map(b, (v) => int.to_string(v)), ",")})",
+  Pair2(a, b) => "(${list.join(list.map(a, (v) => int.to_string(v)), ",")})(${list.join(list.map(b, (v) => int.to_string(v)), ",")})"
 }
 
 fn main() -> Unit = {

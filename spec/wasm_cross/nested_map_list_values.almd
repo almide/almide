@@ -1,3 +1,4 @@
+// @contract: C-293
 // Map[String, List[Int]] — a map whose values are lists: set, read through
 // a default, read-modify-write of an inner list, and fold rendering.
 // (List[Map] loop builds and Map[_, Map] values are pinned walls —

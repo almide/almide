@@ -1,3 +1,4 @@
+// @contract: C-293
 // A recursive variant whose payload is a List of itself — the archetypal
 // nested-ownership shape: build a tree, fold sum and depth, then drop it
 // whole by shadowing.
@@ -20,7 +21,10 @@ fn main() -> Unit = {
   let t = Branch([
     Leaf(1),
     Branch([Leaf(2), Leaf(3)]),
-    Branch([Branch([Leaf(4)]), Leaf(5)]),
+    Branch([
+      Branch([Leaf(4)]),
+      Leaf(5)
+    ])
   ])
   println(int.to_string(sum(t)))
   println(int.to_string(depth(t)))

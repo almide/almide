@@ -1,3 +1,4 @@
+// @contract: C-292
 // grain strings.re + chars.re — toString_escape1/4/5/6/7/9 (the QUOTED
 // debug rendering of a tuple escapes backslash, newline — literal AND
 // escaped spelling, carriage return, tab, quote identically on every

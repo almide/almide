@@ -1,3 +1,4 @@
+// @contract: C-292
 // roc trmc negative control + grain mutual recursion: a NON-tail recursion
 // whose result is used twice must not be loop-rewritten; mutual tail
 // recursion at depth must not overflow either target.
@@ -8,6 +9,7 @@ else {
 }
 
 fn is_even(n: Int) -> Bool = if n == 0 then true else is_odd(n - 1)
+
 fn is_odd(n: Int) -> Bool = if n == 0 then false else is_even(n - 1)
 
 fn main() -> Unit = {

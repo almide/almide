@@ -1,3 +1,4 @@
+// @contract: C-292
 // grain pattern_matching.re — guarded_match_1..10, constant_match_2..4:
 // guard cascades over tuples and ADT payloads (same-ctor rows falling
 // through failed guards, a constant-false guard row, the last-resort row),

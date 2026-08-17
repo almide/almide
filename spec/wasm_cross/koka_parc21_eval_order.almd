@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka parc21: argument evaluation order must survive drop insertion — a
 // 2-arg call whose operands PRINT must print left-to-right, including when
 // the callee ignores one argument (the borrowed-arg shape).

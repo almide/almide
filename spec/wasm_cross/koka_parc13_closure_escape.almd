@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka parc13: a closure capturing a parameter ESCAPES its defining frame —
 // the environment must own the capture (scalar and heap flavors), and
 // calling it twice must not double-consume.

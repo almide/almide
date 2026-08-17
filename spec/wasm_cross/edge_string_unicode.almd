@@ -1,3 +1,4 @@
+// @contract: C-292
 // Unicode strings: multibyte slicing, len semantics, codepoints, case ops,
 // split/join roundtrips with multibyte separators, interpolated nesting.
 fn main() -> Unit = {

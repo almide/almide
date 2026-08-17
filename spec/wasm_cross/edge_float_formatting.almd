@@ -1,3 +1,4 @@
+// @contract: C-292
 // Float edges: -0.0, huge/tiny magnitudes, formatting, parse roundtrips,
 // division corners, to_fixed rounding — formatting is a classic divergence.
 fn f2s(x: Float) -> String = float.to_string(x)

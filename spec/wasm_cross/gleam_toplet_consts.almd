@@ -1,18 +1,26 @@
+// @contract: C-292
 // gleam test/language/constant_test.gleam (#6086 aliasing rows): module
 // constants as top-level lets — int/float/string/result/list shapes, an
 // ALIASED constant, a constant built by concatenation of another, and a
 // guard comparing a match binding against const-derived data.
 let C_INT = 5
+
 let C_FLOAT = 1.0
+
 let C_STRING = "Gleam"
+
 let C_EMPTY: List[Int] = []
+
 let C_ONE = [1]
+
 let C_TWO = [1, 2]
+
 let MESSAGE = "hello"
+
 let MESSAGE_2 = MESSAGE
+
 // a COMPUTED top-let init (MESSAGE_2 + "?") is a pinned wall —
 // walls/toplet_computed_string_init.almd — so the concat happens in main.
-
 fn eq(x: Bool) -> String = if x then "1" else "0"
 
 fn main() -> Unit = {
@@ -37,5 +45,8 @@ fn main() -> Unit = {
   list.push(aliased, eq(MESSAGE + "!" == "hello!"))
   println(list.join(aliased, ""))
   let subject = "hello!"
-  println(match subject { w if w == MESSAGE + "!" => "guard-hit", _ => "guard-miss" })
+  println(match subject {
+    w if w == MESSAGE + "!" => "guard-hit",
+    _ => "guard-miss",
+  })
 }

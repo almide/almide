@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka parc18: nested match on a SECOND list inside the first's arm, with
 // the inner binding SHADOWING the outer one (z twice) — the taken arm must
 // dup the inner z and drop BOTH scrutinees; the fallthrough arms return one

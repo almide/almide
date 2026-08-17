@@ -1,11 +1,15 @@
+// @contract: C-293
 // List[List[Int]] exhaustively: literal, grown, jagged, empty inners,
 // indexing both levels, map/fold over inner lists, equality, and the
 // aliasing question (does pushing into a copy mutate the source?).
-fn show(xss: List[List[Int]]) -> String =
-  list.join(list.map(xss, (xs) => "[${list.join(list.map(xs, (x) => int.to_string(x)), ",")}]"), " ")
+fn show(xss: List[List[Int]]) -> String = list.join(list.map(xss, (xs) => "[${list.join(list.map(xs, (x) => int.to_string(x)), ",")}]"), " ")
 
 fn main() -> Unit = {
-  let lit: List[List[Int]] = [[1, 2], [], [3, 4, 5]]
+  let lit: List[List[Int]] = [
+    [1, 2],
+    [],
+    [3, 4, 5]
+  ]
   println(show(lit))
   println(int.to_string(list.len(lit)))
   let inner = list.get(lit, 2) ?? []
@@ -32,8 +36,20 @@ fn main() -> Unit = {
   // map at the outer level rebuilding inners
   println(show(list.map(lit, (xs) => list.map(xs, (x) => x * 2))))
   // equality at both depths
-  println(if [[1], [2, 3]] == [[1], [2, 3]] then "eq" else "ne")
-  println(if [[1], [2, 3]] == [[1], [2]] then "eq" else "ne")
+  println(if [
+    [1],
+    [2, 3]
+  ] == [
+    [1],
+    [2, 3]
+  ] then "eq" else "ne")
+  println(if [
+    [1],
+    [2, 3]
+  ] == [
+    [1],
+    [2]
+  ] then "eq" else "ne")
   // aliasing: pushing into a fetched inner must not mutate the source
   var alias = list.get(lit, 0) ?? []
   list.push(alias, 99)

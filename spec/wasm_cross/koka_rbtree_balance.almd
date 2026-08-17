@@ -1,14 +1,15 @@
+// @contract: C-292
 // koka reuse-spec1: red-black balance-left — deeply nested ctor patterns
 // that immediately REBUILD nearly the same nodes; the shape where reuse
 // analysis either shines or corrupts. Flat catch-all rows keep every level
 // covered. Insert a few keys and read the paint back.
 type Color = | Red | Black
+
 type Tree = | TLeaf | TNode(Color, Tree, Int, Tree)
 
 fn balance_left(l: Tree, k: Int, r: Tree) -> Tree = match l {
   TNode(_, ll, ky, ry) => match ll {
-    TNode(Red, lx, kx, rx) =>
-      TNode(Red, TNode(Black, lx, kx, rx), ky, TNode(Black, ry, k, r)),
+    TNode(Red, lx, kx, rx) => TNode(Red, TNode(Black, lx, kx, rx), ky, TNode(Black, ry, k, r)),
     TNode(Black, _, _, _) => TNode(Black, TNode(Red, ll, ky, ry), k, r),
     TLeaf => TNode(Black, TNode(Red, TLeaf, ky, ry), k, r),
   },
@@ -16,7 +17,10 @@ fn balance_left(l: Tree, k: Int, r: Tree) -> Tree = match l {
 }
 
 fn show(t: Tree) -> String = match t {
-  TNode(c, l, k, r) => "(" + (match c { Red => "R", Black => "B" }) + int.to_string(k) + " " + show(l) + " " + show(r) + ")",
+  TNode(c, l, k, r) => "(" + (match c {
+    Red => "R",
+    Black => "B",
+  }) + int.to_string(k) + " " + show(l) + " " + show(r) + ")",
   TLeaf => ".",
 }
 

@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam record_access_test (#1093) + record_update_test (#1379) +
 // tuple_access_test (#1980) + anonymous_function_test (#1637) +
 // record_with_field_named_constructor (~14 cases). Record update is spelled
@@ -5,6 +6,7 @@
 // the new field READS the old record. Deep tuple chains use the
 // parenthesised form — bare `t.0.1` lexes as the float 0.1.
 type Person = { name: String, age: Int, country: String }
+
 type Boxc = { constructor: Int }
 
 fn id(x: Int) -> Int = x
@@ -36,8 +38,10 @@ fn main() -> Unit = {
   let bx2 = Boxc { constructor: 1 }
   println(if bx == bx2 then "eq" else "ne")
   // #1637: a lambda param immediately shadowed by its own let
-  let f = (x: Int) => { let x = x
-    x }
+  let f = (x: Int) => {
+    let x = x
+    x
+  }
   println(int.to_string(f(1)))
   // a fn value in a tuple slot, called through the projection
   let t = ((x: Int) => x + 7, 0)

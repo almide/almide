@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam test/language/pipe_test.gleam (portable half): pipe into a named
 // fn, into an inline lambda, chained pipes through both, and pipe feeding
 // the FIRST argument of a two-arg fn via a lambda (the `pair(2, _)` capture
@@ -6,7 +7,9 @@ fn identity(x: Int) -> Int = x
 
 fn pair(a: Int, b: Int) -> (Int, Int) = (a, b)
 
-fn show(p: (Int, Int)) -> String = match p { (a, b) => "${int.to_string(a)},${int.to_string(b)}" }
+fn show(p: (Int, Int)) -> String = match p {
+  (a, b) => "${int.to_string(a)},${int.to_string(b)}"
+}
 
 fn hundred() -> Int = 100
 

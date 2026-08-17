@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka parc3/parc4: guard chains over a cons list — each arm must drop
 // exactly the bindings the others hold (dup x on the taken arm, drop the
 // scrutinee and the unused params). Payload-in-Option variant included.
@@ -13,7 +14,6 @@ fn pick3(xs: IList, y: Int, z: Int) -> Int = match xs {
 
 // NB: the parc4 shape (guard on a NESTED Option payload pattern) is a
 // pinned wall — see walls/nested_payload_guard.almd.
-
 fn main() -> Unit = {
   let xs = ICons(5, ICons(7, INil))
   println(int.to_string(pick3(xs, 9, 5)))

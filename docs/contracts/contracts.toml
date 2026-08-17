@@ -2986,6 +2986,7 @@ evidence  = [
   { path = "spec/wasm_cross/range_first_class.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_bind_no_materialize.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_bind_huge.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_materialize_oom.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -3601,4 +3602,104 @@ since     = "0.57.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_read_text_utf8.almd", class = "fixture" },
+]
+
+# ── REFERENCE-SUITE CONFORMANCE CORPUS ─
+[[contract]]
+id        = "C-292"
+spec      = "ALS-M4"
+title     = "The reference-suite conformance corpus runs byte-identical across targets"
+statement = "The executable distillation of the reference-compiler test mining (#1508): koka's Perceus RC corpus (guard liveness, re-scrutinee, generic one-side consumption, closure escape, evaluation order under drop insertion, half-consumed tuples, ctor-cell reuse, red-black rebalance, n-queens), roc's RC-conformance and TRMC-control shapes (shared-vs-unique COW, non-tail recursion whose result is used twice), gleam's language suite (guard matrix, scientific-notation identities, radix literals, unary-minus precedence, pipe landings, short-circuit proofs, arm-local shadowing, module constants, multi-subject match), grain's suites (guard fall-through rows, destructure snapshots, gc churn shapes, labeled/default args, recursive generic ADTs, printer escapes), and the cross-cutting numeric/unicode/closure/map-order edge matrices — every fixture prints deterministic output that must be byte-identical native == wasm (the interpreter votes where its capability slice allows, ledgered where not). Each fixture header names its upstream source; the ported patterns Almide cannot express yet are tracked in #1508."
+since     = "0.57.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/edge_closure_matrix.almd", class = "fixture" },
+  { path = "spec/wasm_cross/edge_float_formatting.almd", class = "fixture" },
+  { path = "spec/wasm_cross/edge_int_boundaries.almd", class = "fixture" },
+  { path = "spec/wasm_cross/edge_map_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/edge_string_unicode.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_bool_shortcircuit.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_equality_matrix.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_float_sci.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_guard_matrix.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_int_radix.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_multi_subject.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_pipe_shapes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_precedence_unary.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_records_tuples.almd", class = "fixture" },
+  { path = "spec/wasm_cross/gleam_toplet_consts.almd", class = "fixture" },
+  { path = "spec/wasm_cross/grain_functions.almd", class = "fixture" },
+  { path = "spec/wasm_cross/grain_gc_shapes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/grain_pattern_destructure.almd", class = "fixture" },
+  { path = "spec/wasm_cross/grain_pattern_guards.almd", class = "fixture" },
+  { path = "spec/wasm_cross/grain_records_enums.almd", class = "fixture" },
+  { path = "spec/wasm_cross/grain_string_escapes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_186_reused_names.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_beans_pairs.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_hqueens.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_inline4_joinsep.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_inline_ctor_reuse.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_issue894_seq_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_parc13_closure_escape.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_parc14_generic_pick.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_parc18_two_scrutinees.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_parc21_eval_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_parc3_guard_chain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_parc6_local_scrutinee.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_parcleak1_half_consumed.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_rbtree_balance.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_reuse1_unzip.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_reuse4_map_rebuild.almd", class = "fixture" },
+  { path = "spec/wasm_cross/koka_unicode_combining.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_gleam_capture_shadow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_gleam_div_zero_abort.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_gleam_fnvalue_shadow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_gleam_tail_deep.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_grain_nan_struct.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_int_min_div_abort.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_koka_guard_liveness.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_koka_rescrutinee.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_roc_shared_cow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_roc_trmc_control.almd", class = "fixture" },
+]
+
+# ── NESTED-CONTAINER MATRIX ─
+[[contract]]
+id        = "C-293"
+spec      = "ALS-M4"
+title     = "Two-level container nestings run byte-identical; the third level and map-valued shapes are pinned walls"
+statement = "The nested-type matrix: List[List[Int]] (jagged literal, loop-grown, two-level indexing, fold, equality, alias isolation), List[List[String]] (heap-in-heap grids, split-rebuild, shadow drops), Option/Result woven through containers (List[Int?], List[Result], Option[List], Result[List], Option[Option[Int]]), Map[String, List[Int]] (set, defaulted get, inner read-modify-write), tuples in containers (List[(Int,String)], tuple-of-lists, List[List[(Int,Int)]]), and a recursive variant tree (Branch(List[Tree])) — all byte-identical native == wasm. The matrix's BOUNDARY is pinned as refusals in proofs/wall-corpus: three-level lists in both spellings, Map-valued maps (_hval_wall), List[Map] loop builds, list-of-tuples equality, and map.fold over heap-valued maps — a shape that starts lowering must graduate its specimen into this corpus under this contract in the same PR."
+since     = "0.57.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_list_list_int.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_list_list_string.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_list_option_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_map_list_values.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_tuples.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_variant_tree.almd", class = "fixture" },
+]
+
+# ── ZERO-BUDGET x THE SHARED-MIR INLINER ─
+[[contract]]
+id        = "C-294"
+spec      = "ALS-T1"
+title     = "A zero compute budget admits inlined loop-free callees on every leg"
+statement = "ADR-0001 S5's check-then-charge zero-budget edge composed with the shared-MIR inliner: W1 charge sites are defined over the SHARED MIR (ADR-0001's charge-site definition), and the MIR inlines loop-free non-recursive user fns into their metered region entry-charge and all, so `fan.bounded(compute.ms(0)) { w() }` admits `w` when its body is loop-free (`= 42`, a let block, a branch) and exhausts when it carries a loop (the surviving loop-head charge). The reference interpreter mirrors the same exemption (loop-free, on no call cycle — direct or mutual recursion keeps its per-entry charges, the TCO-aligned approximation) instead of charging every AST-level entry: before the mirror it voted exhaust where both backends admitted (xtarget-fuzz seed=20260817 index=578, a time_saturate mutation whose dynamic budget collapsed to zero)."
+since     = "0.57.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fuel_zero_budget_inline.almd", class = "fixture" },
+]
+
+# ── BOX-PATTERN REFINEMENT BACKSTOP ─
+[[contract]]
+id        = "C-295"
+spec      = "ALS-M4"
+title     = "A checker-exhaustive match of guard-lowered box patterns still builds on native"
+statement = "The #610 unbox rewrite lowers a nested constructor pattern through a Box to a flat pattern + a matches! shape-guard, and rustc does not count guarded arms toward exhaustiveness — so a match whose arms are ALL nested rows (two-deep list shapes; a single-constructor payload type's only case) passed the checker as exhaustive and died at the native build as rustc E0004 (grain/koka reference-port findings, 2026-08-17). The emitter appends a dead `_ => unreachable!()` backstop exactly when some arm was guard-lowered and no unguarded irrefutable row remains; the checker's own exhaustiveness proof is what makes the backstop dead code rather than a semantic change."
+since     = "0.57.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/match_box_pattern_backstop.almd", class = "fixture" },
 ]

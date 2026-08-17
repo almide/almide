@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka unicode2: precomposed vs combining-mark spellings of the "same" text
 // must count DIFFERENTLY (Almide's string.len is codepoints), and slicing
 // around a combining mark must keep byte boundaries honest on both targets.

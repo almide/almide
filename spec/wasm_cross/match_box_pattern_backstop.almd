@@ -1,3 +1,4 @@
+// @contract: C-295
 // The #610 refinement-backstop regression (grain/koka port findings,
 // 2026-08-17): a match whose arms are all nested box patterns — two-deep
 // list-shape rows with no flat catch-all — passed the checker as exhaustive

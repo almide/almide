@@ -1,3 +1,4 @@
+// @contract: C-294
 // ADR-0001 S5 zero-budget edge × the shared-MIR inliner: charge sites are
 // defined over the SHARED MIR (「charge site」, ADR-0001), so a loop-free
 // non-recursive callee is inlined into its region ENTRY CHARGE AND ALL —
@@ -8,12 +9,21 @@
 // voted exhaust on all four (xtarget-fuzz seed=20260817 index=578, a
 // time_saturate mutation whose dynamic budget collapsed to zero).
 fn w1() -> Int = 42
-fn w2() -> Int = { let x = 40
-  x + 2 }
+
+fn w2() -> Int = {
+  let x = 40
+  x + 2
+}
+
 fn w3(n: Int) -> Int = if n > 0 then n + 41 else 42
-fn w4() -> Int = { var i = 0
-  while i < 1 { i = i + 1 }
-  42 }
+
+fn w4() -> Int = {
+  var i = 0
+  while i < 1 {
+    i = i + 1
+  }
+  42
+}
 
 fn pick(n: Int) -> Int = 0
 

@@ -1,3 +1,4 @@
+// @contract: C-292
 // Closures: captured vars, closures stored in lists, closures returning
 // closures, local fn recursion, higher-order over heap payloads.
 fn make_adder(k: Int) -> (Int) -> Int = (x) => x + k

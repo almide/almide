@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam test/language/clause_guard_test.gleam (~40 cases compressed).
 // Every value is routed through a constructor fn so no constant folder can
 // pre-decide a guard (the suite's own discipline). Covers: bare-var guards,
@@ -6,11 +7,17 @@
 // precedence inside guards, tuple access in guards, and guard-scope
 // non-pollution (gleam-lang/gleam#5283).
 fn t() -> Bool = true
+
 fn f() -> Bool = false
+
 fn zero() -> Int = 0
+
 fn fzero() -> Float = 0.0
 
-fn g(c: Bool) -> Int = match 0 { _ if c => 0, _ => 1 }
+fn g(c: Bool) -> Int = match 0 {
+  _ if c => 0,
+  _ => 1,
+}
 
 fn main() -> Unit = {
   let tv = t()
@@ -23,21 +30,46 @@ fn main() -> Unit = {
   println("${int.to_string(g(tv))}${int.to_string(g(fv))}")
   // int comparisons: == != > >= < <= (match then nomatch)
   let ints = [
-    g(iz == iz), g(iz == io), g(iz != io), g(iz != iz),
-    g(io > iz), g(iz > iz), g(io >= iz), g(iz >= iz), g(iz >= io),
-    g(iz < io), g(iz < iz), g(iz <= io), g(iz <= iz), g(io <= iz),
+    g(iz == iz),
+    g(iz == io),
+    g(iz != io),
+    g(iz != iz),
+    g(io > iz),
+    g(iz > iz),
+    g(io >= iz),
+    g(iz >= iz),
+    g(iz >= io),
+    g(iz < io),
+    g(iz < iz),
+    g(iz <= io),
+    g(iz <= iz),
+    g(io <= iz)
   ]
   println(list.join(list.map(ints, (v) => int.to_string(v)), ""))
   // float comparisons
   let floats = [
-    g(fo > fz), g(fz > fz), g(fo >= fz), g(fz >= fz), g(fz >= fo),
-    g(fz < fo), g(fz < fz), g(fz <= fo), g(fz <= fz), g(fo <= fz),
+    g(fo > fz),
+    g(fz > fz),
+    g(fo >= fz),
+    g(fz >= fz),
+    g(fz >= fo),
+    g(fz < fo),
+    g(fz < fz),
+    g(fz <= fo),
+    g(fz <= fz),
+    g(fo <= fz)
   ]
   println(list.join(list.map(floats, (v) => int.to_string(v)), ""))
   // and/or truth tables
   let tbl = [
-    g(tv and tv), g(tv and fv), g(fv and tv), g(fv and fv),
-    g(tv or tv), g(tv or fv), g(fv or tv), g(fv or fv),
+    g(tv and tv),
+    g(tv and fv),
+    g(fv and tv),
+    g(fv and fv),
+    g(tv or tv),
+    g(tv or fv),
+    g(fv or tv),
+    g(fv or fv)
   ]
   println(list.join(list.map(tbl, (v) => int.to_string(v)), ""))
   // variant equality vs constructed literal, in guard position
@@ -50,8 +82,15 @@ fn main() -> Unit = {
   let pair = (tv, fv)
   println("${int.to_string(g(pair.0))}${int.to_string(g(pair.1))}")
   // #5283: a guard's binding must not pollute the outer scope
-  let a = match 1337 { n if n == 1347 => 1, _ => 2 }
-  let b = match 1337 { n => { let _ = n
-    2 } }
+  let a = match 1337 {
+    n if n == 1347 => 1,
+    _ => 2,
+  }
+  let b = match 1337 {
+    n => {
+      let _ = n
+      2
+    }
+  }
   println(if a == b then "clean" else "polluted")
 }

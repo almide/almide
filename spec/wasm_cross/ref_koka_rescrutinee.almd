@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka parc15/parc20: re-match the SAME scrutinee inside an arm (drop once,
 // not twice), and rebuild a constructor consuming the scrutinee while a
 // binding from it is still live (payload must be duplicated first).

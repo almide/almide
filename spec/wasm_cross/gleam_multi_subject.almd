@@ -1,17 +1,33 @@
+// @contract: C-292
 // gleam test/language/multiple_case_subject_test.gleam (minus the
 // or-pattern case, which needs `|` patterns): multiple subjects spelled as
 // a tuple subject — wildcard row, constructor rows, and a guard reading
 // BOTH subjects. Values come from fns so the match cannot fold.
 fn t() -> Bool = true
+
 fn f() -> Bool = false
 
 fn main() -> Unit = {
   let x = t()
   let y = f()
-  println(int.to_string(match (x, y) { (_, _) => 0 }))
-  println(int.to_string(match (x, y) { (false, true) => 1, (_, _) => 0 }))
-  println(int.to_string(match (y, x) { (false, true) => 1, (_, _) => 0 }))
+  println(int.to_string(match (x, y) {
+    (_, _) => 0
+  }))
+  println(int.to_string(match (x, y) {
+    (false, true) => 1,
+    (_, _) => 0,
+  }))
+  println(int.to_string(match (y, x) {
+    (false, true) => 1,
+    (_, _) => 0,
+  }))
   let z = t()
-  println(int.to_string(match (x, z) { (a, b) if a == b => 1, (_, _) => 0 }))
-  println(int.to_string(match (x, y) { (a, b) if a == b => 1, (_, _) => 0 }))
+  println(int.to_string(match (x, z) {
+    (a, b) if a == b => 1,
+    (_, _) => 0,
+  }))
+  println(int.to_string(match (x, y) {
+    (a, b) if a == b => 1,
+    (_, _) => 0,
+  }))
 }

@@ -1,3 +1,4 @@
+// @contract: C-292
 // Int edges: i64 boundaries, signed division/modulo corners, parse limits,
 // hex parsing, byte truncation through bytes.from_list (the #1505 seam).
 fn main() -> Unit = {
@@ -16,7 +17,18 @@ fn main() -> Unit = {
   println("${int.to_string(p1)} ${int.to_string(p2)} ${int.to_string(p3)}")
   println(int.to_string(int.from_hex("ff") ?? 0))
   println(int.to_string(int.from_hex("FFFFFFFFFFFFFFFF") ?? (0 - 1)))
-  let bs = bytes.from_list([0, 1, 127, 128, 255, 256, 300, 0 - 1, 0 - 128, 0 - 129])
+  let bs = bytes.from_list([
+    0,
+    1,
+    127,
+    128,
+    255,
+    256,
+    300,
+    0 - 1,
+    0 - 128,
+    0 - 129
+  ])
   var out: List[String] = []
   var i = 0
   while i < bytes.len(bs) {

@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka #894: TWO SEQUENTIAL statement-position matches where an arm calls a
 // 2-ARG function — the second match's dispatch was corrupted by the first
 // arm's multi-arg call (the 1-arg spelling passed). Both spellings side by

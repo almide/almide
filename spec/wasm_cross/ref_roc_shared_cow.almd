@@ -1,3 +1,4 @@
+// @contract: C-292
 // roc rc_conformance: shared vs unique heap values through every
 // copy-on-write op — the holder list pins refcount > 1, so any
 // in-place-when-unique optimization firing on a shared value corrupts

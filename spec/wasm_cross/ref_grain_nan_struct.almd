@@ -1,3 +1,4 @@
+// @contract: C-292
 // grain nan_equality + roc NaN collapse: NaN self-inequality in every
 // position, the isNaN idiom, and whether STRUCTURAL equality of a variant
 // carrying NaN agrees with bare float equality — the C-289 twin seam.

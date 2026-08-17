@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam test/language/int_test.gleam (~25 cases): int arithmetic with
 // negative operands, block precedence, RADIX LITERALS (hex/octal/binary),
 // underscore separators, and truncating division (3/2 == 1).

@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam test/language/bool_negation_test.gleam: not-tables, parenthesised
 // negation, and the SHORT-CIRCUIT proofs — gleam guards the RHS with
 // `panic`; here the crasher is a division by a fn-produced zero, so if the

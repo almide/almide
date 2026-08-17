@@ -1,3 +1,4 @@
+// @contract: C-292
 // koka reuse4 + beans map/swap: hand-rolled map over a cons-variant list
 // rebuilding every cell (reuse candidate), and the swap of the first two
 // cells that reuses both cons cells with crossed payloads.

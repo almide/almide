@@ -1,3 +1,4 @@
+// @contract: C-292
 // gleam test/language/float_test.gleam (~50 cases): float arithmetic and
 // block precedence, then the scientific-notation identity battery — a
 // literal that is not correctly rounded at lex time fails one of these

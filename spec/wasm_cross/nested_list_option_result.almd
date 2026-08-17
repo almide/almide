@@ -1,3 +1,4 @@
+// @contract: C-293
 // Option/Result woven through containers: List[Int?], List[Result[Int, String]],
 // Option[List[Int]], Result[List[String], String] — construct, match, fold,
 // and the some(list) / ok(list) payload drops.

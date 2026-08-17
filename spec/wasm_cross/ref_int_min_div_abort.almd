@@ -1,3 +1,4 @@
+// @contract: C-292
 // Trap corner in isolation: i64::MIN / -1 through variables — native idiv
 // faults, wasm i64.div_s traps; both must surface the SAME guarded abort.
 fn main() -> Unit = {

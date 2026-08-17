@@ -1,9 +1,11 @@
+// @contract: C-292
 // gleam test/language/equality_test.gleam + string_test.gleam (~24 cases).
 // List equality in all four length shapes, int equality, ok/err payload
 // equality, Bytes equality (the bit-array cases re-based onto Bytes), the
 // raw-newline string literal, and empty-string equality — every operand
 // built through a fn so nothing constant-folds.
 fn mk(xs: List[Int]) -> List[Int] = xs
+
 fn eq(x: Bool) -> String = if x then "1" else "0"
 
 fn main() -> Unit = {
