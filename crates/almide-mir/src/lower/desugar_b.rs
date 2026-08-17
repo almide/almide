@@ -739,3 +739,161 @@ pub fn desugar_unwrap_or_unwrap_fallback(body: &IrExpr) -> Option<IrExpr> {
 
 
 include!("desugar_b_tail.rs");
+
+
+/// Rewrite a `result.map` / `result.map_err` / `result.flat_map` call whose type
+/// instantiation has NO linked typed twin — [`result_call_name`] answers the deliberately
+/// unlinked `_x` — into the equivalent `match` (#1492's combinator leg):
+///
+///   map:      `match r { ok(v) => ok(f(v)),  err(e) => err(e) }`
+///   map_err:  `match r { ok(v) => ok(v),     err(e) => err(f(e)) }`
+///   flat_map: `match r { ok(v) => f(v),      err(e) => err(e) }`
+///
+/// This is the reference-compiler architecture for combinators (rustc lowers `?` to ONE
+/// generic match; Swift's `??` is a library function; Roc desugars `??` to literally this
+/// match in canonicalization): the combinator is not a special payload-class route, it is
+/// the match the user could have written — and the heap-payload match now lowers. The `f`
+/// argument is used exactly ONCE (no duplication); a non-Var subject is ANF-lifted into a
+/// `let`, the optional-chain desugar's discipline. A twin-linked instantiation is left
+/// untouched (its proven typed path stays byte-identical), and a match shape the lowering
+/// still cannot express walls exactly as the `_x` name did — never worse, usually lowered.
+pub fn desugar_result_combinator_to_match(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, CallTarget, IrMatchArm, IrMutVisitor, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    struct S {
+        changed: bool,
+        next_var: u32,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
+                &e.kind
+            else {
+                return;
+            };
+            if module.as_str() != "result" || args.len() != 2 {
+                return;
+            }
+            let fname = func.as_str().to_string();
+            if !matches!(fname.as_str(), "map" | "map_err" | "flat_map") {
+                return;
+            }
+            let Ty::Applied(TypeConstructorId::Result, ra) = &args[0].ty else { return };
+            if ra.len() != 2 {
+                return;
+            }
+            // Only when the router would emit the unlinked `_x`. Asking the SAME router the
+            // lowering uses keeps the twin-availability logic in exactly one place — the
+            // desugar can never disagree with the dispatch about which cells are linked.
+            let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
+            match result_call_name(&fname, &arg_tys, &e.ty) {
+                Some(n) if n.ends_with("_x") => {}
+                _ => return,
+            }
+            let Ty::Applied(TypeConstructorId::Result, oa) = &e.ty else { return };
+            if oa.len() != 2 {
+                return;
+            }
+            let (a_ty, e_ty) = (ra[0].clone(), ra[1].clone());
+            let (b_ty, e2_ty) = (oa[0].clone(), oa[1].clone());
+            let out_ty = e.ty.clone();
+            let span = e.span.clone();
+            let mk = |kind: IrExprKind, ty: Ty| IrExpr {
+                kind,
+                ty,
+                span: span.clone(),
+                def_id: None,
+            };
+            let r_expr = args[0].clone();
+            let f_expr = args[1].clone();
+            let v = VarId(self.next_var);
+            self.next_var += 1;
+            let w = VarId(self.next_var);
+            self.next_var += 1;
+            let call_f = |payload: IrExpr, ret: Ty| {
+                mk(
+                    IrExprKind::Call {
+                        target: CallTarget::Computed { callee: Box::new(f_expr.clone()) },
+                        args: vec![payload],
+                        type_args: Vec::new(),
+                    },
+                    ret,
+                )
+            };
+            let v_read = mk(IrExprKind::Var { id: v }, a_ty.clone());
+            let w_read = mk(IrExprKind::Var { id: w }, e_ty.clone());
+            let (ok_body, err_body) = match fname.as_str() {
+                "map" => (
+                    mk(
+                        IrExprKind::ResultOk {
+                            expr: Box::new(call_f(v_read, b_ty.clone())),
+                        },
+                        out_ty.clone(),
+                    ),
+                    mk(IrExprKind::ResultErr { expr: Box::new(w_read) }, out_ty.clone()),
+                ),
+                "map_err" => (
+                    mk(IrExprKind::ResultOk { expr: Box::new(v_read) }, out_ty.clone()),
+                    mk(
+                        IrExprKind::ResultErr {
+                            expr: Box::new(call_f(w_read, e2_ty.clone())),
+                        },
+                        out_ty.clone(),
+                    ),
+                ),
+                // flat_map: the ok arm IS the whole result of f.
+                _ => (
+                    call_f(v_read, out_ty.clone()),
+                    mk(IrExprKind::ResultErr { expr: Box::new(w_read) }, out_ty.clone()),
+                ),
+            };
+            let arms = vec![
+                IrMatchArm {
+                    pattern: IrPattern::Ok {
+                        inner: Box::new(IrPattern::Bind { var: v, ty: a_ty.clone() }),
+                    },
+                    guard: None,
+                    body: ok_body,
+                },
+                IrMatchArm {
+                    pattern: IrPattern::Err {
+                        inner: Box::new(IrPattern::Bind { var: w, ty: e_ty.clone() }),
+                    },
+                    guard: None,
+                    body: err_body,
+                },
+            ];
+            // ANF-lift a non-Var subject so the match branches on a tracked bind — the
+            // optional-chain desugar's exact discipline.
+            let (stmts, subject) = if matches!(&r_expr.kind, IrExprKind::Var { .. }) {
+                (Vec::new(), Box::new(r_expr))
+            } else {
+                let s_var = VarId(self.next_var);
+                self.next_var += 1;
+                let subj_ty = r_expr.ty.clone();
+                let bind = IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: s_var,
+                        mutability: almide_ir::Mutability::Let,
+                        ty: subj_ty.clone(),
+                        value: r_expr,
+                    },
+                    span: span.clone(),
+                };
+                (vec![bind], Box::new(mk(IrExprKind::Var { id: s_var }, subj_ty)))
+            };
+            let match_expr = mk(IrExprKind::Match { subject, arms }, out_ty.clone());
+            *e = if stmts.is_empty() {
+                match_expr
+            } else {
+                mk(IrExprKind::Block { stmts, expr: Some(Box::new(match_expr)) }, out_ty)
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false, next_var: crate::lower::desugar_var_seed() };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}

@@ -492,6 +492,7 @@ fn desugar_all_try_match_branch_passes(
     (if unit_main { desugar_unit_main_err_arms(cur) } else { None })
         .or_else(|| desugar_sort_by_cached_keys(cur))
         .or_else(|| desugar_to_option_calls(cur))
+        .or_else(|| desugar_result_combinator_to_match(cur))
         .or_else(|| desugar_offtype_testing_asserts(cur))
         // The heap-if call-arg hoist and the mutable-global projection-arg
         // hoist run in the LOWERING's pre-slots (mod_c.rs) — they must run on

@@ -242,6 +242,9 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_to_option_calls(body) {
             return Some(rewritten);
         }
+        if let Some(rewritten) = crate::lower::desugar_result_combinator_to_match(body) {
+            return Some(rewritten);
+        }
         if let Some(rewritten) = crate::lower::desugar_offtype_testing_asserts(body) {
             return Some(rewritten);
         }
