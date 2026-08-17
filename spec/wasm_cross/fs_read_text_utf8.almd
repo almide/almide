@@ -22,7 +22,10 @@ effect fn show(label: String, p: String) -> Unit = {
     err(m) => "${label} lines=err(${m})",
   })
   println(match fs.read_text_if_exists(p) {
-    ok(o) => "${label} text_if=ok(${match o { some(v) => "some(${string.len(v)})", none => "none" }})",
+    ok(o) => "${label} text_if=ok(${match o {
+      some(v) => "some(${string.len(v)})",
+      none => "none",
+    }})",
     err(m) => "${label} text_if=err(${m})",
   })
   println(match fs.read_bytes(p) {
@@ -38,7 +41,24 @@ effect fn show(label: String, p: String) -> Unit = {
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("utf8")!
   // Latin-1 bytes inside an otherwise-ASCII file (the teastia fixture that found it).
-  fs.write_bytes(d + "/latin1.js", [99, 111, 110, 115, 116, 32, 120, 32, 61, 32, 34, 255, 254, 34, 59, 10])!
+  fs.write_bytes(d + "/latin1.js", [
+    99,
+    111,
+    110,
+    115,
+    116,
+    32,
+    120,
+    32,
+    61,
+    32,
+    34,
+    255,
+    254,
+    34,
+    59,
+    10
+  ])!
   // A truncated 3-byte sequence (E2 82 without its third byte).
   fs.write_bytes(d + "/truncated.bin", [226, 130])!
   // A UTF-16 surrogate encoded as UTF-8 (ED A0 80 = U+D800): rejected by the table.
@@ -46,7 +66,20 @@ effect fn main() -> Unit = {
   // An overlong encoding of '/' (C0 AF): rejected by the table.
   fs.write_bytes(d + "/overlong.bin", [192, 175])!
   // Valid 2/3/4-byte UTF-8 ("é", "✓", U+1D11E) and plain ASCII stay readable.
-  fs.write_bytes(d + "/valid.txt", [195, 169, 32, 226, 156, 147, 32, 240, 157, 132, 158, 10])!
+  fs.write_bytes(d + "/valid.txt", [
+    195,
+    169,
+    32,
+    226,
+    156,
+    147,
+    32,
+    240,
+    157,
+    132,
+    158,
+    10
+  ])!
   fs.write(d + "/ascii.txt", "plain\n")!
   show("latin1", d + "/latin1.js")!
   show("truncated", d + "/truncated.bin")!
