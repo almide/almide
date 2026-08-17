@@ -310,42 +310,47 @@ pub struct LockedDep {
     pub commit: String,
 }
 
-/// Parse almide.lock (simple line-based: name = { git = "...", ref = "...", commit = "..." })
+/// Parse almide.lock. The write format below is valid TOML (one inline table
+/// per dependency), so the reader is the `toml` crate rather than a hand-rolled
+/// line splitter: a ref containing `,` `}` or `"` round-trips instead of being
+/// mangled, and a corrupted entry is an ERROR naming the dependency instead of
+/// a line that silently vanishes from the lock set and gets re-resolved from
+/// the network (#1465). The one-entry-per-line shape — the property that keeps
+/// lock merges conflict-friendly — is untouched; only the reader changed.
 pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let table: toml::Table = content
+        .parse()
+        .map_err(|e| format!("{} is not valid TOML: {}", path.display(), e))?;
     let mut locked = Vec::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
-        if let Some(dep) = parse_lock_line(line) {
-            locked.push(dep);
-        }
+    for (name, val) in table {
+        let entry = val.as_table().ok_or_else(|| {
+            format!("{}: lock entry '{}' is not a table", path.display(), name)
+        })?;
+        let required = |key: &str| -> Result<String, String> {
+            entry.get(key).and_then(|v| v.as_str()).map(str::to_string).ok_or_else(|| {
+                format!(
+                    "{}: lock entry '{}' is missing string field '{}'",
+                    path.display(),
+                    name,
+                    key
+                )
+            })
+        };
+        let git = required("git")?;
+        let commit = required("commit")?;
+        let ref_name =
+            entry.get("ref").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        locked.push(LockedDep { name, git, ref_name, commit });
     }
     Ok(locked)
 }
 
-fn parse_lock_line(line: &str) -> Option<LockedDep> {
-    let mut parts = line.splitn(2, '=');
-    let name = parts.next()?.trim().to_string();
-    let rest = parts.next()?.trim();
-    if !rest.starts_with('{') { return None; }
-    let inner = rest.trim_start_matches('{').trim_end_matches('}').trim();
-    let mut git = String::new();
-    let mut ref_name = String::new();
-    let mut commit = String::new();
-    for item in inner.split(',') {
-        if let Some((k, v)) = parse_kv(item) {
-            match k {
-                "git" => git = v,
-                "ref" => ref_name = v,
-                "commit" => commit = v,
-                _ => {}
-            }
-        }
-    }
-    if git.is_empty() || commit.is_empty() { return None; }
-    Some(LockedDep { name, git, ref_name, commit })
+/// One TOML-escaped quoted string, so a `"` or `\` in a ref/url survives the
+/// round trip — the writer half of #1465.
+fn toml_quoted(s: &str) -> String {
+    toml::Value::String(s.to_string()).to_string()
 }
 
 /// Write almide.lock
@@ -353,8 +358,11 @@ pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> 
     let mut content = String::from("# almide.lock — auto-generated, do not edit\n\n");
     for dep in locked {
         content.push_str(&format!(
-            "{} = {{ git = \"{}\", ref = \"{}\", commit = \"{}\" }}\n",
-            dep.name, dep.git, dep.ref_name, dep.commit
+            "{} = {{ git = {}, ref = {}, commit = {} }}\n",
+            dep.name,
+            toml_quoted(&dep.git),
+            toml_quoted(&dep.ref_name),
+            toml_quoted(&dep.commit)
         ));
     }
     std::fs::write(path, content)
