@@ -108,7 +108,7 @@ effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
 `ok(...)` automatically — write the payload, or write the Result explicitly;
 both work:
 
-```almide
+```almide check
 fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through (already a Result)
 fn double_port(s: String) -> Int! = int.parse(s)! * 2  // value tail — lifts into ok(...)
 fn checked(s: String) -> Int! = {
@@ -596,7 +596,7 @@ test "description" {
 
 In test blocks, `effect fn` calls return `Result[T, String]` — no auto-unwrap. Use `!` for the value, or assert on `ok`/`err` directly:
 
-```almide
+```almide check
 effect fn validate(n: Int) -> Int = {
   guard n > 0 else err("bad")!
   n
@@ -706,7 +706,7 @@ format mirrors the format's field names verbatim, even when they break Almide's
 snake_case convention. The type IS the documentation of the wire; no renaming
 layer exists to misremember:
 
-```almide
+```almide check
 type OtlpSpan: Codec = {
   traceId: String,           // camelCase because the WIRE says traceId
   spanId: String,
@@ -747,7 +747,7 @@ internally (`{"type": "click", ...}`), give each case its own Codec record and
 hand-write only the dispatch — the convention methods compose with every
 derived Codec automatically:
 
-```almide
+```almide check
 type Click: Codec = { x: Int, y: Int }
 type Scroll: Codec = { dy: Int }
 type Event = | C(Click) | S(Scroll)
@@ -824,8 +824,9 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`
 
 ## Complete example
-```
+```almide check
 import fs
+import process
 
 type AppError =
   | NotFound(String)

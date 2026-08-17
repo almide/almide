@@ -938,6 +938,9 @@ jobs:
       - name: Stdlib doc signature indexes up to date (regenerate and diff)
         run: ALMIDE_BIN=/tmp/almide-bin/almide python3 tools/gen-stdlib-doc-index.py --check
 
+      - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
+
       - name: Contract README up to date (regenerate and diff)
         run: |
           bash docs/contracts/generate-readme.sh > docs/contracts/README.md
