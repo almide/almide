@@ -171,6 +171,9 @@ impl LowerCtx {
             IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(result_ty) => {
                 self.lower_scalar_ok_variant_err_ctor_arm(arm, result_ty)
             }
+            IrExprKind::ResultErr { .. } if self.is_scalar_ok_rec_err_result(result_ty) => {
+                self.lower_scalar_ok_rec_err_ctor_arm(arm, result_ty)
+            }
             IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
                 if self.is_custom_variant_ok_payload_ty(result_ty) =>
             {
@@ -222,6 +225,20 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         let arm_mark = self.live_heap_handles.len();
         let obj = self.try_lower_result_err_variant_ctor(arm, result_ty)?;
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+    }
+
+    /// The scalar-Ok RECORD-Err ctor arm body — the record twin of
+    /// [`Self::lower_scalar_ok_variant_err_ctor_arm`], same per-arm `"im"` frame.
+    fn lower_scalar_ok_rec_err_ctor_arm(
+        &mut self,
+        arm: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let obj = self.try_lower_result_err_record_ctor(arm, result_ty)?;
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)

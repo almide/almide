@@ -271,6 +271,13 @@ impl LowerCtx {
                 self.try_lower_concat_list(expr)
             }
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                // A registered variant CTOR is NOT a wasm fn — a plain `CallFn "Cls"` renders
+                // as a dangling unlinked call. Build the tagged block inline instead (the
+                // same guard `lower_named_call_heap_field` carries); its decline stays a
+                // decline (never a dangling call).
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+                    return self.try_lower_variant_ctor(expr);
+                }
                 let lowered = self.lower_call_args(args).ok()?;
                 let pr = repr_of(&expr.ty).ok()?;
                 let p = self.fresh_value();

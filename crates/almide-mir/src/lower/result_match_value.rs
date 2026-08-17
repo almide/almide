@@ -43,12 +43,57 @@ impl LowerCtx {
             return None;
         };
         if heap_ok {
-            // The cap-as-tag wrapper's epilogue drop must release its @12 payload too:
-            // DropListStr rc_decs the single slot handle (len@4 is always 1) + frees the
-            // wrapper — the Ok arm's Dup keeps a returned payload alive, so the dec is the
-            // borrow's release, never a double-free. (A heap-ERR inner's own nested strings
-            // free flat — the statement twin's `else heap_elem_lists` leak-parity bucket.)
-            self.value_drops.entry(subj).or_default().flat_elems = true;
+            // The cap-as-tag wrapper's epilogue drop must release its @12 payload too.
+            // A payload with NO recursive drop (String, Value-less flat shapes): the flat
+            // DropListStr rc_dec of the slot handle is EXACT — the Ok arm's Dup keeps a
+            // returned payload alive, so the dec is the borrow's release, never a
+            // double-free. (A heap-ERR inner's own nested strings free flat — the
+            // statement twin's `else heap_elem_lists` leak-parity bucket.)
+            //
+            // A RECURSIVE-drop payload (a record/variant owning nested heap): the flat dec
+            // frees only the payload BLOCK at its last ref, leaking its fields — observable
+            // the moment an arm extracts a CHILD instead of moving the payload out whole
+            // (`ok(r) => ok(r.node)`, #1492): the child's Dup keeps the child alive but the
+            // parent frees flat, stranding the child's slot ref. Route the subject through
+            // the rc-guarded `DropWrapperRec` (`resrec:` → tag@16==0 recurses via
+            // `$__drop_<T>`, which decs each field and frees only at ITS last ref; Err →
+            // flat rc_dec of the @12 String). A whole-payload move is unchanged in effect:
+            // the payload's rc is 2 at the subject drop, so the recursion decs it to 1 and
+            // stops — exactly the flat release.
+            let rec_drop = self.record_or_anon_drop_type_name(&ok_pay_ty).or_else(|| {
+                self.custom_variant_type_name(&ok_pay_ty).filter(|tn| {
+                    self.variant_layouts.needs_recursive_drop(tn, &|rn| {
+                        crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                    })
+                })
+            });
+            let d = self.value_drops.entry(subj).or_default();
+            match rec_drop {
+                Some(drop_fn) if d.named_route.is_none() => {
+                    d.named_route = Some(format!("resrec:{drop_fn}"));
+                }
+                _ => d.flat_elems = true,
+            }
+        } else {
+            // The len-as-tag mirror: a scalar-Ok subject whose ERR payload needs a
+            // recursive drop (`Result[Int, {code, msg}]`) must recurse at its last
+            // ref — `optrec:` recurses exactly when the wrapper holds a payload
+            // (len@4 > 0 = Err present), which is the Err-iff condition here. A
+            // String Err (the overwhelmingly common case) matches neither predicate
+            // and keeps its existing seeding untouched.
+            let rec_drop = self.record_or_anon_drop_type_name(&err_pay_ty).or_else(|| {
+                self.custom_variant_type_name(&err_pay_ty).filter(|tn| {
+                    self.variant_layouts.needs_recursive_drop(tn, &|rn| {
+                        crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                    })
+                })
+            });
+            if let Some(drop_fn) = rec_drop {
+                let d = self.value_drops.entry(subj).or_default();
+                if d.named_route.is_none() {
+                    d.named_route = Some(format!("optrec:{drop_fn}"));
+                }
+            }
         }
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });

@@ -212,7 +212,16 @@ impl LowerCtx {
         let repr = repr_of(result_ty).ok()?;
         match &expr.kind {
             IrExprKind::ResultOk { expr: inner } => {
-                let piece = self.try_lower_variant_ctor(inner)?;
+                // A ctor payload (`ok(Pair(..))`) builds its tagged block; any OTHER heap
+                // payload shape — `ok(v)` over a Var holding a variant, `ok(r.node)` over a
+                // borrowed projection, a call — lowers to an owned handle via the SAME piece
+                // set the record-Result ctor admits (`lower_result_str_piece`: Var → Dup,
+                // Member/TupleIndex → borrow-then-Dup, call → fresh CallFn result). Without
+                // the fallback a heap→heap payload re-wrap (`let r = g(n)!; ok(r.node)`)
+                // walled the whole function — the #1492 headline shape.
+                let piece = self
+                    .try_lower_variant_ctor(inner)
+                    .or_else(|| self.lower_result_str_piece(inner))?;
                 // The variant piece is MOVED into the Result @12 (Consumed by the materialize below) and
                 // freed by the Result's drop — detach its OWN scope-end drop so it is freed EXACTLY once.
                 self.value_drops.get_mut(&piece).map(|d| d.named_route = None);
@@ -298,6 +307,59 @@ impl LowerCtx {
             self.value_drops.get_mut(&obj).map(|d| d.flat_elems = false);
             self.value_drops.entry(obj).or_default().named_route = Some(format!("res_{type_name}"));
         }
+        Some(obj)
+    }
+
+    /// Is `ty` a `Result[T_scalar, <record>]` — the structured-error shape whose Err is a
+    /// RECORD needing a recursive drop (`Result[Int, {code, msg}]`)? The record twin of
+    /// [`Self::is_scalar_ok_variant_err_result`], previously an unconditional wall.
+    pub(crate) fn is_scalar_ok_rec_err_result(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+            if a.len() == 2
+                && !is_heap_ty(&a[0])
+                && self.record_or_anon_drop_type_name(&a[1]).is_some())
+    }
+
+    /// `err(<record>)` for `Result[T_scalar, <record>]` — the record twin of
+    /// [`Self::try_lower_result_err_variant_ctor`]. The reader seeds this type
+    /// LEN-AS-TAG (Err = len 1 + the payload handle at slot 0), so the Err block is
+    /// the len-1 builder's (`materialize_opt_aggregate_some` — "Err IS Some
+    /// physically"), whose `optrec:<R>` route recurses into the record via the
+    /// generated `$__drop_<R>` exactly when the wrapper holds a payload (len > 0 =
+    /// Err) at its last ref — a flat `DropListStr` would free the record BLOCK and
+    /// leak its heap fields. The payload set is `lower_result_str_piece`'s (a
+    /// record literal via `lower_owned_heap_field`, a Var → Dup, a call), so both
+    /// `err(E { … })` and `err(e)` over a borrowed bind lower. `ok(<scalar>)` for
+    /// this family keeps the existing scalar-Ok materializer.
+    pub(crate) fn try_lower_result_err_record_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let err_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && !is_heap_ty(&a[0]) =>
+            {
+                &a[1]
+            }
+            _ => return None,
+        };
+        let drop_fn = self.record_or_anon_drop_type_name(err_ty)?;
+        let repr = repr_of(result_ty).ok()?;
+        let IrExprKind::ResultErr { expr: inner } = &expr.kind else {
+            return None;
+        };
+        let piece = self.lower_result_str_piece(inner)?;
+        // The record block is MOVED into the Result @slot 0 — detach its own
+        // scope-end drop so it frees exactly once, through the wrapper.
+        self.value_drops.get_mut(&piece).map(|d| d.named_route = None);
+        self.value_drops.get_mut(&piece).map(|d| d.flat_elems = false);
+        self.live_heap_handles.retain(|h| *h != piece);
+        let obj = self.materialize_opt_aggregate_some(piece, repr, drop_fn);
+        self.value_shapes.remove(&obj);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultScalar);
         Some(obj)
     }
 

@@ -180,10 +180,24 @@ impl LowerCtx {
                 Some(obj)
             }
             IrExprKind::Var { id } => {
-                let src = self.value_for(*id).ok()?;
+                // `value_or_global` (not `value_for`): a MODULE-LEVEL heap global arm
+                // (`if c == 100 then DIGIT else …` — dfa's escape_class table) materializes
+                // the global's initializer as a fresh owned copy, exactly as the
+                // owned-heap-field Var arm already does. The copy is a PER-ARM temp
+                // (materialized inside this branch), so it must free within the arm —
+                // a function-scope drop of it would rc_dec an uninitialized local when
+                // the other arm ran. A plain tracked local takes the value_for fast
+                // path inside value_or_global: no live-set change, the frame is a no-op,
+                // and the emitted ops are byte-identical to before.
+                let arm_mark = self.live_heap_handles.len();
+                let src = match self.value_or_global(*id) {
+                    Ok(v) => v,
+                    Err(_) => return None,
+                };
                 let dst = self.fresh_value();
                 self.ops.push(Op::Dup { dst, src });
                 self.ops.push(Op::Consume { v: dst });
+                self.drop_arm_locals(arm_mark);
                 Some(dst)
             }
             _ => None,
