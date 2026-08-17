@@ -44,6 +44,12 @@ Correct flow:
      GitHub PRERELEASE (excluded from "latest"; the blocker gate prints but
      does not fail) and buys a soak window. Tag the final `vX.Y.Z` once the
      soak is clean; the length is a per-release human call.
+   - **Interface diff** (#1488): before the final tag, run
+     `bash scripts/check-interface-diff.sh vPREV vX.Y.Z` — it classifies the
+     public stdlib surface as identical / additive / breaking from the
+     committed signature indexes, and refuses a breaking diff unless declared
+     with `--allow-breaking` (a removal needs its `@deprecated` window and,
+     when it can break written code, a `proofs/dialect-epochs.toml` entry).
 5. **Let the workflow create the release.** It auto-generates notes from commits.
 6. If you want custom notes, edit after the workflow completes: `gh release edit vX.Y.Z --notes "..."`
 7. **Seal the release evidence** (audit freeze): `bash scripts/release-seal.sh gen vX.Y.Z`,
