@@ -35,10 +35,30 @@ checker was never the blocker; the gates written under the old FLAT model were).
   (the `__drop_list_str` sweep, List[flat-variant] precedent verbatim), and the
   `LIST_STR_DROP_SRC` linkage gate.
 
-Result on the 10-shape wall corpus (`w01–w10`): **2 → 6 BUILD+PARITY**, the other
-4 still honest walls (`result.map` heap→heap needs the combinator-to-match desugar;
-`Map`/`Set` with non-primitive keys/values need their typed stdlib twins — both are
-different subsystems, not this lowering).
+Result on the 10-shape wall corpus (`w01–w10`): **2 → 6 BUILD+PARITY**, then
+**7 of 10** with the combinator leg below; the remaining 3 are the Map/Set twins.
+
+## Landed 2026-08-17, second arc: the combinator leg
+
+`result.map` / `map_err` / `flat_map` over a type instantiation with no linked typed
+twin now desugar to the equivalent `match` (`desugar_result_combinator_to_match`,
+in both the counted-tree and lowering chains) — the reference-compiler architecture
+for combinators (rustc's `?`, Swift's library `??`, Roc's canonicalization). The
+desugar asks `result_call_name` itself whether the instantiation routes `_x`, so the
+twin-availability logic lives in exactly one place: linked twins stay byte-identical,
+and a match the lowering cannot express walls exactly as `_x` did. Verified with
+lambda AND named-fn `f` arguments, custom record Err types, 403/403.
+
+## The remaining brick: Map/Set typed twins (sized, not started)
+
+`Map[List[Int], _]` / `Map[String, <record>]` / `Set[List[Int]]` wall at the
+`_key_wall` / `_x` routes (mod_p4_e.rs:609). This is NOT a lowering gap: the
+stdlib self-hosts are per-class prim-level hash tables (`map*.almd` 3,238 lines,
+`set*.almd` 1,191 lines, one file per key/value class — `set_str.almd` is the
+String twin). A heap-key class needs structural eq+hash over elements, owned-block
+drop routing inside the table, registry + router + usage-gate wiring, and — per
+CLAUDE.md's family rule — the executable matrix gate stating which cells exist, in
+the same PR. A real stdlib arc of its own; do not bolt it onto a lowering session.
 
 Downstream check: `almide/dfa` (a full recursive-descent regex parser with a
 `Result[Cursor,_] → Result[Node,_]` spine) now builds to wasm (41KB, v1-verified),
