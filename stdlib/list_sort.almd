@@ -1,28 +1,47 @@
 // list_sort — SELF-HOSTED `list.sort` for v1 over the prim floor: copy the elements into a
-// fresh List[Int] (prim.alloc_list) and selection-sort it in place by ascending i64 value.
-// Sound + loop-bounded (i64 value copies, no new heap elements). List[Int] only: a heap-
-// element list would be sorted by HANDLE address, not value — a per-type refinement. O(n^2)
-// with O(n) recursion depth (very long lists may exhaust the stack; TCO is a later add).
+// fresh List[Int] (prim.alloc_list) and bottom-up MERGESORT them between two buffers by
+// ascending i64 value. Sound + loop-bounded (i64 value copies, no new heap elements).
+// List[Int] only: a heap-element list would be sorted by HANDLE address, not value — a
+// per-type refinement. O(n log n) — the selection sort this replaced was O(n^2), a 100x
+// wall-time cliff at n=20k that native (Rust pdqsort) never had (#1459) — and STABLE
+// (`<=` takes the left run first), matching native's stable sort. Every recursive helper
+// is tail-recursive; depth is O(n) within a merge pass, same bound as the old code.
 fn __sort_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 
-// Index of the minimum element in [i, n), scanning j from `i+1`, best starting at `i`.
-fn __sort_min(h: Int, n: Int, j: Int, best: Int) -> Int = if j >= n then best
+// Merge the runs [lo, mid) and [mid, hi) from src into dst; `i`/`j` walk the
+// two runs, `k` walks [lo, hi) in dst. `<=` keeps the merge stable.
+fn __merge_run(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
-  let e = __sort_load(h, j)
-  let be = __sort_load(h, best)
-  let nb = if e < be then j else best
-  __sort_min(h, n, j + 1, nb)
+  let takel = if j >= hi then true
+    else if i >= mid then false
+    else __sort_load(srch, i) <= __sort_load(srch, j)
+  if takel then {
+    prim.store64(dsth + 12 + k * 8, __sort_load(srch, i))
+    __merge_run(srch, dsth, mid, hi, i + 1, j, k + 1)
+  } else {
+    prim.store64(dsth + 12 + k * 8, __sort_load(srch, j))
+    __merge_run(srch, dsth, mid, hi, i, j + 1, k + 1)
+  }
 }
 
-// Selection-sort the buffer at handle `h` (n elements) in place.
-fn __sort_sel(h: Int, n: Int, i: Int) -> Int = if i >= n then 0
+// One width-pass: merge each adjacent pair of width-runs from src into dst,
+// `lo` stepping by 2*width across [0, n).
+fn __merge_pass(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {
-  let mi = __sort_min(h, n, i + 1, i)
-  let a = __sort_load(h, i)
-  let b = __sort_load(h, mi)
-  prim.store64(h + 12 + i * 8, b)
-  prim.store64(h + 12 + mi * 8, a)
-  __sort_sel(h, n, i + 1)
+  let m0 = lo + width
+  let mid = if m0 > n then n else m0
+  let h0 = lo + width * 2
+  let hi = if h0 > n then n else h0
+  let _r = __merge_run(srch, dsth, mid, hi, lo, mid, lo)
+  __merge_pass(srch, dsth, n, width, lo + width * 2)
+}
+
+// Double the run width until one run covers the list, ping-ponging between
+// the two buffers; returns the handle holding the sorted data.
+fn __merge_rounds(curh: Int, othh: Int, n: Int, width: Int) -> Int = if width >= n then curh
+else {
+  let _p = __merge_pass(curh, othh, n, width, 0)
+  __merge_rounds(othh, curh, n, width * 2)
 }
 
 fn __sort_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
@@ -38,7 +57,12 @@ fn list_sort(xs: List[Int]) -> List[Int] = {
   let buf = prim.alloc_list(n)
   let bh = prim.handle(buf)
   let _c = __sort_copy(h, bh, n, 0)
-  let _s = __sort_sel(bh, n, 0)
+  // The scratch buffer is a plain List[Int] whose drop frees only the block —
+  // it never owns anything, whichever side the ping-pong ends on.
+  let tmp = prim.alloc_list(n)
+  let th = prim.handle(tmp)
+  let fin = __merge_rounds(bh, th, n, 1)
+  let _cb = if fin == bh then 0 else __sort_copy(fin, bh, n, 0)
   buf
 }
 
@@ -68,22 +92,39 @@ else {
   __sort_copy_rc(srch, dsth, n, i + 1)
 }
 
-fn __sort_min_str(h: Int, n: Int, j: Int, best: Int) -> Int = if j >= n then best
+// The String-leg merge twins: same shape as __merge_run/__merge_pass/
+// __merge_rounds with __strcmp for the ordering. Merging moves HANDLES
+// between raw buffers — no rc traffic; the one rc_inc per element happened
+// in __sort_copy_rc, and the returned List[String]'s recursive drop is the
+// single matching rc_dec.
+fn __merge_run_str(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
-  let ej = prim.load64(h + 12 + j * 8)
-  let eb = prim.load64(h + 12 + best * 8)
-  let nb = if __strcmp(ej, eb) < 0 then j else best
-  __sort_min_str(h, n, j + 1, nb)
+  let takel = if j >= hi then true
+    else if i >= mid then false
+    else __strcmp(prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
+  if takel then {
+    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
+    __merge_run_str(srch, dsth, mid, hi, i + 1, j, k + 1)
+  } else {
+    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
+    __merge_run_str(srch, dsth, mid, hi, i, j + 1, k + 1)
+  }
 }
 
-fn __sort_sel_str(h: Int, n: Int, i: Int) -> Int = if i >= n then 0
+fn __merge_pass_str(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {
-  let mi = __sort_min_str(h, n, i + 1, i)
-  let a = prim.load64(h + 12 + i * 8)
-  let b = prim.load64(h + 12 + mi * 8)
-  prim.store64(h + 12 + i * 8, b)
-  prim.store64(h + 12 + mi * 8, a)
-  __sort_sel_str(h, n, i + 1)
+  let m0 = lo + width
+  let mid = if m0 > n then n else m0
+  let h0 = lo + width * 2
+  let hi = if h0 > n then n else h0
+  let _r = __merge_run_str(srch, dsth, mid, hi, lo, mid, lo)
+  __merge_pass_str(srch, dsth, n, width, lo + width * 2)
+}
+
+fn __merge_rounds_str(curh: Int, othh: Int, n: Int, width: Int) -> Int = if width >= n then curh
+else {
+  let _p = __merge_pass_str(curh, othh, n, width, 0)
+  __merge_rounds_str(othh, curh, n, width * 2)
 }
 
 fn list_sort_str(xs: List[String]) -> List[String] = {
@@ -92,7 +133,13 @@ fn list_sort_str(xs: List[String]) -> List[String] = {
   let buf = prim.alloc_list_str(n)
   let bh = prim.handle(buf)
   let _c = __sort_copy_rc(h, bh, n, 0)
-  let _s = __sort_sel_str(bh, n, 0)
+  // Scratch is a FLAT List[Int] on purpose: it holds stale handle copies
+  // after the ping-pong, and a flat drop frees only the block — a
+  // List[String] scratch would rc_dec those stale handles (double-free).
+  let tmp = prim.alloc_list(n)
+  let th = prim.handle(tmp)
+  let fin = __merge_rounds_str(bh, th, n, 1)
+  let _cb = if fin == bh then 0 else __sort_copy(fin, bh, n, 0)
   buf
 }
 
