@@ -1,0 +1,25 @@
+// Map determinism: insertion/overwrite/removal then iteration — entry order
+// must agree across all three targets (keyed-container discipline).
+fn main() -> Unit = {
+  var m = map.new()
+  var i = 0
+  while i < 12 {
+    map.set(m, "k${int.to_string((i * 7) % 12)}", i)
+    i = i + 1
+  }
+  // overwrite half of them in a different order
+  var j = 11
+  while j >= 6 {
+    map.set(m, "k${int.to_string(j)}", j * 100)
+    j = j - 1
+  }
+  println(int.to_string(map.len(m)))
+  let lines = map.fold(m, [], (acc, k, v) => acc + ["${k}=${int.to_string(v)}"])
+  println(list.join(lines, ","))
+  let ent = map.entries(m)
+  println(int.to_string(list.len(ent)))
+  println(int.to_string(map.get_or(m, "k3", 0 - 1)))
+  println(int.to_string(map.get_or(m, "nope", 0 - 1)))
+  let m2 = map.from_list([("a", 1), ("b", 2), ("a", 3)])
+  println("${int.to_string(map.len(m2))} ${int.to_string(map.get_or(m2, "a", 0))}")
+}

@@ -1,0 +1,33 @@
+// A recursive variant whose payload is a List of itself — the archetypal
+// nested-ownership shape: build a tree, fold sum and depth, then drop it
+// whole by shadowing.
+type Tree = | Leaf(Int) | Branch(List[Tree])
+
+fn sum(t: Tree) -> Int = match t {
+  Leaf(n) => n,
+  Branch(kids) => list.fold(kids, 0, (a, k) => a + sum(k)),
+}
+
+fn depth(t: Tree) -> Int = match t {
+  Leaf(_) => 1,
+  Branch(kids) => 1 + list.fold(kids, 0, (a, k) => {
+    let d = depth(k)
+    if d > a then d else a
+  }),
+}
+
+fn main() -> Unit = {
+  let t = Branch([
+    Leaf(1),
+    Branch([Leaf(2), Leaf(3)]),
+    Branch([Branch([Leaf(4)]), Leaf(5)]),
+  ])
+  println(int.to_string(sum(t)))
+  println(int.to_string(depth(t)))
+  let flat = Branch([Leaf(10), Leaf(20)])
+  println(int.to_string(sum(flat)))
+  println(int.to_string(depth(Leaf(9))))
+  var held = t
+  held = Leaf(0)
+  println(int.to_string(sum(held)))
+}

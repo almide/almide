@@ -1,0 +1,35 @@
+// gleam directly_matching_case_subject + immutable_scope: arm-local
+// shadowing must not leak or retype the outer binding; a closure captures
+// the VALUE at definition, invisible to later rebinding; reassigning the
+// var a payload came from must not change the bound payload.
+type U = | A(Int) | B(String)
+
+fn main() -> Unit = {
+  let x = "ABC"
+  let r = match true {
+    true => { let x = 79
+      x },
+    false => { let x = 11
+      x },
+  }
+  println("${x} ${int.to_string(r)}")
+  // block scope does not leak
+  let y = 1
+  let blk = { let y = 2
+    y }
+  println("${int.to_string(y)} ${int.to_string(blk)}")
+  // capture-by-value vs later shadowing
+  let n = 1
+  let f = () => n
+  let n = 2
+  println("${int.to_string(f())} ${int.to_string(n)}")
+  // reassign the source var inside the arm; the bound payload is a copy
+  var u = A(42)
+  let got = match u {
+    A(v) => { u = B("swapped")
+      v },
+    B(_) => 0 - 1,
+  }
+  println(int.to_string(got))
+  println(match u { A(_) => "A", B(s) => "B:${s}" })
+}

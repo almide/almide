@@ -1,0 +1,18 @@
+// roc trmc negative control + grain mutual recursion: a NON-tail recursion
+// whose result is used twice must not be loop-rewritten; mutual tail
+// recursion at depth must not overflow either target.
+fn with_lengths(n: Int) -> List[Int] = if n <= 0 then []
+else {
+  let rest = with_lengths(n - 1)
+  [list.len(rest)] + rest
+}
+
+fn is_even(n: Int) -> Bool = if n == 0 then true else is_odd(n - 1)
+fn is_odd(n: Int) -> Bool = if n == 0 then false else is_even(n - 1)
+
+fn main() -> Unit = {
+  println(list.join(list.map(with_lengths(5), (v) => int.to_string(v)), ","))
+  println(int.to_string(list.len(with_lengths(400))))
+  println(if is_even(50000) then "even" else "odd")
+  println(if is_odd(49999) then "odd" else "even")
+}

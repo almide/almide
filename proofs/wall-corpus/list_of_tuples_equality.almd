@@ -1,0 +1,11 @@
+// @wall: Eq over Applied(List, [Tuple([Int, String])])
+// Structural equality of `List[(Int, String)]` against a literal: the Eq
+// over a list of MIXED-ownership tuples has no lowering (comparing needs a
+// per-element tuple walk with a heap compare in the second slot), and the
+// enclosing `if` cannot take the both-arms linearization because its arms
+// carry calls. Construction, projection, and folds over the same type all
+// vote (spec/wasm_cross/nested_tuples.almd); only the equality is refused.
+fn main() -> Unit = {
+  let pairs: List[(Int, String)] = [(1, "one")]
+  println(if pairs == [(1, "one")] then "eq" else "ne")
+}

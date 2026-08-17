@@ -1,0 +1,24 @@
+// Float edges: -0.0, huge/tiny magnitudes, formatting, parse roundtrips,
+// division corners, to_fixed rounding — formatting is a classic divergence.
+fn f2s(x: Float) -> String = float.to_string(x)
+
+fn main() -> Unit = {
+  let z = 0.0
+  let nz = 0.0 - 0.0
+  let mz = (0.0 - 1.0) * 0.0
+  println("${f2s(z)} ${f2s(nz)} ${f2s(mz)} ${f2s(1.0 / 3.0)}")
+  println("${f2s(0.1 + 0.2)} ${f2s(1e15 + 0.5)} ${f2s(1.0e300 * 10.0)}")
+  println("${f2s(5e-324)} ${f2s(2.2250738585072014e-308)}")
+  println(float.to_fixed(2.675, 2))
+  println(float.to_fixed(0.0 - 2.5, 0))
+  println(float.to_fixed(1.005, 2))
+  let p = float.parse("3.14159") ?? 0.0
+  println(f2s(p * 2.0))
+  println("${f2s(float.sign(mz))} ${f2s(float.sign(z))}")
+  // int/float boundary
+  println(int.to_string(float.to_int(2.99)))
+  println(int.to_string(float.to_int(0.0 - 2.99)))
+  println(f2s(float.from_int(9007199254740993)))
+  // min/max propagation with equal magnitudes of opposite sign
+  println("${f2s(float.min(nz, z))} ${f2s(float.max(nz, z))}")
+}

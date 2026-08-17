@@ -1,0 +1,23 @@
+// Map[String, List[Int]] — a map whose values are lists: set, read through
+// a default, read-modify-write of an inner list, and fold rendering.
+// (List[Map] loop builds and Map[_, Map] values are pinned walls —
+// proofs/wall-corpus/list_of_maps_loop_build.almd / map_of_maps_value.almd.)
+fn main() -> Unit = {
+  var m: Map[String, List[Int]] = map.new()
+  map.set(m, "a", [1, 2])
+  map.set(m, "b", [])
+  // read-modify-write the inner list
+  var inner = map.get_or(m, "a", [])
+  list.push(inner, 3)
+  map.set(m, "a", inner)
+  println(int.to_string(list.len(map.get_or(m, "a", []))))
+  println(int.to_string(list.len(map.get_or(m, "b", [0 - 1]))))
+  println(int.to_string(list.len(map.get_or(m, "zz", [0 - 1]))))
+  // NB: map.fold over a heap-VALUED map is a pinned wall in both accumulator
+  // flavors — proofs/wall-corpus/map_fold_heap_accumulator.almd. Reads stay
+  // on the per-key surface here.
+  println(int.to_string(map.len(m)))
+  // overwrite with a shorter list; the old inner list drops here
+  map.set(m, "a", [9])
+  println(int.to_string(list.get(map.get_or(m, "a", []), 0) ?? (0 - 1)))
+}
