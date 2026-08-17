@@ -124,13 +124,31 @@ impl Parser {
         }
         self.advance();
         self.skip_newlines();
-        let mut body = if self.check(TokenType::Let)
+        let body_span = self.current_span();
+        let parsed = if self.check(TokenType::Let)
             || self.check(TokenType::Var)
             || self.check(TokenType::Guard)
         {
-            self.parse_braceless_block()?
+            self.parse_braceless_block()
         } else {
-            self.parse_expr()?
+            self.parse_expr()
+        };
+        let mut body = match parsed {
+            Ok(b) => b,
+            Err(msg) => {
+                // #1489: an expression-bodied fn with a broken body used to
+                // lose the WHOLE declaration (the entry loop's
+                // skip_to_next_decl), so the checker never saw the signature
+                // and every later diagnostic behind it vanished under one
+                // parse error. Recover here instead: report, resync to the
+                // next declaration, and keep the decl with an Error body —
+                // the checker treats it as Unknown and keeps checking
+                // everything else (the block-body twin of Stmt::Error,
+                // contract C-263's statement-granular recovery).
+                self.errors.push(self.string_to_diagnostic(&msg));
+                self.skip_to_next_decl();
+                Expr::new(self.next_id(), Some(body_span), ExprKind::Error)
+            }
         };
         let returns_result =
             matches!(return_type, TypeExpr::Generic { name, .. } if name == "Result");

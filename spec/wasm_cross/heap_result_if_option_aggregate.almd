@@ -7,15 +7,16 @@
 // literal had no arm at all — so `fn found(...) -> Match? = if id < 0 then
 // none else some(Match { id: id, len: len })` walled its whole function.
 // The dfa package's scanner return is exactly this shape.
-
 type Match = { id: Int, len: Int }
 
-fn found(id: Int, len: Int) -> Match? =
-  if id < 0 then none else some(Match { id: id, len: len })
+fn found(id: Int, len: Int) -> Match? = if id < 0 then none
+else some(Match { id: id, len: len })
 
-fn hits(n: Int) -> List[Int]? = if n < 0 then none else some([n, n + 1])
+fn hits(n: Int) -> List[Int]? = if n < 0 then none
+else some([n, n + 1])
 
-fn names(b: Bool) -> List[String]? = if b then some(["a", "bc"]) else none
+fn names(b: Bool) -> List[String]? = if b then some(["a", "bc"])
+else none
 
 // The match spelling shares the arm router — pin it too.
 fn pick(x: Int) -> Match? = match x > 0 {

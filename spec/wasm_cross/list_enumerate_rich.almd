@@ -8,7 +8,6 @@
 // `$__drop_list_int_<V>`; an element class the drop generator cannot name
 // still walls, as `list.enumerate_x`. Source stays live after the enumerate —
 // the rc-share must co-own, not alias.
-
 type Node = | Leaf(Int) | Tag(String) | Chain(List[Node])
 
 fn show(n: Node) -> String = match n {
@@ -18,7 +17,11 @@ fn show(n: Node) -> String = match n {
 }
 
 effect fn main() -> Unit = {
-  let src = [Leaf(1), Tag("ab"), Chain([Leaf(2), Tag("z")])]
+  let src = [
+    Leaf(1),
+    Tag("ab"),
+    Chain([Leaf(2), Tag("z")])
+  ]
   let es = list.enumerate(src)
   for e in es {
     let (i, n) = e
