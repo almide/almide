@@ -2,11 +2,12 @@
 // Option/Result woven through containers: List[Int?], List[Result[Int, String]],
 // Option[List[Int]], Result[List[String], String] — construct, match, fold,
 // and the some(list) / ok(list) payload drops.
-fn sum_opts(xs: List[Int?]) -> Int =
-  list.fold(xs, 0, (a, o) => a + (o ?? 0))
+fn sum_opts(xs: List[Int?]) -> Int = list.fold(xs, 0, (a, o) => a + (o ?? 0))
 
-fn tally(rs: List[Result[Int, String]]) -> String =
-  list.fold(rs, "", (a, r) => a + match r { ok(n) => int.to_string(n), err(e) => e })
+fn tally(rs: List[Result[Int, String]]) -> String = list.fold(rs, "", (a, r) => a + match r {
+  ok(n) => int.to_string(n),
+  err(e) => e,
+})
 
 fn main() -> Unit = {
   let opts: List[Int?] = [some(1), none, some(3), none]
@@ -15,16 +16,31 @@ fn main() -> Unit = {
   let results: List[Result[Int, String]] = [ok(7), err("x"), ok(2)]
   println(tally(results))
   let ol: List[Int]? = some([4, 5, 6])
-  println(int.to_string(match ol { some(xs) => list.fold(xs, 0, (a, x) => a + x), none => 0 - 1 }))
+  println(int.to_string(match ol {
+    some(xs) => list.fold(xs, 0, (a, x) => a + x),
+    none => 0 - 1,
+  }))
   let on: List[Int]? = none
-  println(int.to_string(match on { some(xs) => list.len(xs), none => 0 - 1 }))
+  println(int.to_string(match on {
+    some(xs) => list.len(xs),
+    none => 0 - 1,
+  }))
   let rl: Result[List[String], String] = ok(["p", "q"])
-  println(match rl { ok(xs) => list.join(xs, "-"), err(e) => e })
+  println(match rl {
+    ok(xs) => list.join(xs, "-"),
+    err(e) => e,
+  })
   let re: Result[List[String], String] = err("boom")
-  println(match re { ok(xs) => list.join(xs, "-"), err(e) => e })
-  // nested option in option (`Int??` lexes as the ?? operator — spell it out)
-  let oo: Option[Int?] = some(some(9))
-  println(int.to_string(match oo { some(inner) => inner ?? (0 - 2), none => 0 - 1 }))
+  println(match re {
+    ok(xs) => list.join(xs, "-"),
+    err(e) => e,
+  })
+  // nested option in option (`Int??` lexes as the ?? operator — parenthesize)
+  let oo: (Int?)? = some(some(9))
+  println(int.to_string(match oo {
+    some(inner) => inner ?? (0 - 2),
+    none => 0 - 1,
+  }))
   // equality over option-of-list and list-of-option
   println(if opts == [some(1), none, some(3), none] then "eq" else "ne")
   println(if ol == some([4, 5, 6]) then "eq" else "ne")

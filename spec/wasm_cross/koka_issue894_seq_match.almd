@@ -5,9 +5,13 @@
 // side; every branch prints so a misdispatch is visible.
 type MyVal = | MStr(String) | MInt(Int)
 
-fn my_get(doc: List[(String, MyVal)], key: String) -> Option[MyVal] = {
-  let hit = list.find(doc, (e) => match e { (k, _) => k == key })
-  option.map(hit, (e) => match e { (_, v) => v })
+fn my_get(doc: List[(String, MyVal)], key: String) -> MyVal? = {
+  let hit = list.find(doc, (e) => match e {
+    (k, _) => k == key
+  })
+  option.map(hit, (e) => match e {
+    (_, v) => v
+  })
 }
 
 fn check1(b: Bool) -> String = if b then "ok" else "FAIL"
