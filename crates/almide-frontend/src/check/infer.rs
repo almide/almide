@@ -172,7 +172,22 @@ impl Checker {
                     }
                 }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
-                else { Ty::Named(sym(name), vec![]) }
+                // A DECLARED type's bare name is a legitimate value-position
+                // occurrence (static-dispatch receiver `Type.method`, enum
+                // case access `Color.Red` — the Member path infers the object
+                // before its own resolution).
+                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), vec![]) }
+                else {
+                    // A capitalized name that is no ctor, no const param, no
+                    // top-let and no declared type resolves to NOTHING.
+                    // Returning a phantom `Ty::Named` here let `"${X}"` pass
+                    // check silently (an interpolation segment accepts any
+                    // type), and the error-recovery `VarId(0)` the lowering
+                    // mints for it then panicked use-counting on an empty
+                    // VarTable — a checker hole, not a lowering bug.
+                    let name = name.as_str().to_string();
+                    self.report_undefined_variable(&name)
+                }
     }
 
     fn infer_expr_record(&mut self, expr: &mut ast::Expr) -> Ty {

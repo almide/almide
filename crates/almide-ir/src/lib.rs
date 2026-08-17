@@ -209,9 +209,13 @@ impl VarTable {
 
     pub fn len(&self) -> usize { self.entries.len() }
 
-    /// Increment the use count for a variable.
+    /// Increment the use count for a variable. Out-of-range ids (the
+    /// error-recovery `VarId(0)` on a table that allocated nothing) are
+    /// counted nowhere rather than panicking — by then a diagnostic has
+    /// already failed the check, and use counts only feed optimization.
     pub fn increment_use(&mut self, id: VarId) {
-        self.entries[id.0 as usize].use_count += 1;
+        debug_assert!((id.0 as usize) < self.entries.len(), "increment_use: VarId {} out of range (len {})", id.0, self.entries.len());
+        if let Some(e) = self.entries.get_mut(id.0 as usize) { e.use_count += 1; }
     }
 
     /// Get the use count for a variable.
