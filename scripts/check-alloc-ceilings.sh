@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
-# Allocation-ceiling gate — ONE limit, six spellings, machine-checked.
+# Allocation-ceiling gate — the REPEAT family's shared limit, machine-checked.
 #
 # WHAT THIS ENFORCES
 # ------------------
-# Every allocation ceiling in the tree denotes the SAME 2 GiB, expressed in
-# whatever unit its module counts in:
+# The REPEAT family's ceiling (C-161, shipped in 0.57.0) denotes the SAME 2 GiB
+# in every spelling:
 #
 #   runtime/rs/src/string.rs  ALMIDE_REPEAT_MAX_BYTES       1 << 31   bytes  x1
-#   runtime/rs/src/bytes.rs   ALMIDE_BYTES_MAX_BYTES        1 << 31   bytes  x1
 #   runtime/rs/src/list.rs    ALMIDE_LIST_REPEAT_MAX_ELEMS  (1<<31)/8 slots  x8
 #   runtime/rs/src/matrix.rs  ALMIDE_MATRIX_MAX_ELEMS       1 << 28   f64    x8
 #   stdlib/*.almd             a literal in a `prim.die` guard
 #
-# The number matters: it is sized BELOW the wasm 4 GiB address space so a size
-# one leg can satisfy and the other cannot never becomes a native success against
-# a wasm out-of-memory. If one of these drifts, the two legs disagree again for
-# exactly the inputs the ceiling exists to make agree — and they disagree
-# SILENTLY, because each leg is internally consistent.
+# SCOPE, ratified A 2026-08-17: this family is the ONLY chosen cross-target
+# ceiling, kept because 0.57.0 released it. Plain allocations (bytes.new/pad,
+# list.range, string.pad_*, the array readers) carry NO chosen cap — each leg
+# allocates to its own structural bound and takes C-197's abort beyond it, and a
+# widened cap that briefly shipped there was withdrawn (it cut 2-4 GiB work
+# both legs satisfied in 0.57.0; nine-compiler survey found zero precedent —
+# ../almide-references/RESEARCH-allocation-ceilings.md). If a repeat spelling
+# drifts, the legs disagree SILENTLY, because each is internally consistent.
 #
 # WHY A GATE AND NOT A COMMENT
 # ----------------------------
@@ -55,7 +57,6 @@ def ev(expr):
 # ── 1. the named native constants, each converted to bytes ──────────────────
 NATIVE = [
     ("runtime/rs/src/string.rs", "ALMIDE_REPEAT_MAX_BYTES",      1),
-    ("runtime/rs/src/bytes.rs",  "ALMIDE_BYTES_MAX_BYTES",       1),
     ("runtime/rs/src/list.rs",   "ALMIDE_LIST_REPEAT_MAX_ELEMS", 8),
     ("runtime/rs/src/matrix.rs", "ALMIDE_MATRIX_MAX_ELEMS",      8),
 ]

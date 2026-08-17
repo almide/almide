@@ -31,9 +31,12 @@ else end - start
 
 fn list_range(start: Int, end: Int) -> List[Int] = {
   let count = __range_count(start, end)
-  // The SAME ceiling `list_repeat` takes twelve lines below — which is where this rule
-  // was already written down, and where `list_range` never joined it.
-  if count < 0 or count > 268435456 then prim.die(prim.handle("Error: out of memory\n")) else ()
+  // Only the WRAP sentinel aborts here (count < 0 marks a span too wide to compute
+  // — see __range_count). No threshold (ratified A, 2026-08-17): 0.57.0's floor
+  // already turned every unsatisfiable real count into the defined out-of-memory
+  // abort on this leg, and a 2^28 guard briefly shipped here cut range(0, 3e8),
+  // which 0.57.0 satisfied. The abort line matches what the floor itself prints.
+  if count < 0 then prim.die(prim.handle("Error: out of memory\n")) else ()
   let buf = prim.alloc_list(count)
   let _x = __range_fill(prim.handle(buf), start, count, 0)
   buf

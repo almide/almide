@@ -144,15 +144,22 @@ pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
     }
     vec![x; n.max(0) as usize]
 }
-// `(start..end)` sized its allocation from a span this leg would attempt and the other
-// could not: `range(i64::MIN, 3)` is ~9.2e18 elements. `saturating_sub` keeps the count
-// honest where `end - start` would wrap, and the ceiling is `list_repeat`'s.
+// `list.range` has NO chosen ceiling (ratified A, 2026-08-17): this leg fills to
+// its own structural bound, and a span the machine cannot satisfy is the C-197
+// abort via try_reserve — never a raw `capacity overflow` panic, which is what
+// `(start..end).collect()`'s infallible reserve produced for a span like
+// (i64::MIN, 3). `saturating_sub` keeps the count honest where `end - start`
+// would wrap. The wasm leg fails with the SAME message at its own i32 floor
+// bound; success between the two bounds is the contracted divergence.
 pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
-    if end.saturating_sub(start).max(0) > ALMIDE_LIST_REPEAT_MAX_ELEMS {
+    let count = end.saturating_sub(start).max(0) as usize;
+    let mut v: Vec<i64> = Vec::new();
+    if v.try_reserve_exact(count).is_err() {
         eprintln!("Error: out of memory");
         std::process::exit(1);
     }
-    (start..end).collect()
+    v.extend(start..end);
+    v
 }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }

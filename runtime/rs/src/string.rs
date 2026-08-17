@@ -96,30 +96,42 @@ pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
     let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
-    // The same ceiling `string_repeat` above takes, on the same grounds: without it
-    // `pad_end("a", u32::MAX, "x")` built a 4 GiB String here while the wasm leg — which
-    // cannot address that much — aborted. Tested by DIVISION because the byte count is
-    // `(w - len) * p.len_utf8()`, and that product is what overflows.
-    if (w - len) as i64 > ALMIDE_REPEAT_MAX_BYTES / p.len_utf8() as i64 {
+    // No chosen ceiling (ratified A, 2026-08-17): the pad byte count is computed
+    // with CHECKED arithmetic — the product is what overflows — and a size this
+    // machine cannot satisfy is the C-197 abort via try_reserve, never a raw
+    // panic. The wasm leg aborts identically at its own i32 floor bound.
+    let need = (w - len)
+        .checked_mul(p.len_utf8())
+        .and_then(|x| x.checked_add(s.len()));
+    let mut out = String::new();
+    if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
         eprintln!("Error: out of memory");
         std::process::exit(1);
     }
-    format!("{}{}", std::iter::repeat(p).take(w - len).collect::<String>(), s)
+    for _ in 0..(w - len) { out.push(p); }
+    out.push_str(s);
+    out
 }
 
 pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
     let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
-    // The same ceiling `string_repeat` above takes, on the same grounds: without it
-    // `pad_end("a", u32::MAX, "x")` built a 4 GiB String here while the wasm leg — which
-    // cannot address that much — aborted. Tested by DIVISION because the byte count is
-    // `(w - len) * p.len_utf8()`, and that product is what overflows.
-    if (w - len) as i64 > ALMIDE_REPEAT_MAX_BYTES / p.len_utf8() as i64 {
+    // No chosen ceiling (ratified A, 2026-08-17): the pad byte count is computed
+    // with CHECKED arithmetic — the product is what overflows — and a size this
+    // machine cannot satisfy is the C-197 abort via try_reserve, never a raw
+    // panic. The wasm leg aborts identically at its own i32 floor bound.
+    let need = (w - len)
+        .checked_mul(p.len_utf8())
+        .and_then(|x| x.checked_add(s.len()));
+    let mut out = String::new();
+    if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
         eprintln!("Error: out of memory");
         std::process::exit(1);
     }
-    format!("{}{}", s, std::iter::repeat(p).take(w - len).collect::<String>())
+    out.push_str(s);
+    for _ in 0..(w - len) { out.push(p); }
+    out
 }
 
 pub fn almide_rt_string_replace_first(s: &str, from: &str, to: &str) -> String {
