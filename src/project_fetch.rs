@@ -206,11 +206,24 @@ fn resolve_fetched_dep_manifest(path: &Path, fallback_name: &str) -> (String, Pa
     }
 }
 
+/// MVS ordering: parse as semver, treating an unparseable version as the
+/// minimum (branch deps already resolve to "0.0.0" upstream).
+fn semver_of(v: &str) -> semver::Version {
+    semver::Version::parse(v).unwrap_or_else(|_| semver::Version::new(0, 0, 0))
+}
+
 /// `fetch_deps_recursive`'s per-dependency body: version/pkg-id resolution,
 /// diamond-dependency major-version-clash warning, dedup via `visited`,
 /// fetch (with lock pin if any), resolve the dependency's own manifest,
-/// record it, then recurse into its own transitive deps. Extracted
-/// verbatim.
+/// record it, then recurse into its own transitive deps.
+///
+/// Selection is Minimal Version Selection, the rule
+/// `docs/specs/package-system.md` documents: per `PkgId` (name + major) the
+/// MAXIMUM requested version wins, and the walk visits every distinct
+/// requested version's own requirement list (reachability is over requested
+/// versions, not selected ones — Go's algorithm). The previous body
+/// short-circuited on the first `PkgId` sighting, so the resolved graph
+/// depended on declaration order (#1458).
 fn fetch_one_dep_recursive(
     dep: &Dependency,
     locked: &[LockedDep],
@@ -219,18 +232,6 @@ fn fetch_one_dep_recursive(
 ) -> Result<(), String> {
     let version_str = resolve_dep_version(dep);
     let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
-
-    if fetched.iter().any(|f| f.pkg_id == pkg_id) {
-        return Ok(());
-    }
-
-    // Detect different major versions of the same package (diamond with version split)
-    if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
-        err(&format!("warning: package '{}' required at two different major versions", pkg_id.name));
-        err(&format!("  → {} (already loaded)", existing.pkg_id));
-        err(&format!("  → {} (newly required)", pkg_id));
-        err(&format!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major));
-    }
 
     let visit_key = if let Some(ref p) = dep.path {
         format!("path:{}@{}", p, version_str)
@@ -242,6 +243,14 @@ fn fetch_one_dep_recursive(
     }
     visited.insert(visit_key);
 
+    // Detect different major versions of the same package (diamond with version split)
+    if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
+        err(&format!("warning: package '{}' required at two different major versions", pkg_id.name));
+        err(&format!("  → {} (already loaded)", existing.pkg_id));
+        err(&format!("  → {} (newly required)", pkg_id));
+        err(&format!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major));
+    }
+
     // Use locked commit if available
     let locked_commit = locked.iter()
         .find(|l| l.name == dep.name)
@@ -251,10 +260,21 @@ fn fetch_one_dep_recursive(
     let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
 
     let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
-    fetched.push(FetchedDep {
-        pkg_id: actual_pkg_id,
-        source_dir,
-    });
+    match fetched.iter_mut().find(|f| f.pkg_id == actual_pkg_id) {
+        Some(existing) => {
+            // MVS: a later, higher request replaces the selection in place —
+            // position (and therefore lock-file alignment) is preserved.
+            if semver_of(&version_str) > semver_of(&existing.version) {
+                existing.version = version_str;
+                existing.source_dir = source_dir;
+            }
+        }
+        None => fetched.push(FetchedDep {
+            pkg_id: actual_pkg_id,
+            version: version_str,
+            source_dir,
+        }),
+    }
 
     if !transitive_deps.is_empty() {
         fetch_deps_recursive(&transitive_deps, locked, fetched, visited)?;
