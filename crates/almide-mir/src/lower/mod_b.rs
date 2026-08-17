@@ -241,7 +241,11 @@ fn variant_drop_supported_heap_field(
             if a.len() == 1
                 && (!is_heap_ty(&a[0])
                     || matches!(a[0], Ty::String)
-                    || variant_field_name(&a[0], variant_names).is_some()))
+                    || variant_field_name(&a[0], variant_names).is_some()
+                    // A SCALAR-tuple element (`List[(Int, Int)]`) is a flat block with
+                    // no inner handles — `__drop_list_str`'s per-element rc_dec sweep
+                    // is its exact free, the List[flat-variant] precedent verbatim.
+                    || matches!(&a[0], Ty::Tuple(tys) if tys.iter().all(|t| !is_heap_ty(t)))))
         // An `Option[T]` field frees exactly like its `List[T]` twin (the
         // 0-or-1-element block) — same supported payload set (#1064).
         || matches!(t, Ty::Applied(TypeConstructorId::Option, a)

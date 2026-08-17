@@ -489,7 +489,13 @@ fn is_list_str_field(t: &Ty, flat_names: &std::collections::HashSet<String>) -> 
     // `__drop_list_str` sweep (the Option→List drop normalization, #1064).
     matches!(t, Ty::Applied(TypeConstructorId::List, a) | Ty::Applied(TypeConstructorId::Option, a)
         if a.len() == 1
-            && (matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_names)))
+            && (matches!(a[0], Ty::String)
+                || is_flat_variant_elem(&a[0], flat_names)
+                // A SCALAR-tuple element (`List[(Int, Int)]` ctor field) frees through
+                // the same `__drop_list_str` sweep — the generator's new scalar-tuple
+                // arm references it, so the gate must count it (admission, free, and
+                // linkage in lockstep).
+                || matches!(&a[0], Ty::Tuple(tys) if tys.iter().all(|t| !crate::lower::is_heap_ty(t)))))
 }
 
 pub const LENLIST_DROP_SRC: &str = "\

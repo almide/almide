@@ -141,7 +141,10 @@ impl VariantLayouts {
                     if a.len() == 1
                         && (!is_heap_ty(&a[0])
                             || matches!(a[0], Ty::String)
-                            || self.field_is_variant(&a[0])))
+                            || self.field_is_variant(&a[0])
+                            // List[(scalar, …)] — flat tuple elements, freed by the
+                            // generator's `__drop_list_str` sweep (mirror of mod_b.rs).
+                            || matches!(&a[0], Ty::Tuple(tys) if tys.iter().all(|t| !is_heap_ty(t)))))
                 || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
                     if a.len() == 1
                         && (!is_heap_ty(&a[0])

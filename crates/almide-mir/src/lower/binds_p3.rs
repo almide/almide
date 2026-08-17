@@ -285,6 +285,10 @@ impl LowerCtx {
             .field_variant_name(&a[0])
             .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
             || self.variant_layouts.is_flat_variant_ty(&a[0])
+            // A SCALAR-tuple element list (`Cls(List[(Int, Int)])`): each element is a
+            // flat block; the generator's `__drop_list_str` sweep (its new scalar-tuple
+            // arm) frees it exactly — admission and drop stay in lockstep.
+            || matches!(&a[0], Ty::Tuple(tys) if tys.iter().all(|t| !is_heap_ty(t)))
     }
 
     /// Is `ty` a scalar, OR a ONE-LEVEL-EXACT heap type — a value whose ENTIRE free is a

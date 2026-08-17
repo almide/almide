@@ -139,6 +139,21 @@ fn variant_field_free_builtin_shape(
         *idx += 1;
         return Some(free);
     }
+    if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+        if a.len() == 1
+            && matches!(&a[0], Ty::Tuple(tys) if tys.iter().all(|t| !is_heap_ty(t))))
+    {
+        // A `List[(scalar, …)]` ctor field (`Cls(List[(Int, Int)])`): each element is a
+        // single owned FLAT tuple block (no inner handles), so `__drop_list_str`'s
+        // per-element `rc_dec` sweep is its exact free — the List[flat-variant]
+        // precedent verbatim (incl. its `List[String]` binding type, the handle-level
+        // reinterpretation that precedent already uses).
+        let free = format!(
+            "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
+        );
+        *idx += 1;
+        return Some(free);
+    }
     if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
         if a.len() == 1 && !is_heap_ty(&a[0]))
     {
