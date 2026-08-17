@@ -1171,11 +1171,13 @@ evidence  = [
 id        = "C-088"
 spec      = "ALS-M7"
 title     = "A Rust-keyword function name compiles on both targets"
-statement = "A user function whose name is a Rust keyword (box, move, dyn, unsafe, …) compiles and runs byte-identical native == wasm. The Rust emitter raw-escapes the name (box → r#box) at BOTH its definition and every call site, driven by one shared keyword predicate (is_rust_keyword) — an incomplete per-site list previously left the definition or the call unescaped, producing invalid Rust. WASM identifiers have no keyword conflict."
+statement = "A user function whose name is a Rust keyword (box, move, dyn, unsafe, …) compiles and runs byte-identical native == wasm. The Rust emitter raw-escapes the name (box → r#box) at BOTH its definition and every call site, driven by one shared keyword predicate (is_rust_keyword) — an incomplete per-site list previously left the definition or the call unescaped, producing invalid Rust. WASM identifiers have no keyword conflict. The escape applies only to UNPREFIXED names: a module-origin symbol (almide_rt_<mod>_<fn>) is never a keyword, and escaping before prefixing produced almide_rt_util_r#move — invalid Rust at the definition while every call site stayed unescaped (#1494, the submodule cell)."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/reserved_keyword_fn.almd", class = "fixture" },
+  { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_builds_and_runs_native", class = "fixture" },
+  { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_matches_on_wasm", class = "fixture" },
 ]
 
 [[contract]]

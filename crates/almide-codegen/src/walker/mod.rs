@@ -344,9 +344,6 @@ fn render_fn_safe_name(
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
     // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
     safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
-    // matches the CALL site exactly (#659).
-    safe_name = escape_rust_ident(&safe_name, ctx.templates);
     // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
     // IR name stays clean; prefix is a rendering concern.
     if let Some(ref origin) = func.module_origin {
@@ -360,7 +357,16 @@ fn render_fn_safe_name(
         } else {
             safe_name.clone()
         };
+        // No keyword escape on this branch: a prefixed symbol is never a Rust
+        // keyword, and the call-emitting paths (render_expr_call,
+        // prefix_intra_module_calls, ...) mangle without escaping — escaping
+        // before prefixing produced `almide_rt_util_r#move` (#1494).
         safe_name = format!("almide_rt_{}_{}", origin, base);
+    } else {
+        // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
+        // matches the CALL site exactly (#659). Only unprefixed names can
+        // collide with a keyword, so the escape lives on this branch (#1494).
+        safe_name = escape_rust_ident(&safe_name, ctx.templates);
     }
     format!("{}{}", safe_name, fn_generics)
 }
