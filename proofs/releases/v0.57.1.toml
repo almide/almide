@@ -1,0 +1,27 @@
+# Release evidence seal — v0.57.1. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.57.1"
+tag = "v0.57.1"
+tag_commit = "8f2adddbcd4bf438d214781dfcdfd735da5f623b"
+date = "2026-08-17"
+url = "https://github.com/almide/almide/releases/tag/v0.57.1"
+
+[derived]
+cargo_version = "0.57.1"
+contracts_sha256 = "66b84c402f0b4659f8cad7ca013b6fdfe8c7bb62b3740ada1c70ddf8b3afbb2a"
+contracts_total = "286"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "0080b5dbe149b1ece6bbbee36cc08aace17a2f0a851070879a23bb8b91edc6dd"
+abstain_ledger_entries = "115"
+wasm_cross_fixtures = "438"
+rust_toolchain = "1.89.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "manual fuzz dispatch on main (= the tagged content), actions run 31990796527, ALL 12 shards completed their full budget (~300 prog/min, ~3,000 programs per shard, x86_64 + aarch64). 8 findings, EVERY one replayed locally against the SHIPPED macos-aarch64 asset. Disposition: (1) ONE real and PRE-EXISTING defect — matrix byte loaders panic natively on a negative dimension (seed 511852744437/1213); v0.57.0 fails identically, so not a regression of this release; filed #1503 with a minimal repro. (2) ONE interpreter wrong-vote — a stored byte 0x80 read back as -128 by the third judge while BOTH targets print 128 (seed 511852744439/603); the shipped semantics agree, the oracle is wrong; filed #1505. (3) SIX replay-clean runner artifacts (seeds 433/2103, 433/2938, 434/1563, 435/1528, 438/6976, 439/1516): native SIGKILLed mid-allocation under Linux overcommit on 7 GB runners (exit None is the signature) or wasmtime aborted under the same pressure (exit 134); each replays native==wasm on the shipped binary on a machine with headroom. Zero unexplained findings."
+assets = "6: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256"
+known_problems = "#1503 matrix byte loaders (from_bytes_f16_le/f32_le) take a raw native capacity-overflow panic (exit 101) on a NEGATIVE dimension where wasm aborts cleanly — pre-existing since at least 0.57.0, outside the sweep's measured surface (Bytes-receiver signatures are in the instrument's skipped set); fix queued under the ratified-A convention. #1229 quadratic wasm string-accumulator concat carries over from 0.57.0 unchanged. The 64 between-bounds allocation cells in proofs/domain-edges.toml are DECLARED contracted divergences (C-197, ratified A 2026-08-17), not defects. Native SIGKILL under OS overcommit on small-RAM hosts (allocation succeeds at reserve, dies at first touch) is outside the language's control — the cohort-universal limitation, disclosed here rather than papered over"
