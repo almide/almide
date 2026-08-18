@@ -1,0 +1,1 @@
+fn main() -> Unit = println("${list.len(1...4)}")
