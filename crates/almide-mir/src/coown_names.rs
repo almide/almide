@@ -43,6 +43,13 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__lsh_copy", // list.{set,insert,remove_at,swap,take_end,drop_end,tail}_heapelem
     "__lsh_insert_fill", // list.insert_heapelem — rc_inc the inserted element
     "__lshu_val", // list.update_heapelem — rc_inc each shared (non-updated) element
+    // #1519: flat_map's generic heap-element splice. Same element-type-BLIND
+    // co-own as __lsh_copy: +1 per spliced sublist element into the fresh
+    // result buffer; the RESULT list's recursive drop (routed from the call
+    // site's element type) returns each +1, and the sublist local's rc-GATED
+    // shallow sweep balances the fresh-sublist case without ever freeing a
+    // shared element — the CoownLoop.v fill/drop pairing verbatim.
+    "__flmh_copy_step", // list.flat_map_h — rc_inc each spliced element
     "__ls_insert_fill", // list.insert_str — rc_inc the inserted String
     "__lsuv_val", // list.update_value — rc_inc each shared (non-updated) Value element
     "__lsu_val_str", // list.update_str — rc_inc each shared (non-updated) String element

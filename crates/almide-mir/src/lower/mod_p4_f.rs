@@ -134,7 +134,7 @@ fn list_call_name_flat_map_heap(func: &str, result_ty: &Ty) -> Option<String> {
         return Some("list.flat_map_str".to_string());
     }
     if is_heap_ty(&args[0]) {
-        return Some("list.flat_map_heapelem".to_string());
+        return Some("list.flat_map_h".to_string());
     }
     None
 }
