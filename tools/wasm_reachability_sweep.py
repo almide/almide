@@ -34,7 +34,7 @@ ALMIDE = os.environ.get("ALMIDE_BIN", os.path.join(REPO, "target/release/almide"
 
 # Modules requiring an explicit `import` (CLAUDE.md); everything else is auto-imported.
 NEEDS_IMPORT = {"json", "fs", "http", "env", "io", "random", "regex", "process",
-                "testing", "net", "zlib", "base64", "hex", "html", "path", "compute"}
+                "testing", "net", "zlib", "base64", "hash", "hex", "html", "path", "compute"}
 
 # Type -> a literal that inhabits it. Reachability only needs the call to RENDER,
 # so an argument that would panic at runtime (an out-of-range index) is fine; an

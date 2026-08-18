@@ -49,3 +49,16 @@ hash.sha256_hex("")
 Out of scope, deliberately: TLS, AEAD, and asymmetric crypto (#1467 keeps
 those a separate decision). Keyed hashing (HMAC) composes from `sha256` when
 needed.
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (4 functions)
+
+```
+hash.fnv1a32(s: String) -> Int
+hash.fnv1a32_bytes(b: Bytes) -> Int
+hash.sha256(b: Bytes) -> Bytes
+hash.sha256_hex(s: String) -> String
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->
