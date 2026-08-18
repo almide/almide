@@ -1,5 +1,3 @@
-import json
-
 type R: Codec = { n: Int }
 
 type T: Codec = { rs: List[List[R]] }

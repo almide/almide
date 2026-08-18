@@ -439,7 +439,7 @@ impl Checker {
         field: &almide_base::intern::Sym,
     ) -> Option<Ty> {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-            self.reject_dead_try_spelling(mod_name, field, object.id, object.span);
+            self.reject_dead_try_spelling(mod_name, field, object.id, object.span, None);
             if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
                 return Some(self.fn_value_ty(&sig));
@@ -823,6 +823,7 @@ impl Checker {
         field: &almide_base::intern::Sym,
         object_id: almide_lang::ast::ExprId,
         object_span: Option<almide_lang::ast::Span>,
+        call_args: Option<&[ast::Expr]>,
     ) {
         let module = mod_name.as_str();
         if !matches!(module, "list" | "fs") || self.hof_rewritten_calls.contains(&object_id) {
@@ -897,6 +898,71 @@ impl Checker {
             d.line = Some(sp.line);
             d.col = Some(sp.col);
         }
+        // Machine-applicable slice (#1486): `module.try_X(args…, f)` with a
+        // BARE fn-reference callback rewrites to the core HOF with the
+        // callback wrapped `(x) => f(x)!` — the propagating callback makes
+        // the polymorphic core instantiate its fallible form, so the
+        // expression's TYPE (the Result carrier) is preserved exactly; no
+        // trailing `!` is added, because unwrapping is the caller's decision.
+        // A lambda callback needs edits INSIDE its body and stays hint-only;
+        // the internal `__fallible_*` form is not a source spelling at all.
+        if !internal {
+            if let Some((sp, snippet)) = self.dead_try_machine_rewrite(module, name, core, call_args) {
+                d = d.with_machine_fix(sp.line, sp.col, sp.end_col, snippet);
+            }
+        }
         self.diagnostics.push(d);
+    }
+
+    /// The exact-source rewrite for [`Self::reject_dead_try_spelling`]'s
+    /// machine slice, or `None` when the shape is not mechanically safe:
+    /// the whole call must sit on ONE line (the fix is a single-line span
+    /// replacement), the callback must be a bare fn reference, and the call's
+    /// source must anchor exactly as `module.try_X(<args…>, <cb>)` — the
+    /// rewrite is textual surgery on that slice (argument spans under-cover
+    /// compound literals, so per-arg slicing is not trustworthy).
+    fn dead_try_machine_rewrite(
+        &self,
+        module: &str,
+        name: &str,
+        core: &str,
+        call_args: Option<&[ast::Expr]>,
+    ) -> Option<(almide_lang::ast::Span, String)> {
+        let args = call_args?;
+        let call_span = self.call_span_hint?;
+        let is_fold = matches!((module, core), ("list", "fold") | ("fs", "fold_lines"));
+        let expected = if is_fold { 3 } else { 2 };
+        if args.len() != expected {
+            return None;
+        }
+        let cb = args.last()?;
+        if !matches!(cb.kind, ExprKind::Ident { .. } | ExprKind::Member { .. }) {
+            return None;
+        }
+        if args.iter().any(|a| a.span.map(|sp| sp.line) != Some(call_span.line)) {
+            return None;
+        }
+        let cb_src = cb.span.and_then(|sp| self.source_slice(sp))?;
+        let call_src = self.source_slice(call_span)?;
+        let head = format!("{module}.{name}(");
+        let tail = format!("{cb_src})");
+        if !call_src.starts_with(&head) || !call_src.ends_with(&tail) {
+            return None;
+        }
+        // `mid` is the lead arguments verbatim, INCLUDING the trailing
+        // comma+space before the callback.
+        let mid = &call_src[head.len()..call_src.len() - tail.len()];
+        // Fresh-enough param names: never collide with the callback's own
+        // spelling (a param shadowing `f` would rebind the callee).
+        let pick = |cands: [&str; 2]| cands.iter().find(|c| **c != cb_src).unwrap().to_string();
+        let snippet = if is_fold {
+            let a = pick(["a", "acc"]);
+            let x = pick(["x", "e"]);
+            format!("{module}.{core}({mid}({a}, {x}) => {cb_src}({a}, {x})!)")
+        } else {
+            let x = pick(["x", "e"]);
+            format!("{module}.{core}({mid}({x}) => {cb_src}({x})!)")
+        };
+        Some((call_span, snippet))
     }
 }

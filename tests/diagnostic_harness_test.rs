@@ -332,6 +332,14 @@ fn try_snippets_with_replace_span_apply_cleanly() {
         let broken = case.join("broken.almd");
         let fixed = case.join("fixed.almd");
         let diagnostics = run_check_json(&broken);
+        // A case with SEVERAL span-anchored fixes (e.g. two unused imports)
+        // reaches fixed.almd only after `almide fix`'s multi-round application;
+        // a single application cannot equal it. Each application must still
+        // COMPILE; the exact fixed.almd equality is asserted only when the
+        // case carries exactly one span fix (#1486).
+        let span_fix_count = diagnostics.iter()
+            .filter(|d| d.try_snippet.is_some() && d.try_replace.is_some())
+            .count();
         for d in &diagnostics {
             let (Some(snippet), Some((line, col, end_col))) = (&d.try_snippet, d.try_replace) else { continue };
             // #1312: a span never travels without an applicability. An
@@ -359,12 +367,14 @@ fn try_snippets_with_replace_span_apply_cleanly() {
                 "applied try: did not compile in {}:\nrewritten:\n{}\nstdout: {}\nstderr: {}",
                 case.display(), rewritten, stdout, stderr
             );
-            let fixed_src = std::fs::read_to_string(&fixed).unwrap();
-            let norm = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
-            assert_eq!(
-                norm(&rewritten), norm(&fixed_src),
-                "applied try: does not match fixed.almd in {}", case.display()
-            );
+            if span_fix_count == 1 {
+                let fixed_src = std::fs::read_to_string(&fixed).unwrap();
+                let norm = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
+                assert_eq!(
+                    norm(&rewritten), norm(&fixed_src),
+                    "applied try: does not match fixed.almd in {}", case.display()
+                );
+            }
         }
     }
 }
@@ -376,7 +386,7 @@ fn try_snippets_with_replace_span_apply_cleanly() {
 ///
 /// Raising this is progress: it means another diagnostic learned to state
 /// its fix exactly. Lowering it needs a reason in the PR body.
-const MACHINE_APPLICABLE_FIXTURE_FLOOR: usize = 2;
+const MACHINE_APPLICABLE_FIXTURE_FLOOR: usize = 27;
 
 #[test]
 fn machine_applicable_fixits_stay_populated() {

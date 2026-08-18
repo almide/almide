@@ -1,6 +1,5 @@
 // The leaf-nominal rule reaches through TWO container levels: a non-Codec
 // record buried in List[List[R]] is still named at the declaration.
-import json
 
 type R = { n: Int }
 

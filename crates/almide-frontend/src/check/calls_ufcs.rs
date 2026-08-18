@@ -19,7 +19,7 @@ impl Checker {
         // ADR-0006 D3 (#1108): user-spelled try_* is deprecated (the
         // fallibility-polymorphic core covers it) — same site as E039.
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-            self.reject_dead_try_spelling(mod_name, field, object.id, object.span);
+            self.reject_dead_try_spelling(mod_name, field, object.id, object.span, Some(args));
         }
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();
