@@ -273,8 +273,11 @@ fn __rx_repi_fwd(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: In
 
 // GREEDY repetition: try one more first (v0's zero-width guard: a zero-width
 // atom extends only from count 0), fall back to the rest from the current `t`.
-// Non-group atoms take the iterative walk (#1524); `*`/`+` are {0,-1} with the
-// entry count the call site already established.
+// Non-group atoms take the iterative walk (#1524). The descending try's
+// FLOOR is the entry count: `+`'s call site pre-consumed one atom, and the
+// recursive shape never gave it back — a floor of 0 would let the walk step
+// one char below the entry and turn `+` into `*` (the seeded differential's
+// `\S+[^a-z]+c` on "@ccbb_" caught exactly that).
 fn __rx_repi_try(pnext: Int, pend: Int, t: Int, ts: Int, te: Int, i: Int, mn: Int) -> Int = {
   if i < mn then 0 - 1
   else {
@@ -291,7 +294,7 @@ fn __rx_repi_try(pnext: Int, pend: Int, t: Int, ts: Int, te: Int, i: Int, mn: In
 // more while under max (same zero-width guard as __rx_rep), fall back to the
 // rest only once at least `min` repetitions matched.
 fn __rx_rep(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, count: Int) -> Int = {
-  if prim.load8(p) != 40 then __rx_repi_fwd(p, ae, pnext, pend, t, ts, te, count, 0, 0 - 1)
+  if prim.load8(p) != 40 then __rx_repi_fwd(p, ae, pnext, pend, t, ts, te, count, count, 0 - 1)
   else {
     let t2 = __rx_one(p, ae, t, ts, te)
     if t2 >= 0 and (t2 > t or count == 0) then {
@@ -662,7 +665,7 @@ fn __rx_rep_bounded_cg(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, 
 }
 
 fn __rx_rep_c(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, count: Int, caps: Int, nslots: Int, pat0: Int) -> Int = {
-  if prim.load8(p) != 40 then __rx_repi_fwd_c(p, ae, pnext, pend, t, ts, te, count, 0, 0 - 1, caps, nslots, pat0)
+  if prim.load8(p) != 40 then __rx_repi_fwd_c(p, ae, pnext, pend, t, ts, te, count, count, 0 - 1, caps, nslots, pat0)
   else __rx_rep_cg(p, ae, pnext, pend, t, ts, te, count, caps, nslots, pat0)
 }
 
