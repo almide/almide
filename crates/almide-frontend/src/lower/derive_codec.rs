@@ -796,11 +796,23 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
 }
 
 fn decode_func_suffix(ty: &Ty) -> &'static str {
+    use almide_lang::types::constructor::TypeConstructorId;
     match ty {
         Ty::String => "string",
         Ty::Int => "int",
         Ty::Float => "float",
         Ty::Bool => "bool",
+        // List[scalar] defaults (#1520): route to the concrete list helpers —
+        // the bare "value" fallback names a helper no runtime provides
+        // (rustc E0425 with check green). Exotic default types keep the
+        // fallback and are rejected at CHECK time by the Codec field rule.
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => match &a[0] {
+            Ty::String => "list_string",
+            Ty::Int => "list_int",
+            Ty::Float => "list_float",
+            Ty::Bool => "list_bool",
+            _ => "value",
+        },
         _ => "value",
     }
 }

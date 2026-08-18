@@ -724,6 +724,9 @@ identifiers (`@type`, `$ref`, `user-id`).
 **Rule 2 — none omits the key.** Encode drops a `none` Option field entirely
 (no `null`); decode folds a missing key or explicit `null` back to `none`.
 `decode(encode(x)) == x` always. Fields with `= default` values stay emitted.
+Default values are supported for scalar (`Int`/`Float`/`Bool`/`String`),
+`Option[T]`, and `List[<scalar>]` fields; a default of any other type is
+rejected at the native build today (#1520 widened the list family).
 This matches proto3 JSON, so protobuf-defined APIs (OTLP etc.) work directly —
 and a proto3 `oneof` is just an all-Option mirror type:
 

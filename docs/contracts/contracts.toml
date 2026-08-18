@@ -3785,3 +3785,15 @@ evidence  = [
   { path = "spec/wasm_cross/tm_variant_lit_print.almd", class = "fixture" },
   { path = "spec/wasm_cross/tm_variant_shadow_drop.almd", class = "fixture" },
 ]
+
+# ── FLAT_MAP OVER ALIASED SUBLISTS ─
+[[contract]]
+id        = "C-297"
+spec      = "ALS-M4"
+title     = "flat_map whose closure returns an aliased list field is drop-balanced on both targets"
+statement = "`ps |> list.flat_map((p) => p.evidence)` — the closure returns the element's OWN List field, so every sublist is an ALIAS into the source — runs and drops clean on both targets (#1519: the self-host scalar body raw-copied element slots, sound only for scalars and for ownership transfer out of a FRESH sublist; an aliased sublist left source and result co-referencing each String un-owned, correct output then an rc_dec trap in the source's scope-end drop). String-element results ride the deep-copy `list_flat_map_str` twin (each copied element single-owned via string.repeat-1, the list_filter_str discipline; the sublist is a typed List[String] local freed by the normal recursive drop whether fresh or aliased); any OTHER heap-element result routes to the unregistered `list.flat_map_heapelem` name and WALLS honestly until its twin exists (the element-modifier precedent). Scalar results keep the raw-copy body, whose transfer semantics are exact. The C1 inline-lambda defunc path is untouched — this contract covers the funcref/self-host route it declines to."
+since     = "0.57.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/flat_map_aliased_field.almd", class = "fixture" },
+]

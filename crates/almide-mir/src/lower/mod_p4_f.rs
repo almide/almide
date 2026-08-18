@@ -102,12 +102,41 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, enum_rich_variant:
     // `enumerate` has two historical arms and the FIRST one — source_keyed — is exhaustive
     // for any single-type-arg List, making transform's `enumerate` arm dead by construction,
     // exactly as in the original unified function). Pure text move, no logic change.
-    list_call_name_hof_combinators(func, arg_tys, result_ty)
+    // #1519: `flat_map` with a HEAP-element result reaching the self-host
+    // (funcref) route. The scalar body raw-copies element slots — sound only
+    // for scalars (and for ownership TRANSFER out of a fresh sublist); an
+    // ALIASED sublist (closure returns the element's own List field) left
+    // source and result co-referencing each element un-owned — the scope-end
+    // rc_dec double-free. String results ride the deep-copy `_str` twin; any
+    // other heap element routes to the UNREGISTERED `_heapelem` name so the
+    // render WALLS honestly (the element-modifier precedent) until its twin
+    // exists. Scalar results keep the plain name. (The C1 defunc lowers
+    // inline-lambda cases before this router and is unaffected.)
+    list_call_name_flat_map_heap(func, result_ty)
+        .or_else(|| list_call_name_hof_combinators(func, arg_tys, result_ty))
         .or_else(|| list_call_name_source_keyed(func, arg_tys, result_ty, enum_rich_variant))
         .or_else(|| list_call_name_ordering(func, arg_tys, result_ty))
         .or_else(|| list_call_name_transform(func, arg_tys, result_ty))
         .or_else(|| list_call_name_modifiers(func, arg_tys, result_ty))
         .or_else(|| list_call_name_accessors(func, arg_tys, result_ty))
+}
+
+fn list_call_name_flat_map_heap(func: &str, result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if func != "flat_map" {
+        return None;
+    }
+    let Ty::Applied(TypeConstructorId::List, args) = result_ty else { return None };
+    if args.len() != 1 {
+        return None;
+    }
+    if matches!(args[0], Ty::String) {
+        return Some("list.flat_map_str".to_string());
+    }
+    if is_heap_ty(&args[0]) {
+        return Some("list.flat_map_heapelem".to_string());
+    }
+    None
 }
 
 fn list_call_name_hof_combinators(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {

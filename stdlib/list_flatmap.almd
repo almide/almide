@@ -46,3 +46,55 @@ fn list_flat_map(xs: List[Int], f: fn(Int) -> List[Int]) -> List[Int] = {
   let _x = __flm_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
   buf
 }
+
+// list_flat_map_str — the REPR-POLY heap twin (#1519): result element String
+// (source element ANY handle repr — a record source rides the same i32 slot,
+// the closure knows its true type). The scalar body above raw-copies element
+// slots, which under-owns an ALIASED sublist (a closure returning the
+// element's own List field: source and result co-referenced each String
+// un-owned — the scope-end rc_dec double-free the issue's trap shows). Same
+// discipline as list_filter_str: each copied element is DEEP-COPIED
+// (string.repeat ·1) into the result so it is single-owned; the sublist
+// itself is a typed List[String] local, freed by the normal recursive drop
+// whether fresh or aliased. Two passes like the scalar body; a pure f is
+// called twice with the same result.
+fn __flmstr_len_step(sh: Int, f: fn(String) -> List[String], i: Int) -> Int = {
+  let x = prim.load_str(sh + 12 + i * 8)
+  let sub = f(x)
+  list.len(sub)
+}
+
+fn __flmstr_total(sh: Int, f: fn(String) -> List[String], n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let s = __flmstr_len_step(sh, f, i)
+  __flmstr_total(sh, f, n, i + 1, acc + s)
+}
+
+fn __flmstr_copy(dh: Int, sub: List[String], sublen: Int, j: Int, di: Int) -> Int = if j >= sublen then di
+else {
+  let e = list.get(sub, j) ?? ""
+  let copy = string.repeat(e, 1)
+  prim.store_str(dh + 12 + di * 8, copy)
+  __flmstr_copy(dh, sub, sublen, j + 1, di + 1)
+}
+
+fn __flmstr_fill_step(dh: Int, sh: Int, f: fn(String) -> List[String], i: Int, di: Int) -> Int = {
+  let x = prim.load_str(sh + 12 + i * 8)
+  let sub = f(x)
+  __flmstr_copy(dh, sub, list.len(sub), 0, di)
+}
+
+fn __flmstr_fill(dh: Int, sh: Int, f: fn(String) -> List[String], n: Int, i: Int, di: Int) -> Int = if i >= n then di
+else {
+  let ndi = __flmstr_fill_step(dh, sh, f, i, di)
+  __flmstr_fill(dh, sh, f, n, i + 1, ndi)
+}
+
+fn list_flat_map_str(xs: List[String], f: fn(String) -> List[String]) -> List[String] = {
+  let n = list.len(xs)
+  let total = __flmstr_total(prim.handle(xs), f, n, 0, 0)
+  let buf = prim.alloc_list_str(total)
+  let _x = __flmstr_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
+  prim.store32(prim.handle(buf) + 4, total)
+  buf
+}

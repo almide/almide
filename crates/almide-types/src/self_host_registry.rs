@@ -191,7 +191,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (crate::embedded::SRC_LIST_SORT_BY_STR_KEY, &[("list_sort_by_str_key", "list.sort_by_str_key"), ("list_sort_by_str_key_rc", "list.sort_by_str_key_rc")]),
         (crate::embedded::SRC_LIST_UNIQUEBY, &[("list_unique_by", "list.unique_by"), ("list_unique_by_sk", "list.unique_by_sk")]),
         (crate::embedded::SRC_LIST_FILTERMAP, &[("list_filter_map", "list.filter_map")]),
-        (crate::embedded::SRC_LIST_FLATMAP, &[("list_flat_map", "list.flat_map")]),
+        (crate::embedded::SRC_LIST_FLATMAP, &[("list_flat_map", "list.flat_map"), ("list_flat_map_str", "list.flat_map_str")]),
         (
             crate::embedded::SRC_FLOAT_CORE,
             &[
