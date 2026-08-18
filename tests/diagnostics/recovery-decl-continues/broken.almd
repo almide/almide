@@ -1,0 +1,7 @@
+// #1489 pin: the DECLARATION-level recovery point (skip_to_next_decl) — a
+// broken declaration must not silence its siblings' diagnostics.
+fn broken(x: Int) -> Int = x +
+
+fn ok_two(s: String) -> Int = s
+
+fn main() -> Unit = println(int.to_string(ok_two("a")))

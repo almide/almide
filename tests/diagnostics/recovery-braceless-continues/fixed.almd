@@ -1,0 +1,7 @@
+fn g(x: Int) -> Int = if x > 0 then {
+  let a = x + 1
+  let b: Int = 2
+  a + b
+} else 0
+
+fn main() -> Unit = println(int.to_string(g(1)))

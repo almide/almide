@@ -1,0 +1,11 @@
+// #1489 pin: a malformed statement inside a BRACED block becomes Stmt::Error
+// and the rest of the block still parses AND type-checks — the expected code
+// here is the LATER error, so this fixture fails if recovery ever regresses
+// to declaration granularity.
+fn f(x: Int) -> Int = {
+  let a = x!!
+  let b: Int = "not an int"
+  b
+}
+
+fn main() -> Unit = println(int.to_string(f(1)))

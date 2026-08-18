@@ -1,0 +1,5 @@
+fn broken(x: Int) -> Int = x + 1
+
+fn ok_two(s: String) -> Int = string.len(s)
+
+fn main() -> Unit = println(int.to_string(ok_two("a")))
