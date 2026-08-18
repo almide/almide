@@ -30,3 +30,13 @@ fft 1.176
 # same-shape reference and 1.94x against the idiomatic one.
 nbody 0.997
 spectralnorm 1.001
+# Ablation deltas (#1466): ablated-native / optimized-native median per
+# anchored bench (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate). Anchored at
+# the measured ~1.00: on the rustc-backed native leg these passes are
+# SUBSUMED by LLVM, which runs the same folds downstream — the recorded
+# finding, published in docs/project/BENCHMARKS.md. Floor 0.90 (the optimizer
+# must never COST), ceiling +budget (a new earning re-anchors on purpose).
+ablation/fasta 1.000
+ablation/fft 1.000
+ablation/nbody 1.000
+ablation/spectralnorm 1.000

@@ -149,6 +149,33 @@ fannkuch-redux 1.892s) and *faster* than native on binary-trees (0.239s vs
 mandelbrot (~130×) — those two cliffs are the current wasm perf arc, tracked in
 #917's follow-up.
 
+### Ablation: what the IR optimizer buys (2026-08-18)
+
+Koka's benchmark methodology publishes ablation legs (`std` = no FIP reuse
+optimization) so a performance claim is about the *optimizer*, not just the
+language — `#1466` adopts the same axis. `ALMIDE_DISABLE_OPT=1` skips the IR
+perf passes (constant fold, DCE, constant propagation; the lowering enablers
+and the unsigned-lane correctness re-fold stay), and the perf gate runs every
+anchored benchmark both ways each CI round. The delta (ablated / optimized)
+is anchored in `scripts/perf-ratio-baseline.txt` with a floor at 0.90 and the
+standard re-anchor-on-purpose ceiling.
+
+| bench | ablated / optimized |
+|---|---:|
+| nbody | 1.00 |
+| spectralnorm | 1.00 |
+| fasta | 1.00 |
+| fft | 1.00 |
+
+**The measured finding, stated plainly:** on the rustc-backed native leg the
+IR perf passes buy ~0% on these benchmarks — LLVM runs the same folds
+downstream and subsumes them. That is the honest ablation answer today, and
+it is exactly what the axis is FOR: a pass that earns will show up as the
+delta leaving 1.00 (and gets re-anchored, visibly); a pass that starts
+*costing* trips the 0.90 floor. The passes' present value is compile-time
+shape and the wasm leg (which has no LLVM behind it — ablating there costs a
+file its lowering, not its speed; see `optimize_program`'s header note).
+
 ## AI Coding Language Benchmark
 
 Based on [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task: v1 implement, v2 extend).
