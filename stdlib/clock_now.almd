@@ -4,9 +4,10 @@
 // scratch Bytes dropped at scope end — wasmtime's clock_time_get TRAPS on an unaligned
 // timestamp pointer, and `handle+12` is only 4-aligned). `datetime.now` returns Unix SECONDS (native `as_secs()`), `env.millis`
 // MILLISECONDS (native `as_millis() as i64`). Both bodies reach prim.clock_time_get, so
-// their cap_witness carries Capability::Clock — callers are caps-verified only when they
-// declare it (an `effect fn`). PLAIN `fn`s (not `effect fn`) so the bare i64 scalar
-// return is not Result-wrapped — callers expect a raw Int.
+// their cap_witness carries Capability::Clock. The PUBLIC surface declares every one of
+// these `effect fn` (#1515 — a wall-clock read is nondeterminism, E006-gated like the
+// entropy surface); bundled-stdlib effect fns are never Result-lifted, so callers still
+// see the raw Int. scripts/check-cap-effect-consistency.sh holds the rule.
 // NON-DETERMINISTIC (reads the wall clock): no byte-match across runs.
 fn datetime_now() -> Int = {
   let buf = prim.alloc_bytes(16)
