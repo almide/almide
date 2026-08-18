@@ -333,7 +333,7 @@ fn check_import_duplicate(
                 format!("module '{}' is already imported as '{}'", canonical, existing_alias),
                 "Remove the duplicate import".to_string(),
                 format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
-            ));
+            ).with_code("E060"));
         }
     }
 }

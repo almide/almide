@@ -571,6 +571,24 @@ impl Checker {
             }
         }
         self.emit(diag);
+        return;
+    }
+    // #1521: a field access on a concrete NON-record (`3.value`, a Bool, a
+    // Map…) fell through EVERY reporter above — Option and closed records
+    // here, List/String in `suggest_stdlib_for_member` — with no diagnostic,
+    // and died at codegen behind the COMPILER BUG banner. Anything still
+    // concrete at this point has no fields at all.
+    let handled_elsewhere = matches!(&concrete,
+        Ty::Applied(crate::types::TypeConstructorId::List, _) | Ty::String);
+    let opaque = concrete.contains_typevar()
+        || matches!(&concrete, Ty::Unknown | Ty::Never)
+        || matches!(&record_shape, Ty::OpenRecord { .. });
+    if !handled_elsewhere && !opaque {
+        self.emit(super::err(
+            format!("no field '{}' on {} — the type has no fields", field, concrete.display()),
+            "Almide values outside records have no fields. Use the type's stdlib module functions instead.".to_string(),
+            format!("field access .{}", field),
+        ).with_code("E013"));
     }
     }
 
@@ -756,7 +774,7 @@ impl Checker {
                                 format!("cannot access field '{}' on type {}", field, inner_ty.display()),
                                 "Optional chaining requires a record type inside Option",
                                 format!("field {}", field),
-                            ));
+                            ).with_code("E013"));
                             Ty::Unknown
                         }
                     }

@@ -1019,7 +1019,7 @@ impl Checker {
                 format!("unused import '{}'", import_name),
                 format!("Remove the import or prefix with '_' to suppress: _{}", import_name),
                 format!("import at line {}", line),
-            ));
+            ).with_code("E060"));
         }
         self.check_reimpl_lint(program);
         std::mem::take(&mut self.diagnostics)

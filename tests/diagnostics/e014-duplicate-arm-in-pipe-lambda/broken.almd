@@ -1,0 +1,10 @@
+// #1521: a lambda in pipe position had no expected-type pin, so its param
+// stayed unresolved and the duplicate-arm check never ran.
+fn main() -> Unit = {
+  let r = [1, 2] |> list.map((x) => match x {
+    1 => "a",
+    1 => "b",
+    _ => "c",
+  })
+  println(string.join(r, ","))
+}

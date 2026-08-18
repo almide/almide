@@ -325,6 +325,14 @@ when_attr = "has_non_eq_fields"
 template = "#[derive(Clone, Debug)]\npub struct {name} {{\n{fields}\n}}"
 
 [[struct_decl]]
+when_attr = "has_ord_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "has_ord"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
 when_attr = "has_hash"
 template = "#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct {name} {{\n{fields}\n}}"
 
@@ -341,6 +349,14 @@ template = "    pub {name}: {type},"
 [[enum_decl]]
 when_attr = "has_fn_fields"
 template = "#[derive(Clone)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+when_attr = "has_ord_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+when_attr = "has_ord"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]\npub enum {name} {{\n{variants}\n}}"
 
 [[enum_decl]]
 when_attr = "has_hash"

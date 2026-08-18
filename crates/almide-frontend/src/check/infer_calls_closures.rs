@@ -674,6 +674,17 @@ impl Checker {
             let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
                 .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned().flatten()))
                 .unwrap_or_else(|| self.fresh_var());
+            // #1521: a lambda param annotation is an annotation like any other
+            // — an undeclared name here used to flow into unification and
+            // surface as a phantom E001 ("expected Zzz but got Int") instead
+            // of E029's unknown-type report.
+            if p.ty.is_some() {
+                self.deferred_unknown_type_checks.push((
+                    ty.clone(),
+                    self.current_span,
+                    format!("lambda parameter '{}'", p.name),
+                ));
+            }
             let concrete = resolve_ty(&ty, &self.uf);
             // A tuple-pattern parameter (`((k, v)) => …`) binds EVERY name, not
             // just the first. The parser has produced `tuple_names` since the
@@ -1175,11 +1186,56 @@ impl Checker {
         // `xs |> list.map(f) |> list.join(",")` sees a raw TypeVar for the
         // intermediate result, causing module resolution to fail.
         let left_ty = super::types::resolve_ty(&left_ty, &self.uf);
+        // #1521: the pipe path bypasses `check_call_with_type_args`, so the
+        // E052 deprecation warning never fired for `x |> yell` — a caller
+        // could migrate every direct call and keep using the deprecated fn
+        // through pipes unwarned. Warn on the same callee shapes here.
+        match &right.kind {
+            ExprKind::Call { callee, .. } => self.warn_if_deprecated(callee),
+            ExprKind::Ident { .. } | ExprKind::Member { .. } => self.warn_if_deprecated(right),
+            _ => {}
+        }
         match &mut right.kind {
             ExprKind::Call { callee, args, .. } => {
+                // #1521: the pipe path inferred its args BARE, without #653's
+                // expected-type-directed lambda pinning, so a lambda param in
+                // pipe position stayed an unresolved var through its whole
+                // body — `xs |> list.map((x) => match x { 1 => …, 1 => … })`
+                // skipped the E014 duplicate-arm check the direct call form
+                // runs. Reuse the call path's machinery on a sig SHIFTED by
+                // one: the piped subject occupies param 0, and the generics
+                // it pins (List[A] ⊢ A) are substituted into the remaining
+                // params so the lambda pin sees the element type.
+                let mut call_sig = self.lookup_call_sig(callee);
+                if let Some(sig) = call_sig.as_mut() {
+                    // A sig generic whose NAME is shadowed by one of the
+                    // enclosing fn's RIGID generics (zip_with[A, B] piping
+                    // into list.map's own `A`) defeats the pin machinery:
+                    // `lambda_pin_for_arg`'s unbound filter deliberately lets
+                    // an in-scope rigid name through (the #653 protocol-bound
+                    // case), so the sig's OWN unbound `A` would be written
+                    // into the lambda param as the caller's rigid var — `let
+                    // (a, b) = p` then sees `A` where a tuple flows. Bail to
+                    // the unpinned behavior whenever the names overlap.
+                    let shadowed = sig.generics.iter().any(|g|
+                        matches!(self.env.types.get(g), Some(Ty::TypeVar(n)) if n == g));
+                    if shadowed {
+                        call_sig = None;
+                    } else if let Some((_, p0)) = sig.params.first() {
+                        let mut b: std::collections::HashMap<almide_base::intern::Sym, Ty> = std::collections::HashMap::new();
+                        crate::types::unify(p0, &left_ty, &mut b);
+                        for (_n, pty) in sig.params.iter_mut() {
+                            *pty = crate::types::substitute(pty, &b);
+                        }
+                        sig.generics.retain(|g| !b.contains_key(g));
+                    }
+                    if let Some(sig) = call_sig.as_mut() {
+                        if !sig.params.is_empty() { sig.params.remove(0); }
+                    }
+                }
                 // Pipe inserts left as the first argument
                 let mut all_arg_tys: Vec<Ty> = vec![left_ty];
-                all_arg_tys.extend(args.iter_mut().map(|a| self.infer_expr(a)));
+                all_arg_tys.extend(self.infer_call_arg_tys(callee, args, &call_sig));
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 match &mut callee.kind {
                     ExprKind::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),

@@ -842,7 +842,7 @@ impl Checker {
                 self.emit(super::err(
                     format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
                     "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
-                    format!("operator {}", op)));
+                    format!("operator {}", op)).with_code("E030"));
             }
         }
         Ty::Bool

@@ -167,7 +167,7 @@ impl Checker {
     /// the callee signature (#653), enqueueing the E025 ctor-in-arg and E024
     /// sized-literal checks, and accumulating generic bindings so later
     /// lambda slots see them.
-    fn infer_call_arg_tys(&mut self, callee: &ast::Expr, args: &mut [ast::Expr], call_sig: &Option<crate::types::FnSig>) -> Vec<Ty> {
+    pub(crate) fn infer_call_arg_tys(&mut self, callee: &ast::Expr, args: &mut [ast::Expr], call_sig: &Option<crate::types::FnSig>) -> Vec<Ty> {
         let mut bindings: HashMap<Sym, Ty> = HashMap::new();
         let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
         for (i, a) in args.iter_mut().enumerate() {
@@ -633,6 +633,17 @@ impl Checker {
     /// PARAMETER). `None` when the name's local is not a function.
     fn call_fn_typed_local(&mut self, name: &str, ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
         let Ty::Fn { is_effect, params, ret } = ty else { return None };
+        // #1521: the zip below silently DROPS surplus/missing arguments, so a
+        // fn-typed VALUE called at the wrong arity passed check (arity checks
+        // were named-fn only) and died downstream. A function value has a
+        // fixed arity — no defaults — so exact mismatch is the rule.
+        if arg_tys.len() != params.len() {
+            self.emit(super::err(
+                format!("function value `{}` takes {} argument(s), {} given",
+                    name, params.len(), arg_tys.len()),
+                "A function value has a fixed parameter list — match its arity exactly (named-fn defaults do not apply here)".to_string(),
+                format!("call to {}()", name)).with_code("E004"));
+        }
         arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
             self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
         });

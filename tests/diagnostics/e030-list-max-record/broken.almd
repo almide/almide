@@ -1,0 +1,14 @@
+// #1521: a record element passed the orderable check while rustc rejected
+// the monomorph — a user record is Ord only when it declares `: Ord`.
+type P = { x: Int }
+
+fn main() -> Unit = {
+  let ps = [
+    P { x: 2 },
+    P { x: 1 }
+  ]
+  match list.max(ps) {
+    some(p) => println(int.to_string(p.x)),
+    none => println("-"),
+  }
+}

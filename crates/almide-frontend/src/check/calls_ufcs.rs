@@ -62,6 +62,21 @@ impl Checker {
         if let Some(ty) = self.check_call_target_e002_hint(builtin_module, &field, object) {
             return ty;
         }
+        // #1521: an unknown method on a CONCRETE user type used to fall into
+        // the callable-object constrain below and E001'd "expected P but got
+        // fn() -> …" — but the object was never a function; the METHOD is
+        // what does not exist. Name that directly.
+        if matches!(&obj_concrete, Ty::Named(..) | Ty::Record { .. }) && !obj_concrete.contains_typevar() {
+            let type_name = obj_concrete.display();
+            self.emit(super::err(
+                format!("undefined method '{}' on {}", field, type_name),
+                format!("No function `{f}` takes a {t} receiver: UFCS resolves `x.{f}(…)` to `{f}(x, …)`. \
+                         Define `fn {f}({t}, …)`, or call the intended module function directly.",
+                    f = field, t = type_name),
+                format!("method call .{}()", field),
+            ).with_code("E002"));
+            return Ty::Unknown;
+        }
         let ret = self.fresh_var();
         self.constrain(obj_ty, Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
         ret

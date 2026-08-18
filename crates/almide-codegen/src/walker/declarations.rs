@@ -104,10 +104,15 @@ fn render_type_decl_record(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &
         .join("\n");
     let full_name = format!("{}{}", td.name, generics_str);
     let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
+    // #1521: `: Ord` validated at check but never reached a derive here, so
+    // list.sort/min/max on a declared-Ord record still failed rustc's bound.
+    let has_ord = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Ord"));
     let mut attrs = decl_attrs.to_vec();
     if has_fn_fields { attrs.push("has_fn_fields"); }
     if has_non_eq_fields { attrs.push("has_non_eq_fields"); }
-    if has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_hash"); }
+    if has_ord && has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_ord_hash"); }
+    else if has_ord && !has_fn_fields && !has_non_eq_fields { attrs.push("has_ord"); }
+    else if has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_hash"); }
     let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
     let fallback = if has_fn_fields {
         format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
@@ -186,8 +191,11 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
         IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
         IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
     });
+    let has_ord = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Ord"));
     let mut enum_attrs = decl_attrs.to_vec();
     if has_fn_fields { enum_attrs.push("has_fn_fields"); }
+    else if has_ord && has_hash { enum_attrs.push("has_ord_hash"); }
+    else if has_ord { enum_attrs.push("has_ord"); }
     else if has_hash { enum_attrs.push("has_hash"); }
     let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
     let fallback = if has_fn_fields {

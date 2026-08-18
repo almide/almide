@@ -373,20 +373,41 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return true;
                 }
-                ty.children().iter().all(|child| self.is_ord_inner(child, seen))
+                self.declares_ord(*name)
+                    && ty.children().iter().all(|child| self.is_ord_inner(child, seen))
             }
             Ty::Named(name, _) => {
                 if !seen.insert(*name) {
                     return true;
                 }
-                if let Some(resolved) = self.types.get(name) {
-                    self.is_ord_inner(resolved, seen)
+                if let Some(resolved) = self.types.get(name).cloned() {
+                    // #1521: a user record/variant is Ord natively only when it
+                    // DECLARES `: Ord` (the derive). Structural orderability of
+                    // its fields is not enough — check said yes while rustc
+                    // rejected the monomorph ("P: Ord is not satisfied") —
+                    // list.max(List[record]) was the silent cell.
+                    if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
+                        && !self.declares_ord(*name)
+                    {
+                        return false;
+                    }
+                    self.is_ord_inner(&resolved, seen)
                 } else {
                     true
                 }
             }
             _ => ty.children().iter().all(|child| self.is_ord_inner(child, seen)),
         }
+    }
+
+    /// Does the user type declare `: Ord`? Keyed leniently like the derive
+    /// checks: `type_protocols` interns bare names, a cross-module type may
+    /// carry the qualified `mod.Type` spelling — accept either.
+    fn declares_ord(&self, name: Sym) -> bool {
+        let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+        let declares = |n: &str| self.type_protocols.get(&sym(n))
+            .is_some_and(|s| s.contains(&sym("Ord")));
+        declares(name.as_str()) || declares(bare)
     }
 
     pub fn push_scope(&mut self) {

@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let r = [1, 2] |> list.map((x) => match x {
+    1 => "a",
+    2 => "b",
+    _ => "c",
+  })
+  println(string.join(r, ","))
+}
