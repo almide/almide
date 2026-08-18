@@ -1,0 +1,27 @@
+# Release evidence seal — v0.57.2. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.57.2"
+tag = "v0.57.2"
+tag_commit = "132fd7a95cc772f88926820aadb3718ef3994d8e"
+date = "2026-08-18"
+url = "https://github.com/almide/almide/releases/tag/v0.57.2"
+
+[derived]
+cargo_version = "0.57.2"
+contracts_sha256 = "a16667b08643ea497e418105606c98c7cda995cdf4da96aa2247de5a38d8baa1"
+contracts_total = "298"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "f38831a5ba90b91ffd78e963b85e3d90a45e07bcd1ecda3d22e4930d271b60d2"
+abstain_ledger_entries = "133"
+wasm_cross_fixtures = "585"
+rust_toolchain = "1.89.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "manual fuzz dispatch on main (= the tagged content), actions run 32105580062, 8 shards x 10 min (x86_64 + aarch64). Six shards (3-8) completed their full 600s budget: 17,683 programs generated, ~300 prog/min. Shards 1-2 (both x86_64) were SIGTERMed by the runner mid-budget (exit 143 at 445s / 170s, the small-runner memory-pressure kill documented in the v0.57.1 seal) with findings=0 up to termination and ~2,800 further programs on the books — infra loss, not silence about a defect. ONE finding, fully disposed: OutputDivergence seed 513689280998 index 1469 (mutation of spec/wasm_cross/matrix_domain_edges.almd) — matrix.from_q1_0_bytes with cols=i64::MAX takes a raw native capacity-overflow panic (exit 101, the ALS-T6-forbidden form) while wasm aborts cleanly with OOM (exit 1). Replayed locally against BOTH shipped macos-aarch64 assets: v0.57.2 and v0.57.1 fail byte-identically -> PRE-EXISTING, not a 0.57.2 regression; it is the residual edge of #1503's family sweep (e1ef12707 clamped the float loaders' dims natively but not the native q1_0 path); filed #1525 with a minimal repro. Zero unexplained findings. Internal soak behind the direct-final decision (RC skipped): 5 differential campaigns ~34k programs, 5 panic-wash rounds ~72k checks, the 585-fixture 3-way suite, all green at the tag."
+assets = "6: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256"
+known_problems = "#1525 matrix.from_q1_0_bytes raw-panics natively (capacity overflow, exit 101) on a huge POSITIVE dimension where wasm aborts cleanly — the #1503 sweep's residual (that fix clamped the float loaders native-side and the q-formats self-host-side only); pre-existing since at least 0.57.1, fix queued under the ratified-A convention. #1229 quadratic wasm string-accumulator concat carries over unchanged. #1520/#1522 Codec decode on heap-result-match subset boundary walls honestly on wasm (COMPILER_FRONTIER pin, native + interpreter fully agree) — a disclosed frontier, not a miscompile. The declared contracted divergences in proofs/domain-edges.toml (C-197, ratified A 2026-08-17) are unchanged. Native SIGKILL under OS overcommit on small-RAM hosts remains the cohort-universal limitation, disclosed rather than papered over."
