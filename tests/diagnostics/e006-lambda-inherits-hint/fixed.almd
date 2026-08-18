@@ -1,0 +1,8 @@
+effect fn stamp() -> Int = 7
+
+effect fn run() -> Int = {
+  let f = () => stamp()
+  1
+}
+
+effect fn main() -> Unit = println(int.to_string(run()!))

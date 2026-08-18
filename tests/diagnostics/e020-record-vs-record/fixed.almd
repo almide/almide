@@ -1,0 +1,4 @@
+type Cfg = { host: String }
+type CfgPort = { port: Int }
+
+fn main() -> Unit = println("ok")

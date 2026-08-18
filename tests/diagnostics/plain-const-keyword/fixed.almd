@@ -1,0 +1,3 @@
+let LIMIT = 5
+
+fn main() -> Unit = println("x")

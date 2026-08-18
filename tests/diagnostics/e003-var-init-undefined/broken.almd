@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var v = ghostseed + 1
+  println(int.to_string(v))
+}

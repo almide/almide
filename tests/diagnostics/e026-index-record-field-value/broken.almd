@@ -1,0 +1,7 @@
+// String indexing as a RECORD field value.
+type R = { c: String }
+
+fn main() -> Unit = {
+  let r = R { c: "abc"[0] }
+  println(r.c)
+}

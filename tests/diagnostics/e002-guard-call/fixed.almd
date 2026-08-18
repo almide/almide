@@ -1,0 +1,6 @@
+fn check(n: Int) -> Bool = n > 0
+
+fn main() -> Unit = println(match 1 {
+  n if check(n) => "hit",
+  _ => "rest",
+})

@@ -1,0 +1,4 @@
+@depreacted(since = 3, use = "shout")
+fn yell(s: String) -> String = s + "!"
+
+fn main() -> Unit = println(yell("hi"))

@@ -1,0 +1,7 @@
+import json.{parse, stringify}
+
+fn parse_len(s: String) -> Int = string.len(s)
+
+fn show(n: Int) -> String = int.to_string(n)
+
+effect fn main() -> Unit = println(show(parse_len("hi")))

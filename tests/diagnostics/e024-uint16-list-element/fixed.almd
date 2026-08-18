@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let xs: List[UInt16] = [1, 7000]
+  println(int.to_string(list.len(xs)))
+}

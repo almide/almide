@@ -1,0 +1,5 @@
+fn f(n: Int) -> Int = n
+
+fn g(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println(int.to_string(f(1) + g(1)))

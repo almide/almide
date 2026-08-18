@@ -1,0 +1,3 @@
+fn shorten(s: String) -> String = string.take(s, 2)
+
+fn main() -> Unit = println(shortan("hello"))

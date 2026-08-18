@@ -1,0 +1,2 @@
+expects_code = "E043"
+expects_error = "try_flat_map"

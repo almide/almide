@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let second = 2
+  let t = (1, second)
+  println(int.to_string(match t { (a, _) => a }))
+}

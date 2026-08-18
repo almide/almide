@@ -1,0 +1,8 @@
+// E050: BOTH selectively imported names shadowed by locals.
+import json.{parse, stringify}
+
+fn parse(s: String) -> Int = string.len(s)
+
+fn stringify(n: Int) -> String = int.to_string(n)
+
+effect fn main() -> Unit = println(stringify(parse("hi")))

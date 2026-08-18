@@ -1,0 +1,6 @@
+type C = | R | G | B
+
+fn main() -> Unit = {
+  let f = (c: C) => match c { R => 1, G => 2 }
+  println(int.to_string(f(R)))
+}

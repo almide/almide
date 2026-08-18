@@ -1,0 +1,9 @@
+fn sum2(t: (Int, Int)) -> Int = match t { (a, b) => a + b }
+
+effect fn build() -> Int = {
+  let f = () => sum2(fan { 1
+    2 })
+  f()
+}
+
+effect fn main() -> Unit = println(int.to_string(build()!))

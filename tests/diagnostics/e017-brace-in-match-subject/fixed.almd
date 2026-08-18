@@ -1,0 +1,3 @@
+type Shape = | Circle(Int) | Dot
+
+fn main() -> Unit = println(match Circle(2) { Circle(r) => int.to_string(r), Dot => "d" })

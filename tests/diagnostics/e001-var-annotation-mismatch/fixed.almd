@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var n: Int = 7
+  println(int.to_string(n))
+}

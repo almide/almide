@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var c = string.get("abc", 1) ?? ""
+  println(c)
+}

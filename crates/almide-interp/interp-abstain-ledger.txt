@@ -115,6 +115,10 @@ string_rle  out-of-interp-scope capability: prim.alloc_list_str
 string_split_rle_codepoint  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 string_whitespace  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 tco_map_acc_seed  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+tm_map_int_fn_pass  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+tm_map_int_interp  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+tm_map_int_lit_print  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+tm_map_int_shadow_drop  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 unwrap_or_unwrap_fallback  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 value_array_leak_loop  out-of-interp-scope capability: prim.alloc_value
 value_array_tuple_tco  out-of-interp-scope capability: prim.alloc_value

@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  var n = 0
+  while n < ghostcap {
+    n = n + 1
+  }
+  println(int.to_string(n))
+}

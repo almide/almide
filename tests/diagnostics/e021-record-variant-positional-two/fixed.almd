@@ -1,0 +1,3 @@
+type S = | Cfg { host: String, port: Int }
+
+fn main() -> Unit = println(match Cfg(host: "h", port: 1) { Cfg { host, port } => host })

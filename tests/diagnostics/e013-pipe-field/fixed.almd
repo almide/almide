@@ -1,0 +1,6 @@
+type P = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  let p = P { x: 4, y: 2 }
+  p.x |> int.to_string |> println
+}

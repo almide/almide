@@ -1,0 +1,5 @@
+fn two(a: Int, b: Int) -> Int = a + b
+
+effect fn main() -> Unit = {
+  println(int.to_string(two(9)))
+}

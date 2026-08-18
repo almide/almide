@@ -1,0 +1,2 @@
+expects_code = "E015"
+expects_error = "same signature as stdlib"

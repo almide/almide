@@ -1,0 +1,6 @@
+// E030: sort_by whose KEY is a tuple carrying a fn.
+fn main() -> Unit = {
+  let xs = [1, 2]
+  let sorted = list.sort_by(xs, (n) => (n, (x: Int) => x))
+  println(int.to_string(list.len(sorted)))
+}

@@ -1,0 +1,8 @@
+type Ev = | Click(Int) | Key(String) | Quit
+
+fn f(e: Ev) -> String = match e {
+  Click(_) => "c",
+  Key(_) => "k",
+}
+
+fn main() -> Unit = println(f(Quit))

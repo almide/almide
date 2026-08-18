@@ -1,0 +1,4 @@
+fn main() -> Unit = println(match (true, false) {
+  (true, true) => "tt",
+  (false, _) => "f_",
+})

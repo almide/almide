@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let base = 1
+  let f = (n: Int) => {
+    base = n
+    base
+  }
+  println(int.to_string(f(3)))
+}

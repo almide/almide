@@ -1,0 +1,6 @@
+type P = { x: Int }
+
+fn main() -> Unit = {
+  let p = P { x: 3 }
+  println("val ${p.x}")
+}

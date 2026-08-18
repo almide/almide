@@ -1,0 +1,3 @@
+effect fn go(w: Int) -> Unit = println("x")
+
+effect fn main() -> Unit = go(1)!

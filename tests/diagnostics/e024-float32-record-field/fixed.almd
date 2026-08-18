@@ -1,0 +1,6 @@
+type P = { w: Float32 }
+
+fn main() -> Unit = {
+  let p = P { w: 1.0e30 }
+  println(float.to_string(float.from_float32(p.w) / 1.0e30))
+}

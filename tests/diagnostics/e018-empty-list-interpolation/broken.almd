@@ -1,0 +1,2 @@
+// `[]` interpolated directly — repr needs the element type.
+fn main() -> Unit = println("${[]}")

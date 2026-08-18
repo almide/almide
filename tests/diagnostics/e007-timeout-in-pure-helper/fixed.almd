@@ -1,0 +1,3 @@
+effect fn slow() -> Int = fan.timeout(duration.ms(5)) { 21 } ?? 0
+
+effect fn main() -> Unit = println(int.to_string(slow()!))

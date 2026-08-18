@@ -1,0 +1,1 @@
+fn main() -> Unit = println(int.to_string(list.index_of([1], 1) ?? (0 - 1)))

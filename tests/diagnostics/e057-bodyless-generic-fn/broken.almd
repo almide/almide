@@ -1,0 +1,4 @@
+// E057 variant: a generic signature without a body.
+fn first[T](xs: List[T]) -> T?
+
+fn main() -> Unit = println("x")

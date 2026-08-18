@@ -1,0 +1,9 @@
+type P = { x: Int }
+type W = | Wrap(P)
+
+fn main() -> Unit = {
+  let n = match Wrap(P { x: 3 }) {
+    Wrap(p) => p.missing,
+  }
+  println(int.to_string(n))
+}

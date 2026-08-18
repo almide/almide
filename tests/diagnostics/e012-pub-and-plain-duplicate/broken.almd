@@ -1,0 +1,5 @@
+pub fn g() -> Int = 1
+
+fn g() -> Int = 2
+
+fn main() -> Unit = println(int.to_string(g()))

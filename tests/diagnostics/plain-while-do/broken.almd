@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  var i = 0
+  while i < 3 do {
+    i = i + 1
+  }
+  println(int.to_string(i))
+}

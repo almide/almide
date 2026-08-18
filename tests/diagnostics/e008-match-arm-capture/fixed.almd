@@ -1,0 +1,11 @@
+fn sum2(t: (Int, Int)) -> Int = match t { (a, b) => a + b }
+
+effect fn main() -> Unit = {
+  let hits = 0
+  let r = sum2(fan { match 1 {
+      1 => hits + 1,
+      _ => 0,
+    }
+    2 })
+  println(int.to_string(r))
+}

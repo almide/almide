@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let out = list.sort_by([3, 1], (n) => n)
+  println(int.to_string(list.len(out)))
+}

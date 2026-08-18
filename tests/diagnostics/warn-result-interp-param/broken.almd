@@ -1,0 +1,3 @@
+fn show(r: Result[Int, String]) -> String = "${r}"
+
+effect fn main() -> Unit = println(show(int.parse("5")))

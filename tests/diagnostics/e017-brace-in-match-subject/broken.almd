@@ -1,0 +1,4 @@
+// Enum brace construction as the MATCH SUBJECT.
+type Shape = | Circle(Int) | Dot
+
+fn main() -> Unit = println(match Shape { r: 2 } { Circle(r) => int.to_string(r), Dot => "d" })

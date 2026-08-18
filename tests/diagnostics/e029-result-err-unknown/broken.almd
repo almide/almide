@@ -1,0 +1,4 @@
+// Unknown type in a Result's ERROR slot.
+fn f() -> Result[Int, AppErr] = ok(1)
+
+fn main() -> Unit = println(match f() { ok(n) => int.to_string(n), err(_) => "e" })

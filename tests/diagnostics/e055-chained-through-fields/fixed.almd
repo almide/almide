@@ -1,0 +1,10 @@
+// E055: `?.` on a Result-of-record, reached through a field chain.
+type Inner = { n: Int }
+type Outer = { inner: Inner }
+
+fn get() -> Result[Outer, String] = ok(Outer { inner: Inner { n: 4 } })
+
+fn main() -> Unit = {
+  let o = option.map(result.to_option(get()), (v) => v.inner)
+  println(match o { some(i) => int.to_string(i.n), none => "-" })
+}

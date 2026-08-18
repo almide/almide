@@ -1,0 +1,5 @@
+protocol Walker {
+  fn steps(self) -> Int
+}
+
+fn main() -> Unit = println("x")

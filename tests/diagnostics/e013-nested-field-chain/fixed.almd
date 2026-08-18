@@ -1,0 +1,7 @@
+type Inner = { z: Int }
+type Outer = { inner: Inner, tag: Int }
+
+fn main() -> Unit = {
+  let o = Outer { inner: Inner { z: 1 }, tag: 2 }
+  println(int.to_string(o.inner.z))
+}

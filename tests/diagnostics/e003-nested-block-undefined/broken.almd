@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let n = {
+    ghostinner + 1
+  }
+  println(int.to_string(n))
+}

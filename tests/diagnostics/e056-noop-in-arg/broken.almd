@@ -1,0 +1,6 @@
+fn take(o: Int?) -> Int = o ?? 0
+
+fn main() -> Unit = {
+  let o: Int? = some(2)
+  println(int.to_string(take(o?)))
+}

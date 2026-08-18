@@ -1,0 +1,7 @@
+type P = { count: Int }
+
+fn main() -> Unit = {
+  let xs = [P(count: 1)]
+  let ys = list.map(xs, (p) => p.count)
+  println(int.to_string(list.len(ys)))
+}

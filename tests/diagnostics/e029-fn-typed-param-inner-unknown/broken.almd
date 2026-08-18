@@ -1,0 +1,4 @@
+// Unknown type INSIDE a fn-typed parameter annotation.
+fn apply(f: (Gadget) -> Int) -> Int = 1
+
+fn main() -> Unit = println(int.to_string(apply((g) => 2)))

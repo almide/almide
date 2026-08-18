@@ -1,0 +1,6 @@
+effect fn main() -> Unit = {
+  fan {
+    let x = 1
+  }
+  println("x")
+}

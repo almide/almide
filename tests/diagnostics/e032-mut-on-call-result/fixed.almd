@@ -1,0 +1,7 @@
+fn make() -> List[Int] = [1]
+
+fn main() -> Unit = {
+  var xs = make()
+  list.push(xs, 2)
+  println(int.to_string(list.len(xs)))
+}

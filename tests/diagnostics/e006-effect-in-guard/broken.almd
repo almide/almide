@@ -1,0 +1,8 @@
+effect fn flag() -> Bool = true
+
+fn pick(n: Int) -> String = match n {
+  _ if flag() => "f",
+  _ => "g",
+}
+
+effect fn main() -> Unit = println(pick(1))

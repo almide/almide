@@ -1,0 +1,5 @@
+effect fn tick() -> Int = 1
+
+fn f(n: Int) -> String = if n > 0 then "t" else "f"
+
+fn main() -> Unit = println(f(1))

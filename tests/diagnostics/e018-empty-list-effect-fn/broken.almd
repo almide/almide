@@ -1,0 +1,5 @@
+// `[]` in an EFFECT fn, only length-checked.
+effect fn main() -> Unit = {
+  let xs = []
+  println(int.to_string(list.len(xs)))
+}

@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let b: UInt8 = 30
+  println(int.to_string(int.from_uint8(b)))
+}

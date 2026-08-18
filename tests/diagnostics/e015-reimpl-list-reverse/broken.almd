@@ -1,0 +1,4 @@
+// Reimplementing list.reverse under the bare stdlib name.
+fn reverse(xs: List[Int]) -> List[Int] = xs
+
+fn main() -> Unit = println(int.to_string(list.len(reverse([1, 2]))))

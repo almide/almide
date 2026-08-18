@@ -1,0 +1,3 @@
+fn two(a: Int, b: Int) -> Int = a + b
+
+fn main() -> Unit = println("sum=${two(1)}")

@@ -1,0 +1,6 @@
+type Ev = | Click { x: Int, y: Int } | Quit
+
+effect fn main() -> Unit = {
+  let e = Click { x: 1, y: 3 }
+  println("${e}")
+}

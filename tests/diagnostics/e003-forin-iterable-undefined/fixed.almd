@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let xs = [1, 2]
+  var t = 0
+  for x in xs {
+    t = t + x
+  }
+  println(int.to_string(t))
+}

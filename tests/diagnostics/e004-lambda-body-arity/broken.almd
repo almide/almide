@@ -1,0 +1,6 @@
+fn two(a: Int, b: Int) -> Int = a + b
+
+fn main() -> Unit = {
+  let f = (n: Int) => two(n)
+  println(int.to_string(f(1)))
+}

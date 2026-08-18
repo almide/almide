@@ -1,0 +1,10 @@
+effect fn tick(n: Int) -> Result[Int, String] = ok(n)
+
+effect fn main() -> Unit = {
+  var i = 0
+  while i < 2 {
+    tick(i)
+    i = i + 1
+  }
+  println(int.to_string(i))
+}

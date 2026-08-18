@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let r = list.try_filter_map([1, 2], (n) => if n > 1 then some(n) else none)
+  println(int.to_string(list.len([1])))
+}

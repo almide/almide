@@ -1,0 +1,2 @@
+// main with a single non-argv-shaped parameter.
+effect fn main(name: String) -> Unit = println(name)

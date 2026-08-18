@@ -1,0 +1,5 @@
+// E041: a Result binding read raw inside a guard.
+effect fn main() -> Unit = {
+  let n = int.parse("5")
+  println(match 1 { _ if n > 3 => "big", _ => "small" })
+}

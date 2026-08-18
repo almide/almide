@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let x = 2 > 1
+  println("done")
+}

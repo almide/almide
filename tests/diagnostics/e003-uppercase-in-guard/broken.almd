@@ -1,0 +1,4 @@
+fn main() -> Unit = println(match 1 {
+  n if n < GHOST_CAP => "small",
+  _ => "rest",
+})

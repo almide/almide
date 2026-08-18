@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var o = some(1)
+  println("${o}")
+}

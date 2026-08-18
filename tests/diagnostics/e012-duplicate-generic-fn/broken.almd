@@ -1,0 +1,5 @@
+fn pick[T](x: T, y: T) -> T = x
+
+fn pick[T](x: T, y: T) -> T = y
+
+fn main() -> Unit = println(int.to_string(pick(1, 2)))

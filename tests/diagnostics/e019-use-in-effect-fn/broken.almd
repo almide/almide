@@ -1,0 +1,8 @@
+// The ambiguous ctor used from an EFFECT fn.
+type A = | Ping | Pong
+type B = | Ping | Pow
+
+effect fn main() -> Unit = {
+  let p = Ping
+  println("${p}")
+}

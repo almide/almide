@@ -1,0 +1,7 @@
+// An Int16 RECORD field literal out of range.
+type P = { v: Int16 }
+
+fn main() -> Unit = {
+  let p = P { v: 70000 }
+  println("never")
+}

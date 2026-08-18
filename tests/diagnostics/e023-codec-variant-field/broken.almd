@@ -1,0 +1,6 @@
+// Codec whose field is a NON-Codec variant.
+type Kind = | Alpha | Beta
+
+type Doc: Codec = { kind: Kind }
+
+fn main() -> Unit = println("ok")

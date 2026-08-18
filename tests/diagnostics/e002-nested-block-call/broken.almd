@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  let n = {
+    let base = 1
+    base + mystery_extra()
+  }
+  println(int.to_string(n))
+}

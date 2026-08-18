@@ -1,0 +1,4 @@
+// Duplicate arm in a match INSIDE an interpolation segment.
+fn f(n: Int) -> String = "${match n { 0 => "z", 0 => "zz", _ => "n" }}"
+
+fn main() -> Unit = println(f(0))

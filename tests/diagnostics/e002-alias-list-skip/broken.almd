@@ -1,0 +1,1 @@
+fn main() -> Unit = println(int.to_string(list.len(list.skip([1, 2, 3], 1))))

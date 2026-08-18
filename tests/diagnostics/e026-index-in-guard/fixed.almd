@@ -1,0 +1,3 @@
+fn f(s: String) -> Int = match s { _ if (string.get(s, 0) ?? "") == "a" => 1, _ => 0 }
+
+fn main() -> Unit = println(int.to_string(f("ab")))

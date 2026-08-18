@@ -1,0 +1,4 @@
+// `!` on a non-channel operand inside an interpolation segment.
+fn f(s: String) -> String = "${s!}"
+
+fn main() -> Unit = println(f("x"))

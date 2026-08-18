@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var acc = 0
+  for i in 1...3 { acc = acc + i }
+  println(int.to_string(acc))
+}

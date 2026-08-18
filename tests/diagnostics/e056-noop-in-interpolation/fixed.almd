@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let o: Int? = some(3)
+  println("${o}")
+}

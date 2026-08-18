@@ -1,0 +1,3 @@
+fn first(s: String) -> String = string.get(s, 0) ?? ""
+
+fn main() -> Unit = println(first("hi"))

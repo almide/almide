@@ -1,0 +1,6 @@
+effect fn flag() -> Bool = true
+
+effect fn main() -> Unit = {
+  let f = flag()!
+  println(if f then "f" else "g")
+}

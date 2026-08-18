@@ -1,0 +1,4 @@
+// Codec with a List-of-tuples field.
+type Doc: Codec = { pairs: List[(String, Int)] }
+
+fn main() -> Unit = println("ok")

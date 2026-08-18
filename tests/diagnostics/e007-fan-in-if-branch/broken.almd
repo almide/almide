@@ -1,0 +1,6 @@
+fn sum2(t: (Int, Int)) -> Int = match t { (a, b) => a + b }
+
+fn f(n: Int) -> Int = if n > 0 then sum2(fan { n
+    n }) else 0
+
+fn main() -> Unit = println(int.to_string(f(1)))

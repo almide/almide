@@ -1,0 +1,4 @@
+// `!` on a non-channel operand in ARGUMENT position.
+fn f(n: Int) -> Int = int.clamp(n!, 0, 9)
+
+fn main() -> Unit = println(int.to_string(f(4)))

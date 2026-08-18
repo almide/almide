@@ -1,0 +1,5 @@
+type Row: Codec = { a: Int, b: Int }
+
+type Doc: Codec = { rows: List[Row]? }
+
+fn main() -> Unit = println("ok")

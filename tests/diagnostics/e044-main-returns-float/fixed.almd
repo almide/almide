@@ -1,0 +1,1 @@
+fn main() -> Unit = println(float.to_string(1.5))

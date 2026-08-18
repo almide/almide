@@ -1,0 +1,4 @@
+// E057 variant: `pub` visibility does not license a missing body.
+pub fn api() -> Int
+
+fn main() -> Unit = println("x")

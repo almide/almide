@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let seedvar = 9
+  seedvar |> int.to_string |> println
+}

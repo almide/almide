@@ -1,0 +1,5 @@
+// A leading comment block before the pragma must not hide the stamp.
+// The stamp still governs the whole file.
+@dialect(12)
+
+fn main() -> Unit = println("hi")

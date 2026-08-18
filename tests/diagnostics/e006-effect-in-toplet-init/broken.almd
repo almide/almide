@@ -1,0 +1,5 @@
+effect fn stamp() -> Int = 7
+
+let BASE = stamp()
+
+fn main() -> Unit = println(int.to_string(BASE))

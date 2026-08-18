@@ -1,0 +1,5 @@
+// E048: the cross-family pattern sits in a GUARDED arm.
+fn main() -> Unit = {
+  let r: Result[Int, String] = ok(2)
+  println(match r { some(v) if v > 1 => "s", ok(v) => int.to_string(v), err(_) => "e" })
+}

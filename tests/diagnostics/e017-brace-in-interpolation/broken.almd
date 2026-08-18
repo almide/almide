@@ -1,0 +1,4 @@
+// Enum brace construction inside an INTERPOLATION segment.
+type Shape = | Circle(Int) | Dot
+
+fn main() -> Unit = println("${Shape { r: 1 }}")

@@ -1,0 +1,4 @@
+@zzzcompletelyunknown
+fn f() -> Int = 1
+
+fn main() -> Unit = println(int.to_string(f()))

@@ -1,0 +1,6 @@
+effect fn main() -> Unit = {
+  fan {
+    println("arm")
+  }
+  println("x")
+}

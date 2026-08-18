@@ -1,0 +1,2 @@
+// A list of bare `none`s, only length-checked and interpolated.
+fn main() -> Unit = println("${[none, none]}")

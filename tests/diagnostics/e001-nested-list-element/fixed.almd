@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let xs: List[List[Int]] = [[1], [2]]
+  println(int.to_string(list.len(xs)))
+}

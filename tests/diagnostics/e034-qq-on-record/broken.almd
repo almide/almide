@@ -1,0 +1,6 @@
+type P = { n: Int }
+
+fn main() -> Unit = {
+  let x = (P { n: 1 }) ?? (P { n: 2 })
+  println("done")
+}

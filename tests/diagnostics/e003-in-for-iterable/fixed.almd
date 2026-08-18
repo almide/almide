@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let zzitems = [1, 2]
+  var acc = 0
+  for x in zzitems { acc = acc + x }
+  println(int.to_string(acc))
+}

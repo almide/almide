@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let out = list.map([1, 2], (n) => n, 9)
+  println(int.to_string(list.len(out)))
+}

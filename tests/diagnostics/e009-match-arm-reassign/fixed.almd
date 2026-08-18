@@ -1,0 +1,10 @@
+fn main() -> Unit = {
+  var acc = 0
+  match 1 {
+    1 => {
+      acc = 5
+    },
+    _ => println("rest"),
+  }
+  println(int.to_string(acc))
+}

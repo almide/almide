@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let cap = 3
+  var n = 0
+  while n < cap {
+    n = n + 1
+  }
+  println(int.to_string(n))
+}

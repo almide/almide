@@ -1,0 +1,6 @@
+// E050 variant: local fn shadowing the FIRST name of a selective import.
+import json.{parse}
+
+fn parse(s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = println(int.to_string(parse("hi")))

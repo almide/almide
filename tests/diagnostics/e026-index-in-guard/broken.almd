@@ -1,0 +1,4 @@
+// String indexing inside a match GUARD.
+fn f(s: String) -> Int = match s { _ if s[0] == "a" => 1, _ => 0 }
+
+fn main() -> Unit = println(int.to_string(f("ab")))

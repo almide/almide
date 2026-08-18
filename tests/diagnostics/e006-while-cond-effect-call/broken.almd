@@ -1,0 +1,11 @@
+effect fn tick() -> Int = 1
+
+fn f() -> Int = {
+  var n = 0
+  while tick() > n {
+    n = n + 3
+  }
+  n
+}
+
+fn main() -> Unit = println(int.to_string(f()))

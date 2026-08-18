@@ -1,0 +1,3 @@
+enum Color { }
+
+fn main() -> Unit = println("x")

@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let depth = 1
+  let n = {
+    depth = 2
+    depth + 1
+  }
+  println(int.to_string(n))
+}

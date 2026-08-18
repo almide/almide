@@ -1,0 +1,5 @@
+type Pair: Codec = { k: String, v: Int }
+
+type Doc: Codec = { pairs: List[Pair] }
+
+fn main() -> Unit = println("ok")

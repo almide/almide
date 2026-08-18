@@ -1,0 +1,3 @@
+fn f(n: Int) -> String = "${match n { 0 => "z", _ => "n" }}"
+
+fn main() -> Unit = println(f(0))

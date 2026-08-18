@@ -1,0 +1,4 @@
+type Box[T] = | B(T)
+type IntBox = { v: Int }
+
+fn main() -> Unit = println("ok")

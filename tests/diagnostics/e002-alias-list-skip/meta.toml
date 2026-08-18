@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function"
+hint_substring = "list.drop"

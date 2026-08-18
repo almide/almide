@@ -1,0 +1,7 @@
+// E038: terminal `??` inside a lambda body block.
+fn main() -> Unit = {
+  let f = (s: String) => {
+    int.parse(s)??
+  }
+  println(int.to_string(f("4")))
+}

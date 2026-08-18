@@ -1,0 +1,4 @@
+type Token = | Word(String) | Num
+type TokenText = { text: String }
+
+fn main() -> Unit = println("ok")

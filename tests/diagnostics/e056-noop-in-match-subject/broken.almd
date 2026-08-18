@@ -1,0 +1,6 @@
+fn tag(o: Int?) -> String = match o? {
+  some(_) => "s",
+  none => "n",
+}
+
+fn main() -> Unit = println(tag(some(1)))

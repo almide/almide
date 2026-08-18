@@ -1,0 +1,6 @@
+// Codec whose field is a record that does NOT derive Codec.
+type Inner = { n: Int }
+
+type Doc: Codec = { inner: Inner }
+
+fn main() -> Unit = println("ok")

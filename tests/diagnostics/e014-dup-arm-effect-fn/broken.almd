@@ -1,0 +1,5 @@
+// Duplicate arm in an EFFECT fn body match.
+effect fn main() -> Unit = {
+  let s = match 2 { 1 => "one", 2 => "two", 2 => "again", _ => "other" }
+  println(s)
+}

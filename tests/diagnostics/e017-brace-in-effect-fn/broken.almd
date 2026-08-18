@@ -1,0 +1,7 @@
+// Enum brace construction inside an EFFECT fn.
+type Shape = | Circle(Int) | Dot
+
+effect fn main() -> Unit = {
+  let s = Shape { r: 4 }
+  println("${s}")
+}

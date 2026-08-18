@@ -1,0 +1,3 @@
+fn f(n: Int) -> Result[Int, String] = ok(n)
+
+fn main() -> Unit = println(match f(1) { ok(n) => int.to_string(n), err(_) => "e" })

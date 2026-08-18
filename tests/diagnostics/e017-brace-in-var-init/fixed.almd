@@ -1,0 +1,6 @@
+type Shape = | Circle(Int) | Dot
+
+fn main() -> Unit = {
+  var s = Circle(6)
+  println("${s}")
+}

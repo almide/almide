@@ -1,0 +1,4 @@
+@export("wasm")
+fn tick() -> Int = 1
+
+fn main() -> Unit = println("x")

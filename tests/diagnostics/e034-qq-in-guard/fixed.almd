@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let n = 5
+  println(match n { x if x > 3 => "big", _ => "small" })
+}

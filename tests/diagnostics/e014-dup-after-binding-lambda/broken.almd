@@ -1,0 +1,5 @@
+// An arm AFTER a binding arm, inside a lambda callback.
+fn f(xs: List[Int]) -> List[Int] =
+  list.map(xs, (n) => match n { v => v, 0 => 99 })
+
+fn main() -> Unit = println(int.to_string(list.len(f([1]))))

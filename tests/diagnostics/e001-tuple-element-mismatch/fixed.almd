@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let t: (Int, String) = (1, "two")
+  println(match t { (a, b) => int.to_string(a) + b })
+}

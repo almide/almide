@@ -1,0 +1,7 @@
+// Enum brace construction as a VAR initializer.
+type Shape = | Circle(Int) | Dot
+
+fn main() -> Unit = {
+  var s = Shape { r: 6 }
+  println("${s}")
+}

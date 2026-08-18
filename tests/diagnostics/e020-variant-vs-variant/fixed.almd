@@ -1,0 +1,4 @@
+type Signal = | On | Off
+type Level = | High | Low
+
+fn main() -> Unit = println("ok")

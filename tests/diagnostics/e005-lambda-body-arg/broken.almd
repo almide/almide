@@ -1,0 +1,6 @@
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = {
+  let f = (s: String) => double(s)
+  println(int.to_string(f("x")))
+}

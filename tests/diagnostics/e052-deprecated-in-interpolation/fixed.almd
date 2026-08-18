@@ -1,0 +1,3 @@
+fn shout(s: String) -> String = s + "!"
+
+effect fn main() -> Unit = println("said: ${shout("hi")}")

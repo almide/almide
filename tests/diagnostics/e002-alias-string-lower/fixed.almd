@@ -1,0 +1,1 @@
+fn main() -> Unit = println(string.to_lower("ABC"))

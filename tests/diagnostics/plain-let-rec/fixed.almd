@@ -1,0 +1,3 @@
+fn go(n: Int) -> Int = if n <= 0 then 0 else go(n - 1)
+
+fn main() -> Unit = println(int.to_string(go(3)))

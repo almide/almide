@@ -1,0 +1,7 @@
+effect fn get() -> Result[Int, String] = ok(1)
+
+fn wrap(n: Int) -> Int = n
+
+effect fn caller() -> Int = wrap(get()!)
+
+effect fn main() -> Unit = println(int.to_string(caller()!))

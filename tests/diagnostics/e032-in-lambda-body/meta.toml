@@ -1,0 +1,2 @@
+expects_code = "E032"
+expects_error = "list.push"

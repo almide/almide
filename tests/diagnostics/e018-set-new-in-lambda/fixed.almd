@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let mk = () => set.from_list([1])
+  println(int.to_string(set.len(mk())))
+}

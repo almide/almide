@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  var t = 0
+  for x in ghostlist {
+    t = t + x
+  }
+  println(int.to_string(t))
+}

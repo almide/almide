@@ -1,0 +1,5 @@
+// `[]` from BOTH if branches, only length-checked.
+fn main() -> Unit = {
+  let xs = if 1 > 0 then [] else []
+  println(int.to_string(list.len(xs)))
+}

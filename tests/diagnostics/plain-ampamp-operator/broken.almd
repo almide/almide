@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let a = true && false
+  println(if a then "t" else "f")
+}

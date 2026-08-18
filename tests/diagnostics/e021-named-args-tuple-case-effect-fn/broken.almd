@@ -1,0 +1,7 @@
+// Named args to a TUPLE case, in an EFFECT fn.
+type Msg = | Pair(Int, Int) | Nil
+
+effect fn main() -> Unit = {
+  let m = Pair(a: 1, b: 2)
+  println("${m}")
+}

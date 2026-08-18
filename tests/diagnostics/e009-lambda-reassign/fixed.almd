@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  var base = 1
+  let f = (n: Int) => {
+    n + 1
+  }
+  base = f(3)
+  println(int.to_string(base))
+}

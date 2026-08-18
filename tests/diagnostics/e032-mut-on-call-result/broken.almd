@@ -1,0 +1,6 @@
+fn make() -> List[Int] = [1]
+
+fn main() -> Unit = {
+  list.push(make(), 2)
+  println("x")
+}

@@ -1,0 +1,6 @@
+fn f(o: Int?) -> String = match o {
+  _ if o != none => "s",
+  _ => "n",
+}
+
+fn main() -> Unit = println(f(some(1)))

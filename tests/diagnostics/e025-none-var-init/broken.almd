@@ -1,0 +1,5 @@
+// A bare `none` VAR initializer, never pinned.
+fn main() -> Unit = {
+  var o = none
+  println("${o}")
+}

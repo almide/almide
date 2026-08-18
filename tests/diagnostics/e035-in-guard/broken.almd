@@ -1,0 +1,7 @@
+// E035: matching error TEXT inside a guard.
+effect fn risky() -> Result[Int, String] = err("boom")
+
+effect fn main() -> Unit = {
+  let r = risky()
+  println(match r { err(e) if e == "boom" => "known", err(_) => "other", ok(_) => "fine" })
+}

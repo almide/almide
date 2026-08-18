@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let mk = () => some(1)
+  println("${mk()}")
+}

@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let fs = [3, 1]
+  let m = list.min(fs)
+  println(int.to_string(m ?? 0))
+}

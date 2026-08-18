@@ -1,0 +1,8 @@
+fn sum2(t: (Int, Int)) -> Int = match t { (a, b) => a + b }
+
+effect fn main() -> Unit = {
+  var tag = 3
+  let r = sum2(fan { string.len("t=${tag}")
+    2 })
+  println(int.to_string(r))
+}

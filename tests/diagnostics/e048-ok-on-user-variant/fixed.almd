@@ -1,0 +1,5 @@
+type S = | Up | Down
+
+fn f(s: S) -> Int = match s { Up => 1, _ => 0 }
+
+fn main() -> Unit = println(int.to_string(f(Up)))

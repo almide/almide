@@ -1,0 +1,5 @@
+type Ev = | Click { x: Int, y: Int } | Quit
+
+fn tag(e: Ev) -> String = match e { Click { x: _, y: _ } => "c", Quit => "q" }
+
+fn main() -> Unit = println(Click { x: 3, y: 4 } |> tag)

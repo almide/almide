@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let r = list.find(["a", "bb"], (s) => string.len(s) > 1)
+  println(int.to_string(list.len(["x"])))
+}

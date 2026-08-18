@@ -1,0 +1,2 @@
+// A bare `none` as a MAP VALUE, never pinned.
+fn main() -> Unit = println("${[1: none]}")

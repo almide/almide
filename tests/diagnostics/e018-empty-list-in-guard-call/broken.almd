@@ -1,0 +1,3 @@
+fn main() -> Unit = {
+  println(match 1 { _ if list.len([]) == 0 => "empty", _ => "no" })
+}

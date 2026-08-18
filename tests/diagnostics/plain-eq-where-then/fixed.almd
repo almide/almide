@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let n = 3
+  if n == 3 then println("eq") else println("ne")
+}

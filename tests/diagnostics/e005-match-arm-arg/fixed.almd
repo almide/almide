@@ -1,0 +1,6 @@
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println(match 1 {
+  1 => int.to_string(double(1)),
+  _ => "rest",
+})

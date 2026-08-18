@@ -1,0 +1,7 @@
+effect fn main() -> Unit = {
+  let x = 1
+  fan {
+    println(int.to_string(x))
+  }
+  println("x")
+}

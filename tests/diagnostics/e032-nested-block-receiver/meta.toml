@@ -1,0 +1,2 @@
+expects_code = "E032"
+expects_error = "bytes.set_at"

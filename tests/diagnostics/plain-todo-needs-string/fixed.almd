@@ -1,0 +1,3 @@
+fn later() -> Int = todo("wire this up")
+
+fn main() -> Unit = println("x")

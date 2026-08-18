@@ -1,0 +1,7 @@
+// E045: positional index applied to a RECORD value.
+type P = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  let p = P { x: 1, y: 2 }
+  println(int.to_string(p.0))
+}

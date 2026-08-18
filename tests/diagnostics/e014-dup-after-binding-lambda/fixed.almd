@@ -1,0 +1,4 @@
+fn f(xs: List[Int]) -> List[Int] =
+  list.map(xs, (n) => match n { v => v })
+
+fn main() -> Unit = println(int.to_string(list.len(f([1]))))

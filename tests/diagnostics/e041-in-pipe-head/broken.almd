@@ -1,0 +1,5 @@
+// E041: the raw Result binding heads a pipe.
+effect fn main() -> Unit = {
+  let n = int.parse("5")
+  println(n |> int.to_string)
+}

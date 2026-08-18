@@ -1,0 +1,2 @@
+expects_code = "E005"
+hint_substring = "int.parse"

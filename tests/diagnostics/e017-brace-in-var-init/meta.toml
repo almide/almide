@@ -1,0 +1,2 @@
+expects_code = "E017"
+expects_error = "cannot construct enum type"

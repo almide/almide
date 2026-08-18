@@ -1,0 +1,10 @@
+// `!` inside a NESTED lambda (two levels of closure).
+fn f() -> Int = {
+  let outer = () => {
+    let inner = (t: Int) => t! + 1
+    inner(2)
+  }
+  outer()
+}
+
+fn main() -> Unit = println(int.to_string(f()))

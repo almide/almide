@@ -1,0 +1,4 @@
+@extern("c")
+fn puts(s: String) -> Int
+
+fn main() -> Unit = println("x")

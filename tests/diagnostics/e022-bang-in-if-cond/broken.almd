@@ -1,0 +1,4 @@
+// `!` on a non-channel operand in an IF condition.
+fn f(b: Bool) -> Int = if b! then 1 else 0
+
+fn main() -> Unit = println(int.to_string(f(true)))

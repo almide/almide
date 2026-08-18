@@ -1,0 +1,6 @@
+@deprecated(since = -x, use = "other")
+fn old() -> Int = 1
+
+fn other() -> Int = 1
+
+fn main() -> Unit = println(int.to_string(other()))

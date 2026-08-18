@@ -1,0 +1,6 @@
+fn f(o: Option[Int?]) -> Int = match o {
+  some(some(n)) => n,
+  none => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(some(some(4)))))

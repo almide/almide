@@ -1,0 +1,5 @@
+// Duplicate match arm inside a LAMBDA body.
+fn tag(xs: List[Int]) -> List[String] =
+  list.map(xs, (n) => match n { 0 => "z", 0 => "zz", _ => "n" })
+
+fn main() -> Unit = println(list.join(tag([0, 1]), ","))

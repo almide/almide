@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let arg = 5
+  println(int.to_string(arg))
+}

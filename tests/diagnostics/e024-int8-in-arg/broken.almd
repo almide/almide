@@ -1,0 +1,4 @@
+// An Int8 argument out of range at the call site.
+fn take(b: Int8) -> Int = 1
+
+fn main() -> Unit = println(int.to_string(take(300)))

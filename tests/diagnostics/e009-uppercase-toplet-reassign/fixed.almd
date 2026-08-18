@@ -1,0 +1,10 @@
+var LIMIT = 5
+
+effect fn bump() -> Unit = {
+  LIMIT = 6
+}
+
+effect fn main() -> Unit = {
+  bump()!
+  println(int.to_string(LIMIT))
+}

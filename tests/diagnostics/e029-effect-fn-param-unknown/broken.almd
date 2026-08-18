@@ -1,0 +1,4 @@
+// Unknown type on an EFFECT fn parameter.
+effect fn go(w: Widget) -> Unit = println("x")
+
+effect fn main() -> Unit = go(1)!

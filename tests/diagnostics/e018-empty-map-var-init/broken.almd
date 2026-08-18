@@ -1,0 +1,5 @@
+// `[:]` as a VAR initializer that is never element-constrained.
+fn main() -> Unit = {
+  var m = [:]
+  println(int.to_string(map.len(m)))
+}

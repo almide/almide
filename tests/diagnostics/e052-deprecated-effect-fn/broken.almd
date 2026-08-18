@@ -1,0 +1,6 @@
+@deprecated(since = 3, use = "boot2")
+effect fn boot() -> Unit = println("boot")
+
+effect fn boot2() -> Unit = println("boot2")
+
+effect fn main() -> Unit = boot()!

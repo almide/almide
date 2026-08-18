@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s = "abc"
+  println(match 1 { _ if s[0] == "a" => "a", _ => "other" })
+}

@@ -1,0 +1,6 @@
+type Col = | Red | Green | Blue
+
+fn main() -> Unit = println(int.to_string(match Green {
+  Red => 1,
+  Green => 2,
+}))

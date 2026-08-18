@@ -1,0 +1,3 @@
+fn later() -> Int = todo(42)
+
+fn main() -> Unit = println("x")

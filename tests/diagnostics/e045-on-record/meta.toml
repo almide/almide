@@ -1,0 +1,2 @@
+expects_code = "E045"
+expects_error = "index"

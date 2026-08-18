@@ -1,0 +1,4 @@
+// `!` on a non-channel operand inside a MATCH ARM of a pure fn.
+fn f(n: Int) -> Int = match n { 0 => n!, _ => n }
+
+fn main() -> Unit = println(int.to_string(f(0)))

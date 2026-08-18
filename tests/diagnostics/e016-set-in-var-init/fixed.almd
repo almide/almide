@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var s = set.from_list([2])
+  println(int.to_string(set.len(s)))
+}
