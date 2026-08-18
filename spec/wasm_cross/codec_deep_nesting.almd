@@ -1,0 +1,24 @@
+// @contract: C-298
+// Three-level Codec nesting: decode(encode(x)) reaches every level, and a
+// TYPE ERROR at the innermost level surfaces through the nesting instead of
+// silently defaulting (Swift's nested keyed-container error propagation).
+import json
+
+type L3: Codec = { v: Int }
+
+type L2: Codec = { three: L3, tag: String }
+
+type L1: Codec = { two: L2 }
+
+effect fn main() -> Unit = {
+  let x = L1 { two: L2 { three: L3 { v: 42 }, tag: "t" } }
+  let enc = json.stringify(L1.encode(x))
+  println(enc)
+  let d = L1.decode(json.parse(enc)!)!
+  println(int.to_string(d.two.three.v) + d.two.tag)
+  let bad = json.parse('{"two": {"three": {"v": "nope"}, "tag": "t"}}')!
+  println(match L1.decode(bad) {
+    ok(_) => "ok",
+    err(e) => "deep-err:" + e,
+  })
+}

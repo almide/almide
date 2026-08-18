@@ -1,0 +1,24 @@
+// @wall: record argument cannot be faithfully materialized
+// A Codec record with a LIST default field: the native leg round-trips
+// (#1520's helpers), but the record materialization with a defaulted List
+// field sits outside the wasm value subset — the honest wall the issue
+// itself observed. Graduation seed: when the record brick learns defaulted
+// heap fields, this file moves to spec/wasm_cross verbatim.
+// List[scalar] DEFAULTS (#1520): a missing key yields the default list, a
+// present key overrides it, an explicit null falls back to the default, and
+// encoding a defaulted instance emits the default's value. The scalar body
+// previously emitted `__decode_default_value` — a helper no runtime
+// provides — so check was green and the native build died (rustc E0425).
+import json
+
+type Dep: Codec = { name: String, tags: List[String] = [], weights: List[Int] = [1, 2] }
+
+effect fn main() -> Unit = {
+  println(json.stringify(Dep.encode(Dep { name: "x" })))
+  let missing = Dep.decode(json.parse('{"name": "y"}')!)!
+  println(missing.name + "/" + int.to_string(list.len(missing.tags)) + "/" + list.join(list.map(missing.weights, (w) => int.to_string(w)), "+"))
+  let given = Dep.decode(json.parse('{"name": "z", "tags": ["a", "b"], "weights": [9]}')!)!
+  println(given.name + "/" + list.join(given.tags, ",") + "/" + int.to_string(list.len(given.weights)))
+  let nulled = Dep.decode(json.parse('{"name": "n", "tags": null}')!)!
+  println(nulled.name + "/" + int.to_string(list.len(nulled.tags)))
+}

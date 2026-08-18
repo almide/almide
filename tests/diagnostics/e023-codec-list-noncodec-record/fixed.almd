@@ -1,0 +1,7 @@
+import json
+
+type R: Codec = { n: Int }
+
+type T: Codec = { rs: List[R] }
+
+effect fn main() -> Unit = println(json.stringify(T.encode(T { rs: [] })))

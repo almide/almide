@@ -3797,3 +3797,26 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/flat_map_aliased_field.almd", class = "fixture" },
 ]
+
+# ── CODEC CONFORMANCE CORPUS (Swift Codable model) ─
+[[contract]]
+id        = "C-298"
+spec      = "ALS-T3"
+title     = "The Codec conformance corpus round-trips byte-identical across targets"
+statement = "The Swift-Codable-modeled Codec surface, as executable rows: nested-record and List[record] round-trips (encode-then-decode re-stringifies identically), three-level nesting with the deepest type mismatch surfacing as err, jagged List[List[String]] fields, i64::MAX/MIN and float-anchor boundaries, the decode error surface (null at a required field, element-wise list type mismatch, non-object at a record position), unknown-key tolerance with canonical re-encode (declared order, extras dropped), string escape and multibyte stringify round-trips, empty containers and Bool extremes, top-level document arrays decoded element-wise, pretty-printed input tolerance, Option numerics (present/missing/null; none omitted on encode), and VARIANT Codec derives (externally-tagged payloads, variant-in-record fields, unknown-tag errors). Every row byte-identical native == wasm. The wasm subset boundary for Codec shapes is pinned separately (codec_list_default / codec_triple_list wall specimens): a shape that starts lowering graduates by regeneration in the same PR."
+since     = "0.57.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/codec_decode_error_surface.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_deep_nesting.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_doc_array.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_empty_and_bool.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_extra_keys.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_int_float_boundaries.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_list_list_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_nested_records.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_option_numeric.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_string_escapes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_variant_roundtrip.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
+]

@@ -19,9 +19,21 @@ bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr
 bytes_set_value_semantics  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 bytes_string_window_domain  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 chunk_str  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
+codec_decode_error_surface  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 codec_decode_errors  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+codec_deep_nesting  out-of-interp-scope capability: prim.alloc_value
+codec_doc_array  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+codec_empty_and_bool  out-of-interp-scope capability: prim.alloc_value
+codec_extra_keys  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 codec_float_int  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+codec_int_float_boundaries  out-of-interp-scope capability: prim.alloc_value
+codec_list_list_field  out-of-interp-scope capability: prim.alloc_value
+codec_nested_records  out-of-interp-scope capability: prim.alloc_value
 codec_none_omission  out-of-interp-scope capability: prim.alloc_value
+codec_option_numeric  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+codec_string_escapes  out-of-interp-scope capability: prim.alloc_value
+codec_variant_roundtrip  out-of-interp-scope capability: prim.alloc_value
+codec_whitespace_tolerance  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
 compound_eq  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
 count_domain_nonbytes  out-of-interp-scope capability: prim.alloc_list
 datetime_format  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)

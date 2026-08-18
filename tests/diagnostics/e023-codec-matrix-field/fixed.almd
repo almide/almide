@@ -1,0 +1,5 @@
+import json
+
+type T: Codec = { rows: List[Float] }
+
+effect fn main() -> Unit = println("x")

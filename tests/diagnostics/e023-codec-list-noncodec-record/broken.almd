@@ -1,0 +1,9 @@
+// A List of a record that does NOT derive Codec: the element type must
+// itself be Codec (the Swift Codable conditional-conformance rule).
+import json
+
+type R = { n: Int }
+
+type T: Codec = { rs: List[R] }
+
+effect fn main() -> Unit = println(json.stringify(T.encode(T { rs: [] })))

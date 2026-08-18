@@ -1,0 +1,7 @@
+// A Set INSIDE an Option field: the container rule reaches through the
+// Option wrapper (Set has no canonical wire form).
+import json
+
+type T: Codec = { s: Option[Set[String]] }
+
+effect fn main() -> Unit = println("x")

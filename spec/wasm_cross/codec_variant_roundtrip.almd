@@ -1,0 +1,31 @@
+// @contract: C-298
+// A VARIANT deriving Codec (externally-tagged, the Swift/serde enum shape:
+// {"Case":[payload...]}): unit and payload cases round-trip, a Codec variant
+// rides as a FIELD of a Codec record, and an unknown tag is a decode err.
+import json
+
+type V: Codec = | A(Int) | B(String) | C
+
+type Holder: Codec = { v: V, vs: List[V] }
+
+fn show(v: V) -> String = match v {
+  A(n) => "A" + int.to_string(n),
+  B(s) => "B" + s,
+  C => "C",
+}
+
+effect fn main() -> Unit = {
+  println(json.stringify(V.encode(A(1))))
+  println(json.stringify(V.encode(C)))
+  let a = V.decode(json.parse('{"A": [7]}')!)!
+  println(show(a))
+  let h = Holder { v: B("x"), vs: [A(2), C] }
+  let enc = json.stringify(Holder.encode(h))
+  println(enc)
+  let d = Holder.decode(json.parse(enc)!)!
+  println(show(d.v) + "/" + list.join(list.map(d.vs, (e) => show(e)), ","))
+  println(match V.decode(json.parse('{"Zed": [1]}')!) {
+    ok(_) => "ok",
+    err(e) => "tag-err:" + e,
+  })
+}
