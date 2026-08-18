@@ -1,0 +1,6 @@
+// Tuple-pattern arity must match the value's arity; the overflow element
+// used to bind as Unknown silently (sweep 2026-08-18).
+fn main() -> Unit = {
+  let (a, b, c) = (1, 2)
+  println(int.to_string(a + b + c))
+}

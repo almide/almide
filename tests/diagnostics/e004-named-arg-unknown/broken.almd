@@ -1,0 +1,6 @@
+// A named argument naming NO parameter fell back to positional order
+// silently; when the types lined up, check passed and the by-name lowering
+// died at the native build (sweep 2026-08-18).
+fn rep(s: String, times: Int) -> String = string.repeat(s, times)
+
+fn main() -> Unit = println(rep("a", count: 3))

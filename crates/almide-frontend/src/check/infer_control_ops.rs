@@ -241,7 +241,14 @@ impl Checker {
             self.env.push_scope();
             let sub_c = resolve_ty(subject_ty, &self.uf);
             self.bind_pattern(&arm.pattern, &sub_c);
-            if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
+            if let Some(ref mut guard) = arm.guard {
+                // A guard is a CONDITION: constrain it to Bool. Uninferred,
+                // `p if p + 1` passed check and native ran the Int as truthy
+                // (diagnostic sweep 2026-08-18) — the same discipline as an
+                // `if` condition, at the same rank.
+                let gty = self.infer_expr(guard);
+                self.constrain(crate::types::Ty::Bool, gty, "match guard");
+            }
             let arm_ty = self.infer_expr(&mut arm.body);
             out.real_types.push(arm_ty.clone());
             let arm_ty = self.match_arm_join_ty(arm, arm_ty, arms_have_result_ctor);

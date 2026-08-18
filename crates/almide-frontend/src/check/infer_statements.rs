@@ -522,6 +522,15 @@ impl Checker {
     fn bind_pattern_tuple(&mut self, elements: &[ast::Pattern], ty: &Ty) {
         let resolved = resolve_ty(ty, &self.uf);
         if let Ty::Tuple(tys) = &resolved {
+            // Arity must match: `let (a, b, c) = (1, 2)` used to bind the
+            // overflow element as Unknown silently (sweep 2026-08-18).
+            if tys.len() != elements.len() {
+                self.emit(crate::check::err(
+                    format!("tuple pattern has {} element(s) but the value has {}", elements.len(), tys.len()),
+                    "Match the pattern's shape to the tuple's arity",
+                    "tuple destructure",
+                ).with_code("E001"));
+            }
             for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); }
         } else if super::types::is_inference_var(&resolved).is_some() {
             // Type is an unresolved inference var (e.g., lambda parameter).
@@ -532,6 +541,17 @@ impl Checker {
             self.constrain(resolved, Ty::Tuple(elem_vars.clone()), "tuple destructure");
             for (e, ev) in elements.iter().zip(elem_vars.iter()) { self.bind_pattern(e, ev); }
         } else {
+            // A CONCRETE non-tuple value under a tuple pattern is a type
+            // error, not a lenient bind: `let (a, b) = 3` bound a and b as
+            // Unknown silently (sweep 2026-08-18). Unknown stays lenient —
+            // upstream recovery owns that case.
+            if !matches!(resolved, Ty::Unknown) {
+                self.emit(crate::check::err(
+                    format!("tuple pattern requires a tuple value, got {}", resolved.display()),
+                    "Destructure only tuples: `let (a, b) = pair`",
+                    "tuple destructure",
+                ).with_code("E001"));
+            }
             for e in elements { self.bind_pattern(e, &Ty::Unknown); }
         }
     }

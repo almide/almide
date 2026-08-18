@@ -1,0 +1,8 @@
+// A match guard is a CONDITION: a non-Bool guard used to pass check and
+// native ran the Int as truthy (sweep 2026-08-18).
+fn f(v: Int) -> String = match v {
+  x if x + 1 => "odd",
+  _ => "rest",
+}
+
+fn main() -> Unit = println(f(2))

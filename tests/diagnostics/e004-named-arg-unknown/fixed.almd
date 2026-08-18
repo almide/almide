@@ -1,0 +1,3 @@
+fn rep(s: String, times: Int) -> String = string.repeat(s, times)
+
+fn main() -> Unit = println(rep("a", times: 3))

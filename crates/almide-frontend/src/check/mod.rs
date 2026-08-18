@@ -843,6 +843,37 @@ impl Checker {
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
         // #1311 front-end phase accounting (no-op unless `--timings`).
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+        // E012 for DUPLICATE top-level lets: registration is idempotent by
+        // design (it re-runs per driver leg), so the seed insert cannot
+        // detect a second declaration — the last one silently won and the
+        // native build died on rustc's duplicate definition (diagnostic
+        // sweep 2026-08-18). One scan over the source decls, here, where a
+        // program is seen exactly once.
+        {
+            let mut seen: std::collections::HashMap<almide_base::intern::Sym, Option<ast::Span>> =
+                std::collections::HashMap::new();
+            for decl in &program.decls {
+                if let ast::Decl::TopLet { name, span, .. } = decl {
+                    if let Some(first) = seen.get(name) {
+                        let mut d = err(
+                            format!("duplicate top-level binding '{}'", name),
+                            format!("'{}' is already declared at module scope — rename one, or merge the two initializers", name),
+                            format!("let {}", name),
+                        ).with_code("E012");
+                        if let Some(sp) = span {
+                            d.line = Some(sp.line);
+                            d.col = Some(sp.col);
+                        }
+                        if let Some(fsp) = first {
+                            d = d.with_secondary(fsp.line, Some(fsp.col), format!("'{}' first declared here", name));
+                        }
+                        self.diagnostics.push(d);
+                    } else {
+                        seen.insert(*name, *span);
+                    }
+                }
+            }
+        }
         // ADR-0006 D1 (#1108): record every fn DECLARED `-> T!` before
         // resolution erases the marker, so a named callback argument's
         // fallibility bit is known at HOF call sites.
