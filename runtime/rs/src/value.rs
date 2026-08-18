@@ -21,6 +21,11 @@ pub fn almide_rt_value_bool(b: bool) -> Value { Value::Bool(b) }
 pub fn almide_rt_value_array(items: &Vec<Value>) -> Value { Value::Array(items.clone()) }
 pub fn almide_rt_value_object(pairs: &Vec<(String, Value)>) -> Value { Value::Object(pairs.clone()) }
 pub fn almide_rt_value_null() -> Value { Value::Null }
+// Structural equality (`value.eq`). The wasm leg had this in its self-host
+// registry all along; native only ever reached Value equality through user
+// positions the walker lowers itself, so the first runtime-emitted call site
+// (the #1522 record-default decode arm) came up E0425.
+pub fn almide_rt_value_eq(a: Value, b: Value) -> bool { a == b }
 
 // ── Access ──
 

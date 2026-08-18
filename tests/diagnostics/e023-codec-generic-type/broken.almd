@@ -1,0 +1,6 @@
+// #1522: the Codec derive emits one encode/decode pair per type, so a
+// generic type's `T` field reached codegen unresolved — check green, a
+// dozen rustc errors.
+type Box[T]: Codec = { v: T }
+
+fn main() -> Unit = println("unreachable")

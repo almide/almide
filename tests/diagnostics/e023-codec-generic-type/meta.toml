@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "generic"
+hint_substring = "wire form"

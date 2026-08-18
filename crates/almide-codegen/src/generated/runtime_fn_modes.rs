@@ -731,6 +731,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_value_decode_option_custom" => &[false, false, false],
         "almide_rt_value_decode_with_default" => &[false, false, false, false],
         "almide_rt_value_encode_list" => &[false, false],
+        "almide_rt_value_eq" => &[false, false],
         "almide_rt_value_field" => &[false, false],
         "almide_rt_value_float" => &[false],
         "almide_rt_value_int" => &[false],

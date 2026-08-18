@@ -1,0 +1,4 @@
+// The fix: wrap the concrete instantiation in its own Codec type.
+type IntBox: Codec = { v: Int }
+
+fn main() -> Unit = println("ok")
