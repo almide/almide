@@ -35,6 +35,8 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   pairs vs rust's ~15k is the widest maturity gap. Exit: every E-code has a
   fixture family covering each hint variant and each fix-it verdict; ≥1,000
   pairs; the coverage gate enumerates E-codes with < 3 fixtures.
+  PROGRESS 2026-08-18: **749 pairs** (wave-2's 730 + the #1518/#1521/#1486/
+  #1515 families); three new E-codes (E058/E059/E060) landed with families.
 - [ ] **A1-4 (M) RC-placement snapshots (koka parc model).** Commit the
   post-RC-insertion drop/dup placement as expected output beside the runtime
   result for an RC-critical corpus (the koka_parc* family is the seed), so a
@@ -48,10 +50,10 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   allocation counter surface + exact loop-body counts with a control program
   per assertion. Exit: gate over ≥ 10 loop shapes asserting zero per-iteration
   allocation.
-- [ ] **A1-7 (S) Filed diagnostics trio.** #1509 (`not (expr)` guard parse),
+- [x] **A1-7 (S) Filed diagnostics trio.** #1509 (`not (expr)` guard parse),
   #1510 (`t.0.1` float lexing hint), #1511 (fmt Option-canonicalization E054
   — fmt must be total over legal programs). Exit: all three closed with
-  fixtures.
+  fixtures. DONE 2026-08-18, shipped in v0.57.2.
 
 ## Tier 2 — Prove the findings have dried up (time is the ingredient)
 
@@ -66,12 +68,15 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   acceptance ring — the E0004 and #1501 classes were both found by real code,
   not generated code. Exit: ≥ 3 real projects green in CI on every develop
   push.
-- [ ] **A2-3 (S) New-angle cadence.** Each quarter adds one new detection
+- [x] **A2-3 (S) New-angle cadence.** Each quarter adds one new detection
   angle (this campaign added: reference-suite ports, panic-wash, nested-type
   matrix). The #1508 backlog (or-patterns, string patterns, NaN-bits) feeds
   it as features land. Exit: a standing roadmap row per quarter; a quarter
   with a new angle and zero findings is the drying-up evidence this market
-  asks for.
+  asks for. 2026-Q3 QUOTA EXCEEDED (2026-08-18): pass-isolated
+  semantic-preservation gate (#1487, mutant-kill verified), perf ablation
+  leg (#1466), cap-effect consistency gate (#1515), seeded regex
+  differential (its first CI kill confirmed the same day). Recurs 2026-Q4.
 
 ## Tier 3 — Outside the compiler (no issue-fixing moves these)
 
