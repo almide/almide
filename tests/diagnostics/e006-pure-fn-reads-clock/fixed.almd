@@ -1,0 +1,5 @@
+// The fix: the caller declares the effect; the call spelling is unchanged
+// (bundled effect fns return the raw value — no `!` needed).
+effect fn honest() -> Int = datetime.now()
+
+effect fn main() -> Unit = println(int.to_string(honest()!))

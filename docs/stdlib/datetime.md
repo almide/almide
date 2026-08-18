@@ -2,12 +2,15 @@
 
 Date and time. import datetime, effect.
 
-### `datetime.now() -> Int`
+### `datetime.now() -> Int` (effect)
 
-Get the current time as a Unix timestamp (seconds, UTC).
+Get the current time as a Unix timestamp (seconds, UTC). An **effect fn**
+(#1515): a wall-clock read is nondeterministic, so a pure `fn` cannot call it
+(E006) — the caller must be an `effect fn`, where the spelling is unchanged
+(the raw Int comes back, no `!`). `monotonic_ns` follows the same rule.
 
 ```almd
-let ts = datetime.now()
+effect fn stamp() -> Int = datetime.now()
 ```
 
 ### `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int`
@@ -205,8 +208,8 @@ datetime.is_after(a: Int, b: Int) -> Bool
 datetime.is_before(a: Int, b: Int) -> Bool
 datetime.minute(ts: Int) -> Int
 datetime.month(ts: Int) -> Int
-datetime.now() -> Int
-datetime.monotonic_ns() -> Int
+effect datetime.now() -> Int
+effect datetime.monotonic_ns() -> Int
 datetime.parse_iso(s: String) -> Result[Int, String]
 datetime.second(ts: Int) -> Int
 datetime.to_iso(ts: Int) -> String

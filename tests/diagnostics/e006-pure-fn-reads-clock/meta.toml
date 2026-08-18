@@ -1,0 +1,3 @@
+expects_code = "E006"
+expects_error = "effect function 'datetime.now'"
+hint_substring = "effect fn"
