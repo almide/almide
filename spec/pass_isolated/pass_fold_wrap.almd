@@ -1,0 +1,13 @@
+// @pass: fold
+// #1487: constant folding in ISOLATION — the #809 shape: an immutable top-let
+// product that overflows i64 must fold to the WRAPPED literal (both targets
+// wrap at runtime), identically with the pass alone, the full pipeline, and
+// no passes at all.
+let MAX_COUNT = 3
+
+let DOUBLE_MAX = MAX_COUNT * 9223372036854775807
+
+fn main() -> Unit = {
+  println(int.to_string(DOUBLE_MAX))
+  println(int.to_string(2 * 3 + 100 / 4))
+}

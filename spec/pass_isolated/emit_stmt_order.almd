@@ -1,0 +1,13 @@
+// @pass: none
+// #1487 isolated fixture for the m4-reverse-stmt-order mutation path
+// (codegen/walker/mod.rs render_fn_body_str block statements): three
+// order-dependent effects — reversing the rendered statement order permutes
+// the printed lines.
+fn main() -> Unit = {
+  var acc = 1
+  println("first:" + int.to_string(acc))
+  acc = acc * 2
+  println("second:" + int.to_string(acc))
+  acc = acc + 5
+  println("third:" + int.to_string(acc))
+}

@@ -1,0 +1,12 @@
+// @pass: propagate
+// #1487: constant propagation in ISOLATION — a literal binding read after a
+// VAR reassignment between the binding and the read; propagation must respect
+// the mutation, identically with the pass alone and without it.
+fn main() -> Unit = {
+  let k = 10
+  var n = k
+  n = n + k
+  println(int.to_string(n))
+  let s = "lit"
+  println(s + ":" + int.to_string(k))
+}

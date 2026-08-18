@@ -1,0 +1,16 @@
+// @pass: none
+// #1487 isolated fixture for the m1-swap-match-arms mutation path
+// (codegen/walker/statements_box_patterns.rs render_pattern_hinted's Ok arm):
+// nested ctor patterns in statement position, where a swapped Ok/Err render
+// flips which arm binds. Output is asymmetric so the swap cannot cancel.
+fn classify(r: Result[Int?, String]) -> String = match r {
+  ok(some(v)) => "ok-some:" + int.to_string(v),
+  ok(none) => "ok-none",
+  err(e) => "err:" + e,
+}
+
+fn main() -> Unit = {
+  println(classify(ok(some(7))))
+  println(classify(ok(none)))
+  println(classify(err("boom")))
+}
