@@ -1,0 +1,8 @@
+// A tuple-variant constructor called under-arity: the diagnostic existed
+// but carried no E-code (invisible to explain/coverage) until 2026-08-18.
+type Pt = | P(Int, Int)
+
+fn main() -> Unit = {
+  let x = P(1)
+  println(match x { P(a, b) => int.to_string(a + b) })
+}

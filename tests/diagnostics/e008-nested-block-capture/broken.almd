@@ -1,0 +1,10 @@
+// A fan branch reading a mutable var INSIDE a nested block: the old
+// two-group ident walk had no Block arm, so this escaped E008 entirely.
+effect fn main() -> Unit = {
+  var hits = 0
+  fan {
+    { let h = hits + 1
+      println(int.to_string(h)) }
+  }
+  println(int.to_string(hits))
+}

@@ -1,0 +1,6 @@
+type Color = | Red | Blue
+
+fn main() -> Unit = {
+  var color_v = 1
+  println(int.to_string(color_v))
+}

@@ -9,8 +9,14 @@ impl Parser {
         if self.check(TokenType::Var) { return self.parse_var_stmt(); }
         if self.check(TokenType::Guard) { return self.parse_guard_stmt(); }
 
-        // name = value (simple assignment)
-        if self.check(TokenType::Ident)
+        // name = value (simple assignment). The target may be an UPPERCASE
+        // name too: module globals follow the LIMIT/COUNT convention, and the
+        // Ident-only lookahead sent `COUNT = 1` down the expression path to
+        // die as "Assignments return Unit" (diagnostic sweep 2026-08-18). A
+        // TypeName target that is not an assignable binding is the checker's
+        // E003/E009 to report, with the assignment shape intact.
+        let assign_target = self.check(TokenType::Ident) || self.check(TokenType::TypeName);
+        if assign_target
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
             && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Eq)
         {
@@ -18,7 +24,7 @@ impl Parser {
         }
 
         // xs[i] = value (index assignment)
-        if self.check(TokenType::Ident)
+        if assign_target
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBracket)
         {
             if let Some(stmt) = self.try_parse_index_assign()? {
@@ -30,7 +36,7 @@ impl Parser {
         // `expect_any_name` accepts (ident, TypeName, or a soft keyword) so
         // `obj.ok = v` routes here, exactly as `obj.ok` reads in expression
         // position — see parse_field_assign_stmt / parse_postfix.
-        if self.check(TokenType::Ident)
+        if assign_target
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
             && self.peek_at(2).map(|t| Self::is_name_token(&t.token_type)).unwrap_or(false)
             && self.peek_at(3).map(|t| &t.token_type) == Some(&TokenType::Eq)

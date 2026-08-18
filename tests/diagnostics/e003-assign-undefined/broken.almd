@@ -1,0 +1,6 @@
+// Assignment to a name with no binding anywhere: silent before (and the
+// lowering's recovery VarId(0) aliased the first local).
+fn main() -> Unit = {
+  nope = 1
+  println("x")
+}

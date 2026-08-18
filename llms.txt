@@ -248,6 +248,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E054 | `almide fmt` refused to write: formatting would not conserve the program (parse, AST, or comments — the #1309 `--safe` verifier). The file is left untouched | Nothing in your source — this is a FORMATTER bug; report the file, leave it unformatted, format the rest |
 | E055 | `?.` on a Result — the optional chain is Option-only (`o?.f` is `option.map`) | Convert or unwrap first: `(r?)?.field` (Result→Option, then chain), `(r ?? fb).field`, or `match` |
 | E056 | (warning) `?` on an Option is a no-op — the operand is already an Option, nothing converts | Drop the operator; to unwrap use `?? fallback`, `match`, or `!` (effect fn) |
+| E057 | fn declaration has no body — only @extern/@intrinsic may omit it | Write `= expr` (or `= { ... }`) after the signature |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 

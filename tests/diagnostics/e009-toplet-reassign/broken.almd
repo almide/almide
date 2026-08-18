@@ -1,0 +1,10 @@
+// A module-level `let` reassigned from a fn body: the local-scope lookup
+// never saw top-lets, so this passed silently (sweep 2026-08-18, #1517).
+let limit = 5
+
+fn bump() -> Unit = {
+  limit = 6
+}
+
+fn main() -> Unit = { bump()
+  println(int.to_string(limit)) }

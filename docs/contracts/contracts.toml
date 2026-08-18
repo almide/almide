@@ -2369,6 +2369,7 @@ evidence  = [
   { path = "spec/wasm_cross/mutable_global_bytes_arena.almd", class = "fixture" },
   { path = "spec/wasm_cross/scalar_if_arm_effects.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_repeat_writes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutable_global_scalar_assign.almd", class = "fixture" },
 ]
 
 # ── STATEMENT EFFECTS INSIDE A REAL SCALAR-`if` ARM ─

@@ -200,62 +200,18 @@ fn collect_in_expr_keyed_literals(expr: &ast::Expr, out: &mut std::collections::
 
 /// Collect all Ident names referenced in an expression (shallow, for var capture check).
 fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
-    if collect_idents_operands(expr, out) { return; }
-    // An expression neither group claims — a literal, `none`, `unit` — references
-    // no identifier, so contributing nothing is the right answer, not a gap.
-    collect_idents_structural(expr, out);
-}
-
-/// Operators, calls and the operand-shaped forms.
-///
-/// One group of `collect_idents`'s arm table, arms verbatim and in source
-/// order. Returns whether it recognised the expression, so the router can try
-/// the next group — collecting from an expression twice would double every
-/// identifier under it.
-fn collect_idents_operands(expr: &ast::Expr, out: &mut Vec<String>) -> bool {
-    match &expr.kind {
-        ExprKind::Ident { name, .. } => out.push(name.to_string()),
-        ExprKind::Call { callee, args, .. } => {
-            collect_idents(callee, out);
-            for a in args { collect_idents(a, out); }
-        }
-        ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. }
-        | ExprKind::IndexAccess { object, .. } => collect_idents(object, out),
-        ExprKind::Binary { left, right, .. } | ExprKind::Pipe { left, right, .. } | ExprKind::Compose { left, right, .. } => {
-            collect_idents(left, out); collect_idents(right, out);
-        }
-        ExprKind::Unary { operand, .. } | ExprKind::Paren { expr: operand, .. }
-        | ExprKind::Some { expr: operand, .. } | ExprKind::Ok { expr: operand, .. }
-        | ExprKind::Err { expr: operand, .. } | ExprKind::Try { expr: operand, .. } => {
-            collect_idents(operand, out);
-        }
-        _ => return false,
-    }
-    true
-}
-
-/// Blocks, collections, records and the branching forms.
-///
-/// One group of `collect_idents`'s arm table, arms verbatim and in source
-/// order. Returns whether it recognised the expression, so the router can try
-/// the next group — collecting from an expression twice would double every
-/// identifier under it.
-fn collect_idents_structural(expr: &ast::Expr, out: &mut Vec<String>) -> bool {
-    match &expr.kind {
-        ExprKind::If { cond, then, else_, .. } => {
-            collect_idents(cond, out); collect_idents(then, out); collect_idents(else_, out);
-        }
-        ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
-            for e in elements { collect_idents(e, out); }
-        }
-        ExprKind::Lambda { body, .. } => collect_idents(body, out),
-        ExprKind::InterpolatedString { parts, .. } => {
-            for p in parts { if let ast::StringPart::Expr { expr } = p { collect_idents(expr, out); } }
-        }
-        ExprKind::Record { fields, .. } => { for f in fields { collect_idents(&f.value, out); } }
-        _ => return false,
-    }
-    true
+    // COMPLETE walk (ast::visit_expr covers every child, statements in
+    // Block/While/ForIn bodies and match arms included). The old two-group
+    // arm table had no Block/Match/loop arms, so a fan branch reading a
+    // mutable var inside `{ ... }` escaped the E008 capture check entirely
+    // (diagnostic sweep 2026-08-18, #1517). TypeName counts too — module
+    // globals follow the UPPERCASE convention and are assignable now.
+    // Over-approximation by NAME (a shadowing local of the same name still
+    // flags) matches the old operand-position behavior.
+    ast::visit_expr(expr, &mut |e| match &e.kind {
+        ExprKind::Ident { name, .. } | ExprKind::TypeName { name } => out.push(name.to_string()),
+        _ => {}
+    });
 }
 
 /// If an `if/else` arm is a statement-only block that assigns to a variable

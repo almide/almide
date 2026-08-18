@@ -815,7 +815,7 @@ impl Checker {
             if arg_tys.len() != expected_tys.len() {
                 self.emit(super::err(
                     format!("{}() expects {} argument(s) but got {}", name, expected_tys.len(), arg_tys.len()),
-                    "Check the number of arguments", format!("constructor {}()", name)));
+                    "Check the number of arguments", format!("constructor {}()", name)).with_code("E004"));
             }
             for (i, (aty, ety)) in arg_tys.iter().zip(expected_tys.iter()).enumerate() {
                 let concrete_arg = resolve_ty(aty, &self.uf);

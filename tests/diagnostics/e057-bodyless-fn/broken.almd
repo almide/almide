@@ -1,0 +1,5 @@
+// A plain fn declaration with no `= body`: check must reject it (the first
+// call otherwise dies at the native build — acceptance-parity class).
+fn f() -> Int
+
+fn main() -> Unit = println("x")

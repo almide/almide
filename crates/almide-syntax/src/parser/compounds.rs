@@ -53,7 +53,7 @@ impl Parser {
     }
 
     fn parse_if_branch(&mut self) -> Result<Expr, String> {
-        if self.check(TokenType::Ident) {
+        if self.check(TokenType::Ident) || self.check(TokenType::TypeName) {
             let is_assign = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
                 && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Eq);
             let is_index = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBracket);
