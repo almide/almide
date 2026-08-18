@@ -15,10 +15,13 @@ effect fn main() -> Unit = {
   var z = bytes.new(18)
   let m0 = matrix.from_q1_0_bytes(z, 0, 1, 128)
   println("ok: " + int.to_string(matrix.rows(m0)))
-  // cols NOT a multiple of the 128-weight block -> the all-zero matrix on
-  // BOTH legs (the q8_0 %32 precedent). Before, cols=42 made num_blocks 0 and
-  // the native reshape sliced an EMPTY flat — a raw range panic (exit 101)
-  // while wasm read buffer bytes (#1532 smoke night, seed 514313080930/1308).
+  // cols need NOT be a 128-multiple: both legs decode on the GLOBAL-k
+  // schedule (element k reads block k>>7) with a PER-ELEMENT bound — a block
+  // outside the data region is 0.0, never a read past it (#1526 discipline).
+  // Before, cols=42 made the native flat/num_blocks construction compute
+  // ZERO whole blocks and the reshape sliced an empty vec — a raw range
+  // panic (exit 101) while wasm answered (#1532 smoke night, seed
+  // 514313080930/1308). A zero buffer decodes to 0.0 rows either way.
   let odd = matrix.from_q1_0_bytes(z, 0, 1, 42)
   println("odd=" + int.to_string(matrix.rows(odd)) + "," + float.to_string(list.get(list.get(matrix.to_lists(odd), 0) ?? [], 0) ?? 9.9))
   let odds = matrix.select_rows_q1_0(z, 0, 42, [0])
