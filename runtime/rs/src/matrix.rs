@@ -155,12 +155,18 @@ pub fn almide_rt_matrix_head_geometry(n_heads_u: usize, head_dim_u: usize, rows:
 
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
-    vec![vec![0.0; c]; r].into()
+    // Row-lazy on purpose (#1532 confirm night, seed 514359535655/2163):
+    // `vec![vec![0.0; c]; r]` evaluates the ROW expression once even at
+    // r == 0, and (0, i64::MAX) passes the dims guard with zero elements —
+    // the eager row was a raw capacity-overflow panic where the wasm leg
+    // answered the empty matrix.
+    (0..r).map(|_| vec![0.0; c]).collect::<Vec<_>>().into()
 }
 
 pub fn almide_rt_matrix_ones(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
-    vec![vec![1.0; c]; r].into()
+    // Row-lazy, same as `zeros` — see the note there.
+    (0..r).map(|_| vec![1.0; c]).collect::<Vec<_>>().into()
 }
 
 pub fn almide_rt_matrix_shape(m: &AlmideMatrix) -> (i64, i64) {

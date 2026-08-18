@@ -174,7 +174,11 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     let (rows_u, cols_u) = almide_rt_matrix_dims(rows, cols);
     let total = rows_u * cols_u;
     if total == 0 || data.is_empty() {
-        return vec![vec![0.0f64; cols_u]; rows_u].into();
+        // Row-lazy: at rows_u == 0 the eager `vec![vec![…; cols_u]; 0]`
+        // still evaluates the row once, and (0, i64::MAX) passes the dims
+        // guard — a raw capacity-overflow panic against wasm's empty matrix
+        // (#1532 confirm night, seed 514359535655/2163).
+        return (0..rows_u).map(|_| vec![0.0f64; cols_u]).collect::<Vec<_>>().into();
     }
     let off = offset.max(0) as usize;
     // PER-ELEMENT decode on the GLOBAL-k schedule, exactly the wasm
