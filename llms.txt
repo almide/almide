@@ -18,8 +18,8 @@ concise on purpose. Follow the link map for depth.
   auto-imported for UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to
   `int32.to_int64(x)`.
   Everything else needs an explicit `import`: `args`, `base64`, `bytes`,
-  `env`, `fs`, `hex`, `html`, `http`, `io`, `json`, `matrix`, `mem`, `net`,
-  `path`, `process`, `random`, `regex`, `testing`, `zlib`.
+  `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`, `matrix`, `mem`,
+  `net`, `path`, `process`, `random`, `regex`, `testing`, `zlib`.
 - Null is spelled `T?` (shorthand for `Option[T]`, valid in every type
   position — the canonical spelling, `almide fmt` normalizes to it; ADR-0010).
   `?` binds to the preceding type atom, never across `->`: `(A) -> B?` is a fn

@@ -51,6 +51,7 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("path", "file path manipulation"),
     ("base64", "Base64 encoding and decoding"),
     ("hex", "hexadecimal encoding and decoding"),
+    ("hash", "non-cryptographic digests and SHA-256"),
     ("html", "HTML escaping and construction"),
     ("mem", "raw memory checkpoints"),
     ("net", "TCP sockets"),

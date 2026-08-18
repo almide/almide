@@ -3822,3 +3822,15 @@ evidence  = [
   { path = "spec/wasm_cross/codec_variant_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-299"
+spec      = "ALS-T3"
+title     = "hash digests are byte-identical across targets"
+statement = "hash.fnv1a32 / fnv1a32_bytes (FNV-1a 32-BIT: offset basis 2166136261, prime 16777619, every step masked to 32 bits — chosen over the 64-bit variant so the self-host's i64 arithmetic is exact, no wrapping 64-bit multiply exists on that floor) and hash.sha256 / sha256_hex (FIPS 180-4) answer byte-identically on native and wasm, pinned against published vectors: the FNV offset basis for the empty string, the classic a/foobar values, the NIST empty/abc/quick-brown-fox digests, and the SHA-256 padding EDGES — 55/56 bytes straddle the length-trailer boundary, 63/64 the block boundary, 119/120 the two-block boundary, which are the cells where a padding defect lives. The wasm leg is fully SELF-HOSTED (stdlib/hash_impl.almd, no new intrinsic); the native leg is runtime/rs/src/hash.rs; both were verified against an independent oracle (Python hashlib) at introduction."
+since     = "0.58.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/hash_digests.almd", class = "fixture" },
+  { path = "spec/stdlib/hash_test.almd", class = "fixture" },
+]
