@@ -145,6 +145,7 @@ fn resolve_family(args: &[String]) -> Family {
 
 fn cmd_run(args: &[String]) {
     let repo = resolve_repo(args);
+    sweep_stale_scratch(&repo);
     let almide = resolve_almide(&repo, args);
     let wasmtime = resolve_wasmtime();
 
@@ -248,6 +249,7 @@ fn cmd_run(args: &[String]) {
 
     let elapsed = start.elapsed();
     print_summary(&stats, &sink, elapsed, &out_dir);
+    let _ = std::fs::remove_dir_all(scratch_root(&repo));
 
     // Exit code carries the finding CLASS split (#1235): correctness
     // findings exit 1; a campaign whose only findings are perf-class Slow
@@ -472,21 +474,59 @@ fn run_metamorphic(
     None
 }
 
+/// The invocation-unique scratch ROOT (#1532). Every path under `.scratch/`
+/// is keyed by this process's pid, so CONCURRENT invocations — two ladders
+/// in two terminals, a replay racing a campaign, parallel CI lanes — never
+/// share a cargo build dir or a `replay.almd`. Shared scratch manufactured
+/// BOGUS DIVERGENCES: one invocation's stale binary answered another's
+/// fresh source, and the ladder minted a "finding" with no program
+/// divergence in it (the 2026-08-18 sweep's parallel-safety note; the
+/// attack list carried it as A2-1's second wedge). Stale pid dirs from
+/// killed invocations are swept by [`sweep_stale_scratch`] on startup.
+fn scratch_root(repo: &Path) -> PathBuf {
+    repo.join(format!("tools/xtarget-fuzz/.scratch/pid-{}", std::process::id()))
+}
+
+/// Best-effort startup sweep: remove sibling `pid-*` dirs untouched for a
+/// day — their owning process is long gone (a live campaign touches its
+/// scratch constantly). Never touches the CURRENT pid's dir.
+fn sweep_stale_scratch(repo: &Path) {
+    let root = repo.join("tools/xtarget-fuzz/.scratch");
+    let own = format!("pid-{}", std::process::id());
+    let cutoff = std::time::SystemTime::now() - Duration::from_secs(24 * 3600);
+    let Ok(entries) = std::fs::read_dir(&root) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if !name.starts_with("pid-") || name == own {
+            continue;
+        }
+        let stale = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t < cutoff)
+            .unwrap_or(true);
+        if stale {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 /// Per-program scratch dir for native cargo builds (isolated per worker
 /// so the shared-`/tmp` build flock never serializes workers).
 fn worker_scratch(repo: &Path, worker_id: usize) -> PathBuf {
-    repo.join(format!("tools/xtarget-fuzz/.scratch/build-{worker_id}"))
+    scratch_root(repo).join(format!("build-{worker_id}"))
 }
 
 /// Per-program source/artifact dir for a worker.
 fn worker_work_dir(repo: &Path, worker_id: usize) -> PathBuf {
-    repo.join(format!("tools/xtarget-fuzz/.scratch/work-{worker_id}"))
+    scratch_root(repo).join(format!("work-{worker_id}"))
 }
 
 // ── replay ──
 
 fn cmd_replay(args: &[String]) {
     let repo = resolve_repo(args);
+    sweep_stale_scratch(&repo);
     let almide = resolve_almide(&repo, args);
     let seed: u64 = flag_value(args, "--seed")
         .and_then(|s| s.parse().ok())
@@ -500,7 +540,7 @@ fn cmd_replay(args: &[String]) {
     println!("// seed={seed} index={index} origin={:?}\n", gen.origin);
     println!("{}", gen.source);
 
-    let work_dir = repo.join("tools/xtarget-fuzz/.scratch/replay");
+    let work_dir = scratch_root(&repo).join("replay");
     let _ = std::fs::create_dir_all(&work_dir);
     let file = work_dir.join("replay.almd");
     let wasm = work_dir.join("replay.wasm");
@@ -510,7 +550,7 @@ fn cmd_replay(args: &[String]) {
     let tc = Toolchain {
         almide,
         wasmtime: resolve_wasmtime(),
-        scratch: repo.join("tools/xtarget-fuzz/.scratch/replay-build"),
+        scratch: scratch_root(&repo).join("replay-build"),
         timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
     };
     let outcome = run_ladder(
@@ -523,6 +563,7 @@ fn cmd_replay(args: &[String]) {
     );
     eprintln!("\n=== ladder outcome ===");
     print_outcome(&outcome);
+    let _ = std::fs::remove_dir_all(scratch_root(&repo));
 }
 
 // ── ladder ──
@@ -545,12 +586,13 @@ fn cmd_ladder(args: &[String]) {
         }
     };
     let repo = resolve_repo(args);
+    sweep_stale_scratch(&repo);
     let almide = resolve_almide(&repo, args);
     let timeout = flag_value(args, "--timeout")
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_TIMEOUT_SECS);
 
-    let work_dir = repo.join("tools/xtarget-fuzz/.scratch/ladder");
+    let work_dir = scratch_root(&repo).join("ladder");
     let _ = std::fs::create_dir_all(&work_dir);
     let file = work_dir.join("ladder.almd");
     let wasm = work_dir.join("ladder.wasm");
@@ -560,7 +602,7 @@ fn cmd_ladder(args: &[String]) {
     let tc = Toolchain {
         almide,
         wasmtime: resolve_wasmtime(),
-        scratch: repo.join("tools/xtarget-fuzz/.scratch/ladder-build"),
+        scratch: scratch_root(&repo).join("ladder-build"),
         timeout: Duration::from_secs(timeout),
     };
     // An identity-family repro carries its own oracle in `// @expect`
@@ -579,6 +621,7 @@ fn cmd_ladder(args: &[String]) {
         expected.as_deref(),
     );
     print_outcome(&outcome);
+    let _ = std::fs::remove_dir_all(scratch_root(&repo));
     if matches!(outcome, Outcome::Finding(_)) {
         std::process::exit(1);
     }
@@ -588,6 +631,7 @@ fn cmd_ladder(args: &[String]) {
 
 fn cmd_gen(args: &[String]) {
     let repo = resolve_repo(args);
+    sweep_stale_scratch(&repo);
     let seed: u64 = flag_value(args, "--seed")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
