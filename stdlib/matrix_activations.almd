@@ -536,9 +536,13 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
   let r = if rows < 0 then 0 else rows
   let c = if cols < 0 then 0 else cols
   let _g = __q_dims_guard(r, c)
-  let out: List[List[Float]] = prim.alloc_list_str(r)
-  let _x = __q10_rows(prim.handle(out), base, limit, r, c, 0)
-  out
+  // cols % 128 != 0 -> the all-zero matrix (native's guard; the q8_0 %32 edge).
+  if c % 128 != 0 then __q8_zeros(r, c)
+  else {
+    let out: List[List[Float]] = prim.alloc_list_str(r)
+    let _x = __q10_rows(prim.handle(out), base, limit, r, c, 0)
+    out
+  }
 }
 
 // select_rows_q1_0(data, offset, cols, row_ids) — the ROW-SUBSET twin of
@@ -571,9 +575,14 @@ fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[In
   let c = if cols < 0 then 0 else cols
   let n = list.len(row_ids)
   let _g = __q_dims_guard(n, c)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, c, 0)
-  out
+  // cols % 128 != 0 -> all-zero rows: native's zero n_blocks loop leaves the
+  // pre-zeroed row untouched, while __q10_row would READ buffer bytes.
+  if c % 128 != 0 then __q8_zeros(n, c)
+  else {
+    let out: List[List[Float]] = prim.alloc_list_str(n)
+    let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, c, 0)
+    out
+  }
 }
 
 // select_rows_q8_0_dq(data, offset, cols, row_ids) — Q8_0 row dequant: 34 bytes

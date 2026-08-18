@@ -15,6 +15,14 @@ effect fn main() -> Unit = {
   var z = bytes.new(18)
   let m0 = matrix.from_q1_0_bytes(z, 0, 1, 128)
   println("ok: " + int.to_string(matrix.rows(m0)))
+  // cols NOT a multiple of the 128-weight block -> the all-zero matrix on
+  // BOTH legs (the q8_0 %32 precedent). Before, cols=42 made num_blocks 0 and
+  // the native reshape sliced an EMPTY flat — a raw range panic (exit 101)
+  // while wasm read buffer bytes (#1532 smoke night, seed 514313080930/1308).
+  let odd = matrix.from_q1_0_bytes(z, 0, 1, 42)
+  println("odd=" + int.to_string(matrix.rows(odd)) + "," + float.to_string(list.get(list.get(matrix.to_lists(odd), 0) ?? [], 0) ?? 9.9))
+  let odds = matrix.select_rows_q1_0(z, 0, 42, [0])
+  println("odds=" + int.to_string(matrix.rows(odds)) + "," + float.to_string(list.get(list.get(matrix.to_lists(odds), 0) ?? [], 0) ?? 9.9))
   let huge = matrix.from_q1_0_bytes(z, 0, 1, 9223372036854775807)
   println("unreachable: " + int.to_string(matrix.rows(huge)))
 }

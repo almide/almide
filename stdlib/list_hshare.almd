@@ -69,14 +69,21 @@ else {
 // i64 slots — exact for inline-scalar blocks), kept elements rc_inc-SHARED into an
 // over-allocated block whose len is patched to the kept count (the alloc_set
 // convention; cap keeps the free-list exact).
+// #1532 smoke-night finding (seed 514313080935/326): this twin had INVENTED
+// its own negative edges — start<0 clamped to 0 (the WHOLE list) and end<0
+// to 0 — while the scalar twin, the _str twin, and the native runtime all
+// follow v0's `as usize` doctrine: negative start -> EMPTY, negative end ->
+// len. A recursion shrinking via `list.slice(xs, <negative>, len)` therefore
+// terminated natively and looped forever on wasm (the koka_beans has_none
+// mutation: native printed F in 0.3s, wasm hung). One doctrine, four
+// implementations, byte-identical.
 fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let s0 = if start < 0 then 0
-  else if start > len then len else start
-  let e0 = if end < 0 then 0
+  let e0 = if end < 0 then len
   else if end > len then len else end
-  let k = if e0 > s0 then e0 - s0 else 0
+  let s0 = if start < 0 then len else start
+  let k = if s0 >= e0 then 0 else e0 - s0
   let out: List[List[Int]] = prim.alloc_list_str(k)
   let _x = __drop_h_fill(prim.handle(out), h, s0, k, 0)
   out

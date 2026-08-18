@@ -173,7 +173,12 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     // took the raw capacity-overflow panic the float loaders already refuse.
     let (rows_u, cols_u) = almide_rt_matrix_dims(rows, cols);
     let total = rows_u * cols_u;
-    if total == 0 || data.is_empty() {
+    // A cols not divisible by the 128-weight block is the all-zero matrix —
+    // the same defined edge the q8_0 selector's `% Q8_BLOCK` guard takes
+    // (nightly seed 514313080935 sibling: cols=42 made num_blocks 0 and the
+    // reshape sliced an EMPTY flat, a raw range panic natively while the
+    // wasm leg read buffer bytes — two answers for one call).
+    if total == 0 || data.is_empty() || cols_u % 128 != 0 {
         return vec![vec![0.0f64; cols_u]; rows_u].into();
     }
     let off = offset.max(0) as usize;
