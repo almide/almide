@@ -2060,6 +2060,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_overflow.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_rows.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/count_domain_nonbytes.almd", class = "fixture" },
 ]
 
@@ -2883,6 +2884,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows_oob.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
 ]

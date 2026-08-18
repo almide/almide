@@ -188,7 +188,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-158 | A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor | 0.32.0 | active | fixture | 1 |
 | C-159 | list.binary_search returns the same index on both targets for duplicate keys | 0.32.0 | active | fixture | 1 |
 | C-160 | Pure-Almide bundled stdlib modules link and run byte-identically on wasm | 0.34.4 | active | fixture | 1 |
-| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 4 |
+| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 5 |
 | C-162 | io.write / io.write_bytes emit in program order, interleaved with println | 0.35.0 | active | fixture | 1 |
 | C-163 | A heap-result if/match bound to a let/var executes the taken arm on both targets | 0.35.0 | active | fixture | 1 |
 | C-164 | List modifiers and suffix copies co-own tuple / record / nested-list elements | 0.35.0 | active | fixture | 1 |
@@ -256,7 +256,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 1 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 2 |
-| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 3 |
+| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 4 |
 | C-230 | The flight reference PID kernel runs identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-231 | Integer and boolean literal forms evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-232 | Boolean literals and their display form are identical on both targets | 0.57.1 | active | fixture | 1 |

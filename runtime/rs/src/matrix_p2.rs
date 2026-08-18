@@ -168,8 +168,10 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     rows: i64,
     cols: i64,
 ) -> AlmideMatrix {
-    let rows_u = rows.max(0) as usize;
-    let cols_u = cols.max(0) as usize;
+    // #1525: the #1503 sweep clamped this loader's negatives but skipped the
+    // shared ceiling, so a huge POSITIVE `cols` reached `with_capacity` and
+    // took the raw capacity-overflow panic the float loaders already refuse.
+    let (rows_u, cols_u) = almide_rt_matrix_dims(rows, cols);
     let total = rows_u * cols_u;
     if total == 0 || data.is_empty() {
         return vec![vec![0.0f64; cols_u]; rows_u].into();
@@ -389,11 +391,14 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     // Almide itself on native). Quantized matmul is outside BLAS, so this is a
     // BLAS blind spot almide-kernel owns.
     let x_rows = x.rows;
-    let n_in = w_cols.max(0) as usize;
-    let out_cols = w_rows.max(0) as usize;
+    // #1525: the weight dims arrive raw from the caller — ceiling them, and the
+    // output shape they induce, like every constructor; a huge `w_rows` died in
+    // the raw capacity-overflow form at the `out` allocation below.
+    let (out_cols, n_in) = almide_rt_matrix_dims(w_rows, w_cols);
     if x_rows == 0 || out_cols == 0 || n_in == 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
+    let (x_rows, out_cols) = almide_rt_matrix_dims(x_rows as i64, out_cols as i64);
     let mut out = vec![0.0f64; x_rows * out_cols];
     almide_kernel::q1_0_packed::linear_q1_0_packed(
         &x.data,
@@ -451,7 +456,9 @@ pub fn almide_rt_matrix_select_rows_q1_0(
     cols: i64,
     row_ids: &[i64],
 ) -> AlmideMatrix {
-    let cols_u = cols.max(0) as usize;
+    // #1525: ceiling the output shape like every constructor — an over-ceiling
+    // `cols` died in the raw capacity-overflow form here.
+    let (_, cols_u) = almide_rt_matrix_dims(row_ids.len() as i64, cols);
     let n_blocks = cols_u / 128;
     let off = offset.max(0) as usize;
     let mut out = Vec::<Vec<f64>>::with_capacity(row_ids.len());
@@ -720,7 +727,9 @@ pub fn almide_rt_matrix_select_rows_f32(
     cols: i64,
     row_ids: &[i64],
 ) -> AlmideMatrix {
-    let c = cols.max(0) as usize;
+    // #1525: ceiling the output shape like every constructor — an over-ceiling
+    // `cols` died in the raw capacity-overflow form here.
+    let (_, c) = almide_rt_matrix_dims(row_ids.len() as i64, cols);
     let off = offset.max(0) as usize;
     let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
     for &rid in row_ids {
@@ -990,7 +999,9 @@ pub fn almide_rt_matrix_select_rows_q8_0_dq(
     cols: i64,
     row_ids: &[i64],
 ) -> AlmideMatrix {
-    let c = cols.max(0) as usize;
+    // #1525: ceiling the output shape like every constructor — an over-ceiling
+    // `cols` died in the raw capacity-overflow form here.
+    let (_, c) = almide_rt_matrix_dims(row_ids.len() as i64, cols);
     let off = offset.max(0) as usize;
     if c % Q8_BLOCK != 0 {
         return mk(row_ids.len(), c, vec![0.0f64; row_ids.len() * c]);

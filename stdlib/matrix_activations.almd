@@ -514,6 +514,19 @@ else {
   __q10_rows(ho, base, limit, rows, cols, r + 1)
 }
 
+// #1525: the shared constructor ceiling — a mirror of `__mx_dims_guard` in
+// matrix_core.almd (helpers are file-local, hence the copy; 268435456 = 2^28,
+// keep in sync with `__mx_max_elems` and native's ALMIDE_MATRIX_MAX_ELEMS).
+// The #1503 sweep clamped this family's negatives but skipped the ceiling, so
+// an absurd-but-positive shape died in undefined forms (native raw
+// capacity-overflow panic, exit 101, vs wasm OOM) instead of the unified T6
+// abort both targets share.
+fn __q_dims_guard(rows: Int, cols: Int) -> Int = {
+  if rows > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  if rows > 0 and cols > 268435456 / rows then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  0
+}
+
 fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
   let hd = prim.handle(data)
   let off = if offset < 0 then 0 else offset
@@ -522,6 +535,7 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
   // #1503: negative dims clamp to the empty matrix like every loader.
   let r = if rows < 0 then 0 else rows
   let c = if cols < 0 then 0 else cols
+  let _g = __q_dims_guard(r, c)
   let out: List[List[Float]] = prim.alloc_list_str(r)
   let _x = __q10_rows(prim.handle(out), base, limit, r, c, 0)
   out
@@ -556,6 +570,7 @@ fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[In
   // #1503: negative cols clamps to 0 like the loader family.
   let c = if cols < 0 then 0 else cols
   let n = list.len(row_ids)
+  let _g = __q_dims_guard(n, c)
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, c, 0)
   out
@@ -607,6 +622,7 @@ fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List
   let n = list.len(row_ids)
   // #1503: negative cols clamps to 0 like the loader family.
   let c = if cols < 0 then 0 else cols
+  let _g = __q_dims_guard(n, c)
   if c % 32 != 0 then __q8_zeros(n, c)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(n)
