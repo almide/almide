@@ -153,6 +153,11 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 burn-down PR: dropped-site (UNCLASSIFIED) and bogus-verdict (BAD VERDICT) both demonstrated with LANDED forgeries — the first probe round was a dud (wrong block/field names) and wrongly suggested a hole; probes must diff-verify they landed"
 
 [[gate]]
+path = "scripts/check-pass-isolated.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1487 introduction: three seeded emitter mutants each turn the gate red through their DEDICATED fixture — m1-swap-match-arms (3 errors), m4-reverse-stmt-order (6), m5-double-wasm-print (9) — applied via git apply, rebuilt, measured, reverted; the unforged tree reads '8 fixture(s), each byte-identical'. m2/m3 deliberately die in the conformance-mutations gate instead (emitted-code-visible / silent-fallback damage an output-identity runner structurally cannot see; the division of labor is in the script header)."
+
+[[gate]]
 path = "scripts/check-perf-ratio.sh"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok"

@@ -19,6 +19,13 @@
 # ADDITIVE by design (DoD item 4): the end-to-end corpus is untouched — this
 # gate catches a pass changing semantics in isolation, end-to-end catches the
 # interactions isolation structurally cannot.
+#
+# Division of labor with proofs/conformance-mutations: mutants whose damage is
+# OUTPUT-visible die here (verified at introduction: m1/m4/m5 each turn this
+# gate red); mutants whose damage is emitted-code-visible or degrades to the
+# silent classic-codegen fallback (m2, m3) die in the mutation gate, which
+# watches the emitted artifacts. An output-identity runner structurally cannot
+# see a graceful fallback — that is the mutation gate's job, kept there.
 set -uo pipefail
 export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
