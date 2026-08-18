@@ -1,0 +1,6 @@
+// #1518: a malformed @deprecated was silently dropped — the author believed
+// the marker was live while callers were told nothing.
+@deprecated(since=2)
+fn old_api() -> Int = 1
+
+fn main() -> Unit = println(int.to_string(old_api()))

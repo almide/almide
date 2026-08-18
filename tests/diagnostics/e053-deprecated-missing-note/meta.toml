@@ -1,0 +1,3 @@
+expects_code = "E053"
+expects_error = "@deprecated"
+hint_substring = "successor"

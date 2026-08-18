@@ -529,11 +529,7 @@ impl Checker {
             if !self.env.is_hash(&resolved) {
                 let ty_name = Self::type_display_name(&resolved);
                 reported.insert(ty_name.clone());
-                let mut diag = err(
-                    format!("type '{}' is not hashable — cannot be used as a Map key", ty_name),
-                    "Map keys must be hashable. Use String, Int, Bool, or a record/variant with only hashable fields.".to_string(),
-                    "map literal".to_string(),
-                );
+                let mut diag = Self::unhashable_key_diag(&self.env, &resolved, &ty_name, "map literal");
                 if let Some(s) = span {
                     diag.line = Some(s.line);
                     diag.col = Some(s.col);
@@ -566,13 +562,31 @@ impl Checker {
             if !self.env.is_hash(&resolved) {
                 let ty_name = Self::type_display_name(&resolved);
                 if reported.insert(ty_name.clone()) {
-                    self.diagnostics.push(err(
-                        format!("type '{}' is not hashable — cannot be used as a Map key", ty_name),
-                        "Map keys must be hashable. Use String, Int, Bool, or a record/variant with only hashable fields.".to_string(),
-                        "map key".to_string(),
-                    ));
+                    self.diagnostics.push(Self::unhashable_key_diag(&self.env, &resolved, &ty_name, "map key"));
                 }
             }
+        }
+    }
+
+    /// The unhashable-Map-key diagnostic, coded by CAUSE (#1518: this error
+    /// used to carry no code at all, so `almide explain` and the coverage
+    /// gate never saw it). A key blocked by a FUNCTION anywhere in its type —
+    /// including a fn-typed field reached through a Named record, which the
+    /// bind-site E016 recursion does not expand — is E016's own class and
+    /// keeps its closure wording; every other blocker (Float, Map) is E058.
+    fn unhashable_key_diag(env: &crate::type_env::TypeEnv, resolved: &crate::types::Ty, ty_name: &str, context: &str) -> Diagnostic {
+        match env.hash_blocker(resolved) {
+            Some("a function") => err(
+                format!("type '{}' is not hashable — cannot be used as a Map key", ty_name),
+                "A function-typed field anywhere in the key type makes it unusable: closures have no equality or hashing. Closures are fine as `Map` values; only the key must be comparable.".to_string(),
+                context.to_string(),
+            ).with_code("E016"),
+            blocker => err(
+                format!("type '{}' is not hashable — cannot be used as a Map key{}", ty_name,
+                    blocker.map(|b| format!(" (it contains {})", b)).unwrap_or_default()),
+                "Map keys must be hashable. Use String, Int, Bool, or a record/variant with only hashable fields.".to_string(),
+                context.to_string(),
+            ).with_code("E058"),
         }
     }
 

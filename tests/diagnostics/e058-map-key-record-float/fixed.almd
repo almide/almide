@@ -1,0 +1,7 @@
+// The fix: hashable fields only in the key record.
+type P = { x: Int }
+
+fn main() -> Unit = {
+  let m: Map[P, Int] = [:]
+  println(int.to_string(map.len(m)))
+}

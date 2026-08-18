@@ -1,0 +1,3 @@
+expects_code = "E037"
+expects_error = "Option"
+hint_substring = "Unwrap the Option"
