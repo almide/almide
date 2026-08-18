@@ -1,0 +1,7 @@
+// E026: indexing the RESULT of a string concatenation — the operand is an
+// expression, not a binding.
+fn main() -> Unit = {
+  let a = "ab"
+  let b = "cd"
+  println((a + b)[2])
+}

@@ -1,0 +1,2 @@
+expects_code = "E018"
+expects_error = "cannot infer"

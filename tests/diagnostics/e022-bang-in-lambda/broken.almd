@@ -1,0 +1,9 @@
+// `!` on a non-channel operand inside a lambda: no error can leave the
+// closure, and the hint must say the lambda rule (a Result-typed `!` in a
+// lambda is the legal ADR-0006 fallible-callback idiom instead).
+fn bump() -> Int = {
+  let g = (t: Int) => t! + 1
+  g(3)
+}
+
+fn main() -> Unit = println(int.to_string(bump()))

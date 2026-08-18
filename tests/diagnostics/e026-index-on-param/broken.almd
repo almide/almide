@@ -1,0 +1,5 @@
+// E026: indexing a String PARAMETER (the type flows from the signature,
+// not a local literal).
+fn head(s: String) -> String = s[0]
+
+fn main() -> Unit = println(head("xyz"))

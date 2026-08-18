@@ -1,0 +1,7 @@
+// E034: postfix `?` on a plain String.
+fn f() -> Int? = {
+  let s = "hi"?
+  some(1)
+}
+
+fn main() -> Unit = println("x")

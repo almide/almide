@@ -1,0 +1,2 @@
+expects_code = "E005"
+expects_error = "argument 'n' expects Int but got Option[Int]"

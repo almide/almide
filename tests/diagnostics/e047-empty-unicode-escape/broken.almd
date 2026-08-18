@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s = "a\u{}b"
+  println(s)
+}

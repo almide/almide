@@ -1,0 +1,2 @@
+expects_code = "E010"
+expects_error = "non-exhaustive match"

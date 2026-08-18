@@ -1,0 +1,8 @@
+// E031: the retired `..` inside a MATCH ARM body.
+fn main() -> Unit = {
+  let t = match 1 {
+    1 => list.len(0 ..< 3),
+    _ => 0,
+  }
+  println(int.to_string(t))
+}

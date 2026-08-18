@@ -1,0 +1,3 @@
+effect fn show(s: String) -> Unit = println(int.to_string(int.parse(s)!))
+
+effect fn main() -> Unit = show("42")

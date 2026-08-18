@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  let r: Result[Int?, String] = ok(none)
+  match r {
+    ok(o) => println(int.to_string(o ?? -1)),
+    err(e) => println(e),
+  }
+}

@@ -1,0 +1,9 @@
+type Color = | Red | Green | Blue
+
+fn label(c: Color) -> String = match c {
+  Red => "r",
+  Green => "g",
+  Blue => "b",
+}
+
+fn main() -> Unit = println(label(Blue))

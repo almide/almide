@@ -1,0 +1,2 @@
+// list.with_capacity carries a length but no element type.
+fn main() -> Unit = println(int.to_string(list.len(list.with_capacity(4))))

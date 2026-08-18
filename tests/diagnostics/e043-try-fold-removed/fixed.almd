@@ -1,0 +1,5 @@
+// E043 variant: list.fold.
+fn main() -> Unit = {
+  let r = list.fold(["a", "bb"], 0, (acc, s) => acc + string.len(s))
+  println(int.to_string(r))
+}

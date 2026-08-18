@@ -1,0 +1,6 @@
+fn fetch_all() -> Int = 7
+
+effect fn main() -> Unit = {
+  let r = fetch_all()
+  println(int.to_string(r))
+}

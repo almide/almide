@@ -1,0 +1,8 @@
+// The mutation sits two lambda levels below the declaring frame.
+fn cross(xs: List[Int], ys: List[Int]) -> Int = {
+  var count = 0
+  list.each(xs, (x) => list.each(ys, (y) => { count = count + 1 }))
+  count
+}
+
+fn main() -> Unit = println(int.to_string(cross([1], [2, 3])))

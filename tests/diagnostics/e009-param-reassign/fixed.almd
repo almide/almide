@@ -1,0 +1,7 @@
+fn bump(n: Int) -> Int = {
+  var m = n
+  m = m + 1
+  m
+}
+
+fn main() -> Unit = println(int.to_string(bump(1)))

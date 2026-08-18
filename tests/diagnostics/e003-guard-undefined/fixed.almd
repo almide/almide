@@ -1,0 +1,9 @@
+fn pick(n: Int) -> String = {
+  let threshold = 3
+  match n {
+    _ if n > threshold => "big",
+    _ => "small",
+  }
+}
+
+fn main() -> Unit = println(pick(5))

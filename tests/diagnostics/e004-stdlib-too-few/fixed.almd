@@ -1,0 +1,1 @@
+fn main() -> Unit = println(string.join(["a", "b"], ","))

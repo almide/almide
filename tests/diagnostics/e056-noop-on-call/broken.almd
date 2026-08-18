@@ -1,0 +1,4 @@
+// E056 variant: `?` on an Option-returning CALL — already an Option.
+fn g() -> Int? = some(4)
+
+fn f() -> Int? = g()?

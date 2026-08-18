@@ -1,0 +1,5 @@
+// E045 variant: .2 on a 2-tuple — out of range at check time (#1266).
+fn main() -> Unit = {
+  let p = (1, 2)
+  println(int.to_string(p.2))
+}

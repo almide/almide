@@ -1,0 +1,6 @@
+// The ONLY arm is a guarded wildcard: nothing unguarded covers the subject.
+fn sign(n: Int) -> String = match n {
+  _ if n > 0 => "pos",
+}
+
+fn main() -> Unit = println(sign(1))

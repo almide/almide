@@ -1,0 +1,2 @@
+expects_code = "E008"
+expects_error = "cannot capture mutable variable 'base' inside fan block"

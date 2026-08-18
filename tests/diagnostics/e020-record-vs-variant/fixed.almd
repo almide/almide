@@ -1,0 +1,4 @@
+type PayloadRec = { data: String }
+type Payload = | Empty | Full(String)
+
+fn main() -> Unit = println("ok")

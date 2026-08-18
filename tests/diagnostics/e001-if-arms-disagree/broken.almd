@@ -1,0 +1,3 @@
+fn pick(c: Bool) -> Int = if c then 1 else "one"
+
+fn main() -> Unit = println(int.to_string(pick(true)))

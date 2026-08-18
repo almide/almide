@@ -1,0 +1,7 @@
+// E041 variant: the Result-valued binding is the fn's tail value.
+effect fn h() -> Int = {
+  let v = int.parse("1")!
+  v
+}
+
+effect fn main() -> Unit = println(int.to_string(h()!))

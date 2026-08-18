@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let fs: List[Int] = [2, 1]
+  let s = list.sort(fs)
+  println(int.to_string(list.len(s)))
+}

@@ -1,0 +1,3 @@
+fn g() -> Int? = some(4)
+
+fn f() -> Int? = g()

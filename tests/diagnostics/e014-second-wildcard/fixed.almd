@@ -1,0 +1,6 @@
+fn tag(n: Int) -> String = match n {
+  0 => "zero",
+  _ => "a",
+}
+
+fn main() -> Unit = println(tag(1))

@@ -1,0 +1,3 @@
+fn cross(xs: List[Int], ys: List[Int]) -> Int = list.len(xs) * list.len(ys)
+
+fn main() -> Unit = println(int.to_string(cross([1], [2, 3])))

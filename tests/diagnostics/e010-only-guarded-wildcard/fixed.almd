@@ -1,0 +1,6 @@
+fn sign(n: Int) -> String = match n {
+  _ if n > 0 => "pos",
+  _ => "other",
+}
+
+fn main() -> Unit = println(sign(1))

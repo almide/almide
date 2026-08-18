@@ -1,0 +1,5 @@
+// E026: a String index inside an IF condition.
+fn main() -> Unit = {
+  let s = "abc"
+  if s[0] == "a" then println("yes") else println("no")
+}

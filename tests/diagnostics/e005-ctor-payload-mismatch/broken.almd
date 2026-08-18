@@ -1,0 +1,6 @@
+type Point = | Pt(Int, Int)
+
+fn main() -> Unit = {
+  let p = Pt("x", "y")
+  println(match p { Pt(a, _) => int.to_string(a) })
+}

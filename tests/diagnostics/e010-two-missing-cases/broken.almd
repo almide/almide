@@ -1,0 +1,9 @@
+// Two of four cases missing: the message must name what is absent.
+type Dir = | North | South | East | West
+
+fn axis(d: Dir) -> String = match d {
+  North => "v",
+  South => "v",
+}
+
+fn main() -> Unit = println(axis(East))

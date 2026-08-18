@@ -188,3 +188,21 @@ fn a_line_comment_before_a_continuation_still_refuses() {
         .expect_err("an unattachable line comment must refuse, never silently drop");
     assert!(why.contains("comment"), "got: {why}");
 }
+
+/// #1511: `Option[T]` and `T?` are one type — the canonicalizing rewrite to
+/// the sugar must VERIFY as conserving (it used to refuse as E054, so a legal
+/// spelled-out source could neither format nor live under the fmt gate).
+#[test]
+fn option_sugar_canonicalization_verifies_as_conserving() {
+    let src = "fn pick(n: Int) -> Option[Int] = if n > 0 then some(n) else none\n\nfn main() -> Unit = {\n  let oo: Option[Int?] = some(some(9))\n  println(int.to_string((pick(3) ?? 0) + match oo { some(i) => i ?? 0, none => 0 - 1 }))\n}\n";
+    let program = parse(src).expect("parses");
+    let formatted = format_program(&program);
+    assert!(
+        formatted.contains("-> Int?") && formatted.contains("(Int?)?"),
+        "fmt canonicalizes to the sugar:\n{formatted}"
+    );
+    verify_format(src, &program, &formatted)
+        .expect("the Option->? spelling rename is the same type, not an AST change");
+    let second = parse(&formatted).expect("formatted parses");
+    assert_eq!(format_program(&second), formatted, "fmt must stay idempotent");
+}

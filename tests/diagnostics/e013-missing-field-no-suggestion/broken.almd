@@ -1,0 +1,7 @@
+// A field name far from every declared one: no did-you-mean, just the
+// roster.
+type Point = { alpha: Int, beta: Int }
+
+fn read(p: Point) -> Int = p.zzz
+
+fn main() -> Unit = println(int.to_string(read(Point(alpha: 1, beta: 2))))

@@ -1,0 +1,5 @@
+type Pt = { x: Int, y: Int }
+
+fn mk() -> Pt = Pt(x: 1, y: 2)
+
+fn main() -> Unit = println(int.to_string(mk().x))

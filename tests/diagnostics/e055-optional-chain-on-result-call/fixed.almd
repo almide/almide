@@ -1,0 +1,5 @@
+type P = { v: Int }
+
+fn get() -> Result[P, String] = ok(P { v: 3 })
+
+fn f() -> Int? = option.map(get()?, (p) => p.v)

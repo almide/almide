@@ -1,0 +1,3 @@
+expects_code = "E021"
+expects_error = "takes named fields, not positional"
+hint_substring = "Name every field"

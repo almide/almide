@@ -1,0 +1,2 @@
+// E028: main with TWO parameters — the arity does not change the verdict.
+effect fn main(argc: Int, argv: List[String]) -> Unit = println("hi")

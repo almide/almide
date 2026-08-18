@@ -1,0 +1,6 @@
+// E036: the direct-call spelling (no pipe) of a map_err that ignores its
+// named error parameter.
+effect fn main() -> Unit = {
+  let n = result.map_err(int.parse("7"), (e) => "unparseable")!
+  println("${n}")
+}

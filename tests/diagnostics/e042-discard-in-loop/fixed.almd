@@ -1,0 +1,12 @@
+// E042 variant: the discard sits inside a while body — each iteration
+// silently drops the error.
+effect fn touch(i: Int) -> Result[Unit, String] = ok(())
+
+effect fn main() -> Unit = {
+  var i = 0
+  while i < 3 {
+    touch(i)!
+    i = i + 1
+  }
+  println("done")
+}

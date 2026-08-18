@@ -1,0 +1,5 @@
+// The negative side of the f32 finite range.
+fn main() -> Unit = {
+  let p: Float32 = -1.0e300
+  println("never")
+}

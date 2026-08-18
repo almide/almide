@@ -1,0 +1,3 @@
+expects_code = "E047"
+expects_error = "unknown escape sequence"
+hint_substring = "literal backslash"

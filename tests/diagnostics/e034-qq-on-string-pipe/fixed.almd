@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let v = "a" |> string.to_upper
+  println(v)
+}

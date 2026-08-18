@@ -1,0 +1,6 @@
+// E027: the removed thunk-list spelling fires even on an EMPTY list — the
+// spelling is gone regardless of arity.
+effect fn main() -> Unit = {
+  let r = fan.any([])
+  println("x")
+}

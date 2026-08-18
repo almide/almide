@@ -1,0 +1,6 @@
+// The same field twice in one construction.
+type Cfg = { name: String, port: Int }
+
+fn mk() -> Cfg = Cfg(name: "a", name: "b", port: 1)
+
+fn main() -> Unit = println(mk().name)

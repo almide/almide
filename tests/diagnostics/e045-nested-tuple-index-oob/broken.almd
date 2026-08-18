@@ -1,0 +1,5 @@
+// E045 variant: in-range outer projection, OUT-of-range inner.
+fn main() -> Unit = {
+  let t = (1, (2, 3))
+  println(int.to_string((t.1).5))
+}

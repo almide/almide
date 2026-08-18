@@ -130,6 +130,19 @@ impl Parser {
                     }
                 }
                 TokenType::EOF => return false,
+                // A token that can NEVER appear in a lambda parameter list
+                // (names, commas, `:` + type syntax only) un-commits the
+                // lookahead. Without this, a guard `if not (a > b)` before a
+                // match arm's `=>` read `(a > b) =>` as a lambda head and
+                // died on the `>` (#1509) — balanced-parens-then-arrow alone
+                // cannot tell a parenthesized guard tail from parameters.
+                TokenType::RAngle | TokenType::LAngle | TokenType::GtEq | TokenType::LtEq
+                | TokenType::EqEq | TokenType::BangEq
+                | TokenType::Plus | TokenType::Minus | TokenType::Star
+                | TokenType::Slash | TokenType::Percent | TokenType::PlusPlus
+                | TokenType::And | TokenType::Or | TokenType::Not
+                | TokenType::PipeArrow | TokenType::QuestionQuestion
+                | TokenType::Int | TokenType::Float | TokenType::String => return false,
                 _ => {}
             }
             i += 1;

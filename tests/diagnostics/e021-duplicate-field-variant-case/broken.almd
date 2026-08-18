@@ -1,0 +1,6 @@
+// Duplicate field on a record-payload CASE construction.
+type Ev = | SetName { name: String } | Quit
+
+fn mk() -> Ev = SetName { name: "a", name: "b" }
+
+fn main() -> Unit = println("${mk()}")

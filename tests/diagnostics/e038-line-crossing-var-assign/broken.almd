@@ -1,0 +1,7 @@
+// E038: line-crossing `??` in a VAR-ASSIGNMENT statement.
+effect fn main() -> Unit = {
+  var v = 0
+  v = int.parse("x")??
+  7
+  println(int.to_string(v))
+}

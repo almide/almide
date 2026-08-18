@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let grand_total = 9
+  println("total=${grand_total}")
+}

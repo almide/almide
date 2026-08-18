@@ -1,0 +1,1 @@
+fn main() -> Unit = println("total=${grand_total}")

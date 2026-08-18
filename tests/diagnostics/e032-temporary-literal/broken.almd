@@ -1,0 +1,6 @@
+// E032: a TEMPORARY (a bare literal) passed to a `mut` parameter — there is
+// no place to mutate at all.
+fn main() -> Unit = {
+  list.push([1, 2], 3)
+  println("done")
+}

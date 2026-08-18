@@ -1,0 +1,5 @@
+// E046 variant: `_` inside a pipe target's argument list — it does NOT
+// partially apply.
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn main() -> Unit = println(int.to_string(2 |> add(_, 3)))

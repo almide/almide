@@ -1,0 +1,3 @@
+fn double(a: Int) -> Int = a * 2
+
+fn main() -> Unit = println(int.to_string(double(4)))

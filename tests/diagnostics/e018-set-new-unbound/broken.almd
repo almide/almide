@@ -1,0 +1,2 @@
+// `set.new()` passed straight to set.len: the element type never appears.
+fn main() -> Unit = println(int.to_string(set.len(set.new())))

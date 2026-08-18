@@ -1,0 +1,6 @@
+// Two enums in one module declare the same case name: reported at the
+// DECLARATION, before any use.
+type Cmd = | Halt | Dup(Int)
+type Op = | Dup(Int) | Nop
+
+fn main() -> Unit = println("ok")

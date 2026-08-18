@@ -1,0 +1,2 @@
+// E044 variant: fn main declared -> String.
+fn main() -> String = "done"

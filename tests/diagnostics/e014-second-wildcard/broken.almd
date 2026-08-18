@@ -1,0 +1,8 @@
+// Two wildcards: the second is dead by the first.
+fn tag(n: Int) -> String = match n {
+  0 => "zero",
+  _ => "a",
+  _ => "b",
+}
+
+fn main() -> Unit = println(tag(1))

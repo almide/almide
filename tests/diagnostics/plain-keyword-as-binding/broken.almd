@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let match = 1
+  println(int.to_string(match))
+}

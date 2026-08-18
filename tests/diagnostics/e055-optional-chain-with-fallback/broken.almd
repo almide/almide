@@ -1,0 +1,4 @@
+// E055 variant: the `?.` misuse buried under a `??` fallback.
+type P = { v: Int }
+
+fn f(r: Result[P, String]) -> Int = (r?.v) ?? 0

@@ -1,0 +1,14 @@
+// E035: comparing an err-binding to a string LITERAL with `==` — the
+// equality spelling of text-branching.
+import fs
+
+effect fn load(path: String) -> Result[String, String] = {
+  match fs.read_text(path) {
+    ok(t) => ok(t),
+    err(e) => if e == "No such file or directory" then ok("default") else err(e),
+  }
+}
+
+effect fn main() -> Unit = {
+  println(load("/nonexistent") ?? "fallback")
+}

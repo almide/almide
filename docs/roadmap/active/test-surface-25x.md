@@ -57,3 +57,4 @@ Meter: `bash scripts/test-surface-meter.sh` (append a dated trend row with
 | date | wasm_cross | other almd | #[test] | diag pairs | walls |
 |------|-----------|------------|---------|------------|-------|
 | 2026-08-17 | 500 | 497 | 2198 | 99 | 16 |
+| 2026-08-18 | 501 | 497 | 2199 | 335 | 16 |

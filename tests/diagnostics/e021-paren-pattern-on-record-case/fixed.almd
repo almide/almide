@@ -1,0 +1,8 @@
+type Ev = | SetName { name: String } | Quit
+
+fn label(e: Ev) -> String = match e {
+  SetName { .. } => "set",
+  Quit => "quit",
+}
+
+fn main() -> Unit = println(label(Quit))

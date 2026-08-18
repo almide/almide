@@ -1,0 +1,8 @@
+// E032: a CALL RESULT passed to a `mut` parameter — the returned value is a
+// temporary; the mutation would be lost.
+fn make() -> List[Int] = [1]
+
+fn main() -> Unit = {
+  list.push(make(), 2)
+  println("done")
+}

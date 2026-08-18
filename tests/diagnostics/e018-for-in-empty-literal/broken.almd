@@ -1,0 +1,7 @@
+// Iterating a bare `[]`: the loop variable's type has no source.
+effect fn main() -> Unit = {
+  for x in [] {
+    println("never")
+  }
+  println("done")
+}

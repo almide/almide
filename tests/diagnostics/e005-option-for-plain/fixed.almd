@@ -1,0 +1,6 @@
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = {
+  let o: Int? = some(3)
+  println(int.to_string(double(o ?? 0)))
+}

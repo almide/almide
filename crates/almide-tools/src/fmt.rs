@@ -570,8 +570,16 @@ pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> 
         Err(e) => return Err(format!("formatted output no longer parses: {e}")),
     };
 
-    let before = serde_json::to_value(program).map_err(|e| e.to_string())?;
-    let after = serde_json::to_value(&reparsed).map_err(|e| e.to_string())?;
+    let mut before = serde_json::to_value(program).map_err(|e| e.to_string())?;
+    let mut after = serde_json::to_value(&reparsed).map_err(|e| e.to_string())?;
+    // `Option[T]` and `T?` are the SAME type by definition — the formatter
+    // canonicalizes to the sugar, and that rename must count as conserving
+    // (#1511: a legal `Option[Int?]` source could neither format nor pass
+    // the fmt gate, because the reparse carried name "?" where the source
+    // AST said "Option"). Both sides are normalized identically, so only
+    // the spelling is forgiven — arity or argument drift still diverges.
+    normalize_option_sugar(&mut before);
+    normalize_option_sugar(&mut after);
     if before != after {
         return Err(format!(
             "AST changed by formatting at {}",
@@ -591,6 +599,31 @@ pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> 
         return Err(format!("{} comment(s) would be lost ({b} → {a})", b - a));
     }
     Ok(())
+}
+
+/// Rewrite every type node spelled `Option[T]` to its `?`-sugar identity so
+/// the AST comparison treats the two spellings as one type (#1511). A node
+/// qualifies only with name "Option" AND exactly one type argument — the
+/// exact shape `T?` parses to (`TypeExpr::Generic { name: "?", args: [T] }`).
+fn normalize_option_sugar(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Object(map) => {
+            let is_option_1 = map.get("name").and_then(|n| n.as_str()) == Some("Option")
+                && map.get("args").and_then(|a| a.as_array()).map(|a| a.len()) == Some(1);
+            if is_option_1 {
+                map.insert("name".into(), serde_json::Value::String("?".into()));
+            }
+            for (_, child) in map.iter_mut() {
+                normalize_option_sugar(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items.iter_mut() {
+                normalize_option_sugar(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The E054 form of a `verify_format` failure (#1464): the same reason,

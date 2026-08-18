@@ -1,0 +1,2 @@
+expects_code = "E025"
+expects_error = "cannot infer a concrete type"

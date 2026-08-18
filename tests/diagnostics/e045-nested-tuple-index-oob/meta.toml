@@ -1,0 +1,3 @@
+expects_code = "E045"
+expects_error = "is out of range"
+hint_substring = "element(s)"

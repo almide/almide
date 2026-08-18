@@ -1,0 +1,6 @@
+fn unwrap_or_zero(o: Int?) -> Int = match o {
+  some(x) => x,
+  none => 0,
+}
+
+fn main() -> Unit = println(int.to_string(unwrap_or_zero(none)))

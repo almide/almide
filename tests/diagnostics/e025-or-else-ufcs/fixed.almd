@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let r0: Result[Int, String] = ok(7)
+  let r: Result[Int, String] = r0.or_else((e) => ok(0))
+  println(int.to_string(r ?? 0))
+}

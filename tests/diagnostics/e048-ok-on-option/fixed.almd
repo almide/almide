@@ -1,0 +1,6 @@
+fn f(o: Int?) -> Int = match o {
+  some(n) => n,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(some(3))))

@@ -1,0 +1,11 @@
+fn work() -> Int = {
+  let a = 1
+  a + 1
+}
+
+fn work_more() -> Int = {
+  let b = 2
+  b + 2
+}
+
+fn main() -> Unit = println(int.to_string(work()))

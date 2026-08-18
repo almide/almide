@@ -1,0 +1,6 @@
+// A required (no-default) field left out.
+type Pt = { x: Int, y: Int }
+
+fn mk() -> Pt = Pt(x: 1)
+
+fn main() -> Unit = println(int.to_string(mk().x))

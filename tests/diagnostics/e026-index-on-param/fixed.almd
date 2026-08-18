@@ -1,0 +1,3 @@
+fn head(s: String) -> String = string.get(s, 0) ?? ""
+
+fn main() -> Unit = println(head("xyz"))

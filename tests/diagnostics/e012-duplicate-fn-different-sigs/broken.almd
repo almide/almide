@@ -1,0 +1,7 @@
+// A second definition with a DIFFERENT signature is still a duplicate —
+// Almide has no overloading, the name must be unique per module.
+fn describe(x: Int) -> String = int.to_string(x)
+
+fn describe(s: String) -> String = s
+
+fn main() -> Unit = println(describe(1))

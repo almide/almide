@@ -1,0 +1,7 @@
+// E034: postfix `?` on a plain Float.
+fn f() -> Float? = {
+  let x = 1.5?
+  some(1.0)
+}
+
+fn main() -> Unit = println("x")

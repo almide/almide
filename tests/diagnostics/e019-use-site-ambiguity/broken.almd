@@ -1,0 +1,6 @@
+// The USE of a constructor two types declare: the call-site message names
+// the candidates without the same-module framing.
+type A = | Wrap(Int) | ANil
+type B = | Wrap(Int) | BNil
+
+fn main() -> Unit = println("${Wrap(1)}")

@@ -1,0 +1,2 @@
+expects_code = "E005"
+expects_error = "Pt() argument 1 expects Int but got String"

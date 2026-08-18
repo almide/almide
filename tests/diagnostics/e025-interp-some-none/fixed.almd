@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let o: Option[Int?] = some(none)
+  println("${o}")
+}

@@ -1,0 +1,6 @@
+// E030: list.max over Set elements — the max spelling of the unorderable rule.
+fn main() -> Unit = {
+  let xs: List[Set[Int]] = []
+  let m = list.max(xs)
+  println("done")
+}

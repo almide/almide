@@ -1,0 +1,3 @@
+// The empty literal as a direct argument to a generic fn: reverse is
+// element-agnostic, so nothing pins the element type.
+fn main() -> Unit = println(int.to_string(list.len(list.reverse([]))))

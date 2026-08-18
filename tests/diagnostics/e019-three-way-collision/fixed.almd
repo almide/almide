@@ -1,0 +1,5 @@
+type A = | AGo
+type B = | BGo
+type C = | CGo
+
+fn main() -> Unit = println("ok")

@@ -1,0 +1,6 @@
+// #1510 pin: `t.0.1` lexes `.0.1` as the float 0.1 — the CURRENT diagnostic,
+// pinned until a targeted hint lands.
+fn main() -> Unit = {
+  let t = ((5, (6, 7)))
+  println(int.to_string(t.0.1))
+}

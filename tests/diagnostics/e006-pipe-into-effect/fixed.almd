@@ -1,0 +1,6 @@
+effect fn load() -> Int = 7
+effect fn scale(n: Int) -> Int = n * 2
+
+effect fn pure_pipe() -> Int = 5 |> scale
+
+effect fn main() -> Unit = println(int.to_string(pure_pipe()!))

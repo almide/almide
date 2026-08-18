@@ -1,0 +1,7 @@
+// The function hides inside a tuple ELEMENT of the Set — the mention is
+// nested, and still unhashable.
+effect fn main() -> Unit = {
+  var s: Set[(Int, (Int) -> Int)] = set.new()
+  set.insert(s, (1, (x) => x))
+  println(int.to_string(set.len(s)))
+}

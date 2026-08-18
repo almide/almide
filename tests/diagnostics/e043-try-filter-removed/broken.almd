@@ -1,0 +1,6 @@
+// E043 variant: list.try_filter — the fallible filter is the core filter
+// with a `!` callback (ADR-0006).
+fn main() -> Unit = {
+  let r = list.try_filter(["a", "bb"], (s) => string.len(s) > 1)
+  println(int.to_string(list.len(r)))
+}

@@ -1,0 +1,3 @@
+// E028: a PURE fn main with a parameter is rejected the same way as the
+// effect form.
+fn main(n: Int) -> Unit = println(int.to_string(n))

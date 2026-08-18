@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var x = 0
+  x = 1
+  println(int.to_string(x))
+}

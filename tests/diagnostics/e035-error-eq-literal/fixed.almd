@@ -1,0 +1,12 @@
+import fs
+
+effect fn load(path: String) -> Result[String, String] = {
+  match fs.read_text_if_exists(path) {
+    ok(t) => ok(t ?? "default"),
+    err(e) => err(e),
+  }
+}
+
+effect fn main() -> Unit = {
+  println(load("/nonexistent") ?? "fallback")
+}

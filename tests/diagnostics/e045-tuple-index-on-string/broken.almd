@@ -1,0 +1,5 @@
+// E045 variant: positional .0 on a String — only tuples have .k access.
+fn main() -> Unit = {
+  let s = "ab"
+  println("${s.0}")
+}

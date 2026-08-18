@@ -1,0 +1,7 @@
+import fs
+
+effect fn load(path: String) -> Result[String, String] = fs.read_text(path)
+
+effect fn main() -> Unit = {
+  println(load("/nonexistent") ?? "fallback")
+}

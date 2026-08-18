@@ -1,0 +1,6 @@
+// An Option match covering only `some` — `none` is a case like any other.
+fn unwrap_or_zero(o: Int?) -> Int = match o {
+  some(x) => x,
+}
+
+fn main() -> Unit = println(int.to_string(unwrap_or_zero(none)))

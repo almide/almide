@@ -1,0 +1,4 @@
+fn f(o: Int?) -> Int = {
+  let q = o
+  q ?? 0
+}

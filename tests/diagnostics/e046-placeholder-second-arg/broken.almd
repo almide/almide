@@ -1,0 +1,4 @@
+// E046 variant: `_` as the SECOND argument.
+fn pair(a: Int, b: Int) -> Int = a * 10 + b
+
+fn main() -> Unit = println(int.to_string(pair(1, _)))

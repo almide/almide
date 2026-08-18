@@ -1,0 +1,7 @@
+// A float literal beyond f32's finite range at a Float32 type: check
+// accepted this while native rustc rejected the emitted `1e300f32`
+// (Wave 4 L7) — now a check-time error.
+fn main() -> Unit = {
+  let p: Float32 = 1.0e300
+  println("never")
+}

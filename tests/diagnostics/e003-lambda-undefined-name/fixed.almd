@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let offset = 10
+  let ys = list.map([1, 2], (x) => x + offset)
+  println(int.to_string(list.len(ys)))
+}

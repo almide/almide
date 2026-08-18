@@ -373,9 +373,26 @@ impl Checker {
             ast::Decl::TopLet { name, ty, value, mutable, .. } => {
                 self.check_decl_top_let(name, ty, value, *mutable);
             }
-            ast::Decl::Type { ty, .. } => {
+            ast::Decl::Type { name, ty, span, .. } => {
                 // Infer types for default value expressions in variant record fields
                 infer_default_exprs(self, ty);
+                // E029 payload sweep: queue the REGISTERED type so the
+                // post-solve unknown-name walk sees variant payload / field
+                // references (an undeclared payload type died at the native
+                // build with check silent).
+                let key = self
+                    .current_module_prefix
+                    .as_deref()
+                    .map(|pfx| sym(&format!("{}.{}", pfx, name)))
+                    .filter(|k| self.env.types.contains_key(k))
+                    .unwrap_or_else(|| sym(name));
+                if let Some(t) = self.env.types.get(&key).cloned() {
+                    self.deferred_unknown_type_checks.push((
+                        t,
+                        *span,
+                        format!("type declaration '{}'", name),
+                    ));
+                }
             }
             _ => {}
         }

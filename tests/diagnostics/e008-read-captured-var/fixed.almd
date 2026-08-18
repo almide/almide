@@ -1,0 +1,10 @@
+effect fn peek() -> Int = {
+  let base = 10
+  let (a, b) = fan {
+    base + 1
+    base + 2
+  }
+  a + b
+}
+
+effect fn main() -> Unit = println(int.to_string(peek()!))

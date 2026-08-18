@@ -1,0 +1,13 @@
+// E035: the UFCS spelling (`e.contains(...)`) of error-text branching.
+import fs
+
+effect fn load(path: String) -> Result[String, String] = {
+  match fs.read_text(path) {
+    ok(t) => ok(t),
+    err(e) => if e.contains("denied") then err("no access") else err(e),
+  }
+}
+
+effect fn main() -> Unit = {
+  println(load("/nonexistent") ?? "fallback")
+}

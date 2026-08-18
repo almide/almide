@@ -949,6 +949,8 @@ jobs:
 
       - name: _str twin ratchet (#1460 — the suffix bill is frozen while the protocol decision pends)
         run: bash scripts/check-str-twin-ratchet.sh
+      - name: diagnostic-code coverage floor (attack-list A1-3)
+        run: bash scripts/check-diagnostic-code-coverage.sh
 
       - name: Contract README up to date (regenerate and diff)
         run: |

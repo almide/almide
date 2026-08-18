@@ -1,0 +1,5 @@
+// E045 variant: positional .0 on a List — lists index with [i], not .k.
+fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println(int.to_string(xs.0))
+}

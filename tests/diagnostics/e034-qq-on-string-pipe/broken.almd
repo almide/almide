@@ -1,0 +1,6 @@
+// E034: `??` on a String flowing out of a PIPE — the operand type comes from
+// the pipeline, not a literal.
+fn main() -> Unit = {
+  let v = ("a" |> string.to_upper) ?? "z"
+  println(v)
+}

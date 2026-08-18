@@ -1,0 +1,5 @@
+// E041 variant: a fallible CALL interpolated directly — the segment's
+// Result was implicitly stripped under the 0.54 window.
+effect fn main() -> Unit = {
+  println("${int.parse("3")}")
+}

@@ -1,0 +1,6 @@
+fn sum_abs(n: Int) -> Int = {
+  let abs_n = int.abs(n)
+  abs_n
+}
+
+fn main() -> Unit = println(int.to_string(sum_abs(0 - 4)))

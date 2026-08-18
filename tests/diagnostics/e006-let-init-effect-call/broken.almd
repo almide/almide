@@ -1,0 +1,8 @@
+effect fn load() -> Int = 7
+
+fn pure_user() -> Int = {
+  let v = load()
+  v + 1
+}
+
+effect fn main() -> Unit = println(int.to_string(pure_user()))

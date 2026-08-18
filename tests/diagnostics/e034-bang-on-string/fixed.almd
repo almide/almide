@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let s = "hi"
+  println(s)
+}

@@ -1,0 +1,5 @@
+// E026: a String index inside an interpolation segment.
+fn main() -> Unit = {
+  let s = "abc"
+  println("first=${s[0]}")
+}

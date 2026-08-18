@@ -1,0 +1,3 @@
+expects_code = "E013"
+expects_error = "no field 'size'"
+hint_substring = "no fields"

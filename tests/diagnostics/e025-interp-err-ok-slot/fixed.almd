@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  let r: Result[String, Int] = err(1)
+  match r {
+    ok(s) => println(s),
+    err(n) => println(int.to_string(n)),
+  }
+}

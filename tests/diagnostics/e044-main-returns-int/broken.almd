@@ -1,0 +1,2 @@
+// E044 variant: fn main declared -> Int.
+fn main() -> Int = 42

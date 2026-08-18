@@ -1,0 +1,5 @@
+// E025 (#1115): `some(none)` in an interpolation keeps the INNER option
+// payload undecidable — same class as the bare-none segment.
+fn main() -> Unit = {
+  println("${some(none)}")
+}

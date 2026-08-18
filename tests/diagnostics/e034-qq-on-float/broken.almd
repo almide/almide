@@ -1,0 +1,5 @@
+// E034: `??` on a plain Float.
+fn main() -> Unit = {
+  let v = 1.5 ?? 0.0
+  println(float.to_string(v))
+}

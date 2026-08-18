@@ -1,0 +1,8 @@
+// E032: UFCS mutation through a FIELD of an immutable record binding.
+type Box = { items: List[Int] }
+
+fn main() -> Unit = {
+  let b = Box { items: [1] }
+  b.items.push(2)
+  println(int.to_string(list.len(b.items)))
+}

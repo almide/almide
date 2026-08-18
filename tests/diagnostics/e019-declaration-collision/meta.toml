@@ -1,0 +1,3 @@
+expects_code = "E019"
+expects_error = "ambiguous constructor 'Dup'"
+hint_substring = "Rename"

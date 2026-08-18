@@ -1,0 +1,5 @@
+type Rect = { w: Int, h: Int, tag: String }
+
+fn mk() -> Rect = Rect(w: 1, h: 2, tag: "r")
+
+fn main() -> Unit = println(mk().tag)

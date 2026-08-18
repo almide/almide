@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let a = "ab"
+  let b = "cd"
+  println(string.get(a + b, 2) ?? "?")
+}

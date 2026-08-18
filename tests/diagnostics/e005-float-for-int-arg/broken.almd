@@ -1,0 +1,1 @@
+fn main() -> Unit = println(string.repeat("z", 2.5))

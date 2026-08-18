@@ -1,0 +1,6 @@
+// The function hides inside a TUPLE used as the Map key.
+effect fn main() -> Unit = {
+  var m: Map[(Int, (Int) -> Int), Int] = map.new()
+  map.set(m, (1, (x) => x), 9)
+  println(int.to_string(map.len(m)))
+}

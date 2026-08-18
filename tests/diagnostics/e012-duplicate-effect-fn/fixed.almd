@@ -1,0 +1,5 @@
+effect fn run() -> Unit = println("a")
+
+effect fn run_b() -> Unit = println("b")
+
+effect fn main() -> Unit = run()

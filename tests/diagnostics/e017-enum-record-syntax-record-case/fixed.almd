@@ -1,0 +1,5 @@
+type Event = | Move { dx: Int } | Quit
+
+fn mk() -> Event = Move { dx: 3 }
+
+fn main() -> Unit = println("${mk()}")

@@ -1,0 +1,9 @@
+// Three definitions of one name: every re-definition after the first is
+// reported against the first site.
+fn ping() -> Int = 1
+
+fn ping() -> Int = 2
+
+fn ping() -> Int = 3
+
+fn main() -> Unit = println(int.to_string(ping()))

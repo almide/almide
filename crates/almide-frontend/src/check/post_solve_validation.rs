@@ -332,6 +332,26 @@ impl Checker {
                 Ty::Record { fields } | Ty::OpenRecord { fields } => {
                     for (_, f) in fields { collect_named(f, out); }
                 }
+                // A VARIANT's payload types are annotations too: an undeclared
+                // name in `type Tree = | Leaf(Payload)` flowed to codegen as a
+                // nonexistent Rust type (E0425) with check silent — the same
+                // acceptance-parity gap E029 closed for let/param/return
+                // positions (reference-port sweep finding, 2026-08-18). The
+                // variant's own name is in env.types by registration, so only
+                // dangling payload references survive the declared-name skip.
+                Ty::Variant { name: _, cases } => {
+                    for c in cases {
+                        match &c.payload {
+                            almide_lang::types::VariantPayload::Tuple(ts) => {
+                                for t in ts { collect_named(t, out); }
+                            }
+                            almide_lang::types::VariantPayload::Record(fs) => {
+                                for (_, t) in fs { collect_named(t, out); }
+                            }
+                            almide_lang::types::VariantPayload::Unit => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }

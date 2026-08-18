@@ -1,0 +1,3 @@
+expects_code = "E021"
+expects_error = "has named fields"
+hint_substring = "record pattern"

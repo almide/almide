@@ -1,0 +1,2 @@
+expects_code = "E016"
+expects_error = "`Set` element type cannot contain a function"

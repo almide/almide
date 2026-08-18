@@ -1,0 +1,3 @@
+fn gt2(n: Int) -> Bool = n > 2
+
+fn main() -> Unit = println(if gt2("5") then "y" else "n")

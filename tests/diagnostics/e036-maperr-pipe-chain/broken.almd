@@ -1,0 +1,5 @@
+// E036: map_err dropping the error inside a LONGER pipe chain.
+effect fn main() -> Unit = {
+  let n = int.parse("42") |> result.map((x) => x + 1) |> result.map_err((cause) => "bad input")!
+  println("${n}")
+}

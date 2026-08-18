@@ -1,0 +1,4 @@
+// Field access on a String: Almide values have no fields at all.
+fn size(s: String) -> Int = s.size
+
+fn main() -> Unit = println(int.to_string(size("abc")))

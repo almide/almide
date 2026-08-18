@@ -1,0 +1,7 @@
+fn clamp_lo(x: Int, lo: Int) -> Int = {
+  var v = x
+  if v < lo then { v = lo
+    v } else v
+}
+
+fn main() -> Unit = println(int.to_string(clamp_lo(1, 3)))

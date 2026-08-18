@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let n = int.parse("7") |> result.map_err((_) => "bad")!
+  println("${n}")
+}

@@ -1,0 +1,8 @@
+effect fn load() -> Int = 7
+
+effect fn decide(c: Bool) -> Int = match c {
+  true => load()!,
+  false => 0,
+}
+
+effect fn main() -> Unit = println(int.to_string(decide(true)!))

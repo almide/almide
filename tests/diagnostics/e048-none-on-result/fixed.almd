@@ -1,0 +1,6 @@
+fn f(r: Result[Int, String]) -> Int = match r {
+  err(_) => 0,
+  _ => 1,
+}
+
+fn main() -> Unit = println(int.to_string(f(ok(3))))

@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  let s = "abc"
+  match string.get(s, 0) {
+    some(c) => println(c),
+    none => println("empty"),
+  }
+}

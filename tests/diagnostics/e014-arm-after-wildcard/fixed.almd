@@ -1,0 +1,6 @@
+fn describe(n: Int) -> String = match n {
+  0 => "zero",
+  _ => "any",
+}
+
+fn main() -> Unit = println(describe(0))

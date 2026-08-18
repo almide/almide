@@ -1,0 +1,6 @@
+// An unknown field on a CLOSED record: the roster is the hint.
+type Cfg = { name: String, port: Int }
+
+fn mk() -> Cfg = Cfg(name: "a", portt: 1)
+
+fn main() -> Unit = println(mk().name)

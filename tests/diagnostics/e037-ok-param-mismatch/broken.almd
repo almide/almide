@@ -1,0 +1,6 @@
+// E037: same Result container, different OK parameter.
+fn main() -> Unit = {
+  let a: Result[Int, String] = ok(1)
+  let b: Result[String, String] = ok("1")
+  println("${a == b}")
+}

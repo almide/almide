@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let a: Result[Int, String] = ok(1)
+  let b: Result[Int, String] = ok(1)
+  println("${a == b}")
+}

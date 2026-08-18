@@ -1,0 +1,3 @@
+expects_code = "E013"
+expects_error = "no field 'cout'"
+hint_substring = "Did you mean"

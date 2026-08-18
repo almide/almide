@@ -1,0 +1,2 @@
+expects_code = "E021"
+expects_error = "given more than once"

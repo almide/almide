@@ -1,0 +1,3 @@
+expects_code = "E046"
+expects_error = "placeholder"
+hint_substring = "lambda"

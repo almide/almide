@@ -1,0 +1,7 @@
+// E034: `!` on a RECORD value — user types have no error channel either.
+type P = { v: Int }
+
+effect fn main() -> Unit = {
+  let p = P { v: 1 }!
+  println(int.to_string(p.v))
+}

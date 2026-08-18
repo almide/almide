@@ -1,0 +1,5 @@
+type Payload = { n: Int }
+
+type Tree = | Leaf(Payload) | Empty
+
+fn main() -> Unit = println("x")
