@@ -1,0 +1,6 @@
+fn two(a: Int, b: Int) -> Int = a + b
+
+fn main() -> Unit = println(match 1 {
+  1 => int.to_string(two(5, 6)),
+  _ => "rest",
+})

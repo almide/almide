@@ -80,8 +80,11 @@ if [ "$REPORTING" -eq 0 ]; then
   echo "$LINE" >&2
   echo '```'; echo "$LINE"; echo '```'
   echo ""
-  echo "No shard reported: every runner was reclaimed before its campaign could upload."
-  exit 0
+  echo "No shard reported: every runner was reclaimed before its campaign could"
+  echo "upload. A night with zero evidence cannot be green — that would be the"
+  echo "vacuous pass (#976 class) — so this is an INFRA failure, distinct from"
+  echo "a finding."
+  exit 1
 fi
 
 COMPLETED=0

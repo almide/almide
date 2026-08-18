@@ -1,0 +1,2 @@
+expects_code = "E019"
+expects_error = "declared in A and B"

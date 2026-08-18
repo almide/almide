@@ -1,0 +1,24 @@
+// @contract: C-295
+// The #610 refinement-backstop regression (grain/koka port findings,
+// 2026-08-17): a match whose arms are all nested box patterns — two-deep
+// list-shape rows with no flat catch-all — passed the checker as exhaustive
+// but died at the native build as rustc E0004: the unbox rewrite lowers a
+// nested pattern to a `matches!` shape-guard, and guarded arms do not count
+// toward rustc's exhaustiveness. The emitter now appends a dead
+// `_ => unreachable!()` backstop when a guard-lowered arm set has no
+// unguarded irrefutable row. (The single-ctor payload shape
+// `FCons(Node(s, _), _)` pins the same path but sits outside the wasm value
+// subset, so this fixture rides the list shape.)
+type IL = | INil | ICons(Int, IL)
+
+fn second_or(l: IL) -> Int = match l {
+  ICons(_, ICons(y, _)) => y,
+  ICons(x, INil) => x,
+  INil => 0 - 1,
+}
+
+fn main() -> Unit = {
+  println(int.to_string(second_or(ICons(7, ICons(8, ICons(9, INil))))))
+  println(int.to_string(second_or(ICons(7, INil))))
+  println(int.to_string(second_or(INil)))
+}

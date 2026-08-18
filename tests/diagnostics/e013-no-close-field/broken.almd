@@ -1,0 +1,6 @@
+type P = { alpha: Int, beta: Int }
+
+fn main() -> Unit = {
+  let p = P(alpha: 1, beta: 2)
+  println(int.to_string(p.zzz))
+}

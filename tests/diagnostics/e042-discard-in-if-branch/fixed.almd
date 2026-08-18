@@ -1,0 +1,6 @@
+effect fn ping() -> Result[Unit, String] = ok(())
+
+effect fn main() -> Unit = {
+  if 1 > 0 then { let _ = ping() } else { println("no") }
+  println("done")
+}

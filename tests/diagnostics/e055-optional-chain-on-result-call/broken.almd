@@ -1,0 +1,6 @@
+// E055 variant: `?.` directly on a Result-returning call.
+type P = { v: Int }
+
+fn get() -> Result[P, String] = ok(P { v: 3 })
+
+fn f() -> Int? = get()?.v

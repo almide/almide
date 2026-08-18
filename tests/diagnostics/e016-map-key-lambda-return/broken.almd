@@ -1,0 +1,7 @@
+// The offending map is a LAMBDA's return value.
+fn mk() -> Map[(Int) -> Int, Int] = {
+  let build = () => [(x) => x: 1]
+  build()
+}
+
+fn main() -> Unit = println(int.to_string(map.len(mk())))

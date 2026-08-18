@@ -1,0 +1,5 @@
+// Unknown type on a VAR annotation.
+fn main() -> Unit = {
+  var acc: Tally = 0
+  println("x")
+}

@@ -1,0 +1,6 @@
+// Positional args to a RECORD case, in ARGUMENT position.
+type Ev = | Click { x: Int, y: Int } | Quit
+
+fn show(e: Ev) -> String = match e { Click { x, y: _ } => int.to_string(x), Quit => "q" }
+
+fn main() -> Unit = println(show(Click(1, 2)))

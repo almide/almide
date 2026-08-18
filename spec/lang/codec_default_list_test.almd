@@ -1,0 +1,38 @@
+import json
+
+// #1520: a Codec field with a List[scalar] DEFAULT. The derive used to emit
+// `__decode_default_value` — a helper no runtime provides — so check was
+// green and the native build died as rustc E0425. The concrete
+// `__decode_default_list_*` family now serves List[String/Int/Float/Bool]
+// defaults; scalar and Option defaults were already covered. Exotic default
+// types remain unsupported (documented in the CHEATSHEET).
+type Dep: Codec = { name: String, tags: List[String] = [] }
+
+type Counts: Codec = { label: String, ns: List[Int] = [1, 2] }
+
+test "encode fills the default list" {
+  assert_eq(json.stringify(Dep.encode(Dep { name: "x" })), "{\"name\":\"x\",\"tags\":[]}")
+}
+
+test "decode: missing key takes the default" {
+  let d = Dep.decode(json.parse("{\"name\":\"y\"}")!)!
+  assert_eq(d.name, "y")
+  assert_eq(list.len(d.tags), 0)
+}
+
+test "decode: present key overrides the default" {
+  let e = Dep.decode(json.parse("{\"name\":\"z\",\"tags\":[\"a\",\"b\"]}")!)!
+  assert_eq(list.join(e.tags, "+"), "a+b")
+}
+
+test "decode: null key takes the default" {
+  let n = Dep.decode(json.parse("{\"name\":\"n\",\"tags\":null}")!)!
+  assert_eq(list.len(n.tags), 0)
+}
+
+test "int-list default round-trips" {
+  let c = Counts.decode(json.parse("{\"label\":\"k\"}")!)!
+  assert_eq(list.len(c.ns), 2)
+  let over = Counts.decode(json.parse("{\"label\":\"k\",\"ns\":[9]}")!)!
+  assert_eq(list.len(over.ns), 1)
+}

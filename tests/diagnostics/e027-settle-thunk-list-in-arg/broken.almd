@@ -1,0 +1,4 @@
+// E027: the removed fan.settle thunk-list spelling, nested in an argument.
+effect fn main() -> Unit = {
+  println("${list.len(fan.settle([() => 1, () => 2]))}")
+}

@@ -1,0 +1,6 @@
+// E049 variant: the let-in buried in an if arm's block.
+fn f(n: Int) -> Int = if n > 0 then {
+  let m = n * 2 in m + 1
+} else 0
+
+fn main() -> Unit = println(int.to_string(f(2)))

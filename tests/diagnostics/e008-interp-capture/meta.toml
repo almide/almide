@@ -1,0 +1,2 @@
+expects_code = "E008"
+expects_error = "capture mutable"

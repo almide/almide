@@ -1,0 +1,2 @@
+expects_code = "E001"
+expects_error = "match guard"

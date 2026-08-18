@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var v = mystery_seed()
+  println(int.to_string(v))
+}

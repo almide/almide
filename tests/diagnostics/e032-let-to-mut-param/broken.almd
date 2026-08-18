@@ -1,0 +1,7 @@
+// E032: an immutable `let` binding passed straight to a `mut` parameter
+// (module spelling — the UFCS twin is e032-ufcs-mut-receiver).
+fn main() -> Unit = {
+  let xs: List[Int] = [1]
+  list.push(xs, 2)
+  println(int.to_string(list.len(xs)))
+}

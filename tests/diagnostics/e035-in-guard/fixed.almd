@@ -1,0 +1,8 @@
+type Fail = | Boom | Other
+
+effect fn risky() -> Result[Int, Fail] = err(Boom)
+
+effect fn main() -> Unit = {
+  let r = risky()
+  println(match r { err(Boom) => "known", err(_) => "other", ok(_) => "fine" })
+}

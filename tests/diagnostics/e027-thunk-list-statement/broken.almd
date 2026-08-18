@@ -1,0 +1,5 @@
+// The removed thunk-list spelling in bare STATEMENT position.
+effect fn main() -> Unit = {
+  fan.race([() => 1, () => 2])
+  println("done")
+}

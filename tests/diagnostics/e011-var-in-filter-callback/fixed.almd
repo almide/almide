@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let xs = list.filter([1, 2], (n) => n > 1)
+  println(int.to_string(list.len(xs)))
+}

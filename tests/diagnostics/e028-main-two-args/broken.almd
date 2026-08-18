@@ -1,0 +1,1 @@
+fn main(a: Int, b: String) -> Unit = println(b)

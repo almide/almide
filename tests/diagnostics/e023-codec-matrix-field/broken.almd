@@ -1,0 +1,7 @@
+// A Matrix field on a Codec record: the derive has no Matrix arm — reject
+// at declaration instead of emitting invalid codegen.
+import json
+
+type T: Codec = { m: Matrix }
+
+effect fn main() -> Unit = println("x")

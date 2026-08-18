@@ -1,0 +1,6 @@
+type Widget = { id: Int }
+
+fn main() -> Unit = {
+  let x: Widget = Widget { id: 1 }
+  println(int.to_string(x.id))
+}

@@ -1,0 +1,4 @@
+// Codec with an Option-of-List-of-tuples field.
+type Doc: Codec = { rows: List[(Int, Int)]? }
+
+fn main() -> Unit = println("ok")

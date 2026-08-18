@@ -1,0 +1,7 @@
+// Matching an Int against literals alone can never be exhaustive.
+fn name(n: Int) -> String = match n {
+  0 => "zero",
+  1 => "one",
+}
+
+fn main() -> Unit = println(name(2))

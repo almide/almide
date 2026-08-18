@@ -1,0 +1,5 @@
+// E047 variant: a UTF-16 surrogate is not a Unicode scalar value.
+fn main() -> Unit = {
+  let ch = "\u{D800}"
+  println(ch)
+}

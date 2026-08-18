@@ -1,0 +1,10 @@
+type FetchErr = | Timeout | Hard(String)
+
+effect fn fetch() -> Result[Int, FetchErr] = err(Hard("boom"))
+
+effect fn main() -> Unit = {
+  match fetch() {
+    ok(n) => println(int.to_string(n)),
+    err(e) => println(match e { Timeout => "soft", Hard(_) => "hard" }),
+  }
+}

@@ -1,0 +1,7 @@
+// A List of FUNCTION values in a Codec field: unencodable element type,
+// rejected at declaration (a fn has no serialized form).
+import json
+
+type T: Codec = { fs: List[(Int) -> Int] }
+
+effect fn main() -> Unit = println("x")

@@ -1,0 +1,5 @@
+import json
+
+type T: Codec = { s: List[String]? = none }
+
+effect fn main() -> Unit = println("x")

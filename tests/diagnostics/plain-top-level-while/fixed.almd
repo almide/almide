@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  var i = 0
+  while i < 1 {
+    println("loop")
+    i = i + 1
+  }
+}

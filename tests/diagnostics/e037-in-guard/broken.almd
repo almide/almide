@@ -1,0 +1,6 @@
+// E037 raised from a match GUARD comparing two concrete mismatched Results.
+fn main() -> Unit = {
+  let a: Result[Int, String] = ok(1)
+  let b: Result[String, String] = ok("one")
+  println(match 0 { _ if a == b => "eq", _ => "ne" })
+}

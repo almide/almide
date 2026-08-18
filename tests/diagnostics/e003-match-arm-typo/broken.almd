@@ -1,0 +1,6 @@
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(value) => int.to_string(valeu),
+  err(e) => e,
+}
+
+fn main() -> Unit = println(show(ok(1)))

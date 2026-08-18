@@ -1,0 +1,9 @@
+// Mutating an outer `var` inside a lambda is an effect the enclosing PURE
+// fn cannot host — the closure escapes the pure-evaluation contract.
+fn total(xs: List[Int]) -> Int = {
+  var sum = 0
+  list.each(xs, (x) => { sum = sum + x })
+  sum
+}
+
+fn main() -> Unit = println(int.to_string(total([1, 2, 3])))

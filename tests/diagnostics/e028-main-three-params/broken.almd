@@ -1,0 +1,2 @@
+// main with THREE parameters.
+effect fn main(a: Int, b: Int, c: Int) -> Unit = println("hi")

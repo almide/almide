@@ -1,0 +1,6 @@
+type Box = { value: Int }
+
+fn main() -> Unit = {
+  let b = Box { value: 7 }
+  println(int.to_string(b.value))
+}

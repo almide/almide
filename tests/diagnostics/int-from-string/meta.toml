@@ -1,2 +1,3 @@
 expects_code = "E002"
 expects_error = "undefined function 'parseInt'"
+hint_substring = "Check the function name"

@@ -1,0 +1,2 @@
+expects_code = "E057"
+expects_error = "has no body"

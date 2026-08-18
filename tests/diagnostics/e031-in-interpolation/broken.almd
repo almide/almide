@@ -1,0 +1,4 @@
+// A retired `..=` INSIDE an interpolation segment: the segment sub-parser's
+// recoverable diagnostics were dropped on the Ok path, so this parsed and
+// RAN where the direct spelling errors (sweep 2026-08-18, #1521).
+fn main() -> Unit = println("${list.len(1..=4)}")

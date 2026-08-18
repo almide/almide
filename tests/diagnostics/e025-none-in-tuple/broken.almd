@@ -1,0 +1,2 @@
+// A bare `none` inside a TUPLE, never pinned.
+fn main() -> Unit = println("${(1, none)}")

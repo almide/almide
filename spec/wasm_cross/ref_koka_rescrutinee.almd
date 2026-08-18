@@ -1,0 +1,30 @@
+// @contract: C-292
+// koka parc15/parc20: re-match the SAME scrutinee inside an arm (drop once,
+// not twice), and rebuild a constructor consuming the scrutinee while a
+// binding from it is still live (payload must be duplicated first).
+type L = | Nil | Cons(String, List[String])
+
+fn twice(xs: L, y: String) -> String = match xs {
+  Cons(x, _) => match xs {
+    Cons(_, _) => x,
+    Nil => "inner-nil",
+  },
+  Nil => y,
+}
+
+fn rebuild(xs: L) -> L = match xs {
+  Cons(x, rest) => Cons(x, [x] + rest),
+  Nil => Nil,
+}
+
+fn show(l: L) -> String = match l {
+  Cons(h, t) => "${h}:[${list.join(t, ",")}]",
+  Nil => "nil",
+}
+
+fn main() -> Unit = {
+  println(twice(Cons(string.repeat("ab", 2), ["t1", "t2"]), "fallback"))
+  println(twice(Nil, string.repeat("fb", 2)))
+  println(show(rebuild(Cons("h", ["a", "b"]))))
+  println(show(rebuild(Nil)))
+}

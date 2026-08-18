@@ -1,0 +1,7 @@
+// A VAR initializer beyond f32 at a Float32 annotation. (Branch-result
+// positions escape the range check; recorded as a wave-2 sweep finding.)
+fn main() -> Unit = {
+  var p: Float32 = 1.0e300
+  p = p
+  println("never")
+}

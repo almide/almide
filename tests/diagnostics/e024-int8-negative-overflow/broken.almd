@@ -1,0 +1,5 @@
+// An Int8 literal below the negative bound (unary-minus literal form).
+fn main() -> Unit = {
+  let b: Int8 = -200
+  println("never")
+}

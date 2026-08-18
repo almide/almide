@@ -1,0 +1,6 @@
+type Missing = { v: Int }
+
+fn main() -> Unit = {
+  let p: (Missing, Int) = (Missing { v: 0 }, 1)
+  println(int.to_string(match p { (m, n) => m.v + n }))
+}

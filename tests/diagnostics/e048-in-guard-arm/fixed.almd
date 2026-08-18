@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let r: Result[Int, String] = ok(2)
+  println(match r { ok(v) if v > 1 => "big", ok(v) => int.to_string(v), err(_) => "e" })
+}

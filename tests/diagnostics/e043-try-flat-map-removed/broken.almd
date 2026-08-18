@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let r = list.try_flat_map([1, 2], (n) => [n, n])
+  println(int.to_string(list.len([1])))
+}

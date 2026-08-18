@@ -1,0 +1,7 @@
+// The enum HAS a record case; the hint must steer to constructing the
+// case, not the type.
+type Event = | Move { dx: Int } | Quit
+
+fn mk() -> Event = Event { dx: 3 }
+
+fn main() -> Unit = println("${mk()}")

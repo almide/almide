@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let i = 0
+  while i < 3 { i = i + 1 }
+  println(int.to_string(i))
+}

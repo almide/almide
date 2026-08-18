@@ -1,0 +1,5 @@
+// A bare `none` produced by a lambda whose slot is never pinned.
+fn main() -> Unit = {
+  let mk = () => none
+  println("${mk()}")
+}

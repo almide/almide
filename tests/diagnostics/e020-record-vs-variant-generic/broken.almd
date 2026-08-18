@@ -1,0 +1,7 @@
+type Box[T] = { value: T }
+type Box2 = | Boxed(Int)
+type Box2X = { other: Int }
+
+type Box2 = { conflict: Int }
+
+fn main() -> Unit = println("x")

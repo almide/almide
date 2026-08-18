@@ -1,0 +1,9 @@
+// A bare binding pattern covers everything; the case arm below is dead.
+type Color = | Red | Green
+
+fn label(c: Color) -> String = match c {
+  other => "some",
+  Red => "r",
+}
+
+fn main() -> Unit = println(label(Red))

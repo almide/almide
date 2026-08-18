@@ -1,0 +1,7 @@
+// E037: `==` with a Result on one side and its plain payload type on the
+// other — the carrier never equals the payload.
+fn helper() -> Result[Int, String] = ok(0)
+
+fn main() -> Unit = {
+  if helper() == 0 then println("eq") else println("ne")
+}

@@ -1,0 +1,5 @@
+fn helper() -> Result[Int, String] = ok(0)
+
+fn main() -> Unit = {
+  if (helper() ?? -1) == 0 then println("eq") else println("ne")
+}

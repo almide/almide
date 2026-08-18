@@ -1,0 +1,5 @@
+// A user fn whose name and signature mirror stdlib list.contains: the
+// warning steers to delegation instead of a drifting local copy.
+fn contains(xs: List[Int], target: Int) -> Bool = false
+
+fn main() -> Unit = println(if contains([1], 1) then "y" else "n")

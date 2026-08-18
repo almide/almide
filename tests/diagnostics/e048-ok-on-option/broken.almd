@@ -1,0 +1,7 @@
+// E048 variant: `ok(..)` used to match an Option subject.
+fn f(o: Int?) -> Int = match o {
+  ok(n) => n,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(some(3))))

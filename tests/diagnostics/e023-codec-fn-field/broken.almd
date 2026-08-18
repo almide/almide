@@ -1,0 +1,4 @@
+// Codec with a FN-typed field.
+type Doc: Codec = { hook: (Int) -> Int }
+
+fn main() -> Unit = println("ok")

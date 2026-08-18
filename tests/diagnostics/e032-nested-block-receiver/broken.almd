@@ -1,0 +1,6 @@
+// E032 with the receiver read through a nested block.
+fn main() -> Unit = {
+  let buf = bytes.new(4)
+  { bytes.set_at(buf, 0, 7) }
+  println(int.to_string(bytes.len(buf)))
+}

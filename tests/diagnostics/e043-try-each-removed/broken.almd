@@ -1,0 +1,7 @@
+// E043 variant: list.try_each — the core `each` is fallibility-polymorphic,
+// instantiated by the callback's `!` (ADR-0006).
+effect fn out(s: String) -> Result[Unit, String] = ok(println(s))
+
+effect fn main() -> Unit = {
+  list.try_each(["a", "b"], (s) => out(s)!)!
+}

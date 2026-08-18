@@ -188,6 +188,11 @@ pub(crate) fn list_heap_call_name(
     // is the all-Int/Bool-field record-key twin, gating `_srec`.
     map_key_nullary: bool,
     map_key_scalar_rec: bool,
+    // Is `list.enumerate`'s source element a RICH named variant the drop
+    // generator covers? Computed by the caller (LowerCtx has the layouts;
+    // this router is a free fn) — gates `list.enumerate_h` (#1496); any
+    // other rich element keeps the honest `_x` wall.
+    enum_rich_variant: bool,
 ) -> String {
     // A MONO-SPECIALIZED stdlib call name (`result.or_else__Int_String_String` —
     // the optimizer suffixes a generic intrinsic's instantiation) must route by
@@ -204,7 +209,7 @@ pub(crate) fn list_heap_call_name(
     // heap-accumulator `fold` guard fires BEFORE the per-module tables (a
     // scalar-acc fold over heap elements falls through to `list.fold_str`).
     let routed = list_heap_call_name_special_cases(module, func, arg_tys, result_ty).or_else(
-        || list_heap_call_name_module_routed(module, func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec),
+        || list_heap_call_name_module_routed(module, func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec, enum_rich_variant),
     );
     routed.unwrap_or_else(|| format!("{module}.{func}"))
 }
@@ -297,9 +302,10 @@ fn list_heap_call_name_module_routed(
     result_ty: &Ty,
     map_key_nullary: bool,
     map_key_scalar_rec: bool,
+    enum_rich_variant: bool,
 ) -> Option<String> {
     match module {
-        "list" => list_call_name(func, arg_tys, result_ty),
+        "list" => list_call_name(func, arg_tys, result_ty, enum_rich_variant),
         "set" => set_call_name(func, arg_tys, result_ty),
         "map" => map_call_name(func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec),
         "result" | "option" if func == "unwrap_or" => unwrap_or_call_name(module, arg_tys),

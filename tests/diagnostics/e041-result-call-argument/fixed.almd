@@ -1,0 +1,5 @@
+// E041 variant: the Result-valued binding read inside a call ARGUMENT.
+effect fn main() -> Unit = {
+  let x = int.parse("2")!
+  println(int.to_string(x + 1))
+}

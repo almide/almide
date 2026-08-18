@@ -34,6 +34,12 @@ const FIXTURE_ALLOWLIST: &[&str] = &[
     // E033 (opaque-type construction outside its defining module) needs a
     // two-module import graph the single-file harness can't express.
     "E033",
+    // E054 (fmt verification failed) fires on an INTERNAL formatter defect —
+    // no committed source file can (or should) trigger it deliberately, and
+    // the harness runs `almide check`, which never formats. The verifier
+    // logic is pinned by crates/almide-tools/tests/fmt_corpus_test.rs, which
+    // feeds corrupted outputs straight into verify_format (#1464).
+    "E054",
 ];
 
 fn repo_root() -> PathBuf {
@@ -154,6 +160,56 @@ fn diagnostic_fixture_and_doc_coverage_report() {
             missing_fixture, missing_doc
         );
     }
+}
+
+/// #1486: every diagnostic doc declares its FIX-IT VERDICT — `mechanical`
+/// (an unattended fixer may apply it), `conditional` (suggested, needs
+/// review), or `not-fixable`. The verdict is the third piece of the
+/// per-code checklist this gate already enforces (fixture + doc), so a new
+/// code cannot ship without stating where it sits on the applicability
+/// ladder. The soft report below it names the mechanical-verdict codes
+/// still lacking a `with_machine_fix` emitter — the backlog #1486 tracks.
+#[test]
+fn every_diagnostic_doc_declares_a_fix_it_verdict() {
+    let root = repo_root().join("docs/diagnostics");
+    let mut missing: Vec<String> = Vec::new();
+    let mut mechanical: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&root).expect("read docs/diagnostics").flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        if !name.starts_with('E') || !name.ends_with(".md") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        if !text.contains("## Fix-it verdict") {
+            missing.push(name.to_string());
+            continue;
+        }
+        if text.contains("**mechanical**") {
+            mechanical.push(name.trim_end_matches(".md").to_string());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "diagnostic docs without a '## Fix-it verdict' section: {:?}",
+        missing
+    );
+    // Soft report: mechanical verdicts not yet wired to with_machine_fix.
+    let machine_coded = machine_fix_codes();
+    let backlog: Vec<&String> =
+        mechanical.iter().filter(|c| !machine_coded.contains(c.as_str())).collect();
+    eprintln!(
+        "fix-it backlog: {} mechanical-verdict code(s) without with_machine_fix: {:?}",
+        backlog.len(),
+        backlog
+    );
+}
+
+/// Codes with a `with_machine_fix` emitter under `crates/`.
+fn machine_fix_codes() -> std::collections::BTreeSet<&'static str> {
+    // Kept as a literal so the backlog report needs no source scan; update
+    // when converting a code (the conversion PR flips its entry here).
+    ["E013", "E031", "E049", "E052"].into_iter().collect()
 }
 
 #[test]

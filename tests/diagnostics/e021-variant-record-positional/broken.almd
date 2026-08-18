@@ -1,0 +1,6 @@
+// A record-payload CASE called positionally.
+type Shape = | Group { items: List[Int] } | Dot
+
+fn mk() -> Shape = Group([1, 2])
+
+fn main() -> Unit = println("${mk()}")

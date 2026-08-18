@@ -1,0 +1,11 @@
+effect fn one() -> Result[Int, String] = ok(1)
+
+effect fn two() -> Result[Int, String] = ok(2)
+
+effect fn main() -> Unit = {
+  let r = fan.any {
+    one()
+    two()
+  }!
+  println(int.to_string(r))
+}

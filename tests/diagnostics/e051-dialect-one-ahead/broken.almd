@@ -1,0 +1,3 @@
+@dialect(4)
+
+fn main() -> Unit = println("hi")

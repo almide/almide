@@ -1,0 +1,7 @@
+// A specific pattern below `_` is dead.
+fn describe(n: Int) -> String = match n {
+  _ => "any",
+  0 => "zero",
+}
+
+fn main() -> Unit = println(describe(0))

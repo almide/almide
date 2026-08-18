@@ -263,6 +263,47 @@ impl Checker {
     /// E009: reassigning an immutable `let` binding (or a function
     /// parameter). Verbatim text move out of [`Self::check_stmt_assign`].
     fn check_stmt_assign_immutable(&mut self, name: &Sym) {
+        let known_top_let = self.env.top_lets.contains_key(&sym(name))
+            || self
+                .current_module_prefix
+                .as_deref()
+                .is_some_and(|pfx| self.env.top_lets.contains_key(&sym(&format!("{}.{}", pfx, name))));
+        // A MODULE-LEVEL `let` lives in env.top_lets, not the var scopes, so
+        // the local lookup below never saw it and reassignment from a fn body
+        // passed silently (diagnostic sweep 2026-08-18; a `var` top-let is in
+        // mutable_vars via check_decl_top_let and stays assignable).
+        if self.env.lookup_var(name).is_none()
+            && known_top_let
+            && !self.env.mutable_vars.contains(&sym(name))
+        {
+            let mut diag = crate::check::err(
+                format!("cannot reassign immutable binding '{}'", name),
+                format!("'{0}' is a module-level `let`. Declare it `var {0} = ...` to make it assignable", name),
+                format!("{} = ...", name),
+            ).with_code("E009");
+            if let Some(&(line, col)) = self.env.var_decl_locs.get(&sym(name)) {
+                diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", name));
+            }
+            self.emit(diag);
+            return;
+        }
+        // No binding at all: the target is neither a local nor a top-let.
+        // Silent before (and the lowering's error-recovery VarId(0) would
+        // alias the first allocated local), reachable for any spelling now
+        // that uppercase targets parse as assignments.
+        if self.env.lookup_var(name).is_none() && !known_top_let {
+            let hint = if self.env.types.contains_key(&sym(name)) {
+                format!("'{}' names a TYPE — a type is not an assignable binding. Declare a variable: `var {0}_v = ...`", name)
+            } else {
+                format!("No `let`/`var` named '{}' is in scope to assign to. Declare it first: `var {0} = ...`", name)
+            };
+            self.emit(crate::check::err(
+                format!("cannot assign to undefined binding '{}'", name),
+                hint,
+                format!("{} = ...", name),
+            ).with_code("E003"));
+            return;
+        }
         if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
             let is_param = self.env.param_vars.contains(&sym(name));
             let hint = if is_param {
@@ -481,6 +522,15 @@ impl Checker {
     fn bind_pattern_tuple(&mut self, elements: &[ast::Pattern], ty: &Ty) {
         let resolved = resolve_ty(ty, &self.uf);
         if let Ty::Tuple(tys) = &resolved {
+            // Arity must match: `let (a, b, c) = (1, 2)` used to bind the
+            // overflow element as Unknown silently (sweep 2026-08-18).
+            if tys.len() != elements.len() {
+                self.emit(crate::check::err(
+                    format!("tuple pattern has {} element(s) but the value has {}", elements.len(), tys.len()),
+                    "Match the pattern's shape to the tuple's arity",
+                    "tuple destructure",
+                ).with_code("E001"));
+            }
             for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); }
         } else if super::types::is_inference_var(&resolved).is_some() {
             // Type is an unresolved inference var (e.g., lambda parameter).
@@ -491,6 +541,17 @@ impl Checker {
             self.constrain(resolved, Ty::Tuple(elem_vars.clone()), "tuple destructure");
             for (e, ev) in elements.iter().zip(elem_vars.iter()) { self.bind_pattern(e, ev); }
         } else {
+            // A CONCRETE non-tuple value under a tuple pattern is a type
+            // error, not a lenient bind: `let (a, b) = 3` bound a and b as
+            // Unknown silently (sweep 2026-08-18). Unknown stays lenient —
+            // upstream recovery owns that case.
+            if !matches!(resolved, Ty::Unknown) {
+                self.emit(crate::check::err(
+                    format!("tuple pattern requires a tuple value, got {}", resolved.display()),
+                    "Destructure only tuples: `let (a, b) = pair`",
+                    "tuple destructure",
+                ).with_code("E001"));
+            }
             for e in elements { self.bind_pattern(e, &Ty::Unknown); }
         }
     }

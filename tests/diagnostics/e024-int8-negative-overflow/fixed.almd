@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let b: Int8 = -100
+  println(int.to_string(int.from_int8(b)))
+}

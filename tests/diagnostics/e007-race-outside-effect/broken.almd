@@ -1,0 +1,3 @@
+fn fastest() -> Int = fan.race([3, 5], (x) => ok(x)) ?? 0
+
+effect fn main() -> Unit = println(int.to_string(fastest()))

@@ -22,40 +22,77 @@ pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
     fetch_dep_with_lock(dep, None)
 }
 
+/// Populate cache dir `dir` atomically: run `clone` against a fresh sibling
+/// temp dir, then rename it into place. Callers may race — `almide test`
+/// compiles test files on parallel threads and every thread resolves deps,
+/// and two `almide` processes can share `~/.almide` — so the old
+/// "`dir.exists()` then clone into `dir`" let several clones write into the
+/// same directory (`fatal: cannot copy ... File exists`) and left a
+/// half-populated dir that later runs took for a finished cache. With the
+/// rename, `dir` exists only when it is complete; the first rename wins and
+/// the losers discard their own copy.
+fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
+    if dir.exists() {
+        return Ok(());
+    }
+    let parent = dir.parent().ok_or_else(|| "cache dir has no parent".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    let leaf = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = parent.join(format!(".{}.tmp-{}-{}", leaf, std::process::id(), seq));
+    let _ = std::fs::remove_dir_all(&tmp);
+    if let Err(e) = clone(&tmp) {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(e);
+    }
+    match std::fs::rename(&tmp, dir) {
+        Ok(()) => Ok(()),
+        Err(_) if dir.exists() => {
+            // Another clone finished first; ours is redundant.
+            let _ = std::fs::remove_dir_all(&tmp);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&tmp);
+            Err(format!("Failed to move fetched dependency into cache: {}", e))
+        }
+    }
+}
+
 /// `fetch_dep_with_lock`'s locked-commit path: clone into a commit-keyed
-/// cache dir and checkout the exact commit. Extracted verbatim.
+/// cache dir and checkout the exact commit.
 fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String> {
     let cache = cache_dir();
     let dir = cache.join(&dep.name).join(&commit[..12.min(commit.len())]);
     if dir.exists() {
         return Ok(dir);
     }
-    // Clone and checkout exact commit
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
     err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]));
-    let output = Command::new("git")
-        .arg("clone").arg(&dep.git).arg(&dir)
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-    if !output.status.success() {
-        let _ = std::fs::remove_dir_all(&dir);
-        return Err(format!("Failed to fetch {}: {}", dep.name, String::from_utf8_lossy(&output.stderr)));
-    }
-    let checkout = Command::new("git")
-        .arg("-C").arg(&dir)
-        .arg("checkout").arg(commit)
-        .output()
-        .map_err(|e| format!("Failed to checkout commit: {}", e))?;
-    if !checkout.status.success() {
-        let _ = std::fs::remove_dir_all(&dir);
-        return Err(format!("Failed to checkout {} at {}: {}", dep.name, commit, String::from_utf8_lossy(&checkout.stderr)));
-    }
+    populate_cache_dir(&dir, |tmp| {
+        let output = Command::new("git")
+            .arg("clone").arg(&dep.git).arg(tmp)
+            .output()
+            .map_err(|e| format!("Failed to run git: {}", e))?;
+        if !output.status.success() {
+            return Err(format!("Failed to fetch {}: {}", dep.name, String::from_utf8_lossy(&output.stderr)));
+        }
+        let checkout = Command::new("git")
+            .arg("-C").arg(tmp)
+            .arg("checkout").arg(commit)
+            .output()
+            .map_err(|e| format!("Failed to checkout commit: {}", e))?;
+        if !checkout.status.success() {
+            return Err(format!("Failed to checkout {} at {}: {}", dep.name, commit, String::from_utf8_lossy(&checkout.stderr)));
+        }
+        Ok(())
+    })?;
     Ok(dir)
 }
 
 /// `fetch_dep_with_lock`'s ref-based path (tag/branch, no lock pin): clone
-/// into a ref-keyed cache dir. Extracted verbatim.
+/// into a ref-keyed cache dir.
 fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str) -> Result<PathBuf, String> {
     let cache = cache_dir();
     let dep_dir = cache.join(&dep.name).join(ref_name);
@@ -64,31 +101,30 @@ fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str) -> Result<PathBuf, String>
         return Ok(dep_dir);
     }
 
-    std::fs::create_dir_all(&dep_dir)
-        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
-
     err(&format!("Fetching {} from {} ({})", dep.name, dep.git, ref_name));
 
-    let mut cmd = Command::new("git");
-    cmd.arg("clone")
-        .arg("--depth").arg("1")
-        .arg(&dep.git)
-        .arg(&dep_dir);
+    populate_cache_dir(&dep_dir, |tmp| {
+        let mut cmd = Command::new("git");
+        cmd.arg("clone")
+            .arg("--depth").arg("1")
+            .arg(&dep.git)
+            .arg(tmp);
 
-    if let Some(ref tag) = dep.tag {
-        cmd.arg("--branch").arg(tag);
-    } else if let Some(ref branch) = dep.branch {
-        cmd.arg("--branch").arg(branch);
-    }
+        if let Some(ref tag) = dep.tag {
+            cmd.arg("--branch").arg(tag);
+        } else if let Some(ref branch) = dep.branch {
+            cmd.arg("--branch").arg(branch);
+        }
 
-    let output = cmd.output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
+        let output = cmd.output()
+            .map_err(|e| format!("Failed to run git: {}", e))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let _ = std::fs::remove_dir_all(&dep_dir);
-        return Err(format!("Failed to fetch {}: {}", dep.name, stderr));
-    }
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Failed to fetch {}: {}", dep.name, stderr));
+        }
+        Ok(())
+    })?;
 
     Ok(dep_dir)
 }
@@ -206,11 +242,24 @@ fn resolve_fetched_dep_manifest(path: &Path, fallback_name: &str) -> (String, Pa
     }
 }
 
+/// MVS ordering: parse as semver, treating an unparseable version as the
+/// minimum (branch deps already resolve to "0.0.0" upstream).
+fn semver_of(v: &str) -> semver::Version {
+    semver::Version::parse(v).unwrap_or_else(|_| semver::Version::new(0, 0, 0))
+}
+
 /// `fetch_deps_recursive`'s per-dependency body: version/pkg-id resolution,
 /// diamond-dependency major-version-clash warning, dedup via `visited`,
 /// fetch (with lock pin if any), resolve the dependency's own manifest,
-/// record it, then recurse into its own transitive deps. Extracted
-/// verbatim.
+/// record it, then recurse into its own transitive deps.
+///
+/// Selection is Minimal Version Selection, the rule
+/// `docs/specs/package-system.md` documents: per `PkgId` (name + major) the
+/// MAXIMUM requested version wins, and the walk visits every distinct
+/// requested version's own requirement list (reachability is over requested
+/// versions, not selected ones — Go's algorithm). The previous body
+/// short-circuited on the first `PkgId` sighting, so the resolved graph
+/// depended on declaration order (#1458).
 fn fetch_one_dep_recursive(
     dep: &Dependency,
     locked: &[LockedDep],
@@ -219,18 +268,6 @@ fn fetch_one_dep_recursive(
 ) -> Result<(), String> {
     let version_str = resolve_dep_version(dep);
     let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
-
-    if fetched.iter().any(|f| f.pkg_id == pkg_id) {
-        return Ok(());
-    }
-
-    // Detect different major versions of the same package (diamond with version split)
-    if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
-        err(&format!("warning: package '{}' required at two different major versions", pkg_id.name));
-        err(&format!("  → {} (already loaded)", existing.pkg_id));
-        err(&format!("  → {} (newly required)", pkg_id));
-        err(&format!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major));
-    }
 
     let visit_key = if let Some(ref p) = dep.path {
         format!("path:{}@{}", p, version_str)
@@ -242,6 +279,14 @@ fn fetch_one_dep_recursive(
     }
     visited.insert(visit_key);
 
+    // Detect different major versions of the same package (diamond with version split)
+    if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
+        err(&format!("warning: package '{}' required at two different major versions", pkg_id.name));
+        err(&format!("  → {} (already loaded)", existing.pkg_id));
+        err(&format!("  → {} (newly required)", pkg_id));
+        err(&format!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major));
+    }
+
     // Use locked commit if available
     let locked_commit = locked.iter()
         .find(|l| l.name == dep.name)
@@ -251,10 +296,21 @@ fn fetch_one_dep_recursive(
     let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
 
     let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
-    fetched.push(FetchedDep {
-        pkg_id: actual_pkg_id,
-        source_dir,
-    });
+    match fetched.iter_mut().find(|f| f.pkg_id == actual_pkg_id) {
+        Some(existing) => {
+            // MVS: a later, higher request replaces the selection in place —
+            // position (and therefore lock-file alignment) is preserved.
+            if semver_of(&version_str) > semver_of(&existing.version) {
+                existing.version = version_str;
+                existing.source_dir = source_dir;
+            }
+        }
+        None => fetched.push(FetchedDep {
+            pkg_id: actual_pkg_id,
+            version: version_str,
+            source_dir,
+        }),
+    }
 
     if !transitive_deps.is_empty() {
         fetch_deps_recursive(&transitive_deps, locked, fetched, visited)?;
@@ -300,6 +356,18 @@ pub fn resolve_package_spec(spec: &str) -> (String, String, Option<String>) {
     };
 
     (name, git_url, tag)
+}
+
+/// Resolve the `almide add` arguments to `(name, git_url, tag)`. `--tag`
+/// applies to both spellings; a `pkg@tag` suffix in the spec is the fallback
+/// when `--tag` is absent. (Previously the spec's tag silently replaced
+/// `--tag`, so `almide add almide/svg --tag v0.1.0` pinned to `main`.)
+pub fn resolve_add_target(pkg: String, git: Option<String>, tag: Option<String>) -> (String, String, Option<String>) {
+    if let Some(git_url) = git {
+        return (pkg, git_url, tag);
+    }
+    let (name, git_url, spec_tag) = resolve_package_spec(&pkg);
+    (name, git_url, tag.or(spec_tag))
 }
 
 /// Add a dependency to almide.toml
@@ -433,4 +501,68 @@ fn git_remote_head(git_url: &str, ref_name: &str) -> Result<String, String> {
         return Err(format!("no ref '{}' at {}", ref_name, git_url));
     }
     Ok(hash)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_tag_flag_is_kept_for_short_specs() {
+        let (name, git, tag) = resolve_add_target("almide/svg".into(), None, Some("v0.1.0".into()));
+        assert_eq!(name, "svg");
+        assert_eq!(git, "https://github.com/almide/svg");
+        assert_eq!(tag.as_deref(), Some("v0.1.0"));
+    }
+
+    #[test]
+    fn add_tag_flag_wins_over_spec_suffix_and_suffix_is_fallback() {
+        let (_, _, tag) = resolve_add_target("svg@v0.2.0".into(), None, Some("v0.1.0".into()));
+        assert_eq!(tag.as_deref(), Some("v0.1.0"));
+        let (_, _, tag) = resolve_add_target("svg@v0.2.0".into(), None, None);
+        assert_eq!(tag.as_deref(), Some("v0.2.0"));
+    }
+
+    #[test]
+    fn populate_cache_dir_survives_concurrent_callers() {
+        let root = std::env::temp_dir().join(format!("almide-populate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("dep").join("abcdef123456");
+        let handles: Vec<_> = (0..8).map(|i| {
+            let dir = dir.clone();
+            std::thread::spawn(move || {
+                populate_cache_dir(&dir, |tmp| {
+                    std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    std::fs::write(tmp.join("marker"), format!("{}", i)).map_err(|e| e.to_string())
+                })
+            })
+        }).collect();
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+        // Exactly one complete copy is in place and no temp dirs are left behind.
+        assert!(dir.join("marker").is_file());
+        let leftovers: Vec<_> = std::fs::read_dir(dir.parent().unwrap()).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "abcdef123456")
+            .collect();
+        assert!(leftovers.is_empty(), "leftover temp dirs: {:?}", leftovers);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn populate_cache_dir_leaves_nothing_when_clone_fails() {
+        let root = std::env::temp_dir().join(format!("almide-populate-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("dep").join("deadbeef0000");
+        let r = populate_cache_dir(&dir, |tmp| {
+            std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
+            Err("boom".to_string())
+        });
+        assert_eq!(r, Err("boom".to_string()));
+        assert!(!dir.exists());
+        assert!(std::fs::read_dir(dir.parent().unwrap()).unwrap().next().is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

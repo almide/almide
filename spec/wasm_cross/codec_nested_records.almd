@@ -1,0 +1,26 @@
+// @contract: C-298
+// Nested Codec records (the Swift Codable nested-container discipline,
+// CodableTests.swift round-trip shape): a record field, a List[record]
+// field, encode → parse → decode → re-encode must be the identity on the
+// document, byte-identical across targets.
+import json
+
+type Inner: Codec = { n: Int, s: String }
+
+type Outer: Codec = { name: String, inner: Inner, kids: List[Inner] }
+
+effect fn main() -> Unit = {
+  let o = Outer { name: "o", inner: Inner { n: 1, s: "a" }, kids: [
+    Inner { n: 2, s: "b" },
+    Inner { n: 3, s: "c" }
+  ] }
+  let enc = json.stringify(Outer.encode(o))
+  println(enc)
+  let d = Outer.decode(json.parse(enc)!)!
+  println(if json.stringify(Outer.encode(d)) == enc then "rt-id" else "RT-DRIFT")
+  println(d.inner.s + int.to_string(d.inner.n) + "/" + int.to_string(list.len(d.kids)))
+  println(match list.get(d.kids, 1) {
+    some(k) => k.s + int.to_string(k.n),
+    none => "-",
+  })
+}

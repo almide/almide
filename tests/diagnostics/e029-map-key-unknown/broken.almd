@@ -1,0 +1,5 @@
+// Unknown type as a Map KEY annotation.
+fn main() -> Unit = {
+  let m: Map[Badge, Int] = map.new()
+  println(int.to_string(map.len(m)))
+}

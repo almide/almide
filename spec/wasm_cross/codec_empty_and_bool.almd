@@ -1,0 +1,26 @@
+// @contract: C-298
+// Empty containers and the Bool matrix: an empty list field, an empty
+// string, both Bool polarities and an Option[Bool] in all three states
+// (present true / present false via C-209's omission rule on none).
+import json
+
+type F: Codec = { on: Bool, off: Bool, maybe: Bool? = none, items: List[Int], note: String }
+
+effect fn main() -> Unit = {
+  let x = F { on: true, off: false, items: [], note: "" }
+  let enc = json.stringify(F.encode(x))
+  println(enc)
+  let d = F.decode(json.parse(enc)!)!
+  println(if d.on and not d.off then "bools" else "BOOL-DRIFT")
+  println(int.to_string(list.len(d.items)) + "/" + int.to_string(string.len(d.note)))
+  let some_true = F.decode(json.parse('{"on": true, "off": false, "maybe": true, "items": [], "note": ""}')!)!
+  println(match some_true.maybe {
+    some(b) => if b then "mt" else "mf",
+    none => "mn",
+  })
+  let some_false = F.decode(json.parse('{"on": true, "off": false, "maybe": false, "items": [], "note": ""}')!)!
+  println(match some_false.maybe {
+    some(b) => if b then "mt" else "mf",
+    none => "mn",
+  })
+}

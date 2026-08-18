@@ -1,0 +1,5 @@
+// The same name as TWO different variants.
+type Signal = | On | Off
+type Signal = | High | Low
+
+fn main() -> Unit = println("ok")

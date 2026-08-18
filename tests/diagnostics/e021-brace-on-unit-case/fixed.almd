@@ -1,0 +1,5 @@
+type Box = | Wrap(Int) | Empty
+
+fn mk() -> Box = Empty
+
+fn main() -> Unit = println("${mk()}")

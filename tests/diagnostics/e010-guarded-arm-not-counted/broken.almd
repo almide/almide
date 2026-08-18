@@ -1,0 +1,11 @@
+// Every case is textually present, but the last one only behind a guard —
+// guards can fail at runtime, so the arm does NOT count toward
+// exhaustiveness and the hint must say so.
+type Color = | Red | Blue
+
+fn label(c: Color, n: Int) -> String = match c {
+  Red => "r",
+  Blue if n > 0 => "b",
+}
+
+fn main() -> Unit = println(label(Blue, 1))

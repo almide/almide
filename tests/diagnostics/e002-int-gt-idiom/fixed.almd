@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let bigger = 4 > 2
+  println(if bigger then "y" else "n")
+}

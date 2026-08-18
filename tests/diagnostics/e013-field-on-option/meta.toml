@@ -1,0 +1,3 @@
+expects_code = "E013"
+expects_error = "the value is optional"
+hint_substring = "optional chaining"

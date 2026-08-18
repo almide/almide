@@ -1,0 +1,4 @@
+// String indexing inside a FOLD callback.
+fn f(xs: List[String]) -> String = list.fold(xs, "", (acc, s) => acc + s[0])
+
+fn main() -> Unit = println(f(["ab", "cd"]))

@@ -1,0 +1,12 @@
+// Duplicate arm in a match inside a WHILE body.
+fn f() -> Int = {
+  var i = 0
+  var acc = 0
+  while i < 2 {
+    acc = acc + match i { 0 => 1, 0 => 2, _ => 3 }
+    i = i + 1
+  }
+  acc
+}
+
+fn main() -> Unit = println(int.to_string(f()))

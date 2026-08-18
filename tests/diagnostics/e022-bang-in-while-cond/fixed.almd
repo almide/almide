@@ -1,0 +1,7 @@
+fn f() -> Int = {
+  var i = 0
+  while i < 2 { i = i + 1 }
+  i
+}
+
+fn main() -> Unit = println(int.to_string(f()))

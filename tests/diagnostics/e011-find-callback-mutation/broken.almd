@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  var probes = 0
+  let hit = list.find([1, 2], (n) => {
+    probes = probes + 1
+    n > 1
+  })
+  println(int.to_string(hit ?? 0))
+}

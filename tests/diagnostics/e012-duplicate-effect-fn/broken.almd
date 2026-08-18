@@ -1,0 +1,6 @@
+// effect fns share the same namespace as pure fns.
+effect fn run() -> Unit = println("a")
+
+effect fn run() -> Unit = println("b")
+
+effect fn main() -> Unit = run()

@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var s = "a\zb"
+  println(s)
+}

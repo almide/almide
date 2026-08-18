@@ -519,8 +519,11 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
   let off = if offset < 0 then 0 else offset
   let base = hd + 12 + off
   let limit = hd + 12 + prim.load32(hd + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __q10_rows(prim.handle(out), base, limit, rows, cols, 0)
+  // #1503: negative dims clamp to the empty matrix like every loader.
+  let r = if rows < 0 then 0 else rows
+  let c = if cols < 0 then 0 else cols
+  let out: List[List[Float]] = prim.alloc_list_str(r)
+  let _x = __q10_rows(prim.handle(out), base, limit, r, c, 0)
   out
 }
 
@@ -550,9 +553,11 @@ fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[In
   let off = if offset < 0 then 0 else offset
   let base = hd + 12 + off
   let limit = hd + 12 + prim.load32(hd + 4)
+  // #1503: negative cols clamps to 0 like the loader family.
+  let c = if cols < 0 then 0 else cols
   let n = list.len(row_ids)
   let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, cols, 0)
+  let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, c, 0)
   out
 }
 
@@ -600,11 +605,13 @@ fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List
   let base = hd + 12 + off
   let limit = hd + 12 + prim.load32(hd + 4)
   let n = list.len(row_ids)
-  if cols % 32 != 0 then __q8_zeros(n, cols)
+  // #1503: negative cols clamps to 0 like the loader family.
+  let c = if cols < 0 then 0 else cols
+  if c % 32 != 0 then __q8_zeros(n, c)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(n)
-    let row_bytes = cols / 32 * 34
-    let _x = __q8_sel_rows(prim.handle(out), base, limit, row_ids, cols, row_bytes, 0)
+    let row_bytes = c / 32 * 34
+    let _x = __q8_sel_rows(prim.handle(out), base, limit, row_ids, c, row_bytes, 0)
     out
   }
 }

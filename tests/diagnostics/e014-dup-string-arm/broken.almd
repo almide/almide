@@ -1,0 +1,4 @@
+// Duplicate STRING-literal arms.
+fn f(s: String) -> Int = match s { "a" => 1, "b" => 2, "a" => 3, _ => 0 }
+
+fn main() -> Unit = println(int.to_string(f("a")))

@@ -1,0 +1,8 @@
+// String indexing in a WHILE condition.
+fn f(s: String) -> Int = {
+  var i = 0
+  while s[i] == "a" { i = i + 1 }
+  i
+}
+
+fn main() -> Unit = println(int.to_string(f("aab")))

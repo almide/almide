@@ -1,0 +1,5 @@
+type Shape = | Group { items: List[Int] } | Dot
+
+fn mk() -> Shape = Group { items: [1, 2] }
+
+fn main() -> Unit = println("${mk()}")

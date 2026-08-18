@@ -1,0 +1,5 @@
+// E046 variant: `_` as a stdlib HOF's callback slot.
+fn main() -> Unit = {
+  let ys = list.map([1, 2, 3], _)
+  println(int.to_string(list.len(ys)))
+}

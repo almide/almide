@@ -153,10 +153,25 @@ impl Parser {
         } else {
             (None, None)
         };
+        // A parse-error string without an embedded marker used to land with an
+        // EMPTY hint — the one production path that defeated "hint is
+        // mandatory by type" (#1471). The targeted hints stay embedded where a
+        // site knows something specific; this floor guarantees the reader is
+        // never told nothing.
         let (message, hint) = if let Some(idx) = msg.find("\n  Hint: ") {
             (msg[..idx].to_string(), msg[idx + 9..].to_string())
         } else {
-            (msg.to_string(), String::new())
+            let floor = if msg.contains("got EOF") {
+                "The file ended while a form was still open. Count delimiters upward \
+                 from here — an unclosed '(', '[', '{' or a dangling operator on the \
+                 last line is the usual cause."
+            } else {
+                "The parser expected a different token here. The message names what it \
+                 wanted; check the token just BEFORE this position too — an unclosed \
+                 delimiter or an idiom from another language usually breaks the shape \
+                 one token earlier (grammar reference: docs/GRAMMAR.md)."
+            };
+            (msg.to_string(), floor.to_string())
         };
         let mut d = Diagnostic::error(message, hint, "");
         if let Some(f) = &self.file {

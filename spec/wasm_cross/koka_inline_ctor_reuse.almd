@@ -1,0 +1,41 @@
+// @contract: C-292
+// koka inline1/2/3: extract from nested ctors across TWO variant types and
+// rebuild swapped — the cross-type cell-reuse shape (A(y, B(z)) -> A(z, B(y))).
+// Flat rows keep each match exhaustive without relying on nested-only analysis.
+type Alpha = | A(Int, Beta) | A2
+
+type Beta = | B(Int) | B2
+
+fn swap_ab(x: Alpha) -> Alpha = match x {
+  A(y, b) => match b {
+    B(z) => A(z, B(y)),
+    B2 => A2,
+  },
+  A2 => A2,
+}
+
+fn inner_b(x: Alpha) -> Beta = match x {
+  A(y, b) => match b {
+    B(_) => B(y),
+    B2 => B2,
+  },
+  A2 => B2,
+}
+
+fn show_b(b: Beta) -> String = match b {
+  B(m) => "B" + int.to_string(m),
+  B2 => "B2",
+}
+
+fn show(x: Alpha) -> String = match x {
+  A(n, b) => "A(${int.to_string(n)},${show_b(b)})",
+  A2 => "A2",
+}
+
+fn main() -> Unit = {
+  println(show(swap_ab(A(1, B(9)))))
+  println(show(swap_ab(A(1, B2))))
+  println(show(swap_ab(A2)))
+  println(show_b(inner_b(A(5, B(0)))))
+  println(show_b(inner_b(A2)))
+}

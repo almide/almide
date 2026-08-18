@@ -1,0 +1,6 @@
+// Brace construction of a UNIT case.
+type Box = | Wrap(Int) | Empty
+
+fn mk() -> Box = Empty { x: 1 }
+
+fn main() -> Unit = println("${mk()}")

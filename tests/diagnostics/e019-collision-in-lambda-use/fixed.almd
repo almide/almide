@@ -1,0 +1,7 @@
+type A = | ATick | Tock
+type B = | BTick | Beep
+
+fn main() -> Unit = {
+  let f = () => ATick
+  println("${f()}")
+}

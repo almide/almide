@@ -1,0 +1,8 @@
+// Assignment to a TYPE name — parses as an assignment now that uppercase
+// targets are accepted (module-global convention), and must diagnose.
+type Color = | Red | Blue
+
+fn main() -> Unit = {
+  Color = 1
+  println("x")
+}

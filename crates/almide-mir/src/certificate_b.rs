@@ -633,6 +633,7 @@ fn alloc_class_prim_dst(op: &Op) -> Option<ValueId> {
                 PrimKind::ArgsGetList
                 | PrimKind::EnvGet
                 | PrimKind::ReadTextFile
+                | PrimKind::ReadBytesFile
                 | PrimKind::ReadDir
                 | PrimKind::WriteTextFile
                 | PrimKind::MakeDir

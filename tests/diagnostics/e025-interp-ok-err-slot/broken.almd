@@ -1,0 +1,6 @@
+// E025 (#1115): `ok(1)` interpolated leaves the ERR slot free; silently
+// concretizing E is against the never-silently-defaulted doctrine, so all
+// four #1115 shapes are the same check-time error.
+fn main() -> Unit = {
+  println("${ok(1)}")
+}

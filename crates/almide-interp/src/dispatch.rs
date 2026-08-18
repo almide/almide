@@ -645,6 +645,36 @@ impl<'a> Interpreter<'a> {
                 return flow;
             }
             match func.as_str() {
+                // `prim.die(prim.handle(msg))` — the guarded-abort floor
+                // (Stage 2 BRIDGEABLE burn-down: int_pow_negative_exponent,
+                // list_chunk_zero, …). The argument is by construction a
+                // handle to the full "Error: <reason>\n" line both backends
+                // eprint VERBATIM before exit(1); the interp's Abort contract
+                // prints `Error: {msg}\n`, so the bridged message is that line
+                // with the frame stripped. A message outside the frame
+                // abstains — this floor must never invent a stderr the
+                // backends would not produce.
+                "die" => {
+                    let Some(addr) = heap_addr(args.first()) else {
+                        return Flow::Unsupported("prim.die with a non-address".into());
+                    };
+                    let Some((bytes, _)) = self.heap.block_bytes(addr) else {
+                        return Flow::Unsupported(
+                            "prim.die outside this heap's arena".into(),
+                        );
+                    };
+                    let msg = String::from_utf8_lossy(&bytes).into_owned();
+                    let Some(reason) = msg
+                        .strip_prefix("Error: ")
+                        .and_then(|m| m.strip_suffix('\n'))
+                    else {
+                        return Flow::Unsupported(
+                            "prim.die with a message outside the Error:-line contract"
+                                .into(),
+                        );
+                    };
+                    return Flow::Abort(reason.to_string());
+                }
                 "args_get_list" => {
                     let items: Vec<Value> =
                         self.args.iter().map(|s| Value::str(s.clone())).collect();

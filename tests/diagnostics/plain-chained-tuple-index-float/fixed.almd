@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let t = (5, (6, 7))
+  println(int.to_string((t.1).0))
+}

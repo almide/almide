@@ -1,0 +1,5 @@
+// String indexing inside a LAMBDA body.
+fn main() -> Unit = {
+  let first = (s: String) => s[0]
+  println(first("xy"))
+}

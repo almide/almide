@@ -1,0 +1,6 @@
+// A one-letter typo on a closed record: the roster plus a did-you-mean.
+type Stats = { count: Int, total: Int }
+
+fn read(s: Stats) -> Int = s.count
+
+fn main() -> Unit = println(int.to_string(read(Stats(count: 1, total: 2))))

@@ -1,0 +1,6 @@
+// A record-case misuse (missing field) referenced from a GUARD position.
+type Ev = | Click { x: Int, y: Int } | Quit
+
+fn f(n: Int) -> Int = match n { _ if Click { x: 1 } == Click { x: 1, y: 2 } => 1, _ => 0 }
+
+fn main() -> Unit = println(int.to_string(f(0)))

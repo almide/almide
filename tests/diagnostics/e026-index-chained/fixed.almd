@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s = "abc"
+  println(string.get(string.get(s, 0) ?? "", 0) ?? "")
+}

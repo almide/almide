@@ -1,0 +1,9 @@
+type Col = | Red | Green | Blue
+
+effect fn main() -> Unit = {
+  let n = match Blue {
+    Red => 1,
+    Blue => 3,
+  }
+  println(int.to_string(n))
+}

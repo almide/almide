@@ -1,0 +1,6 @@
+// Two required fields left out: each is reported.
+type Rect = { w: Int, h: Int, tag: String }
+
+fn mk() -> Rect = Rect(tag: "r")
+
+fn main() -> Unit = println(mk().tag)

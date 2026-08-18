@@ -562,6 +562,19 @@ impl Parser {
             Ok(parsed) => {
                 // Advance our id counter past sub-parser's allocations
                 self.next_expr_id = sub_parser.expr_id_counter();
+                // RECOVERABLE diagnostics the sub-parse pushed (an E031
+                // retired-range fix-it, an E038 fallback rule, …) must
+                // surface: dropping them made `"${list.len(1..=4)}"` parse
+                // and RUN where the direct spelling errors (sweep
+                // 2026-08-18). Token positions were remapped before the
+                // sub-parse, so the diagnostics already point into the
+                // parent string; only the file name is ours to fill.
+                for mut d in std::mem::take(&mut sub_parser.errors) {
+                    if d.file.is_none() {
+                        d.file = self.file.clone();
+                    }
+                    self.errors.push(d);
+                }
                 StringPart::Expr { expr: Box::new(parsed) }
             }
             Err(e) => {

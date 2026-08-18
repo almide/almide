@@ -1,0 +1,9 @@
+test "adds" {
+  assert_eq(1 + 1, 2)
+}
+
+test "adds again" {
+  assert_eq(2 + 2, 4)
+}
+
+fn main() -> Unit = println("ok")

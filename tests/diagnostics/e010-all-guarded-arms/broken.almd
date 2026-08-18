@@ -1,0 +1,4 @@
+fn main() -> Unit = println(match 3 {
+  n if n > 5 => "big",
+  n if n > 0 => "pos",
+})

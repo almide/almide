@@ -611,6 +611,13 @@ impl LowerCtx {
             self.value_drops.entry(dst).or_default().named_route = Some("list_int_str".to_string());
             return true;
         }
+        if let Some(n) = self.list_int_variant_drop(ty) {
+            // `List[(Int, <rich variant>)]` (list.enumerate_h) — the generated
+            // `$__drop_list_int_<V>` recurses into slot1; the flat DropListStr
+            // would leak every element's tree (#1496).
+            self.value_drops.entry(dst).or_default().named_route = Some(n);
+            return true;
+        }
         if crate::lower::is_map_ivh_ty(ty) {
             // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
             self.value_drops.entry(dst).or_default().named_route = Some("map_ivh".to_string());

@@ -1,0 +1,7 @@
+fn f(n: Int) -> String = match n {
+  1 => "one",
+  2 => "two",
+  _ => "other",
+}
+
+fn main() -> Unit = println(f(1))

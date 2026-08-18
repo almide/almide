@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s = "abc"
+  println("first=${string.get(s, 0) ?? "?"}")
+}

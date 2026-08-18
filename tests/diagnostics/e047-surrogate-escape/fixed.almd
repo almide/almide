@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let ch = "\u{D7FF}"
+  println(ch)
+}

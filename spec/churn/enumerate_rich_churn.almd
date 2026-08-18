@@ -1,0 +1,30 @@
+// list.enumerate over RICH-variant elements churn — the #1496 class.
+//
+// Every iteration builds a fresh List[Node] whose elements own further heap (a
+// Tag's String), enumerates it (the `list.enumerate_h` rc-share self-host), and
+// drops the pair list at scope end. The pair list's drop is the generated
+// `$__drop_list_int_Node`, which must recurse into slot1 @20 and free each
+// element's tree exactly once: a flat DropListStr sweep leaks every Tag's
+// String (RSS grows), an over-eager one double-frees against the source list's
+// own drop (traps). Byte-identical native == wasm, flat RSS under churn.
+fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 200000 {
+    let src = [Leaf(i), Tag("t" + int.to_string(i % 10)), Leaf(i + 1)]
+    let es = list.enumerate(src)
+    for e in es {
+      let (k, n) = e
+      sink = sink + k + weight(n)
+    }
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}
+
+type Node = | Leaf(Int) | Tag(String)
+
+fn weight(n: Node) -> Int = match n {
+  Leaf(k) => k,
+  Tag(s) => string.len(s),
+}

@@ -1,0 +1,4 @@
+// Duplicate BOOL-literal arms.
+fn f(b: Bool) -> Int = match b { true => 1, false => 0, true => 2 }
+
+fn main() -> Unit = println(int.to_string(f(true)))

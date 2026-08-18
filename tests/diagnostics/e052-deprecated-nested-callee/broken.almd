@@ -1,0 +1,8 @@
+@deprecated(since = 3, use = "shout")
+fn yell(s: String) -> String = shout(s)
+
+fn shout(s: String) -> String = s + "!"
+
+fn greet(s: String) -> String = yell(s) + "?"
+
+effect fn main() -> Unit = println(greet("hi"))

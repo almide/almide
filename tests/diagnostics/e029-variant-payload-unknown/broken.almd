@@ -1,0 +1,6 @@
+// An undeclared type in a VARIANT PAYLOAD position: before the sweep covered
+// declarations, this passed check silently and died at the native build as
+// rustc E0425 (reference-port sweep finding, 2026-08-18).
+type Tree = | Leaf(Payload) | Empty
+
+fn main() -> Unit = println("x")

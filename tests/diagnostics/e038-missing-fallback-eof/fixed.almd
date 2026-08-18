@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let v = int.parse("x") ?? 0
+  println(int.to_string(v))
+}

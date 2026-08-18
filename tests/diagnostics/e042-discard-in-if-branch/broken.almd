@@ -1,0 +1,7 @@
+// E042 variant: the discard hides in one arm of a statement if.
+effect fn ping() -> Result[Unit, String] = ok(())
+
+effect fn main() -> Unit = {
+  if 1 > 0 then { ping() } else { println("no") }
+  println("done")
+}

@@ -1,0 +1,7 @@
+// E030: sort_by whose KEY is a Float nested inside a tuple — the compound
+// key has no Ord (bare Float routes to the totalOrder twins, nested does not).
+fn main() -> Unit = {
+  let xs: List[Int] = [1, 2]
+  let s = list.sort_by(xs, (x) => (int.to_float(x), x))
+  println(int.to_string(list.len(s)))
+}

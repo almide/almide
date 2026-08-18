@@ -167,6 +167,14 @@ pub struct Interpreter<'a> {
     /// The user program's own fn names — captured BEFORE the stdlib pool is
     /// layered into `fns`, so the meter can tell the two apart at call time.
     pub(crate) user_fn_names: HashSet<Sym>,
+    /// ENTRY-CHARGE-EXEMPT user fns — the mirror of the backends' region
+    /// inliner (lazily built; see `det_entry_exempt`). W1's charge sites are
+    /// defined over the SHARED MIR (ADR-0001 「charge site」), and the MIR
+    /// inlines loop-free non-recursive user fns into their callers, deleting
+    /// the entry charge a per-call AST mirror would count: with `compute.h(0)`
+    /// both backends admitted `{ work() }` (zero surviving charges) while this
+    /// meter voted exhaust (xtarget-fuzz seed=20260817 index=578).
+    det_exempt: std::cell::RefCell<Option<HashSet<Sym>>>,
     /// T5-1 wall-deadline mirror (fan.timeout): absolute deadline (ns since
     /// interp start; i64::MAX = none), hit flag, persisted verdict, and the
     /// wall-check ordinal (the ω of T5-2). Replay/record ride the same env
@@ -378,6 +386,7 @@ impl<'a> Interpreter<'a> {
             det_in_user: Cell::new(false),
             det_region_depth: Cell::new(0),
             user_fn_names,
+            det_exempt: std::cell::RefCell::new(None),
             t_deadline: Cell::new(i64::MAX),
             t_hit: Cell::new(false),
             t_verdict: Cell::new(0),
@@ -427,6 +436,85 @@ impl<'a> Interpreter<'a> {
         if self.det_in_user.get() {
             self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
         }
+    }
+
+    /// True when `name`'s ENTRY charge is exempt — the fn is loop-free
+    /// (no While/ForIn anywhere in its body) and on no call cycle, exactly
+    /// the class the shared-MIR inliner folds into its callers, entry charge
+    /// and all. Direct or MUTUAL recursion stays charged: TCO rewrites it
+    /// into a loop whose head charges survive, so the per-call entry this
+    /// mirror counts stays the aligned approximation. A loop-free fn CALLING
+    /// a loop-carrying one is exempt itself while the callee keeps charging
+    /// (inline-the-wrapper, keep-the-worker). Built once, lazily, from the
+    /// user-fn call graph.
+    fn det_entry_exempt(&self, name: Sym) -> bool {
+        let mut cache = self.det_exempt.borrow_mut();
+        let set = cache.get_or_insert_with(|| {
+            use almide_ir::visit::{walk_expr, IrVisitor};
+            use almide_ir::{CallTarget, IrExpr, IrExprKind};
+            struct Scan {
+                has_loop: bool,
+                calls: HashSet<Sym>,
+            }
+            impl IrVisitor for Scan {
+                fn visit_expr(&mut self, e: &IrExpr) {
+                    match &e.kind {
+                        IrExprKind::While { .. } | IrExprKind::ForIn { .. } => {
+                            self.has_loop = true
+                        }
+                        IrExprKind::Call { target, .. } => match target {
+                            CallTarget::Named { name } => {
+                                self.calls.insert(*name);
+                            }
+                            CallTarget::Module { func, .. } => {
+                                self.calls.insert(*func);
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                    walk_expr(self, e);
+                }
+            }
+            let user_bodies: Vec<&IrFunction> = self
+                .fns
+                .values()
+                .copied()
+                .filter(|f| self.user_fn_names.contains(&f.name))
+                .chain(self.module_fns.values().copied())
+                .collect();
+            let mut loopy: HashSet<Sym> = HashSet::new();
+            let mut edges: HashMap<Sym, HashSet<Sym>> = HashMap::new();
+            for f in &user_bodies {
+                let mut s = Scan { has_loop: false, calls: HashSet::new() };
+                s.visit_expr(&f.body);
+                if s.has_loop {
+                    loopy.insert(f.name);
+                }
+                s.calls.retain(|c| self.user_fn_names.contains(c));
+                edges.entry(f.name).or_default().extend(s.calls);
+            }
+            // On-a-cycle = the fn reaches itself through user-fn edges.
+            let reaches_self = |start: Sym| -> bool {
+                let mut seen: HashSet<Sym> = HashSet::new();
+                let mut stack: Vec<Sym> = edges.get(&start).into_iter().flatten().copied().collect();
+                while let Some(n) = stack.pop() {
+                    if n == start {
+                        return true;
+                    }
+                    if seen.insert(n) {
+                        stack.extend(edges.get(&n).into_iter().flatten().copied());
+                    }
+                }
+                false
+            };
+            user_bodies
+                .iter()
+                .map(|f| f.name)
+                .filter(|n| !loopy.contains(n) && !reaches_self(*n))
+                .collect::<HashSet<Sym>>()
+        });
+        set.contains(&name)
     }
 
     /// T1-1 strict cut: inside an open metered region with the meter below
@@ -773,7 +861,12 @@ impl<'a> Interpreter<'a> {
                 if !det_is_user {
                     return None;
                 }
-                self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+                // Loop-free non-recursive fns are inlined by the shared MIR,
+                // entry charge included — skip the entry here too (the fn's
+                // own dyn charges still count via `det_in_user`).
+                if !self.det_entry_exempt(f.name) {
+                    self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+                }
             }
             TailCallee::Clo(_) => self.det_charge(),
         }

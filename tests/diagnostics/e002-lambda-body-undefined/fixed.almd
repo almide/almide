@@ -1,0 +1,6 @@
+fn scale(n: Int) -> Int = n * 10
+
+fn main() -> Unit = {
+  let ys = list.map([1, 2], (x) => scale(x))
+  println(int.to_string(ys |> list.len))
+}

@@ -1,0 +1,21 @@
+// @wall: Record heap bind cannot be faithfully materialized
+// A Codec record whose field is a THREE-level list: the codec surface
+// handles it (native round-trips), but binding the record with a
+// triple-nested heap field sits outside the wasm value subset — the same
+// third-level boundary the nested-type matrix pins. Graduation seed.
+// A three-level List Codec field: encode nests unkeyed containers three
+// deep and the round trip preserves every level (the deepest shape the
+// Swift unkeyed-container tests exercise).
+import json
+
+type T: Codec = { ll: List[List[List[Int]]] }
+
+effect fn main() -> Unit = {
+  let x = T { ll: [[[1, 2], []], [[3]]] }
+  let enc = json.stringify(T.encode(x))
+  println(enc)
+  let d = T.decode(json.parse(enc)!)!
+  println(int.to_string(list.len(d.ll)))
+  let flat = list.fold(d.ll, 0, (a, mid) => a + list.fold(mid, 0, (b, leaf) => b + list.fold(leaf, 0, (c, n) => c + n)))
+  println(int.to_string(flat))
+}

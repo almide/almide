@@ -1,0 +1,8 @@
+// The ambiguous ctor is used inside a LAMBDA body.
+type A = | Tick | Tock
+type B = | Tick | Beep
+
+fn main() -> Unit = {
+  let f = () => Tick
+  println("${f()}")
+}

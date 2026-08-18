@@ -1,0 +1,11 @@
+// E042: a Result discarded as a match-arm side effect.
+effect fn log(s: String) -> Result[Unit, String] = ok(println(s))
+
+effect fn main() -> Unit = {
+  match 1 {
+    1 => { log("one")
+      () },
+    _ => (),
+  }
+  println("done")
+}

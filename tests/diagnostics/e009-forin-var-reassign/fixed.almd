@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  var total = 0
+  for i in 0..<3 {
+    total = total + i + 10
+  }
+  println(int.to_string(total))
+}

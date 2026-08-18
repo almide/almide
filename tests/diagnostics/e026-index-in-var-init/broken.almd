@@ -1,0 +1,5 @@
+// String indexing as a VAR initializer.
+fn main() -> Unit = {
+  var c = "abc"[1]
+  println(c)
+}

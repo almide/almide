@@ -1,0 +1,3 @@
+fn new_way(s: String) -> String = s
+
+effect fn main() -> Unit = println(new_way("hi"))

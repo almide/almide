@@ -1,0 +1,3 @@
+fn calc(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println("v=${calc(2)}")

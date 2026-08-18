@@ -1,0 +1,6 @@
+type Gadget = { n: Int }
+
+fn main() -> Unit = {
+  var m: Map[String, Gadget] = map.new()
+  println(int.to_string(map.len(m)))
+}

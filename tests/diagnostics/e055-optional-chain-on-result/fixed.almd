@@ -1,0 +1,3 @@
+type P = { v: Int }
+
+fn g(r: Result[P, String]) -> Int? = (r?)?.v

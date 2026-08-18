@@ -1,0 +1,6 @@
+// E025: the UFCS spelling of the never-pinned or_else error slot.
+fn main() -> Unit = {
+  let r0: Result[Int, String] = ok(7)
+  let r = r0.or_else((e) => ok(0))
+  println("done")
+}

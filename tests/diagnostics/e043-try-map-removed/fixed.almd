@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let r = list.map([1, 2], (n) => n * 2)
+  println(int.to_string(list.len(r)))
+}

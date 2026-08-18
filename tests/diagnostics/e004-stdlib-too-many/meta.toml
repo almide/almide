@@ -1,0 +1,2 @@
+expects_code = "E004"
+expects_error = "list.len() expects 1 argument(s) but got 2"

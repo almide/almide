@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let a: Option[Int] = some(1)
+  let b: Option[Int] = some(2)
+  println("${a != b}")
+}

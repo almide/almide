@@ -1,0 +1,6 @@
+type Shape = | Circle(Int) | Dot
+
+effect fn main() -> Unit = {
+  let s = Circle(4)
+  println("${s}")
+}

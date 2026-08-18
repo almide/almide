@@ -1,0 +1,5 @@
+type Cfg = { name: String, port: Int }
+
+fn mk() -> Cfg = Cfg(name: "a", port: 1)
+
+fn main() -> Unit = println(mk().name)

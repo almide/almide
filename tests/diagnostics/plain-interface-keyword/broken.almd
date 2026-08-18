@@ -1,0 +1,3 @@
+interface Walker { }
+
+fn main() -> Unit = println("x")

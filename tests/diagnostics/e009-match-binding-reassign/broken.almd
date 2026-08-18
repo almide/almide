@@ -1,0 +1,7 @@
+fn first_or(xs: List[Int]) -> Int = match list.get(xs, 0) {
+  some(v) => { v = v + 1
+    v },
+  none => 0,
+}
+
+fn main() -> Unit = println(int.to_string(first_or([4])))

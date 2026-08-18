@@ -1,0 +1,6 @@
+type C = | Red | Blue
+
+fn f(cs: List[C]) -> Int =
+  list.fold(list.map(cs, (c) => match c { Red => 1, Blue => 3 }), 0, (a, x) => a + x)
+
+fn main() -> Unit = println(int.to_string(f([Red, Blue])))

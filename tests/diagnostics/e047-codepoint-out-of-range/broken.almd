@@ -1,0 +1,1 @@
+fn main() -> Unit = println("\u{110000}")

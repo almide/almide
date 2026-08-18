@@ -1,0 +1,5 @@
+// The same name as a record AND a variant in one module.
+type Payload = { data: String }
+type Payload = | Empty | Full(String)
+
+fn main() -> Unit = println("ok")

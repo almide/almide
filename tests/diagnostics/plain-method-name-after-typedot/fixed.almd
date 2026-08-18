@@ -1,0 +1,5 @@
+type Dog = { name: String }
+
+fn Dog.bark(d: Dog) -> String = d.name
+
+fn main() -> Unit = println(Dog { name: "rex" }.bark())

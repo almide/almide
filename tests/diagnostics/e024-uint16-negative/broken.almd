@@ -1,0 +1,5 @@
+// A negated literal at an unsigned width: no negative value ever fits.
+fn main() -> Unit = {
+  let u: UInt16 = -3
+  println(uint16.to_string(u))
+}

@@ -1,0 +1,32 @@
+// @contract: C-292
+// koka reuse4 + beans map/swap: hand-rolled map over a cons-variant list
+// rebuilding every cell (reuse candidate), and the swap of the first two
+// cells that reuses both cons cells with crossed payloads.
+type IList = | INil | ICons(Int, IList)
+
+fn mapx(xs: IList, k: Int) -> IList = match xs {
+  ICons(x, rest) => ICons(x * k, mapx(rest, k)),
+  INil => INil,
+}
+
+fn swap2(xs: IList) -> IList = match xs {
+  ICons(x, rest) => match rest {
+    ICons(y, zs) => ICons(y, ICons(x, zs)),
+    INil => ICons(x, INil),
+  },
+  INil => INil,
+}
+
+fn show(xs: IList) -> String = match xs {
+  ICons(h, t) => int.to_string(h) + ":" + show(t),
+  INil => "$",
+}
+
+fn main() -> Unit = {
+  let xs = ICons(1, ICons(2, ICons(3, INil)))
+  println(show(mapx(xs, 10)))
+  println(show(swap2(xs)))
+  println(show(swap2(ICons(5, INil))))
+  println(show(swap2(INil)))
+  println(show(mapx(INil, 3)))
+}

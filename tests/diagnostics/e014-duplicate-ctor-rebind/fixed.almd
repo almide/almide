@@ -1,0 +1,8 @@
+type C = | Val(Int) | Nil
+
+fn f(c: C) -> Int = match c {
+  Val(a) => a,
+  Nil => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(Val(3))))

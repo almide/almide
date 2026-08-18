@@ -1,0 +1,8 @@
+// The removed thunk-list spelling inside a NESTED block.
+effect fn main() -> Unit = {
+  let go = {
+    let r = fan.race([() => 1])
+    1
+  }
+  println(int.to_string(go))
+}

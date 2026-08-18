@@ -1,0 +1,7 @@
+// E026: a String index as a MATCH SUBJECT.
+fn main() -> Unit = {
+  let s = "abc"
+  match s[0] {
+    _ => println("arm"),
+  }
+}

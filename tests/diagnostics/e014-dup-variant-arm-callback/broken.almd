@@ -1,0 +1,9 @@
+// Duplicate VARIANT arm inside a direct-call callback. (The same match in
+// PIPE position escapes E014 entirely — a recorded checker gap, see the
+// wave-2 sweep findings.)
+type C = | Red | Blue
+
+fn f(cs: List[C]) -> Int =
+  list.fold(list.map(cs, (c) => match c { Red => 1, Red => 2, Blue => 3 }), 0, (a, x) => a + x)
+
+fn main() -> Unit = println(int.to_string(f([Red, Blue])))

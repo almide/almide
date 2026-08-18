@@ -1,0 +1,5 @@
+// A CHAINED index: the first `[]` on a String is the error.
+fn main() -> Unit = {
+  let s = "abc"
+  println(s[0][0])
+}

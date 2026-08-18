@@ -1,0 +1,6 @@
+type Ev = | Scroll { dy: Int }
+
+effect fn main() -> Unit = {
+  let e = Scroll { dy: 3 }
+  println(match e { Scroll { dy } => int.to_string(dy) })
+}

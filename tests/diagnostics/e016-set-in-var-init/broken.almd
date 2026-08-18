@@ -1,0 +1,5 @@
+// A Set of closures as a VAR initializer.
+fn main() -> Unit = {
+  var s = set.from_list([(x: Int) => x * 2])
+  println(int.to_string(set.len(s)))
+}

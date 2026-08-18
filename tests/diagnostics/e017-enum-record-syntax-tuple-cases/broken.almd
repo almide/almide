@@ -1,0 +1,7 @@
+// Brace-constructing the ENUM TYPE itself when none of its cases take
+// named fields.
+type Shape = | Circle(Int) | Dot
+
+fn mk() -> Shape = Shape { r: 3 }
+
+fn main() -> Unit = println("${mk()}")

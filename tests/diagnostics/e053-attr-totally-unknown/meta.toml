@@ -1,0 +1,3 @@
+expects_code = "E053"
+expects_error = "unknown attribute"
+hint_substring = "Almide reads these attributes"

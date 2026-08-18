@@ -1,0 +1,6 @@
+// E049 variant: same-line `let ... in <expr>`.
+fn f(n: Int) -> Int = {
+  let m = n * 2 in m + 1
+}
+
+fn main() -> Unit = println(int.to_string(f(4)))

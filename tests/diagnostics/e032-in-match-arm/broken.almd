@@ -1,0 +1,9 @@
+// E032 raised from a match-arm body.
+fn main() -> Unit = {
+  let xs = [1]
+  match 1 {
+    1 => list.push(xs, 2),
+    _ => (),
+  }
+  println(int.to_string(list.len(xs)))
+}

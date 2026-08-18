@@ -589,6 +589,25 @@ impl Checker {
                     aligned_spans[pi] = self.arg_spans.get(src).copied().flatten();
                     raw[pi] = arg_tys.get(src).cloned();
                 }
+                None => {
+                    // A named arg naming NO parameter used to fall back to
+                    // the positional appendix SILENTLY — if the types lined
+                    // up by accident, check passed and the by-name lowering
+                    // died at the native build (diagnostic sweep 2026-08-18).
+                    let roster = sig
+                        .params
+                        .iter()
+                        .map(|(pn, _)| pn.as_str().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.emit(super::err(
+                        format!("no parameter named '{}' on this function", nm),
+                        format!("declared parameter name(s): {}", roster),
+                        format!("named argument {}:", nm),
+                    ).with_code("E004"));
+                    ok = false;
+                    break;
+                }
                 _ => { ok = false; break; }
             }
         }
@@ -815,7 +834,7 @@ impl Checker {
             if arg_tys.len() != expected_tys.len() {
                 self.emit(super::err(
                     format!("{}() expects {} argument(s) but got {}", name, expected_tys.len(), arg_tys.len()),
-                    "Check the number of arguments", format!("constructor {}()", name)));
+                    "Check the number of arguments", format!("constructor {}()", name)).with_code("E004"));
             }
             for (i, (aty, ety)) in arg_tys.iter().zip(expected_tys.iter()).enumerate() {
                 let concrete_arg = resolve_ty(aty, &self.uf);

@@ -1,0 +1,6 @@
+type Msg = | Pair(Int, Int) | Nil
+
+effect fn main() -> Unit = {
+  let m = Pair(1, 2)
+  println("${m}")
+}

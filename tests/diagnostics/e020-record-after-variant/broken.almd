@@ -1,0 +1,5 @@
+// Variant first, record second — order does not change the verdict.
+type Token = | Word(String) | Num
+type Token = { text: String }
+
+fn main() -> Unit = println("ok")

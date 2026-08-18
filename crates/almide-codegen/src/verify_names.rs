@@ -492,6 +492,43 @@ fn repair_scope(
     }
 }
 
+/// Widen the global map with the candidates a specific MODULE scope can
+/// legitimately mean (#1501). A bare reference inside module `deplib.engine`
+/// can only have been produced from a declaration its own package could name
+/// bare — `deplib.syntax.Node`, never the dependent app's `parse.Node`, which
+/// is not even importable there — so narrowing an ambiguous base to the
+/// owners sharing the scope's package namespace (the module name's first
+/// segment) is the checker's own visibility rule replayed, not a guess. The
+/// bug this fixes: a package and its dependency each declaring a `type Node`
+/// in their own submodules tripped the #433 gate on the DEPENDENCY's own
+/// internal references the moment the two were linked, though each package
+/// compiled clean alone.
+fn augment_map_for_scope(
+    global: &std::collections::HashMap<Sym, Sym>,
+    decls: &DeclIndex,
+    module_name: &str,
+) -> std::collections::HashMap<Sym, Sym> {
+    let ns = module_name.split('.').next().unwrap_or(module_name);
+    let mut map = global.clone();
+    for (base, owners) in &decls.qualified {
+        let key = almide_base::intern::sym(base);
+        if map.contains_key(&key) || decls.bare.contains(&key) {
+            continue;
+        }
+        let in_pkg: Vec<&String> = owners
+            .iter()
+            .filter(|o| {
+                let modpart = o.rsplit_once('.').map(|(m, _)| m).unwrap_or("");
+                modpart == ns || modpart.starts_with(&format!("{ns}."))
+            })
+            .collect();
+        if in_pkg.len() == 1 {
+            map.insert(key, almide_base::intern::sym(in_pkg[0]));
+        }
+    }
+    map
+}
+
 /// Rewrite every unambiguous bare type reference to its canonical qualified
 /// name, in place. Runs at codegen entry, before `assert_names_resolvable`.
 pub fn repair_bare_type_names(program: &mut IrProgram) {
@@ -502,15 +539,22 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
         eprintln!("[names-debug] repair: qualified = {:?}", decls.qualified);
         eprintln!("[names-debug] repair: map = {:?}", map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
     }
-    if map.is_empty() {
-        return;
-    }
     repair_scope(&mut program.type_decls, &mut program.functions, &mut program.top_lets, &mut program.var_table, &map);
     for d in &mut program.def_table.entries {
         d.ty = repair_ty(&d.ty, &map);
     }
     for m in &mut program.modules {
-        repair_scope(&mut m.type_decls, &mut m.functions, &mut m.top_lets, &mut m.var_table, &map);
+        // Per-scope widening (#1501): the module's own package namespace can
+        // disambiguate a base the GLOBAL view cannot.
+        let scoped = augment_map_for_scope(&map, &decls, m.name.as_str());
+        if std::env::var_os("ALMIDE_NAMES_DEBUG").is_some() && scoped.len() > map.len() {
+            eprintln!(
+                "[names-debug] repair: module `{}` scoped additions = {:?}",
+                m.name,
+                scoped.iter().filter(|(k, _)| !map.contains_key(*k)).map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>()
+            );
+        }
+        repair_scope(&mut m.type_decls, &mut m.functions, &mut m.top_lets, &mut m.var_table, &scoped);
     }
 }
 

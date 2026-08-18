@@ -1,0 +1,10 @@
+let LIMIT = 5
+
+fn bump() -> Unit = {
+  LIMIT = 6
+}
+
+fn main() -> Unit = {
+  bump()
+  println(int.to_string(LIMIT))
+}

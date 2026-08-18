@@ -1,0 +1,5 @@
+// E056 variant: the no-op `?` in a let binding.
+fn f(o: Int?) -> Int = {
+  let q = o?
+  q ?? 0
+}

@@ -1,0 +1,6 @@
+// A Set of unary Int functions declared via annotation.
+effect fn main() -> Unit = {
+  var s: Set[(Int) -> Int] = set.new()
+  set.insert(s, (x) => x * 2)
+  println(int.to_string(set.len(s)))
+}

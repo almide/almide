@@ -1,0 +1,8 @@
+type Shade = | Light(Int) | Dark
+
+fn f(s: Shade) -> Int = match s {
+  Light(n) => n,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(Dark)))

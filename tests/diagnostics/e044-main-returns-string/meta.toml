@@ -1,0 +1,3 @@
+expects_code = "E044"
+expects_error = "main() returns Unit"
+hint_substring = "print it"

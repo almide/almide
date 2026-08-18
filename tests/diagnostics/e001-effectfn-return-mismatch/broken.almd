@@ -1,0 +1,3 @@
+effect fn f() -> Int = "nope"
+
+effect fn main() -> Unit = println(int.to_string(f()!))

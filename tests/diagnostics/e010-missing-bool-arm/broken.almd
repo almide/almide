@@ -1,0 +1,6 @@
+// A Bool match covering only `true` — the missing `false` must be named.
+fn flag(b: Bool) -> Int = match b {
+  true => 1,
+}
+
+fn main() -> Unit = println(int.to_string(flag(false)))

@@ -1,0 +1,5 @@
+fn describe(x: Int) -> String = int.to_string(x)
+
+fn describe_str(s: String) -> String = s
+
+fn main() -> Unit = println(describe(1))

@@ -1,0 +1,40 @@
+// @contract: C-293
+// Tuples woven through containers: List[(Int, String)], a tuple OF lists,
+// and List[List[(Int, Int)]] — construction, projection, folds, equality.
+fn main() -> Unit = {
+  let pairs: List[(Int, String)] = [(1, "one"), (2, "two"), (3, "three")]
+  println(int.to_string(list.len(pairs)))
+  let labels = list.map(pairs, (p) => match p {
+    (n, s) => "${int.to_string(n)}:${s}"
+  })
+  println(list.join(labels, " "))
+  let ksum = list.fold(pairs, 0, (a, p) => a + match p {
+    (n, _) => n
+  })
+  println(int.to_string(ksum))
+  // tuple of lists: both halves independently heap-owned
+  let halves: (List[Int], List[String]) = ([1, 2, 3], ["a", "b"])
+  let total = match halves {
+    (ns, ss) => list.len(ns) + list.len(ss)
+  }
+  println(int.to_string(total))
+  println(match halves {
+    (_, ss) => list.join(ss, "/")
+  })
+  // grid of scalar pairs
+  var grid: List[List[(Int, Int)]] = []
+  var i = 0
+  while i < 2 {
+    var row: List[(Int, Int)] = []
+    list.push(row, (i, i * 2))
+    list.push(row, (i, i * 3))
+    list.push(grid, row)
+    i = i + 1
+  }
+  let gsum = list.fold(grid, 0, (a, row) => a + list.fold(row, 0, (b, p) => b + match p {
+    (x, y) => x + y
+  }))
+  // NB: `pairs == [(1, "one"), …]` (list-of-tuples equality) is a pinned wall
+  // — proofs/wall-corpus/list_of_tuples_equality.almd.
+  println(int.to_string(gsum))
+}

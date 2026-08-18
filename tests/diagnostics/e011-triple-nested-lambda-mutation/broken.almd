@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  var total = 0
+  let f = (a: Int) => (b: Int) => (c: Int) => { total = total + a + b + c
+    total }
+  println(int.to_string(f(1)(2)(3)))
+}

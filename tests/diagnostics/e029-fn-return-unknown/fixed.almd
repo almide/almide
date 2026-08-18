@@ -1,0 +1,5 @@
+type Gadget = { n: Int }
+
+fn make() -> Gadget = Gadget { n: 0 }
+
+fn main() -> Unit = println("x")

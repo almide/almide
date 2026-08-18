@@ -1,0 +1,3 @@
+import json
+
+effect fn main() -> Unit = println(json.stringify(json.parse("1") ?? value.int(0)))

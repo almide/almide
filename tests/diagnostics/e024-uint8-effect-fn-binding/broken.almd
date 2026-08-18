@@ -1,0 +1,7 @@
+// A UInt8 binding out of range inside an EFFECT fn. (Branch-result
+// positions — if/match arms feeding a sized binding — escape the range
+// check entirely; recorded as a wave-2 sweep finding.)
+effect fn main() -> Unit = {
+  let b: UInt8 = 300
+  println(int.to_string(b))
+}

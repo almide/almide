@@ -1,0 +1,8 @@
+// E042 variant: the discarded Result carries a payload (Int), not Unit —
+// still must-use.
+effect fn count() -> Result[Int, String] = ok(7)
+
+effect fn main() -> Unit = {
+  count()
+  println("done")
+}

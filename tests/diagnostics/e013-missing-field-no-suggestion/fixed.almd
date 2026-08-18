@@ -1,0 +1,5 @@
+type Point = { alpha: Int, beta: Int }
+
+fn read(p: Point) -> Int = p.alpha
+
+fn main() -> Unit = println(int.to_string(read(Point(alpha: 1, beta: 2))))

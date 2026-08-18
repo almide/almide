@@ -1,0 +1,6 @@
+// E030: sorting FUNCTION VALUES — no order exists.
+fn main() -> Unit = {
+  let fs: List[(Int) -> Int] = [(x) => x, (x) => x + 1]
+  let s = list.sort(fs)
+  println(int.to_string(list.len(s)))
+}

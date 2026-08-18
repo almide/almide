@@ -1,0 +1,6 @@
+// A Result match covering only `ok` — the err channel cannot be dropped.
+fn take(r: Result[Int, String]) -> Int = match r {
+  ok(n) => n,
+}
+
+fn main() -> Unit = println(int.to_string(take(ok(3))))

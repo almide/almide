@@ -1,0 +1,4 @@
+type A = | AWrap(Int) | ANil
+type B = | BWrap(Int) | BNil
+
+fn main() -> Unit = println("${AWrap(1)}")

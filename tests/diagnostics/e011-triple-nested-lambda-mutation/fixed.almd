@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let f = (a: Int) => (b: Int) => (c: Int) => a + b + c
+  println(int.to_string(f(1)(2)(3)))
+}

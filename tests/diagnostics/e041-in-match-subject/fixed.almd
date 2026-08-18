@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let n = int.parse("5")!
+  println(match n > 0 { true => "p", false => "n" })
+}

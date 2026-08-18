@@ -1,0 +1,6 @@
+type Pt = | P(Int, Int)
+
+fn main() -> Unit = {
+  let x = P(1, 2)
+  println(match x { P(a, b) => int.to_string(a + b) })
+}

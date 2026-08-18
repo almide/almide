@@ -1,0 +1,6 @@
+type Pair = { first: Int, second: Int }
+
+fn main() -> Unit = {
+  let p = Pair { first: 1, second: 2 }
+  println(int.to_string(p.first))
+}

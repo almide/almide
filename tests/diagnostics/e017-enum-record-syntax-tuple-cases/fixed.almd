@@ -1,0 +1,5 @@
+type Shape = | Circle(Int) | Dot
+
+fn mk() -> Shape = Circle(3)
+
+fn main() -> Unit = println("${mk()}")

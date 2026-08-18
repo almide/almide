@@ -1,0 +1,5 @@
+// An Int8 binding with a magnitude beyond 127.
+fn main() -> Unit = {
+  let b: Int8 = 200
+  println(int.to_string(int.from_int8(b)))
+}

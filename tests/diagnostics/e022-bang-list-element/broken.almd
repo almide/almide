@@ -1,0 +1,4 @@
+// `!` on a non-channel operand as a LIST element.
+fn f(n: Int) -> Int = list.len([n!, 2])
+
+fn main() -> Unit = println(int.to_string(f(1)))

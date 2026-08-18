@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s: Set[Nope] = set.new()
+  println(int.to_string(set.len(s)))
+}

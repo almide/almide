@@ -1,0 +1,10 @@
+effect fn tally() -> Int = {
+  let total = 5
+  let (a, b) = fan {
+    total
+    total
+  }
+  a + b
+}
+
+effect fn main() -> Unit = println(int.to_string(tally()!))

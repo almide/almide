@@ -1,0 +1,2 @@
+expects_code = "E003"
+hint_substring = "Check the variable name"

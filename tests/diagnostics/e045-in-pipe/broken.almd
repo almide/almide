@@ -1,0 +1,5 @@
+// E045: tuple index out of range on a PIPED value.
+fn main() -> Unit = {
+  let p = (1, 2)
+  println(int.to_string((p |> (t: (Int, Int)) => t.5)))
+}

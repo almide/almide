@@ -1,0 +1,16 @@
+// @contract: C-238
+// The DISQUALIFYING-shape resource edge of the bound-range deferral: a range
+// a for-in head could iterate lazily is FORCED to materialize by list.len /
+// indexing, and the span cannot be satisfied by any 64-bit machine
+// (i64::MAX elements × 8 bytes > isize::MAX). Both targets must take the
+// C-197 defined abort — "Error: out of memory" + exit 1 — where native's
+// range template previously died as a raw `capacity overflow` panic
+// (exit 101) from collect()'s infallible reserve (xtarget-fuzz
+// seed=20260819 index=2963). The reference interpreter abstains on a
+// beyond-cap materialization rather than voting a truncated length.
+effect fn main() -> Unit = {
+  println("before")
+  let idx = 0..<9223372036854775807
+  println("len=" + int.to_string(list.len(idx)) + " at2=" + int.to_string(idx[2]))
+  println("after")
+}

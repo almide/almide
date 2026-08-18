@@ -1,0 +1,3 @@
+fn id[T](x: T) -> T = x
+
+fn main() -> Unit = println(int.to_string(id(3)))

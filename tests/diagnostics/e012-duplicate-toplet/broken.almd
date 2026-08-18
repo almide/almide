@@ -1,0 +1,7 @@
+// Two module-level lets with one name: the last silently won and the
+// native build died on rustc's duplicate definition (sweep 2026-08-18).
+let k = 1
+
+let k = 2
+
+fn main() -> Unit = println(int.to_string(k))

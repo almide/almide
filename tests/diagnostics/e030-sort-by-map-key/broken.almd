@@ -1,0 +1,7 @@
+// E030: sort_by whose KEY function returns a Map — the key type must be
+// orderable, not just the elements.
+fn main() -> Unit = {
+  let xs: List[Int] = [1, 2]
+  let s = list.sort_by(xs, (x) => ["k": x])
+  println(int.to_string(list.len(s)))
+}

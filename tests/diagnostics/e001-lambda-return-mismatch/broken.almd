@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let ys: List[Int] = list.map([1, 2], (x) => "n")
+  println(int.to_string(list.len(ys)))
+}

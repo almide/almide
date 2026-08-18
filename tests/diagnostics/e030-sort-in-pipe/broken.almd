@@ -1,0 +1,7 @@
+// E030 in PIPE position: the unorderable-element check must see through |>.
+type W = { f: (Int) -> Int }
+
+fn main() -> Unit = {
+  let xs = [W { f: (x) => x }, W { f: (x) => x + 1 }]
+  println(int.to_string(list.len(xs |> list.sort)))
+}

@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let r = fan.bounded([1, 2], (n) => n * 2) ?? -1
+  println(int.to_string(r))
+}

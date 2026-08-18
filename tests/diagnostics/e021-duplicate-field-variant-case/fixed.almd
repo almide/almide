@@ -1,0 +1,5 @@
+type Ev = | SetName { name: String } | Quit
+
+fn mk() -> Ev = SetName { name: "a" }
+
+fn main() -> Unit = println("${mk()}")

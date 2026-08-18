@@ -1,0 +1,5 @@
+effect fn tick() -> Int = 1
+
+let seed = 1
+
+fn main() -> Unit = println(int.to_string(seed))

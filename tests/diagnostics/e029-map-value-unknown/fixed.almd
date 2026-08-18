@@ -1,0 +1,6 @@
+type Entry = { v: Int }
+
+fn main() -> Unit = {
+  let m: Map[String, Entry] = map.new()
+  println(int.to_string(map.len(m)))
+}

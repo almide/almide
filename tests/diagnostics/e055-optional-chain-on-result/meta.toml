@@ -1,0 +1,3 @@
+expects_code = "E055"
+expects_error = "requires Option type but got Result"
+hint_substring = "turns Result into Option"

@@ -1,0 +1,6 @@
+fn label(n: Int) -> String = match n {
+  0 => "zero",
+  _ => int.to_string(n),
+}
+
+fn main() -> Unit = println(label(0))

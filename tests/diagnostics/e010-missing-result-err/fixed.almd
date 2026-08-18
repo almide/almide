@@ -1,0 +1,6 @@
+fn take(r: Result[Int, String]) -> Int = match r {
+  ok(n) => n,
+  err(_) => 0 - 1,
+}
+
+fn main() -> Unit = println(int.to_string(take(ok(3))))

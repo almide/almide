@@ -1,0 +1,7 @@
+// A capitalized name that resolves to nothing (no ctor, no type, no top-let)
+// must be an E003 at the reference — inside an interpolation segment the
+// context accepts any type, so before the fix this passed check silently and
+// panicked the use-count walk on the lowering's error-recovery VarId(0).
+fn banner() -> String = "${APP_NAME} ready"
+
+fn main() -> Unit = println(banner())

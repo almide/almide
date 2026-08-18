@@ -1,0 +1,6 @@
+// A tuple pattern over a CONCRETE non-tuple value bound its elements as
+// Unknown silently (sweep 2026-08-18).
+fn main() -> Unit = {
+  let (a, b) = 3
+  println(int.to_string(a + b))
+}

@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  var total = 0
+  let out = list.map([1, 2], (n) => {
+    total = total + n
+    n * 2
+  })
+  println(int.to_string(list.len(out)))
+}

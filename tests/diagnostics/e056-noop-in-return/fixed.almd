@@ -1,0 +1,3 @@
+fn conv(o: Int?) -> Int? = o
+
+fn main() -> Unit = println(int.to_string(conv(some(2)) ?? 0))

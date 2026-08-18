@@ -1,0 +1,5 @@
+type Gizmo = { n: Int }
+
+fn eat(g: Gizmo) -> Int = g.n
+
+fn main() -> Unit = println("x")

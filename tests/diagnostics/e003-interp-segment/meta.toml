@@ -1,0 +1,2 @@
+expects_code = "E003"
+expects_error = "undefined variable 'grand_total'"

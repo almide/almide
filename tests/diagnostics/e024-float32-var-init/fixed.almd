@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var p: Float32 = 1.0e30
+  p = p
+  println("fits")
+}

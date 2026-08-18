@@ -332,6 +332,26 @@ impl Checker {
                 Ty::Record { fields } | Ty::OpenRecord { fields } => {
                     for (_, f) in fields { collect_named(f, out); }
                 }
+                // A VARIANT's payload types are annotations too: an undeclared
+                // name in `type Tree = | Leaf(Payload)` flowed to codegen as a
+                // nonexistent Rust type (E0425) with check silent — the same
+                // acceptance-parity gap E029 closed for let/param/return
+                // positions (reference-port sweep finding, 2026-08-18). The
+                // variant's own name is in env.types by registration, so only
+                // dangling payload references survive the declared-name skip.
+                Ty::Variant { name: _, cases } => {
+                    for c in cases {
+                        match &c.payload {
+                            almide_lang::types::VariantPayload::Tuple(ts) => {
+                                for t in ts { collect_named(t, out); }
+                            }
+                            almide_lang::types::VariantPayload::Record(fs) => {
+                                for (_, t) in fs { collect_named(t, out); }
+                            }
+                            almide_lang::types::VariantPayload::Unit => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -459,6 +479,28 @@ impl Checker {
         let checks = std::mem::take(&mut self.deferred_result_interp_checks);
         for (ty, span) in checks {
             let resolved = resolve_ty(&ty, &self.uf);
+            // `"${b}"` over Bytes passed check and died downstream on BOTH
+            // legs — native emitted `Display` on `Vec<u8>` (rustc E0277, the
+            // check-vs-build gap class) and the wasm renderer walled — so a
+            // Bytes segment has never printed anywhere. Reject it at check
+            // time with the spellings that ARE defined.
+            if matches!(resolved, Ty::Bytes) {
+                let mut diag = err(
+                    "a Bytes value has no defined string form — it cannot be interpolated".to_string(),
+                    "Interpolate what you mean: `${bytes.to_list(b)}` for the octets, \
+                     `${bytes.to_string_lossy(b)}` for UTF-8 text, or \
+                     `${int.to_string(bytes.len(b))}` for the length."
+                        .to_string(),
+                    "string interpolation".to_string(),
+                );
+                if let Some(s) = span {
+                    diag.file = self.source_file.clone();
+                    diag.line = Some(s.line);
+                    diag.col = Some(s.col);
+                }
+                self.diagnostics.push(diag);
+                continue;
+            }
             if !resolved.is_result() {
                 continue;
             }

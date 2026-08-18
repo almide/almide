@@ -55,7 +55,16 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
     }
     match ty {
         Ty::Named(name, args) => {
-            if args.is_empty() { name.to_string() }
+            // A mangled name is an IDENTIFIER SEGMENT, not a type spelling: a
+            // module-qualified type (`varlib.Pigment`) kept its dot here, and
+            // the consumers disagreed about it — the MIR-side
+            // `user_module_fn_name` replaces dots while the mono call
+            // rewriters do not, so a specialized fn over a dotted type was
+            // called by one spelling and defined under another (an unlinked
+            // wall misread as a registry gap, #1496). Sanitize at the single
+            // mint point every consumer shares.
+            let name = name.replace('.', "_");
+            if args.is_empty() { name }
             else {
                 let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();
                 format!("{}_{}", name, arg_strs.join("_"))

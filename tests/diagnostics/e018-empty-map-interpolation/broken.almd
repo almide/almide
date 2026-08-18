@@ -1,0 +1,2 @@
+// `[:]` interpolated directly.
+fn main() -> Unit = println("${[:]}")

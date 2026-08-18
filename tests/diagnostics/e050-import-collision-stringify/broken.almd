@@ -1,0 +1,6 @@
+// E050 variant: local fn shadowing the OTHER imported name.
+import json.{parse, stringify}
+
+fn stringify(n: Int) -> String = int.to_string(n)
+
+effect fn main() -> Unit = println(stringify(7))

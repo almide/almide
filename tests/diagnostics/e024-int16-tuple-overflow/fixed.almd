@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let t: (Int16, Int) = (7000, 1)
+  println(int.to_string(t.1))
+}

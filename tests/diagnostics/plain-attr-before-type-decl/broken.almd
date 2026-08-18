@@ -1,0 +1,6 @@
+// Attributes attach to fns only: one before a `type` decl is a parse error
+// (the "Expected Fn" wording is the pinned current state).
+@derive("Codec")
+type P = { x: Int }
+
+fn main() -> Unit = println(int.to_string(P { x: 1 }.x))

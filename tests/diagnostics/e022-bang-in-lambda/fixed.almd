@@ -1,0 +1,6 @@
+fn bump() -> Int = {
+  let g = (t: Int) => t + 1
+  g(3)
+}
+
+fn main() -> Unit = println(int.to_string(bump()))

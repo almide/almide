@@ -1,0 +1,7 @@
+// E034: postfix `?` on a TUPLE value.
+fn f() -> Int? = {
+  let t = (1, 2)?
+  some(1)
+}
+
+fn main() -> Unit = println("x")

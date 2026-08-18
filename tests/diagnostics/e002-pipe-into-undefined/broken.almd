@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let v = 5 |> triple
+  println(int.to_string(v))
+}

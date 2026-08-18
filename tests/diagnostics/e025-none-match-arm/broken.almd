@@ -1,0 +1,4 @@
+// `none` from a MATCH arm, never pinned.
+fn f(n: Int) -> Unit = println("${match n { 0 => none, _ => none }}")
+
+fn main() -> Unit = f(0)

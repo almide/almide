@@ -1,0 +1,6 @@
+// E038: `??` missing its fallback inside a PURE fn body.
+fn pick(s: String) -> Int = {
+  int.parse(s) ?? 0
+}
+
+fn main() -> Unit = println(int.to_string(pick("3")))

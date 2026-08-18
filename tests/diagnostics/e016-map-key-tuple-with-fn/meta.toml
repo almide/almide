@@ -1,0 +1,2 @@
+expects_code = "E016"
+expects_error = "`Map` key type cannot contain a function"

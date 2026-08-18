@@ -1,0 +1,8 @@
+effect fn tick() -> Int = 1
+
+fn f(seed: Int) -> Int = {
+  var v = seed
+  v + 1
+}
+
+fn main() -> Unit = println(int.to_string(f(1)))

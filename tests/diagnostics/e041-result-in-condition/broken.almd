@@ -1,0 +1,6 @@
+// E041 variant: a Result-valued binding read in an if CONDITION — the 0.54
+// auto-? is gone, so the comparison sees Result, not Int.
+effect fn main() -> Unit = {
+  let n = int.parse("5")
+  if n > 0 then println("pos") else println("neg")
+}

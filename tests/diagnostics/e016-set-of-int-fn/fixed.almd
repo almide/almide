@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  var s: Set[Int] = set.new()
+  set.insert(s, 2)
+  println(int.to_string(set.len(s)))
+}

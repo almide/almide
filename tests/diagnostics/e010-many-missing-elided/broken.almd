@@ -1,0 +1,5 @@
+type Dir = | N | S | E | W | C
+
+fn main() -> Unit = println(int.to_string(match N {
+  N => 1,
+}))

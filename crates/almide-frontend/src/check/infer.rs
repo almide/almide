@@ -172,7 +172,22 @@ impl Checker {
                     }
                 }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
-                else { Ty::Named(sym(name), vec![]) }
+                // A DECLARED type's bare name is a legitimate value-position
+                // occurrence (static-dispatch receiver `Type.method`, enum
+                // case access `Color.Red` — the Member path infers the object
+                // before its own resolution).
+                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), vec![]) }
+                else {
+                    // A capitalized name that is no ctor, no const param, no
+                    // top-let and no declared type resolves to NOTHING.
+                    // Returning a phantom `Ty::Named` here let `"${X}"` pass
+                    // check silently (an interpolation segment accepts any
+                    // type), and the error-recovery `VarId(0)` the lowering
+                    // mints for it then panicked use-counting on an empty
+                    // VarTable — a checker hole, not a lowering bug.
+                    let name = name.as_str().to_string();
+                    self.report_undefined_variable(&name)
+                }
     }
 
     fn infer_expr_record(&mut self, expr: &mut ast::Expr) -> Ty {
@@ -699,11 +714,23 @@ impl Checker {
                 } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
                     return self.fresh_var();
                 } else {
+                    // ADR-0005 D2 (#1107): the Result misuse gets its own
+                    // code and the canonical unwrap ladder as the hint —
+                    // `?.` is Option-only by definition (`o?.f ≡
+                    // option.map(o, (v) => v.f)`).
+                    let hint = if resolved.is_result() {
+                        "'?.' is Option-only. For a Result, convert first: `r?` turns \
+                         Result into Option (err → none), so `r?.field` becomes \
+                         `(r?)?.field`; or unwrap with `?? fallback` / `match` / `!` \
+                         (effect fn) and access the field directly."
+                    } else {
+                        "Use '?.' only on Option[T] values"
+                    };
                     self.emit(super::err(
                         format!("operator '?.' requires Option type but got {}", resolved.display()),
-                        "Use '?.' only on Option[T] values",
+                        hint,
                         "operator ?.",
-                    ));
+                    ).with_code("E055"));
                     return Ty::Unknown;
                 };
                 // Resolve field type from inner_ty

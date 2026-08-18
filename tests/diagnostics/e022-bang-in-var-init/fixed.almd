@@ -1,0 +1,6 @@
+fn f() -> Int = {
+  var n = 3
+  n
+}
+
+fn main() -> Unit = println(int.to_string(f()))

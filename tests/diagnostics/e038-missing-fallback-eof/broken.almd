@@ -1,0 +1,5 @@
+// E038: `??` with NO fallback operand at all (end of statement).
+effect fn main() -> Unit = {
+  let v = int.parse("x")??
+  println("${v}")
+}

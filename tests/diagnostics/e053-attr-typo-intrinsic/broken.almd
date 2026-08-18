@@ -1,0 +1,5 @@
+// E053 variant: another one-letter typo, nearest-match branch.
+@intrinsik("almide_rt_noop")
+fn f() -> Int = 1
+
+fn main() -> Unit = println(int.to_string(f()))

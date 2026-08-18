@@ -1,0 +1,3 @@
+effect fn boot() -> Unit = println("boot")
+
+effect fn main() -> Unit = boot()!

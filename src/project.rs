@@ -43,6 +43,9 @@ impl std::fmt::Display for PkgId {
 #[derive(Debug, Clone)]
 pub struct FetchedDep {
     pub pkg_id: PkgId,
+    /// The requested version this entry currently holds — MVS keeps the
+    /// maximum requested version per `PkgId` (#1458).
+    pub version: String,
     pub source_dir: PathBuf,
 }
 

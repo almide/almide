@@ -1,0 +1,5 @@
+// Unknown type as a Set element annotation.
+fn main() -> Unit = {
+  let s: Set[Ghost] = set.new()
+  println(int.to_string(set.len(s)))
+}

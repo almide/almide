@@ -1,0 +1,3 @@
+expects_code = "E021"
+expects_error = "takes positional arguments, not named ones"
+hint_substring = "Drop the names"

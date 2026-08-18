@@ -1,0 +1,4 @@
+// Unknown type nested in a RETURN annotation's generic.
+fn mk() -> List[Ghost] = []
+
+fn main() -> Unit = println(int.to_string(list.len(mk())))

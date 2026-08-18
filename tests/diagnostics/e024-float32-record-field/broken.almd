@@ -1,0 +1,7 @@
+// A Float32 RECORD field beyond f32.
+type P = { w: Float32 }
+
+fn main() -> Unit = {
+  let p = P { w: 1.0e300 }
+  println("never")
+}

@@ -1,0 +1,6 @@
+// E026: a String index in ARGUMENT position gets the same check-time
+// rejection as the statement form.
+fn main() -> Unit = {
+  let s = "hello"
+  println(s[1])
+}

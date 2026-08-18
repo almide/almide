@@ -1,0 +1,3 @@
+fn f(n: Int) -> Int = match n { _ if n > 0 => 1, _ => 0 }
+
+fn main() -> Unit = println(int.to_string(f(1)))

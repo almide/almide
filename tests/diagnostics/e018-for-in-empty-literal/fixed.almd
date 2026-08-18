@@ -1,0 +1,7 @@
+effect fn main() -> Unit = {
+  let xs: List[Int] = []
+  for x in xs {
+    println(int.to_string(x))
+  }
+  println("done")
+}

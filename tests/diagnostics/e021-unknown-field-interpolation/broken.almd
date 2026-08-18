@@ -1,0 +1,4 @@
+// An UNKNOWN field on a record case, constructed inside an interpolation.
+type Ev = | Click { x: Int, y: Int } | Quit
+
+fn main() -> Unit = println("${Click { x: 1, y: 2, z: 3 }}")

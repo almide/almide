@@ -1,0 +1,5 @@
+let APP_NAME = "modg"
+
+fn banner() -> String = "${APP_NAME} ready"
+
+fn main() -> Unit = println(banner())

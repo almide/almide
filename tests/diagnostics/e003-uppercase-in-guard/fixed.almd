@@ -1,0 +1,6 @@
+let CAP = 5
+
+fn main() -> Unit = println(match 1 {
+  n if n < CAP => "small",
+  _ => "rest",
+})

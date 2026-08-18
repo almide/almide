@@ -1,0 +1,4 @@
+// Duplicate TUPLE-pattern arms.
+fn f(p: (Int, Int)) -> Int = match p { (0, 0) => 1, (0, 0) => 2, _ => 3 }
+
+fn main() -> Unit = println(int.to_string(f((0, 0))))

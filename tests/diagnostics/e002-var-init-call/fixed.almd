@@ -1,0 +1,6 @@
+fn seed() -> Int = 3
+
+fn main() -> Unit = {
+  var v = seed()
+  println(int.to_string(v))
+}

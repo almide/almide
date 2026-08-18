@@ -1,0 +1,6 @@
+// E052 variant: @deprecated with a note but NO `use = ...` — the
+// no-drop-in-replacement hint branch.
+@deprecated(since = 2, note = "the shim era ended")
+fn old_way(s: String) -> String = s
+
+effect fn main() -> Unit = println(old_way("hi"))

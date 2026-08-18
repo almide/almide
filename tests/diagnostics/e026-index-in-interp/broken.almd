@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s = "abc"
+  println("${s[1]}")
+}

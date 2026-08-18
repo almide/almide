@@ -1,0 +1,11 @@
+// E038: the fallback on the NEXT line inside a nested block — same
+// line-crossing rule as statement level.
+effect fn main() -> Unit = {
+  var t = 0
+  if true then {
+    let v = int.parse("x")??
+    9
+    t = v
+  } else { t = 1 }
+  println(int.to_string(t))
+}

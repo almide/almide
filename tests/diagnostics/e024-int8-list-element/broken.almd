@@ -1,0 +1,5 @@
+// An out-of-range element in a List[Int8] literal.
+fn main() -> Unit = {
+  let xs: List[Int8] = [1, 2, 300]
+  println(int.to_string(list.len(xs)))
+}

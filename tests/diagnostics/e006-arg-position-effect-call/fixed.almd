@@ -1,0 +1,5 @@
+effect fn tick() -> Int = 1
+
+fn f(n: Int) -> String = int.to_string(n)
+
+fn main() -> Unit = println(f(1))

@@ -1,0 +1,7 @@
+// E049 variant: the `in` arrives on the NEXT line (the dojo-observed shape).
+fn f(n: Int) -> Int = {
+  let abs_n = int.abs(n)
+    in abs_n + 1
+}
+
+fn main() -> Unit = println(int.to_string(f(0 - 3)))

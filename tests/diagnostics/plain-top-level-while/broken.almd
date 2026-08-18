@@ -1,0 +1,5 @@
+while true {
+  println("loop")
+}
+
+fn main() -> Unit = println("x")

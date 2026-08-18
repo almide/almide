@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let out = list.map([1, 2], (n) => n * 2)
+  let total = list.fold(out, 0, (a, n) => a + n)
+  println(int.to_string(total))
+}

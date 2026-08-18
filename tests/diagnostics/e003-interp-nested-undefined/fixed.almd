@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let deep = 1
+  println("a${"b${deep}"}")
+}

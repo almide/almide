@@ -1,0 +1,8 @@
+fn sum2(t: (Int, Int)) -> Int = match t { (a, b) => a + b }
+
+effect fn main() -> Unit = {
+  var bias = 2
+  let r = sum2(fan { if 1 > 0 then bias else 0
+    2 })
+  println(int.to_string(r))
+}

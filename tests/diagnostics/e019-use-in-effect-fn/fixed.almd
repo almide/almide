@@ -1,0 +1,7 @@
+type A = | APing | Pong
+type B = | BPing | Pow
+
+effect fn main() -> Unit = {
+  let p = APing
+  println("${p}")
+}

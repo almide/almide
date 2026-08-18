@@ -1,0 +1,5 @@
+// E025: a `none` binding whose payload type is never pinned by any use.
+fn main() -> Unit = {
+  let o = none
+  println("bound")
+}

@@ -1,0 +1,7 @@
+// `.x` on an OPTIONAL record — the value may be absent, so plain field
+// access must point at `?.` instead of sailing through as Unknown (#1120).
+type P = { x: Int }
+
+fn getx(p: P?) -> Int? = p.x
+
+fn main() -> Unit = println(int.to_string(getx(some(P { x: 4 })) ?? 0))

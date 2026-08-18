@@ -1,0 +1,5 @@
+type Shape = | Circle(Int) | Dot
+
+fn area(s: Shape) -> Int = match s { Circle(r) => r * r, Dot => 0 }
+
+fn main() -> Unit = println(int.to_string(Circle(5) |> area))

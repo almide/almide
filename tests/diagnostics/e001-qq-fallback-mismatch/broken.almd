@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let o: Int? = some(1)
+  let v = o ?? "zero"
+  println(int.to_string(v))
+}

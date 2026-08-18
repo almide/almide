@@ -1,0 +1,7 @@
+// E032 raised from INSIDE a lambda body.
+fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  let f = (n: Int) => { list.push(xs, n)
+    n }
+  println(int.to_string(f(4) + list.len(xs)))
+}

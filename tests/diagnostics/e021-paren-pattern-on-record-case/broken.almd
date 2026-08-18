@@ -1,0 +1,10 @@
+// A record-payload case matched with a PAREN pattern (#488): rustc E0164
+// territory on native — rejected at check with the brace spelling.
+type Ev = | SetName { name: String } | Quit
+
+fn label(e: Ev) -> String = match e {
+  SetName(_) => "set",
+  Quit => "quit",
+}
+
+fn main() -> Unit = println(label(Quit))

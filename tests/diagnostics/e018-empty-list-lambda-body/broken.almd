@@ -1,0 +1,5 @@
+// `[]` produced by a lambda whose return is never element-constrained.
+fn main() -> Unit = {
+  let mk = () => []
+  println(int.to_string(list.len(mk())))
+}

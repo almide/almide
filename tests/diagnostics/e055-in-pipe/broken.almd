@@ -1,0 +1,9 @@
+// E055: `?.` on a Result at a pipe head.
+type W = { n: Int }
+
+fn get() -> Result[W, String] = ok(W { n: 3 })
+
+fn main() -> Unit = {
+  let o = get()?.n |> (x) => x
+  println(int.to_string(o ?? 0))
+}

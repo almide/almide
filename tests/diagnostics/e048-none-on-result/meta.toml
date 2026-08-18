@@ -1,0 +1,3 @@
+expects_code = "E048"
+expects_error = "Option and Result are separate types"
+hint_substring = "ok"

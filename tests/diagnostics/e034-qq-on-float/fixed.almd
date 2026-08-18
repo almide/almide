@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let o: Float? = some(1.5)
+  let v = o ?? 0.0
+  println(float.to_string(v))
+}

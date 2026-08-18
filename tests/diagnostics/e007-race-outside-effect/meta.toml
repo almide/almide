@@ -1,0 +1,2 @@
+expects_code = "E007"
+expects_error = "fan.race can only be used inside an effect fn"

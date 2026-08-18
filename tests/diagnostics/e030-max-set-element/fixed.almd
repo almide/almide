@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let xs: List[Int] = [3, 1]
+  let m = list.max(xs) ?? 0
+  println(int.to_string(m))
+}

@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let r = fetch_all()
+  println(int.to_string(r))
+}

@@ -1,0 +1,6 @@
+effect fn step(n: Int) -> Result[Int, String] = ok(n + 1)
+
+effect fn main() -> Unit = {
+  let bad = result.map_err(step(2), (oops) => "step2: " + oops)!
+  println(int.to_string(bad))
+}

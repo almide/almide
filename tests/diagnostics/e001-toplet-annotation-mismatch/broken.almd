@@ -1,0 +1,3 @@
+let LIMIT: Float = "ten"
+
+fn main() -> Unit = println(float.to_string(LIMIT))

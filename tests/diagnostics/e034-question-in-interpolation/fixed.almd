@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let n = 5
+  println("got ${n}")
+}

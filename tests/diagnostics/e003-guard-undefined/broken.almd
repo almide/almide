@@ -1,0 +1,6 @@
+fn pick(n: Int) -> String = match n {
+  _ if n > threshold => "big",
+  _ => "small",
+}
+
+fn main() -> Unit = println(pick(5))

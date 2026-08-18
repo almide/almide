@@ -1,0 +1,10 @@
+// The same pattern twice: the second arm can never run.
+type Color = | Red | Green
+
+fn label(c: Color) -> String = match c {
+  Red => "r",
+  Green => "g",
+  Red => "again",
+}
+
+fn main() -> Unit = println(label(Red))

@@ -1,0 +1,5 @@
+// A Set of closures inside an EFFECT fn.
+effect fn main() -> Unit = {
+  let s = set.from_list([(x: Int) => x + 1])
+  println(int.to_string(set.len(s)))
+}

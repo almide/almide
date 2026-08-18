@@ -1,0 +1,6 @@
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println(match 3 {
+  n if double(true) > 0 => "pos",
+  _ => "rest",
+})

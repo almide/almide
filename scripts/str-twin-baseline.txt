@@ -1,0 +1,7 @@
+# The stdlib `_str`-twin count (#1460): shrink-only, held by
+# scripts/check-str-twin-ratchet.sh. Lower on removal; raising needs the
+# #1460 mob decision or a justified bump in the same PR.
+# 2026-08-18: +1 — list_flat_map_str, the deep-copy twin that fixes the
+# aliased-sublist double-free (#1519, C-297). A justified bump, not drift;
+# the #1460 protocol direction still owns the family's future.
+119

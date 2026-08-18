@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let qzxvw = 1
+  println(int.to_string(qzxvw))
+}

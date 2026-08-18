@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let hit = list.find([1, 2], (n) => n > 1)
+  println(int.to_string(hit ?? 0))
+}

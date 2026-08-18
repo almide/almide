@@ -1,0 +1,6 @@
+type P = { n: Int }
+
+fn main() -> Unit = {
+  let p = P { n: "s" }
+  println(int.to_string(p.n))
+}

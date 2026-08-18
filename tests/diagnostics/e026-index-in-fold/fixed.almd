@@ -1,0 +1,3 @@
+fn f(xs: List[String]) -> String = list.fold(xs, "", (acc, s) => acc + (string.get(s, 0) ?? ""))
+
+fn main() -> Unit = println(f(["ab", "cd"]))

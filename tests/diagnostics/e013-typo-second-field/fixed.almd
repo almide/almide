@@ -1,0 +1,7 @@
+// The typo'd name sits next to several candidates; the suggestion must
+// pick the closest, not the first.
+type Rgb = { red: Int, green: Int, blue: Int }
+
+fn g(c: Rgb) -> Int = c.green
+
+fn main() -> Unit = println(int.to_string(g(Rgb(red: 1, green: 2, blue: 3))))

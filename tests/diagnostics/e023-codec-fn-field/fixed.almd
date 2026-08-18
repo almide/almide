@@ -1,0 +1,3 @@
+type Doc: Codec = { hook_name: String }
+
+fn main() -> Unit = println("ok")

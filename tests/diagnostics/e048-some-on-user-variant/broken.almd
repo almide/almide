@@ -1,0 +1,10 @@
+// E048 variant: `some(..)` used to match a USER variant subject (a `_`
+// fallback keeps exhaustiveness quiet so the family error owns the report).
+type Shade = | Light(Int) | Dark
+
+fn f(s: Shade) -> Int = match s {
+  some(n) => n,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(Dark)))

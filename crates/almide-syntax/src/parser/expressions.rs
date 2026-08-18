@@ -495,6 +495,20 @@ impl Parser {
                 object: Box::new(expr), index,
             }));
         }
+        // #1510: `t.0.1` — the lexer greedily reads `0.1` as a FLOAT right
+        // after the first dot, so a chained tuple index arrives here as one
+        // Float token. Name the trap and the working spelling instead of the
+        // generic "Expected name".
+        if self.check(TokenType::Float) {
+            let tok = self.current();
+            let (a, b) = tok.value.split_once('.').unwrap_or((tok.value.as_str(), ""));
+            if !a.is_empty() && !b.is_empty() && a.bytes().all(|c| c.is_ascii_digit()) && b.bytes().all(|c| c.is_ascii_digit()) {
+                return Err(format!(
+                    "Chained tuple index at line {}:{}: `.{}` lexes as the float literal '{}', not two projections.\n  Hint: parenthesize the first projection — `(x.{}).{}`",
+                    tok.line, tok.col, tok.value, tok.value, a, b
+                ));
+            }
+        }
         // Capture the field's token span BEFORE `expect_any_name`
         // advances past it. The Member's span then covers the
         // full `object.field` — from the object's starting

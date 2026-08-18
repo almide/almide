@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let m: Map[String, Int] = map.from_list([("a", 1)])
+  println(int.to_string(map.len(m)))
+}

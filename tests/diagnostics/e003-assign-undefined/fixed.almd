@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var nope = 1
+  println(int.to_string(nope))
+}

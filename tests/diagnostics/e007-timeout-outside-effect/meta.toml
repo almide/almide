@@ -1,0 +1,2 @@
+expects_code = "E007"
+expects_error = "fan.timeout can only be used inside an effect fn"

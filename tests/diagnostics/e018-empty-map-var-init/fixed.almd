@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  var m = [1: "a"]
+  println(int.to_string(map.len(m)))
+}

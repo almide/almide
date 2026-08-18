@@ -1,0 +1,3 @@
+expects_code = "E056"
+expects_error = "no-op"
+hint_substring = "converts Result to Option"

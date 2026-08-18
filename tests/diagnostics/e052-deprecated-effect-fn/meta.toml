@@ -1,0 +1,2 @@
+expects_code = "E052"
+expects_error = "deprecated"

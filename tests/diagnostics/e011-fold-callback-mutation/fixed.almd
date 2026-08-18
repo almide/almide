@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let total = list.fold([1, 2], 0, (a, n) => a + n)
+  println(int.to_string(total))
+}

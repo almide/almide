@@ -1,0 +1,3 @@
+fn show(r: Result[Int, String]) -> String = match r { ok(n) => int.to_string(n), err(e) => e }
+
+effect fn main() -> Unit = println(show(int.parse("5")))

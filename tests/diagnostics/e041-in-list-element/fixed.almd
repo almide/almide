@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  let n = int.parse("4")!
+  let xs = [n, 1]
+  println(int.to_string(list.len(xs)))
+}

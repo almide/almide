@@ -1,0 +1,3 @@
+expects_code = "E014"
+expects_error = "unreachable match arm"
+hint_substring = "already covered"

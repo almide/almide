@@ -1,0 +1,9 @@
+effect fn load() -> Int = 7
+
+fn outer() -> Int = {
+  let x = { let y = load()
+    y }
+  x
+}
+
+effect fn main() -> Unit = println(int.to_string(outer()))

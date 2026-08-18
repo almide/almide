@@ -1,0 +1,6 @@
+let LIMIT = 10
+
+fn main() -> Unit = {
+  let v = LIMIT + 1
+  println(int.to_string(v))
+}

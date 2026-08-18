@@ -1,0 +1,11 @@
+effect fn tick() -> Int = 1
+
+fn f(n: Int) -> Int = {
+  var t = 0
+  for i in 0..<n {
+    t = t + i
+  }
+  t
+}
+
+fn main() -> Unit = println(int.to_string(f(2)))

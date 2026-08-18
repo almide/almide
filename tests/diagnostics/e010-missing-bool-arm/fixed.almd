@@ -1,0 +1,6 @@
+fn flag(b: Bool) -> Int = match b {
+  true => 1,
+  false => 0,
+}
+
+fn main() -> Unit = println(int.to_string(flag(false)))

@@ -1,0 +1,7 @@
+effect fn work() -> (Int, Int) = fan { 1
+  2 }
+
+effect fn main() -> Unit = {
+  let t = work()!
+  println("done")
+}

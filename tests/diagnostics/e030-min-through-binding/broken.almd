@@ -1,0 +1,6 @@
+// E030 with the unorderable list flowing through a BINDING first.
+fn main() -> Unit = {
+  let fs = [(x: Int) => x, (x: Int) => x * 2]
+  let m = list.min(fs)
+  println(if m == none then "none" else "some")
+}

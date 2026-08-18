@@ -1,0 +1,6 @@
+// E037: the `!=` spelling of the mismatched-parameter comparison.
+fn main() -> Unit = {
+  let a: Option[Int] = some(1)
+  let b: Option[String] = some("x")
+  println("${a != b}")
+}

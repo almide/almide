@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let first = (s: String) => string.get(s, 0) ?? ""
+  println(first("xy"))
+}

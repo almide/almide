@@ -1,0 +1,4 @@
+fn f(xs: List[Int]) -> Int =
+  list.fold(xs, 0, (acc, n) => acc + match n { 9 => 1, _ => 0 })
+
+fn main() -> Unit = println(int.to_string(f([9])))

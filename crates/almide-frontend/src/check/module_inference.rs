@@ -358,6 +358,33 @@ impl Checker {
 
     fn check_decl(&mut self, decl: &mut ast::Decl) {
         match decl {
+            // E057: a fn DECLARATION with no body. The parser keeps the
+            // bodyless form for @extern/@intrinsic declarations (and the
+            // stdlib's `= _` placeholder parses as a body), so a plain fn
+            // that omits `=` used to skip this match arm entirely — check
+            // passed, an unused decl even ran, and the first CALL died at
+            // the native build (rustc: cannot find function; sweep finding
+            // 2026-08-18, the acceptance-parity class).
+            ast::Decl::Fn { name, body: None, extern_attrs, attrs, span, .. } => {
+                let declared_extern = !extern_attrs.is_empty()
+                    || attrs.iter().any(|a| a.name.as_str() == "intrinsic");
+                if !declared_extern {
+                    let mut d = crate::check::err(
+                        format!("fn '{}' has no body", name),
+                        format!(
+                            "Write the body after '=': `fn {}(...) -> T = expr` (or `= {{ ... }}`). Only @extern / @intrinsic declarations may omit it",
+                            name
+                        ),
+                        format!("fn {}", name),
+                    )
+                    .with_code("E057");
+                    if let Some(sp) = span {
+                        d.line = Some(sp.line);
+                        d.col = Some(sp.col);
+                    }
+                    self.emit(d);
+                }
+            }
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
                 self.check_fn_decl(name, FnToCheck {
                     params, return_type, body, effect, generics,
@@ -373,9 +400,26 @@ impl Checker {
             ast::Decl::TopLet { name, ty, value, mutable, .. } => {
                 self.check_decl_top_let(name, ty, value, *mutable);
             }
-            ast::Decl::Type { ty, .. } => {
+            ast::Decl::Type { name, ty, span, .. } => {
                 // Infer types for default value expressions in variant record fields
                 infer_default_exprs(self, ty);
+                // E029 payload sweep: queue the REGISTERED type so the
+                // post-solve unknown-name walk sees variant payload / field
+                // references (an undeclared payload type died at the native
+                // build with check silent).
+                let key = self
+                    .current_module_prefix
+                    .as_deref()
+                    .map(|pfx| sym(&format!("{}.{}", pfx, name)))
+                    .filter(|k| self.env.types.contains_key(k))
+                    .unwrap_or_else(|| sym(name));
+                if let Some(t) = self.env.types.get(&key).cloned() {
+                    self.deferred_unknown_type_checks.push((
+                        t,
+                        *span,
+                        format!("type declaration '{}'", name),
+                    ));
+                }
             }
             _ => {}
         }

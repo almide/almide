@@ -1,0 +1,2 @@
+expects_code = "E023"
+expects_error = "type 'R', which does not derive 'Codec'"

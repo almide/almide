@@ -1,0 +1,6 @@
+// A Map KEY containing a function: closures have no equality or hashing.
+effect fn main() -> Unit = {
+  var m: Map[(Int) -> Int, String] = map.new()
+  map.set(m, (x) => x + 1, "inc")
+  println(int.to_string(map.len(m)))
+}

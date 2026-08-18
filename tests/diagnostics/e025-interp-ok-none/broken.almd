@@ -1,0 +1,5 @@
+// E025 (#1115): `ok(none)` in an interpolation keeps BOTH the inner option
+// payload and the err slot undecidable.
+fn main() -> Unit = {
+  println("${ok(none)}")
+}

@@ -153,6 +153,34 @@ fn broken_files_produce_expected_diagnostics() {
     }
 }
 
+/// #1471: `Diagnostic.hint` is a `String`, not an `Option` — the type says
+/// mandatory — but nothing gated the CONTENT, so an empty hint compiled fine
+/// and several production paths shipped one. Over the whole fixture corpus,
+/// every diagnostic a broken file produces must carry a non-empty hint.
+#[test]
+fn every_diagnostic_carries_a_hint() {
+    let cases = collect_cases();
+    let mut offenders = Vec::new();
+    for case in &cases {
+        let diags = run_check_json(&case.join("broken.almd"));
+        for d in &diags {
+            if d.hint.as_deref().unwrap_or("").trim().is_empty() {
+                offenders.push(format!(
+                    "{} — code {:?} has an empty hint",
+                    case.display(),
+                    d.code.as_deref().unwrap_or("<none>")
+                ));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "diagnostics with empty hints (the hint field is mandatory by type — \
+         make it mandatory by content):\n  {}",
+        offenders.join("\n  ")
+    );
+}
+
 #[test]
 fn fixed_files_compile_cleanly() {
     let cases = collect_cases();
@@ -182,6 +210,10 @@ fn run_check_json(file: &Path) -> Vec<DiagJson> {
 #[derive(Debug)]
 struct DiagJson {
     code: Option<String>,
+    /// #1471: the hint payload — mandatory by type (`Diagnostic.hint` is a
+    /// `String`, not an `Option`), so an empty one is a permission the
+    /// corpus gate below revokes.
+    hint: Option<String>,
     try_snippet: Option<String>,
     try_replace: Option<(usize, usize, usize)>,
     /// #1312: the applicability tag that decides whether an unattended
@@ -194,6 +226,7 @@ impl DiagJson {
         if !line.trim_start().starts_with('{') { return None; }
         Some(DiagJson {
             code: json_string(line, "\"code\":"),
+            hint: json_string(line, "\"hint\":"),
             try_snippet: json_string(line, "\"try\":"),
             try_replace: json_obj_uints(line, "\"try_replace\":", &["line", "col", "end_col"])
                 .map(|v| (v[0], v[1], v[2])),

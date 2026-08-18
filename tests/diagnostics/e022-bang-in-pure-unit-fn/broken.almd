@@ -1,0 +1,5 @@
+// `!` in a pure fn returning Unit: nowhere for the error to go — the hint
+// offers Result return, effect fn, or `??`.
+fn show(s: String) -> Unit = println(int.to_string(int.parse(s)!))
+
+fn main() -> Unit = show("42")

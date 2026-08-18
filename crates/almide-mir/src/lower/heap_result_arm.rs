@@ -397,9 +397,12 @@ impl LowerCtx {
     /// [`Self::lower_heap_result_arm_some`]). Arms are in their original order.
     fn arm_some_aggregate(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<Option<ValueId>> {
         Some(match &expr.kind {
-            IrExprKind::Record { .. }
-                if self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
-            {
+            // ANY record literal with a known layout — mirroring the bind
+            // position's guard (binds_p4_b.rs `try_opt_record_aggregate_payload`).
+            // The old gate demanded a recursive drop, so an ALL-SCALAR record
+            // (`some(Match { id, len })`) fell through to arm_some_heap_piece,
+            // which has no Record case, and the whole `if` walled (#1495).
+            IrExprKind::Record { .. } if self.aggregate_field_tys(&expr.ty).is_some() => {
                 self.arm_some_record(expr, result_ty)
             }
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
@@ -437,26 +440,30 @@ impl LowerCtx {
         })
     }
 
-    /// A `some(<record>)` arm — Option wrapping a heap RECORD (porta find_eq_pos's
-    /// `some({key: key, val: val})`). Materialize the owned record payload
-    /// (`try_lower_record_construct`, recursive-drop), wrap it in the 0-or-1 Option, and route
-    /// the Option's scope-end drop to the recursive `$__drop_<R>` (`Op::DropWrapperRec`) so the
-    /// record's nested heap fields are freed — NOT the flat `DropListStr` that leaks them. Same
-    /// per-arm `"im"` balance (Alloc `i` + the move-out `Consume` `m`); the record-construct's
-    /// transient temps are freed within the arm (`drop_arm_locals`). Gated on the record needing
-    /// a recursive drop (`record_or_anon_drop_type_name`) — a scalar-only record has no
-    /// `$__drop_<R>` and is not reached here (it would fall through to the deferred path).
+    /// A `some(<record>)` arm — Option wrapping a RECORD (porta find_eq_pos's
+    /// `some({key: key, val: val})`, and the all-scalar `some(Match { id, len })`).
+    /// Materialize the owned record payload, wrap it in the 0-or-1 Option, and
+    /// route the Option's scope-end drop by the record's own drop need — the
+    /// same split `try_opt_record_aggregate_payload` makes at bind position: a
+    /// recursive-drop record routes `$__drop_<R>` (`Op::DropWrapperRec`) so its
+    /// nested heap fields are freed, an all-scalar record takes the flat
+    /// Some(string) shape whose slot-0 rc_dec IS its exact drop (#1495). Same
+    /// per-arm `"im"` balance (Alloc `i` + the move-out `Consume` `m`); the
+    /// record-construct's transient temps are freed within the arm
+    /// (`drop_arm_locals`).
     fn arm_some_record(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         let arm_mark = self.live_heap_handles.len();
         let repr = repr_of(result_ty).ok()?;
-        let drop_fn = self.record_or_anon_drop_type_name(&expr.ty)?;
-        let piece = self.try_lower_record_construct(expr)?;
-        let obj = self.materialize_opt_aggregate_some(piece, repr, drop_fn);
+        let piece = self
+            .try_lower_record_construct(expr)
+            .or_else(|| self.try_lower_scalar_record_construct(expr))?;
+        let obj = match self.record_or_anon_drop_type_name(&expr.ty) {
+            Some(drop_fn) => self.materialize_opt_aggregate_some(piece, repr, drop_fn),
+            None => self.materialize_opt_str_some(piece, repr),
+        };
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)
-            
-            
     }
 
     /// `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload as a MATCH/if ARM
@@ -655,6 +662,24 @@ impl LowerCtx {
                     repr: pr,
                     init: Init::Str(value.clone()),
                 });
+                p
+            }
+            // `some([n, n + 1])` — a SCALAR list literal payload (#1495). Same
+            // builder the bind position uses (binds_p4_b.rs); the flat block's
+            // rc_dec is its full free, so the enclosing
+            // `materialize_opt_str_some`'s DropListStr is exact.
+            IrExprKind::List { elements } if Self::is_scalar_list_ty(&expr.ty) => {
+                self.try_lower_scalar_list_slots(elements)?
+            }
+            // `some(["a", "b"])` — a HEAP-element list literal (#1495). The
+            // fresh list moves into the Option (sole owner); any residual
+            // element temp must free WITHIN the arm (the untaken-arm garbage
+            // rc_dec trap — same frame as the Module-call arm above).
+            IrExprKind::List { .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let p = self.try_lower_str_list_literal(expr)?;
+                self.live_heap_handles.retain(|h| *h != p);
+                self.drop_arm_locals(arm_mark);
                 p
             }
             _ => return None,

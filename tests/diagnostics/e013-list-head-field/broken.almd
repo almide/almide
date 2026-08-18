@@ -1,0 +1,4 @@
+// Haskell-style `.head` on a List: the rewrite hint names the stdlib fn.
+fn first(xs: List[Int]) -> Int? = xs.head
+
+fn main() -> Unit = println(int.to_string(first([7, 8]) ?? 0))

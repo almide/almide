@@ -1,0 +1,6 @@
+fn one() -> String = "one"
+
+fn main() -> Unit = println(match 1 {
+  1 => one(),
+  _ => "rest",
+})

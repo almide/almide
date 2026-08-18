@@ -1,0 +1,6 @@
+// A tuple-payload case given NAMED arguments.
+type Box = | Wrap(Int) | Empty
+
+fn mk() -> Box = Wrap(value: 3)
+
+fn main() -> Unit = println("${mk()}")

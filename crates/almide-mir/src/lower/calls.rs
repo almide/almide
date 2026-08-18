@@ -259,7 +259,8 @@ impl LowerCtx {
         } else {
             let key_nullary = self.map_key_is_nullary_variant(&arg_tys, result_ty);
             let key_scalar_rec = self.map_key_is_scalar_record(&arg_tys, result_ty);
-            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec)
+            let enum_rich = self.enumerate_elem_is_rich_variant(&arg_tys);
+            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec, enum_rich)
         };
         self.ops.push(Op::CallFn {
             dst: Some(dst),
@@ -462,8 +463,9 @@ impl LowerCtx {
         // scalar impl — is subsumed.)
         let key_nullary = self.map_key_is_nullary_variant(&arg_tys, result_ty);
         let key_scalar_rec = self.map_key_is_scalar_record(&arg_tys, result_ty);
+        let enum_rich = self.enumerate_elem_is_rich_variant(&arg_tys);
         let call_name =
-            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec);
+            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec, enum_rich);
         if is_heap_ty(result_ty) {
             let dst = self.fresh_value();
             let repr = repr_of(result_ty)?;

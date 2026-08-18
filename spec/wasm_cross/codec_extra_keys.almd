@@ -1,0 +1,14 @@
+// @contract: C-298
+// Unknown keys are IGNORED on decode (Swift's default keyed-container
+// tolerance), and re-encoding the decoded value NORMALIZES the document:
+// extra keys dropped, field order restored to declaration order.
+import json
+
+type T: Codec = { a: Int, b: String }
+
+effect fn main() -> Unit = {
+  let noisy = json.parse('{"zzz": [1, {"deep": true}], "b": "s", "a": 7, "extra": null}')!
+  let d = T.decode(noisy)!
+  println(int.to_string(d.a) + d.b)
+  println(json.stringify(T.encode(d)))
+}

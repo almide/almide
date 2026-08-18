@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var buf = bytes.new(4)
+  bytes.set_at(buf, 0, 7)
+  println(int.to_string(bytes.len(buf)))
+}

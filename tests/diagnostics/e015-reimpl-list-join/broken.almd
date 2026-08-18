@@ -1,0 +1,4 @@
+// Reimplementing list.join under the bare stdlib name.
+fn join(xs: List[String], sep: String) -> String = sep
+
+fn main() -> Unit = println(join(["a", "b"], ","))

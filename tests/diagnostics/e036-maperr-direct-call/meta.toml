@@ -1,0 +1,2 @@
+expects_code = "E036"
+expects_error = "never uses the error value"

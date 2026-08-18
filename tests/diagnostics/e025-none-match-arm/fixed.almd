@@ -1,0 +1,3 @@
+fn f(n: Int) -> Unit = println("${match n { 0 => some(n), _ => none }}")
+
+fn main() -> Unit = f(0)

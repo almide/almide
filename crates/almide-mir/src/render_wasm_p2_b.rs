@@ -508,8 +508,13 @@ fn render_op_prim_mem_io_b(kind: &PrimKind, args: &[ValueId]) -> Option<String> 
                 // The path arg is a heap Ptr local (i32 handle, like a $list ptr), passed DIRECTLY
                 // (no i32.wrap — it is already i32, like `Handle`'s arg). dst is a heap Ptr
                 // (value_reprs_wasm), so the call result sets the local directly (no i64 extend).
+                // The second operand is the `$validate` flag (#1506): 1 = refuse invalid UTF-8
+                // with Err like native read_to_string; 0 = raw bytes like native std::fs::read.
                 PrimKind::ReadTextFile => {
-                    format!("(call $read_text_file (local.get {}))", local(args[0]))
+                    format!("(call $read_text_file (local.get {}) (i32.const 1))", local(args[0]))
+                }
+                PrimKind::ReadBytesFile => {
+                    format!("(call $read_text_file (local.get {}) (i32.const 0))", local(args[0]))
                 }
                 // read_dir(path) — the WASI directory-listing floor; path_open(O_DIRECTORY) +
                 // fd_readdir, parses the dirent buffer (skipping `.`/`..`), sorts the names, and

@@ -1,0 +1,5 @@
+// E027: the removed fan.race thunk-list spelling, in LET-BINDING position.
+effect fn main() -> Unit = {
+  let r = fan.race([() => 1, () => 2])
+  println("done")
+}

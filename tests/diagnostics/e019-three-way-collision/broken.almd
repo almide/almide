@@ -1,0 +1,6 @@
+// Three declarations sharing one case name.
+type A = | Go
+type B = | Go
+type C = | Go
+
+fn main() -> Unit = println("ok")

@@ -1,0 +1,7 @@
+type W = { v: Int }
+
+effect fn main() -> Unit = {
+  let n = int.parse("4")
+  let w = W { v: n }
+  println(int.to_string(w.v))
+}

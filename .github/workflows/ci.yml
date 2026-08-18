@@ -324,6 +324,9 @@ jobs:
       - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-fallback.sh
 
+      - name: Wall corpus (#1481 — refused shapes stay refused, with their reasons)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wall-corpus.sh
+
       # Per-FUNCTION parity. The ratchet above measures which spec FILES fall back,
       # so a stdlib fn no test touches is invisible to it — datetime.monotonic_ns
       # had no wasm body at all while that gate read a clean 18/18. ~70s.
@@ -937,6 +940,17 @@ jobs:
 
       - name: Stdlib doc signature indexes up to date (regenerate and diff)
         run: ALMIDE_BIN=/tmp/almide-bin/almide python3 tools/gen-stdlib-doc-index.py --check
+
+      - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
+
+      - name: Intrinsic boundary (#1468 — every @intrinsic target has a provider)
+        run: bash scripts/check-intrinsic-boundary.sh
+
+      - name: _str twin ratchet (#1460 — the suffix bill is frozen while the protocol decision pends)
+        run: bash scripts/check-str-twin-ratchet.sh
+      - name: diagnostic-code coverage floor (attack-list A1-3)
+        run: bash scripts/check-diagnostic-code-coverage.sh
 
       - name: Contract README up to date (regenerate and diff)
         run: |

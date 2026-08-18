@@ -1,0 +1,3 @@
+type P: Codec = { x: Int }
+
+fn main() -> Unit = println(int.to_string(P { x: 1 }.x))

@@ -1,0 +1,4 @@
+// E057 variant: a bodyless EFFECT fn declaration.
+effect fn boot() -> Unit
+
+effect fn main() -> Unit = println("x")

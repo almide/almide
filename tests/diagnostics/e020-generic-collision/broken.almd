@@ -1,0 +1,5 @@
+// A generic and a non-generic declaration under one name.
+type Box[T] = | B(T)
+type Box = { v: Int }
+
+fn main() -> Unit = println("ok")

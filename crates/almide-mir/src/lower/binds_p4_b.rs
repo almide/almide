@@ -364,8 +364,9 @@ impl LowerCtx {
     }
 
     /// A SCALAR-element `List[T]` — used by both the literal and computed-list
-    /// arms of [`Self::opt_heap_general_piece`] (they shared this identical guard).
-    fn is_scalar_list_ty(ty: &Ty) -> bool {
+    /// arms of [`Self::opt_heap_general_piece`] (they shared this identical
+    /// guard), and by the if-arm mirror in `heap_result_arm.rs` (#1495).
+    pub(crate) fn is_scalar_list_ty(ty: &Ty) -> bool {
         matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
             if a.len() == 1 && !is_heap_ty(&a[0]))
     }

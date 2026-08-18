@@ -1,0 +1,4 @@
+// E046: placeholder buried one call deeper.
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn main() -> Unit = println(int.to_string(add(1, add(_, 2))))

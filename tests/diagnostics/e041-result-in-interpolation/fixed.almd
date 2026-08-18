@@ -1,0 +1,3 @@
+effect fn main() -> Unit = {
+  println("${int.parse("3")!}")
+}

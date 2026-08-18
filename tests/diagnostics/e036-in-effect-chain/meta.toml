@@ -1,0 +1,2 @@
+expects_code = "E036"
+expects_error = "map_err"

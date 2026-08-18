@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let o: Int? = some(1)
+  println(match o { some(v) => int.to_string(v), none => "n" })
+}

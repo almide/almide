@@ -1,0 +1,4 @@
+// A Set field on a Codec-deriving type: the derive cannot encode it.
+type D: Codec = { tags: Set[String] }
+
+fn main() -> Unit = println("x")

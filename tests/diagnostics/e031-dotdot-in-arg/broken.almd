@@ -1,0 +1,4 @@
+// E031: the retired `..` spelling in ARGUMENT position.
+fn main() -> Unit = {
+  println(int.to_string(list.len(0 .. 4)))
+}

@@ -1,0 +1,5 @@
+import json.{parse}
+
+fn stringify(n: Int) -> String = int.to_string(n)
+
+effect fn main() -> Unit = println(stringify(7))

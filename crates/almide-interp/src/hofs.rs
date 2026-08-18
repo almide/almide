@@ -117,16 +117,82 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    /// The Map-MODULE HOFs (`map.fold` — Stage 2 BRIDGEABLE burn-down). The
-    /// receiver is a `Value::Map` of insertion-ordered `(k, v)` entries — the
-    /// AlmideMap determinism contract — so a sequential fold over the backing
-    /// vec IS the spec order. The remaining map HOFs on the `is_hof` allowlist
-    /// keep the explicit Unsupported abstain until a fixture exercises them.
+    /// The Map-MODULE HOFs (Stage 2 BRIDGEABLE burn-down). The receiver is a
+    /// `Value::Map` of insertion-ordered `(k, v)` entries — the AlmideMap
+    /// determinism contract — so a sequential walk over the backing vec IS
+    /// the spec order. Remaining map HOFs on the `is_hof` allowlist keep the
+    /// explicit Unsupported abstain until a fixture exercises them.
     fn eval_hof_map_mod(&mut self, f: &str, evaled: &[Value]) -> Flow {
         match f {
             "fold" => self.hof_map_fold(evaled),
+            "map" => self.hof_map_map(evaled),
+            "filter" => self.hof_map_filter(evaled),
+            "find" => self.hof_map_find(evaled),
             _ => Flow::Unsupported(format!("HOF map.{}", f)),
         }
+    }
+
+    /// `map.map(m, (v) -> B)` — VALUES rewritten, keys and entry order kept
+    /// (`stdlib/map.almd`'s 1-ary callback signature).
+    fn hof_map_map(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.map receiver not a Map".into()),
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::with_capacity(entries.len());
+        for (k, v) in entries.iter() {
+            let nv = val!(self.apply_closure(&clo, vec![v.clone()]));
+            out.push((k.clone(), nv));
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
+    }
+
+    /// `map.filter(m, (k, v) -> Bool)` — entries kept in order where the
+    /// 2-ary callback answers true.
+    fn hof_map_filter(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.filter receiver not a Map".into()),
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::new();
+        for (k, v) in entries.iter() {
+            let keep = val!(self.apply_closure(&clo, vec![k.clone(), v.clone()]));
+            if matches!(keep, Value::Bool(true)) {
+                out.push((k.clone(), v.clone()));
+            }
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
+    }
+
+    /// `map.find(m, (k, v) -> Bool)` — first entry (insertion order) the
+    /// 2-ary callback accepts, as `some((k, v))`; a full pass answers `none`.
+    fn hof_map_find(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.find receiver not a Map".into()),
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for (k, v) in entries.iter() {
+            let hit = val!(self.apply_closure(&clo, vec![k.clone(), v.clone()]));
+            if matches!(hit, Value::Bool(true)) {
+                return Flow::val(Value::Option(Some(Box::new(Value::tuple(vec![
+                    k.clone(),
+                    v.clone(),
+                ])))));
+            }
+        }
+        Flow::val(Value::Option(None))
     }
 
     /// `map.fold(m, init, (acc, k, v) -> acc)` — the 3-ary callback form (the

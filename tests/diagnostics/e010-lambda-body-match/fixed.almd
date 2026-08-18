@@ -1,0 +1,10 @@
+type Col = | Red | Green | Blue
+
+fn main() -> Unit = {
+  let f = (c: Col) => match c {
+    Red => 1,
+    Green => 2,
+    Blue => 3,
+  }
+  println(int.to_string(f(Red)))
+}

@@ -1,0 +1,5 @@
+// String indexing in an EFFECT fn statement.
+effect fn main() -> Unit = {
+  let s = "hey"
+  println(s[2])
+}

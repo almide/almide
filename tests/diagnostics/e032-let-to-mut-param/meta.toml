@@ -1,0 +1,3 @@
+expects_code = "E032"
+expects_error = "immutable binding"
+hint_substring = "var"

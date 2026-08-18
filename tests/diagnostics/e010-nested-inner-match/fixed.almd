@@ -1,0 +1,12 @@
+type Col = | Red | Green | Blue
+
+fn f(a: Col, b: Col) -> Int = match a {
+  Red => match b {
+    Red => 1,
+    Green => 2,
+    Blue => 3,
+  },
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(Red, Red)))

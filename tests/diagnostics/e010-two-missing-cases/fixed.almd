@@ -1,0 +1,10 @@
+type Dir = | North | South | East | West
+
+fn axis(d: Dir) -> String = match d {
+  North => "v",
+  South => "v",
+  East => "h",
+  West => "h",
+}
+
+fn main() -> Unit = println(axis(East))

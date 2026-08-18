@@ -1,0 +1,4 @@
+fn wants_str(s: String) -> Int = string.len(s)
+fn wants_int(n: Int) -> Int = n
+
+fn main() -> Unit = println(int.to_string(wants_str(int.to_string(42))))

@@ -1,0 +1,5 @@
+// E025 (#1115): a bare `none` interpolation segment keeps an undecidable
+// payload slot — it used to pass check and die at codegen (rustc E0282).
+fn main() -> Unit = {
+  println("${none}")
+}

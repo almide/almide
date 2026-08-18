@@ -1,0 +1,6 @@
+effect fn get() -> Result[Int, String] = err("x")
+
+effect fn main() -> Unit = {
+  let r = get().map_err((e) => "fixed: ${e}")
+  println(match r { ok(n) => int.to_string(n), err(m) => m })
+}

@@ -1,0 +1,4 @@
+// Duplicate arm in a match sitting in an IF branch.
+fn f(n: Int) -> Int = if n > 0 then match n { 1 => 1, 1 => 2, _ => 3 } else 0
+
+fn main() -> Unit = println(int.to_string(f(1)))

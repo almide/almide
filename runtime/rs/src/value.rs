@@ -118,6 +118,14 @@ pub fn almide_rt___decode_default_string(v: Value, key: String, default: String)
 pub fn almide_rt___decode_default_int(v: Value, key: String, default: i64) -> Result<i64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_int(&x)) }
 pub fn almide_rt___decode_default_float(v: Value, key: String, default: f64) -> Result<f64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_float(&x)) }
 pub fn almide_rt___decode_default_bool(v: Value, key: String, default: bool) -> Result<bool, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_bool(&x)) }
+// List[scalar] defaults (#1520): a missing/null key yields the default list;
+// a present key decodes through the same per-element path the required-field
+// form uses. Without these the derive emitted `__decode_default_value`, a
+// name no runtime provides — check green, rustc E0425.
+pub fn almide_rt___decode_default_list_string(v: Value, key: String, default: Vec<String>) -> Result<Vec<String>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_string(&e))) }
+pub fn almide_rt___decode_default_list_int(v: Value, key: String, default: Vec<i64>) -> Result<Vec<i64>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_int(&e))) }
+pub fn almide_rt___decode_default_list_float(v: Value, key: String, default: Vec<f64>) -> Result<Vec<f64>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_float(&e))) }
+pub fn almide_rt___decode_default_list_bool(v: Value, key: String, default: Vec<bool>) -> Result<Vec<bool>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_bool(&e))) }
 
 // ── Value utilities ──
 

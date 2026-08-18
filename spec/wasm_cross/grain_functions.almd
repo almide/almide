@@ -1,0 +1,45 @@
+// @contract: C-292
+// grain functions.re — curried_func (call-of-call), letrec_2 (mutual
+// recursion referencing a later definition, order-independent), named and
+// default arguments (labeled_args1..5, default_args1..5: reorder, omit,
+// mix positional+named), labeled_args6 (argument EVALUATION ORDER is the
+// written order, labels notwithstanding), regression_no_elim_impure_call
+// (a discarded binding whose initializer prints must not be eliminated),
+// test_mut_inlining (a read binding snapshots the var before its write).
+fn add(a: Int) -> (Int) -> Int = (b) => a + b
+
+fn y_first(n: Int) -> Int = x_later(n + 1)
+
+fn x_later(n: Int) -> Int = if n > 3 then n else x_later(n + 2)
+
+fn concat(a: String, b: String) -> String = a + b
+
+fn concat_d(b: String, a: String = "1") -> String = a + b
+
+fn tagged(tag: String, v: Int) -> Int = {
+  println(tag)
+  v
+}
+
+fn use2(a: Int, b: Int) -> Int = a * 10 + b
+
+fn main() -> Unit = {
+  println(int.to_string(add(2)(3)))
+  println(int.to_string(y_first(2)))
+  println(concat(a: "1", b: "2"))
+  println(concat(b: "2", a: "1"))
+  println(concat_d("2"))
+  println(concat_d(b: "2"))
+  println(concat_d(a: "3", b: "2"))
+  // evaluation order is the WRITTEN order even with labels out of position
+  println(int.to_string(use2(b: tagged("first", 1), a: tagged("second", 2))))
+  // an impure discarded binding still runs
+  let _ = tagged("kept", 5)
+  println("after")
+  // a read snapshots the var before a later write
+  var foo = 5
+  let bar = foo
+  foo = 6
+  println(int.to_string(bar))
+  println(int.to_string(foo))
+}

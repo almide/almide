@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let xs: List[Int] = []
+  println(match 1 { _ if list.len(xs) == 0 => "empty", _ => "no" })
+}

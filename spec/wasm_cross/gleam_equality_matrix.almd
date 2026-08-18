@@ -1,0 +1,47 @@
+// @contract: C-292
+// gleam test/language/equality_test.gleam + string_test.gleam (~24 cases).
+// List equality in all four length shapes, int equality, ok/err payload
+// equality, Bytes equality (the bit-array cases re-based onto Bytes), the
+// raw-newline string literal, and empty-string equality — every operand
+// built through a fn so nothing constant-folds.
+fn mk(xs: List[Int]) -> List[Int] = xs
+
+fn eq(x: Bool) -> String = if x then "1" else "0"
+
+fn main() -> Unit = {
+  // list eq: []==[], []!=[0], [0]!=[], [0]==[0]
+  var lists: List[String] = []
+  list.push(lists, eq(mk([]) == mk([])))
+  list.push(lists, eq(mk([]) == mk([0])))
+  list.push(lists, eq(mk([0]) == mk([])))
+  list.push(lists, eq(mk([0]) == mk([0])))
+  println(list.join(lists, ""))
+  // int eq / neq
+  var ints: List[String] = []
+  list.push(ints, eq(0 == 0))
+  list.push(ints, eq(1 == 0))
+  list.push(ints, eq(1 == 1))
+  list.push(ints, eq(1 != 0))
+  list.push(ints, eq(0 != 0))
+  println(list.join(ints, ""))
+  // NB: gleam's bit-array eq cases (<<1,2>> == <<1,2>>) re-base onto Bytes,
+  // but Bytes equality over call operands is a pinned wall —
+  // walls/bytes_equality_call_operands.almd.
+  // result eq across payloads and ctors
+  let ok1: Result[Int, Int] = ok(1)
+  let ok2: Result[Int, Int] = ok(2)
+  let er1: Result[Int, Int] = err(1)
+  let er2: Result[Int, Int] = err(2)
+  var ress: List[String] = []
+  list.push(ress, eq(ok1 == ok(1)))
+  list.push(ress, eq(ok2 == ok1))
+  list.push(ress, eq(er1 == err(1)))
+  list.push(ress, eq(er2 == er1))
+  list.push(ress, eq(ok1 == er1))
+  println(list.join(ress, ""))
+  // a raw newline in a source literal IS "\n"
+  let raw = "
+"
+  println(eq(raw == "\n"))
+  println(eq("" == ""))
+}

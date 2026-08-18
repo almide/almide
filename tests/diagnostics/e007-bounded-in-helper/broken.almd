@@ -1,0 +1,3 @@
+fn budget_run() -> Int = fan.bounded(compute.ms(1)) { 42 } ?? 0
+
+effect fn main() -> Unit = println(int.to_string(budget_run()))

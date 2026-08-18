@@ -1,0 +1,4 @@
+// E029: an unknown type in a RETURN annotation.
+fn make() -> Gadget = 0
+
+fn main() -> Unit = println("x")

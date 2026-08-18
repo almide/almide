@@ -1,0 +1,5 @@
+// E029: an unknown type as a MAP VALUE parameter.
+fn main() -> Unit = {
+  let m: Map[String, Entry] = map.new()
+  println(int.to_string(map.len(m)))
+}

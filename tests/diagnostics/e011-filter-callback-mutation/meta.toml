@@ -1,0 +1,2 @@
+expects_code = "E011"
+expects_error = "mutated inside a closure"

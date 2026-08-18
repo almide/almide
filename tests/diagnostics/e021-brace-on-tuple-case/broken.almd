@@ -1,0 +1,6 @@
+// Brace construction of a TUPLE case.
+type Box = | Wrap(Int) | Empty
+
+fn mk() -> Box = Wrap { x: 1 }
+
+fn main() -> Unit = println("${mk()}")

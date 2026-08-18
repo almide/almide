@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let b: UInt8 = 200
+  println("${b}")
+}

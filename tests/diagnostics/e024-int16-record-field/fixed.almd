@@ -1,0 +1,6 @@
+type P = { v: Int16 }
+
+fn main() -> Unit = {
+  let p = P { v: 7000 }
+  println(int.to_string(int.from_int16(p.v)))
+}

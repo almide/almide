@@ -1,0 +1,5 @@
+effect fn load() -> Int = 7
+
+fn banner() -> String = "v=${load()}"
+
+effect fn main() -> Unit = println(banner())

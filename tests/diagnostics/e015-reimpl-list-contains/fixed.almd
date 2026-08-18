@@ -1,0 +1,3 @@
+fn has_target(xs: List[Int], target: Int) -> Bool = list.contains(xs, target)
+
+fn main() -> Unit = println(if has_target([1], 1) then "y" else "n")

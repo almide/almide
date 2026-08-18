@@ -1,0 +1,9 @@
+fn main() -> Unit = {
+  var mode = 1
+  if 2 > 1 then {
+    mode = 2
+  } else {
+    println("no")
+  }
+  println(int.to_string(mode))
+}

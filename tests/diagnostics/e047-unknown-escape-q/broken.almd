@@ -1,0 +1,5 @@
+// E047 variant: `\q` names no escape.
+fn main() -> Unit = {
+  let s = "a\qb"
+  println(s)
+}

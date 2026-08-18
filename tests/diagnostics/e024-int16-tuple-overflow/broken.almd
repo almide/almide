@@ -1,0 +1,5 @@
+// The overflowing literal sits in a TUPLE component (aggregate position).
+fn main() -> Unit = {
+  let t: (Int16, Int) = (70000, 1)
+  println(int.to_string(t.1))
+}

@@ -1,0 +1,2 @@
+expects_code = "E006"
+expects_error = "cannot call effect function 'load' from a pure function"

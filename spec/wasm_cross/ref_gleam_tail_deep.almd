@@ -1,0 +1,19 @@
+// @contract: C-292
+// gleam tail_call: deep self-recursion must not grow the stack on either
+// target; the accumulator-permutation form must use temporaries when the
+// call is rewritten into assignment+jump.
+fn count_down(i: Int) -> Int = if i <= 0 then 0 else count_down(i - 1)
+
+fn acc_down(x: Int, y: List[Int]) -> List[Int] = if x <= 0 then y
+else acc_down(x - 1, [x] + y)
+
+fn swap_args(a: Int, b: Int, n: Int) -> Int = if n <= 0 then a * 10 + b
+else swap_args(b, a, n - 1)
+
+fn main() -> Unit = {
+  println(int.to_string(count_down(200000)))
+  println(list.join(list.map(acc_down(4, []), (v) => int.to_string(v)), ","))
+  // odd and even permutation counts land differently
+  println(int.to_string(swap_args(1, 2, 7)))
+  println(int.to_string(swap_args(1, 2, 8)))
+}

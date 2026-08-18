@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s = "abc"
+  if (string.get(s, 0) ?? "") == "a" then println("yes") else println("no")
+}

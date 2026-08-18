@@ -1,0 +1,6 @@
+type P = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  let f = (p: P) => p.x
+  println(int.to_string(f(P { x: 1, y: 2 })))
+}

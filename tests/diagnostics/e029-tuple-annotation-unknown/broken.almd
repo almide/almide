@@ -1,0 +1,5 @@
+// E029: an unknown type inside a TUPLE annotation.
+fn main() -> Unit = {
+  let p: (Missing, Int) = (0, 1)
+  println("x")
+}

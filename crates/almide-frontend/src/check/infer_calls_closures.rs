@@ -805,6 +805,20 @@ impl Checker {
         if let Some(ok_ty) = resolved.result_ok_ty() {
             Ty::option(ok_ty)
         } else if resolved.is_option() {
+            // ADR-0005 D3 (#1107): `o?` on a value that is ALREADY an Option
+            // is the identity — it converts nothing and silently reads as if
+            // it did something. Warn so the no-op is visible; the value flows
+            // through unchanged either way.
+            self.emit(
+                almide_base::diagnostic::Diagnostic::warning(
+                    format!("'?' on {} is a no-op — the value is already an Option", resolved.display()),
+                    "'?' converts Result to Option (err → none). This operand is an \
+                     Option already, so drop the operator; if you meant to unwrap, \
+                     use `?? fallback`, `match`, or `!` (effect fn).",
+                    "operator ?",
+                )
+                .with_code("E056"),
+            );
             resolved.clone()
         } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
             Ty::option(self.fresh_var())

@@ -8,12 +8,12 @@ use super::types::{is_inference_var, resolve_ty, FixHint, IfArm};
 impl Checker {
     pub(super) fn solve_constraints(&mut self) {
         let constraints = std::mem::take(&mut self.constraints);
-        // Union-Find makes constraint solving order-independent.
-        // A single pass suffices; re-processing is a harmless no-op.
-        for c in &constraints {
-            self.unify_infer(&c.expected, &c.actual);
-        }
-        // Emit diagnostics for unresolvable mismatches
+        // Union-Find makes constraint solving order-independent, and a
+        // successful unification is stable — re-running it is a no-op and a
+        // failed one cannot become a success (partial component unions stay
+        // either way). So ONE pass both unifies and reports; the former
+        // second full pass re-unified every constraint just to find the
+        // failures again (#1232's double-pass row, measured equivalent).
         for c in &constraints {
             if !self.unify_infer(&c.expected, &c.actual) {
                 self.report_constraint_mismatch(c);

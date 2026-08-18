@@ -1,0 +1,5 @@
+// E025 (#1115 family): `err(1)` interpolated leaves the OK slot free —
+// the mirror of the ok-side shape.
+fn main() -> Unit = {
+  println("${err(1)}")
+}

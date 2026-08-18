@@ -672,6 +672,9 @@ impl LowerCtx {
             self.value_drops.entry(obj).or_default().str_str_elems = true;
         } else if crate::lower::is_list_int_str_ty(ty) {
             self.value_drops.entry(obj).or_default().named_route = Some("list_int_str".to_string());
+        } else if let Some(n) = self.list_int_variant_drop(ty) {
+            // `List[(Int, <rich variant>)]` (list.enumerate_h, #1496).
+            self.value_drops.entry(obj).or_default().named_route = Some(n);
         } else if crate::lower::is_lenlist_list_ty(ty) {
             self.value_drops.entry(obj).or_default().named_route = Some("list_lenlist".to_string());
         } else if is_heap_elem_list_ty(ty) {

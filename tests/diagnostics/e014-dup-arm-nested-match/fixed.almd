@@ -1,0 +1,6 @@
+fn f(a: Int, b: Int) -> Int = match a {
+  0 => match b { 1 => 10, _ => 12 },
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(f(0, 1)))

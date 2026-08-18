@@ -1,0 +1,7 @@
+// E037: same container, different ERR parameter — Result[Int, String] vs
+// Result[Int, Int] can never compare.
+fn main() -> Unit = {
+  let a: Result[Int, String] = ok(1)
+  let b: Result[Int, Int] = ok(1)
+  println("${a == b}")
+}

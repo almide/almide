@@ -1,0 +1,7 @@
+fn name(n: Int) -> String = match n {
+  0 => "zero",
+  1 => "one",
+  _ => "many",
+}
+
+fn main() -> Unit = println(name(2))

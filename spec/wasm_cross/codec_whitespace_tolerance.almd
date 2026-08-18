@@ -1,0 +1,14 @@
+// @contract: C-298
+// Formatted (pretty-printed) input: whitespace and newlines between tokens
+// are insignificant — decode sees the same document, and re-encoding
+// produces the canonical compact form.
+import json
+
+type C: Codec = { name: String, vals: List[Int] }
+
+effect fn main() -> Unit = {
+  let pretty = "{\n  \"name\": \"x\",\n  \"vals\": [\n    1,\n    2\n  ]\n}"
+  let d = C.decode(json.parse(pretty)!)!
+  println(d.name + "/" + int.to_string(list.len(d.vals)))
+  println(json.stringify(C.encode(d)))
+}

@@ -1,0 +1,4 @@
+// Reimplementing string.trim under the bare stdlib name.
+fn trim(s: String) -> String = s
+
+fn main() -> Unit = println(trim(" x "))

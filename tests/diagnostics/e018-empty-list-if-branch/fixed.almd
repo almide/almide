@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let xs = if 1 > 0 then [1] else [2]
+  println(int.to_string(list.len(xs)))
+}

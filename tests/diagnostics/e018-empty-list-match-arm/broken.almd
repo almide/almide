@@ -1,0 +1,4 @@
+// `[]` as a MATCH-ARM result, only ever length-checked.
+fn pick(n: Int) -> Int = list.len(match n { 0 => [], _ => [] })
+
+fn main() -> Unit = println(int.to_string(pick(0)))

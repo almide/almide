@@ -107,3 +107,11 @@
 # rewrite's injected owned-copy concat is counted 1:1 (mir == ir).
 # The ratchet target is now permanently 0: ANY new walled-real entry is a
 # regression and fails the gate.
+# 2026-08-18 (#1520 pin): codec_default_list_test declares two Codec types to
+# pin List[<scalar>] DEFAULT round-trips natively; their derived `.decode`
+# fns sit on the known heap-result-`match` subset boundary (the same wall the
+# whole Codec decode family carries — codec_list_default.almd is the
+# wall-corpus specimen). NEW TEST DECLS, not a lowering regression; remove
+# these rows when the heap-result-match brick lands.
+spec/lang/codec_default_list_test.almd :: Counts.decode
+spec/lang/codec_default_list_test.almd :: Dep.decode

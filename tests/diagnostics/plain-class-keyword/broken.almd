@@ -1,0 +1,3 @@
+class Dog { }
+
+fn main() -> Unit = println("x")

@@ -1,0 +1,9 @@
+type P = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  let p = P { x: 1, y: 2 }
+  println(match 1 {
+    1 => int.to_string(p.w),
+    _ => "rest",
+  })
+}

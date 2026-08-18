@@ -1,0 +1,6 @@
+type Box[T] = | B(T)
+
+fn main() -> Unit = {
+  let b: Box[Int] = B(1)
+  println("${b}")
+}

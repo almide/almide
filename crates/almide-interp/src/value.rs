@@ -113,13 +113,18 @@ impl Value {
             Value::Range { start, end, inclusive } => {
                 // #561: defensive cap — for-in iterates ranges LAZILY
                 // (eval.rs::eval_for_in_range), so this materializing path is
-                // only reached by repr/eq of a Range, where a multi-billion
-                // range would OOM. Bound it; a range this large in a repr/eq
-                // position is degenerate and the interp (an abstaining oracle)
-                // need not be exact there.
+                // only reached by len/repr/eq/index of a BOUND Range. A span
+                // beyond the cap answers None (an honest abstain upstream),
+                // NOT a truncated vector: the old truncation voted a wrong
+                // len while both backends took the C-197 resource abort
+                // (xtarget-fuzz seed=20260819 index=2963 — `0..<i64::MAX`
+                // forced to materialize by list.len/indexing).
                 const MAX_RANGE_MATERIALIZE: i64 = 16 * 1024 * 1024;
                 let last = if *inclusive { *end } else { *end - 1 };
-                let count = (last - *start + 1).max(0).min(MAX_RANGE_MATERIALIZE);
+                let count = (last.saturating_sub(*start)).saturating_add(1).max(0);
+                if count > MAX_RANGE_MATERIALIZE {
+                    return None;
+                }
                 let mut out = Vec::with_capacity(count as usize);
                 let mut i = *start;
                 let stop = *start + count;

@@ -1,0 +1,10 @@
+// A three-case enum matched with only two arms: the checker must name the
+// missing case instead of letting codegen surface rustc E0004.
+type Color = | Red | Green | Blue
+
+fn label(c: Color) -> String = match c {
+  Red => "r",
+  Green => "g",
+}
+
+fn main() -> Unit = println(label(Blue))

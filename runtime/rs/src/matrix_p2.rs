@@ -24,15 +24,17 @@ pub fn almide_rt_matrix_to_bytes_f32_le(m: &AlmideMatrix) -> Vec<u8> {
 }
 
 pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
-    let r = rows as usize;
-    let c = cols as usize;
-    let off = offset as usize;
+    // #1503: negative dims clamp to the empty matrix (C-034/C-161), a negative
+    // offset is OOB by definition, and the bounds compare is overflow-safe —
+    // same discipline as the f32/f16 loaders in matrix.rs.
+    let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 8;
     let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if off + need > data.len() {
+    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
         for _ in 0..r { result.push(vec![0.0f64; c]); }
         return result.into();
     }
+    let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
         let mut row: Vec<f64> = Vec::with_capacity(c);

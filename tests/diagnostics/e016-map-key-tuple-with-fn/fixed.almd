@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  var m: Map[(Int, Int), Int] = map.new()
+  map.set(m, (1, 2), 9)
+  println(int.to_string(map.len(m)))
+}

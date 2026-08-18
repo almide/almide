@@ -1,0 +1,6 @@
+type R = { c: String }
+
+fn main() -> Unit = {
+  let r = R { c: string.get("abc", 0) ?? "" }
+  println(r.c)
+}

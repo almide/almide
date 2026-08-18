@@ -1,0 +1,5 @@
+// The same name as TWO different records.
+type Cfg = { host: String }
+type Cfg = { port: Int }
+
+fn main() -> Unit = println("ok")

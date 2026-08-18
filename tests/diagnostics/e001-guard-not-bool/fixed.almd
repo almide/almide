@@ -1,0 +1,6 @@
+fn f(v: Int) -> String = match v {
+  x if x % 2 == 1 => "odd",
+  _ => "rest",
+}
+
+fn main() -> Unit = println(f(2))

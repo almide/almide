@@ -1,0 +1,8 @@
+effect fn fetch() -> Result[Int, String] = err("boom")
+
+effect fn main() -> Unit = {
+  match fetch() {
+    ok(n) => println(int.to_string(n)),
+    err(e) => println(if e != "timeout" then "hard" else "soft"),
+  }
+}

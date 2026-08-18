@@ -233,6 +233,37 @@ class = "EXERCISED"
 evidence = "survey4-tier12 landing (2026-08-15): both verdict directions observed in real operation before first green. FIRST RUN was a genuine catch: mutants m1 (Ok/Err arm swap in render_pattern_constructor) and m4 (statement reversal in expressions.rs render_stmts) SURVIVED => exit 1 — those walker paths are not what the corpus exercises (user-enum ctor patterns and nested-block lambdas sit outside the lambda-almd fragment; Result arms render through the pattern_ok/pattern_err templates, fn bodies through render_fn_body_str). Retargeted at the real paths, the gate reads 5/5 killed, exit 0 (m2 kills via the almide#1428 turbofish, m3 via the almide#1429 ok-lift, m5 via the wasm-only double print — which is why the script hard-refuses to run without a wasm runtime). Nightly + workflow_dispatch (conformance-mutations.yml), deliberately not a PR gate (five compiler rebuilds)."
 
 [[gate]]
+path = "proofs/check-wall-corpus.sh"
+class = "NEGATIVE_TESTED"
+evidence = "wall-corpus landing (2026-08-17, #1481): four refusal fixtures pinned (enumerate over an unnameable element -> list.enumerate_x; heap-element pop -> list.pop_x; rich-variant Map key -> _key_wall; non-flat unique -> list.unique_x), each verified to fail `build --target wasm` with its declared substring at landing. Negative controls demonstrated before first green: (1) a COMPILING program with an @wall header makes the gate exit 1 with the graduation instruction (the silent-admission direction this gate exists for); (2) a fixture failing with a DIFFERENT message exits 1 as reason drift; (3) an emptied corpus (<3 fixtures) exits 1 (the #976 vacuous direction). Graduation is shrink-only and explicit: a shape that starts lowering must move to spec/wasm_cross/ under a contract in the same PR."
+
+[[gate]]
+path = "scripts/check-str-twin-ratchet.sh"
+class = "NEGATIVE_TESTED"
+evidence = "str-twin ratchet landing (2026-08-17, #1460 item 2): freezes the stdlib _str-suffix twin count at 118 (the triage watched it creep 119 -> 120 in one day) while the protocol-vs-suffix direction stays a mob decision. Two-directional: count above baseline fails as growth needing the decision (demonstrated before first green by forging the baseline to 117 — exit 1 naming both numbers), count below fails as STALE demanding the shrink be recorded. Both controls restored to green at 118."
+
+[[gate]]
+path = "scripts/check-diagnostic-code-coverage.sh"
+class = "NEGATIVE_TESTED"
+evidence = "diagnostic-code coverage floor landing (2026-08-18, attack-list A1-3): every documented E-code must carry >=1 fixture family under tests/diagnostics/ (three no-fixture codes exempted with documented reasons: E054 internal-defect trigger, E033/E420 need module projects). Landed alongside the 4x fixture expansion (99 -> 335 dirs); negative control demonstrated before first green by renaming e055-* dirs aside — the gate exited 1 naming E055 as an uncovered documented code — then restored. Codes below the 3-family tier-1 bar are reported as backlog, not failed: the floor is deliberate (a zero-fixture documented code is unrefactorable), the bar is the roadmap target."
+
+
+[[gate]]
+path = "scripts/check-intrinsic-boundary.sh"
+class = "NEGATIVE_TESTED"
+evidence = "intrinsic-boundary landing (2026-08-17, #1468 option b): the join is re-derived from the sources on every run (the check-stdlib-purity-registry discipline — no hand-maintained row file to drift). Three provider classes verified: runtime/rs tokens (pub fns AND macro-minted names, which a pub-fn grep alone missed — cursor_read_float! mints 129 of them), the compiler-lowered PRIM FLOOR (an almide_rt_prim_* target is satisfied by its short op name having a lowering arm in crates/almide-mir), and the http/json families that predate the rt_ prefix. Negative control demonstrated before first green: a forged @intrinsic(almide_rt_totally_bogus_fn) appended to stdlib/bool.almd made the gate exit 1 naming the target, then restored to green. Accounting leg: 107 untargeted runtime pub-fns are all template-referenced from crates/ or src/ (the Codec __decode_* glue class); an orphan would be listed, never silently carried. Measured at landing: 768 targets, 0 dangling."
+
+[[gate]]
+path = "scripts/check-llm-surface.sh"
+class = "NEGATIVE_TESTED"
+evidence = "llm-surface landing (2026-08-17, #1483): the negative control was paid for by REALITY on the first run — docs/CHEATSHEET.md's own '## Complete example' used process.args() without `import process` and the gate failed loud on it (E003 with the import hint); the example was fixed in the same landing and the gate went green over 5 `almide check`-marked fences. The vacuous direction is guarded separately: zero extracted fences exits 1 (the #976 find-nothing-exit-0 class), demonstrated by running against a tree with no marked fences before the markers landed. Scope contract: only the ```almide check info-string opts a fence in, so highlighting-only fragments and deliberate wrong-examples cannot produce false reds; the allowlist is shrink-only and empty at landing."
+
+[[gate]]
+path = "scripts/check-interface-diff.sh"
+class = "NEGATIVE_TESTED"
+evidence = "interface-differ landing (2026-08-17, #1488): the classifier is demonstrated against REAL release history rather than forged inputs — v0.55.0 -> v0.56.0 (the ADR-0006 try_* removal release) classifies `breaking` with the seven removed signatures listed and EXITS 1 without --allow-breaking (the negative control), and exits 0 WITH the flag (the declared-break path); v0.56.0 -> v0.57.0 classifies `additive` (2 added, 0 removed, exit 0); v0.57.0 -> HEAD at landing classified `identical`. Internal `__`-prefixed carrier names are excluded from the surface, which is what keeps the v0.56->v0.57 verdict honest (its only removals were checker-inserted __try_* carriers, not writable API). The surface is read from the committed machine-generated signature-index blocks in docs/stdlib/*.md at each ref — themselves CI-gated fresh by the 'Stdlib doc signature indexes up to date' job — so the measurement is build-free, deterministic, and derivable at any ref pair forever."
+
+[[gate]]
 path = "scripts/check-dialect-epochs.sh"
 class = "NEGATIVE_TESTED"
 evidence = "dialect-stamp landing (2026-08-16): companion check-dialect-epochs-negative.sh feeds five forged inputs, each demonstrated to FAIL before first green, with the committed ledger + real constant as the positive control — (1) an EMPTY ledger (the #976 find-nothing-exit-0 direction); (2) a GAPPED epoch sequence 1,2,4, which would let a `@dialect(3)` stamp name an epoch that never existed; (3) an epoch above 1 with an empty `breaks` list, i.e. a release masquerading as a dialect break; (4) CURRENT_DIALECT forged to 7 against a ledger topping out at 3 — the two-hand-maintained-numbers drift this gate exists for, the rustc CURRENT_RUSTC_VERSION pattern; (5) the constant RENAMED so the extraction cannot find it, which must go loud rather than green (blind-gate guard). All five restored and re-confirmed green (3 epochs, constant agrees)."

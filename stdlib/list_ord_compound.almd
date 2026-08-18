@@ -65,7 +65,7 @@ fn __cmp_oint(a: Int, b: Int) -> Int = {
   else if tb == 0 then 1 else __ordc_icmp(prim.load64(a + 12), prim.load64(b + 12))
 }
 
-// ── shared machinery: rc-copy, per-comparator selection sort / extremum index ──
+// ── shared machinery: rc-copy, sel-dispatched stable mergesort / extremum index ──
 fn __ordc_copy_rc(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let e = prim.load64(srch + 12 + i * 8)
@@ -74,63 +74,61 @@ else {
   __ordc_copy_rc(srch, dsth, n, i + 1)
 }
 
-fn __ordc_swap(h: Int, i: Int, j: Int) -> Int = {
-  let a = prim.load64(h + 12 + i * 8)
-  let b = prim.load64(h + 12 + j * 8)
-  prim.store64(h + 12 + i * 8, b)
-  prim.store64(h + 12 + j * 8, a)
-  0
-}
+// One comparator dispatch for the merge (sel: 0=tss, 1=tsstr, 2=lint, 3=oint) —
+// the four sorts share ONE stable bottom-up mergesort (#1459, O(n log n) in
+// place of four O(n^2) selection sorts) instead of four duplicated walkers.
+fn __ordc_cmp(sel: Int, a: Int, b: Int) -> Int = if sel == 0 then __cmp_tss(a, b)
+else if sel == 1 then __cmp_tsstr(a, b)
+else if sel == 2 then __cmp_lint(a, b)
+else __cmp_oint(a, b)
 
-fn __selmin_tss(h: Int, n: Int, j: Int, best: Int) -> Int = if j >= n then best
+// `<=` takes the left run first, so equal elements keep their order — matching
+// native's stable derived-Ord sort where the difference is even observable.
+fn __ordc_mrun(sel: Int, srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
-  let nb = if __cmp_tss(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
-  __selmin_tss(h, n, j + 1, nb)
+  let takel = if j >= hi then true
+    else if i >= mid then false
+    else __ordc_cmp(sel, prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
+  if takel then {
+    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
+    __ordc_mrun(sel, srch, dsth, mid, hi, i + 1, j, k + 1)
+  } else {
+    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
+    __ordc_mrun(sel, srch, dsth, mid, hi, i, j + 1, k + 1)
+  }
 }
 
-fn __selsort_tss(h: Int, n: Int, i: Int) -> Int = if i >= n then 0
+fn __ordc_mpass(sel: Int, srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {
-  let _x = __ordc_swap(h, i, __selmin_tss(h, n, i + 1, i))
-  __selsort_tss(h, n, i + 1)
+  let m0 = lo + width
+  let mid = if m0 > n then n else m0
+  let h0 = lo + width * 2
+  let hi = if h0 > n then n else h0
+  let _r = __ordc_mrun(sel, srch, dsth, mid, hi, lo, mid, lo)
+  __ordc_mpass(sel, srch, dsth, n, width, lo + width * 2)
 }
 
-fn __selmin_tsstr(h: Int, n: Int, j: Int, best: Int) -> Int = if j >= n then best
+fn __ordc_mrounds(sel: Int, curh: Int, othh: Int, n: Int, width: Int) -> Int = if width >= n then curh
 else {
-  let nb = if __cmp_tsstr(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
-  __selmin_tsstr(h, n, j + 1, nb)
+  let _p = __ordc_mpass(sel, curh, othh, n, width, 0)
+  __ordc_mrounds(sel, othh, curh, n, width * 2)
 }
 
-fn __selsort_tsstr(h: Int, n: Int, i: Int) -> Int = if i >= n then 0
+fn __ordc_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
-  let _x = __ordc_swap(h, i, __selmin_tsstr(h, n, i + 1, i))
-  __selsort_tsstr(h, n, i + 1)
+  prim.store64(dsth + 12 + i * 8, prim.load64(srch + 12 + i * 8))
+  __ordc_copy(srch, dsth, n, i + 1)
 }
 
-fn __selmin_lint(h: Int, n: Int, j: Int, best: Int) -> Int = if j >= n then best
-else {
-  let nb = if __cmp_lint(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
-  __selmin_lint(h, n, j + 1, nb)
+// rc-copy the source into the owned result buffer, mergesort against a FLAT
+// scratch (stale handle copies are never rc-touched by its drop), copy back if
+// the ping-pong ended on the scratch. The result buffer co-owns each element
+// exactly once; the caller's type-routed recursive drop balances the rc_incs.
+fn __ordc_msort(sel: Int, bh: Int, th: Int, n: Int) -> Int = {
+  let fin = __ordc_mrounds(sel, bh, th, n, 1)
+  if fin == bh then 0 else __ordc_copy(th, bh, n, 0)
 }
 
-fn __selsort_lint(h: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let _x = __ordc_swap(h, i, __selmin_lint(h, n, i + 1, i))
-  __selsort_lint(h, n, i + 1)
-}
-
-fn __selmin_oint(h: Int, n: Int, j: Int, best: Int) -> Int = if j >= n then best
-else {
-  let nb = if __cmp_oint(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
-  __selmin_oint(h, n, j + 1, nb)
-}
-
-fn __selsort_oint(h: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let _x = __ordc_swap(h, i, __selmin_oint(h, n, i + 1, i))
-  __selsort_oint(h, n, i + 1)
-}
-
-// Extremum INDEX per comparator (dir: max when the compare is > 0).
 fn __exidx_tss(h: Int, n: Int, i: Int, best: Int, want_max: Bool) -> Int = if i >= n then best
 else {
   let c = __cmp_tss(prim.load64(h + 12 + i * 8), prim.load64(h + 12 + best * 8))
@@ -167,7 +165,7 @@ else {
 }
 
 // ── public twins ──
-// sort: rc-copy into an owned buffer, selection-sort in place (handle swaps only).
+// sort: rc-copy into an owned buffer, stable mergesort (handle moves only, #1459).
 // The RESULT's recursive drop is routed by TYPE at the caller's bind — balanced
 // against the rc_incs here.
 fn list_sort_tsstr(xs: List[(Int, String)]) -> List[(Int, String)] = {
@@ -176,7 +174,8 @@ fn list_sort_tsstr(xs: List[(Int, String)]) -> List[(Int, String)] = {
   let buf = prim.alloc_list_str(n)
   let bh = prim.handle(buf)
   let _c = __ordc_copy_rc(h, bh, n, 0)
-  let _s = __selsort_tsstr(bh, n, 0)
+  let tmp = prim.alloc_list(n)
+  let _s = __ordc_msort(1, bh, prim.handle(tmp), n)
   buf
 }
 
@@ -186,7 +185,8 @@ fn list_sort_tss(xs: List[(Int, Int)]) -> List[(Int, Int)] = {
   let buf = prim.alloc_list_str(n)
   let bh = prim.handle(buf)
   let _c = __ordc_copy_rc(h, bh, n, 0)
-  let _s = __selsort_tss(bh, n, 0)
+  let tmp = prim.alloc_list(n)
+  let _s = __ordc_msort(0, bh, prim.handle(tmp), n)
   buf
 }
 
@@ -196,7 +196,8 @@ fn list_sort_lint(xs: List[List[Int]]) -> List[List[Int]] = {
   let buf = prim.alloc_list_str(n)
   let bh = prim.handle(buf)
   let _c = __ordc_copy_rc(h, bh, n, 0)
-  let _s = __selsort_lint(bh, n, 0)
+  let tmp = prim.alloc_list(n)
+  let _s = __ordc_msort(2, bh, prim.handle(tmp), n)
   buf
 }
 
@@ -206,7 +207,8 @@ fn list_sort_oint(xs: List[Int?]) -> List[Int?] = {
   let buf = prim.alloc_list_str(n)
   let bh = prim.handle(buf)
   let _c = __ordc_copy_rc(h, bh, n, 0)
-  let _s = __selsort_oint(bh, n, 0)
+  let tmp = prim.alloc_list(n)
+  let _s = __ordc_msort(3, bh, prim.handle(tmp), n)
   buf
 }
 

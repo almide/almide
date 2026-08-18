@@ -1,0 +1,4 @@
+type Cmd = | Halt | CmdDup(Int)
+type Op = | OpDup(Int) | Nop
+
+fn main() -> Unit = println("ok")

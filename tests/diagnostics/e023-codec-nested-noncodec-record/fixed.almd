@@ -1,0 +1,5 @@
+type Inner: Codec = { n: Int }
+
+type Doc: Codec = { inner: Inner }
+
+fn main() -> Unit = println("ok")

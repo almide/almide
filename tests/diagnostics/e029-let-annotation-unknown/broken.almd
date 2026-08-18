@@ -1,0 +1,5 @@
+// E029: an unknown type in a LET annotation.
+fn main() -> Unit = {
+  let x: Widget = 1
+  println("bound")
+}
