@@ -10,7 +10,7 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 0 — Semantics must stop moving (everything else builds on this)
 
-- [ ] **A0-1 (L) Spec freeze + compatibility contract.** 0.57.2 itself carries
+- [ ] **A0-1 (#530 + #1485 + #1483) (L) Spec freeze + compatibility contract.** 0.57.2 itself carries
   two behavior changes; a patch-level semantic move disqualifies the language
   for this market. Exit: an ALS freeze document, a breaking-change policy
   (deprecation cycle, never silent), and a 1.0 criteria checklist the release
@@ -18,11 +18,11 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 1 — Close the verification holes (compiler correctness)
 
-- [ ] **A1-1 (L) Interp tagged-heap slice (#1226 slice 2).** HEAP_BOUNDARY
+- [ ] **A1-1 (#1226) (L) Interp tagged-heap slice (#1226 slice 2).** HEAP_BOUNDARY
   abstains = 115/501 fixtures; every abstain is a place where a shared
   frontend bug passes on a 2-0 vote (the E0004 family was exactly this
   shape). Exit: abstain rate < 5% (voting ≥ 476/501).
-- [ ] **A1-2 (XL) Wall burn-down, fuzz-frequency order.** The subset walls
+- [ ] **A1-2 (XL, #1527) Wall burn-down, fuzz-frequency order.** The subset walls
   sit on everyday code. Burn down by observed frequency (per 30-min fuzz run):
   List-argument materialization (~98×), unresolvable-`if` with call-bearing
   arms (~59×), registry gaps `result.flatten/to_list/filter`, `list.zip_with`
@@ -31,22 +31,22 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   Exit: walls < 100 per 30-min fuzz run AND every graduation lands its
   specimen as a voting fixture under contract in the same PR (the shrink-only
   rule already in place).
-- [ ] **A1-3 (L) Negative-test 10× (test-surface-25x tier 1).** 99 diagnostic
+- [ ] **A1-3 (L, #1528) Negative-test 10× (test-surface-25x tier 1).** 99 diagnostic
   pairs vs rust's ~15k is the widest maturity gap. Exit: every E-code has a
   fixture family covering each hint variant and each fix-it verdict; ≥1,000
   pairs; the coverage gate enumerates E-codes with < 3 fixtures.
   PROGRESS 2026-08-18: **749 pairs** (wave-2's 730 + the #1518/#1521/#1486/
   #1515 families); three new E-codes (E058/E059/E060) landed with families.
-- [ ] **A1-4 (M) RC-placement snapshots (koka parc model).** Commit the
+- [ ] **A1-4 (M, #1529) RC-placement snapshots (koka parc model).** Commit the
   post-RC-insertion drop/dup placement as expected output beside the runtime
   result for an RC-critical corpus (the koka_parc* family is the seed), so a
   benign-today placement move is loud. Exit: snapshot gate in CI over ≥ 20
   shapes.
-- [ ] **A1-5 (M) Heap-cap leak harness (grain makeGcProgram model).** A hard
+- [ ] **A1-5 (M, #1530) Heap-cap leak harness (grain makeGcProgram model).** A hard
   heap budget knob on both targets; run each RC fixture at N units and N-1 —
   silent leaks become deterministic OOM. Exit: churn corpus runs under the
   cap in CI; one deliberately-leaking control proves the harness bites.
-- [ ] **A1-6 (M) Allocation-count assertions (roc alloc-count model).** An
+- [ ] **A1-6 (M, #1531) Allocation-count assertions (roc alloc-count model).** An
   allocation counter surface + exact loop-body counts with a control program
   per assertion. Exit: gate over ≥ 10 loop shapes asserting zero per-iteration
   allocation.
@@ -57,13 +57,13 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 2 — Prove the findings have dried up (time is the ingredient)
 
-- [ ] **A2-1 (M) Fuzz nightly hardening + 90-day green streak.** Fix the
+- [ ] **A2-1 (M, #1532 + #924) Fuzz nightly hardening + 90-day green streak.** Fix the
   drain wedge first (a stuck native cargo build survives the per-case
   timeout — runner needs a kill on the BUILD phase; it wedged two campaigns
   this week). Then: nightly runs with rotating seeds, findings auto-filed,
   streak meter. Exit: 90 consecutive green nights with zero new
   correctness findings.
-- [ ] **A2-2 (M) Real-code acceptance tier.** Compile-and-test the real
+- [ ] **A2-2 (M, #1533) Real-code acceptance tier.** Compile-and-test the real
   downstream projects (dfa, parsegen, and the other consumers) in CI as an
   acceptance ring — the E0004 and #1501 classes were both found by real code,
   not generated code. Exit: ≥ 3 real projects green in CI on every develop
@@ -80,10 +80,10 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 3 — Outside the compiler (no issue-fixing moves these)
 
-- [ ] **A3-1 (S) Security posture floor.** SECURITY.md with a disclosure
+- [ ] **A3-1 (#1534) (S) Security posture floor.** SECURITY.md with a disclosure
   channel, dependency lock audit in CI (the MVS+lock work is the seed), and
   a release-signing story. Exit: documented, linked from README.
-- [ ] **A3-2 (M) Support contract.** LTS policy (which versions get fixes,
+- [ ] **A3-2 (#1535) (M) Support contract.** LTS policy (which versions get fixes,
   for how long), versioning guarantees, and a bus-factor statement honest
   about the maintainer surface. Exit: SUPPORT.md ratified.
 - [ ] **A3-3 (XL) Qualification data pack (only if a certified industry is
