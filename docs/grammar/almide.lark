@@ -220,9 +220,13 @@ var_stmt: VAR IDENT _o_ty_ann EQ _nl expr
 guard_stmt: GUARD LET _nl IDENT _nl EQ _nl expr _nl ELSE _nl expr
           | GUARD expr ELSE _nl expr
 
-assign_stmt: IDENT EQ _nl expr
-index_assign_stmt: IDENT "[" expr "]" EQ _nl expr
-field_assign_stmt: IDENT DOT name_tok EQ _nl expr
+// Assignment targets accept TYPE_NAME too: module globals follow the
+// UPPERCASE convention (COUNT = 1), accepted by the parser since 2199ded6d;
+// the checker adjudicates the target (var / let-E009 / unknown-E003).
+assign_stmt: _assign_target EQ _nl expr
+index_assign_stmt: _assign_target "[" expr "]" EQ _nl expr
+field_assign_stmt: _assign_target DOT name_tok EQ _nl expr
+_assign_target: IDENT | TYPENAME
 
 destructure_tuple: "(" (_destructure_elem _comma _nl)* ")"
 _destructure_elem: destructure_tuple | UNDERSCORE | IDENT
