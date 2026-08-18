@@ -768,3 +768,39 @@ fn continue_outside_recognized_positions_still_walls() {
         "a continue outside the recognized statement positions must keep the honest wall"
     );
 }
+
+#[test]
+fn heap_option_none_reserves_the_payload_slot() {
+    // #1526 (atzurody): the variant-match/`??` machinery pre-binds the @12
+    // payload slot BEFORE the tag test, so a header-only 12-byte `none` block
+    // read 4 bytes past itself — an OOB trap whenever that block sat at the
+    // linear-memory frontier (trap decided by argv[0] length in the teastia
+    // repro). Every heap-Option `none` producer must reserve the payload slot:
+    // no rendered module may allocate a cap-0 list block for an Option, and
+    // the self-host `list.get_str` none arms must carry a nonzero cap.
+    let src = "fn main() -> Unit = {\n  \
+        let cs = string.chars(\"ab\")\n  \
+        let c = list.get(cs, 5) ?? \"\"\n  \
+        println(\"<\" + c + \">\")\n}\n";
+    let prog = lower_source(src);
+    let wat = render_wasm_program(&prog);
+    assert!(
+        !wat.contains("(call $list_new (i32.const 0) (i32.const 0))"),
+        "a cap-0 Option block reappeared — the @12 pre-read goes OOB at the frontier"
+    );
+    // The self-host list.get_str's two none arms: len 0 with cap RESERVED
+    // (Init::OptNone renders $list_new(0, 1 + PUSH_HEADROOM)).
+    let get_str = wat
+        .split("(func $list.get_str ")
+        .nth(1)
+        .map(|s| &s[..s.find("\n  (func ").unwrap_or(s.len())])
+        .expect("list.get_str rendered");
+    assert!(
+        !get_str.contains("(call $alloc (i32.add (i32.const 12) (i32.mul"),
+        "list.get_str's none went back to the header-only DynListStr alloc"
+    );
+    assert!(get_str.contains("(call $list_new (i32.const 0) (i32.const 9))"));
+    if let Some(out) = build_and_run("heap_option_none_reserves_the_payload_slot", &render_wasm_program(&prog)) {
+        assert_eq!(out, "<>");
+    }
+}

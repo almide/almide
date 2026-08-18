@@ -155,13 +155,22 @@ impl LowerCtx {
         obj
     }
 
-    /// Materialize `None` for an `Option[String]` as a 0-element `DynListStr` (tracked like
+    /// Materialize `None` for an `Option[String]` (tracked like
     /// `materialize_opt_str_some`). `DropListStr` over len 0 frees only the block.
     pub(crate) fn materialize_opt_str_none(&mut self, repr: crate::Repr) -> ValueId {
-        let zero = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
         let obj = self.fresh_value();
-        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: zero } });
+        // #1526: `Init::OptNone`, NOT `DynListStr{len:0}`. The len-0 DynListStr
+        // allocated a HEADER-ONLY 12-byte block, but the variant-match/`??`
+        // machinery pre-binds the @12 payload slot BEFORE the tag test (the
+        // ownership-severing pre-bind), so every such `none` read 4 bytes past
+        // its own block — harmless garbage until the block sat at the linear-
+        // memory frontier, then an OOB trap whose occurrence depended on how
+        // argv/environ bytes shifted the allocator (atzurody's teastia repro:
+        // same module, trap decided by argv[0] LENGTH). OptNone reserves the
+        // payload slot (len 0, cap 1 + headroom) — the sizing doctrine scalar
+        // `none` always had — so the pre-read stays in bounds for every
+        // producer. len 0 still reads as None; the drop route is unchanged.
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::OptNone });
         self.value_drops.entry(obj).or_default().flat_elems = true;
         self.value_shapes.insert(obj, crate::lower::VariantShape::Option);
         obj
