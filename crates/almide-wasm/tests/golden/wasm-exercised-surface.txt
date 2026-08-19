@@ -1,7 +1,9 @@
+binop:AddFloat
 binop:AddInt
 binop:And
 binop:ConcatList
 binop:ConcatStr
+binop:DivFloat
 binop:DivInt
 binop:Eq
 binop:Gt
@@ -9,9 +11,14 @@ binop:Gte
 binop:Lt
 binop:Lte
 binop:ModInt
+binop:MulFloat
 binop:MulInt
+binop:Neq
 binop:Or
+binop:SubFloat
 binop:SubInt
+call:float.to_fixed
+call:float.to_string
 call:int.to_string
 call:list.enumerate
 call:list.filter

@@ -137,6 +137,7 @@ dependencies = [
  "almide",
  "almide-driver",
  "almide-syntax",
+ "almide-types",
  "salsa",
  "serde_json",
  "sha2",

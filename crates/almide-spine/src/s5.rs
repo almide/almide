@@ -80,8 +80,144 @@ pub fn lower_to_ir(path: &str, source_text: &str) -> Result<almide::ir::IrProgra
         checker.env.self_module_name = saved_self;
         ir.modules.push(mod_ir_module);
     }
+    link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
     Ok(ir)
+}
+
+/// Self-host registry LOADING (wasm-leg resolution, interp-neutral):
+/// registry modules are fully-bodied almide implementations of stdlib
+/// surfaces (`float.to_string` → the Dragon4 in float_to_string.almd)
+/// that are never imported, so resolve never sees them. This loads
+/// exactly the ones the program (transitively) calls into `ir.modules`
+/// and STOPS THERE: call sites keep their surface form
+/// (`Module{float, to_string}`), which the interpreter resolves through
+/// its native bridge exactly as before (rewriting them broke the interp
+/// leg 468 → 254 — the bridge IS its execution path), while the wasm
+/// emitter resolves the surface against the loaded implementation via
+/// the same registry. One IR, two sound resolutions.
+fn link_self_host(
+    ir: &mut almide::ir::IrProgram,
+    checker: &mut almide::check::Checker,
+    sources: &std::collections::HashMap<String, (String, String)>,
+) {
+    use std::collections::{HashMap, HashSet};
+
+    let mut registry: HashMap<String, &'static str> = HashMap::new();
+    for (src, maps) in almide_types::self_host_registry::self_host_runtime() {
+        for (_impl_fn, surface) in *maps {
+            registry.insert((*surface).to_string(), *src);
+        }
+    }
+
+    fn scan_expr(e: &almide::ir::IrExpr, out: &mut HashSet<String>) {
+        match &e.kind {
+            almide::ir::IrExprKind::Call { target, .. }
+            | almide::ir::IrExprKind::TailCall { target, .. } => {
+                if let almide::ir::CallTarget::Module { module, func, .. } = target {
+                    out.insert(format!("{}.{}", module.as_str(), func.as_str()));
+                }
+            }
+            // A Float interpolation part formats through float.to_string
+            // at emission — the demand is implicit in the IR.
+            almide::ir::IrExprKind::StringInterp { parts } => {
+                for p in parts {
+                    if let almide::ir::IrStringPart::Expr { expr } = p
+                        && matches!(expr.ty, almide::types::Ty::Float)
+                    {
+                        out.insert("float.to_string_compound".to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+        e.clone().map_children(&mut |c| {
+            scan_expr(&c, out);
+            c
+        });
+    }
+    fn scan_program(ir: &almide::ir::IrProgram, out: &mut HashSet<String>) {
+        for f in &ir.functions {
+            scan_expr(&f.body, out);
+        }
+        for tl in &ir.top_lets {
+            scan_expr(&tl.value, out);
+        }
+        for m in &ir.modules {
+            for f in &m.functions {
+                scan_expr(&f.body, out);
+            }
+            for tl in &m.top_lets {
+                scan_expr(&tl.value, out);
+            }
+        }
+    }
+
+    let mut loaded: HashSet<&'static str> = HashSet::new();
+    let mut module_diags = Vec::new();
+    loop {
+        let mut needed = HashSet::new();
+        scan_program(ir, &mut needed);
+        // Deterministic load order: module indices, names, and layouts
+        // must not depend on hash-seed iteration order.
+        let mut needed: Vec<String> = needed.into_iter().collect();
+        needed.sort();
+        let mut grew = false;
+        for surface in needed {
+            let Some(&src) = registry.get(&surface) else { continue };
+            if loaded.contains(&src) {
+                continue;
+            }
+            loaded.insert(src);
+            let name = format!("__selfhost_{}", loaded.len());
+            let tokens = almide::lexer::Lexer::tokenize(src);
+            let mut parser = almide::parser::Parser::new(tokens).with_file(&name);
+            let Ok(mut mod_prog) = parser.parse() else { continue };
+            if !parser.errors.is_empty() {
+                continue;
+            }
+            // Only fully-bodied implementations may load — a bodyless
+            // decl is a bridge surface, not an implementation.
+            let bodyless = mod_prog
+                .decls
+                .iter()
+                .any(|d| matches!(d, almide::ast::Decl::Fn { body: None, .. }));
+            if bodyless {
+                continue;
+            }
+            crate::s3::infer_module_capturing(
+                checker,
+                &name,
+                &mut mod_prog,
+                sources,
+                &mut module_diags,
+            );
+            // The same import-table dance the resolved-modules loop does:
+            // lowering against the ENTRY's import table leaves the
+            // module's own references as holes (found by the burn-up:
+            // expr:Hole ×72 when this was skipped).
+            let (mod_table, _) = almide::import_table::build_import_table(
+                &mod_prog,
+                Some(&name),
+                &checker.env.user_modules,
+            );
+            let saved_table =
+                std::mem::replace(&mut checker.env.import_table, mod_table);
+            let mod_ir = almide::lower::lower_module(
+                &name,
+                &mod_prog,
+                &checker.env,
+                &checker.type_map,
+                None,
+            );
+            checker.env.import_table = saved_table;
+            ir.modules.push(mod_ir);
+            grew = true;
+        }
+        if !grew {
+            break;
+        }
+    }
 }
 
 pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {

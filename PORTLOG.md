@@ -894,3 +894,47 @@ fully-bodied but never imported, so resolve never sees them) plus the
 prim floor (~25 direct-mapping ops) — that combination unlocks the
 oracle's own Dragon4 float formatting, Bytes, and the self-hosted
 string surface.
+
+---
+
+## Unit 6 — stage 12: the self-host arc lands (2026-08-20)
+
+The oracle's own Dragon4 now formats floats on the wasm leg, byte-exact
+under fuzz (random float arithmetic → formatting → 1,000+ compared runs
+clean). The arc surfaced more real bugs than any before it, each caught
+by a referee:
+
+- **prim floor** (~22 direct-mapping ops: handle/loads/stores/allocs/
+  bit ops/f64 ops, `f2i` as trunc_sat = Rust `as` semantics, `die` as
+  eprint+trap) — `src/prim.rs`.
+- **s5 loads registry modules on demand** (worklist to closure over the
+  IR's module calls + implicit demands like `${float}` →
+  float.to_string_compound), and — after the first attempt REWROTE call
+  sites and broke the interp leg 468 → 254 — the ratified shape is
+  LOADING ONLY: one IR, two sound resolutions (interp keeps its bridge,
+  the emitter resolves surfaces through the same registry).
+- **The layout boundary is real and now explicit**: the incumbent keeps
+  Result tags in the len slot and packs EVERY list element into 8 bytes;
+  ours differ deliberately. After the signature heuristic missed two
+  coupling classes (result.unwrap_or returned the default for ok(5);
+  string.join trapped on 4-byte list slots), linked-impl resolution is a
+  VERIFIED WHITELIST — Dragon4 + its closure (math_log family) — grown
+  one impl at a time with parity evidence.
+- **Named-call resolution is module-scoped** (a global simple-name index
+  collided across modules' helper names and called the WRONG module's
+  fn — nondeterministically, until self-host load order was also made
+  deterministic). Reachability BFS now walks table INDICES, closing the
+  registry-resolved escape it had.
+- **`${float}` formats via float.to_string_compound** — the oracle's
+  interpolation form drops the ".0" suffix; to_string does not. Two
+  formatters, both linked, each used where the oracle uses it.
+- **slot_size was still two-way** — F64 slots computed as 4 bytes (the
+  parity net showed zeroed float lists; the disassembly showed a div-by-4
+  against an f64 load). Every 8-byte VALUE type is an 8-byte slot now.
+- Float list elements cross the 8-byte helper boundary as BIT PATTERNS
+  (i64.reinterpret_f64) — memory is bytes; only call-boundary value
+  types need bridging.
+
+**Burn-up: 128 → 137 / 590**, floor 137, zero divergence; fuzz surface
+includes float arithmetic + formatting; interp leg re-verified at
+468/121/0 after every s5 change.

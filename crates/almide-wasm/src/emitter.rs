@@ -15,7 +15,7 @@ pub(crate) struct Emitter<'a> {
     pub(crate) locals: &'a HashMap<VarId, (u32, SliceTy)>,
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
-    pub(crate) calls: &'a mut HashSet<String>,
+    pub(crate) calls: &'a mut HashSet<usize>,
     /// The containing function's return slice type — `!` PROPAGATES (not
     /// aborts) in pure fns returning Option/Result, so those are refused.
     pub(crate) fn_ret: Option<SliceTy>,
@@ -31,6 +31,9 @@ pub(crate) struct Emitter<'a> {
     /// call in tail position with a matching return type emits
     /// `return_call` — constant stack for deep (incl. mutual) recursion.
     pub(crate) in_tail: bool,
+    /// The module this function belongs to (None = entry program) —
+    /// intra-module Named calls resolve module-qualified FIRST.
+    pub(crate) cur_module: Option<&'a str>,
     pub(crate) hold_i32_base: u32,
     pub(crate) hold_i32_depth: u32,
     pub(crate) hold_i64_base: u32,

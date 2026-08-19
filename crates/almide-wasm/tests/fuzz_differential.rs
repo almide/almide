@@ -64,6 +64,9 @@ enum Ty {
     Vart,
     /// `Map[Int, String]` — exercises entry layout with mixed slot widths.
     MapIS,
+    /// `Float` — arithmetic fuzzed freely; printing routes through the
+    /// linked self-host Dragon4, the same formatter the oracle uses.
+    Float,
     /// `Set[Int]`.
     SetInt,
 }
@@ -79,6 +82,7 @@ impl Ty {
             Ty::Rec => "Pt",
             Ty::Vart => "Tr",
             Ty::MapIS => "Map[Int, String]",
+            Ty::Float => "Float",
             Ty::SetInt => "Set[Int]",
         }
     }
@@ -102,6 +106,9 @@ struct Gen {
 // the corpus's i64_min_literal fixture covers that edge instead.
 const INT_POOL: &[i64] = &[0, 1, 2, 3, 7, 10, -1, -5, 42, 999, i64::MAX, i64::MIN + 1, 1 << 40];
 const STR_POOL: &[&str] = &["", "a", "hello", "第二行", "🦀", "x y z", "-"];
+const FLOAT_POOL: &[&str] = &[
+    "0.0", "1.0", "0.5", "-3.25", "2.5", "0.1", "1000000.0", "-0.001",
+];
 
 impl Gen {
     fn new(seed: u64) -> Gen {
@@ -251,6 +258,19 @@ impl Gen {
                 2 => "Mt".to_string(),
                 _ => self.leaf(Ty::Vart),
             },
+            Ty::Float => match self.rng.below(5) {
+                0 | 1 => self.leaf(Ty::Float),
+                2 | 3 => {
+                    let op = ["+", "-", "*"][self.rng.below(3)];
+                    format!(
+                        "({} {} {})",
+                        self.expr(Ty::Float, depth - 1),
+                        op,
+                        self.expr(Ty::Float, depth - 1)
+                    )
+                }
+                _ => self.leaf(Ty::Float),
+            },
             Ty::MapIS => match (self.rng.below(3), self.var_of(Ty::MapIS)) {
                 (0, Some(v)) | (1, Some(v)) => format!(
                     "map.set({v}, {}, {})",
@@ -270,7 +290,8 @@ impl Gen {
     }
 
     fn str_expr_core(&mut self, depth: usize) -> String {
-        match self.rng.below(5) {
+        match self.rng.below(6) {
+            5 => format!("float.to_string({})", self.expr(Ty::Float, depth.saturating_sub(1))),
             0 | 1 => self.leaf(Ty::Str),
             2 => format!("({} + {})", self.expr(Ty::Str, depth - 1), self.expr(Ty::Str, depth - 1)),
             3 => format!("int.to_string({})", self.expr(Ty::Int, depth - 1)),
@@ -305,6 +326,9 @@ impl Gen {
             Ty::Vart => ["Lf(3)", "Nd(4, 5)", "Mt"][i % 3].to_string(),
             Ty::MapIS => "map.new()".to_string(),
             Ty::SetInt => "set.new()".to_string(),
+            Ty::Float => {
+                FLOAT_POOL[i % FLOAT_POOL.len()].to_string()
+            }
         }
     }
 
@@ -335,7 +359,8 @@ impl Gen {
             Ty::Vart,
             Ty::MapIS,
             Ty::SetInt,
-        ][self.rng.below(9)];
+            Ty::Float,
+        ][self.rng.below(10)];
         let name = self.fresh();
         let mutable = self.rng.chance(40);
         let kw = if mutable { "var" } else { "let" };

@@ -72,6 +72,7 @@ mod collect;
 mod collections;
 mod emitter;
 mod patterns;
+mod prim;
 mod runtime;
 mod types_table;
 
@@ -248,10 +249,12 @@ impl SliceTy {
     }
 
     /// Slot width of this value inside an aggregate (record field, variant
-    /// case field, option slot, list element).
+    /// case field, option slot, list element). Every 8-byte VALUE type is
+    /// an 8-byte slot — f64 included (the two-way version silently gave
+    /// Float slots 4 bytes and the parity net caught zeroed float lists).
     fn slot_size(self) -> u32 {
         match self.val_type() {
-            ValType::I64 => 8,
+            ValType::I64 | ValType::F64 => 8,
             _ => 4,
         }
     }
@@ -372,6 +375,9 @@ struct FnInfo {
 
 struct FnTable {
     by_name: HashMap<String, usize>,
+    /// Module functions ALSO indexed by their simple name, for the
+    /// self-host registry's surface→implementation resolution.
+    impl_index: HashMap<String, usize>,
     infos: Vec<FnInfo>,
 }
 
@@ -379,6 +385,20 @@ struct FnTable {
 pub(crate) struct Ctx<'a> {
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
+}
+
+/// The registry's implementation-symbol set (unique by design — they are
+/// the self-host linkage names).
+fn registry_impl_names() -> &'static std::collections::HashSet<&'static str> {
+    use std::sync::OnceLock;
+    static NAMES: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        almide_types::self_host_registry::self_host_runtime()
+            .iter()
+            .flat_map(|(_, maps)| maps.iter())
+            .map(|(impl_fn, _)| *impl_fn)
+            .collect()
+    })
 }
 
 fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<SliceTy>, Option<SliceTy>), String> {
@@ -430,7 +450,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
             continue;
         }
         for f in &m.functions {
-            if !f.is_test {
+            // A Hole body is a bodyless SURFACE decl (`= _`) — a bridge
+            // boundary, not an implementation. Registering it would
+            // shadow the self-host registry's real implementation with
+            // an unlowersble stub (found by the burn-up: expr:Hole ×70).
+            let is_surface = matches!(f.body.kind, IrExprKind::Hole);
+            if !f.is_test && !is_surface {
                 program_fns
                     .push((f, Some(format!("{}.{}", m.name.as_str(), f.name.as_str()))));
             }
@@ -439,13 +464,21 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let types = TypeTable::build(ir);
 
     // Signature table first: call sites need indices and types up front.
-    let mut table = FnTable { by_name: HashMap::new(), infos: Vec::new() };
+    let mut table =
+        FnTable { by_name: HashMap::new(), impl_index: HashMap::new(), infos: Vec::new() };
     for (i, (f, qual)) in program_fns.iter().enumerate() {
         let (params, ret, refuse) = match fn_signature(f, &types) {
             Ok((p, r)) => (p, r, None),
             Err(reason) => (Vec::new(), None, Some(reason)),
         };
         let key = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
+        // impl_index carries ONLY registry implementation symbols — a
+        // global simple-name index over ALL module fns collides across
+        // modules (two self-host modules both defining __len_loop made
+        // cross_module fixtures call the WRONG module's helper).
+        if qual.is_some() && registry_impl_names().contains(f.name.as_str()) {
+            table.impl_index.insert(f.name.as_str().to_string(), i);
+        }
         table.by_name.insert(key, i);
         table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse });
     }
@@ -458,8 +491,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 
     // Lower every callable function; a body that doesn't lower yet is
     // recorded (not fatal) — fatal only if `main` can reach it.
-    let mut lowered: Vec<Result<(Function, HashSet<String>), String>> = Vec::new();
-    for (i, (f, _)) in program_fns.iter().enumerate() {
+    let mut lowered: Vec<Result<(Function, HashSet<usize>), String>> = Vec::new();
+    for (i, (f, qual)) in program_fns.iter().enumerate() {
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
             continue;
@@ -467,7 +500,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         let params: Vec<(VarId, SliceTy)> =
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
         let ctx = Ctx { table: &table, types: &types };
-        match lower_fn(&params, table.infos[i].ret, &f.body, &[], &ctx, &mut pool) {
+        let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
+        match lower_fn(&params, table.infos[i].ret, &f.body, &[], cur_module, &ctx, &mut pool) {
             Ok(ok) => lowered.push(Ok(ok)),
             Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
         }
@@ -476,20 +510,20 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
     let ctx = Ctx { table: &table, types: &types };
-    let (main_fn, main_calls) = lower_fn(&[], None, &main.body, &ir.top_lets, &ctx, &mut pool)?;
+    let (main_fn, main_calls) =
+        lower_fn(&[], None, &main.body, &ir.top_lets, None, &ctx, &mut pool)?;
 
     // Reachability: refuse the program iff a call chain from `main` lands
     // on a function whose body did not lower (its stub would trap).
-    let mut queue: Vec<String> = main_calls.iter().cloned().collect();
-    let mut visited: HashSet<String> = HashSet::new();
-    while let Some(name) = queue.pop() {
-        if !visited.insert(name.clone()) {
+    let mut queue: Vec<usize> = main_calls.iter().copied().collect();
+    let mut visited: HashSet<usize> = HashSet::new();
+    while let Some(i) = queue.pop() {
+        if !visited.insert(i) {
             continue;
         }
-        let Some(&i) = table.by_name.get(&name) else { continue };
         match &lowered[i] {
             Err(reason) => return unsup(reason),
-            Ok((_, calls)) => queue.extend(calls.iter().cloned()),
+            Ok((_, calls)) => queue.extend(calls.iter().copied()),
         }
     }
 
@@ -647,9 +681,10 @@ fn lower_fn(
     ret: Option<SliceTy>,
     body: &IrExpr,
     top_lets: &[IrTopLet],
+    cur_module: Option<&str>,
     ctx: &Ctx,
     pool: &mut Pool,
-) -> Result<(Function, HashSet<String>), EmitError> {
+) -> Result<(Function, HashSet<usize>), EmitError> {
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
     let mut seen: HashSet<VarId> = HashSet::new();
     for (i, (var, ty)) in params.iter().enumerate() {
@@ -692,7 +727,7 @@ fn lower_fn(
     local_decls.push((HOLD_F64_POOL, ValType::F64));
 
     let mut f = Function::new(local_decls);
-    let mut calls: HashSet<String> = HashSet::new();
+    let mut calls: HashSet<usize> = HashSet::new();
     {
         let mut em = Emitter {
             pool,
@@ -713,6 +748,7 @@ fn lower_fn(
             hold_f64_depth: 0,
             scr_f64_local,
             in_tail: false,
+            cur_module,
             f: &mut f,
         };
         for tl in top_lets {

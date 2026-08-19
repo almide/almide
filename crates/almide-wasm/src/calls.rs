@@ -75,7 +75,18 @@ impl Emitter<'_> {
                     self.release_i32();
                     return Ok(Some(SliceTy::Named(ti)));
                 }
-                let Some(&i) = self.table.by_name.get(name) else {
+                // Entry fns resolve by name; a miss falls back to the
+                // module-fn simple-name index (intra-module calls arrive
+                // as Named after lower_module).
+                // Intra-module Named calls resolve within the CURRENT
+                // module first (simple names collide across modules),
+                // then the entry program's globals.
+                let resolved = self
+                    .cur_module
+                    .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
+                    .or_else(|| self.table.by_name.get(name))
+                    .copied();
+                let Some(i) = resolved else {
                     return unsup(&format!("call:{name}"));
                 };
                 let info = &self.table.infos[i];
@@ -89,7 +100,7 @@ impl Emitter<'_> {
                 for (a, want) in args.iter().zip(params) {
                     self.lower(a, Some(want))?;
                 }
-                self.calls.insert(name.to_string());
+                self.calls.insert(i);
                 // Tail position with a matching return type → return_call:
                 // constant stack for arbitrarily deep (incl. mutual)
                 // recursion, the C-292 contract.
@@ -126,11 +137,18 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. } if module.as_str() == "set" => {
                 self.lower_set_call(func.as_str(), args, ret_hint)
             }
+            CallTarget::Module { module, func, .. } if module.as_str() == "prim" => {
+                self.lower_prim_call(func.as_str(), args)
+            }
             CallTarget::Module { module, func, .. } => {
                 // Linked module functions live in the table under their
-                // qualified name; anything else is an honest wall.
+                // qualified name. A stdlib SURFACE call additionally
+                // resolves through the self-host registry to its loaded
+                // implementation (same registry the interp's bridge uses —
+                // one IR, two sound resolutions). Anything else is an
+                // honest wall.
                 let key = format!("{}.{}", module.as_str(), func.as_str());
-                let Some(&i) = self.table.by_name.get(&key) else {
+                let Some(i) = self.resolve_qualified(&key) else {
                     return unsup(&format!("call:{key}"));
                 };
                 let info = &self.table.infos[i];
@@ -144,7 +162,7 @@ impl Emitter<'_> {
                 for (a, want) in args.iter().zip(params) {
                     self.lower(a, Some(want))?;
                 }
-                self.calls.insert(key);
+                self.calls.insert(i);
                 if tail && ret.is_some() && ret == self.fn_ret {
                     self.f.instructions().return_call(index);
                 } else {
@@ -206,6 +224,12 @@ impl Emitter<'_> {
                 let elem = self.types.el(h);
                 self.f.instructions().local_get(var_idx);
                 self.lower(v, Some(elem))?;
+                // The 8-byte helper's value param is i64; an f64 element
+                // crosses the call boundary as its BIT PATTERN (memory is
+                // bytes — the consumer reloads the slot as f64).
+                if elem.val_type() == wasm_encoder::ValType::F64 {
+                    self.f.instructions().i64_reinterpret_f64();
+                }
                 let helper = match elem.slot_size() {
                     8 => F_LIST_PUSH_8,
                     _ => F_LIST_PUSH_4,
@@ -504,6 +528,66 @@ impl Emitter<'_> {
         Ok(Some(elem))
     }
 
+    /// Resolve a qualified stdlib call ("float.to_string") to a table
+    /// index: linked module fns first, then the self-host registry's
+    /// implementation index.
+    pub(crate) fn resolve_qualified(&self, key: &str) -> Option<usize> {
+        self.table.by_name.get(key).copied().or_else(|| {
+            let impl_fn = almide_types::self_host_registry::self_host_runtime()
+                .iter()
+                .flat_map(|(_, maps)| maps.iter())
+                .find(|(_, surface)| *surface == key)
+                .map(|(impl_fn, _)| *impl_fn)?;
+            // WHITELIST: linked impls join the resolvable set ONE AT A
+            // TIME, each landing with its own parity evidence — the
+            // signature heuristic missed incumbent-layout coupling twice
+            // (8-byte list slots, header-writing string builders).
+            const VERIFIED: &[&str] = &[
+                "float_to_string",
+                "float_to_string_compound",
+                "float_to_fixed",
+                "int_to_string",
+                // Dragon4's own dependency closure (prim-only bodies).
+                "math_log",
+                "math_log2",
+                "math_log10",
+            ];
+            if !VERIFIED.contains(&impl_fn) {
+                return None;
+            }
+            let i = self.table.impl_index.get(impl_fn).copied()?;
+            // LAYOUT BOUNDARY: self-host impls encode the INCUMBENT's
+            // block layout. Scalars, strings and List[scalar] match our
+            // ratified layout byte-for-byte; sums/maps/sets/tuples/named
+            // do NOT (the incumbent keeps the Result tag in the len slot
+            // — found by the burn-up: result.unwrap_or(ok(5)) returned
+            // the default). An impl whose signature carries a
+            // layout-coupled type stays UNRESOLVED (honest wall) until
+            // the layouts are deliberately reconciled.
+            let info = &self.table.infos[i];
+            let coupled = |t: &SliceTy| {
+                match t {
+                    SliceTy::Option(_)
+                    | SliceTy::Result(..)
+                    | SliceTy::Map(..)
+                    | SliceTy::Set(_)
+                    | SliceTy::Tuple(_)
+                    | SliceTy::Named(_) => true,
+                    // The incumbent packs EVERY list element into an
+                    // 8-byte slot; ours are 4 for the i32 word class —
+                    // List[Int]/List[Float] agree, List[String]/List[Bool]
+                    // do not (string.join through a linked impl trapped).
+                    SliceTy::List(h) => self.types.el(*h).slot_size() == 4,
+                    _ => false,
+                }
+            };
+            if info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled) {
+                return None;
+            }
+            Some(i)
+        })
+    }
+
     /// `println`/`eprintln`: interpolations build in the line buffer;
     /// everything else must lower to a String block and goes through the
     /// stream's block-print helper.
@@ -590,6 +674,30 @@ impl Emitter<'_> {
                             self.f
                                 .instructions()
                                 .call(F_APPEND_BOOL)
+                                .local_set(self.cursor_local);
+                        }
+                        // Float parts format through the SAME linked
+                        // Dragon4 the oracle uses (float.to_string), then
+                        // append as a string block.
+                        FLOAT => {
+                            let Some(i) = self.resolve_qualified("float.to_string_compound") else {
+                                return unsup("interp-part:Float-unlinked");
+                            };
+                            let info = &self.table.infos[i];
+                            if info.refuse.is_some() || info.ret != Some(STR) {
+                                return unsup("interp-part:Float-impl");
+                            }
+                            let idx = info.wasm_index;
+                            self.calls.insert(i);
+                            self.f
+                                .instructions()
+                                .call(idx)
+                                .local_tee(self.tmp_i32_local)
+                                .i32_const(almide_layout::PAYLOAD as i32)
+                                .i32_add()
+                                .local_get(self.tmp_i32_local)
+                                .i32_load(len_memarg())
+                                .call(F_APPEND_COPY)
                                 .local_set(self.cursor_local);
                         }
                         other => return unsup(&format!("interp-part:{other:?}")),

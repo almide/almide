@@ -9,6 +9,7 @@ description = "SPIKE S1: salsa query spine over the ported parser (ARCHITECTURE.
 [dependencies]
 almide = { path = "../almide" }
 almide-driver = { path = "../almide-driver" }
+almide-types = { path = "../almide-types" }
 almide-syntax = { path = "../almide-syntax" }
 salsa = "0.23"
 serde_json = "1"
