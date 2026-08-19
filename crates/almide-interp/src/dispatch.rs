@@ -1248,6 +1248,26 @@ impl<'a> Interpreter<'a> {
                 self.heap.keep(rc);
                 Ok(a as i64)
             }
+            // The paired scalar-map layout under its declared key/value types
+            // — same strictness as the sequences. SCALAR declarations only:
+            // a heap-keyed map spells the skv/interleaved layouts, not this
+            // one, and those stay out of this slice.
+            (Value::Map(rc), Some(Ty::Applied(C::Map, ts)))
+                if ts.len() == 2
+                    && !heap_slot_is_child(&ts[0])
+                    && !heap_slot_is_child(&ts[1]) =>
+            {
+                let rc = Rc::clone(rc);
+                let entries = rc.len() as u32;
+                let mut slots = Vec::with_capacity(2 * rc.len());
+                for (k, v) in rc.iter() {
+                    slots.push(self.heap_slot_hinted(k, &ts[0])?);
+                    slots.push(self.heap_slot_hinted(v, &ts[1])?);
+                }
+                let a = self.heap.bind_slots(rc_key(&rc), &slots, entries);
+                self.heap.keep(rc);
+                Ok(a as i64)
+            }
             // NOT here: tuple materialization. Physically a tuple is one more
             // slot block (value_object reads `(String, Value)` pairs as
             // `load64(tup+12)` / `load64(tup+20)`), and an arm for it was
@@ -1263,14 +1283,40 @@ impl<'a> Interpreter<'a> {
 
     /// One container element as its slot i64, driven by the DECLARED element
     /// type: scalars inline (NaN still abstains — #1403), heap elements as
-    /// recursively-materialized children under their own hint. An Int under
-    /// ANY declared type is the address-identity (an opaque `Value` element
-    /// is exactly that).
+    /// recursively-materialized children under their own hint.
+    ///
+    /// Scalars are STRICT against the declaration, and that strictness is the
+    /// wrong-impl detector: a Float VALUE under a declared-Int element means
+    /// the untyped pool resolved the scalar core impl where the backends'
+    /// type-directed rewrite picks the `_f64` twin — the body would run, but
+    /// its declared return type then mislabels the result and the f64 BITS
+    /// leak out as integers (nightly fuzz 2026-08-19, seed 515402596033/74:
+    /// `list.dedup([2.718…])` printed 4613303445314885481). A mismatch
+    /// abstains; matching declarations pass. An Int under an OPAQUE declared
+    /// type (`Value`, a type variable) is the address-identity and stays.
     fn heap_slot_hinted(&mut self, e: &Value, ty: &Ty) -> Result<i64, String> {
+        let int_decl = matches!(
+            ty,
+            Ty::Int
+                | Ty::Int8
+                | Ty::Int16
+                | Ty::Int32
+                | Ty::Int64
+                | Ty::UInt8
+                | Ty::UInt16
+                | Ty::UInt32
+                | Ty::UInt64
+        );
+        let opaque_decl = matches!(ty, Ty::TypeVar(_) | Ty::Unknown)
+            || matches!(ty, Ty::Named(n, args) if args.is_empty() && n.as_str() == "Value");
         match e {
-            Value::Int(_) | Value::Float(_) | Value::Bool(_) => heap_scalar_slot(e, "container"),
+            Value::Int(i) if int_decl || opaque_decl => Ok(*i),
+            Value::Float(_) if matches!(ty, Ty::Float | Ty::Float64) || opaque_decl => {
+                heap_scalar_slot(e, "container")
+            }
+            Value::Bool(b) if matches!(ty, Ty::Bool) || opaque_decl => Ok(*b as i64),
             Value::Str(_) | Value::List(_) | Value::Set(_) | Value::Map(_)
-                if heap_slot_is_child(ty) && !matches!(ty, Ty::TypeVar(_) | Ty::Unknown) =>
+                if heap_slot_is_child(ty) && !opaque_decl =>
             {
                 self.heap_materialize_hinted(e, Some(ty))
             }
@@ -1327,13 +1373,26 @@ impl<'a> Interpreter<'a> {
                 Ok(a as i64)
             }
             // The `alloc_map` paired layout `[k0,v0,…]`, `len` = entry count.
+            // Un-hinted, so Int/Bool only — see `heap_scalar_slots` for why a
+            // Float's bits must not enter without a declared type to leave by.
             Value::Map(rc) => {
                 let rc = Rc::clone(rc);
                 let entries = rc.len() as u32;
                 let mut slots = Vec::with_capacity(2 * rc.len());
                 for (k, v) in rc.iter() {
-                    slots.push(heap_scalar_slot(k, "Map")?);
-                    slots.push(heap_scalar_slot(v, "Map")?);
+                    for x in [k, v] {
+                        slots.push(match x {
+                            Value::Int(i) => *i,
+                            Value::Bool(b) => *b as i64,
+                            other => {
+                                return Err(format!(
+                                    "prim.handle of a Map holding a {} with no \
+                                     declared type (its slot could not be typed back)",
+                                    other.type_name()
+                                ))
+                            }
+                        });
+                    }
                 }
                 let a = self.heap.bind_slots(rc_key(&rc), &slots, entries);
                 self.heap.keep(rc);
@@ -1647,10 +1706,24 @@ fn heap_addr(v: Option<&Value>) -> Option<u32> {
     }
 }
 
-/// Container elements as raw slot i64s: scalars only (f64 as BITS) — see
-/// `heap_materialize` for why a heap element must abstain here.
+/// Container elements as raw slot i64s with NO declared element type in
+/// sight: Int and Bool only. A Float would be stored as BITS and the resolved
+/// body's (possibly mislabeling) declared return type is the only thing that
+/// could type it back — exactly the leak the hinted path's strictness closes,
+/// so the un-hinted path must not open it from the other side.
 fn heap_scalar_slots(items: &[Value], shape: &str) -> Result<Vec<i64>, String> {
-    items.iter().map(|e| heap_scalar_slot(e, shape)).collect()
+    items
+        .iter()
+        .map(|e| match e {
+            Value::Int(i) => Ok(*i),
+            Value::Bool(b) => Ok(*b as i64),
+            other => Err(format!(
+                "prim.handle of a {shape} holding a {} element with no \
+                 declared element type (its slot could not be typed back)",
+                other.type_name()
+            )),
+        })
+        .collect()
 }
 
 fn heap_scalar_slot(e: &Value, shape: &str) -> Result<i64, String> {

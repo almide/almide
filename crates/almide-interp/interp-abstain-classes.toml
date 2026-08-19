@@ -84,4 +84,17 @@ patterns = [
   #                  (`self.stdout`), so this is glue at the argv/env/fs tier.
   "capability: prim.die",
   "capability: prim.fd_write",
+  # SURFACED BY #1226 slice 2: these fixtures used to abstain at the heap
+  # boundary and now run deep enough to reach the capability underneath.
+  #   prim.random_get   — per-run OS entropy, the argv/env/clock tier: the
+  #                       backends read real randomness, so the interp needs
+  #                       a seeded/injected source (state glue, not a new
+  #                       evaluation model) before it can vote.
+  #   prim.read_n_bytes — a raw fd read, the same tier as fd_write above.
+  "capability: prim.random_get",
+  "capability: prim.read_n_bytes",
+  # A store through a value the interp knows is NOT an address (the callee
+  # was reached with an argument shape the block heap never handed out) —
+  # dispatch-tier strictness, one level in from the heap boundary.
+  "capability: prim.store64 with a non-address",
 ]
