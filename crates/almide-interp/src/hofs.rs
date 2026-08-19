@@ -128,8 +128,35 @@ impl<'a> Interpreter<'a> {
             "map" => self.hof_map_map(evaled),
             "filter" => self.hof_map_filter(evaled),
             "find" => self.hof_map_find(evaled),
+            "update" => self.hof_map_update(evaled),
             _ => Flow::Unsupported(format!("HOF map.{}", f)),
         }
+    }
+
+    /// `map.update(m, key, (v) -> V)` — the value at `key` rewritten in
+    /// place (position kept), a missing key returns the map unchanged —
+    /// map_core's `__map_find_soft` + `__map_update_at` behavior.
+    fn hof_map_update(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.update receiver not a Map".into()),
+        };
+        let Some(key) = args.get(1).cloned() else {
+            return Flow::Abort("internal: map.update missing key".into());
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = (*entries).clone();
+        for pair in out.iter_mut() {
+            if pair.0 == key {
+                let nv = val!(self.apply_closure(&clo, vec![pair.1.clone()]));
+                pair.1 = nv;
+                break;
+            }
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
     /// `map.map(m, (v) -> B)` — VALUES rewritten, keys and entry order kept

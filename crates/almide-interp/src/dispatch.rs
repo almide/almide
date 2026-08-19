@@ -1525,6 +1525,38 @@ impl<'a> Interpreter<'a> {
                 };
                 Some(self.child_block_value(h, func))
             }
+            // The WASI entropy exit, served with REAL per-process randomness:
+            // the backends read OS entropy, and every fixture that passes the
+            // 2-way byte-compare can only be asserting SHAPE (uniqueness
+            // suffixes, draws-differ properties) — so any honest entropy
+            // source is a faithful third vote, and a deterministic stand-in
+            // would be the lie. Bytes land in the arena like any store.
+            "random_get" => {
+                let (Some(a), Some(Value::Int(len))) = (heap_addr(args.first()), args.get(1))
+                else {
+                    return Some(Flow::Unsupported("prim.random_get with a non-address".into()));
+                };
+                if *len < 0 {
+                    return Some(Flow::Unsupported("prim.random_get with a negative len".into()));
+                }
+                use std::hash::{BuildHasher, Hasher};
+                let mut word = 0u64;
+                for i in 0..*len as u32 {
+                    if i % 8 == 0 {
+                        let mut h =
+                            std::collections::hash_map::RandomState::new().build_hasher();
+                        h.write_u32(i);
+                        word = h.finish();
+                    }
+                    if self.heap.store(a + i, 1, (word & 0xff) as i64).is_none() {
+                        return Some(Flow::Unsupported(
+                            "prim.random_get outside this heap's arena".into(),
+                        ));
+                    }
+                    word >>= 8;
+                }
+                Some(Flow::val(Value::Int(0)))
+            }
             // Raw refcount adjust on a block base. The arena never FREES —
             // `keepalive` is its whole liveness model and an address must stay
             // valid for the run — so `rc_dec` to zero leaks by design: a leak

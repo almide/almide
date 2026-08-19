@@ -81,12 +81,60 @@ impl<'a> Interpreter<'a> {
             // fixture, #1416).
             "with_capacity" => Some(Flow::val(Value::list(Vec::new()))),
             "concat" => Some(self.list_concat(args)),
+            // Structural, element-type-blind — served natively so a heap-element
+            // list never reaches the pool's Int-declared core impl (the
+            // wrong-impl guard walled chunk/windows on List[String], #1226).
+            // Semantics mirror stdlib/list_chunk.almd EXACTLY: chunk(0) /
+            // windows(0) abort in the T6 form; a negative chunk size is one
+            // chunk holding everything; windows past the length are none.
+            "chunk" => Some(self.list_chunk(args)),
+            "windows" | "window" => Some(self.list_windows(args)),
             // The aggregate/ordering ops are a second-tier sub-router — purely
             // to keep this router's own arm count (and cyclomatic weight)
             // under the per-function threshold; `func` still uniquely selects
             // exactly one op either way.
             _ => self.eval_container_op_list_agg(func, args),
         }
+    }
+
+    /// `list.chunk(xs, n)` — stdlib/list_chunk.almd's exact domain rules:
+    /// n == 0 aborts with v0's line, n < 0 is `chunks(huge usize)` = one
+    /// chunk holding everything, and the count is the overflow-proof
+    /// `total/n + (total % n != 0)`.
+    fn list_chunk(&mut self, args: &[Value]) -> Flow {
+        let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
+            return Flow::Abort("internal: list.chunk bad args".into());
+        };
+        if *n == 0 {
+            return Flow::Abort("chunk size must be positive".into());
+        }
+        let total = xs.len() as i64;
+        let n = if *n < 0 { total.max(1) } else { *n };
+        let out: Vec<Value> = xs
+            .chunks(usize::try_from(n).unwrap_or(usize::MAX).max(1))
+            .map(|c| Value::list(c.to_vec()))
+            .collect();
+        Flow::val(Value::list(out))
+    }
+
+    /// `list.windows(xs, n)` — n == 0 aborts, n < 0 or n > len is the empty
+    /// list, else the len-n+1 overlapping sub-slices.
+    fn list_windows(&mut self, args: &[Value]) -> Flow {
+        let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
+            return Flow::Abort("internal: list.windows bad args".into());
+        };
+        if *n == 0 {
+            return Flow::Abort("window size must be positive".into());
+        }
+        let total = xs.len() as i64;
+        if *n < 0 || *n > total {
+            return Flow::val(Value::list(Vec::new()));
+        }
+        let out: Vec<Value> = xs
+            .windows(*n as usize)
+            .map(|w| Value::list(w.to_vec()))
+            .collect();
+        Flow::val(Value::list(out))
     }
 
     fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
@@ -367,7 +415,51 @@ impl<'a> Interpreter<'a> {
             "set" => Some(self.map_set(args)),
             "keys" => Some(self.map_keys(args)),
             "values" => Some(self.map_values(args)),
+            // Served natively so a String-keyed map never reaches the pool's
+            // scalar core impl (the wrong-impl guard walled these on
+            // Map[String, _], #1226). All three are element-type-blind over
+            // the insertion-ordered entry list both backends share.
+            "get_or" => Some(self.map_get_or(args)),
+            "from_list" => Some(self.map_from_list(args)),
+            "entries" | "to_list" => Some(self.map_entries(args)),
             _ => None,
+        }
+    }
+
+    fn map_get_or(&mut self, args: &[Value]) -> Flow {
+        match (args.first(), args.get(1), args.get(2)) {
+            (Some(Value::Map(e)), Some(k), Some(d)) => Flow::val(
+                e.iter().find(|(ek, _)| ek == k).map(|(_, v)| v.clone()).unwrap_or_else(|| d.clone()),
+            ),
+            _ => Flow::Abort("internal: map.get_or bad args".into()),
+        }
+    }
+
+    /// Insertion order with upsert-in-place — v0's AlmideMap `from_list`
+    /// (FIRST position, LAST value), the same rule `map_insert` implements.
+    fn map_from_list(&mut self, args: &[Value]) -> Flow {
+        let Some(Value::List(pairs)) = args.first() else {
+            return Flow::Abort("internal: map.from_list bad args".into());
+        };
+        let mut out: Vec<(Value, Value)> = Vec::with_capacity(pairs.len());
+        for p in pairs.iter() {
+            let Value::Tuple(kv) = p else {
+                return Flow::Abort("internal: map.from_list on a non-tuple element".into());
+            };
+            let (Some(k), Some(v)) = (kv.first(), kv.get(1)) else {
+                return Flow::Abort("internal: map.from_list on a non-pair tuple".into());
+            };
+            crate::eval::map_insert(&mut out, k.clone(), v.clone());
+        }
+        Flow::val(Value::Map(Rc::new(out)))
+    }
+
+    fn map_entries(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Map(e)) => Flow::val(Value::list(
+                e.iter().map(|(k, v)| Value::tuple(vec![k.clone(), v.clone()])).collect(),
+            )),
+            _ => Flow::Abort("internal: map.entries on non-map".into()),
         }
     }
 
