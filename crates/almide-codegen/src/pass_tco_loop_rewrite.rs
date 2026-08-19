@@ -362,6 +362,31 @@ fn rewrite_tail_expr(expr: IrExpr, f: &TailFrame<'_>) -> IrExpr {
             rewrite_tail_expr(*inner, f)
         }
 
+        // Effect fn: an `err(..)` tail is an EARLY EXIT, not a loop result.
+        // The accumulator holds the UNWRAPPED Ok-side payload (see `ret_ty`
+        // at the top of `rewrite_to_loop`), so assigning the full Result was
+        // invalid Rust — `__tco_result: i64 = Err(..)`, rustc E0308, on a
+        // body `almide check` had passed (#1536). Route it through the same
+        // `?` the effect convention already uses: `Err(e)?` early-returns
+        // the Err before the assign it is wrapped in can run, and its formal
+        // type is the payload, so the base-case shape stays valid.
+        IrExprKind::ResultErr { .. } if is_effect => {
+            let payload_ty = match &expr.ty {
+                Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => {
+                    args[0].clone()
+                }
+                other => other.clone(),
+            };
+            let span = expr.span;
+            let wrapped = IrExpr {
+                kind: IrExprKind::Try { expr: Box::new(expr) },
+                ty: payload_ty,
+                span,
+                def_id: None,
+            };
+            emit_base_case(wrapped, result_var, dec_params, owned_params)
+        }
+
         // If: recurse into both branches. The condition is a NON-terminal
         // region: every consuming owned-param read in it clones (this pass
         // owns those decisions now — CloneInsertion skips owned params).

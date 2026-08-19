@@ -32,6 +32,7 @@ codec_whitespace_tolerance  out-of-interp-scope capability: prim.handle of a Lis
 compound_eq  out-of-interp-scope capability: prim.handle of a List holding a Tuple element (the untyped pool tier runs the scalar core impls, so only scalar slots are faithful — #1226 slice 2)
 count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes
 edge_map_order  out-of-interp-scope capability: return sync: a block under an unspellable container return type (List[Tuple])
+effect_tco_err_rewrap  interp fuel/recursion budget exhausted
 fan_effect_mapper_capability  out-of-interp-scope capability: prim.random_get
 fs_composition_family  out-of-interp-scope capability: prim.random_get
 fs_fallible_stream_callback  out-of-interp-scope capability: prim.random_get
