@@ -15,7 +15,10 @@ pub struct RunResult {
     pub stderr: String,
 }
 
-pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {
+/// Front half of `run_file`: parse → check → lower → link, returning the
+/// linked IR (unit 6's emission gate shares this exact pipeline so the
+/// interpreter and the wasm backend judge the SAME IR).
+pub fn lower_to_ir(path: &str, source_text: &str) -> Result<almide::ir::IrProgram, String> {
     let tokens = almide::lexer::Lexer::tokenize(source_text);
     let mut parser = almide::parser::Parser::new(tokens).with_file(path);
     let mut program = parser.parse().map_err(|e| format!("parse: {e}"))?;
@@ -78,6 +81,11 @@ pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {
         ir.modules.push(mod_ir_module);
     }
     almide_driver::link_ir(&mut ir);
+    Ok(ir)
+}
+
+pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {
+    let ir = lower_to_ir(path, source_text)?;
     let out = almide::interp::Interpreter::new(&ir).run_main();
     // Surface the distinguished-outcome reason (Unsupported carries it in the
     // status, not in stderr) so harnesses can report skip classes precisely.

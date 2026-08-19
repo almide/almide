@@ -308,3 +308,42 @@ structural policy, enforced in CI shape rather than allow lists:
   and tested, not clippy-gated. All allow tables removed. When a ported
   module is rebuilt as new structure (unit 4 stage 2+), it moves into the
   strict tier with that rebuild.
+
+---
+
+## Unit 6 — `almide-wasm` stage 0+1: the canonical backend's first light (2026-08-19)
+
+The first fully NEW-CONSTRUCTION unit (§3 bans porting the incumbent's
+WAT-text/TOML-template/dual-renderer emission).
+
+### Stage 0 — layout DSL (§6.6 obligation, precondition)
+
+- New crate `almide-layout`: THE single source for block layout
+  (`[rc@0][len@4][cap@8][payload@12]`, NULL_ADDR) with a contiguity test, a
+  generated doc table, and a **pinned digest** — any layout change must
+  re-pin deliberately (an intentional-change event), ending comments-as-spec.
+- The interpreter's arena now derives its constants from it (structure-new
+  edit to the ported crate; **run-parity stayed 468/0 — byte-neutrality
+  proven by the net**).
+
+### Stage 1 — emission skeleton + first light + burn-up ratchet
+
+- `almide-wasm`: typed IR → core wasm via wasm-encoder, structural only.
+  String literals are laid out as REAL layout blocks from byte one. Every
+  module passes the wasmparser wall before instantiation (tests/harness).
+- **First light**: source → IR → emit → validate → wasmtime → output
+  byte-identical to the interpreter (the definition), Unicode included.
+- **Burn-up gate** (`tests/backend_parity.rs`): sweeps the full 590-fixture
+  run manifest. Two lines held at once: any fixture the backend CLAIMS is
+  executed and must match the oracle hash+exit (divergence = failure, never
+  a skip); everything else lands in a precise reason histogram. Supported
+  count is a **grow-only floor** (pinned 1). First sweep verdict:
+  1 supported / 590; the treasure map for the next slices:
+  `stmt:Bind ×368 → println-arg:Call ×123 → StringInterp ×24 → Match ×22`.
+- The gate caught its first over-claim immediately: eager top-level lets
+  were silently skipped (`top_let_div_eager` diverged) → refused explicitly
+  until that slice lands.
+- Known wrinkle recorded: the 9 unit-6 deviation-register rows cite
+  incumbent implementation paths (`crates/almide-mir/...`) that greenfield
+  will never create; retiring them at unit-6 completion requires an
+  intentional-change edit to the contract STATEMENTS, not a port.

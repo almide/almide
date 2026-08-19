@@ -1,0 +1,24 @@
+[package]
+name = "almide-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Unit 6: typed IR -> structural wasm emission (wasm-encoder; no WAT text, no templates)"
+
+[dependencies]
+almide-ir = { path = "../almide-ir" }
+almide-base = { path = "../almide-base" }
+almide-layout = { path = "../almide-layout" }
+wasm-encoder = "0.256"
+
+[dev-dependencies]
+anyhow = "1"
+almide-spine = { path = "../almide-spine" }
+almide = { path = "../almide" }
+wasmparser = "0.256"
+wasmtime = "47"
+sha2 = "0.10"
+
+[lints]
+workspace = true
