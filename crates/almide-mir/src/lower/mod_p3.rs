@@ -413,7 +413,6 @@ impl LowerCtx {
                 self.record_elided_calls(cond);
                 self.record_elided_calls(else_);
                 let _ = (cond, else_);
-                crate::trace::trace("ALMIDE_DBG_GUARD", || "[guard] wall arm fired".into());
                 Err(LowerError::Unsupported(
                     "guard-else early return cannot be faithfully lowered (v1 has no early-return                      control flow; deferring it silently miscompiles the !cond path) not in this brick"
                         .into(),
