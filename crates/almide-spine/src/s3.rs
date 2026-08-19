@@ -219,9 +219,10 @@ pub fn check_file_json_v2(db: &dyn salsa::Database, file: SourceFile) -> CheckOu
 /// Cache legitimacy: a pure function of embedded constants + the module
 /// list; the salsa dependency edges still flow through the file's text via
 /// resolve. Byte-equivalence adjudicated by the oracle parity gate.
-static TEMPLATE_CACHE: std::sync::Mutex<
-    Option<std::collections::HashMap<String, std::sync::Arc<(almide::check::Checker, Vec<Diagnostic>)>>>,
-> = std::sync::Mutex::new(None);
+/// One cached env template: the module-half checker plus its diagnostics.
+type EnvTemplate = std::sync::Arc<(almide::check::Checker, Vec<Diagnostic>)>;
+type TemplateMap = std::collections::HashMap<String, EnvTemplate>;
+static TEMPLATE_CACHE: std::sync::Mutex<Option<TemplateMap>> = std::sync::Mutex::new(None);
 
 #[salsa::tracked]
 pub fn check_file_json_v3(db: &dyn salsa::Database, file: SourceFile) -> CheckOutput {
