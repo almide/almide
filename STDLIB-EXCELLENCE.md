@@ -35,9 +35,9 @@ Pending ratification (genuine forks, ○× one at a time):
 
 | id | decision | recommendation | status |
 |---|---|---|---|
-| SD1 | **Scope stance = Grain–Roc hybrid**: fund pure-algorithm DEPTH in the stdlib (codecs, url, regex, math — correctness-hard pure functions), keep ALL effectful surface capability-gated `effect fn` modules, add no ambient state (no async I/O before the fan-world arc), vendor APIs permanently banned | adopt | PENDING |
-| SD2 | **Two tiers, machine-enforced**: `core` tier (pure+total modules: string/list/int/float/bytes/math/option/result/…) may contain no `effect fn` and may not import an effect-tier module (fs/net/http/env/io/process/random); enforced by a gate script, Rust-tidy style | adopt | PENDING |
-| SD3 | **Fallibility alphabet frozen**: bare name = total; `_checked` → Option; `_saturating` / `_wrapping` where lossy — whole matrices or nothing; NO panicking variant on the stdlib surface (runtime abort is reserved for logic failure per Swift's four-kind taxonomy: domain absence → Option, recoverable → Result in effect fns, logic failure → abort with E-coded diagnostic, universal → out of band) | adopt | PENDING |
+| SD1 | **Scope stance = Grain–Roc hybrid**: fund pure-algorithm DEPTH in the stdlib (codecs, url, regex, math — correctness-hard pure functions), keep ALL effectful surface capability-gated `effect fn` modules, add no ambient state (no async I/O before the fan-world arc), vendor APIs permanently banned | adopt | **RATIFIED 2026-08-19** |
+| SD2 | **Two tiers, machine-enforced**: `core` tier (pure+total modules: string/list/int/float/bytes/math/option/result/…) may contain no `effect fn` and may not import an effect-tier module (fs/net/http/env/io/process/random); enforced by a gate script, Rust-tidy style | adopt | **RATIFIED 2026-08-19** |
+| SD3 | **Fallibility alphabet frozen**: bare name = total; `_checked` → Option; `_saturating` / `_wrapping` where lossy — whole matrices or nothing; NO panicking variant on the stdlib surface (runtime abort is reserved for logic failure per Swift's four-kind taxonomy: domain absence → Option, recoverable → Result in effect fns, logic failure → abort with E-coded diagnostic, universal → out of band) | adopt | **RATIFIED 2026-08-19** |
 
 ## The intentional-change protocol
 
