@@ -167,8 +167,177 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_LIST_JOIN);
                 Ok(Some(STR))
             }
+            ("map", [xs, cb]) => self.lower_list_map(xs, cb),
+            ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
+            ("fold", [xs, init, cb]) => self.lower_list_fold(xs, init, cb),
             _ => unsup(&format!("call:list.{func}")),
         }
+    }
+
+    /// A literal-lambda HOF callback: (param locals, body). Fn-typed
+    /// VALUES are a later mechanism — the direct-lambda form is the
+    /// dominant idiom (153:31 in the corpus) and inlines with zero
+    /// closure machinery: captures are just enclosing locals in scope.
+    fn hof_lambda<'e>(
+        &mut self,
+        cb: &'e IrExpr,
+        arity: usize,
+    ) -> Result<(Vec<u32>, &'e IrExpr), EmitError> {
+        let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
+            return unsup("list-hof-nonlambda");
+        };
+        if params.len() != arity {
+            return unsup("list-hof-arity");
+        }
+        let mut idxs = Vec::new();
+        for (var, _) in params {
+            let Some(&(idx, _)) = self.locals.get(var) else {
+                return unsup("bind:unmapped");
+            };
+            idxs.push(idx);
+        }
+        Ok((idxs, body))
+    }
+
+    /// Shared loop header: xs → holds (base, count, idx); returns them.
+    fn hof_loop_open(
+        &mut self,
+        xs: &IrExpr,
+    ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
+        let elem = match self.lower(xs, None)? {
+            SliceTy::List(h) => self.types.el(h),
+            other => return unsup(&format!("list-hof-of:{other:?}")),
+        };
+        let bh = self.hold_i32()?;
+        let ch = self.hold_i32()?;
+        let ih = self.hold_i32()?;
+        self.f.instructions().local_tee(bh);
+        self.f
+            .instructions()
+            .i32_load(len_memarg())
+            .i32_const(elem.slot_size() as i32)
+            .i32_div_u()
+            .local_set(ch)
+            .i32_const(0)
+            .local_set(ih);
+        Ok((elem, bh, ch, ih))
+    }
+
+    /// Loop-body prologue: guard + load current element into `param`.
+    fn hof_elem_into(&mut self, elem: SliceTy, bh: u32, ch: u32, ih: u32, param: u32) {
+        self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
+        self.f
+            .instructions()
+            .local_get(bh)
+            .local_get(ih)
+            .i32_const(elem.slot_size() as i32)
+            .i32_mul()
+            .i32_add();
+        self.load_ty_slot(elem, 0);
+        self.f.instructions().local_set(param);
+    }
+
+    fn hof_step(&mut self, ih: u32) {
+        self.f.instructions().local_get(ih).i32_const(1).i32_add().local_set(ih).br(0).end().end();
+    }
+
+    fn lower_list_map(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let Some(u) = slice_ty_of(&body.ty, self.types) else {
+            return unsup(&format!("list-map-ret:{}", ty_name(&body.ty)));
+        };
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        // result = alloc(count * stride_u), same element count as source
+        let rh = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_get(ch)
+            .i32_const(u.slot_size() as i32)
+            .i32_mul()
+            .call(F_ALLOC)
+            .local_set(rh);
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        // dest addr, then value, then store
+        self.f
+            .instructions()
+            .local_get(rh)
+            .local_get(ih)
+            .i32_const(u.slot_size() as i32)
+            .i32_mul()
+            .i32_add();
+        self.lower(body, Some(u))?;
+        self.store_ty_slot(u, 0);
+        self.hof_step(ih);
+        self.f.instructions().local_get(rh);
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(Some(SliceTy::List(self.types.intern(u))))
+    }
+
+    fn lower_list_filter(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let rh = self.hold_i32()?;
+        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(rh); // []
+        let push = match elem.slot_size() {
+            8 => F_LIST_PUSH_8,
+            _ => F_LIST_PUSH_4,
+        };
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.lower(body, Some(BOOL))?;
+        self.f.instructions().if_(BlockType::Empty);
+        self.f
+            .instructions()
+            .local_get(rh)
+            .local_get(params[0])
+            .call(push)
+            .local_set(rh);
+        self.f.instructions().end();
+        self.hof_step(ih);
+        self.f.instructions().local_get(rh);
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(Some(SliceTy::List(self.types.intern(elem))))
+    }
+
+    fn lower_list_fold(
+        &mut self,
+        xs: &IrExpr,
+        init: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 2)?;
+        let (acc_p, x_p) = (params[0], params[1]);
+        let Some(b) = slice_ty_of(&init.ty, self.types) else {
+            return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
+        };
+        self.lower(init, Some(b))?;
+        self.f.instructions().local_set(acc_p);
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, x_p);
+        self.lower(body, Some(b))?;
+        self.f.instructions().local_set(acc_p);
+        self.hof_step(ih);
+        self.f.instructions().local_get(acc_p);
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(Some(b))
     }
 
     /// `list.get_or(xs, i, d)`: (xs.get(i)) ?? d, inlined via the get

@@ -688,3 +688,24 @@ at slice scale.
   interpolations; 1,500-seed burst clean.
 - **Burn-up: 57 → 64 / 590**, floor re-pinned 64, zero divergence;
   surface manifest +`call:string.len`.
+
+---
+
+## Unit 6 — stage 8: HOF inlining (map/filter/fold) (2026-08-20)
+
+The corpus's callback idiom is the LITERAL lambda (153 lambda sites vs 31
+other lines) — so the dominant list HOFs land with ZERO closure
+machinery: the lambda is inlined at the call site, its params become
+locals (collected like any bind), and captures are simply the enclosing
+locals already in scope. `list.map` mallocs the result up front (same
+count), `filter` builds through the amortized push helper, `fold`
+threads the accumulator param. Fn-typed VALUES (closures as data) remain
+their own honest refusal — a later mechanism, not a partial fake.
+
+- **Burn-up: 64 → 85 / 590** (+21, the largest single-slice jump), floor
+  re-pinned 85, zero divergence; `call:list.map` left the histogram.
+- The fuzzer now generates map/filter callbacks and fold chains;
+  1,500-seed burst clean. Surface manifest +3 (lambda, map/filter/fold).
+- Remaining walls: Applied ×80 (Map/Set), Named ×45, Bytes ×24,
+  Tuple ×19, Float ×16, Matrix ×12, process.exit ×10, RuntimeCall ×9,
+  Fn-typed values ×8.

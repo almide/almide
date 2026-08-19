@@ -117,6 +117,19 @@ pub(crate) fn collect_binds_data(
             Ok(())
         }
         IrExprKind::Member { object, .. } => collect_binds(object, out, seen, types),
+        // Lambda params become locals (used when the lambda is inlined as
+        // a direct HOF callback; harmless extras otherwise).
+        IrExprKind::Lambda { params, body, .. } => {
+            for (var, ty) in params {
+                let Some(sty) = slice_ty_of(ty, types) else {
+                    return unsup(&format!("bind-ty:{}", ty_name(ty)));
+                };
+                if seen.insert(*var) {
+                    out.push((*var, sty));
+                }
+            }
+            collect_binds(body, out, seen, types)
+        }
         IrExprKind::Call { args, .. } => {
             for a in args {
                 collect_binds(a, out, seen, types)?;

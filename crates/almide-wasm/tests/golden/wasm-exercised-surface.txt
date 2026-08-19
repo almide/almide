@@ -13,10 +13,12 @@ binop:MulInt
 binop:Or
 binop:SubInt
 call:int.to_string
+call:list.fold
 call:list.get
 call:list.get_or
 call:list.join
 call:list.len
+call:list.map
 call:list.push
 call:println
 call:string.len
@@ -27,6 +29,7 @@ expr:Call
 expr:ForIn
 expr:If
 expr:IndexAccess
+expr:Lambda
 expr:List
 expr:LitBool
 expr:LitInt

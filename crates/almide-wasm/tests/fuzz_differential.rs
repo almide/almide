@@ -145,6 +145,17 @@ impl Gen {
                     self.expr(Ty::Int, depth - 1),
                     self.expr(Ty::Int, depth - 1)
                 ),
+                5 if depth >= 2 => {
+                    let (acc, x) = (self.fresh(), self.fresh());
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    let init = self.expr(Ty::Int, depth - 1);
+                    self.vars.push(Var { name: acc.clone(), ty: Ty::Int, mutable: false });
+                    self.vars.push(Var { name: x.clone(), ty: Ty::Int, mutable: false });
+                    let body = self.expr(Ty::Int, depth - 1);
+                    self.vars.pop();
+                    self.vars.pop();
+                    format!("list.fold({src}, {init}, ({acc}, {x}) => {body})")
+                }
                 5 => match self.var_of(Ty::Rec) {
                     Some(v) => format!("{v}.{}", ["px", "py"][self.rng.below(2)]),
                     None => self.leaf(Ty::Int),
@@ -180,13 +191,30 @@ impl Gen {
                 1 | 2 => format!("some({})", self.expr(Ty::Int, depth - 1)),
                 _ => self.leaf(Ty::OptInt),
             },
-            Ty::ListInt => match self.rng.below(3) {
+            Ty::ListInt => match self.rng.below(5) {
                 0 => {
                     let n = self.rng.below(4);
                     let items: Vec<String> = (0..n).map(|_| self.expr(Ty::Int, depth - 1)).collect();
                     format!("[{}]", items.join(", "))
                 }
                 1 => format!("({} ++ {})", self.expr(Ty::ListInt, depth - 1), self.expr(Ty::ListInt, depth - 1)),
+                // HOF callbacks — inlined lambdas over the new machinery.
+                2 => {
+                    let p = self.fresh();
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    self.vars.push(Var { name: p.clone(), ty: Ty::Int, mutable: false });
+                    let body = self.expr(Ty::Int, depth - 1);
+                    self.vars.pop();
+                    format!("list.map({src}, ({p}) => {body})")
+                }
+                3 => {
+                    let p = self.fresh();
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    self.vars.push(Var { name: p.clone(), ty: Ty::Int, mutable: false });
+                    let cond = self.expr(Ty::Bool, depth - 1);
+                    self.vars.pop();
+                    format!("list.filter({src}, ({p}) => {cond})")
+                }
                 _ => self.leaf(Ty::ListInt),
             },
             Ty::Rec => match self.rng.below(3) {
