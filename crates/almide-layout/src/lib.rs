@@ -40,6 +40,26 @@ pub const PAYLOAD: u32 = 12;
 /// backend must too).
 pub const NULL_ADDR: u32 = 0;
 
+// ── sum layout (payload-relative) ───────────────────────────────────────
+//
+// Option[T]: `none` IS `NULL_ADDR` — no block, no tag. `some(v)` is a block
+// whose payload holds the value slot directly at `OPTION_FIELD`.
+// (Consequence, by design: nested Option cannot be represented and must be
+// refused by any consumer until a tagged Option layout is ratified.)
+//
+// Result[T, E]: a block with a 4-byte tag at `SUM_TAG` (0 = Ok, 1 = Err)
+// and the value slot at `SUM_FIELD` (8-byte slot, uniform for both sides).
+// This shape — tag word, padding, fields — is the one user-defined
+// variants will generalise.
+
+/// Option's value slot, payload-relative.
+pub const OPTION_FIELD: u32 = 0;
+/// Sum tag word, payload-relative (Result: 0 = Ok, 1 = Err).
+pub const SUM_TAG: u32 = 0;
+/// Tagged sum's value slot, payload-relative (leaves the tag an 8-byte
+/// aligned pad so an i64 slot never straddles it).
+pub const SUM_FIELD: u32 = 8;
+
 /// Stable digest of the layout definition. Any change to the fields above
 /// changes this value and fails the pin test — re-pin ONLY as a deliberate,
 /// reviewed layout change (an intentional-change-protocol event).
@@ -53,6 +73,9 @@ pub fn layout_digest() -> u64 {
     }
     PAYLOAD.hash(&mut h);
     NULL_ADDR.hash(&mut h);
+    OPTION_FIELD.hash(&mut h);
+    SUM_TAG.hash(&mut h);
+    SUM_FIELD.hash(&mut h);
     h.finish()
 }
 
@@ -85,7 +108,10 @@ mod tests {
     /// same commit, making every layout change loud and reviewed.
     #[test]
     fn digest_is_pinned() {
-        assert_eq!(layout_digest(), 8782915244131330720, "layout changed — re-pin deliberately");
+        // Re-pinned 2026-08-19: sum layout added (OPTION_FIELD / SUM_TAG /
+        // SUM_FIELD) for unit-6 stage 3 — an intentional-change event, see
+        // PORTLOG.md.
+        assert_eq!(layout_digest(), 6642309021484683773, "layout changed — re-pin deliberately");
     }
 
     #[test]

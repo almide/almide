@@ -393,3 +393,45 @@ CONSTRUCTION (no incumbent renderer consulted):
   → 4 fixtures red (`i64_min_literal` among them). Both reverted; suite
   green. Strict-tier clippy extended to `-p almide-layout -p almide-wasm`
   in CI (zero findings).
+
+---
+
+## Unit 6 — stage 3: the scalar-sum slice (Option/Result + match) (2026-08-19)
+
+Driven by the measured map (stage 2's next walls: Applied ×216, Match ×30).
+All new construction:
+
+- **Sum layout ratified into `almide-layout`** (§6.6: no ad-hoc repr in the
+  emitter): Option's `none` IS `NULL_ADDR` — no block, no tag (nested
+  Option therefore unrepresentable and refused by construction);
+  Result is a tagged block (`SUM_TAG` 0=Ok 1=Err, value at `SUM_FIELD`,
+  8-aligned slot) — the shape user variants will generalise. Layout digest
+  deliberately RE-PINNED (8782915244131330720 → 6642309021484683773), the
+  crate's documented intentional-change procedure.
+- **Type-hint flow**: `none`/`ok(x)`/`err(x)` have no self-contained type,
+  so `lower(e, want)` carries the expectation DOWN from binds, args,
+  returns, match arms. First bug of the slice proved the wall works: the
+  hinted `none` returned its type without pushing `i32.const NULL_ADDR` —
+  wasmparser validation refused all three affected modules (never
+  instantiated), exactly the invariant the harness promises.
+- **`match`**: if/else chain over pattern tests; subjects live in shared
+  scratch locals (safe: a subject is only read during its own tests,
+  which finish before any nested match in a selected arm's body runs).
+  Arm-bind patterns load slots from the subject; the FINAL arm keeps its
+  test with a LOUD `unreachable` behind it — the checker's exhaustiveness
+  promise is verified at runtime, never assumed silently. Guards refused
+  (own reason) for now.
+- **`!` semantics honoured, not approximated**: in a pure fn returning
+  Option/Result the oracle PROPAGATES on none/Err (#1410 family) — those
+  bodies are refused (`unwrap-propagating`), only the ABORT form lowers
+  (null/Err → trap). A mis-lowering here would have been a silent
+  divergence class; the refusal keeps the histogram honest instead.
+- **`$str_eq`** helper (byte compare): unlocks `==`/`!=` on String and
+  string-literal match arms.
+- **Burn-up**: 18 → **27 / 590**, floor re-pinned 27, zero divergence.
+- **Mutation evidence**: Result tag inverted → 5 fixtures red
+  (letbound_variant_match + tm_res_int family). Reverted; suite green.
+- Next walls, measured: `bind-ty:Applied ×193` (now almost all List) →
+  `Named ×69` (user records/variants) → `Bytes ×23` → `Float ×16` →
+  list module calls. The LIST slice (layout for element arrays, ForIn,
+  list.len/join) is the next big mechanism.
