@@ -89,8 +89,37 @@ impl<'a> Interpreter<'a> {
             "unique_by" => self.hof_unique_by(evaled),
             "scan" => self.hof_scan(evaled),
             "update" => self.hof_list_update(evaled),
+            "group_by" => self.hof_group_by(evaled),
             _ => self.eval_hof_list_try(f, evaled),
         }
+    }
+
+    /// `list.group_by(xs, (x) -> K)` — a Map of first-occurrence-ordered keys
+    /// to the sub-lists in source order (runtime/rs/src/list.rs's
+    /// insert-or-append walk, verbatim).
+    fn hof_group_by(&mut self, args: &[Value]) -> Flow {
+        let xs = match args.first() {
+            Some(Value::List(e)) => e.clone(),
+            _ => return Flow::Abort("internal: list.group_by receiver not a List".into()),
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out: Vec<(Value, Value)> = Vec::new();
+        for x in xs.iter() {
+            let k = val!(self.apply_closure(&clo, vec![x.clone()]));
+            match out.iter_mut().find(|(ek, _)| *ek == k) {
+                Some((_, Value::List(group))) => {
+                    let mut g = (**group).clone();
+                    g.push(x.clone());
+                    *group = std::rc::Rc::new(g);
+                }
+                Some(_) => unreachable!("group values are lists by construction"),
+                None => out.push((k, Value::list(vec![x.clone()]))),
+            }
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
     /// The `__fallible_*` carriers (ADR-0006): the fallibility-polymorphic form of
