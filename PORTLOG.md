@@ -626,3 +626,16 @@ the committed, reviewed matrix of what the wasm leg CLAIMS to exercise:
 - The refused half of the matrix needs no second registry: the burn-up
   histogram already names every wall.
 - Mutation-verified in both directions (planted `binop:FakeOp` → red).
+
+---
+
+## Fuzzer surface: records + variants (coverage witness) (2026-08-20)
+
+The generator now produces the fixed preamble types `Pt`/`Tr`, record
+literals, spreads, member reads, variant constructors, and variant
+matches (binding + literal-ctor arms). Purpose delivered: the coverage
+inventory's "hint-absent constructor paths" are now WITNESSED — emitter
+line coverage 86.9% → 90.0%, package total 92.8% → 94.0%, never-run
+functions 3 → 2; floor re-pinned 90 → 92. Fixed-range claim rate 84% →
+89%; a 2,000-seed exploration burst on the extended surface found no
+divergence.

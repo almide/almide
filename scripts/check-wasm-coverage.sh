@@ -19,7 +19,7 @@ cd "$(dirname "$0")/.."
 
 # Grow-only floor (line coverage %, emitter sources only). Raise as
 # uncovered branches are witnessed or retired — never lower.
-FLOOR=90
+FLOOR=92
 
 if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
   echo "cargo-llvm-cov not found on PATH" >&2

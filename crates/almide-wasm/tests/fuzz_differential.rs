@@ -58,6 +58,10 @@ enum Ty {
     Str,
     OptInt,
     ListInt,
+    /// The fixed preamble record `Pt { px: Int, py: Int }`.
+    Rec,
+    /// The fixed preamble variant `Tr = | Lf(Int) | Nd(Int, Int) | Mt`.
+    Vart,
 }
 
 impl Ty {
@@ -68,6 +72,8 @@ impl Ty {
             Ty::Str => "String",
             Ty::OptInt => "Int?",
             Ty::ListInt => "List[Int]",
+            Ty::Rec => "Pt",
+            Ty::Vart => "Tr",
         }
     }
 }
@@ -124,7 +130,7 @@ impl Gen {
             return self.leaf(ty);
         }
         match ty {
-            Ty::Int => match self.rng.below(6) {
+            Ty::Int => match self.rng.below(7) {
                 0 | 1 => self.leaf(Ty::Int),
                 2 => {
                     let op = ["+", "-", "*"][self.rng.below(3)];
@@ -139,6 +145,10 @@ impl Gen {
                     self.expr(Ty::Int, depth - 1),
                     self.expr(Ty::Int, depth - 1)
                 ),
+                5 => match self.var_of(Ty::Rec) {
+                    Some(v) => format!("{v}.{}", ["px", "py"][self.rng.below(2)]),
+                    None => self.leaf(Ty::Int),
+                },
                 _ => format!("({} ?? {})", self.expr(Ty::OptInt, depth - 1), self.expr(Ty::Int, depth - 1)),
             },
             Ty::Bool => match self.rng.below(5) {
@@ -172,6 +182,32 @@ impl Gen {
                 1 => format!("({} ++ {})", self.expr(Ty::ListInt, depth - 1), self.expr(Ty::ListInt, depth - 1)),
                 _ => self.leaf(Ty::ListInt),
             },
+            Ty::Rec => match self.rng.below(3) {
+                0 | 1 => format!(
+                    "Pt {{ px: {}, py: {} }}",
+                    self.expr(Ty::Int, depth - 1),
+                    self.expr(Ty::Int, depth - 1)
+                ),
+                // Functional update — the SpreadRecord path.
+                _ => match self.var_of(Ty::Rec) {
+                    Some(v) => format!("{{ ...{v}, px: {} }}", self.expr(Ty::Int, depth - 1)),
+                    None => format!(
+                        "Pt {{ px: {}, py: {} }}",
+                        self.expr(Ty::Int, depth - 1),
+                        self.expr(Ty::Int, depth - 1)
+                    ),
+                },
+            },
+            Ty::Vart => match self.rng.below(4) {
+                0 => format!("Lf({})", self.expr(Ty::Int, depth - 1)),
+                1 => format!(
+                    "Nd({}, {})",
+                    self.expr(Ty::Int, depth - 1),
+                    self.expr(Ty::Int, depth - 1)
+                ),
+                2 => "Mt".to_string(),
+                _ => self.leaf(Ty::Vart),
+            },
         }
     }
 
@@ -194,23 +230,28 @@ impl Gen {
                 }
             }
             Ty::ListInt => "[1, 2]".to_string(),
+            Ty::Rec => "Pt { px: 1, py: 2 }".to_string(),
+            Ty::Vart => ["Lf(3)", "Nd(4, 5)", "Mt"][i % 3].to_string(),
         }
     }
 
     fn stmt(&mut self, depth: usize) {
-        match self.rng.below(10) {
+        match self.rng.below(11) {
             0..=2 => self.stmt_bind(depth),
             3 | 4 => self.stmt_println(depth),
             5 => self.stmt_assign(depth),
             6 => self.stmt_if(depth),
             7 => self.stmt_for_range(depth),
             8 => self.stmt_match_opt(depth),
+            9 => self.stmt_match_variant(depth),
             _ => self.stmt_push(depth),
         }
     }
 
     fn stmt_bind(&mut self, depth: usize) {
-        let ty = [Ty::Int, Ty::Bool, Ty::Str, Ty::OptInt, Ty::ListInt][self.rng.below(5)];
+        let ty =
+            [Ty::Int, Ty::Bool, Ty::Str, Ty::OptInt, Ty::ListInt, Ty::Rec, Ty::Vart]
+                [self.rng.below(7)];
         let name = self.fresh();
         let mutable = self.rng.chance(40);
         let kw = if mutable { "var" } else { "let" };
@@ -302,6 +343,22 @@ impl Gen {
         self.line("}");
     }
 
+    fn stmt_match_variant(&mut self, depth: usize) {
+        let subj = self.expr(Ty::Vart, depth);
+        let (a, b) = (self.fresh(), self.fresh());
+        self.line(&format!("match {subj} {{"));
+        self.indent += 1;
+        if self.rng.chance(30) {
+            // A literal ctor arm before the binding arm.
+            self.line("Lf(0) => println(\"z\"),");
+        }
+        self.line(&format!("Lf({a}) => println(\"L ${{{a}}}\"),"));
+        self.line(&format!("Nd({a}, {b}) => println(\"N ${{{a}}}|${{{b}}}\"),"));
+        self.line("Mt => println(\"M\"),");
+        self.indent -= 1;
+        self.line("}");
+    }
+
     fn stmt_push(&mut self, depth: usize) {
         let lists: Vec<String> = self
             .vars
@@ -320,6 +377,8 @@ impl Gen {
     }
 
     fn program(mut self) -> String {
+        self.out.push_str("type Pt = { px: Int, py: Int }\n");
+        self.out.push_str("type Tr = | Lf(Int) | Nd(Int, Int) | Mt\n");
         self.out.push_str("fn main() -> Unit = {\n");
         let n = 3 + self.rng.below(6);
         for _ in 0..n {
