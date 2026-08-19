@@ -1,0 +1,87 @@
+# ── ABSTAIN CLASSIFICATION (aviation-quality Stage 2) ──
+#
+# Every reason string in interp-abstain-ledger.txt must match exactly one
+# pattern here (first match wins, checked by scripts/check-abstain-classes.sh).
+# The class answers the auditor's question "WHY is this fixture outside the
+# executable spec, and what would bring it in":
+#
+#   HEAP_BOUNDARY  — the fixture (usually via self-hosted stdlib) does raw
+#                    handle/pointer work (prim.handle / prim.alloc_*). The
+#                    interp models values, not bytes; bringing these in is the
+#                    interp-heap arc (model the block heap), the LARGE half of
+#                    totalization.
+#   BRIDGEABLE     — closable with bounded work, no architectural change:
+#                    dispatch glue (missing HOF arms), argv/env injection,
+#                    sandboxed fs, vendoring the SAME musl-libm the backends
+#                    use (retiring the ULP abstain), sequential fan evaluation
+#                    under the pure-fan determinism contracts, or a bigger
+#                    fuel budget. The Stage 2 near-horizon burn-down list.
+#
+# Coverage arithmetic these classes feed (research/benchmark/three-way/):
+# voting = corpus - abstains; the near-horizon target is voting + BRIDGEABLE.
+
+[[class]]
+name = "HEAP_BOUNDARY"
+patterns = [
+  # C-197's interp face: an over-cap bound-range materialization is a
+  # MACHINE-DEPENDENT observable (both backends take the defined OOM abort at
+  # their own limits), so no interp answer is ever a faithful vote — 
+  # architectural, not bounded work.
+  "capability: range materialization beyond the interp cap",
+  "capability: prim.handle",
+  "capability: prim.alloc_value",
+  "capability: prim.alloc_map",
+  "capability: prim.alloc_list_str",
+  "capability: prim.alloc_list",
+  "capability: prim.alloc_str",
+  "capability: prim.alloc_set",
+  "capability: prim.alloc_bytes",
+  # Raw pointer conversion — pointer work by definition, same class as handle.
+  "capability: prim.int_to_ptr",
+  # An access the #1226 slice-1 arena does not own. The flat String/Bytes
+  # family is modeled; a load/store landing outside it is still the heap
+  # boundary, one level in from `prim.handle`.
+  "outside this heap's arena",
+]
+
+[[class]]
+name = "BRIDGEABLE"
+patterns = [
+  "capability: HOF map.fold",
+  # SURFACED BY the #1416 ctor glue (map.new/set.new/with_capacity), not
+  # introduced by it: map_filter / map_set_typechange used to abstain at
+  # `prim.alloc_map` (HEAP_BOUNDARY, first-hit) and now get past the
+  # constructor to reveal the missing HOF arm underneath — dispatch glue,
+  # the textbook BRIDGEABLE shape.
+  "capability: HOF map.filter",
+  "capability: HOF map.map",
+  # Surfaced by the scalar-key find/map/upsert twins (#1423 burn-down): the
+  # fixture now gets PAST `prim.alloc_map` (which used to abstain first) and
+  # reaches the missing dispatch arm underneath — bounded glue, same shape as
+  # its map.filter/map.map siblings above.
+  "capability: HOF map.find",
+  "capability: HOF list.update",
+  "capability: list.min/max on non-comparable elements",
+  "capability: prim.args_get_list_full",
+  "capability: prim.args_get_list",
+  "capability: args.",
+  "capability: prim.make_dir",
+  "capability: prim.read_text_file",
+  "capability: prim.write_text_file",
+  "capability: fan.any",
+  "transcendental",
+  "float `**`",
+  "interp fuel/recursion budget exhausted",
+  # SURFACED BY #1226 slice 1, not introduced by it: these fixtures used to
+  # abstain at `prim.handle` (HEAP_BOUNDARY, first-hit) and now get past it to
+  # reveal the blocker underneath. Both are bounded dispatch work with no
+  # architectural change, which is what BRIDGEABLE means:
+  #   prim.die     — native panics with exit 101; `Flow::Abort` is this
+  #                  interpreter's exit-1 model, so voting it would be wrong
+  #                  (the #1366 lesson). Needs an abort that carries the exit
+  #                  code, not a new evaluation model.
+  #   prim.fd_write— the raw fd write. The interp already captures stdout
+  #                  (`self.stdout`), so this is glue at the argv/env/fs tier.
+  "capability: prim.die",
+  "capability: prim.fd_write",
+]

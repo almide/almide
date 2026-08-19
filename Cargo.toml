@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/almide", "crates/almide-base", "crates/almide-diag", "crates/almide-frontend", "crates/almide-ir", "crates/almide-lang", "crates/almide-spine", "crates/almide-syntax", "crates/almide-types"]
+members = ["crates/almide", "crates/almide-base", "crates/almide-diag", "crates/almide-driver", "crates/almide-interp", "crates/almide-frontend", "crates/almide-ir", "crates/almide-lang", "crates/almide-optimize", "crates/almide-spine", "crates/almide-syntax", "crates/almide-types"]
 
 [workspace.package]
 version = "0.0.1"

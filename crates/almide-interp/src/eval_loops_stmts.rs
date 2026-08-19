@@ -1,0 +1,407 @@
+/// A `for-in`'s binding form: one variable, or a tuple destructure.
+/// Bundled so the lazy-Range loop takes 4 parameters instead of 8 — the shape
+/// and the range are two independent facts, not six loose scalars.
+struct ForInBinder<'v> {
+    var: VarId,
+    var_tuple: Option<&'v [VarId]>,
+}
+
+/// The half-open or inclusive integer range a lazy `for-in` walks.
+struct RangeSpec {
+    start: i64,
+    end: i64,
+    inclusive: bool,
+}
+
+/// What one iteration of a loop body decided.
+enum LoopStep {
+    /// Ran to completion (or hit `continue`) — keep looping.
+    Next,
+    /// `break` — the loop's value is Unit.
+    Break,
+    /// A signal that leaves the loop entirely (return / abort / fuel).
+    Signal(Flow),
+}
+
+impl<'a> Interpreter<'a> {
+    // ── Loops ───────────────────────────────────────────────────
+
+    /// Run one loop body. All three loops (`for-in`, its lazy Range twin, and
+    /// `while`) made the same break/continue/propagate decision inline; sharing it
+    /// is what keeps their own bodies at the binder logic. `continue` ends this
+    /// iteration only, which is why it maps to `Next` rather than a signal.
+    fn run_loop_body(&mut self, body: &[IrStmt], frame: &Scope) -> LoopStep {
+        for stmt in body {
+            match self.exec_stmt(stmt, frame) {
+                Ok(()) => {}
+                Err(Flow::Break) => return LoopStep::Break,
+                Err(Flow::Continue) => return LoopStep::Next,
+                Err(other) => return LoopStep::Signal(other),
+            }
+        }
+        LoopStep::Next
+    }
+
+    /// Bind a for-in element into `frame`: either the single binder, or the
+    /// tuple-destructure form `for (a, b) in …` (shape-checked). Extracted from
+    /// both for-in paths, which had the same nested match.
+    fn bind_for_in_item(
+        frame: &Scope,
+        var: VarId,
+        var_tuple: Option<&[VarId]>,
+        item: Value,
+    ) -> Option<Flow> {
+        let Some(vars) = var_tuple else {
+            frame.bind(var, item);
+            return None;
+        };
+        match &item {
+            Value::Tuple(elems) if elems.len() == vars.len() => {
+                for (vid, ev) in vars.iter().zip(elems.iter()) {
+                    frame.bind(*vid, ev.clone());
+                }
+                None
+            }
+            _ => Some(Flow::Abort(
+                "internal: for-in tuple destructure shape mismatch".into(),
+            )),
+        }
+    }
+
+    fn eval_for_in(
+        &mut self,
+        var: VarId,
+        var_tuple: Option<&[VarId]>,
+        iterable: &IrExpr,
+        body: &[IrStmt],
+        scope: &Scope,
+    ) -> Flow {
+        let iter_v = val!(self.eval_expr(iterable, scope));
+        // #561: a Range iterates LAZILY — never materialized into a Vec. The
+        // eager materialization in `as_iter_items` allocated the entire range
+        // up front with no fuel accounting, so `for i in 0..2_000_000_000`
+        // OOM-ABORTED the process (uncatchable by the fuzzer oracle) before a
+        // single fuel check. Generating each value on demand keeps the loop
+        // fuel-bounded: it stops at `Flow::Fuel`, never allocating the range.
+        let items: Vec<Value> = match &iter_v {
+            Value::Range { start, end, inclusive } => {
+                return self.eval_for_in_range(
+                    ForInBinder { var, var_tuple },
+                    RangeSpec { start: *start, end: *end, inclusive: *inclusive },
+                    body,
+                    scope,
+                );
+            }
+            _ => match iter_v.as_iter_items() {
+                Some(items) => items,
+                None => {
+                    return Flow::Abort(format!(
+                        "internal: for-in over non-iterable {}",
+                        iter_v.type_name()
+                    ))
+                }
+            },
+        };
+        for item in items {
+            if let Err(f) = self.step() {
+                return f;
+            }
+            // Deterministic meter: one loop-head charge per iteration entry,
+            // plus the final exit check below (n iterations = n+1 checks).
+            self.det_charge();
+            if self.det_cut() {
+                return Flow::Return(Value::Int(0));
+            }
+            let frame = scope.child();
+            if let Some(abort) = Self::bind_for_in_item(&frame, var, var_tuple, item) {
+                return abort;
+            }
+            match self.run_loop_body(body, &frame) {
+                LoopStep::Next => {}
+                LoopStep::Break => return Flow::val(Value::Unit),
+                LoopStep::Signal(f) => return f,
+            }
+        }
+        self.det_charge();
+        Flow::val(Value::Unit)
+    }
+
+    /// #561: lazy `for i in start..end` — generates each Int on demand and
+    /// charges fuel per iteration, so an adversarially huge range terminates
+    /// as `Flow::Fuel` instead of materializing (and OOM-aborting) the whole
+    /// range. A tuple binder over a Range is shape-invalid (Ints aren't
+    /// tuples), matching the eager path's mismatch abort.
+    fn eval_for_in_range(
+        &mut self,
+        binder: ForInBinder<'_>,
+        range: RangeSpec,
+        body: &[IrStmt],
+        scope: &Scope,
+    ) -> Flow {
+        let ForInBinder { var, var_tuple } = binder;
+        let RangeSpec { start, end, inclusive } = range;
+        let last = if inclusive { end } else { end - 1 };
+        let mut i = start;
+        while i <= last {
+            if let Err(f) = self.step() {
+                return f;
+            }
+            // Deterministic meter: per-iteration loop-head charge (the +1 exit
+            // check is charged after the loop).
+            self.det_charge();
+            if self.det_cut() {
+                return Flow::Return(Value::Int(0));
+            }
+            let frame = scope.child();
+            if var_tuple.is_some() {
+                return Flow::Abort(
+                    "internal: for-in tuple destructure shape mismatch".into(),
+                );
+            }
+            frame.bind(var, Value::Int(i));
+            match self.run_loop_body(body, &frame) {
+                LoopStep::Next => {}
+                LoopStep::Break => return Flow::val(Value::Unit),
+                LoopStep::Signal(f) => return f,
+            }
+            i += 1;
+        }
+        self.det_charge();
+        Flow::val(Value::Unit)
+    }
+
+    fn eval_while(&mut self, cond: &IrExpr, body: &[IrStmt], scope: &Scope) -> Flow {
+        loop {
+            if let Err(f) = self.step() {
+                return f;
+            }
+            // Deterministic meter: one loop-head charge per condition CHECK
+            // (n iterations = n+1 checks), mirroring the MIR LoopStart charge.
+            self.det_charge();
+            if self.det_cut() {
+                return Flow::Return(Value::Int(0));
+            }
+            let c = val!(self.eval_expr(cond, scope));
+            match c {
+                Value::Bool(true) => {}
+                Value::Bool(false) => return Flow::val(Value::Unit),
+                other => {
+                    return Flow::Abort(format!(
+                        "internal: while-condition is {} not Bool",
+                        other.type_name()
+                    ))
+                }
+            }
+            let frame = scope.child();
+            match self.run_loop_body(body, &frame) {
+                LoopStep::Next => {}
+                LoopStep::Break => return Flow::val(Value::Unit),
+                LoopStep::Signal(f) => return f,
+            }
+        }
+    }
+
+    // ── Statements ──────────────────────────────────────────────
+
+    fn exec_stmt(&mut self, stmt: &IrStmt, scope: &Scope) -> Result<(), Flow> {
+        if let Err(f) = self.step() {
+            return Err(f);
+        }
+        match &stmt.kind {
+            IrStmtKind::Bind { var, value, .. } => {
+                let v = self.eval_value(value, scope)?;
+                scope.bind(*var, v);
+                Ok(())
+            }
+            IrStmtKind::BindDestructure { pattern, value } => {
+                self.exec_stmt_destructure(pattern, value, scope)
+            }
+            IrStmtKind::Assign { var, value } => self.exec_stmt_assign(*var, value, scope),
+            IrStmtKind::IndexAssign { target, index, value } => {
+                self.exec_stmt_index_assign(*target, index, value, scope)
+            }
+            IrStmtKind::MapInsert { target, key, value } => {
+                self.exec_stmt_map_insert(*target, key, value, scope)
+            }
+            IrStmtKind::FieldAssign { target, field, value } => {
+                self.exec_stmt_field_assign(*target, *field, value, scope)
+            }
+            IrStmtKind::Guard { cond, else_ } => self.exec_stmt_guard(cond, else_, scope),
+            IrStmtKind::Expr { expr } => {
+                self.eval_value(expr, scope)?;
+                Ok(())
+            }
+            IrStmtKind::Comment { .. } => Ok(()),
+
+            // ── Codegen-inserted statement kinds ──
+            // RcInc/RcDec are pure refcount bookkeeping (Perceus, post-cut) —
+            // semantic no-ops for values. Degrade to no-op (belt-and-braces) so
+            // a future post-Perceus run doesn't panic.
+            IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => Ok(()),
+            IrStmtKind::ListSwap { .. }
+            | IrStmtKind::ListReverse { .. }
+            | IrStmtKind::ListRotateLeft { .. }
+            | IrStmtKind::ListCopySlice { .. } => unreachable!(
+                "list peephole stmt is codegen-inserted (PeepholePass); interp runs pre-codegen"
+            ),
+        }
+    }
+
+    /// Evaluate `expr` for its VALUE. Any other `Flow` (a return, a loop
+    /// signal, an abort, an abstain) is what the enclosing statement list
+    /// propagates, so it leaves as `Err`.
+    pub(crate) fn eval_value(&mut self, expr: &IrExpr, scope: &Scope) -> Result<Value, Flow> {
+        match self.eval_expr(expr, scope) {
+            Flow::Value(v) => Ok(v),
+            other => Err(other),
+        }
+    }
+
+    /// `let <pattern> = value` — the pattern is irrefutable by construction
+    /// (the checker rejects a refutable one), so a failed match is an ICE.
+    fn exec_stmt_destructure(
+        &mut self,
+        pattern: &almide_ir::IrPattern,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let v = self.eval_value(value, scope)?;
+        let mut binds = Vec::new();
+        if !self.try_match(pattern, &v, &mut binds) {
+            return Err(Flow::Abort("internal: irrefutable destructure failed".into()));
+        }
+        for (id, val) in binds {
+            scope.bind(id, val);
+        }
+        Ok(())
+    }
+
+    /// `var = value` — the binding must already exist in an enclosing scope.
+    fn exec_stmt_assign(
+        &mut self,
+        var: almide_ir::VarId,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let v = self.eval_value(value, scope)?;
+        if !scope.assign(var, v) {
+            return Err(Flow::Abort(format!(
+                "internal: assign to unbound variable {:?}",
+                var
+            )));
+        }
+        Ok(())
+    }
+
+    /// `guard cond else E` — the early-return form. A false condition evaluates
+    /// `E` and returns its value from the ENCLOSING function, so the else branch
+    /// leaves as `Flow::Return`, not as a value. Extracted from `exec_stmt`: this
+    /// one arm carried three nested matches, which was most of that function's
+    /// complexity.
+    fn exec_stmt_guard(&mut self, cond: &IrExpr, else_: &IrExpr, scope: &Scope) -> Result<(), Flow> {
+        match self.eval_value(cond, scope)? {
+            Value::Bool(true) => Ok(()),
+            Value::Bool(false) => match self.eval_expr(else_, scope) {
+                Flow::Value(v) => Err(Flow::Return(v)),
+                other => Err(other),
+            },
+            other => Err(Flow::Abort(format!(
+                "internal: guard condition is {} not Bool",
+                other.type_name()
+            ))),
+        }
+    }
+
+    // ── exec_stmt's assign-family arms ─────────────────────────
+
+    fn exec_stmt_index_assign(
+        &mut self,
+        target: VarId,
+        index: &IrExpr,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let iv = match self.eval_expr(index, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        let vv = match self.eval_expr(value, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        // Mutate through the binding's own slot (not get → assign): `get`
+        // hands back a clone, so the Rc is never sole-owned and every
+        // `xs[i] = v` copies the whole list — a fill loop turns quadratic.
+        // `Rc::make_mut` copies only when an alias exists (C-033 COW).
+        let Value::Int(i) = iv else {
+            return Err(Flow::Abort("internal: malformed index-assign".into()));
+        };
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::List(xs) => {
+                    if i < 0 || (i as usize) >= xs.len() {
+                        return Err(Flow::Abort("index out of bounds".into()));
+                    }
+                    Rc::make_mut(xs)[i as usize] = vv;
+                    Ok(())
+                }
+                _ => Err(Flow::Abort("internal: malformed index-assign".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: index-assign to unbound list".into()))?
+    }
+
+    fn exec_stmt_map_insert(
+        &mut self,
+        target: VarId,
+        key: &IrExpr,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let kv = match self.eval_expr(key, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        let vv = match self.eval_expr(value, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        // Slot mutation, not get → assign: see exec_stmt_index_assign.
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::Map(entries) => {
+                    map_insert(Rc::make_mut(entries), kv, vv);
+                    Ok(())
+                }
+                _ => Err(Flow::Abort("internal: map-insert on non-Map".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: map-insert to unbound map".into()))?
+    }
+
+    fn exec_stmt_field_assign(
+        &mut self,
+        target: VarId,
+        field: Sym,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let vv = match self.eval_expr(value, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        // Slot mutation, not get → assign: see exec_stmt_index_assign.
+        scope
+            .with_slot(target, |slot| match slot {
+                Value::Record { fields, .. } => {
+                    let fields = Rc::make_mut(fields);
+                    if let Some(slot) = fields.iter_mut().find(|(k, _)| *k == field) {
+                        slot.1 = vv;
+                    } else {
+                        fields.push((field, vv));
+                    }
+                    Ok(())
+                }
+                _ => Err(Flow::Abort("internal: field-assign on non-Record".into())),
+            })
+            .ok_or_else(|| Flow::Abort("internal: field-assign to unbound record".into()))?
+    }
+}

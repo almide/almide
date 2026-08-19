@@ -1,0 +1,148 @@
+// int extern — Rust native implementations
+// Tested by: cargo test in stdlib/
+
+pub fn almide_rt_int_to_string(n: i64) -> String {
+    n.to_string()
+}
+
+pub fn almide_rt_int_from_string(s: String) -> Result<i64, String> {
+    s.trim().parse::<i64>().map_err(|e| format!("invalid integer: {}", e))
+}
+
+#[inline(always)] pub fn almide_rt_int_abs(n: i64) -> i64 { n.abs() }
+#[inline(always)] pub fn almide_rt_int_min(a: i64, b: i64) -> i64 { a.min(b) }
+#[inline(always)] pub fn almide_rt_int_max(a: i64, b: i64) -> i64 { a.max(b) }
+// ALS-T6: an inverted range is a domain error in the abort form (one stderr
+// line + exit 1) — the raw i64::clamp panic (exit 101) is non-conforming.
+#[inline(always)] pub fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 {
+    if lo > hi { eprintln!("Error: clamp requires min <= max"); std::process::exit(1); }
+    n.clamp(lo, hi)
+}
+#[inline(always)] pub fn almide_rt_int_to_float(n: i64) -> f64 { n as f64 }
+pub fn almide_rt_int_to_hex(n: i64) -> String { format!("{:x}", n) }
+#[inline(always)] pub fn almide_rt_int_to_u(n: i64) -> i64 { n.unsigned_abs() as i64 }
+pub fn almide_rt_int_parse(s: &str) -> Result<i64, String> { s.trim().parse::<i64>().map_err(|e| e.to_string()) }
+pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, String> { i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string()) }
+#[inline(always)] pub fn almide_rt_int_band(a: i64, b: i64) -> i64 { a & b }
+#[inline(always)] pub fn almide_rt_int_bor(a: i64, b: i64) -> i64 { a | b }
+#[inline(always)] pub fn almide_rt_int_bxor(a: i64, b: i64) -> i64 { a ^ b }
+#[inline(always)] pub fn almide_rt_int_bnot(n: i64) -> i64 { !n }
+#[inline(always)] pub fn almide_rt_int_bshl(n: i64, bits: i64) -> i64 { n << bits }
+#[inline(always)] pub fn almide_rt_int_bshr(n: i64, bits: i64) -> i64 { n >> bits }
+/// Width at and above which the `bits`-wide mask saturates to all-ones — see
+/// the wasm `FULL_WIDTH_BITS` (calls_numeric.rs); the guard is shared.
+const ROTATE_FULL_WIDTH_BITS: i64 = 64;
+/// `Error: <msg>` text for a non-positive rotate width. A width `<= 0` has no
+/// register to rotate (and `n % bits` would divide by zero), so `rotate_*` is
+/// TOTAL like int `/`/`%` (C-001): it aborts with this message + exit 1,
+/// byte-identical on both targets, instead of a native rem-by-zero panic (101)
+/// / wasm `i64.rem_s` trap (134). Wording shared verbatim with the wasm emit.
+pub const ROTATE_NONPOSITIVE_WIDTH_MSG: &str = "rotate width must be positive";
+#[inline]
+fn rotate_mask(bits: i64) -> u64 {
+    if bits >= ROTATE_FULL_WIDTH_BITS { u64::MAX } else { (1u64 << bits) - 1 }
+}
+#[inline]
+fn check_rotate_width(bits: i64) {
+    if bits <= 0 {
+        eprintln!("Error: {}", ROTATE_NONPOSITIVE_WIDTH_MSG);
+        std::process::exit(1);
+    }
+}
+pub fn almide_rt_int_rotate_left(a: i64, n: i64, bits: i64) -> i64 {
+    check_rotate_width(bits);
+    let mask = rotate_mask(bits);
+    let v = (a as u64) & mask;
+    let n = (n % bits) as u32;
+    ((v << n) | (v >> (bits as u32 - n))) as i64 & mask as i64
+}
+pub fn almide_rt_int_rotate_right(a: i64, n: i64, bits: i64) -> i64 {
+    check_rotate_width(bits);
+    let mask = rotate_mask(bits);
+    let v = (a as u64) & mask;
+    let n = (n % bits) as u32;
+    ((v >> n) | (v << (bits as u32 - n))) as i64 & mask as i64
+}
+pub fn almide_rt_int_wrap_add(a: i64, b: i64, bits: i64) -> i64 {
+    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+    ((a as u64).wrapping_add(b as u64) & mask) as i64
+}
+pub fn almide_rt_int_wrap_mul(a: i64, b: i64, bits: i64) -> i64 {
+    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+    ((a as u64).wrapping_mul(b as u64) & mask) as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_string() {
+        assert_eq!(almide_rt_int_to_string(42), "42");
+        assert_eq!(almide_rt_int_to_string(-1), "-1");
+        assert_eq!(almide_rt_int_to_string(0), "0");
+    }
+
+    #[test]
+    fn test_from_string() {
+        assert_eq!(almide_rt_int_from_string("42".into()), Ok(42));
+        assert_eq!(almide_rt_int_from_string("-1".into()), Ok(-1));
+        assert!(almide_rt_int_from_string("abc".into()).is_err());
+        assert!(almide_rt_int_from_string("".into()).is_err());
+    }
+}
+
+// ── Bit introspection ──
+
+#[inline(always)] pub fn almide_rt_int_count_leading_zeros(n: i64) -> i64 { (n as u64).leading_zeros() as i64 }
+#[inline(always)] pub fn almide_rt_int_count_trailing_zeros(n: i64) -> i64 { (n as u64).trailing_zeros() as i64 }
+#[inline(always)] pub fn almide_rt_int_pop_count(n: i64) -> i64 { (n as u64).count_ones() as i64 }
+#[inline(always)] pub fn almide_rt_int_bit_reverse(n: i64) -> i64 { (n as u64).reverse_bits() as i64 }
+#[inline(always)] pub fn almide_rt_int_byte_swap(n: i64) -> i64 { (n as u64).swap_bytes() as i64 }
+#[inline(always)] pub fn almide_rt_int_bit_width(n: i64) -> i64 {
+    if n == 0 { 0 } else { 64 - (n as u64).leading_zeros() as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_log2_floor(n: i64) -> i64 {
+    if n <= 0 { -1 } else { 63 - (n as u64).leading_zeros() as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_log2_ceil(n: i64) -> i64 {
+    if n <= 0 { 0 }
+    else if n == 1 { 0 }
+    else { 64 - ((n as u64 - 1).leading_zeros()) as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_next_power_of_two(n: i64) -> i64 {
+    if n <= 1 { 1 } else { (n as u64).next_power_of_two() as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_prev_power_of_two(n: i64) -> i64 {
+    if n <= 0 { 0 }
+    else { 1i64 << (63 - (n as u64).leading_zeros() as i64) }
+}
+
+pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
+pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
+#[inline(always)] pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }
+#[inline(always)] pub fn almide_rt_int_bits_to_f32(bits: i64) -> f64 { f32::from_bits(bits as u32) as f64 }
+
+// ── Sized conversions (for `@intrinsic` migration of `int.to_*`) ──
+
+pub fn almide_rt_int_to_int8(n: i64) -> i8 { n as i8 }
+pub fn almide_rt_int_to_int16(n: i64) -> i16 { n as i16 }
+pub fn almide_rt_int_to_int32(n: i64) -> i32 { n as i32 }
+pub fn almide_rt_int_to_int64(n: i64) -> i64 { n }
+pub fn almide_rt_int_to_uint8(n: i64) -> u8 { n as u8 }
+pub fn almide_rt_int_to_uint16(n: i64) -> u16 { n as u16 }
+pub fn almide_rt_int_to_uint32(n: i64) -> u32 { n as u32 }
+pub fn almide_rt_int_to_uint64(n: i64) -> u64 { n as u64 }
+pub fn almide_rt_int_to_float32(n: i64) -> f32 { n as f32 }
+pub fn almide_rt_int_to_float64(n: i64) -> f64 { n as f64 }
+
+// ── Widening conversions (sized → Int, for typed-bytes Endian dispatch) ──
+
+pub fn almide_rt_int_from_int8(n: i8) -> i64 { n as i64 }
+pub fn almide_rt_int_from_int16(n: i16) -> i64 { n as i64 }
+pub fn almide_rt_int_from_int32(n: i32) -> i64 { n as i64 }
+pub fn almide_rt_int_from_int64(n: i64) -> i64 { n }
+pub fn almide_rt_int_from_uint8(n: u8) -> i64 { n as i64 }
+pub fn almide_rt_int_from_uint16(n: u16) -> i64 { n as i64 }
+pub fn almide_rt_int_from_uint32(n: u32) -> i64 { n as i64 }
+pub fn almide_rt_int_from_uint64(n: u64) -> i64 { n as i64 }

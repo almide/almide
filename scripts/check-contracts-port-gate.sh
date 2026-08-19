@@ -28,7 +28,7 @@ REGISTER="scripts/lib/port-deviations.txt"
 [ -f "$REGISTER" ] || { echo "::error::$REGISTER not found"; exit 2; }
 
 # Ratchet ceiling: LOWER only, never raise. Set at unit #0 landing (96 paths).
-MAX_DEVIATIONS=67
+MAX_DEVIATIONS=50
 n_reg="$(grep -cvE '^[[:space:]]*(#|$)' "$REGISTER")"
 fail=0
 err() { echo "::error::$1"; fail=1; }

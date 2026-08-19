@@ -240,6 +240,47 @@ by the 1,062-file oracle manifest staying byte-identical):
   whole-file inference still scales with file size), Zig-style incremental
   diagnostic scenarios, E1 wiring (misspellings + recoverable codes).
 
+---
+
+## Unit 3 — the executable spec: `almide-interp` + pipeline (LANDED 2026-08-19)
+
+- **Ported verbatim (zero source edits):** `crates/almide-optimize`,
+  `crates/almide-driver` (the crate that PINS the canonical
+  lower→optimize→mono→ir_link order — it exists because a real ordering
+  divergence once shipped), `crates/almide-interp` (9.6k lines incl. its own
+  104-test suite), and `runtime/rs/src` (37 files — the interpreter
+  `include!`s the vendored libm from there).
+- **The new engine EXECUTES.** `almide-spine/src/s5.rs::run_file` assembles
+  the interpreter's canonical cut (per the crate's own eval_test) through the
+  full resolve/canonicalize path: parse → check → `lower_program` →
+  `almide_driver::link_ir` → `Interpreter::run_main`. The ported interp test
+  suite passes 104/104.
+
+### Gate verdict — run parity vs the oracle over the CONTRACT corpus
+
+Oracle: clean-a877d2138 `almide run --target wasm` over all 591
+`spec/wasm_cross` + `spec/wasm_fail` fixtures (the wasm leg is legitimate as
+reference because wasm_cross fixtures are cross-target byte-identical by the
+incumbent's own CI definition; also ~10x faster to harvest than per-fixture
+rustc builds). `scripts/gen-run-manifest.sh`, parallel harvest, sha256(stdout)
++ exit code; 1 oracle exclusion (`guard_else_exit_code`, oracle exit 3).
+
+`tests/run_parity.rs` → **GREEN: 451/451 comparable fixtures identical
+(stdout hash + exit code), 0 divergent.** Two distinguished skip classes,
+both the incumbent oracle's own doctrine, both ceilinged shrink-only:
+- 138 `Unsupported` (bridge coverage — the reasons printed are the
+  incumbent's own recorded debts verbatim: `prim.handle` slices #1226,
+  `prim.alloc_*` families, `args.*`, `fd_write`);
+- 1 `FuelExhausted` (`range_bind_huge`) — "NOT a hang or panic" by design.
+
+One boundary adaptation in s5: `Unsupported`'s reason string is surfaced via
+the returned stderr so harnesses can report skip classes precisely.
+
+### Register shrink, second firing
+
+interp + runtime paths now exist: 17 more stale deviations flagged and
+removed; register 67 → **50**, ceiling lowered. 0 unexplained.
+
 ### Lint policy change (2026-08-19): two tiers, structural
 
 The growing per-crate `[lints.clippy]` allow tables were heading toward

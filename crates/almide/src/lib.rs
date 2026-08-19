@@ -27,6 +27,12 @@ pub use almide_frontend::ir_link;
 pub use almide_frontend::lower;
 pub use almide_frontend::stdlib;
 
+pub use almide_optimize::mono;
+pub use almide_optimize::optimize;
+
+// Reference interpreter (the third cross-target judge).
+pub use almide_interp as interp;
+
 pub mod types {
     pub use almide_frontend::types::{TypeEnv, TypeMap};
     pub use almide_lang::types::*;

@@ -81,7 +81,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 | 0 | `spec/` corpus + contracts.toml schema + checker scripts | ledger checker green on ported set — **LANDED 2026-08-19**, see PORTLOG.md |
 | 1 | `almide-diag` | unit tests + JSON snapshot parity — **LANDED 2026-08-19**, see PORTLOG.md |
 | 2 | `almide-syntax` | corpus parses; AST JSON parity vs `--emit-ast` oracle at the port SHA — **LANDED 2026-08-19**, 1,095/1,095 byte-identical, see PORTLOG.md |
-| 3 | `almide-spec` (interpreter) + `almide-ir` | corpus output parity vs v0.57.2 native |
+| 3 | `almide-spec` (interpreter) + `almide-ir` | corpus output parity vs the port-SHA oracle — **LANDED 2026-08-19**: 451/451 comparable contract fixtures identical (stdout+exit), 138+1 doctrine-consistent skips ceilinged shrink-only, see PORTLOG.md |
 | 4 | `almide-spine` + `almide-sema` | corpus diagnostics parity; keystroke re-check touches only edited function's queries (measured); **diagnostic stability across edits** (Zig-style incremental scenarios — survey steal, RESEARCH-diagnostics.md) |
 | 5 | Lean belts + dialect epochs + llms.txt gate | lean-proofs green; llm-surface gate green |
 | 6 | `almide-wasm` (Perceus + certificates onto new emission) | corpus parity interpreter ↔ wasm; wasmparser-validate wall |

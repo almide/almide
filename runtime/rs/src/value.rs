@@ -1,0 +1,285 @@
+// Value — universal data model for Codec protocol
+// All public functions use `almide_rt_` prefix for consistent codegen dispatch.
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Array(Vec<Value>),
+    Object(Vec<(String, Value)>),
+}
+
+// ── Construction ──
+
+pub fn almide_rt_value_str(s: &str) -> Value { Value::Str(s.to_string()) }
+pub fn almide_rt_value_int(n: i64) -> Value { Value::Int(n) }
+pub fn almide_rt_value_float(f: f64) -> Value { Value::Float(f) }
+pub fn almide_rt_value_bool(b: bool) -> Value { Value::Bool(b) }
+pub fn almide_rt_value_array(items: &Vec<Value>) -> Value { Value::Array(items.clone()) }
+pub fn almide_rt_value_object(pairs: &Vec<(String, Value)>) -> Value { Value::Object(pairs.clone()) }
+pub fn almide_rt_value_null() -> Value { Value::Null }
+// Structural equality (`value.eq`). The wasm leg had this in its self-host
+// registry all along; native only ever reached Value equality through user
+// positions the walker lowers itself, so the first runtime-emitted call site
+// (the #1522 record-default decode arm) came up E0425.
+pub fn almide_rt_value_eq(a: Value, b: Value) -> bool { a == b }
+
+// ── Access ──
+
+pub fn almide_rt_value_field(v: &Value, key: &str) -> Result<Value, String> {
+    if let Value::Object(pairs) = v {
+        for (k, val) in pairs {
+            if k == key { return Ok(val.clone()); }
+        }
+        Err(format!("missing field '{}'", key))
+    } else {
+        Err("expected Object".to_string())
+    }
+}
+
+pub fn almide_rt_value_as_string(v: &Value) -> Result<String, String> {
+    match v { Value::Str(s) => Ok(s.clone()), _ => Err("expected Str".to_string()) }
+}
+pub fn almide_rt_value_as_int(v: &Value) -> Result<i64, String> {
+    match v { Value::Int(n) => Ok(*n), _ => Err("expected Int".to_string()) }
+}
+pub fn almide_rt_value_as_float(v: &Value) -> Result<f64, String> {
+    // A JSON number has no int/float distinction, so an integer literal is a
+    // valid Float — widen it (mirrors json.as_float/get_float, value.rs siblings,
+    // and serde's f64 deserializer). Keeps Codec roundtrips total for Float
+    // fields whose value happens to be integral (#658).
+    match v { Value::Float(f) => Ok(*f), Value::Int(n) => Ok(*n as f64), _ => Err("expected Float".to_string()) }
+}
+pub fn almide_rt_value_as_bool(v: &Value) -> Result<bool, String> {
+    match v { Value::Bool(b) => Ok(*b), _ => Err("expected Bool".to_string()) }
+}
+pub fn almide_rt_value_as_array(v: &Value) -> Result<Vec<Value>, String> {
+    match v { Value::Array(a) => Ok(a.clone()), _ => Err("expected Array".to_string()) }
+}
+
+// ── List encode/decode ──
+
+pub fn almide_rt_value_encode_list<T, F: Fn(T) -> Value>(items: Vec<T>, f: F) -> Value {
+    Value::Array(items.into_iter().map(f).collect())
+}
+pub fn almide_rt_value_decode_list<T, F: Fn(Value) -> Result<T, String>>(v: Value, f: F) -> Result<Vec<T>, String> {
+    match v {
+        Value::Array(items) => items.into_iter().map(f).collect(),
+        _ => Err("expected Array".to_string()),
+    }
+}
+
+// ── Option encode/decode ──
+
+pub fn almide_rt_value_option_encode<T, F: Fn(T) -> Value>(opt: Option<T>, f: F) -> Value {
+    match opt { Some(v) => f(v), None => Value::Null }
+}
+pub fn almide_rt_value_decode_option<T, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, f: F) -> Result<Option<T>, String> {
+    match almide_rt_value_field(v, key) {
+        Ok(Value::Null) => Ok(None),
+        Ok(val) => f(val).map(Some),
+        Err(_) => Ok(None),
+    }
+}
+/// Owned-argument variant for derived `Option[CustomType]` decode. The codegen
+/// passes the object and key by value (like `almide_rt_value_decode_list`), so this
+/// wrapper borrows for the by-ref generic above (新②).
+pub fn almide_rt_value_decode_option_custom<T, F: Fn(Value) -> Result<T, String>>(v: Value, key: String, f: F) -> Result<Option<T>, String> {
+    almide_rt_value_decode_option(&v, &key, f)
+}
+pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, default: T, f: F) -> Result<T, String> {
+    match almide_rt_value_field(v, key) {
+        Ok(Value::Null) => Ok(default),
+        Ok(val) => f(val),
+        Err(_) => Ok(default),
+    }
+}
+
+// ── Concrete list helpers ──
+
+pub fn almide_rt___encode_list_string(items: Vec<String>) -> Value { almide_rt_value_encode_list(items, |s| almide_rt_value_str(&s)) }
+pub fn almide_rt___encode_list_int(items: Vec<i64>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_int) }
+pub fn almide_rt___encode_list_float(items: Vec<f64>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_float) }
+pub fn almide_rt___encode_list_bool(items: Vec<bool>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_bool) }
+pub fn almide_rt___decode_list_string(v: Value) -> Result<Vec<String>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_list_int(v: Value) -> Result<Vec<i64>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_list_float(v: Value) -> Result<Vec<f64>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_list_bool(v: Value) -> Result<Vec<bool>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_bool(&x)) }
+
+// ── Concrete option helpers ──
+
+pub fn almide_rt___encode_option_string(v: Option<String>) -> Value { almide_rt_value_option_encode(v, |s| almide_rt_value_str(&s)) }
+pub fn almide_rt___encode_option_int(v: Option<i64>) -> Value { almide_rt_value_option_encode(v, almide_rt_value_int) }
+pub fn almide_rt___encode_option_float(v: Option<f64>) -> Value { almide_rt_value_option_encode(v, almide_rt_value_float) }
+pub fn almide_rt___encode_option_bool(v: Option<bool>) -> Value { almide_rt_value_option_encode(v, almide_rt_value_bool) }
+pub fn almide_rt___decode_option_string(v: Value, key: String) -> Result<Option<String>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_option_int(v: Value, key: String) -> Result<Option<i64>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_option_float(v: Value, key: String) -> Result<Option<f64>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_option_bool(v: Value, key: String) -> Result<Option<bool>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_bool(&x)) }
+pub fn almide_rt___decode_default_string(v: Value, key: String, default: String) -> Result<String, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_default_int(v: Value, key: String, default: i64) -> Result<i64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_default_float(v: Value, key: String, default: f64) -> Result<f64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_default_bool(v: Value, key: String, default: bool) -> Result<bool, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_bool(&x)) }
+// List[scalar] defaults (#1520): a missing/null key yields the default list;
+// a present key decodes through the same per-element path the required-field
+// form uses. Without these the derive emitted `__decode_default_value`, a
+// name no runtime provides — check green, rustc E0425.
+pub fn almide_rt___decode_default_list_string(v: Value, key: String, default: Vec<String>) -> Result<Vec<String>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_string(&e))) }
+pub fn almide_rt___decode_default_list_int(v: Value, key: String, default: Vec<i64>) -> Result<Vec<i64>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_int(&e))) }
+pub fn almide_rt___decode_default_list_float(v: Value, key: String, default: Vec<f64>) -> Result<Vec<f64>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_float(&e))) }
+pub fn almide_rt___decode_default_list_bool(v: Value, key: String, default: Vec<bool>) -> Result<Vec<bool>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_bool(&e))) }
+
+// ── Value utilities ──
+
+/// Object keys in insertion order. Lives in the `value` runtime (not reusing
+/// `almide_json_keys`) so a program that uses `value.keys` but never `json` still
+/// links — the native runtime is included per-module, so a cross-module reference
+/// would be undefined on a value-only program (#416 native-link fix).
+pub fn almide_rt_value_keys(v: &Value) -> Vec<String> {
+    match v {
+        Value::Object(entries) => entries.iter().map(|(k, _)| k.clone()).collect(),
+        _ => vec![],
+    }
+}
+
+/// Pick specific keys from an Object, discarding the rest.
+pub fn almide_rt_value_pick(v: &Value, keys: &[String]) -> Value {
+    match v {
+        Value::Object(pairs) => {
+            Value::Object(pairs.iter().filter(|(k, _)| keys.contains(k)).cloned().collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Rename keys in an Object using a transform function.
+pub fn almide_rt_value_rename_keys(v: &Value, f: impl Fn(String) -> String) -> Value {
+    match v {
+        Value::Object(pairs) => {
+            Value::Object(pairs.iter().map(|(k, v)| (f(k.clone()), v.clone())).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Merge two Objects. Keys from `b` override keys from `a`.
+pub fn almide_rt_value_merge(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Object(pa), Value::Object(pb)) => {
+            let mut pa = pa.clone();
+            for (k, v) in pb {
+                if let Some(pos) = pa.iter().position(|(ek, _)| ek == k) {
+                    pa[pos] = (k.clone(), v.clone());
+                } else {
+                    pa.push((k.clone(), v.clone()));
+                }
+            }
+            Value::Object(pa)
+        }
+        (_, b) => b.clone(),
+    }
+}
+
+/// Remove specific keys from an Object.
+pub fn almide_rt_value_omit(v: &Value, keys: &[String]) -> Value {
+    match v {
+        Value::Object(pairs) => {
+            Value::Object(pairs.iter().filter(|(k, _)| !keys.contains(k)).cloned().collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Convert snake_case key to camelCase.
+pub fn almide_rt_value_to_camel_case(v: &Value) -> Value {
+    almide_rt_value_rename_keys(v, |k| {
+        let mut result = String::new();
+        let mut capitalize_next = false;
+        for c in k.chars() {
+            if c == '_' { capitalize_next = true; }
+            else if capitalize_next { result.push(c.to_ascii_uppercase()); capitalize_next = false; }
+            else { result.push(c); }
+        }
+        result
+    })
+}
+
+/// Convert camelCase key to snake_case.
+pub fn almide_rt_value_to_snake_case(v: &Value) -> Value {
+    almide_rt_value_rename_keys(v, |k| {
+        let mut result = String::new();
+        for (i, c) in k.chars().enumerate() {
+            if c.is_ascii_uppercase() && i > 0 { result.push('_'); }
+            result.push(c.to_ascii_lowercase());
+        }
+        result
+    })
+}
+
+// ── Variant decode helper ──
+
+/// Extract the tag and payload from a tagged variant object {"Tag": payload}
+pub fn almide_rt_value_tagged_variant(v: Value) -> Result<(String, Value), String> {
+    match v {
+        Value::Object(pairs) => {
+            if pairs.len() == 1 {
+                let (tag, payload) = pairs.into_iter().next().unwrap();
+                Ok((tag, payload))
+            } else {
+                Err(format!("expected object with exactly 1 key for variant, got {} keys", pairs.len()))
+            }
+        }
+        _ => Err("expected Object for variant decode".to_string()),
+    }
+}
+
+// ── Stringify ──
+
+pub fn almide_rt_value_stringify(v: &Value) -> String {
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => format!("{}", f),
+        Value::Str(s) => format!("\"{}\"", s
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")),
+        Value::Array(items) => {
+            let inner: Vec<String> = items.iter().map(almide_rt_value_stringify).collect();
+            format!("[{}]", inner.join(","))
+        }
+        Value::Object(pairs) => {
+            let inner: Vec<String> = pairs.iter().map(|(k, v)| {
+                let ek = k.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+                format!("\"{}\":{}", ek, almide_rt_value_stringify(v))
+            }).collect();
+            format!("{{{}}}", inner.join(","))
+        }
+    }
+}
+
+// `Value` participates in derived `Repr` and string interpolation like any
+// other type. A record/variant with a `Value` field generates both
+// `self.<field>.almide_repr()` (the `AlmideRepr` path) and `{}` (the `Display`
+// path used by the `<Type>_repr` free fn and `"${t}"` interpolation), so `Value`
+// must impl both — without either, such a type fails to compile (E0599 / E0277).
+// Both render the Value as its JSON text, identically, so the field reprs
+// consistently across every path — and byte-identically to wasm, which reprs a
+// `Value` through the same JSON serializer (see `emit_repr_value`).
+impl AlmideRepr for Value {
+    fn almide_repr(&self) -> String { almide_rt_value_stringify(self) }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&almide_rt_value_stringify(self))
+    }
+}
+
+// json_parse and json_stringify moved to json.rs
