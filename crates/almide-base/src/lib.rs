@@ -6,7 +6,12 @@
 //! lines compile UNCHANGED. `intern` and `profile` are ported verbatim from
 //! almide@a877d2138 (crates/almide-base/src/{intern,profile}.rs).
 
+// Scoped allows on the verbatim-ported modules only (same doctrine as
+// almide-diag, PORTLOG.md unit 1): style lints in code we do not edit
+// during a port.
+#[allow(clippy::empty_line_after_doc_comments)]
 pub mod intern;
+#[allow(clippy::unnecessary_lazy_evaluations)]
 pub mod profile;
 
 pub use almide_diag::diagnostic;
