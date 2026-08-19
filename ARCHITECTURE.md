@@ -140,6 +140,28 @@ are develop-eligible and are NOT counted as greenfield returns.
 1,098 files / 55,089 lines). Greenfield CONTINUES; next = unit-4 sema spike.
 Full report: docs/spikes/S1-salsa-spine.md.**
 
+Cross-compiler reconciliation: the reference corpus's own anti-recommendation
+("no query-level invalidation" — championship, citing rustc's 15,695-line
+hand-rolled retrofit and Swift's unconsumed graph) warns against hand-rolling
+and retrofitting; S1 does neither (library salsa, ~90-line spine, consumer
+from day one), and the architecture that got it right (rust-analyzer) was
+absent from that corpus — the audit's identified sampling error. The
+comparison also surfaced the next trap: **absolute spans defeat per-function
+invalidation** (any early-line edit shifts every span downstream). Known
+cures are rust-analyzer's firewall pattern (interface-fingerprint query
+separated from body-check query) and MoonBit's relative positions (Rloc).
+
+**Spike S2 — sema-as-queries, gates:**
+- (d) body-only edit → exactly 1 function's check query re-runs (fan-out 0
+  via unchanged interface fingerprint);
+- (e) interface-changing edit → only dependent functions re-check (measured
+  against the true dependency set, not the whole module);
+- (f) span-only edit (insert a blank line above) → **0 check re-runs** — the
+  fingerprint must be span-independent;
+- (g) warm full-loop (front-end + check) ≥ 10x vs the batch equivalent on
+  the same corpus slice.
+Same fold clause as S1: any red → freeze and backport.
+
 ## 7. Certification trajectory (R1a + R1b)
 
 Aviation-grade (DO-178C-class) is a declared destination, reached from either
