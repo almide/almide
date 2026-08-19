@@ -77,7 +77,7 @@ pub fn check_file_json(db: &dyn salsa::Database, file: SourceFile) -> CheckOutpu
     let mut program = match parser.parse() {
         Ok(p) => p,
         Err(e) => {
-            return CheckOutput { fatal: Some(format!("{e}")), diags: Vec::new(), module_diags: Vec::new() };
+            return CheckOutput { fatal: Some(e), diags: Vec::new(), module_diags: Vec::new() };
         }
     };
     let parse_errors = std::mem::take(&mut parser.errors);
@@ -85,12 +85,12 @@ pub fn check_file_json(db: &dyn salsa::Database, file: SourceFile) -> CheckOutpu
     let mut resolved = match almide::resolve::resolve_imports_with_deps(&path, &program, &[]) {
         Ok(r) => r,
         Err(e) => {
-            return CheckOutput { fatal: Some(format!("{e}")), diags: Vec::new(), module_diags: Vec::new() };
+            return CheckOutput { fatal: Some(e), diags: Vec::new(), module_diags: Vec::new() };
         }
     };
 
     let canon = almide::canonicalize::canonicalize_program(
-        &mut program,
+        &program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
     );
     let mut checker = almide::check::Checker::from_env(canon.env);
