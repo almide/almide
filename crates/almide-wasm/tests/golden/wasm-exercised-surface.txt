@@ -19,6 +19,7 @@ call:list.join
 call:list.len
 call:list.push
 call:println
+call:string.len
 call:user-fn
 expr:BinOp
 expr:Block

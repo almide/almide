@@ -23,11 +23,15 @@ pub(crate) fn emit_block_print(import: u32) -> Function {
 }
 
 /// `$append_copy(cur: i32, src: i32, len: i32) -> i32`: memory.copy bytes
-/// to the cursor, return the advanced cursor.
+/// to the cursor, return the advanced cursor. Traps LOUDLY when the write
+/// would leave the line buffer (never corrupts the heap behind it).
 pub(crate) fn emit_append_copy() -> Function {
     let mut f = Function::new([]);
-    f.instructions()
-        .local_get(0)
+    let mut i = f.instructions();
+    i.local_get(0).local_get(2).i32_add().global_get(G_LINE_END).i32_gt_u().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
+    i.local_get(0)
         .local_get(1)
         .local_get(2)
         .memory_copy(0, 0)
@@ -35,6 +39,50 @@ pub(crate) fn emit_append_copy() -> Function {
         .local_get(2)
         .i32_add()
         .end();
+    f
+}
+
+/// `$buf_to_block(start: i32, cur: i32) -> i32`: capture a finished
+/// line-buffer build as a REAL layout block (value-position `"${...}"`).
+pub(crate) fn emit_buf_to_block() -> Function {
+    // params: 0=start i32, 1=cur i32; locals: 2=len i32, 3=base i32
+    let (start, cur, len, bbase) = (0u32, 1u32, 2u32, 3u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(cur).local_get(start).i32_sub().local_set(len);
+    i.local_get(len).call(F_ALLOC).local_set(bbase);
+    i.local_get(bbase).i32_const(payload).i32_add();
+    i.local_get(start);
+    i.local_get(len);
+    i.memory_copy(0, 0);
+    i.local_get(bbase);
+    i.end();
+    f
+}
+
+/// `$str_len_chars(base: i32) -> i64`: codepoint count — the oracle's
+/// `string.len` is `chars().count()`, i.e. bytes that are NOT UTF-8
+/// continuation bytes (`b & 0xC0 != 0x80`).
+pub(crate) fn emit_str_len_chars() -> Function {
+    // params: 0=base i32; locals: 1=i i32, 2=blen i32, 3=n i64
+    let (bbase, idx, blen, n) = (0u32, 1u32, 2u32, 3u32);
+    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
+    let mut i = f.instructions();
+    i.local_get(bbase).i32_load(len_memarg()).local_set(blen);
+    i.i32_const(0).local_set(idx);
+    i.i64_const(0).local_set(n);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(idx).local_get(blen).i32_ge_u().br_if(1);
+    i.local_get(bbase).local_get(idx).i32_add().i32_load8_u(byte);
+    i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().if_(BlockType::Empty);
+    i.local_get(n).i64_const(1).i64_add().local_set(n);
+    i.end();
+    i.local_get(idx).i32_const(1).i32_add().local_set(idx);
+    i.br(0).end().end();
+    i.local_get(n);
+    i.end();
     f
 }
 

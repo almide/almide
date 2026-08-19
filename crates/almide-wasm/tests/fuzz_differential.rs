@@ -163,10 +163,17 @@ impl Gen {
                 }
                 _ => format!("(not {})", self.expr(Ty::Bool, depth - 1)),
             },
-            Ty::Str => match self.rng.below(4) {
+            Ty::Str => match self.rng.below(5) {
                 0 | 1 => self.leaf(Ty::Str),
                 2 => format!("({} + {})", self.expr(Ty::Str, depth - 1), self.expr(Ty::Str, depth - 1)),
-                _ => format!("int.to_string({})", self.expr(Ty::Int, depth - 1)),
+                3 => format!("int.to_string({})", self.expr(Ty::Int, depth - 1)),
+                // VALUE-position interpolation — parts may themselves be
+                // interpolations, exercising the nested build discipline.
+                _ => {
+                    let a = self.expr(Ty::Int, depth - 1);
+                    let b = self.expr(Ty::Str, depth - 1);
+                    format!("\"${{{a}}}~${{{b}}}\"")
+                }
             },
             Ty::OptInt => match self.rng.below(4) {
                 0 => "none".to_string(),

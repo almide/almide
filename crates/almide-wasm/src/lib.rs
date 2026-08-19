@@ -110,19 +110,29 @@ const F_LIST_PUSH_8: u32 = 14;
 const F_LIST_PUSH_4: u32 = 15;
 const F_LIST_JOIN: u32 = 16;
 const F_BLOCK_COPY: u32 = 17;
+const F_BUF_TO_BLOCK: u32 = 18;
+const F_STR_LEN_CHARS: u32 = 19;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 18;
+const F_FN_BASE: u32 = 20;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
 /// 7 (i32)→i32 (alloc); program-function types start after.
 const T_MAIN: u32 = 4;
-/// (i32,i64)→i32: list_get_8 / list_push_8.
-const T_FN_BASE: u32 = 9;
-/// Immutable i32 global: the line-buffer start (= align16(pool end)).
-const G_LINE_START: u32 = 0;
+/// (i32,i64)→i32: list_get_8 / list_push_8; 9: (i32)→i64 str_len_chars.
+const T_FN_BASE: u32 = 10;
+// Global 0 is the immutable line-buffer start (= align16(pool end)); it
+// is emitted for inspectability but no instruction references it since
+// the build cursor (global 2) took over.
 /// Mutable i32 global: the bump-allocator head.
 const G_HEAP: u32 = 1;
+/// Mutable i32 global: the line-buffer BUILD CURSOR — stack-disciplined so
+/// interpolation builds NEST (a value-position `"${...}"` inside another
+/// build starts after the outer's partial content and restores on exit).
+const G_LINE_CURSOR: u32 = 2;
+/// Immutable i32 global: one past the line buffer (= heap start); the
+/// append helpers trap LOUDLY on overflow instead of corrupting the heap.
+const G_LINE_END: u32 = 3;
 
 // ── slice value model ───────────────────────────────────────────────────
 
@@ -429,10 +439,11 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     types.ty().function([ValType::I64], [ValType::I32]); // 6: itoa / int_to_string
     types.ty().function([ValType::I32], [ValType::I32]); // 7: alloc
     types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 8: list_get/push (8-byte)
+    types.ty().function([ValType::I32], [ValType::I64]); // 9: str_len_chars
     for (i, info) in table.infos.iter().enumerate() {
         // Refused functions keep a placeholder type — their stub body is
         // `unreachable` and no call site ever targets them.
-        debug_assert_eq!(T_FN_BASE as usize + i, 9 + i);
+        debug_assert_eq!(T_FN_BASE as usize + i, 10 + i);
         if info.refuse.is_some() {
             types.ty().function([], []);
         } else {
@@ -463,6 +474,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     functions.function(5); // F_LIST_PUSH_4
     functions.function(5); // F_LIST_JOIN
     functions.function(7); // F_BLOCK_COPY
+    functions.function(5); // F_BUF_TO_BLOCK
+    functions.function(9); // F_STR_LEN_CHARS
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -484,6 +497,14 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     );
     globals.global(
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(heap_start as i32),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(line_start as i32),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: false, shared: false },
         &ConstExpr::i32_const(heap_start as i32),
     );
 
@@ -508,6 +529,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_list_push(Scalar::Str));
     code.function(&emit_list_join());
     code.function(&emit_block_copy());
+    code.function(&emit_buf_to_block());
+    code.function(&emit_str_len_chars());
     for l in &lowered {
         match l {
             Ok((f, _)) => {

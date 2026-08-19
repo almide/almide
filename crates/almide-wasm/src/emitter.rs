@@ -299,6 +299,21 @@ impl Emitter<'_> {
                 self.lower(tail, want)?
             }
             IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_control(e, want)?,
+            // Value-position interpolation: build in the line buffer, then
+            // capture as a real block; the cursor global restores so the
+            // buffer region is reusable (and nested builds stay sound).
+            IrExprKind::StringInterp { parts } => {
+                let start = self.lower_interp_build(parts)?;
+                self.f
+                    .instructions()
+                    .local_get(start)
+                    .local_get(self.cursor_local)
+                    .call(F_BUF_TO_BLOCK)
+                    .local_get(start)
+                    .global_set(G_LINE_CURSOR);
+                self.release_i32();
+                STR
+            }
             _ => self.lower_data(e, want)?,
         };
         if let Some(w) = want
@@ -374,7 +389,8 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i32();
                 elem
-            }            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
+            }
+            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
         };
         Ok(got)
     }

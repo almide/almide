@@ -671,3 +671,20 @@ at slice scale.
   fixed range green. Next walls: bind-ty:Applied ×80 (Map/Set/remaining),
   Named ×46 (record-shaped variant cases, generics), Bytes ×24,
   list.map ×20 (closures), Tuple ×17, Float ×16, StringInterp-as-value ×12.
+
+---
+
+## Unit 6 — stage 7: value-position interpolation + string.len (2026-08-20)
+
+- **`"${...}"` as a VALUE**: the line buffer gained a stack-disciplined
+  BUILD CURSOR global — a nested value-position build starts after the
+  outer's partial content and restores on exit, so interpolations nest to
+  any depth; the finished region is captured as a real block
+  (`$buf_to_block`). The append helpers now TRAP on buffer overflow
+  (bounds against `G_LINE_END`) instead of corrupting the heap behind it.
+- **`string.len`** — the oracle counts CODEPOINTS (`chars().count()`),
+  so `$str_len_chars` counts non-continuation bytes, never the byte len.
+- The fuzzer generates value-position (and therefore nested)
+  interpolations; 1,500-seed burst clean.
+- **Burn-up: 57 → 64 / 590**, floor re-pinned 64, zero divergence;
+  surface manifest +`call:string.len`.
