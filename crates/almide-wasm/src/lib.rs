@@ -119,8 +119,11 @@ const F_SCAN_W64: u32 = 20;
 const F_SCAN_W32: u32 = 21;
 const F_SCAN_STR: u32 = 22;
 const F_F16_TO_F64: u32 = 23;
+const F_CP_OFF: u32 = 24;
+const F_STR_SLICE: u32 = 25;
+const F_STR_REPEAT: u32 = 26;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 24;
+const F_FN_BASE: u32 = 27;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
@@ -128,8 +131,9 @@ const F_FN_BASE: u32 = 24;
 const T_MAIN: u32 = 4;
 /// (i32,i64)→i32: list_get_8 / list_push_8; 9: (i32)→i64 str_len_chars;
 /// 10: (i32,i32,i32,i64)→i32 scan_w64; 11: (i32,i32,i32,i32)→i32 scan_w32/str;
-/// 12: (i32)→f64 f16_to_f64.
-const T_FN_BASE: u32 = 13;
+/// 12: (i32)→f64 f16_to_f64; 13: (i32,i64)→i32 cp_off/str_repeat;
+/// 14: (i32,i64,i64)→i32 str_slice.
+const T_FN_BASE: u32 = 15;
 // Global 0 is the immutable line-buffer start (= align16(pool end)); it
 // is emitted for inspectability but no instruction references it since
 // the build cursor (global 2) took over.
@@ -554,10 +558,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I64], [ValType::I32]); // 10: scan_w64
     types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 11: scan_w32/str
     types.ty().function([ValType::I32], [ValType::F64]); // 12: f16_to_f64
+    types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 13: cp_off / str_repeat
+    types.ty().function([ValType::I32, ValType::I64, ValType::I64], [ValType::I32]); // 14: str_slice
     for (i, info) in table.infos.iter().enumerate() {
         // Refused functions keep a placeholder type — their stub body is
         // `unreachable` and no call site ever targets them.
-        debug_assert_eq!(T_FN_BASE as usize + i, 13 + i);
+        debug_assert_eq!(T_FN_BASE as usize + i, 15 + i);
         if info.refuse.is_some() {
             types.ty().function([], []);
         } else {
@@ -594,6 +600,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     functions.function(11); // F_SCAN_W32
     functions.function(11); // F_SCAN_STR
     functions.function(12); // F_F16_TO_F64
+    functions.function(13); // F_CP_OFF
+    functions.function(14); // F_STR_SLICE
+    functions.function(13); // F_STR_REPEAT
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -653,6 +662,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_scan_w32());
     code.function(&emit_scan_str());
     code.function(&emit_f16_to_f64());
+    code.function(&emit_cp_off());
+    code.function(&emit_str_slice());
+    code.function(&emit_str_repeat());
     for l in &lowered {
         match l {
             Ok((f, _)) => {

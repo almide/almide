@@ -138,6 +138,30 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_BLOCK_COPY);
                 Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
             }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string"
+                    && func.as_str() == "slice"
+                    && (args.len() == 2 || args.len() == 3) =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                self.lower(&args[1], Some(INT))?;
+                if let Some(e) = args.get(2) {
+                    self.lower(e, Some(INT))?;
+                } else {
+                    // the surface's `end` default: i64::MAX ("to the end")
+                    self.f.instructions().i64_const(i64::MAX);
+                }
+                self.f.instructions().call(F_STR_SLICE);
+                Ok(Some(STR))
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "repeat" && args.len() == 2 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                self.lower(&args[1], Some(INT))?;
+                self.f.instructions().call(F_STR_REPEAT);
+                Ok(Some(STR))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
                 self.lower_list_call(func.as_str(), args)
             }
@@ -334,6 +358,73 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti)))))
+            }
+            ("slice", [xs, a, b]) => {
+                let (h, elem) = match self.lower(xs, None)? {
+                    SliceTy::List(h) => (h, self.types.el(h)),
+                    other => return unsup(&format!("list-slice-of:{other:?}")),
+                };
+                let stride = elem.slot_size() as i64;
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(a, Some(INT))?;
+                let ah = self.hold_i64()?;
+                self.f.instructions().local_set(ah);
+                self.lower(b, Some(INT))?;
+                let eh = self.hold_i64()?;
+                // e = min(b, count); s = a; s < 0 or s >= e → []
+                let mut ins = self.f.instructions();
+                ins.local_tee(eh);
+                ins.local_get(bh)
+                    .i32_load(len_memarg())
+                    .i64_extend_i32_u()
+                    .i64_const(stride)
+                    .i64_div_s();
+                ins.local_get(eh);
+                ins.local_get(bh)
+                    .i32_load(len_memarg())
+                    .i64_extend_i32_u()
+                    .i64_const(stride)
+                    .i64_div_s();
+                ins.i64_lt_s().select().local_set(eh);
+                // empty when a < 0 (usize-wrap semantics) or a >= e
+                ins.local_get(ah).i64_const(0).i64_lt_s();
+                ins.local_get(ah).local_get(eh).i64_ge_s();
+                ins.i32_or().if_(BlockType::Result(ValType::I32));
+                ins.i32_const(0).call(F_ALLOC);
+                ins.else_();
+                // alloc (e-a)*stride; copy from base + a*stride
+                ins.local_get(eh)
+                    .local_get(ah)
+                    .i64_sub()
+                    .i64_const(stride)
+                    .i64_mul()
+                    .i32_wrap_i64()
+                    .call(F_ALLOC)
+                    .local_tee(self.tmp_i32_local)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add();
+                ins.local_get(bh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(ah)
+                    .i64_const(stride)
+                    .i64_mul()
+                    .i32_wrap_i64()
+                    .i32_add();
+                ins.local_get(eh)
+                    .local_get(ah)
+                    .i64_sub()
+                    .i64_const(stride)
+                    .i64_mul()
+                    .i32_wrap_i64();
+                ins.memory_copy(0, 0);
+                ins.local_get(self.tmp_i32_local);
+                ins.end();
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(SliceTy::List(h)))
             }
             ("map", [xs, cb]) => self.lower_list_map(xs, cb),
             ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),

@@ -169,6 +169,103 @@ pub(crate) fn emit_f16_to_f64() -> Function {
     f
 }
 
+/// `$cp_off(base: i32, idx: i64) -> i32`: byte offset of the idx-th
+/// CODEPOINT start (clamped: negative → 0, past-the-end → byte len) —
+/// the oracle's string indices are codepoints, never bytes.
+pub(crate) fn emit_cp_off() -> Function {
+    // params: 0=base, 1=idx i64; locals: 2=p i32, 3=blen i32, 4=n i64
+    let (bbase, idx, p, blen, n) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
+    let mut i = f.instructions();
+    i.local_get(bbase).i32_load(len_memarg()).local_set(blen);
+    i.i32_const(0).local_set(p);
+    i.i64_const(0).local_set(n);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(blen).i32_ge_u().br_if(1);
+    // at a codepoint start: stop when n == clamp(idx)
+    i.local_get(n).local_get(idx).i64_ge_s().br_if(1);
+    // advance one byte, then skip continuation bytes
+    i.local_get(p).i32_const(1).i32_add().local_set(p);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(blen).i32_ge_u().br_if(1);
+    i.local_get(bbase).local_get(p).i32_add().i32_load8_u(byte);
+    i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().br_if(1);
+    i.local_get(p).i32_const(1).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.local_get(n).i64_const(1).i64_add().local_set(n);
+    i.br(0).end().end();
+    i.local_get(p);
+    i.end();
+    f
+}
+
+/// `$str_slice(base, start_cp, end_cp) -> i32`: the oracle's clamped
+/// codepoint slice (start/end clamp to [0, count]; start >= end → "").
+pub(crate) fn emit_str_slice() -> Function {
+    // params: 0=base, 1=s i64, 2=e i64; locals: 3=so i32, 4=eo i32, 5=r i32
+    let (bbase, sidx, eidx, so, eo, r) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    // negative indices clamp to 0 before the scan
+    i.local_get(bbase);
+    i.local_get(sidx).i64_const(0).i64_lt_s().if_(BlockType::Result(ValType::I64));
+    i.i64_const(0);
+    i.else_().local_get(sidx).end();
+    i.call(F_CP_OFF).local_set(so);
+    i.local_get(bbase);
+    i.local_get(eidx).i64_const(0).i64_lt_s().if_(BlockType::Result(ValType::I64));
+    i.i64_const(0);
+    i.else_().local_get(eidx).end();
+    i.call(F_CP_OFF).local_set(eo);
+    i.local_get(so).local_get(eo).i32_ge_u().if_(BlockType::Empty);
+    i.i32_const(0).call(F_ALLOC).return_();
+    i.end();
+    i.local_get(eo).local_get(so).i32_sub().call(F_ALLOC).local_set(r);
+    i.local_get(r).i32_const(payload).i32_add();
+    i.local_get(bbase).i32_const(payload).i32_add().local_get(so).i32_add();
+    i.local_get(eo).local_get(so).i32_sub();
+    i.memory_copy(0, 0);
+    i.local_get(r);
+    i.end();
+    f
+}
+
+/// `$str_repeat(base, n) -> i32`: n clamps at 0; the oracle aborts past
+/// 2 GiB (`ALMIDE_REPEAT_MAX_BYTES`) — here that is a trap in the same
+/// abort-pending class.
+pub(crate) fn emit_str_repeat() -> Function {
+    // params: 0=base, 1=n i64; locals: 2=len i32, 3=total i64, 4=r i32, 5=k i64
+    let (bbase, n, len, total, r, k) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let mut f =
+        Function::new([(1, ValType::I32), (1, ValType::I64), (1, ValType::I32), (1, ValType::I64)]);
+    let mut i = f.instructions();
+    i.local_get(n).i64_const(0).i64_le_s().if_(BlockType::Empty);
+    i.i32_const(0).call(F_ALLOC).return_();
+    i.end();
+    i.local_get(bbase).i32_load(len_memarg()).local_set(len);
+    i.local_get(len).i64_extend_i32_u().local_get(n).i64_mul().local_set(total);
+    i.local_get(total).i64_const(1 << 31).i64_gt_s().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
+    i.local_get(total).i32_wrap_i64().call(F_ALLOC).local_set(r);
+    i.i64_const(0).local_set(k);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(k).local_get(n).i64_ge_s().br_if(1);
+    i.local_get(r).i32_const(payload).i32_add();
+    i.local_get(k).i32_wrap_i64().local_get(len).i32_mul().i32_add();
+    i.local_get(bbase).i32_const(payload).i32_add();
+    i.local_get(len);
+    i.memory_copy(0, 0);
+    i.local_get(k).i64_const(1).i64_add().local_set(k);
+    i.br(0).end().end();
+    i.local_get(r);
+    i.end();
+    f
+}
+
 /// `$str_len_chars(base: i32) -> i64`: codepoint count — the oracle's
 /// `string.len` is `chars().count()`, i.e. bytes that are NOT UTF-8
 /// continuation bytes (`b & 0xC0 != 0x80`).

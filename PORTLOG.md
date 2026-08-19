@@ -964,3 +964,18 @@ Referees earned their keep three times in one slice:
   new shape.
 
 **Burn-up: 137 → 140 / 590**, floor 140, zero divergence.
+
+---
+
+## Unit 6 — stage 14: the slice/repeat cluster (2026-08-20)
+
+`string.slice` (CODEPOINT indices — `$cp_off` scans to the idx-th
+codepoint start, clamped like the native rt: negatives → 0, past-end →
+len, start ≥ end → ""), `string.repeat` (n ≤ 0 → "", the 2 GiB cap traps
+in the abort-pending class), and `list.slice` (element indices with the
+native `start as usize` semantics: negative start → empty; end clamps to
+count). The `end` parameter's surface default (i64::MAX = "to the end")
+is materialized at the call site when the third argument is omitted.
+
+**Burn-up: 140 → 149 / 590**, floor 149, zero divergence — codepoint
+semantics matched the oracle on the first gate run.
