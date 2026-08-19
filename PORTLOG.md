@@ -709,3 +709,24 @@ their own honest refusal — a later mechanism, not a partial fake.
 - Remaining walls: Applied ×80 (Map/Set), Named ×45, Bytes ×24,
   Tuple ×19, Float ×16, Matrix ×12, process.exit ×10, RuntimeCall ×9,
   Fn-typed values ×8.
+
+---
+
+## Stage-8 CI red → return_call (C-292) (2026-08-20)
+
+The stage-8 push went RED in CI: `ref_gleam_tail_deep` (first claimed by
+the HOF slice) runs 200k-deep tail recursion — it survived a laptop's
+generous wasmtime stack and overflowed the runner's. Environment-shaped
+depth bugs are exactly what the C-292 contract exists for; the fix is
+the real mechanism, not a bigger stack:
+
+- Tail position now propagates through function bodies, block tails,
+  if arms and match arms (one-shot `in_tail` marker, TAKEN at `lower`
+  entry so it can never leak into operand lowering); a direct call in
+  tail position with a matching return type emits **`return_call`** —
+  constant stack for arbitrarily deep, including mutual, recursion.
+- New referee `tests/tail_calls.rs` pins a DELIBERATELY TINY 64 KiB wasm
+  stack so depth-vs-environment can never hide again;
+  mutation-verified (disabling return_call → red) and promoted to
+  standing mutant `006-return-call-disabled.patch` (gate suites now
+  include the referee).

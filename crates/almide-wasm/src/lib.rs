@@ -629,6 +629,7 @@ fn lower_fn(
             hold_i32_depth: 0,
             hold_i64_base,
             hold_i64_depth: 0,
+            in_tail: false,
             f: &mut f,
         };
         for tl in top_lets {
@@ -642,7 +643,7 @@ fn lower_fn(
         match ret {
             None => em.lower_stmt_expr(body)?,
             Some(want) => {
-                em.lower(body, Some(want))?;
+                em.lower_tail(body, Some(want))?;
             }
         }
     }

@@ -14,6 +14,15 @@ impl Emitter<'_> {
         target: &CallTarget,
         args: &[IrExpr],
     ) -> Result<Option<SliceTy>, EmitError> {
+        self.lower_call_at(target, args, false)
+    }
+
+    pub(crate) fn lower_call_at(
+        &mut self,
+        target: &CallTarget,
+        args: &[IrExpr],
+        tail: bool,
+    ) -> Result<Option<SliceTy>, EmitError> {
         match target {
             CallTarget::Named { name } if name.as_str() == "println" && args.len() == 1 => {
                 self.lower_print(&args[0], F_PRINTLN_IMPORT, F_PRINTLN_BLOCK)?;
@@ -71,7 +80,14 @@ impl Emitter<'_> {
                     self.lower(a, Some(want))?;
                 }
                 self.calls.insert(name.to_string());
-                self.f.instructions().call(index);
+                // Tail position with a matching return type → return_call:
+                // constant stack for arbitrarily deep (incl. mutual)
+                // recursion, the C-292 contract.
+                if tail && ret.is_some() && ret == self.fn_ret {
+                    self.f.instructions().return_call(index);
+                } else {
+                    self.f.instructions().call(index);
+                }
                 Ok(ret)
             }
             // Stdlib special forms the runtime helpers cover directly.

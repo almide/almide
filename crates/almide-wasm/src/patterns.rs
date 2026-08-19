@@ -17,6 +17,16 @@ impl Emitter<'_> {
         arms: &[IrMatchArm],
         result: Option<SliceTy>,
     ) -> Result<(), EmitError> {
+        self.lower_match_at(subject, arms, result, false)
+    }
+
+    pub(crate) fn lower_match_at(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result: Option<SliceTy>,
+        tail: bool,
+    ) -> Result<(), EmitError> {
         if arms.is_empty() {
             return unsup("match:no-arms");
         }
@@ -29,7 +39,7 @@ impl Emitter<'_> {
             _ => self.scr_i32_local,
         };
         self.f.instructions().local_set(scr);
-        self.lower_arm_chain(arms, subj_ty, scr, result)
+        self.lower_arm_chain(arms, subj_ty, scr, result, tail)
     }
 
     pub(crate) fn lower_arm_chain(
@@ -38,13 +48,14 @@ impl Emitter<'_> {
         subj_ty: SliceTy,
         scr: u32,
         result: Option<SliceTy>,
+        tail: bool,
     ) -> Result<(), EmitError> {
         let arm = &arms[0];
         if pattern_irrefutable(&arm.pattern) {
             // Selected unconditionally; later arms are dead (checker-
             // verified reachability aside, the oracle picks the first).
             self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
-            return self.lower_arm_body(&arm.body, result);
+            return self.lower_arm_body(&arm.body, result, tail);
         }
         self.emit_pattern_test(&arm.pattern, subj_ty, scr)?;
         let bt = match result {
@@ -53,10 +64,10 @@ impl Emitter<'_> {
         };
         self.f.instructions().if_(bt);
         self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
-        self.lower_arm_body(&arm.body, result)?;
+        self.lower_arm_body(&arm.body, result, tail)?;
         self.f.instructions().else_();
         if arms.len() > 1 {
-            self.lower_arm_chain(&arms[1..], subj_ty, scr, result)?;
+            self.lower_arm_chain(&arms[1..], subj_ty, scr, result, tail)?;
         } else {
             // The checker promises exhaustiveness — if it's ever wrong,
             // trap LOUDLY instead of silently misbehaving.
@@ -66,9 +77,17 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    pub(crate) fn lower_arm_body(&mut self, body: &IrExpr, result: Option<SliceTy>) -> Result<(), EmitError> {
+    pub(crate) fn lower_arm_body(
+        &mut self,
+        body: &IrExpr,
+        result: Option<SliceTy>,
+        tail: bool,
+    ) -> Result<(), EmitError> {
         match result {
-            Some(ty) => self.lower(body, Some(ty)).map(|_| ()),
+            Some(ty) => {
+                self.in_tail = tail;
+                self.lower(body, Some(ty)).map(|_| ())
+            }
             None => self.lower_stmt_expr(body),
         }
     }

@@ -26,6 +26,11 @@ pub(crate) struct Emitter<'a> {
     /// before any nested match/unwrap in a SELECTED arm's body runs.
     pub(crate) scr_i32_local: u32,
     pub(crate) scr_i64_local: u32,
+    /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
+    /// `lower`'s entry so it never leaks into operand lowering. A direct
+    /// call in tail position with a matching return type emits
+    /// `return_call` — constant stack for deep (incl. mutual) recursion.
+    pub(crate) in_tail: bool,
     pub(crate) hold_i32_base: u32,
     pub(crate) hold_i32_depth: u32,
     pub(crate) hold_i64_base: u32,
@@ -250,7 +255,19 @@ impl Emitter<'_> {
                 Ok(())
                 }
 
+    /// Lower `e` in TAIL position (the value becomes the function's
+    /// return): direct calls become `return_call`.
+    pub(crate) fn lower_tail(
+        &mut self,
+        e: &IrExpr,
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+        self.in_tail = true;
+        self.lower(e, want)
+    }
+
     pub(crate) fn lower(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
+        let tail = std::mem::take(&mut self.in_tail);
         let got = match &e.kind {
             IrExprKind::LitInt { value } => {
                 self.f.instructions().i64_const(*value);
@@ -272,10 +289,12 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(idx);
                 ty
             }
-            IrExprKind::Call { target, args, .. } => match self.lower_call(target, args)? {
-                Some(ty) => ty,
-                None => return unsup("call-unit-in-value"),
-            },
+            IrExprKind::Call { target, args, .. } => {
+                match self.lower_call_at(target, args, tail)? {
+                    Some(ty) => ty,
+                    None => return unsup("call-unit-in-value"),
+                }
+            }
             IrExprKind::UnOp { op, operand } => match op {
                 UnOp::NegInt => {
                     self.f.instructions().i64_const(0);
@@ -295,10 +314,13 @@ impl Emitter<'_> {
                 for s in stmts {
                     self.lower_stmt(s)?;
                 }
-                let Some(tail) = expr else { return unsup("expr:Block-no-tail") };
-                self.lower(tail, want)?
+                let Some(t) = expr else { return unsup("expr:Block-no-tail") };
+                self.in_tail = tail;
+                self.lower(t, want)?
             }
-            IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_control(e, want)?,
+            IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                self.lower_control(e, want, tail)?
+            }
             // Value-position interpolation: build in the line buffer, then
             // capture as a real block; the cursor global restores so the
             // buffer region is reusable (and nested builds stay sound).
@@ -695,6 +717,7 @@ impl Emitter<'_> {
         &mut self,
         e: &IrExpr,
         want: Option<SliceTy>,
+        tail: bool,
     ) -> Result<SliceTy, EmitError> {
         let got = match &e.kind {
             // Value-position `if`: the arm type comes from the hint or is
@@ -707,8 +730,10 @@ impl Emitter<'_> {
                     None => self.infer(e)?,
                 };
                 self.f.instructions().if_(BlockType::Result(ty.val_type()));
+                self.in_tail = tail;
                 self.lower(then, Some(ty))?;
                 self.f.instructions().else_();
+                self.in_tail = tail;
                 self.lower(else_, Some(ty))?;
                 self.f.instructions().end();
                 ty
@@ -718,7 +743,7 @@ impl Emitter<'_> {
                     Some(w) => w,
                     None => self.infer(e)?,
                 };
-                self.lower_match(subject, arms, Some(ty))?;
+                self.lower_match_at(subject, arms, Some(ty), tail)?;
                 ty
             }
             other => return unsup(&format!("expr:{}", expr_kind_name(other))),

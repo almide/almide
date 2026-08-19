@@ -21,7 +21,7 @@ if ! git diff --quiet; then
   exit 2
 fi
 
-SUITES=(--test backend_parity --test fuzz_differential --test alias_semantics)
+SUITES=(--test backend_parity --test fuzz_differential --test alias_semantics --test tail_calls)
 fail=0
 
 for patch in ci/mutations/*.patch; do
