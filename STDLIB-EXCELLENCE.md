@@ -59,9 +59,9 @@ Every content improvement follows four steps, in one commit:
 | # | item | evidence | class | status |
 |---|---|---|---|---|
 | 1 | Remove `openai_streaming_call` from core `http` | audit: vendor API in stdlib is a layering violation with a short shelf life | removal (pre-release) | **DONE 2026-08-19** |
-| 2 | `url` module — parse/build/percent-encode | audit: no URL handling; the incumbent's own effect-capability table names a phantom `url` module | additive | queued — survey-first: the 9-compiler stdlib survey (RESEARCH-stdlib.md) sets the design bar before any new module is authored |
+| 2 | `url` module — parse/build/percent-encode | audit gap; phantom `url` in the incumbent capability table | additive | **DONE 2026-08-19** — first module under the constitution: core-tier declared, SD3-compliant (Result-with-reason parse family, total builders, no panic variants), strict UTF-8 percent codec in pure codepoint arithmetic, 15 evaluable `// Example:` lines all green in the interpreter harness |
 | 3 | Opaque `net` handles — `TcpStream`/`TcpListener` types instead of raw `Int` | audit: "indefensible in a language that made `Int` illegal as a *time*" | behavioral | queued |
-| 4 | Interp bridge coverage burn-down (the 138 `Unsupported` skips: `prim.handle` slices #1226, `prim.alloc_*`) | unit-3 gate histogram; world-best = the executable spec covers its own contract corpus | additive (oracle-side) | queued, ceiling 138 shrink-only |
+| 4 | Interp bridge coverage burn-down (#1226) | unit-3 gate histogram | additive (oracle-side) | **IN PROGRESS** — 138 → **121** (ceiling tightened): live-address `prim.handle` passthrough, typed carrier return-sync (Option/Result shells + null-address none), interior-pointer abstain guard, pure-Option-fn `!`-carrier normalization. The parity net caught 2 real semantic bugs mid-burn (interior address printed as data; effect-Option err swallow = the historic #1410 cell) |
 | 5 | `log` module (leveled, structured) | audit: phantom module in the capability table; no logging story | additive | queued |
 | 6 | `uuid` module (v4 + v7) | audit gap; needs a CSPRNG stance first (see #8) | additive | queued |
 | 7 | `time` module or capability-table fix | audit: capability table names `time`, stdlib has only `datetime` | additive/doc | queued |
@@ -69,6 +69,8 @@ Every content improvement follows four steps, in one commit:
 | 9 | `Ord` auto-derive parity with `Eq`/`Hash` | audit: inconsistency an LLM trips on; `<` stays hardwired to 4 types | behavioral (checker) | queued |
 | 10 | Retire hand-monomorphized `fan_map_*` type-pair family | falls out of R3 (dictionary ABI) — do not hand-fix | blocked on unit 6+ | — |
 | 11 | Stdlib fmt canonicalization (legacy fn-slot spellings) | audit: stdlib not formatted to its own canon | mechanical | blocked on almide-tools port |
+
+| 12 | Helper-prefix gate: every private helper in a stdlib module must be `__<module>_`-prefixed | found live: url's `__hex_char` linked to `int_hex`'s same-named Int-returning helper through the flat self-host namespace | mechanical gate | queued |
 
 Rules: the queue is append-only; a DONE row names its commit; `behavioral`
 rows may not land while their parity impact is unreviewed.

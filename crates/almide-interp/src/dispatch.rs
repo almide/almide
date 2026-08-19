@@ -810,14 +810,73 @@ impl<'a> Interpreter<'a> {
     /// type names. Anything else passes through untouched.
     fn sync_block_return(&self, func_def: &'a almide_ir::IrFunction, flow: Flow) -> Flow {
         use almide_lang::types::Ty;
-        let wants_block = matches!(&func_def.ret_ty, Ty::String | Ty::Bytes);
-        if !wants_block {
-            return flow;
-        }
         let Flow::Value(v) = &flow else { return flow };
-        match self.block_value(v) {
-            Some(rebuilt) => Flow::Value(rebuilt),
-            None => flow,
+        let heap_ty = |t: &Ty| matches!(t, Ty::String | Ty::Bytes);
+        // Flat heap-typed return: the original slice — plus the GREENFIELD
+        // interior-pointer guard: a fn DECLARED to return a heap value that
+        // yields an Int with no live block base has produced an interior
+        // pointer (parent + offset); leaking it prints an address as data
+        // (run-parity caught edge_string_unicode printing 37 for a crab
+        // emoji). Abstain, never guess.
+        if heap_ty(&func_def.ret_ty) {
+            return match self.block_value(v) {
+                Some(rebuilt) => Flow::Value(rebuilt),
+                None if matches!(v, Value::Int(_)) => Flow::Unsupported(
+                    "return sync: interior (non-base) address under a heap \
+                     return type — #1226 slice 3"
+                        .into(),
+                ),
+                None => flow,
+            };
+        }
+        // GREENFIELD one-level carrier sync (type-driven, like the flat
+        // case): Option[String|Bytes] and Result with a heap side — the
+        // shells the newly unlocked impls actually return. Anything else
+        // passes through untouched.
+        match (&func_def.ret_ty, v) {
+            // A heap-tier Option can arrive as a RAW address: 0 is the
+            // arena's reserved null (= none), a live base is some(block),
+            // anything else is an interior pointer — abstain.
+            (Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, ts), Value::Int(i)) if ts.len() == 1 && heap_ty(&ts[0]) => {
+                if *i == 0 {
+                    Flow::Value(Value::Option(None))
+                } else {
+                    match self.block_value(v) {
+                        Some(r) => Flow::Value(Value::Option(Some(Box::new(r)))),
+                        None => Flow::Unsupported(
+                            "return sync: interior address under an Option return type — #1226 slice 3".into(),
+                        ),
+                    }
+                }
+            }
+            (Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, ts), Value::Option(Some(x))) if ts.len() == 1 && heap_ty(&ts[0]) => {
+                match self.block_value(x) {
+                    Some(r) => Flow::Value(Value::Option(Some(Box::new(r)))),
+                    None if matches!(**x, Value::Int(_)) => Flow::Unsupported(
+                        "return sync: interior address inside Option — #1226 slice 3".into(),
+                    ),
+                    None => flow,
+                }
+            }
+            (Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, ts), Value::Result(Ok(x))) if ts.len() == 2 && heap_ty(&ts[0]) => {
+                match self.block_value(x) {
+                    Some(r) => Flow::Value(Value::Result(Ok(Box::new(r)))),
+                    None if matches!(**x, Value::Int(_)) => Flow::Unsupported(
+                        "return sync: interior address inside Result — #1226 slice 3".into(),
+                    ),
+                    None => flow,
+                }
+            }
+            (Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, ts), Value::Result(Err(x))) if ts.len() == 2 && heap_ty(&ts[1]) => {
+                match self.block_value(x) {
+                    Some(r) => Flow::Value(Value::Result(Err(Box::new(r)))),
+                    None if matches!(**x, Value::Int(_)) => Flow::Unsupported(
+                        "return sync: interior address inside Result — #1226 slice 3".into(),
+                    ),
+                    None => flow,
+                }
+            }
+            _ => flow,
         }
     }
 
@@ -904,6 +963,19 @@ impl<'a> Interpreter<'a> {
                             .into(),
                     ),
                 }
+            }
+            // GREENFIELD #1226 burn-down slice: an Int naming a LIVE arena
+            // block is already a handle — `prim.alloc_str`/`alloc_bytes`
+            // return the ADDRESS in this model, and impl bodies immediately
+            // re-handle it (string_from_codepoint: `prim.handle(buf)` on the
+            // alloc_str result). Identity for live addresses only; a dead Int
+            // still abstains, so the module-doc warning about identity-handle
+            // corruption stays honored. Adjudicated by the 451-fixture run
+            // manifest and the stdlib examples harness.
+            Some(Value::Int(a))
+                if u32::try_from(*a).is_ok_and(|u| self.heap.block_bytes(u).is_some()) =>
+            {
+                Flow::val(Value::Int(*a))
             }
             _ => Flow::Unsupported(
                 "prim.handle of a value outside the flat String/Bytes family \

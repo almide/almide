@@ -766,7 +766,30 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         base: &env::Scope,
     ) -> (Flow, env::Scope) {
-        self.run_callable(TailCallee::Fn(func), args, base)
+        let (flow, frame) = self.run_callable(TailCallee::Fn(func), args, base);
+        // GREENFIELD (#1226 unlock follow-up, adjudicated by the run-parity
+        // manifest): `!`-propagation always travels as Result(Err(..)) — the
+        // codegen lowers Option `!` to `ok_or("none")?` — but a fn DECLARED
+        // `-> T?` propagates `none` at its boundary on both backends
+        // (spec/wasm_cross/pure_bang_propagation.almd). Normalize the
+        // carrier here, ret-type-driven — but PURE fns only: a declared-Option
+        // EFFECT fn rides AUTO_WRAP and must propagate the Err with its
+        // message (spec/wasm_fail/int_parse_err_propagates.almd — the exact
+        // cell where the wasm leg once swallowed the error, #1410/#1411).
+        let flow = match flow {
+            Flow::Value(crate::value::Value::Result(Err(_)))
+                if func.ret_ty.is_option() && !func.is_effect =>
+            {
+                Flow::Value(crate::value::Value::Option(None))
+            }
+            Flow::Return(crate::value::Value::Result(Err(_)))
+                if func.ret_ty.is_option() && !func.is_effect =>
+            {
+                Flow::Return(crate::value::Value::Option(None))
+            }
+            other => other,
+        };
+        (flow, frame)
     }
 
     /// The tail-call trampoline: the shared engine under every function and

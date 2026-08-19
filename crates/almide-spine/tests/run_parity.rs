@@ -47,7 +47,7 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     // and the incumbent's own 3-way gate SKIPS those rather than voting.
     // Same doctrine here — skipped WITH the reason printed, and the count is
     // a shrink-only ceiling so coverage can only grow.
-    const MAX_UNSUPPORTED: usize = 138;
+    const MAX_UNSUPPORTED: usize = 121;
     // FuelExhausted (-3) is the interpreter's second distinguished outcome
     // ("NOT a hang or panic"); the one huge-range fixture hits it. Ceiling 1.
     const MAX_FUEL: usize = 1;
