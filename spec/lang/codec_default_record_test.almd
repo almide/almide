@@ -1,0 +1,34 @@
+import json
+
+// #1522: a Codec field whose DEFAULT is a named-Codec record. The derive used
+// to emit `__decode_default_value` — a helper no runtime provides — so check
+// was green and the native build died at the COMPILER BUG banner. The decode
+// now routes such a default through the field's OWN decode path inline, with
+// the #1520 helper family's exact semantics: a missing key or an explicit
+// null yields the default, a present value decodes STRICTLY (a malformed
+// present value is an error, never the default).
+type Pt: Codec = { x: Int }
+
+type W: Codec = { label: String, p: Pt = Pt { x: 7 } }
+
+test "decode: missing key takes the default record" {
+  let w = W.decode(json.parse("{\"label\":\"a\"}")!)!
+  assert_eq(w.p.x, 7)
+}
+
+test "decode: null key takes the default record" {
+  let w = W.decode(json.parse("{\"label\":\"b\",\"p\":null}")!)!
+  assert_eq(w.p.x, 7)
+}
+
+test "decode: present key decodes through Pt.decode" {
+  let w = W.decode(json.parse("{\"label\":\"c\",\"p\":{\"x\":42}}")!)!
+  assert_eq(w.p.x, 42)
+}
+
+test "decode: malformed present value is an error, not the default" {
+  match W.decode(json.parse("{\"label\":\"d\",\"p\":{\"y\":1}}")!) {
+    ok(_) => assert_eq("decoded", "should have failed"),
+    err(e) => assert_eq(e, "missing field 'x'"),
+  }
+}

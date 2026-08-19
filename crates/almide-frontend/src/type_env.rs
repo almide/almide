@@ -323,6 +323,38 @@ impl TypeEnv {
         }
     }
 
+    /// Why [`Self::is_hash`] said no, for diagnostics: the first unhashable
+    /// LEAF in the type ("a function", "a Float", "a Map"), or `None` when the
+    /// type is hashable. Mirrors `is_hash_inner`'s traversal exactly, cycle
+    /// detection included, so the two can never disagree on reachability
+    /// (#1518: a fn-typed field inside a Named record key needs the E016
+    /// closure wording, not the generic unhashable one).
+    pub fn hash_blocker(&self, ty: &Ty) -> Option<&'static str> {
+        let mut seen = std::collections::HashSet::new();
+        self.hash_blocker_inner(ty, &mut seen)
+    }
+
+    fn hash_blocker_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<Sym>) -> Option<&'static str> {
+        match ty {
+            Ty::Float => Some("a Float"),
+            Ty::Fn { .. } => Some("a function"),
+            Ty::Applied(almide_lang::types::TypeConstructorId::Map, _) => Some("a Map"),
+            Ty::Variant { name, .. } => {
+                if !seen.insert(*name) {
+                    return None;
+                }
+                ty.children().iter().find_map(|child| self.hash_blocker_inner(child, seen))
+            }
+            Ty::Named(name, _) => {
+                if !seen.insert(*name) {
+                    return None;
+                }
+                self.types.get(name).and_then(|resolved| self.hash_blocker_inner(resolved, seen))
+            }
+            _ => ty.children().iter().find_map(|child| self.hash_blocker_inner(child, seen)),
+        }
+    }
+
     /// Can values of `ty` be ORDERED end-to-end (the native runtime's `T: Ord`
     /// bound on list.sort/min/max and sort_by keys)? Float is rejected HERE —
     /// f64 is not Ord — and the caller special-cases the BARE-Float element,
@@ -341,20 +373,41 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return true;
                 }
-                ty.children().iter().all(|child| self.is_ord_inner(child, seen))
+                self.declares_ord(*name)
+                    && ty.children().iter().all(|child| self.is_ord_inner(child, seen))
             }
             Ty::Named(name, _) => {
                 if !seen.insert(*name) {
                     return true;
                 }
-                if let Some(resolved) = self.types.get(name) {
-                    self.is_ord_inner(resolved, seen)
+                if let Some(resolved) = self.types.get(name).cloned() {
+                    // #1521: a user record/variant is Ord natively only when it
+                    // DECLARES `: Ord` (the derive). Structural orderability of
+                    // its fields is not enough — check said yes while rustc
+                    // rejected the monomorph ("P: Ord is not satisfied") —
+                    // list.max(List[record]) was the silent cell.
+                    if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
+                        && !self.declares_ord(*name)
+                    {
+                        return false;
+                    }
+                    self.is_ord_inner(&resolved, seen)
                 } else {
                     true
                 }
             }
             _ => ty.children().iter().all(|child| self.is_ord_inner(child, seen)),
         }
+    }
+
+    /// Does the user type declare `: Ord`? Keyed leniently like the derive
+    /// checks: `type_protocols` interns bare names, a cross-module type may
+    /// carry the qualified `mod.Type` spelling — accept either.
+    fn declares_ord(&self, name: Sym) -> bool {
+        let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+        let declares = |n: &str| self.type_protocols.get(&sym(n))
+            .is_some_and(|s| s.contains(&sym("Ord")));
+        declares(name.as_str()) || declares(bare)
     }
 
     pub fn push_scope(&mut self) {

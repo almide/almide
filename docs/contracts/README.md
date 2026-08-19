@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-298 contracts
+299 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -63,7 +63,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 2 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 4 |
-| C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 6 |
+| C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 7 |
 | C-037 | bytes.read_f16_le decodes IEEE-754 half floats identically | 0.24.0 | active | fixture | 1 |
 | C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 2 |
 | C-039 | Type-changing map.map / set.map yield a collection of the new type | 0.24.0 | active | fixture | 2 |
@@ -96,7 +96,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 4 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 4 |
 | C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
-| C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 1 |
+| C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 2 |
 | C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 2 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
 | C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 1 |
@@ -188,7 +188,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-158 | A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor | 0.32.0 | active | fixture | 1 |
 | C-159 | list.binary_search returns the same index on both targets for duplicate keys | 0.32.0 | active | fixture | 1 |
 | C-160 | Pure-Almide bundled stdlib modules link and run byte-identically on wasm | 0.34.4 | active | fixture | 1 |
-| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 4 |
+| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 5 |
 | C-162 | io.write / io.write_bytes emit in program order, interleaved with println | 0.35.0 | active | fixture | 1 |
 | C-163 | A heap-result if/match bound to a let/var executes the taken arm on both targets | 0.35.0 | active | fixture | 1 |
 | C-164 | List modifiers and suffix copies co-own tuple / record / nested-list elements | 0.35.0 | active | fixture | 1 |
@@ -256,7 +256,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 1 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 2 |
-| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 3 |
+| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 4 |
 | C-230 | The flight reference PID kernel runs identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-231 | Integer and boolean literal forms evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-232 | Boolean literals and their display form are identical on both targets | 0.57.1 | active | fixture | 1 |
@@ -326,4 +326,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-296 | The generated type x operation matrix runs byte-identical across targets | 0.57.2 | active | fixture | 70 |
 | C-297 | flat_map whose closure returns an aliased list field is drop-balanced on both targets | 0.57.2 | active | fixture | 1 |
 | C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 12 |
+| C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 

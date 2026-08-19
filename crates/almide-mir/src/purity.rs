@@ -92,6 +92,8 @@ pub const PURE_MODULES: &[&str] = &[
     "float_saturating",
     "float_to_string",
     "float_to_string_compound",
+    "hash",
+    "hash_impl",
     "hex",
     "hex_encode",
     "html",

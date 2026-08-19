@@ -1,0 +1,6 @@
+// The fix: unwrap first, or compare two Options.
+fn find() -> Int? = some(1)
+
+fn main() -> Unit = {
+  if (find() ?? 0) == 1 then println("eq") else println("ne")
+}

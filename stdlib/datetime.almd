@@ -47,11 +47,19 @@ fn minute(ts: Int) -> Int = _
 @intrinsic("almide_rt_datetime_month")
 fn month(ts: Int) -> Int = _
 
+// #1515: `now` and `monotonic_ns` are EFFECT fns — a wall-clock read is
+// nondeterministic, so a pure fn must not reach it (E006), exactly as the
+// entropy surface (`random.*`) always declared. The cohort agrees without
+// exception (koka `now() : <ndet,utc>`, lean4 `BaseIO`, roc `!`). Callers
+// see the RAW Int (bundled-stdlib effect fns carry their own propagation and
+// are never Result-lifted), so inside an effect fn the spelling is unchanged:
+// `let t = datetime.now()`. `env.millis` took this shape first; these two
+// were the last Clock reads a pure fn could reach.
 @intrinsic("almide_rt_datetime_now")
-fn now() -> Int = _
+effect fn now() -> Int = _
 
 @intrinsic("almide_rt_datetime_monotonic_ns")
-fn monotonic_ns() -> Int = _
+effect fn monotonic_ns() -> Int = _
 
 @intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _

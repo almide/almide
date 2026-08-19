@@ -148,14 +148,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { shard: 1, os: ubuntu-latest, arch: x86_64 }
-          - { shard: 2, os: ubuntu-latest, arch: x86_64 }
-          - { shard: 3, os: ubuntu-latest, arch: x86_64 }
-          - { shard: 4, os: ubuntu-latest, arch: x86_64 }
-          - { shard: 5, os: ubuntu-24.04-arm, arch: aarch64 }
-          - { shard: 6, os: ubuntu-24.04-arm, arch: aarch64 }
-          - { shard: 7, os: ubuntu-24.04-arm, arch: aarch64 }
-          - { shard: 8, os: ubuntu-24.04-arm, arch: aarch64 }
+          # `jobs`: worker count handed to the campaign (#1532). The x86_64
+          # ubuntu-latest runners are the ones the OS reclaims under memory
+          # pressure — 2 of 4 x86_64 shards died at exit 143 mid-budget in
+          # the v0.57.2 release-gate run (445s/170s in, findings=0, ~2,800
+          # programs of coverage lost) while every aarch64 shard finished,
+          # both that night and on 2026-08-17. Each worker holds a rustc
+          # child at peak, so jobs is the memory knob: 3 on the x86_64
+          # runners trades ~25% shard throughput for shards that LIVE.
+          - { shard: 1, os: ubuntu-latest, arch: x86_64, jobs: 3 }
+          - { shard: 2, os: ubuntu-latest, arch: x86_64, jobs: 3 }
+          - { shard: 3, os: ubuntu-latest, arch: x86_64, jobs: 3 }
+          - { shard: 4, os: ubuntu-latest, arch: x86_64, jobs: 3 }
+          - { shard: 5, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
+          - { shard: 6, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
+          - { shard: 7, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
+          - { shard: 8, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
     # Hard ceiling well above the fuzz budget so a hung child can never
     # wedge the runner indefinitely, with room for a dispatch run that raises
     # `minutes`.
@@ -218,6 +226,7 @@ jobs:
           set +e
           ./tools/xtarget-fuzz/target/release/xtarget-fuzz run \
             --minutes "$MINUTES" \
+            --jobs "${{ matrix.jobs }}" \
             --repo "$PWD" \
             --almide "$PWD/target/release/almide" \
             --seed "$SEED" \

@@ -1,0 +1,5 @@
+// The fix: key on comparable data; keep the closure as the VALUE.
+fn main() -> Unit = {
+  let m: Map[String, (Int) -> Int] = [:]
+  println(int.to_string(map.len(m)))
+}

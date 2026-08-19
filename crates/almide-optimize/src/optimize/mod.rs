@@ -32,17 +32,42 @@ pub fn optimize_program(program: &mut IrProgram) {
     // fallbacks normally, 13 ablated) — which is the correct trade for a
     // measurement mode: an honest wall, never a changed answer.
     let ablate = std::env::var_os("ALMIDE_DISABLE_OPT").is_some();
+    // ALMIDE_ONLY_PASS=fold|dce|propagate runs EXACTLY ONE perf pass — the
+    // rustc `-Zmir-enable-passes=+X` analogue (#1487), so a pass-isolated
+    // fixture's behavior is a function of one pass plus the always-on
+    // enabler/correctness passes, never of a sibling. Composes with the
+    // ablation switch as the "none" point of the same axis; an unknown name
+    // is a hard error, not a silent full pipeline.
+    let only = std::env::var("ALMIDE_ONLY_PASS").ok();
+    if let Some(name) = only.as_deref() {
+        if !matches!(name, "fold" | "dce" | "propagate") {
+            panic!("ALMIDE_ONLY_PASS={name} names no pass (fold | dce | propagate)");
+        }
+    }
+    let run = |pass: &str| -> bool {
+        if ablate {
+            return false;
+        }
+        match only.as_deref() {
+            Some(name) => name == pass,
+            None => true,
+        }
+    };
 
-    if !ablate {
+    if run("fold") {
         // Pass 1: constant folding (bottom-up rewrite)
         constant_fold(program);
 
         // Recompute use-counts after folding may have eliminated references
         compute_use_counts(program);
+    }
 
+    if run("dce") {
         // Pass 2: dead code elimination
         dce::eliminate_dead_code(program);
+    }
 
+    if run("propagate") {
         // Pass 3: constant propagation (replace vars bound to literals with the literal)
         propagate::constant_propagate(program);
     }
@@ -62,7 +87,7 @@ pub fn optimize_program(program: &mut IrProgram) {
     compute_use_counts(program);
 
     // Pass 4: dead code elimination again (propagation may create new dead bindings)
-    if !ablate {
+    if run("dce") {
         dce::eliminate_dead_code(program);
     }
 

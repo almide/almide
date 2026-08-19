@@ -111,7 +111,7 @@ impl Parser {
                 names.push(self.expect_any_name()?);
             }
             self.expect_closing(TokenType::RBrace, open.line, open.col, "selective import")?;
-            return Ok(Decl::Import { path, names: Some(names), alias: None, span: Some(span) });
+            return Ok(Decl::Import { path, names: Some(names), alias: None, span: Some(self.span_to_prev_end(span)) });
         }
 
         let alias = if self.check_ident("as") {
@@ -121,7 +121,7 @@ impl Parser {
             None
         };
 
-        Ok(Decl::Import { path, names: None, alias, span: Some(span) })
+        Ok(Decl::Import { path, names: None, alias, span: Some(self.span_to_prev_end(span)) })
     }
 
     fn parse_module_path(&mut self) -> Result<Vec<Sym>, String> {

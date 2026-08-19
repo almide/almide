@@ -1,0 +1,6 @@
+// #1515: a wall-clock read is nondeterminism — a pure fn reaching it broke
+// the "pure = deterministic" claim silently. datetime.now is an effect fn
+// now, so this is E006, same as the entropy surface always was.
+fn sneaky() -> Int = datetime.now()
+
+fn main() -> Unit = println(int.to_string(sneaky()))

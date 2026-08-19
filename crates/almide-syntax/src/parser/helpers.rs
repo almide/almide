@@ -11,6 +11,21 @@ impl Parser {
         Span { line: tok.line, col: tok.col, end_col: tok.end_col }
     }
 
+    /// `start` widened to the last CONSUMED token's end — same-line only, so a
+    /// multi-line decl keeps its head span and line-anchored fixes stay exact.
+    /// Import decls use it so the E060 deletion span covers `import a.b as c`,
+    /// not just the keyword (#1486).
+    pub(crate) fn span_to_prev_end(&self, start: Span) -> Span {
+        let mut s = start;
+        if self.pos > 0 {
+            let t = &self.tokens[self.pos - 1];
+            if t.line == s.line && t.end_col > s.end_col {
+                s.end_col = t.end_col;
+            }
+        }
+        s
+    }
+
     pub(crate) fn current(&self) -> &Token {
         if self.pos < self.tokens.len() {
             &self.tokens[self.pos]

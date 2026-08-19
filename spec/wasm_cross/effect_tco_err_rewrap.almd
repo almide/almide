@@ -1,0 +1,43 @@
+// @contract: C-069
+// The #1536 cell: an effect fn whose match carries an EXPLICIT err-REWRAP arm
+// (`err(reason) => err(reason)`) beside the tail self-call. The v0 loop
+// rewrite types the TCO accumulator as the UNWRAPPED Ok payload, so the err
+// arm's full-Result tail must take the `?` early exit, never the accumulator
+// — it used to emit `__tco_result: i64 = Err(..)`, rustc E0308, on a body
+// `almide check` accepted (the check-green/build-dead class).
+//
+// The subject is a STDLIB effect call (the reported shape). Depth is pinned
+// at 5000, NOT past the wasm call stack: the v1 leg DELIBERATELY declines
+// the loop rewrite for any body with an `err($var)` base (mod_p5_b's
+// documented bail — the mid-body early-exit's heap reassign would wall in
+// mod_p3) and lowers REAL, input-bounded recursion instead. This cell's
+// claim is the BUILD (the E0308 lived in the v0 rewrite and is caught at
+// compile time, depth-independent) plus byte-identical answers on both legs.
+import fs
+
+effect fn walk(n: Int, acc: Int) -> Result[Int, String] = if n <= 0 then ok(acc)
+else match fs.read_text_if_exists("does-not-matter.txt") {
+  err(reason) => err(reason),
+  ok(_) => walk(n - 1, acc + 1),
+}
+
+effect fn fail_walk(n: Int) -> Result[Int, String] = if n <= 0 then ok(0)
+else match fs.read_text("/definitely/missing/file.txt") {
+  err(reason) => err(reason),
+  ok(_) => fail_walk(n - 1),
+}
+
+effect fn main() -> Unit = {
+  // Clean walk: the rewrap arm never fires; both legs answer 5000.
+  match walk(5000, 0) {
+    ok(v) => println("ok:" + int.to_string(v)),
+    err(e) => println("err:" + e),
+  }
+  // The rewrap arm fires on the first hop and propagates. Only the SHAPE is
+  // asserted — the message text is host-dependent (preopen-relative errno
+  // wording differs across wasi hosts).
+  match fail_walk(3) {
+    ok(_) => println("fail=ok"),
+    err(_) => println("fail=err"),
+  }
+}

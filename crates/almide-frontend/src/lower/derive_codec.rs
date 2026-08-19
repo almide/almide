@@ -722,12 +722,55 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
             }
             }
         } else if has_default {
+            let mut default_expr = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None, def_id: None });
+            // A field default parses in declaration position and can arrive
+            // with ty=Unknown (a record literal is never inferred there); the
+            // v1 record builder classifies heap-ness from expr.ty, so stamp
+            // the declared field type on it (#1522).
+            if matches!(default_expr.ty, Ty::Unknown) { default_expr.ty = f.ty.clone(); }
+            let suffix = decode_func_suffix(&f.ty);
+            if suffix == "value" {
+                // #1522: no concrete runtime helper exists for this default's
+                // type (`__decode_default_value` names a function no runtime
+                // provides — check green, rustc E0425). Route through the
+                // field's OWN decode path inline, with the helper family's
+                // exact semantics: a missing key or an explicit null yields
+                // the default, a present value decodes strictly.
+                let fv = wk.vt.alloc(sym(&format!("_dv_{}", f.name)), value_ty.clone(), Mutability::Let, None);
+                let fv_expr = e_(IrExprKind::Var { id: fv }, value_ty.clone());
+                let is_null = call_mod_("value", "eq", vec![
+                    fv_expr.clone(),
+                    call_mod_("value", "null", vec![], value_ty.clone()),
+                ], Ty::Bool);
+                let decoded = dec_field_expr(wk, fv_expr, &f.ty, &value_ty);
+                IrExpr {
+                    kind: IrExprKind::Match {
+                        subject: Box::new(get_field_call),
+                        arms: vec![
+                            IrMatchArm {
+                                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: fv, ty: value_ty.clone() }) },
+                                guard: None,
+                                body: e_(IrExprKind::If {
+                                    cond: Box::new(is_null),
+                                    then: Box::new(default_expr.clone()),
+                                    else_: Box::new(decoded),
+                                }, f.ty.clone()),
+                            },
+                            IrMatchArm {
+                                pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                                guard: None,
+                                body: default_expr,
+                            },
+                        ],
+                    },
+                    ty: f.ty.clone(), span: None, def_id: None,
+                }
+            } else {
             // Default: use runtime helper value_decode_with_default(_v, "key", default, as_T)
-            let default_expr = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None, def_id: None });
             IrExpr {
                 kind: IrExprKind::Try { expr: Box::new(IrExpr {
                     kind: IrExprKind::Call {
-                        target: CallTarget::Named { name: sym(&format!("__decode_default_{}", decode_func_suffix(&f.ty))) },
+                        target: CallTarget::Named { name: sym(&format!("__decode_default_{}", suffix)) },
                         args: vec![
                             IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
                             IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
@@ -738,6 +781,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
                     ty: Ty::result(f.ty.clone(), Ty::String), span: None, def_id: None,
                 })},
                 ty: f.ty.clone(), span: None, def_id: None,
+            }
             }
         } else {
             // Required: value.field(_v, "key")? |> as_T?

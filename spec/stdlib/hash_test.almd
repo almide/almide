@@ -1,0 +1,26 @@
+import hash
+import hex
+
+test "fnv1a32 published vectors" {
+  assert_eq(hash.fnv1a32(""), 2166136261)
+  assert_eq(hash.fnv1a32("a"), 3826002220)
+  assert_eq(hash.fnv1a32("foobar"), 3214735720)
+  assert_eq(hash.fnv1a32_bytes(bytes.from_string("foobar")), 3214735720)
+}
+
+test "sha256 NIST vectors" {
+  assert_eq(hash.sha256_hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  assert_eq(hash.sha256_hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  assert_eq(hash.sha256_hex("The quick brown fox jumps over the lazy dog"), "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
+}
+
+test "sha256 bytes form agrees with the hex form" {
+  assert_eq(hex.encode(hash.sha256(bytes.from_string("abc"))), hash.sha256_hex("abc"))
+  assert_eq(bytes.len(hash.sha256(bytes.new(0))), 32)
+}
+
+test "sha256 padding edges" {
+  assert_eq(hash.sha256_hex(string.repeat("a", 55)), "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318")
+  assert_eq(hash.sha256_hex(string.repeat("a", 56)), "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a")
+  assert_eq(hash.sha256_hex(string.repeat("a", 64)), "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb")
+}

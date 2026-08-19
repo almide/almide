@@ -10,136 +10,78 @@
 # Preferred alternative to adding an entry: widen the interp glue
 # (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).
 
-alias_combinator_rc  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-base64_encode  out-of-interp-scope capability: prim.alloc_list
-bytes_alloc_ceiling_domain  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-bytes_array_count_domain  out-of-interp-scope capability: prim.alloc_list
-bytes_f16_offset_overflow  out-of-interp-scope capability: prim.alloc_list_f64
+alias_combinator_rc  out-of-interp-scope capability: prim.handle of a Option (outside the slice-2 heap family)
+bytes_f16_offset_overflow  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
 bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr
-bytes_set_value_semantics  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-bytes_string_window_domain  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-chunk_str  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-codec_decode_error_surface  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-codec_decode_errors  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-codec_deep_nesting  out-of-interp-scope capability: prim.alloc_value
-codec_doc_array  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-codec_empty_and_bool  out-of-interp-scope capability: prim.alloc_value
-codec_extra_keys  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-codec_float_int  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-codec_int_float_boundaries  out-of-interp-scope capability: prim.alloc_value
-codec_list_list_field  out-of-interp-scope capability: prim.alloc_value
-codec_nested_records  out-of-interp-scope capability: prim.alloc_value
-codec_none_omission  out-of-interp-scope capability: prim.alloc_value
-codec_option_numeric  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-codec_string_escapes  out-of-interp-scope capability: prim.alloc_value
-codec_variant_roundtrip  out-of-interp-scope capability: prim.alloc_value
-codec_whitespace_tolerance  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-compound_eq  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-count_domain_nonbytes  out-of-interp-scope capability: prim.alloc_list
-datetime_format  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-declaration_forms  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-edge_map_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-edge_string_unicode  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-effect_tuple_result_tco  out-of-interp-scope capability: prim.alloc_value
-encoding_base64  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fan_effect_mapper_capability  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_composition_family  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_fallible_stream_callback  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_list_dir_multipass  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_metadata_family  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_read_directory_errno  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_read_lines  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_read_text_utf8  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-fs_write_errno  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
-heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
-hex_two_module_link  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-host_floor_string_alloc  out-of-interp-scope capability: prim.alloc_list
+chunk_str  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+codec_decode_error_surface  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_decode_errors  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_deep_nesting  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_doc_array  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_empty_and_bool  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_extra_keys  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_float_int  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_int_float_boundaries  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_list_list_field  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_nested_records  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_none_omission  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_option_numeric  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_string_escapes  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_variant_roundtrip  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+codec_whitespace_tolerance  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+compound_eq  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type Int (no faithful slot repr)
+count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes
+edge_map_order  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+effect_tco_err_rewrap  interp fuel/recursion budget exhausted
+fan_effect_mapper_capability  out-of-interp-scope capability: prim.random_get
+fs_composition_family  out-of-interp-scope capability: prim.random_get
+fs_fallible_stream_callback  out-of-interp-scope capability: prim.random_get
+fs_list_dir_multipass  out-of-interp-scope capability: prim.random_get
+fs_metadata_family  out-of-interp-scope capability: prim.random_get
+fs_read_directory_errno  out-of-interp-scope capability: prim.random_get
+fs_read_lines  out-of-interp-scope capability: prim.random_get
+fs_read_text_utf8  out-of-interp-scope capability: prim.random_get
+fs_write_errno  out-of-interp-scope capability: prim.random_get
 io_write_ordering  out-of-interp-scope capability: prim.fd_write
-json_gltf_walk  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-json_number_unicode  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-json_path_edges  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-json_string_span  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-json_stringify_pretty  out-of-interp-scope capability: prim.alloc_value
-json_value  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-koka_unicode_combining  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-let_unwrap_propagation  out-of-interp-scope capability: prim.alloc_value
-list_chunk_windows  out-of-interp-scope capability: prim.alloc_list_str
-list_comprehensive  out-of-interp-scope capability: prim.alloc_list
-list_count_index_truncation  out-of-interp-scope capability: prim.alloc_list_str
-list_flatten_borrow  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-list_float_equality_family  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-list_modify_heap  out-of-interp-scope capability: prim.alloc_value
-list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list
-list_set_value  out-of-interp-scope capability: prim.alloc_value
-list_slice_oob  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-list_update_heap  out-of-interp-scope capability: prim.alloc_value
-list_window_zero  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-map_core_trio  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_fold_heap_acc  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_index_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_insertion_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_set_ops  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_set_typechange  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-map_wide_int_key  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
-matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
-matrix_dims_guard_rows  out-of-interp-scope capability: prim.alloc_list_str
-matrix_domain_edges  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
-matrix_index_domain_family  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-matrix_pow_libm  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.alloc_list_str
-matrix_select_rows  out-of-interp-scope capability: prim.alloc_list_str
-matrix_select_rows_oob  out-of-interp-scope capability: prim.alloc_list_str
-matrix_softmax_fastexp  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-memory_stress  out-of-interp-scope capability: prim.alloc_list
-module_var_alias_cow  out-of-interp-scope capability: prim.alloc_list
-mut_map_param  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-mutual_append  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-negative_offset_and_width_totality  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-nested_hof_lambda_inference  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-nested_map_list_values  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-pure_bang_propagation  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-random_int_entropy  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
+json_gltf_walk  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+json_number_unicode  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+json_path_edges  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+json_string_span  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+json_stringify_pretty  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+json_value  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+list_flatten_borrow  out-of-interp-scope capability: prim.handle of a container holding a List element under the declared element type Int (no faithful slot repr)
+list_float_equality_family  out-of-interp-scope capability: prim.handle of a container holding a Float element under the declared element type Int (no faithful slot repr)
+list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
+list_set_value  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+list_slice_oob  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+list_update_heap  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+list_window_zero  out-of-interp-scope capability: prim.handle of a container holding a Float element under the declared element type Int (no faithful slot repr)
+map_fold_heap_acc  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+map_index_order  interp fuel/recursion budget exhausted
+map_insertion_order  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+map_set_ops  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+map_set_typechange  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+matrix_dims_guard  out-of-interp-scope capability: prim.store64 with a non-address
+matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
+memory_stress  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+module_var_alias_cow  out-of-interp-scope capability: prim.store64 with a non-address
+mut_map_param  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+negative_offset_and_width_totality  out-of-interp-scope capability: prim.int_to_ptr
+nested_hof_lambda_inference  out-of-interp-scope capability: prim.handle of a container holding a List element under the declared element type Int (no faithful slot repr)
+random_int_entropy  out-of-interp-scope capability: prim.random_get
 range_bind_huge  interp fuel/recursion budget exhausted
 range_materialize_oom  out-of-interp-scope capability: range materialization beyond the interp cap (both backends take the C-197 resource path)
-rc_alloc_stress  out-of-interp-scope capability: prim.alloc_list
-regex_engine  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-regex_fuzz_batch  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-result_list_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
-result_match_rewrap_modcall  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
-result_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
-rope_at_family  out-of-interp-scope capability: prim.alloc_list_str
-rope_geometry_family  out-of-interp-scope capability: prim.alloc_list_str
-set_index_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-set_insertion_order  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-spread_record_share  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-str_result_heap_bind  out-of-interp-scope capability: prim.alloc_value
-string_case_unicode  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-string_codepoint  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-string_codepoint_index  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-string_count_truncation  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-string_from_bytes  out-of-interp-scope capability: prim.alloc_list
-string_ops_drain  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-string_passthrough_share  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-string_rle  out-of-interp-scope capability: prim.alloc_list_str
-string_split_rle_codepoint  out-of-interp-scope capability: prim.handle of a List whose elements are not bytes (a tagged List block is not in this slice)
-string_whitespace  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-tco_map_acc_seed  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-tm_map_int_fn_pass  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-tm_map_int_interp  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-tm_map_int_lit_print  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-tm_map_int_shadow_drop  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-unwrap_or_unwrap_fallback  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-value_array_leak_loop  out-of-interp-scope capability: prim.alloc_value
-value_array_tuple_tco  out-of-interp-scope capability: prim.alloc_value
-value_as_array_leak_loop  out-of-interp-scope capability: prim.alloc_value
-value_as_array_roundtrip  out-of-interp-scope capability: prim.alloc_value
-value_deep_eq  out-of-interp-scope capability: prim.alloc_value
-value_domain_arith  out-of-interp-scope capability: prim.handle of a value outside the flat String/Bytes family (alloc_value/alloc_map/alloc_list*/alloc_set blocks carry tagged sub-structure — #1226 slice 2)
-value_eq  out-of-interp-scope capability: prim.alloc_value
-value_merge  out-of-interp-scope capability: prim.alloc_value
-value_object_leak_loop  out-of-interp-scope capability: prim.alloc_value
-value_object_ops_share  out-of-interp-scope capability: prim.alloc_value
-value_repr  out-of-interp-scope capability: prim.alloc_value
+set_index_order  interp fuel/recursion budget exhausted
+spread_record_share  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+string_from_bytes  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
+tm_map_int_fn_pass  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+tm_map_int_interp  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+tm_map_int_lit_print  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+tm_map_int_shadow_drop  out-of-interp-scope capability: prim.handle of a container holding a String element under the declared element type Int (no faithful slot repr)
+unwrap_or_unwrap_fallback  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+value_deep_eq  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+value_eq  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+value_merge  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+value_object_leak_loop  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+value_object_ops_share  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
+value_repr  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)

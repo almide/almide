@@ -1,0 +1,8 @@
+// The Float hides one level down: a record field makes the whole key
+// unhashable.
+type P = { x: Float }
+
+fn main() -> Unit = {
+  let m: Map[P, Int] = [:]
+  println(int.to_string(map.len(m)))
+}

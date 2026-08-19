@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let b: Int8 = if true then 100 else 1
+  println(int8.to_string(b))
+}

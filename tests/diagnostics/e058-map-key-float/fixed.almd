@@ -1,0 +1,5 @@
+// The fix: a hashable key (String here); carry the Float as the value.
+fn main() -> Unit = {
+  let m: Map[String, Float] = [:]
+  println(int.to_string(map.len(m)))
+}

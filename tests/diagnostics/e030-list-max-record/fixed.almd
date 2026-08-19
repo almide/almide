@@ -1,0 +1,13 @@
+// The fix: declare `: Ord` so the derive exists on both legs.
+type P: Ord = { x: Int }
+
+fn main() -> Unit = {
+  let ps = [
+    P { x: 2 },
+    P { x: 1 }
+  ]
+  match list.max(ps) {
+    some(p) => println(int.to_string(p.x)),
+    none => println("-"),
+  }
+}

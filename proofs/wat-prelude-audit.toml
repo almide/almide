@@ -181,8 +181,8 @@ via = "call_closure_lambda_param.almd"
 
 [[fn]]
 name = "env_get"
-site = "crates/almide-mir/src/render_wasm_p3.rs:447"
-digest = "6d99767442b6"
+site = "crates/almide-mir/src/render_wasm_p3.rs:448"
+digest = "f0b9388ce5f8"
 class = "CORPUS"
 via = "env_get.almd"
 

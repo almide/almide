@@ -1,0 +1,8 @@
+// #1518: Option on one side of == passed check and died as rustc E0308
+// natively (an unresolvable-Eq wall on wasm) — the same one-sided rule
+// Result already had.
+fn find() -> Int? = some(1)
+
+fn main() -> Unit = {
+  if find() == 1 then println("eq") else println("ne")
+}

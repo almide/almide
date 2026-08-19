@@ -570,6 +570,10 @@ impl<'a> Interpreter<'a> {
         // both display identically as `Name { f: v }`.
         if let Some(n) = name {
             if let Some((ty_name, crate::dispatch::CtorKind::Record)) = self.variant_ctor(*n) {
+                out = match self.fill_record_defaults(*n, out, scope) {
+                    Ok(filled) => filled,
+                    Err(flow) => return flow,
+                };
                 return Flow::val(Value::Variant {
                     ty: Some(ty_name),
                     ctor: *n,
@@ -621,7 +625,48 @@ impl<'a> Interpreter<'a> {
                 _ => resolved_name = None,
             }
         }
+        if let Some(n) = resolved_name {
+            out = match self.fill_record_defaults(n, out, scope) {
+                Ok(filled) => filled,
+                Err(flow) => return flow,
+            };
+        }
         Flow::val(Value::Record { name: resolved_name, fields: Rc::new(out) })
+    }
+
+    /// The interp-side twin of codegen's `default_fields` pass: a literal for
+    /// a declared record type (or record-variant ctor) that omits defaulted
+    /// fields still constructs them, and the whole record comes out in
+    /// DECLARATION order — exactly the struct both backends build. A name
+    /// with no known declaration (an anonymous record) passes through
+    /// untouched.
+    fn fill_record_defaults(
+        &mut self,
+        key: Sym,
+        mut out: Vec<(Sym, Value)>,
+        scope: &Scope,
+    ) -> Result<Vec<(Sym, Value)>, Flow> {
+        let Some(decl) = self.record_decls.get(&key).copied() else {
+            return Ok(out);
+        };
+        if decl.iter().all(|f| f.default.is_none()) {
+            return Ok(out);
+        }
+        let mut filled = Vec::with_capacity(decl.len());
+        for f in decl {
+            if let Some(pos) = out.iter().position(|(k, _)| *k == f.name) {
+                filled.push(out.swap_remove(pos));
+            } else if let Some(def) = &f.default {
+                match self.eval_expr(def, scope) {
+                    Flow::Value(v) => filled.push((f.name, v)),
+                    other => return Err(other),
+                }
+            }
+        }
+        // Anything the literal wrote beyond the declaration (open-record
+        // extras) keeps its literal position after the declared fields.
+        filled.extend(out);
+        Ok(filled)
     }
 
     fn eval_spread_record(&mut self, base: &IrExpr, fields: &[(Sym, IrExpr)], scope: &Scope) -> Flow {

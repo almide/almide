@@ -1,0 +1,5 @@
+// The fix: flatten the compound key into a hashable one.
+fn main() -> Unit = {
+  let m: Map[String, Int] = [:]
+  println(int.to_string(map.len(m)))
+}

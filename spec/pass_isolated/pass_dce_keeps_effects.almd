@@ -1,0 +1,11 @@
+// @pass: dce
+// #1487: dead-code elimination in ISOLATION — an unused PURE binding may go,
+// but the effectful statements around it must survive with their order; the
+// index-assign write-back (#857) must survive too.
+fn main() -> Unit = {
+  let _unused = 40 + 2
+  var xs = [1, 2, 3]
+  xs[1] = 9
+  println(int.to_string(list.get(xs, 1) ?? 0))
+  println("after")
+}

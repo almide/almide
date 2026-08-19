@@ -1,0 +1,9 @@
+// #1486: the bare fn-reference callback shape is the machine-applicable
+// slice — the rewrite wraps the callback `(x) => f(x)!` and keeps the
+// Result carrier type (no trailing `!`; unwrapping is the caller's call).
+fn half(n: Int) -> Result[Int, String] = if n % 2 == 0 then ok(n / 2) else err("odd")
+
+fn main() -> Unit = {
+  let r = list.map([2, 4], (x) => half(x)!)
+  println("n=${list.len(r ?? [])}")
+}

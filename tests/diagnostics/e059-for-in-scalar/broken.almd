@@ -1,0 +1,7 @@
+// #1521: a concrete non-iterable loop head used to sail through check and
+// die at codegen behind the COMPILER BUG banner.
+fn main() -> Unit = {
+  for x in 5 {
+    println(int.to_string(x))
+  }
+}

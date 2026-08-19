@@ -1,0 +1,8 @@
+// #1518: the fn-in-key detection did not recurse into Named records, so this
+// landed on a code-less "not hashable" error instead of E016's own class.
+type K = { f: (Int) -> Int }
+
+fn main() -> Unit = {
+  let m: Map[K, Int] = [:]
+  println(int.to_string(map.len(m)))
+}

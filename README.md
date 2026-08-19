@@ -87,7 +87,7 @@ almide run hello.almd
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Standard library** — 959 functions across 41 modules (string, list, map, json, http, fs, etc.)
+- **Standard library** — 963 functions across 42 modules (string, list, map, json, http, fs, etc.)
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
@@ -100,7 +100,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 298 contracts — 298 active, 0 flagged-for-revision.**
+> **Ledger: 299 contracts — 299 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
@@ -279,7 +279,7 @@ Full tables, methodology, and charts: **[docs/project/BENCHMARKS.md](./docs/proj
 | Targets | Rust (native), WASM (direct emit) |
 | Verified codegen | The v1 PCC pipeline is the **default** wasm path since 0.29.0 — certificates re-verified on every build (`--no-verified` opts out) |
 | Codegen | Rust: Nanopass + TOML templates; wasm: certified MIR → direct emit (the sole wasm path — the unverified emitter is retired) |
-| Stdlib | 959 functions across 41 modules |
+| Stdlib | 963 functions across 42 modules |
 | Tests | 310 test files pass (299 via WASM, 11 native) + 164-contract cross-target ledger |
 | MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
 | MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, most concise of 5 languages (233 LOC); fastest agent completion wall-clock vs Gleam/MoonBit — an LLM-writability number (measured under 6–9× self-parallelism), **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
@@ -312,7 +312,7 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1 proof-carrying compilation architecture
 - [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md) — Binary sizes, native performance, AI coding benchmark
 - [docs/contracts/](./docs/contracts/) — Behavior-contract ledger (cross-target equivalence)
-- [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (959 functions across 41 modules)
+- [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (963 functions across 42 modules)
 - [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 
 ## Contributing

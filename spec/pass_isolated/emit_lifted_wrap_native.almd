@@ -1,0 +1,12 @@
+// @pass: none
+// #1487 isolated fixture for the m3-disable-lifted-wrap mutation path
+// (mir/render_native.rs finish_native_fn's i64 Res signature): an effect fn
+// whose Int result rides the lifted wrap; the value is USED so a broken wrap
+// changes the printed sum.
+effect fn read_n(s: String) -> Int = int.parse(s)!
+
+effect fn main() -> Unit = {
+  let a = read_n("40")!
+  let b = read_n("2")!
+  println(int.to_string(a + b))
+}

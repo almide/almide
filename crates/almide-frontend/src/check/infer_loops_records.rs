@@ -28,7 +28,18 @@ impl Checker {
         let elem_ty = match &iter_resolved {
             Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
             Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
-            _ => Ty::Unknown,
+            // #1521: a CONCRETE non-iterable head (`for x in 5`) used to fall
+            // through as Unknown and die at codegen behind the COMPILER BUG
+            // banner. Opaque types stay silent — an unresolved var is the
+            // inference's business, not the loop's.
+            Ty::Unknown | Ty::TypeVar(_) | Ty::Never => Ty::Unknown,
+            other => {
+                self.emit(super::err(
+                    format!("`for` cannot iterate `{}` — the loop head must be a List or a Map", other.display()),
+                    "Iterate a collection: a List (`for x in xs`), a range (`for i in 0...n`), or a Map (`for (k, v) in m`)".to_string(),
+                    "for loop head".to_string()).with_code("E059"));
+                Ty::Unknown
+            }
         };
         self.bind_for_in_var(var, var_tuple, elem_ty);
         for stmt in body.iter_mut() { self.check_stmt(stmt); }
@@ -324,6 +335,44 @@ impl Checker {
         if let ExprKind::Paren { expr } = &value.kind {
             self.record_int_literal_context(expr, declared);
             return;
+        }
+        // #1521: BRANCH-RESULT positions carry the annotation too — `let b:
+        // Int8 = if c then 300 else 1` narrows each branch tail in codegen
+        // (`300i8`, rejected by rustc while wasm ran and printed 300: a parity
+        // hole AND a divergence in one shape), but this walk stopped at the
+        // `if`. Same for match-arm bodies and a block's tail expression. A MAP
+        // literal against `Map[K, V]` pins each entry's key AND value — the
+        // VALUE slot was the unchecked one (`["k": 300]` into Map[String,
+        // Int8] was check-green, rustc E0308).
+        match &value.kind {
+            ExprKind::If { then, else_, .. } => {
+                self.record_int_literal_context(then, declared);
+                self.record_int_literal_context(else_, declared);
+                return;
+            }
+            ExprKind::Match { arms, .. } => {
+                for arm in arms {
+                    self.record_int_literal_context(&arm.body, declared);
+                }
+                return;
+            }
+            ExprKind::Block { expr: Some(tail), .. } => {
+                self.record_int_literal_context(tail, declared);
+                return;
+            }
+            ExprKind::MapLiteral { entries } => {
+                use almide_lang::types::constructor::TypeConstructorId as TC;
+                if let Ty::Applied(TC::Map, args) = declared {
+                    if let [k_ty, v_ty] = args.as_slice() {
+                        for (k, v) in entries {
+                            self.record_int_literal_context(k, k_ty);
+                            self.record_int_literal_context(v, v_ty);
+                        }
+                        return;
+                    }
+                }
+            }
+            _ => {}
         }
         if let Some(elem_ty) = Self::annotated_element_ty(declared) {
             if let ExprKind::List { elements, .. } = &value.kind {

@@ -1,0 +1,7 @@
+fn f(x: Int) -> Int = {
+  let a = x + 1
+  let b: Int = 2
+  a + b
+}
+
+fn main() -> Unit = println(int.to_string(f(1)))

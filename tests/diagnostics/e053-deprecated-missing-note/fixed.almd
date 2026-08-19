@@ -1,0 +1,7 @@
+// The fix: name the successor (or say why with note = "...").
+@deprecated(since=2, use="new_api")
+fn old_api() -> Int = 1
+
+fn new_api() -> Int = 1
+
+fn main() -> Unit = println(int.to_string(new_api()))

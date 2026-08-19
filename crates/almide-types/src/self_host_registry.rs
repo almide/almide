@@ -489,6 +489,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("hex_encode", "hex.encode"), ("hex_encode_upper", "hex.encode_upper"), ("hex_decode", "hex.decode")],
         ),
         (
+            crate::embedded::SRC_HASH_IMPL,
+            &[("hash_fnv1a32", "hash.fnv1a32"), ("hash_fnv1a32_bytes", "hash.fnv1a32_bytes"), ("hash_sha256", "hash.sha256"), ("hash_sha256_hex", "hash.sha256_hex")],
+        ),
+        (
             crate::embedded::SRC_BASE64_ENCODE,
             &[("base64_encode", "base64.encode"), ("base64_encode_url", "base64.encode_url"), ("base64_decode", "base64.decode"), ("base64_decode_url", "base64.decode_url")],
         ),

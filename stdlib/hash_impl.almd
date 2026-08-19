@@ -1,0 +1,235 @@
+// hash_impl — SELF-HOSTED hash.fnv1a32 / fnv1a32_bytes / sha256 / sha256_hex
+// for v1 (#1467). Byte-matches runtime/rs/src/hash.rs.
+//
+// Every 32-bit lane is an i64 masked with `band(x, 4294967295)` after each
+// add/multiply/shift, so no intermediate exceeds ~2^56 and the arithmetic is
+// exact on both legs. All loops are tail-recursive; bytes are read through
+// the prim floor at handle+12.
+// ── FNV-1a 32-bit ──
+import prim
+
+fn __fnv_go(a: Int, n: Int, i: Int, h: Int) -> Int = if i >= n then h
+else __fnv_go(a, n, i + 1, prim.band(prim.bxor(h, prim.load8(a + i)) * 16777619, 4294967295))
+
+fn hash_fnv1a32(s: String) -> Int = {
+  let h = prim.handle(s)
+  __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
+}
+
+// ── SHA-256 (FIPS 180-4) ──
+// The 64 round constants, materialized per digest (one list allocation).
+fn hash_fnv1a32_bytes(b: Bytes) -> Int = {
+  let h = prim.handle(b)
+  __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
+}
+
+// Rotate a 32-bit lane right by n (n in 1..31).
+fn __sha_k() -> List[Int] = [
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]
+
+fn __ror32(x: Int, n: Int) -> Int = prim.band(prim.bor(prim.bshr_u(x, n), prim.bshl(x, 32 - n)), 4294967295)
+
+fn __sha_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __sha_copy(dst, src, n, i + 1)
+}
+
+// The 64-bit big-endian bit-length trailer, one byte at a time.
+fn __sha_zero(base: Int, i: Int, end: Int) -> Int = if i >= end then 0
+else {
+  prim.store8(base + i, 0)
+  __sha_zero(base, i + 1, end)
+}
+
+// W[0..16): big-endian 32-bit words from the block.
+fn __sha_len64(at: Int, bits: Int, i: Int) -> Int = if i >= 8 then 0
+else {
+  prim.store8(at + i, prim.band(prim.bshr_u(bits, (7 - i) * 8), 255))
+  __sha_len64(at, bits, i + 1)
+}
+
+// W[16..64): the message-schedule extension.
+fn __sha_w16(wp: Int, bp: Int, t: Int) -> Int = if t >= 16 then 0
+else {
+  let o = bp + t * 4
+  let v = prim.bor(prim.bor(prim.bshl(prim.load8(o), 24), prim.bshl(prim.load8(o + 1), 16)), prim.bor(prim.bshl(prim.load8(o + 2), 8), prim.load8(o + 3)))
+  prim.store64(wp + t * 8, v)
+  __sha_w16(wp, bp, t + 1)
+}
+
+// The 64 compression rounds; at t == 64 the working vars fold back into the
+// state (masked adds), which is the whole per-block state update.
+fn __sha_wext(wp: Int, t: Int) -> Int = if t >= 64 then 0
+else {
+  let w15 = prim.load64(wp + (t - 15) * 8)
+  let w2 = prim.load64(wp + (t - 2) * 8)
+  let s0 = prim.bxor(prim.bxor(__ror32(w15, 7), __ror32(w15, 18)), prim.bshr_u(w15, 3))
+  let s1 = prim.bxor(prim.bxor(__ror32(w2, 17), __ror32(w2, 19)), prim.bshr_u(w2, 10))
+  let v = prim.band(prim.load64(wp + (t - 16) * 8) + s0 + prim.load64(wp + (t - 7) * 8) + s1, 4294967295)
+  prim.store64(wp + t * 8, v)
+  __sha_wext(wp, t + 1)
+}
+
+fn __sha_rounds(sp: Int, kp: Int, wp: Int, t: Int, a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int = if t >= 64 then {
+  prim.store64(sp, prim.band(prim.load64(sp) + a, 4294967295))
+  prim.store64(sp + 8, prim.band(prim.load64(sp + 8) + b, 4294967295))
+  prim.store64(sp + 16, prim.band(prim.load64(sp + 16) + c, 4294967295))
+  prim.store64(sp + 24, prim.band(prim.load64(sp + 24) + d, 4294967295))
+  prim.store64(sp + 32, prim.band(prim.load64(sp + 32) + e, 4294967295))
+  prim.store64(sp + 40, prim.band(prim.load64(sp + 40) + f, 4294967295))
+  prim.store64(sp + 48, prim.band(prim.load64(sp + 48) + g, 4294967295))
+  prim.store64(sp + 56, prim.band(prim.load64(sp + 56) + h, 4294967295))
+  0
+} else {
+  let s1 = prim.bxor(prim.bxor(__ror32(e, 6), __ror32(e, 11)), __ror32(e, 25))
+  let ch = prim.bxor(prim.band(e, f), prim.band(prim.bxor(e, 4294967295), g))
+  let t1 = prim.band(h + s1 + ch + prim.load64(kp + t * 8) + prim.load64(wp + t * 8), 4294967295)
+  let s0 = prim.bxor(prim.bxor(__ror32(a, 2), __ror32(a, 13)), __ror32(a, 22))
+  let maj = prim.bxor(prim.bxor(prim.band(a, b), prim.band(a, c)), prim.band(b, c))
+  let t2 = prim.band(s0 + maj, 4294967295)
+  __sha_rounds(sp, kp, wp, t + 1, prim.band(t1 + t2, 4294967295), a, b, c, prim.band(d + t1, 4294967295), e, f, g)
+}
+
+// The state words, big-endian, into the 32-byte digest.
+fn __sha_blocks(sp: Int, kp: Int, wp: Int, mp: Int, nblocks: Int, i: Int) -> Int = if i >= nblocks then 0
+else {
+  let _w = __sha_w16(wp, mp + i * 64, 0)
+  let _x = __sha_wext(wp, 16)
+  let _r = __sha_rounds(sp, kp, wp, 0, prim.load64(sp), prim.load64(sp + 8), prim.load64(sp + 16), prim.load64(sp + 24), prim.load64(sp + 32), prim.load64(sp + 40), prim.load64(sp + 48), prim.load64(sp + 56))
+  __sha_blocks(sp, kp, wp, mp, nblocks, i + 1)
+}
+
+fn __sha_out(dst: Int, sp: Int, i: Int) -> Int = if i >= 8 then 0
+else {
+  let v = prim.load64(sp + i * 8)
+  let o = dst + i * 4
+  prim.store8(o, prim.band(prim.bshr_u(v, 24), 255))
+  prim.store8(o + 1, prim.band(prim.bshr_u(v, 16), 255))
+  prim.store8(o + 2, prim.band(prim.bshr_u(v, 8), 255))
+  prim.store8(o + 3, prim.band(v, 255))
+  __sha_out(dst, sp, i + 1)
+}
+
+// The shared digest core over the byte range [src, src+n): pad into a fresh
+// buffer, run the blocks, serialize the state.
+fn __sha_init(sp: Int) -> Int = {
+  prim.store64(sp, 1779033703)
+  prim.store64(sp + 8, 3144134277)
+  prim.store64(sp + 16, 1013904242)
+  prim.store64(sp + 24, 2773480762)
+  prim.store64(sp + 32, 1359893119)
+  prim.store64(sp + 40, 2600822924)
+  prim.store64(sp + 48, 528734635)
+  prim.store64(sp + 56, 1541459225)
+  0
+}
+
+fn __sha256_digest(src: Int, n: Int) -> Bytes = {
+  let nblocks = (n + 8) / 64 + 1
+  let plen = nblocks * 64
+  var m = prim.alloc_bytes(plen)
+  let mp = prim.handle(m) + 12
+  let _c = __sha_copy(mp, src, n, 0)
+  prim.store8(mp + n, 128)
+  let _z = __sha_zero(mp, n + 1, plen - 8)
+  let _l = __sha_len64(mp + plen - 8, n * 8, 0)
+  let st: List[Int] = prim.alloc_list(8)
+  let sp = prim.handle(st) + 12
+  let _i = __sha_init(sp)
+  let k = __sha_k()
+  let w: List[Int] = prim.alloc_list(64)
+  let _b = __sha_blocks(sp, prim.handle(k) + 12, prim.handle(w) + 12, mp, nblocks, 0)
+  var out = prim.alloc_bytes(32)
+  let _o = __sha_out(prim.handle(out) + 12, sp, 0)
+  out
+}
+
+// Lowercase hex of the 32-byte digest (the hex.encode nibble mapping, local
+// so this module links alone).
+fn hash_sha256(b: Bytes) -> Bytes = {
+  let h = prim.handle(b)
+  __sha256_digest(h + 12, prim.load32(h + 4))
+}
+
+fn __sha_hex_fill(dst: Int, src: Int, i: Int) -> Int = if i >= 32 then 0
+else {
+  let byte = prim.load8(src + i)
+  let hi = prim.bshr_u(byte, 4)
+  let lo = prim.band(byte, 15)
+  prim.store8(dst + i * 2, if hi < 10 then 48 + hi else 87 + hi)
+  prim.store8(dst + i * 2 + 1, if lo < 10 then 48 + lo else 87 + lo)
+  __sha_hex_fill(dst, src, i + 1)
+}
+
+fn hash_sha256_hex(s: String) -> String = {
+  let h = prim.handle(s)
+  let d = __sha256_digest(h + 12, prim.load32(h + 4))
+  let out = prim.alloc_str(64)
+  let _x = __sha_hex_fill(prim.handle(out) + 12, prim.handle(d) + 12, 0)
+  out
+}

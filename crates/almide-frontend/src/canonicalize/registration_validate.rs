@@ -164,6 +164,20 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
         for proto in protocols {
             let p = proto.as_str();
             if !FIELD_RECURSIVE_PROTOCOLS.contains(&p) { continue; }
+            // #1522: the Codec derive emits ONE encode/decode pair per type, so a
+            // generic type's `T` field reaches codegen unresolved — check green,
+            // a dozen rustc errors. A type parameter has no wire form; reject the
+            // derive itself here until a monomorphizing derive exists.
+            if p == "Codec" && ty.contains_typevar() {
+                if reported.insert((*type_name, *proto, sym("<generic>"))) {
+                    diagnostics.push(err(
+                        format!("type '{}' derives 'Codec' but is generic — the Codec derive cannot encode a type parameter", type_name),
+                        "The derive emits one encode/decode pair per type, and a type parameter has no wire form. Hand-write encode/decode for this type, or wrap each concrete instantiation in its own `: Codec` type.".to_string(),
+                        format!("type {} : Codec", type_name),
+                    ).with_code("E023"));
+                }
+                continue;
+            }
             for (field_name, field_ty) in &slots {
                 let site = DeriveSite { type_name: *type_name, proto: *proto };
                 validate_derive_field(env, diagnostics, &mut reported, site, field_name, field_ty);

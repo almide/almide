@@ -505,9 +505,12 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
       (br_if $done (i32.ne (local.get $opt) (i32.const 0)))
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br $loop)))
-    ;; none: a len-0 block (the canonical empty Option).
+    ;; none: len 0, cap 1 — the payload slot is RESERVED even for none (#1526):
+    ;; the `??`/match machinery pre-reads @12 before testing the tag, and a
+    ;; header-only 12-byte block put that read past the block (an OOB trap when
+    ;; the block sat at the linear-memory frontier).
     (if (i32.eqz (local.get $opt))
-      (then (local.set $opt (call $list_new (i32.const 0) (i32.const 0)))))
+      (then (local.set $opt (call $list_new (i32.const 0) (i32.const 1)))))
     (local.get $opt))
 
 "#

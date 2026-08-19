@@ -539,6 +539,7 @@ evidence  = [
   { path = "spec/wasm_cross/playground_default.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_container_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_payload_string_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_default_field_omitted.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -960,11 +961,12 @@ evidence  = [
 id        = "C-069"
 spec      = "ALS-M4"
 title     = "Effect-fn tail self-recursion loop-converts to O(1) stack on both targets"
-statement = "A self-recursive `effect fn` whose recursive call is in tail position runs in O(1) native/wasm stack (loop-converted), identically to the non-effect equivalent — not O(n) frames that overflow at ~1e5 depth. The auto-? desugar moved into the frontend (cc70ebc4), so the tail self-call reaches TailCallOpt already wrapped as `Try{Call self}` (Rust arm) or `Ok(Try(Call self))` (wasm arm, where ResultPropagation precedes TCO); TCO sees through both wrappers — the `?` is subsumed by the loop (an Err can only originate at a base case) and the `Ok` propagation wrapper is tail-transparent for effect fns. The Err short-circuit at a base case still fires. Before the fix every implicitly-lifted recursive effect fn crashed at ~1e5 depth (native stack overflow exit, wasm call-stack-exhausted trap) while the identical non-effect fn was O(1). The v1 leg's OWN loop rewrite must ALSO see through the wrapper: tco_collect classified `Try{Call self}` as the recursive arm but tco_rewrite lacked the twin arm, so an err-CAPABLE effect fn's recursive arm compiled to 'exit with the last base's kind' — a carried accumulator delivered its INITIAL value, and `checked(n - 0)` terminated with ok(0) where native spins (fuzz seed-20260718 index 946)."
+statement = "A self-recursive `effect fn` whose recursive call is in tail position runs in O(1) native/wasm stack (loop-converted), identically to the non-effect equivalent — not O(n) frames that overflow at ~1e5 depth. The auto-? desugar moved into the frontend (cc70ebc4), so the tail self-call reaches TailCallOpt already wrapped as `Try{Call self}` (Rust arm) or `Ok(Try(Call self))` (wasm arm, where ResultPropagation precedes TCO); TCO sees through both wrappers — the `?` is subsumed by the loop (an Err can only originate at a base case) and the `Ok` propagation wrapper is tail-transparent for effect fns. The Err short-circuit at a base case still fires. Before the fix every implicitly-lifted recursive effect fn crashed at ~1e5 depth (native stack overflow exit, wasm call-stack-exhausted trap) while the identical non-effect fn was O(1). The v1 leg's OWN loop rewrite must ALSO see through the wrapper: tco_collect classified `Try{Call self}` as the recursive arm but tco_rewrite lacked the twin arm, so an err-CAPABLE effect fn's recursive arm compiled to 'exit with the last base's kind' — a carried accumulator delivered its INITIAL value, and `checked(n - 0)` terminated with ok(0) where native spins (fuzz seed-20260718 index 946). The EXPLICIT err-REWRAP arm (`match eff() { err(reason) => err(reason), ok(_) => self(..) }`, #1536) is its own cell on the v0 side: the loop rewrite types the TCO accumulator as the UNWRAPPED Ok payload, so the err arm’s full-Result tail emitted `__tco_result: i64 = Err(..)` — rustc E0308 on a body `almide check` accepted (check-green/build-dead). The err tail now routes through the effect convention’s own `?` (`Err(e)?` early-returns before the assign runs). The v1 leg DELIBERATELY declines the loop rewrite for any `err($var)` base (mod_p5_b’s documented bail; the mid-body early-exit’s heap reassign would wall in mod_p3) and lowers real, input-bounded recursion — so for this shape the O(1)-stack half of this contract binds the v0 leg only; the cross-target claim is build-success + byte-identical answers."
 since     = "0.27.4"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_tco.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_tco_err_rewrap.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -2060,6 +2062,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_overflow.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_rows.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/count_domain_nonbytes.almd", class = "fixture" },
 ]
 
@@ -2883,6 +2886,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows_oob.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
 ]
@@ -3819,4 +3823,16 @@ evidence  = [
   { path = "spec/wasm_cross/codec_string_escapes.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_variant_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-299"
+spec      = "ALS-T3"
+title     = "hash digests are byte-identical across targets"
+statement = "hash.fnv1a32 / fnv1a32_bytes (FNV-1a 32-BIT: offset basis 2166136261, prime 16777619, every step masked to 32 bits — chosen over the 64-bit variant so the self-host's i64 arithmetic is exact, no wrapping 64-bit multiply exists on that floor) and hash.sha256 / sha256_hex (FIPS 180-4) answer byte-identically on native and wasm, pinned against published vectors: the FNV offset basis for the empty string, the classic a/foobar values, the NIST empty/abc/quick-brown-fox digests, and the SHA-256 padding EDGES — 55/56 bytes straddle the length-trailer boundary, 63/64 the block boundary, 119/120 the two-block boundary, which are the cells where a padding defect lives. The wasm leg is fully SELF-HOSTED (stdlib/hash_impl.almd, no new intrinsic); the native leg is runtime/rs/src/hash.rs; both were verified against an independent oracle (Python hashlib) at introduction."
+since     = "0.58.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/hash_digests.almd", class = "fixture" },
+  { path = "spec/stdlib/hash_test.almd", class = "fixture" },
 ]

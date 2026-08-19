@@ -1,0 +1,6 @@
+// The fix: iterate a range.
+fn main() -> Unit = {
+  for x in 0...5 {
+    println(int.to_string(x))
+  }
+}

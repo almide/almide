@@ -1,0 +1,6 @@
+// #1521: the branch tail narrows to the annotated width in codegen, so 300
+// became `300i8` — rustc rejected it while wasm ran and printed 300.
+fn main() -> Unit = {
+  let b: Int8 = if true then 300 else 1
+  println(int8.to_string(b))
+}

@@ -319,8 +319,24 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, mut_params });
-    if let Ok(Some(dep)) = crate::deprecation::parse(attrs) {
-        env.deprecations.insert(sym(&key), dep);
+    match crate::deprecation::parse(attrs) {
+        Ok(Some(dep)) => { env.deprecations.insert(sym(&key), dep); }
+        Ok(None) => {}
+        Err(e) => {
+            // #1518: a malformed `@deprecated` was silently dropped here (the
+            // Err discarded), so the deprecation never registered while the
+            // author believed the marker was live — exactly what the error
+            // type's own doc forbids. Same E053 attribute family, but an
+            // ERROR: an unreadable deprecation is worse than none.
+            let mut diag = almide_base::diagnostic::Diagnostic::error(
+                e.message(), e.hint(), format!("fn {}", key)).with_code("E053");
+            if let Some(s) = attrs.iter().find(|a| a.name.as_str() == "deprecated")
+                .and_then(|a| a.span.as_ref()) {
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            env.attr_diagnostics.push(diag);
+        }
     }
     // An attribute nobody reads is dropped, so a typo silently does nothing.
     // Collected here rather than at the parser because the vocabulary is a

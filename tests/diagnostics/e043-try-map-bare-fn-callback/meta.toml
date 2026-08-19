@@ -1,0 +1,3 @@
+expects_code = "E043"
+expects_error = "was removed"
+hint_substring = "fallible form"

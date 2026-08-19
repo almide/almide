@@ -1,0 +1,8 @@
+// #1521: the pipe path bypassed the deprecation warning — a caller could
+// migrate every direct call and keep using the fn through pipes unwarned.
+@deprecated(since=1, use="shout")
+fn yell(s: String) -> String = s
+
+fn shout(s: String) -> String = s
+
+fn main() -> Unit = println("hi" |> shout)

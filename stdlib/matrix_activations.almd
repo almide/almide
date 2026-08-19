@@ -479,22 +479,28 @@ fn __q10_scale(base: Int, block_start: Int) -> Float = {
   prim.bits_to_f32(__fp16_bits(raw))
 }
 
-fn __q10_val(base: Int, k: Int) -> Float = {
+// PER-ELEMENT bound (#1532 smoke night): an element whose 18-byte block does
+// not lie wholly inside the data region is 0.0 — the never-read-past-the-
+// block discipline (#1526). `cols` need not be a 128-multiple (the sub-128
+// KAT decodes 2x8 from one block), and for sub-128 cols the per-ROW bound
+// (row_bytes = cols/128*18 = 0) guards nothing, so THIS is the guard that
+// holds on that shape. Native runs the identical global-k schedule.
+fn __q10_val(base: Int, limit: Int, k: Int) -> Float = {
   let block_start = prim.bshr_u(k, 7) * 18
-  let scale = __q10_scale(base, block_start)
-  let bits_start = block_start + 2
-  let byte_idx = bits_start + prim.band(prim.bshr_u(k, 3), 15)
-  let bit = prim.band(prim.bshr_u(prim.load8(base + byte_idx), prim.band(k, 7)), 1)
-  // Every element is +scale or -scale, so canonicalizing the two branch values
-  // settles the ruling for the whole block. (Native does this once per block;
-  // here the scale is already recomputed per element, so this rides along.)
-  if bit == 1 then __dq_zero(scale) else __dq_zero(0.0 - scale)
+  if base + block_start + 18 > limit then 0.0
+  else {
+    let scale = __q10_scale(base, block_start)
+    let bits_start = block_start + 2
+    let byte_idx = bits_start + prim.band(prim.bshr_u(k, 3), 15)
+    let bit = prim.band(prim.bshr_u(prim.load8(base + byte_idx), prim.band(k, 7)), 1)
+    if bit == 1 then __dq_zero(scale) else __dq_zero(0.0 - scale)
+  }
 }
 
-fn __q10_row(dh: Int, base: Int, row_k0: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
+fn __q10_row(dh: Int, base: Int, limit: Int, row_k0: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
 else {
-  prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, row_k0 + c)))
-  __q10_row(dh, base, row_k0, cols, c + 1)
+  prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, limit, row_k0 + c)))
+  __q10_row(dh, base, limit, row_k0, cols, c + 1)
 }
 
 // The FULL-MATRIX loader takes the same per-ROW OOB->zeros edge its row-subset
@@ -509,9 +515,22 @@ else {
   let row_bytes = cols / 128 * 18
   let row = prim.alloc_list_f64(cols)
   let _c = if base + r * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
-  else __q10_row(prim.handle(row), base, r * cols, cols, 0)
+  else __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
   prim.store_str(ho + 12 + r * 8, row)
   __q10_rows(ho, base, limit, rows, cols, r + 1)
+}
+
+// #1525: the shared constructor ceiling — a mirror of `__mx_dims_guard` in
+// matrix_core.almd (helpers are file-local, hence the copy; 268435456 = 2^28,
+// keep in sync with `__mx_max_elems` and native's ALMIDE_MATRIX_MAX_ELEMS).
+// The #1503 sweep clamped this family's negatives but skipped the ceiling, so
+// an absurd-but-positive shape died in undefined forms (native raw
+// capacity-overflow panic, exit 101, vs wasm OOM) instead of the unified T6
+// abort both targets share.
+fn __q_dims_guard(rows: Int, cols: Int) -> Int = {
+  if rows > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  if rows > 0 and cols > 268435456 / rows then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  0
 }
 
 fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
@@ -522,6 +541,7 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
   // #1503: negative dims clamp to the empty matrix like every loader.
   let r = if rows < 0 then 0 else rows
   let c = if cols < 0 then 0 else cols
+  let _g = __q_dims_guard(r, c)
   let out: List[List[Float]] = prim.alloc_list_str(r)
   let _x = __q10_rows(prim.handle(out), base, limit, r, c, 0)
   out
@@ -543,7 +563,7 @@ else {
   let row_bytes = cols / 128 * 18
   let row = prim.alloc_list_f64(cols)
   let _c = if base + rid * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
-  else __q10_row(prim.handle(row), base, rid * cols, cols, 0)
+  else __q10_row(prim.handle(row), base, limit, rid * cols, cols, 0)
   prim.store_str(ho + 12 + i * 8, row)
   __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
 }
@@ -556,6 +576,7 @@ fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[In
   // #1503: negative cols clamps to 0 like the loader family.
   let c = if cols < 0 then 0 else cols
   let n = list.len(row_ids)
+  let _g = __q_dims_guard(n, c)
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, c, 0)
   out
@@ -607,6 +628,7 @@ fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List
   let n = list.len(row_ids)
   // #1503: negative cols clamps to 0 like the loader family.
   let c = if cols < 0 then 0 else cols
+  let _g = __q_dims_guard(n, c)
   if c % 32 != 0 then __q8_zeros(n, c)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(n)

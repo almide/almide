@@ -1015,11 +1015,23 @@ impl Checker {
                 || path.first().map(|s| s.as_str()) == Some("self")
             { continue; }
             let line = span.as_ref().map(|s| s.line).unwrap_or(0);
-            self.diagnostics.push(Diagnostic::warning(
+            let mut diag = Diagnostic::warning(
                 format!("unused import '{}'", import_name),
                 format!("Remove the import or prefix with '_' to suppress: _{}", import_name),
                 format!("import at line {}", line),
-            ));
+            ).with_code("E060");
+            // Machine-applicable (#1486): NOTHING references the name, so
+            // blanking the import line is a pure deletion — nothing is decided
+            // for the author. (The duplicate-import sibling in import_table.rs
+            // stays display-only: deleting a duplicate can strand references
+            // to its alias, which needs a reference rewrite.)
+            if let Some(s) = span {
+                diag = diag.with_machine_fix(s.line, s.col, s.end_col, "");
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                diag.end_col = Some(s.end_col);
+            }
+            self.diagnostics.push(diag);
         }
         self.check_reimpl_lint(program);
         std::mem::take(&mut self.diagnostics)

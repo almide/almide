@@ -99,10 +99,28 @@ python3 research/benchmark/perf/bench.py \
   --bench nbody,spectralnorm,fasta,fft,listbuild,listbuild-append,listbuild-comb,strchurn \
   --label ratchet --out "$out"
 
-python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" <<'PY'
+# ABLATION LEG (#1466): the same anchored benchmarks with the IR optimizer's
+# perf passes disabled (ALMIDE_DISABLE_OPT skips fold/DCE/propagate; the
+# lowering enablers and the #872 correctness re-fold stay). The gated number
+# is the DELTA ablated/optimized per bench — a same-machine, same-run ratio,
+# so it anchors where absolute times cannot. MEASURED FINDING at introduction
+# (M4 Pro + CI runner agree): the deltas sit at ~1.00 on every anchored
+# bench — on the rustc-backed native leg these passes are SUBSUMED by LLVM,
+# which runs the same folds downstream. The gate therefore holds the honest
+# band: ablation must never SLOW the build's output past noise (floor —
+# the optimizer must not COST), and a delta leaving the band upward is a new
+# real earning that gets re-anchored on purpose, exactly like the main rows.
+abl_out=$(mktemp -t perf-ratio-abl.XXXXXX.json)
+trap 'rm -f "$out" "$abl_out"' EXIT
+ALMIDE_DISABLE_OPT=1 python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native \
+  --bench nbody,spectralnorm,fasta,fft \
+  --label ratchet-ablated --out "$abl_out"
+
+python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$abl_out" <<'PY'
 import json, sys
 
-out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling, reported_arg = sys.argv[1:8]
+out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling, reported_arg, abl_path = sys.argv[1:9]
 budget = float(budget_pct)
 min_s = float(min_s)
 idiom_ceiling = float(idiom_ceiling)
@@ -185,6 +203,31 @@ if penalty > idiom_ceiling:
 else:
     print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.3f}x the append loop "
           f"(ceiling {idiom_ceiling:.2f}x) ok")
+
+# ABLATION deltas (#1466): ablated/optimized per anchored bench, gated on
+# baseline rows keyed `ablation/<bench>`. Floor 0.90 is the honest direction
+# the measurement supports — the optimizer must never COST more than noise;
+# the +budget ceiling flags a NEW earning so it gets re-anchored on purpose.
+abl = json.load(open(abl_path))["results"]
+for bench in sorted(pairs):
+    o = data[bench]["variants"][f"{bench}/native"]["median"]
+    a = abl[bench]["variants"][f"{bench}/native"]["median"]
+    delta = a / o
+    key = f"ablation/{bench}"
+    base = baseline.get(key)
+    if base is None:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the ablation leg was "
+                 "added without anchoring it; add the line on purpose.")
+    ceiling = base * (1 + budget / 100)
+    floor = 0.90
+    verdict = "ok"
+    if delta < floor:
+        verdict = f"UNDER floor {floor:.2f} — the optimizer is COSTING runtime; find the pass and fix or retire it"
+        failed = True
+    elif delta > ceiling:
+        verdict = f"OVER ceiling {ceiling:.3f} — a new real earning; re-anchor the row in the same change"
+        failed = True
+    print(f"perf-ratio: {key:16s} {delta:.3f} (ablated/optimized, baseline {base:.3f}) {verdict}")
 
 if failed:
     print("::error::perf-ratio: a gated almide/rust runtime ratio left its band. A real")

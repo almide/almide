@@ -7,7 +7,7 @@ pub const STDLIB_MODULES: &[&str] = &[
     "string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
-    "base64", "hex", "net", "zlib",
+    "base64", "hex", "hash", "net", "zlib",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
@@ -19,7 +19,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &[
-    "args", "path", "list", "int", "base64", "hex", "float", "bytes",
+    "args", "path", "list", "int", "base64", "hex", "hash", "float", "bytes",
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
@@ -135,6 +135,7 @@ fn bundled_source_core(name: &str) -> Option<&'static str> {
         "int" => Some(crate::embedded::SRC_INT),
         "base64" => Some(crate::embedded::SRC_BASE64),
         "hex" => Some(crate::embedded::SRC_HEX),
+        "hash" => Some(crate::embedded::SRC_HASH),
         "float" => Some(crate::embedded::SRC_FLOAT),
         "bytes" => Some(crate::embedded::SRC_BYTES),
         "error" => Some(crate::embedded::SRC_ERROR),

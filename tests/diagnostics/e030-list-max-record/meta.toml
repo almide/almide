@@ -1,0 +1,3 @@
+expects_code = "E030"
+expects_error = "no ordering"
+hint_substring = "Ordering needs"

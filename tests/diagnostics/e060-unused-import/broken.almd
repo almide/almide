@@ -1,0 +1,3 @@
+import zlib
+
+fn main() -> Unit = println("no zlib used")

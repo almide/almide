@@ -790,6 +790,18 @@ impl Checker {
                     "Unwrap the Result operand first (`!` in an effect fn body, `?? fallback`, \
                      or `match` on ok/err) — or compare two Results",
                     format!("operator {}", op)).with_code("E037"));
+            } else if !(left_is_none || right_is_none)
+                && lc.is_option() != rc.is_option() && !opaque(&lc) && !opaque(&rc) {
+                // #1518: the same one-sided rule for Option. `opt() == 1`
+                // (and the deeper `Option[Int]? == Int`) passed check and died
+                // as rustc E0308 natively / an unresolvable-Eq wall on wasm.
+                // A literal `none` operand is excluded: the dedicated
+                // none-comparison rule above already reported it.
+                self.emit(super::err(
+                    format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
+                    "Unwrap the Option operand first (`?? fallback`, or `match` on some/none) \
+                     — or compare two Options",
+                    format!("operator {}", op)).with_code("E037"));
             } else if same_head_applied_mismatch(&lc, &rc) {
                 // #1116: `unify_infer` stays silent on a concrete mismatch, so
                 // same-head shapes with different params (`Result[Int, String]
@@ -830,7 +842,7 @@ impl Checker {
                 self.emit(super::err(
                     format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
                     "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
-                    format!("operator {}", op)));
+                    format!("operator {}", op)).with_code("E030"));
             }
         }
         Ty::Bool
