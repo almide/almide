@@ -205,7 +205,7 @@ impl Gen {
                     let items: Vec<String> = (0..n).map(|_| self.expr(Ty::Int, depth - 1)).collect();
                     format!("[{}]", items.join(", "))
                 }
-                1 => format!("({} ++ {})", self.expr(Ty::ListInt, depth - 1), self.expr(Ty::ListInt, depth - 1)),
+                1 => format!("({} + {})", self.expr(Ty::ListInt, depth - 1), self.expr(Ty::ListInt, depth - 1)),
                 // HOF callbacks — inlined lambdas over the new machinery.
                 2 => {
                     let p = self.fresh();
@@ -309,7 +309,7 @@ impl Gen {
     }
 
     fn stmt(&mut self, depth: usize) {
-        match self.rng.below(11) {
+        match self.rng.below(14) {
             0..=2 => self.stmt_bind(depth),
             3 | 4 => self.stmt_println(depth),
             5 => self.stmt_assign(depth),
@@ -317,6 +317,9 @@ impl Gen {
             7 => self.stmt_for_range(depth),
             8 => self.stmt_match_opt(depth),
             9 => self.stmt_match_variant(depth),
+            10 => self.stmt_tuple_destructure(depth),
+            11 => self.stmt_enumerate_loop(depth),
+            12 => self.stmt_map_from_list(depth),
             _ => self.stmt_push(depth),
         }
     }
@@ -438,6 +441,48 @@ impl Gen {
         self.line("Mt => println(\"M\"),");
         self.indent -= 1;
         self.line("}");
+    }
+
+    fn stmt_tuple_destructure(&mut self, depth: usize) {
+        let (a, b) = (self.fresh(), self.fresh());
+        let x = self.expr(Ty::Int, depth);
+        let y = self.expr(Ty::Str, depth.saturating_sub(1));
+        self.line(&format!("let ({a}, {b}) = ({x}, {y})"));
+        self.vars.push(Var { name: a, ty: Ty::Int, mutable: false });
+        self.vars.push(Var { name: b, ty: Ty::Str, mutable: false });
+    }
+
+    fn stmt_enumerate_loop(&mut self, depth: usize) {
+        let (i, x) = (self.fresh(), self.fresh());
+        let src = self.expr(Ty::ListInt, depth);
+        self.line(&format!("for ({i}, {x}) in list.enumerate({src}) {{"));
+        self.indent += 1;
+        self.vars.push(Var { name: i.clone(), ty: Ty::Int, mutable: false });
+        self.vars.push(Var { name: x.clone(), ty: Ty::Int, mutable: false });
+        self.line(&format!("println(\"${{{i}}}:${{{x}}}\")"));
+        self.vars.pop();
+        self.vars.pop();
+        self.indent -= 1;
+        self.line("}");
+    }
+
+    fn stmt_map_from_list(&mut self, depth: usize) {
+        let name = self.fresh();
+        let n = 1 + self.rng.below(3);
+        let pairs: Vec<String> = (0..n)
+            .map(|_| {
+                format!(
+                    "({}, {})",
+                    self.expr(Ty::Int, depth.saturating_sub(1)),
+                    self.expr(Ty::Str, depth.saturating_sub(1))
+                )
+            })
+            .collect();
+        self.line(&format!(
+            "let {name}: Map[Int, String] = map.from_list([{}])",
+            pairs.join(", ")
+        ));
+        self.vars.push(Var { name, ty: Ty::MapIS, mutable: false });
     }
 
     fn stmt_push(&mut self, depth: usize) {

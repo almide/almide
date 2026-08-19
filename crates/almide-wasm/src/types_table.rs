@@ -48,6 +48,17 @@ pub(crate) struct TypeTable {
     /// `ETy` equality IS type equality.
     arena: RefCell<Vec<SliceTy>>,
     interned: RefCell<HashMap<SliceTy, ETy>>,
+    /// Tuple SHAPES, interned by element list — `SliceTy::Tuple(i)`
+    /// equality is shape equality. Layout from `pack_fields`.
+    tuples: RefCell<Vec<TupleDef>>,
+    tuple_ids: RefCell<HashMap<Vec<SliceTy>, u32>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct TupleDef {
+    /// (element type, payload-relative offset) per position.
+    pub(crate) fields: Vec<(SliceTy, u32)>,
+    pub(crate) size: u32,
 }
 
 impl TypeTable {
@@ -66,6 +77,26 @@ impl TypeTable {
     pub(crate) fn el(&self, h: ETy) -> SliceTy {
         self.arena.borrow()[h.index()]
     }
+
+    /// Intern a tuple shape; layout comes from `pack_fields`.
+    pub(crate) fn tuple(&self, elems: Vec<SliceTy>) -> u32 {
+        if let Some(&i) = self.tuple_ids.borrow().get(&elems) {
+            return i;
+        }
+        let widths: Vec<u32> = elems.iter().map(|t| t.slot_size()).collect();
+        let (offs, size) = almide_layout::pack_fields(&widths);
+        let def = TupleDef { fields: elems.iter().copied().zip(offs).collect(), size };
+        let mut ts = self.tuples.borrow_mut();
+        let i = ts.len() as u32;
+        ts.push(def);
+        self.tuple_ids.borrow_mut().insert(elems, i);
+        i
+    }
+
+    /// A tuple shape by id (cloned — defs are tiny).
+    pub(crate) fn tuple_def(&self, i: u32) -> TupleDef {
+        self.tuples.borrow()[i as usize].clone()
+    }
 }
 
 impl TypeTable {
@@ -80,6 +111,8 @@ impl TypeTable {
             ctors: HashMap::new(),
             arena: RefCell::new(Vec::new()),
             interned: RefCell::new(HashMap::new()),
+            tuples: RefCell::new(Vec::new()),
+            tuple_ids: RefCell::new(HashMap::new()),
         };
         for decl in &ir.type_decls {
             if decl.generics.is_some() {

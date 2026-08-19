@@ -758,3 +758,32 @@ elements are scalars (defined equality); values any slice type.
 - **Burn-up: 85 → 87 / 590**, floor 87, zero divergence. The map wall's
   remainder is compound: tuples (map.from_list pairs ×24, bind-ty:Tuple
   ×20) and map HOFs — the tuple slice is next.
+
+---
+
+## Unit 6 — stage 10: tuples (the keystone slice) (2026-08-20)
+
+Tuples unlock everything that carries pairs: `map.from_list`,
+`list.enumerate`, `let (a, b) = …` (BindDestructure), `for (i, x) in …`
+(ForIn tuple vars), tuple literals/`.0`-indexing, tuple match patterns.
+Shapes are INTERNED in the TypeTable's tuple arena (`SliceTy::Tuple(id)`
+— handle equality is shape equality), layout from `pack_fields` like
+records.
+
+- **The gate caught 6 divergences mid-slice** — two mirror-image bugs of
+  one class: field loads computed ABSOLUTE addresses but used the
+  base-relative (+PAYLOAD) accessor in `from_list` (header read as key),
+  and `get`/`get_or` used the base-relative accessor on the scan's
+  absolute entry address (read 12 bytes past the value). The class —
+  two addressing conventions distinguishable only by discipline — is
+  now named in collections.rs; making them type-distinct is queued
+  hardening.
+- **Generator archaeology**: the fuzzer had emitted the REMOVED `++`
+  operator since the List slice — every concat program silently
+  checker-rejected (waste, not blindness; the corpus still covered
+  concat). Fixed to `+`: rejects 41 → 8, compared 137 → 166.
+- Fuzzer generates destructures, enumerate loops, and from_list maps;
+  1,500-seed burst clean (197 oracle-abstained = the known map-bridge
+  blind spot, visible by class).
+- **Burn-up: 87 → 109 / 590** (+22), floor re-pinned 109, zero
+  divergence; surface manifest 69 → 81 constructs.

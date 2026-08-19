@@ -190,6 +190,85 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_LIST_JOIN);
                 Ok(Some(STR))
             }
+            ("enumerate", [xs]) => {
+                let elem = match self.lower(xs, None)? {
+                    SliceTy::List(h) => self.types.el(h),
+                    other => return unsup(&format!("list-enumerate-of:{other:?}")),
+                };
+                let pair_ti = self.types.tuple(vec![INT, elem]);
+                let pdef = self.types.tuple_def(pair_ti);
+                let (ioff, eoff, psize) =
+                    (pdef.fields[0].1, pdef.fields[1].1, pdef.size);
+                let stride = elem.slot_size();
+                let bh = self.hold_i32()?;
+                let ch = self.hold_i32()?;
+                let ih = self.hold_i32()?;
+                let rh = self.hold_i32()?;
+                let ph = self.hold_i32()?;
+                self.f.instructions().local_tee(bh);
+                self.f
+                    .instructions()
+                    .i32_load(len_memarg())
+                    .i32_const(stride as i32)
+                    .i32_div_u()
+                    .local_set(ch)
+                    .i32_const(0)
+                    .local_set(ih);
+                // result list of pair addresses
+                self.f
+                    .instructions()
+                    .local_get(ch)
+                    .i32_const(4)
+                    .i32_mul()
+                    .call(F_ALLOC)
+                    .local_set(rh);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
+                // pair block
+                self.f.instructions().i32_const(psize as i32).call(F_ALLOC).local_set(ph);
+                self.f
+                    .instructions()
+                    .local_get(ph)
+                    .local_get(ih)
+                    .i64_extend_i32_u();
+                self.store_ty_slot(INT, ioff);
+                self.f.instructions().local_get(ph);
+                self.f
+                    .instructions()
+                    .local_get(bh)
+                    .local_get(ih)
+                    .i32_const(stride as i32)
+                    .i32_mul()
+                    .i32_add();
+                self.load_ty_slot(elem, 0);
+                self.store_ty_slot(elem, eoff);
+                // store pair addr into result
+                self.f
+                    .instructions()
+                    .local_get(rh)
+                    .local_get(ih)
+                    .i32_const(4)
+                    .i32_mul()
+                    .i32_add()
+                    .local_get(ph);
+                self.store_ty_slot(SliceTy::Tuple(pair_ti), 0);
+                self.f
+                    .instructions()
+                    .local_get(ih)
+                    .i32_const(1)
+                    .i32_add()
+                    .local_set(ih)
+                    .br(0)
+                    .end()
+                    .end();
+                self.f.instructions().local_get(rh);
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti)))))
+            }
             ("map", [xs, cb]) => self.lower_list_map(xs, cb),
             ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
             ("fold", [xs, init, cb]) => self.lower_list_fold(xs, init, cb),

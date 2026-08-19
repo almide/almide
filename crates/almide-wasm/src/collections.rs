@@ -153,7 +153,7 @@ impl Emitter<'_> {
                     .call(F_ALLOC)
                     .local_tee(vh);
                 self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
-                self.load_ty_slot(v, 0);
+                self.load_ty_slot_at(v); // eh is ABSOLUTE (inside payload)
                 self.store_ty_slot(v, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(vh);
                 self.release_i32(); // vh
@@ -173,7 +173,7 @@ impl Emitter<'_> {
                 self.lower(default, Some(v))?;
                 self.f.instructions().else_();
                 self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
-                self.load_ty_slot(v, 0);
+                self.load_ty_slot_at(v); // eh is ABSOLUTE (inside payload)
                 self.f.instructions().end();
                 self.release_i32();
                 self.release_for(k);
@@ -256,8 +256,149 @@ impl Emitter<'_> {
                 let _ = ret;
                 Ok(None)
             }
+            ("from_list", [pairs]) => {
+                // Insertion-ordered upsert over (K, V) pairs. The result
+                // is freshly built and uniquely owned, so the overwrite
+                // case may store IN PLACE; the append case copy-grows.
+                let (k, v, pair_ti) = match self.lower(pairs, None)? {
+                    SliceTy::List(h) => match self.types.el(h) {
+                        SliceTy::Tuple(ti) => {
+                            let def = self.types.tuple_def(ti);
+                            if def.fields.len() != 2 {
+                                return unsup("map-from-list-arity");
+                            }
+                            (def.fields[0].0, def.fields[1].0, ti)
+                        }
+                        other => return unsup(&format!("map-from-of:{other:?}")),
+                    },
+                    other => return unsup(&format!("map-from-of:{other:?}")),
+                };
+                let SliceTy::Scalar(_) = k else { return unsup("map-key-nonscalar") };
+                let pair_def = self.types.tuple_def(pair_ti);
+                let (koff_p, voff_p) = (pair_def.fields[0].1, pair_def.fields[1].1);
+                let lay = entry_layout(k, v);
+                let scan = self.scan_helper(k)?;
+                let bh = self.hold_i32()?;
+                let ch = self.hold_i32()?;
+                let ih = self.hold_i32()?;
+                let rh = self.hold_i32()?;
+                let ph = self.hold_i32()?; // current pair base
+                let kh = self.hold_for(k)?;
+                let eh = self.hold_i32()?;
+                self.f.instructions().local_tee(bh);
+                self.f
+                    .instructions()
+                    .i32_load(len_memarg())
+                    .i32_const(4)
+                    .i32_div_u()
+                    .local_set(ch)
+                    .i32_const(0)
+                    .local_set(ih)
+                    .i32_const(0)
+                    .call(F_ALLOC)
+                    .local_set(rh);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
+                // pair base (i32 element of the list)
+                self.f
+                    .instructions()
+                    .local_get(bh)
+                    .local_get(ih)
+                    .i32_const(4)
+                    .i32_mul()
+                    .i32_add()
+                    .i32_load(slot_memarg(0))
+                    .local_set(ph);
+                // key (field addr = pair base + PAYLOAD + field offset)
+                self.f
+                    .instructions()
+                    .local_get(ph)
+                    .i32_const((almide_layout::PAYLOAD + koff_p) as i32)
+                    .i32_add();
+                self.load_ty_slot_at(k);
+                self.f.instructions().local_set(kh);
+                // scan result map
+                self.f
+                    .instructions()
+                    .local_get(rh)
+                    .i32_const(lay.2 as i32)
+                    .i32_const(lay.0 as i32)
+                    .local_get(kh)
+                    .call(scan)
+                    .local_set(eh);
+                self.f.instructions().local_get(eh).i32_const(0).i32_ne().if_(BlockType::Empty);
+                // overwrite value in place (uniquely owned)
+                self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
+                self.f
+                    .instructions()
+                    .local_get(ph)
+                    .i32_const((almide_layout::PAYLOAD + voff_p) as i32)
+                    .i32_add();
+                self.load_ty_slot_at(v);
+                self.store_ty_slot_raw(v);
+                self.f.instructions().else_();
+                let (len_h, nh) = self.emit_copy_grow(rh, lay.2)?;
+                self.f
+                    .instructions()
+                    .local_get(nh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h)
+                    .i32_add()
+                    .i32_const(lay.0 as i32)
+                    .i32_add()
+                    .local_get(kh);
+                self.store_ty_slot_raw(k);
+                self.f
+                    .instructions()
+                    .local_get(nh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h)
+                    .i32_add()
+                    .i32_const(lay.1 as i32)
+                    .i32_add();
+                self.f
+                    .instructions()
+                    .local_get(ph)
+                    .i32_const((almide_layout::PAYLOAD + voff_p) as i32)
+                    .i32_add();
+                self.load_ty_slot_at(v);
+                self.store_ty_slot_raw(v);
+                self.f.instructions().local_get(nh).local_set(rh);
+                self.release_i32();
+                self.release_i32();
+                self.f.instructions().end();
+                self.f
+                    .instructions()
+                    .local_get(ih)
+                    .i32_const(1)
+                    .i32_add()
+                    .local_set(ih)
+                    .br(0)
+                    .end()
+                    .end();
+                self.f.instructions().local_get(rh);
+                self.release_i32(); // eh
+                self.release_for(k); // kh
+                self.release_i32(); // ph
+                self.release_i32(); // rh
+                self.release_i32(); // ih
+                self.release_i32(); // ch
+                self.release_i32(); // bh
+                Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+            }
             _ => unsup(&format!("call:map.{func}")),
         }
+    }
+
+    /// Load a slot whose ABSOLUTE address is already on the stack.
+    fn load_ty_slot_at(&mut self, t: SliceTy) {
+        let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
+        match t.val_type() {
+            wasm_encoder::ValType::I64 => self.f.instructions().i64_load(m),
+            _ => self.f.instructions().i32_load(m),
+        };
     }
 
     fn store_ty_slot_raw(&mut self, t: SliceTy) {

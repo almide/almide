@@ -259,6 +259,32 @@ impl Emitter<'_> {
                 };
                 self.bind_inner(inner, e, almide_layout::SUM_FIELD, scr)
             }
+            IrPattern::Tuple { elements } => {
+                let SliceTy::Tuple(ti) = subj_ty else {
+                    return unsup("pattern:tuple-on-nontuple");
+                };
+                let def = self.types.tuple_def(ti);
+                if def.fields.len() != elements.len() {
+                    return unsup("pattern:tuple-arity");
+                }
+                for (ep, (fty, off)) in elements.iter().zip(def.fields) {
+                    match ep {
+                        IrPattern::Wildcard | IrPattern::Literal { .. } => {}
+                        IrPattern::Bind { var, .. } => {
+                            let Some(&(idx, _)) = self.locals.get(var) else {
+                                return unsup("bind:unmapped");
+                            };
+                            self.f.instructions().local_get(scr);
+                            self.load_ty_slot(fty, off);
+                            self.f.instructions().local_set(idx);
+                        }
+                        other => {
+                            return unsup(&format!("pattern:tuple-{}", pattern_name(other)))
+                        }
+                    }
+                }
+                Ok(())
+            }
             IrPattern::Constructor { name, args } => {
                 let SliceTy::Named(ti) = subj_ty else {
                     return unsup("pattern:ctor-on-non-named");

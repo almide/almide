@@ -13,6 +13,8 @@ binop:MulInt
 binop:Or
 binop:SubInt
 call:int.to_string
+call:list.enumerate
+call:list.filter
 call:list.fold
 call:list.get
 call:list.get_or
@@ -20,11 +22,17 @@ call:list.join
 call:list.len
 call:list.map
 call:list.push
+call:map.contains
+call:map.from_list
 call:map.get_or
 call:map.len
 call:map.new
 call:map.set
 call:println
+call:set.contains
+call:set.from_list
+call:set.insert
+call:set.len
 call:string.len
 call:user-fn
 expr:BinOp
@@ -47,6 +55,8 @@ expr:Record
 expr:ResultErr
 expr:ResultOk
 expr:StringInterp
+expr:Tuple
+expr:TupleIndex
 expr:UnOp
 expr:Unit
 expr:Unwrap
@@ -60,9 +70,11 @@ pattern:Literal
 pattern:None
 pattern:Ok
 pattern:Some
+pattern:Tuple
 pattern:Wildcard
 stmt:Assign
 stmt:Bind
+stmt:BindDestructure
 stmt:Comment
 stmt:Expr
 unop:NegInt

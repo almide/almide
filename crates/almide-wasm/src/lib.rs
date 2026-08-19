@@ -209,6 +209,10 @@ enum SliceTy {
     /// `Set[T]` — i32 block; an insertion-ordered element vector with the
     /// dedup-on-insert invariant (layout-identical to List[T]).
     Set(ETy),
+    /// A tuple — i32 block of positional fields packed by `pack_fields`;
+    /// the shape lives in the TypeTable's tuple arena (interned, so
+    /// handle equality is shape equality).
+    Tuple(u32),
     /// A user-defined record or variant — i32 block; the definition lives
     /// in the `TypeTable` at this index. Records are field blocks laid
     /// out by `almide_layout::pack_fields`; variants are tagged blocks
@@ -231,6 +235,7 @@ impl SliceTy {
             | SliceTy::List(_)
             | SliceTy::Map(..)
             | SliceTy::Set(_)
+            | SliceTy::Tuple(_)
             | SliceTy::Named(_) => ValType::I32,
         }
     }
@@ -283,6 +288,13 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
             let e = slice_ty_of(&args[0], types)?;
             let SliceTy::Scalar(_) = e else { return None };
             Some(SliceTy::Set(types.intern(e)))
+        }
+        Ty::Tuple(args) => {
+            let mut elems = Vec::new();
+            for a in args {
+                elems.push(slice_ty_of(a, types)?);
+            }
+            Some(SliceTy::Tuple(types.tuple(elems)))
         }
         Ty::Named(name, args) if args.is_empty() => {
             types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i))
@@ -690,7 +702,12 @@ fn lower_fn(
 // ── reason-string helpers ───────────────────────────────────────────────
 
 fn pattern_irrefutable(p: &IrPattern) -> bool {
-    matches!(p, IrPattern::Wildcard | IrPattern::Bind { .. })
+    match p {
+        IrPattern::Wildcard | IrPattern::Bind { .. } => true,
+        // A tuple of irrefutable positions always matches.
+        IrPattern::Tuple { elements } => elements.iter().all(pattern_irrefutable),
+        _ => false,
+    }
 }
 
 fn expr_kind_name(k: &IrExprKind) -> String {

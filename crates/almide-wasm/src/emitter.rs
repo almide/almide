@@ -115,7 +115,7 @@ impl Emitter<'_> {
             IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
             // for x in <list> / for i in a..b — extracted for complexity.
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-                self.lower_forin(*var, var_tuple.is_some(), iterable, body)
+                self.lower_forin(*var, var_tuple.as_deref(), iterable, body)
             }
             IrExprKind::Unit => Ok(()),
             other => unsup(&format!("expr:{}", expr_kind_name(other))),
@@ -149,6 +149,13 @@ impl Emitter<'_> {
                 Ok(())
             }
             IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),
+            // let (a, b) = e — evaluate once, load each bound position.
+            IrStmtKind::BindDestructure { pattern, value } => {
+                let ty = self.lower(value, None)?;
+                let scr = self.scr_i32_local;
+                self.f.instructions().local_set(scr);
+                self.emit_pattern_binds(pattern, ty, scr)
+            }
             IrStmtKind::Comment { .. } => Ok(()),
             other => unsup(&format!("stmt:{}", stmt_kind_name(other))),
         }
@@ -161,13 +168,10 @@ impl Emitter<'_> {
     pub(crate) fn lower_forin(
         &mut self,
         var: VarId,
-        has_tuple: bool,
+        var_tuple: Option<&[VarId]>,
         iterable: &IrExpr,
         body: &[IrStmt],
     ) -> Result<(), EmitError> {
-        if has_tuple {
-            return unsup("forin-tuple");
-        }
         let Some(&(var_idx, var_ty)) = self.locals.get(&var) else {
             return unsup("bind:unmapped");
         };
@@ -237,6 +241,25 @@ impl Emitter<'_> {
                     .i32_add();
                 self.load_ty_slot(elem, 0);
                 self.f.instructions().local_set(var_idx);
+                // for (a, b) in pairs — the loop var holds the tuple base;
+                // load each position into its destructured local.
+                if let Some(tvars) = var_tuple {
+                    let SliceTy::Tuple(ti) = elem else {
+                        return unsup("forin-tuple-nontuple");
+                    };
+                    let def = self.types.tuple_def(ti);
+                    if def.fields.len() != tvars.len() {
+                        return unsup("forin-tuple-arity");
+                    }
+                    for (tv, (fty, off)) in tvars.iter().zip(def.fields) {
+                        let Some(&(tidx, _)) = self.locals.get(tv) else {
+                            return unsup("bind:unmapped");
+                        };
+                        self.f.instructions().local_get(var_idx);
+                        self.load_ty_slot(fty, off);
+                        self.f.instructions().local_set(tidx);
+                    }
+                }
                 for st in body {
                     self.lower_stmt(st)?;
                 }
@@ -359,7 +382,11 @@ impl Emitter<'_> {
             _ if is_sum_shape(&e.kind) => self.lower_sum(e, want)?,
             _ if matches!(
                 &e.kind,
-                IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. } | IrExprKind::Member { .. }
+                IrExprKind::Record { .. }
+                    | IrExprKind::SpreadRecord { .. }
+                    | IrExprKind::Member { .. }
+                    | IrExprKind::Tuple { .. }
+                    | IrExprKind::TupleIndex { .. }
             ) => self.lower_record(e, want)?,
             // List literal: alloc, then store each element through a hold
             // local (kept live across element lowering — the pool makes
@@ -762,6 +789,40 @@ impl Emitter<'_> {
         want: Option<SliceTy>,
     ) -> Result<SliceTy, EmitError> {
         let got = match &e.kind {
+            // Tuple literal: positional record.
+            IrExprKind::Tuple { elements } => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Tuple(ti) = ty else {
+                    return unsup(&format!("ty-mismatch:tuple-vs-{ty:?}"));
+                };
+                let def = self.types.tuple_def(ti);
+                if def.fields.len() != elements.len() {
+                    return unsup("tuple-arity");
+                }
+                let hold = self.hold_i32()?;
+                self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hold);
+                for (el, (fty, off)) in elements.iter().zip(def.fields) {
+                    self.f.instructions().local_get(hold);
+                    self.lower(el, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                ty
+            }
+            // t.0 / t.1 — positional field read.
+            IrExprKind::TupleIndex { object, index } => {
+                let ty = self.lower(object, None)?;
+                let SliceTy::Tuple(ti) = ty else {
+                    return unsup(&format!("tuple-index-of:{ty:?}"));
+                };
+                let def = self.types.tuple_def(ti);
+                let Some(&(fty, off)) = def.fields.get(*index) else {
+                    return unsup("tuple-index-oob");
+                };
+                self.load_ty_slot(fty, off);
+                fty
+            }
             // Record literal: alloc + store each field at its packed offset.
             IrExprKind::Record { name: Some(_), fields } => {
                 let ty = want.map_or_else(|| self.infer(e), Ok)?;

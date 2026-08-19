@@ -41,7 +41,7 @@ pub(crate) fn collect_binds(
             }
             Ok(())
         }
-        IrExprKind::ForIn { var, iterable, body, .. } => {
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
             // The loop variable is a local; its type comes from the
             // iterable's checker annotation (Range iterates Int).
             let var_ty = if matches!(iterable.kind, IrExprKind::Range { .. }) {
@@ -57,6 +57,14 @@ pub(crate) fn collect_binds(
             };
             if seen.insert(*var) {
                 out.push((*var, var_ty));
+            }
+            if let (Some(tvars), SliceTy::Tuple(ti)) = (var_tuple, var_ty) {
+                let def = types.tuple_def(ti);
+                for (tv, (fty, _)) in tvars.iter().zip(def.fields) {
+                    if seen.insert(*tv) {
+                        out.push((*tv, fty));
+                    }
+                }
             }
             collect_binds(iterable, out, seen, types)?;
             for s in body {
@@ -117,6 +125,13 @@ pub(crate) fn collect_binds_data(
             Ok(())
         }
         IrExprKind::Member { object, .. } => collect_binds(object, out, seen, types),
+        IrExprKind::Tuple { elements } => {
+            for el in elements {
+                collect_binds(el, out, seen, types)?;
+            }
+            Ok(())
+        }
+        IrExprKind::TupleIndex { object, .. } => collect_binds(object, out, seen, types),
         // Lambda params become locals (used when the lambda is inlined as
         // a direct HOF callback; harmless extras otherwise).
         IrExprKind::Lambda { params, body, .. } => {
@@ -177,6 +192,10 @@ pub(crate) fn collect_binds_stmt(
             collect_binds(value, out, seen, types)
         }
         IrStmtKind::Assign { value, .. } => collect_binds(value, out, seen, types),
+        IrStmtKind::BindDestructure { pattern, value } => {
+            collect_pattern_binds(pattern, out, seen, types)?;
+            collect_binds(value, out, seen, types)
+        }
         IrStmtKind::Expr { expr } => collect_binds(expr, out, seen, types),
         _ => Ok(()), // lowering unsups these before any local is needed
     }
@@ -201,7 +220,7 @@ pub(crate) fn collect_pattern_binds(
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
             collect_pattern_binds(inner, out, seen, types)
         }
-        IrPattern::Constructor { args, .. } => {
+        IrPattern::Constructor { args, .. } | IrPattern::Tuple { elements: args } => {
             for a in args {
                 collect_pattern_binds(a, out, seen, types)?;
             }
