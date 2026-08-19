@@ -191,6 +191,32 @@ split canonicalize (modules/entry halves; verbatim fn untouched) + three
 Clone derives. Per-decl granularity remains open for the largest files.
 Report: docs/spikes/S4-stage2-tax-removal.md.**
 
+## 6.6 Authority order and unit-6 obligations (recorded 2026-08-19)
+
+Cross-session review (the incumbent-side "作り直すならこうする" memo) was
+checked against this constitution; three of its five points are already
+ratified law (single semantics with the interpreter as L2-the-definition = R1;
+kill the type-specialized twin explosion via compiler monomorphization = R3;
+"check green ⇒ build total" = R1's rustc-free canonical path). Two sharpen
+into explicit obligations:
+
+- **Authority order, explicit**: the interpreter IS the definition. A
+  semantics change lands in the interpreter FIRST; backends follow and are
+  bound by parity/translation-validation. The #1226 burn-down (121 skips
+  remaining, shrink-only) is the promotion path to a 100%-coverage
+  definition. The intentional-change protocol inherits this order.
+- **Unit 6 obligations (before the wasm backend is designed):**
+  (a) **Layout DSL, single source** — block layout ([rc][len@4][cap@8],
+  len-as-tag conventions, …) is defined ONCE and generates the wasm
+  renderer's layout, the interpreter's arena model, the audit digests, and
+  the docs. Today it is comments in heap.rs — this session worked against
+  those comments; the incumbent session introduced a bug misreading the
+  same comments. Comments-as-spec ends at unit 6.
+  (b) **Numeric determinism pinned in the spec** — canonical NaN at every
+  boundary, one vendored libm/softfloat policy across interp and backend
+  (the ported vendored libm is the seed), ±0 and fmin/fmax tie rules
+  written once.
+
 ## 7. Certification trajectory (R1a + R1b)
 
 Aviation-grade (DO-178C-class) is a declared destination, reached from either
