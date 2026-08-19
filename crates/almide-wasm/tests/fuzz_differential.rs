@@ -338,6 +338,54 @@ pub fn gen_program_for_probe(seed: u64) -> String {
     Gen::new(seed).program()
 }
 
+// ── finding auto-reduction (V-4, rustlantis' --reduce shape) ────────────
+
+/// Does `src` still show a wasm-leg defect? Returns a short description.
+/// Any pipeline refusal (checker, emitter) means "no" — reduction may only
+/// keep changes that PRESERVE the divergence.
+fn still_diverges(src: &str) -> Option<String> {
+    let ir = almide_spine::s5::lower_to_ir("reduce.almd", src).ok()?;
+    let bytes = almide_wasm::emit_program(&ir).ok()?;
+    let interp = almide_spine::s5::run_file("reduce.almd", src).ok()?;
+    if interp.exit != 0 {
+        return None;
+    }
+    match run_wasm(&bytes) {
+        Err(e) => Some(format!("wasm leg failed: {e}")),
+        Ok(out) if out != interp.stdout => {
+            Some(format!("interp:\n{}\nwasm:\n{out}", interp.stdout))
+        }
+        Ok(_) => None,
+    }
+}
+
+/// Shrink a diverging program: repeatedly drop line windows (8,4,2,1) while
+/// the divergence survives. Brace-unbalanced or use-before-def removals are
+/// rejected by the pipeline itself, so soundness is free.
+fn reduce(src: &str) -> String {
+    let mut cur: Vec<String> = src.lines().map(str::to_string).collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for window in [8usize, 4, 2, 1] {
+            let mut i = 1; // keep the `fn main` header line
+            while i + window < cur.len() {
+                // keep the closing brace line intact
+                let mut cand = cur.clone();
+                cand.drain(i..i + window);
+                let cand_src = cand.join("\n");
+                if still_diverges(&cand_src).is_some() {
+                    cur = cand;
+                    changed = true;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+    cur.join("\n")
+}
+
 // ── the differential driver ─────────────────────────────────────────────
 
 struct Tally {
@@ -372,11 +420,15 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
         return Ok(());
     }
     let wasm_out = run_wasm(&bytes).map_err(|e| {
-        format!("seed {seed}: interp exit 0 but wasm leg failed: {e}\n--- src ---\n{src}")
+        let reduced = reduce(&src);
+        format!(
+            "seed {seed}: interp exit 0 but wasm leg failed: {e}\n--- src ---\n{src}\n--- reduced (V-4) ---\n{reduced}"
+        )
     })?;
     if wasm_out != interp.stdout {
+        let reduced = reduce(&src);
         return Err(format!(
-            "seed {seed}: DIVERGENCE\n--- interp ---\n{}\n--- wasm ---\n{}\n--- src ---\n{src}",
+            "seed {seed}: DIVERGENCE\n--- interp ---\n{}\n--- wasm ---\n{}\n--- src ---\n{src}\n--- reduced (V-4) ---\n{reduced}\n(permanence rule V-5: land the reduced case as spec/wasm_cross/fuzz_found_*.almd in the fixing PR)",
             interp.stdout, wasm_out
         ));
     }

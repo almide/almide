@@ -44,3 +44,15 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: emitter coverage floor
         run: bash scripts/check-wasm-coverage.sh
+
+  # V-1 (RESEARCH-verification.md): the field's convergent gate is
+  # "assertions live in the shipped-shape build". Debug CI already runs the
+  # nets with debug_assertions; this lane runs the SAME nets in release
+  # shape so a debug/release divergence (optimizer, overflow-check, cranelift
+  # tier differences) cannot ship unseen.
+  release-shape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: wasm nets in release shape
+        run: cargo test --release -p almide-wasm --locked

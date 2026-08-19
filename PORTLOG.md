@@ -575,3 +575,20 @@ pinned). Key validations and adoptions:
 - The field's answer to comment-argued safety is to make the argument
   EXECUTABLE (verifier passes, certifiers, mutation gates) — never
   thicker review. seed-79 is this survey's living example.
+
+---
+
+## V-1 + V-4 landed: release-shape lane, finding auto-reduction (2026-08-20)
+
+- **V-1**: CI `release-shape` job runs the full almide-wasm net (590-fixture
+  parity, 200-seed fuzz, first light, alias referee) with `--release` — a
+  debug/release divergence (optimizer, overflow-checks, wasmtime tier)
+  cannot ship unseen. Locally the release parity sweep runs 60s → 5s.
+- **V-4**: the differential fuzzer now SHRINKS every finding (rustlantis'
+  `--reduce` shape): drop line windows (8/4/2/1) to fixpoint while the
+  divergence survives; pipeline refusals reject a removal for free, so
+  soundness costs nothing. Mutation-verified end-to-end: the planted
+  `$append_bool` swap's ~10-statement random program reduced to the
+  1-line minimal repro `println("${(42 >= 42)}|${false}")`.
+- **V-5** is now a stated rule in the finding message itself: a reduced
+  divergence lands as `spec/wasm_cross/fuzz_found_*.almd` in the fixing PR.
