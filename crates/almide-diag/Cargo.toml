@@ -1,0 +1,13 @@
+[package]
+name = "almide-diag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Almide diagnostics: data + builders + fix-its + rendering (display, source-annotated, JSON)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

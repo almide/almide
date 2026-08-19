@@ -45,3 +45,49 @@ wildcarded, and may only shrink. This log is append-only.
 - de-registering one path → exit 1 (unexplained finding) ✓
 - materializing one registered path → exit 1 (stale deviation) ✓
 - restored → exit 0 ✓
+
+---
+
+## Unit 1 — `almide-diag` (LANDED 2026-08-19)
+
+- **Source:** `almide@a877d2138`, extracted via `git show <sha>:<path>`.
+  All three source files verified byte-identical between that SHA and the
+  incumbent working tree before goldens were generated from it.
+- **Ported verbatim:**
+  - `crates/almide-diag/src/diagnostic.rs` ← `crates/almide-base/src/diagnostic.rs`
+    (525 lines: Diagnostic, Applicability matrix #1312, fix engine
+    `apply_try_to`, levenshtein/suggest, 11 unit tests)
+  - `crates/almide-diag/src/span.rs` ← `crates/almide-base/src/span.rs`
+  - `crates/almide-diag/src/render.rs` ← `src/diagnostic_render.rs`
+    (display / display_with_source / manual JSON)
+  - `docs/diagnostics/` — all 60 EXXX reference pages
+- **Boundary adaptations (recorded, nothing else changed):**
+  - `render.rs` line 7: `use almide_base::diagnostic::…` →
+    `use crate::diagnostic::…` (verified as the ONLY diff vs the SHA)
+  - New scaffolding: workspace `Cargo.toml` (edition 2024, resolver 3,
+    **`rust-version = "1.89"` pinned** — the incumbent stated it in prose only,
+    audit finding), `[workspace.lints] unsafe_code = "forbid"`, crate manifest,
+    thin `lib.rs`, `.gitignore`, CI workflow `.github/workflows/greenfield.yml`.
+- **Known quirk carried over on purpose:** `render::to_json` escapes
+  backslashes in `suggestions[].replacement` but NOT in `message`/`try`
+  (invalid JSON when a message contains `\`). Reproduced in the golden;
+  fixing it is a later contract-visible change, never a silent porting edit.
+
+### Gate verdict
+
+- `cargo test --workspace` → **12/12 green** (11 ported unit tests +
+  1 golden parity test).
+- **Golden parity (the A/B gate):** one shared battery body
+  (`tests/golden/battery_body.rs`) is compiled against BOTH the incumbent
+  (almide-base + diagnostic_render.rs via `include!`) and the ported crate.
+  The committed `tests/golden/diag-golden.txt` (384 lines) is the incumbent
+  build's byte-exact output covering: all display forms, JSON incl. escaping
+  quirks, the #1312 applicability matrix, guessed-span refusal, secondary-span
+  gutter/ellipsis rendering, unicode caret columns, 8 `apply_try_to` edges,
+  suggest/levenshtein, and all label suffixes. Greenfield replays the same
+  body → byte-for-byte equal.
+- **Parity-gate mutation test:** corrupted one golden byte → test fails ✓;
+  regenerated from incumbent → green ✓.
+- Contract port gate: unchanged (126 registered forward refs, 0 unexplained).
+- clippy `-D warnings` + MSRV (`cargo +1.89 check`) run in CI (local sandbox
+  has no rustup); verdict recorded by the `greenfield` workflow on this push.

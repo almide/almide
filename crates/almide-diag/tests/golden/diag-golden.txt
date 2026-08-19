@@ -1,0 +1,384 @@
+
+--- error-bare ---
+[Diagnostic::display]
+error: type mismatch
+  in let x = f(s)
+  hint: expected Int, found String
+[render::display]
+error: type mismatch
+  in let x = f(s)
+  hint: expected Int, found String
+[render::to_json]
+{"level":"error","code":"","message":"type mismatch","hint":"expected Int, found String","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"let x = f(s)","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- warning-bare-empty-hint-context ---
+[Diagnostic::display]
+warning: unused variable `n`
+[render::display]
+warning: unused variable `n`
+[render::to_json]
+{"level":"warning","code":"","message":"unused variable `n`","hint":"","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- coded-file-line ---
+[Diagnostic::display]
+error[E014]: unknown function 'prase_int'
+  --> app.almd:3
+  in prase_int(s)
+  hint: did you mean 'parse_int'?
+[render::display]
+error[E014]: unknown function 'prase_int'
+  --> app.almd:3
+  in prase_int(s)
+  hint: did you mean 'parse_int'?
+[render::to_json]
+{"level":"error","code":"E014","message":"unknown function 'prase_int'","hint":"did you mean 'parse_int'?","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"prase_int(s)","file":"app.almd","line":3,"col":0,"end_col":null,"secondary":[]}
+
+--- file-no-line ---
+[Diagnostic::display]
+error: module failed to load
+  --> lib/util.almd
+  hint: check the import path
+[render::display]
+error: module failed to load
+  --> lib/util.almd
+  hint: check the import path
+[render::to_json]
+{"level":"error","code":"","message":"module failed to load","hint":"check the import path","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"","file":"lib/util.almd","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- line-no-file ---
+[Diagnostic::display]
+warning: shadowed binding
+  at line 7
+  in let x = 2
+  hint: rename one of them
+[render::display]
+warning: shadowed binding
+  at line 7
+  in let x = 2
+  hint: rename one of them
+[render::to_json]
+{"level":"warning","code":"","message":"shadowed binding","hint":"rename one of them","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"let x = 2","file":"","line":7,"col":0,"end_col":null,"secondary":[]}
+
+--- at_span-caret-range ---
+[Diagnostic::display]
+error[E003]: unknown variable 'cout'
+  --> app.almd:2:15
+  in let total = cout + 1
+  hint: did you mean 'count'?
+[render::display]
+error[E003]: unknown variable 'cout'
+  --> app.almd:2:15
+  in let total = cout + 1
+  hint: did you mean 'count'?
+[render::to_json]
+{"level":"error","code":"E003","message":"unknown variable 'cout'","hint":"did you mean 'count'?","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"let total = cout + 1","file":"app.almd","line":2,"col":15,"end_col":19,"secondary":[]}
+[render::display_with_source]
+error[E003]: unknown variable 'cout'
+  --> app.almd:2:15
+  in let total = cout + 1
+  here: let total = cout + 1
+  hint: did you mean 'count'?
+  |
+2 |   let total = cout + 1
+  |               ^^^^
+
+--- at_span-degenerate-end ---
+[Diagnostic::display]
+error: stray token
+  --> app.almd:2:15
+  hint: remove it
+[render::display]
+error: stray token
+  --> app.almd:2:15
+  hint: remove it
+[render::to_json]
+{"level":"error","code":"","message":"stray token","hint":"remove it","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"","file":"app.almd","line":2,"col":15,"end_col":null,"secondary":[]}
+[render::display_with_source]
+error: stray token
+  --> app.almd:2:15
+  here: let total = cout + 1
+  hint: remove it
+  |
+2 |   let total = cout + 1
+  |               ^
+
+--- with_here-multiline-collapses ---
+[Diagnostic::display]
+error: bad call
+  in f(1, 2, 3)
+  here: f(1, 2, 3)
+  hint: check the arity
+[render::display]
+error: bad call
+  in f(1, 2, 3)
+  here: f(1, 2, 3)
+  hint: check the arity
+[render::to_json]
+{"level":"error","code":"","message":"bad call","hint":"check the arity","here":"f(1, 2, 3)","try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"f(1, 2, 3)","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- with_try-display-only ---
+[Diagnostic::display]
+error[E020]: missing import
+  in json.parse(s)
+  hint: json is not auto-imported
+  try:
+      // add at the top of the file
+      import json
+[render::display]
+error[E020]: missing import
+  in json.parse(s)
+  hint: json is not auto-imported
+  try:
+      // add at the top of the file
+      import json
+[render::to_json]
+{"level":"error","code":"E020","message":"missing import","hint":"json is not auto-imported","here":null,"try":"// add at the top of the file\nimport json","try_replace":null,"applicability":"unspecified","suggestions":[],"context":"json.parse(s)","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- machine-fix ---
+[Diagnostic::display]
+error[E007]: `!` is not a prefix operator
+  --> app.almd:1
+  in if !user_admin then x
+  hint: use `not`
+  try: (machine-applicable — `almide fix` applies it)
+      not 
+[render::display]
+error[E007]: `!` is not a prefix operator
+  --> app.almd:1
+  in if !user_admin then x
+  hint: use `not`
+  try: (machine-applicable — `almide fix` applies it)
+      not 
+[render::to_json]
+{"level":"error","code":"E007","message":"`!` is not a prefix operator","hint":"use `not`","here":null,"try":"not ","try_replace":{"line":1,"col":4,"end_col":5},"applicability":"machine-applicable","suggestions":[{"line":1,"col":4,"end_col":5,"replacement":"not ","applicability":"machine-applicable"}],"context":"if !user_admin then x","file":"app.almd","line":1,"col":0,"end_col":null,"secondary":[]}
+
+--- machine-fix-deletion ---
+[Diagnostic::display]
+error: duplicate keyword
+  in let let x = 1
+  hint: delete it
+  try: delete the highlighted text (machine-applicable — `almide fix` applies it)
+[render::display]
+error: duplicate keyword
+  in let let x = 1
+  hint: delete it
+  try: delete the highlighted text (machine-applicable — `almide fix` applies it)
+[render::to_json]
+{"level":"error","code":"","message":"duplicate keyword","hint":"delete it","here":null,"try":"","try_replace":{"line":1,"col":5,"end_col":9},"applicability":"machine-applicable","suggestions":[{"line":1,"col":5,"end_col":9,"replacement":"","applicability":"machine-applicable"}],"context":"let let x = 1","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- suggested-fix ---
+[Diagnostic::display]
+error: unknown name 'lenght'
+  in lenght(xs)
+  hint: did you mean 'length'?
+  try:
+      length
+[render::display]
+error: unknown name 'lenght'
+  in lenght(xs)
+  hint: did you mean 'length'?
+  try:
+      length
+[render::to_json]
+{"level":"error","code":"","message":"unknown name 'lenght'","hint":"did you mean 'length'?","here":null,"try":"length","try_replace":{"line":1,"col":1,"end_col":7},"applicability":"maybe-incorrect","suggestions":[{"line":1,"col":1,"end_col":7,"replacement":"length","applicability":"maybe-incorrect"}],"context":"lenght(xs)","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- guessed-span-line0 ---
+[Diagnostic::display]
+error: e
+  in c
+  hint: h
+  try:
+      boom
+[render::display]
+error: e
+  in c
+  hint: h
+  try:
+      boom
+[render::to_json]
+{"level":"error","code":"","message":"e","hint":"h","here":null,"try":"boom","try_replace":null,"applicability":"unspecified","suggestions":[],"context":"c","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- guessed-span-col0 ---
+[Diagnostic::display]
+error: e
+  in c
+  hint: h
+  try:
+      boom
+[render::display]
+error: e
+  in c
+  hint: h
+  try:
+      boom
+[render::to_json]
+{"level":"error","code":"","message":"e","hint":"h","here":null,"try":"boom","try_replace":null,"applicability":"unspecified","suggestions":[],"context":"c","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- guessed-span-inverted ---
+[Diagnostic::display]
+error: e
+  in c
+  hint: h
+  try:
+      boom
+[render::display]
+error: e
+  in c
+  hint: h
+  try:
+      boom
+[render::to_json]
+{"level":"error","code":"","message":"e","hint":"h","here":null,"try":"boom","try_replace":null,"applicability":"unspecified","suggestions":[],"context":"c","file":"","line":0,"col":0,"end_col":null,"secondary":[]}
+
+--- secondary-distant-ellipsis ---
+[Diagnostic::display]
+error[E002]: argument type mismatch
+  --> app.almd:11:3
+  in f("x")
+  hint: f expects Int
+[render::display]
+error[E002]: argument type mismatch
+  --> app.almd:11:3
+  in f("x")
+  hint: f expects Int
+[render::to_json]
+{"level":"error","code":"E002","message":"argument type mismatch","hint":"f expects Int","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"f(\"x\")","file":"app.almd","line":11,"col":3,"end_col":9,"secondary":[{"line":1,"col":6,"label":"declared as Int here"}]}
+[render::display_with_source]
+error[E002]: argument type mismatch
+  --> app.almd:11:3
+  in f("x")
+  here: f("x")
+  hint: f expects Int
+   |
+ 1 | fn f(n: Int) -> Int =
+   |      -------------------- declared as Int here
+...
+11 |   f("x")
+   |   ^^^^^^
+
+--- secondary-no-col ---
+[Diagnostic::display]
+error: cycle detected
+  --> app.almd:2
+  hint: break the cycle
+[render::display]
+error: cycle detected
+  --> app.almd:2
+  hint: break the cycle
+[render::to_json]
+{"level":"error","code":"","message":"cycle detected","hint":"break the cycle","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"","file":"app.almd","line":2,"col":0,"end_col":null,"secondary":[{"line":1,"col":null,"label":"first edge here"}]}
+[render::display_with_source]
+error: cycle detected
+  --> app.almd:2
+  here: b -> a
+  hint: break the cycle
+  |
+1 | a -> b
+...
+2 | b -> a
+
+--- secondary-empty-label-and-quote ---
+[Diagnostic::display]
+error: shadow
+  --> app.almd:2:5
+  in let x = 2
+  hint: rename
+[render::display]
+error: shadow
+  --> app.almd:2:5
+  in let x = 2
+  hint: rename
+[render::to_json]
+{"level":"error","code":"","message":"shadow","hint":"rename","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"let x = 2","file":"app.almd","line":2,"col":5,"end_col":6,"secondary":[{"line":1,"col":5,"label":"first \"x\" here"},{"line":2,"col":5,"label":""}]}
+[render::display_with_source]
+error: shadow
+  --> app.almd:2:5
+  in let x = 2
+  here: let x = 2
+  hint: rename
+  |
+1 | let x = 1
+  |     -------------- first "x" here
+  |
+2 | let x = 2
+  |     -
+...
+2 | let x = 2
+  |     ^
+
+--- json-escaping ---
+[Diagnostic::display]
+error[E047]: bad "literal"
+second line
+  --> esc.almd:4
+  in s = "a\b"
+  hint: write \n as a two-char escape
+  try: (machine-applicable — `almide fix` applies it)
+      "a\\b"
+      rest
+[render::display]
+error[E047]: bad "literal"
+second line
+  --> esc.almd:4
+  in s = "a\b"
+  hint: write \n as a two-char escape
+  try: (machine-applicable — `almide fix` applies it)
+      "a\\b"
+      rest
+[render::to_json]
+{"level":"error","code":"E047","message":"bad \"literal\"\nsecond line","hint":"write \n as a two-char escape","here":null,"try":"\"a\\b\"\nrest","try_replace":{"line":4,"col":5,"end_col":11},"applicability":"machine-applicable","suggestions":[{"line":4,"col":5,"end_col":11,"replacement":"\"a\\\\b\"\nrest","applicability":"machine-applicable"}],"context":"s = \"a\b\"","file":"esc.almd","line":4,"col":0,"end_col":null,"secondary":[]}
+
+--- unicode-caret-cols ---
+[Diagnostic::display]
+error: unknown variable '挨拶s'
+  --> jp.almd:2:7
+  in print(挨拶s)
+  hint: did you mean '挨拶'?
+[render::display]
+error: unknown variable '挨拶s'
+  --> jp.almd:2:7
+  in print(挨拶s)
+  hint: did you mean '挨拶'?
+[render::to_json]
+{"level":"error","code":"","message":"unknown variable '挨拶s'","hint":"did you mean '挨拶'?","here":null,"try":null,"try_replace":null,"applicability":"unspecified","suggestions":[],"context":"print(挨拶s)","file":"jp.almd","line":2,"col":7,"end_col":10,"secondary":[]}
+[render::display_with_source]
+error: unknown variable '挨拶s'
+  --> jp.almd:2:7
+  in print(挨拶s)
+  here: print(挨拶s)
+  hint: did you mean '挨拶'?
+  |
+2 | print(挨拶s)
+  |       ^^^
+
+--- apply_try_to ---
+mid-line:      Some("if not user_admin then x")
+whole-token:   Some("let x=int.parse(s)")
+second-line:   Some("fn main() -> Int =\n    int.parse(s)\n")
+zero-width:    Some("import json\neffect fn main() = ...")
+eol-insert:    None
+unicode-line:  Some("let 挨拶 = \"こんにちは\"\nprint(挨拶)\n")
+oob-line:      None
+oob-col:       None
+suggested-not-applied-by-machine_fix: None
+machine-read-path: Some((1, 4, 5, "not "))
+
+--- suggest ---
+suggest("prase_int") = Some("parse_int")
+suggest("to_code_points") = Some("codepoint")
+suggest("lenght") = Some("length")
+suggest("zzzzz") = None
+suggest("parse_int") = None
+levenshtein("kitten", "sitting") = 3
+levenshtein("Almide", "almide") = 0
+levenshtein("", "abc") = 3
+levenshtein("同じ", "同じ") = 0
+
+--- applicability ---
+MachineApplicable = machine-applicable machine=true
+MaybeIncorrect = maybe-incorrect machine=false
+HasPlaceholders = has-placeholders machine=false
+Unspecified = unspecified machine=false
+label-machine:  " (machine-applicable — `almide fix` applies it)"
+label-deletion: " delete the highlighted text (machine-applicable — `almide fix` applies it)"
+label-none:     ""

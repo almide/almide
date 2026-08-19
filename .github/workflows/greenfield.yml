@@ -1,0 +1,25 @@
+name: greenfield
+on:
+  push:
+    branches: [greenfield]
+  pull_request:
+    branches: [greenfield]
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Evidence machinery (unit 0): incumbent contract gate under the
+      # deviation register — only enumerated forward references pass.
+      - name: contract port gate
+        run: bash scripts/check-contracts-port-gate.sh
+      # Rust units (unit 1+): tests include the incumbent golden parity.
+      - name: cargo test
+        run: cargo test --workspace --locked
+      - name: clippy (zero warnings)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: MSRV honesty
+        run: |
+          rustup toolchain install 1.89 --profile minimal
+          cargo +1.89 check --workspace --locked
