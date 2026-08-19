@@ -69,6 +69,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod calls;
 mod collect;
+mod collections;
 mod emitter;
 mod patterns;
 mod runtime;
@@ -112,15 +113,19 @@ const F_LIST_JOIN: u32 = 16;
 const F_BLOCK_COPY: u32 = 17;
 const F_BUF_TO_BLOCK: u32 = 18;
 const F_STR_LEN_CHARS: u32 = 19;
+const F_SCAN_W64: u32 = 20;
+const F_SCAN_W32: u32 = 21;
+const F_SCAN_STR: u32 = 22;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 20;
+const F_FN_BASE: u32 = 23;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
 /// 7 (i32)→i32 (alloc); program-function types start after.
 const T_MAIN: u32 = 4;
-/// (i32,i64)→i32: list_get_8 / list_push_8; 9: (i32)→i64 str_len_chars.
-const T_FN_BASE: u32 = 10;
+/// (i32,i64)→i32: list_get_8 / list_push_8; 9: (i32)→i64 str_len_chars;
+/// 10: (i32,i32,i32,i64)→i32 scan_w64; 11: (i32,i32,i32,i32)→i32 scan_w32/str.
+const T_FN_BASE: u32 = 12;
 // Global 0 is the immutable line-buffer start (= align16(pool end)); it
 // is emitted for inspectability but no instruction references it since
 // the build cursor (global 2) took over.
@@ -195,6 +200,15 @@ enum SliceTy {
     /// deep-copy copies ONE level, sound because inner blocks are never
     /// mutated in place (push needs a plain var, member/index are reads).
     List(ETy),
+    /// `Map[K, V]` — i32 block; payload = INSERTION-ORDERED (k, v) entries
+    /// (the oracle's semantics), entry layout from `pack_fields`. Keys are
+    /// scalars (equality must be defined); values any slice type. Same
+    /// no-in-place-mutation doctrine: binds deep-copy, `map.insert`'s mut
+    /// form is a var write-back.
+    Map(ETy, ETy),
+    /// `Set[T]` — i32 block; an insertion-ordered element vector with the
+    /// dedup-on-insert invariant (layout-identical to List[T]).
+    Set(ETy),
     /// A user-defined record or variant — i32 block; the definition lives
     /// in the `TypeTable` at this index. Records are field blocks laid
     /// out by `almide_layout::pack_fields`; variants are tagged blocks
@@ -215,6 +229,8 @@ impl SliceTy {
             SliceTy::Option(_)
             | SliceTy::Result(..)
             | SliceTy::List(_)
+            | SliceTy::Map(..)
+            | SliceTy::Set(_)
             | SliceTy::Named(_) => ValType::I32,
         }
     }
@@ -255,6 +271,18 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
             let e = slice_ty_of(&args[0], types)?;
             Some(SliceTy::List(types.intern(e)))
+        }
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+            let k = slice_ty_of(&args[0], types)?;
+            // Keys need defined equality — scalars only.
+            let SliceTy::Scalar(_) = k else { return None };
+            let v = slice_ty_of(&args[1], types)?;
+            Some(SliceTy::Map(types.intern(k), types.intern(v)))
+        }
+        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => {
+            let e = slice_ty_of(&args[0], types)?;
+            let SliceTy::Scalar(_) = e else { return None };
+            Some(SliceTy::Set(types.intern(e)))
         }
         Ty::Named(name, args) if args.is_empty() => {
             types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i))
@@ -440,10 +468,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     types.ty().function([ValType::I32], [ValType::I32]); // 7: alloc
     types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 8: list_get/push (8-byte)
     types.ty().function([ValType::I32], [ValType::I64]); // 9: str_len_chars
+    types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I64], [ValType::I32]); // 10: scan_w64
+    types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 11: scan_w32/str
     for (i, info) in table.infos.iter().enumerate() {
         // Refused functions keep a placeholder type — their stub body is
         // `unreachable` and no call site ever targets them.
-        debug_assert_eq!(T_FN_BASE as usize + i, 10 + i);
+        debug_assert_eq!(T_FN_BASE as usize + i, 12 + i);
         if info.refuse.is_some() {
             types.ty().function([], []);
         } else {
@@ -476,6 +506,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     functions.function(7); // F_BLOCK_COPY
     functions.function(5); // F_BUF_TO_BLOCK
     functions.function(9); // F_STR_LEN_CHARS
+    functions.function(10); // F_SCAN_W64
+    functions.function(11); // F_SCAN_W32
+    functions.function(11); // F_SCAN_STR
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -531,6 +564,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_block_copy());
     code.function(&emit_buf_to_block());
     code.function(&emit_str_len_chars());
+    code.function(&emit_scan_w64());
+    code.function(&emit_scan_w32());
+    code.function(&emit_scan_str());
     for l in &lowered {
         match l {
             Ok((f, _)) => {
@@ -635,7 +671,7 @@ fn lower_fn(
         for tl in top_lets {
             let (idx, declared) = em.locals[&tl.var];
             em.lower(&tl.value, Some(declared))?;
-            if matches!(declared, SliceTy::List(_)) {
+            if matches!(declared, SliceTy::List(_) | SliceTy::Map(..) | SliceTy::Set(_)) {
                 em.f.instructions().call(F_BLOCK_COPY);
             }
             em.f.instructions().local_set(idx);

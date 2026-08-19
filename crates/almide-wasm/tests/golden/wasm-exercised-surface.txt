@@ -20,6 +20,10 @@ call:list.join
 call:list.len
 call:list.map
 call:list.push
+call:map.get_or
+call:map.len
+call:map.new
+call:map.set
 call:println
 call:string.len
 call:user-fn

@@ -730,3 +730,31 @@ the real mechanism, not a bigger stack:
   mutation-verified (disabling return_call → red) and promoted to
   standing mutant `006-return-call-disabled.patch` (gate suites now
   include the referee).
+
+---
+
+## Unit 6 — stage 9: Map/Set core (2026-08-20)
+
+Insertion-ordered entry blocks — the oracle's own semantics (`Value::Map`
+is an insertion-ordered entry vec). Entry layout from `pack_fields`;
+lookup via three shared `$scan_*` helpers (i64 / raw-i32 / string-bytes
+key classes) reused by Map (key offset) and Set (offset 0). Keys and set
+elements are scalars (defined equality); values any slice type.
+
+- map.new/set/insert(mut→write-back)/get/get_or/contains/len;
+  set.new/from_list(dedup loop)/insert/contains/len/to_list (layout-
+  identical to List, so to_list is the identity — sharing unobservable
+  under the no-in-place doctrine; binds deep-copy extended to Map/Set).
+- `map.new()`/`set.new()` have no argument to type them: the checker's
+  annotation flows in as a ret-type hint through `lower_call_at`.
+- First hold-arithmetic draft ("reborrow" index guessing) was REJECTED
+  mid-slice as the same comment-argued class seed-79 falsified — scans
+  now RETURN every hold explicitly.
+- **Fuzzer finding about the fuzzer**: map programs made the interp
+  oracle ABSTAIN (exit -2, the #1226 heap-bridge boundary) and the old
+  tally silently filed that under abort-class — a growing blind spot.
+  Now a VISIBLE `ORACLE-ABSTAINED` class (17/200 on the fixed range);
+  the corpus manifest remains the true referee for map fixtures.
+- **Burn-up: 85 → 87 / 590**, floor 87, zero divergence. The map wall's
+  remainder is compound: tuples (map.from_list pairs ×24, bind-ty:Tuple
+  ×20) and map HOFs — the tuple slice is next.

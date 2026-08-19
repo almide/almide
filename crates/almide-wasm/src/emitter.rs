@@ -290,7 +290,8 @@ impl Emitter<'_> {
                 ty
             }
             IrExprKind::Call { target, args, .. } => {
-                match self.lower_call_at(target, args, tail)? {
+                let hint = slice_ty_of(&e.ty, self.types);
+                match self.lower_call_at(target, args, tail, hint)? {
                     Some(ty) => ty,
                     None => return unsup("call-unit-in-value"),
                 }

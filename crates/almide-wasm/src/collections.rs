@@ -1,0 +1,451 @@
+//! Map/Set lowering — insertion-ordered entry blocks (the oracle's
+//! semantics), entry layout from `almide_layout::pack_fields`, key lookup
+//! through the shared `$scan_*` helpers. Keys and set elements are
+//! scalars (equality must be defined); map values are any slice type.
+//!
+//! Mutation doctrine matches List: binds deep-copy, so `map.insert`'s
+//! `mut` form is a var write-back of a functionally-built block. (The
+//! functional build copies per insert — quadratic for adversarial loops;
+//! upgrade to cap-aware in-place growth if a fixture ever trips it.)
+
+use almide_ir::{IrExpr, IrExprKind};
+use wasm_encoder::BlockType;
+
+use crate::emitter::Emitter;
+use crate::*;
+
+/// Entry layout of a Map[K, V]: (key offset, value offset, stride).
+fn entry_layout(k: SliceTy, v: SliceTy) -> (u32, u32, u32) {
+    let (offs, size) = almide_layout::pack_fields(&[k.slot_size(), v.slot_size()]);
+    (offs[0], offs[1], size)
+}
+
+impl Emitter<'_> {
+    /// Which `$scan_*` helper compares this key class.
+    fn scan_helper(&mut self, k: SliceTy) -> Result<u32, EmitError> {
+        match k {
+            INT => Ok(F_SCAN_W64),
+            BOOL => Ok(F_SCAN_W32),
+            STR => Ok(F_SCAN_STR),
+            other => unsup(&format!("map-key:{other:?}")),
+        }
+    }
+
+    fn hold_for(&mut self, t: SliceTy) -> Result<u32, EmitError> {
+        match t.val_type() {
+            wasm_encoder::ValType::I64 => self.hold_i64(),
+            _ => self.hold_i32(),
+        }
+    }
+
+    fn release_for(&mut self, t: SliceTy) {
+        match t.val_type() {
+            wasm_encoder::ValType::I64 => self.release_i64(),
+            _ => self.release_i32(),
+        }
+    }
+
+    /// Evaluate map + key, run the scan; leaves NOTHING on the stack.
+    /// Returns ALL holds explicitly — (map, key, entry) — plus key/val
+    /// types and the entry layout. Release order at every call site:
+    /// entry (i32), key (its own pool), map (i32).
+    #[allow(clippy::type_complexity)]
+    fn map_scan(
+        &mut self,
+        m: &IrExpr,
+        key: &IrExpr,
+    ) -> Result<(u32, u32, u32, SliceTy, SliceTy, (u32, u32, u32)), EmitError> {
+        let (k, v) = match self.lower(m, None)? {
+            SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
+            other => return unsup(&format!("map-op-of:{other:?}")),
+        };
+        let lay = entry_layout(k, v);
+        let mh = self.hold_i32()?;
+        self.f.instructions().local_set(mh);
+        let kh = self.hold_for(k)?;
+        self.lower(key, Some(k))?;
+        self.f.instructions().local_set(kh);
+        let scan = self.scan_helper(k)?;
+        let eh = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_get(mh)
+            .i32_const(lay.2 as i32)
+            .i32_const(lay.0 as i32)
+            .local_get(kh);
+        self.f.instructions().call(scan).local_set(eh);
+        Ok((mh, kh, eh, k, v, lay))
+    }
+
+    /// `r = copy of `base` with `extra` bytes of fresh space at the end`;
+    /// leaves the result in a fresh hold. `len_hold` receives base's OLD
+    /// live length.
+    fn emit_copy_grow(&mut self, base_hold: u32, extra: u32) -> Result<(u32, u32), EmitError> {
+        let payload = almide_layout::PAYLOAD as i32;
+        let len_hold = self.hold_i32()?;
+        let rh = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_get(base_hold)
+            .i32_load(len_memarg())
+            .local_tee(len_hold)
+            .i32_const(extra as i32)
+            .i32_add()
+            .call(F_ALLOC)
+            .local_set(rh);
+        self.f.instructions().local_get(rh).i32_const(payload).i32_add();
+        self.f.instructions().local_get(base_hold).i32_const(payload).i32_add();
+        self.f.instructions().local_get(len_hold);
+        self.f.instructions().memory_copy(0, 0);
+        Ok((len_hold, rh))
+    }
+
+    pub(crate) fn lower_map_call(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+        ret_hint: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
+            ("new", []) => {
+                let Some(ty @ SliceTy::Map(..)) = ret_hint else {
+                    return unsup("map-new-needs-context");
+                };
+                self.f.instructions().i32_const(0).call(F_ALLOC);
+                Ok(Some(ty))
+            }
+            ("len", [m]) => {
+                let (k, v) = match self.lower(m, None)? {
+                    SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
+                    other => return unsup(&format!("map-op-of:{other:?}")),
+                };
+                let stride = entry_layout(k, v).2;
+                self.f
+                    .instructions()
+                    .i32_load(len_memarg())
+                    .i32_const(stride as i32)
+                    .i32_div_u()
+                    .i64_extend_i32_u();
+                Ok(Some(INT))
+            }
+            ("contains", [m, key]) => {
+                let (_mh, _kh, eh, k, ..) = self.map_scan(m, key)?;
+                self.f.instructions().local_get(eh).i32_const(0).i32_ne();
+                self.release_i32(); // eh
+                self.release_for(k);
+                self.release_i32(); // mh
+                Ok(Some(BOOL))
+            }
+            ("get", [m, key]) => {
+                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key)?;
+                // none, or a fresh some-block holding the value slot.
+                self.f
+                    .instructions()
+                    .local_get(eh)
+                    .i32_eqz()
+                    .if_(BlockType::Result(wasm_encoder::ValType::I32));
+                self.f.instructions().i32_const(almide_layout::NULL_ADDR as i32);
+                self.f.instructions().else_();
+                let vh = self.hold_i32()?;
+                self.f
+                    .instructions()
+                    .i32_const(v.slot_size() as i32)
+                    .call(F_ALLOC)
+                    .local_tee(vh);
+                self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
+                self.load_ty_slot(v, 0);
+                self.store_ty_slot(v, almide_layout::OPTION_FIELD);
+                self.f.instructions().local_get(vh);
+                self.release_i32(); // vh
+                self.f.instructions().end();
+                self.release_i32(); // eh
+                self.release_for(k);
+                self.release_i32(); // mh
+                Ok(Some(SliceTy::Option(self.types.intern(v))))
+            }
+            ("get_or", [m, key, default]) => {
+                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key)?;
+                self.f
+                    .instructions()
+                    .local_get(eh)
+                    .i32_eqz()
+                    .if_(BlockType::Result(v.val_type()));
+                self.lower(default, Some(v))?;
+                self.f.instructions().else_();
+                self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
+                self.load_ty_slot(v, 0);
+                self.f.instructions().end();
+                self.release_i32();
+                self.release_for(k);
+                self.release_i32();
+                Ok(Some(v))
+            }
+            ("set", [m, key, value]) => {
+                let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key)?;
+                let vh = self.hold_for(v)?;
+                self.lower(value, Some(v))?;
+                self.f.instructions().local_set(vh);
+                self.f
+                    .instructions()
+                    .local_get(eh)
+                    .i32_const(0)
+                    .i32_ne()
+                    .if_(BlockType::Result(wasm_encoder::ValType::I32));
+                // overwrite in a copy: dest = r + (e - m) + voff
+                let (len_h, rh) = self.emit_copy_grow(mh, 0)?;
+                self.f
+                    .instructions()
+                    .local_get(rh)
+                    .local_get(eh)
+                    .i32_add()
+                    .local_get(mh)
+                    .i32_sub()
+                    .i32_const(lay.1 as i32)
+                    .i32_add()
+                    .local_get(vh);
+                self.store_ty_slot_raw(v);
+                self.f.instructions().local_get(rh);
+                let _ = len_h;
+                self.release_i32();
+                self.release_i32();
+                self.f.instructions().else_();
+                // append a fresh entry at the old end
+                let (len_h2, rh2) = self.emit_copy_grow(mh, lay.2)?;
+                self.f
+                    .instructions()
+                    .local_get(rh2)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h2)
+                    .i32_add()
+                    .i32_const(lay.0 as i32)
+                    .i32_add()
+                    .local_get(kh_local);
+                self.store_ty_slot_raw(k);
+                self.f
+                    .instructions()
+                    .local_get(rh2)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h2)
+                    .i32_add()
+                    .i32_const(lay.1 as i32)
+                    .i32_add()
+                    .local_get(vh);
+                self.store_ty_slot_raw(v);
+                self.f.instructions().local_get(rh2);
+                self.release_i32();
+                self.release_i32();
+                self.f.instructions().end();
+                self.release_for(v);
+                self.release_i32(); // eh
+                self.release_for(k);
+                self.release_i32(); // mh
+                Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+            }
+            ("insert", [m, _key, _value]) => {
+                // mut form: var write-back of the functional build.
+                let IrExprKind::Var { id } = &m.kind else {
+                    return unsup("map-insert-nonvar");
+                };
+                let Some(&(var_idx, _)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                let ret = self.lower_map_call("set", args, ret_hint)?;
+                self.f.instructions().local_set(var_idx);
+                let _ = ret;
+                Ok(None)
+            }
+            _ => unsup(&format!("call:map.{func}")),
+        }
+    }
+
+    fn store_ty_slot_raw(&mut self, t: SliceTy) {
+        // addr and value already on the stack, offset 0 (absolute addr).
+        let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
+        match t.val_type() {
+            wasm_encoder::ValType::I64 => self.f.instructions().i64_store(m),
+            _ => self.f.instructions().i32_store(m),
+        };
+    }
+
+    pub(crate) fn lower_set_call(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+        ret_hint: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
+            ("new", []) => {
+                let Some(ty @ SliceTy::Set(_)) = ret_hint else {
+                    return unsup("set-new-needs-context");
+                };
+                self.f.instructions().i32_const(0).call(F_ALLOC);
+                Ok(Some(ty))
+            }
+            ("len", [s]) => {
+                let e = match self.lower(s, None)? {
+                    SliceTy::Set(h) => self.types.el(h),
+                    other => return unsup(&format!("set-op-of:{other:?}")),
+                };
+                self.f
+                    .instructions()
+                    .i32_load(len_memarg())
+                    .i32_const(e.slot_size() as i32)
+                    .i32_div_u()
+                    .i64_extend_i32_u();
+                Ok(Some(INT))
+            }
+            ("to_list", [s]) => {
+                // Layout-identical; sharing the base is unobservable
+                // (no in-place list/set mutation exists, binds deep-copy).
+                let e = match self.lower(s, None)? {
+                    SliceTy::Set(h) => self.types.el(h),
+                    other => return unsup(&format!("set-op-of:{other:?}")),
+                };
+                Ok(Some(SliceTy::List(self.types.intern(e))))
+            }
+            ("contains", [s, x]) => {
+                let (_sh, _xh, eh, e) = self.set_scan(s, x)?;
+                self.f.instructions().local_get(eh).i32_const(0).i32_ne();
+                self.release_i32(); // eh
+                self.release_for(e);
+                self.release_i32(); // sh
+                Ok(Some(BOOL))
+            }
+            ("insert", [s, x]) => {
+                let (sh, xh, eh, e) = self.set_scan(s, x)?;
+                self.f
+                    .instructions()
+                    .local_get(eh)
+                    .i32_const(0)
+                    .i32_ne()
+                    .if_(BlockType::Result(wasm_encoder::ValType::I32));
+                // already present: the functional result IS the input.
+                self.f.instructions().local_get(sh);
+                self.f.instructions().else_();
+                let (len_h, rh) = self.emit_copy_grow(sh, e.slot_size())?;
+                self.f
+                    .instructions()
+                    .local_get(rh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h)
+                    .i32_add()
+                    .local_get(xh);
+                self.store_ty_slot_raw(e);
+                self.f.instructions().local_get(rh);
+                self.release_i32();
+                self.release_i32();
+                self.f.instructions().end();
+                self.release_i32(); // eh
+                self.release_for(e);
+                self.release_i32(); // sh
+                Ok(Some(SliceTy::Set(self.types.intern(e))))
+            }
+            ("from_list", [xs]) => {
+                let e = match self.lower(xs, None)? {
+                    SliceTy::List(h) => self.types.el(h),
+                    other => return unsup(&format!("set-from-of:{other:?}")),
+                };
+                let SliceTy::Scalar(_) = e else { return unsup("set-elem-nonscalar") };
+                let stride = e.slot_size();
+                let scan = self.scan_helper(e)?;
+                let bh = self.hold_i32()?;
+                let ch = self.hold_i32()?;
+                let ih = self.hold_i32()?;
+                let rh = self.hold_i32()?;
+                let xh = self.hold_for(e)?;
+                self.f.instructions().local_tee(bh);
+                self.f
+                    .instructions()
+                    .i32_load(len_memarg())
+                    .i32_const(stride as i32)
+                    .i32_div_u()
+                    .local_set(ch)
+                    .i32_const(0)
+                    .local_set(ih)
+                    .i32_const(0)
+                    .call(F_ALLOC)
+                    .local_set(rh);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
+                self.f
+                    .instructions()
+                    .local_get(bh)
+                    .local_get(ih)
+                    .i32_const(stride as i32)
+                    .i32_mul()
+                    .i32_add();
+                self.load_ty_slot(e, 0);
+                self.f.instructions().local_set(xh);
+                // dedup: append only when absent
+                self.f
+                    .instructions()
+                    .local_get(rh)
+                    .i32_const(stride as i32)
+                    .i32_const(0)
+                    .local_get(xh)
+                    .call(scan)
+                    .i32_eqz()
+                    .if_(BlockType::Empty);
+                let (len_h, nh) = self.emit_copy_grow(rh, stride)?;
+                self.f
+                    .instructions()
+                    .local_get(nh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h)
+                    .i32_add()
+                    .local_get(xh);
+                self.store_ty_slot_raw(e);
+                self.f.instructions().local_get(nh).local_set(rh);
+                self.release_i32();
+                self.release_i32();
+                self.f.instructions().end();
+                self.f
+                    .instructions()
+                    .local_get(ih)
+                    .i32_const(1)
+                    .i32_add()
+                    .local_set(ih)
+                    .br(0)
+                    .end()
+                    .end();
+                self.f.instructions().local_get(rh);
+                self.release_for(e);
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(SliceTy::Set(self.types.intern(e))))
+            }
+            _ => unsup(&format!("call:set.{func}")),
+        }
+    }
+
+    /// Evaluate set + needle, run the scan. Returns ALL holds explicitly
+    /// — (set, needle, entry, elem ty). Release: entry, needle, set.
+    fn set_scan(&mut self, s: &IrExpr, x: &IrExpr) -> Result<(u32, u32, u32, SliceTy), EmitError> {
+        let e = match self.lower(s, None)? {
+            SliceTy::Set(h) => self.types.el(h),
+            other => return unsup(&format!("set-op-of:{other:?}")),
+        };
+        let sh = self.hold_i32()?;
+        self.f.instructions().local_set(sh);
+        let xh = self.hold_for(e)?;
+        self.lower(x, Some(e))?;
+        self.f.instructions().local_set(xh);
+        let scan = self.scan_helper(e)?;
+        let eh = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_get(sh)
+            .i32_const(e.slot_size() as i32)
+            .i32_const(0)
+            .local_get(xh)
+            .call(scan)
+            .local_set(eh);
+        Ok((sh, xh, eh, e))
+    }
+}

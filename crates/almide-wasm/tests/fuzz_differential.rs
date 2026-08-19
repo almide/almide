@@ -62,6 +62,10 @@ enum Ty {
     Rec,
     /// The fixed preamble variant `Tr = | Lf(Int) | Nd(Int, Int) | Mt`.
     Vart,
+    /// `Map[Int, String]` — exercises entry layout with mixed slot widths.
+    MapIS,
+    /// `Set[Int]`.
+    SetInt,
 }
 
 impl Ty {
@@ -74,6 +78,8 @@ impl Ty {
             Ty::ListInt => "List[Int]",
             Ty::Rec => "Pt",
             Ty::Vart => "Tr",
+            Ty::MapIS => "Map[Int, String]",
+            Ty::SetInt => "Set[Int]",
         }
     }
 }
@@ -158,7 +164,13 @@ impl Gen {
                 }
                 5 => match self.var_of(Ty::Rec) {
                     Some(v) => format!("{v}.{}", ["px", "py"][self.rng.below(2)]),
-                    None => self.leaf(Ty::Int),
+                    None => match self.var_of(Ty::MapIS) {
+                        Some(m) => format!("map.len({m})"),
+                        None => match self.var_of(Ty::SetInt) {
+                            Some(sv) => format!("set.len({sv})"),
+                            None => self.leaf(Ty::Int),
+                        },
+                    },
                 },
                 _ => format!("({} ?? {})", self.expr(Ty::OptInt, depth - 1), self.expr(Ty::Int, depth - 1)),
             },
@@ -174,17 +186,13 @@ impl Gen {
                 }
                 _ => format!("(not {})", self.expr(Ty::Bool, depth - 1)),
             },
-            Ty::Str => match self.rng.below(5) {
-                0 | 1 => self.leaf(Ty::Str),
-                2 => format!("({} + {})", self.expr(Ty::Str, depth - 1), self.expr(Ty::Str, depth - 1)),
-                3 => format!("int.to_string({})", self.expr(Ty::Int, depth - 1)),
-                // VALUE-position interpolation — parts may themselves be
-                // interpolations, exercising the nested build discipline.
-                _ => {
-                    let a = self.expr(Ty::Int, depth - 1);
-                    let b = self.expr(Ty::Str, depth - 1);
-                    format!("\"${{{a}}}~${{{b}}}\"")
-                }
+            Ty::Str => match (self.rng.below(6), self.var_of(Ty::MapIS)) {
+                (0, Some(m)) => format!(
+                    "map.get_or({m}, {}, {})",
+                    self.expr(Ty::Int, depth.saturating_sub(1)),
+                    self.leaf(Ty::Str)
+                ),
+                _ => self.str_expr_core(depth),
             },
             Ty::OptInt => match self.rng.below(4) {
                 0 => "none".to_string(),
@@ -243,6 +251,34 @@ impl Gen {
                 2 => "Mt".to_string(),
                 _ => self.leaf(Ty::Vart),
             },
+            Ty::MapIS => match (self.rng.below(3), self.var_of(Ty::MapIS)) {
+                (0, Some(v)) | (1, Some(v)) => format!(
+                    "map.set({v}, {}, {})",
+                    self.expr(Ty::Int, depth - 1),
+                    self.expr(Ty::Str, depth.saturating_sub(1))
+                ),
+                _ => "map.new()".to_string(),
+            },
+            Ty::SetInt => match (self.rng.below(3), self.var_of(Ty::SetInt)) {
+                (0, Some(v)) | (1, Some(v)) => {
+                    format!("set.insert({v}, {})", self.expr(Ty::Int, depth - 1))
+                }
+                (2, _) => format!("set.from_list({})", self.expr(Ty::ListInt, depth - 1)),
+                _ => "set.new()".to_string(),
+            },
+        }
+    }
+
+    fn str_expr_core(&mut self, depth: usize) -> String {
+        match self.rng.below(5) {
+            0 | 1 => self.leaf(Ty::Str),
+            2 => format!("({} + {})", self.expr(Ty::Str, depth - 1), self.expr(Ty::Str, depth - 1)),
+            3 => format!("int.to_string({})", self.expr(Ty::Int, depth - 1)),
+            _ => {
+                let a = self.expr(Ty::Int, depth - 1);
+                let b = self.expr(Ty::Str, depth - 1);
+                format!("\"${{{a}}}~${{{b}}}\"")
+            }
         }
     }
 
@@ -267,6 +303,8 @@ impl Gen {
             Ty::ListInt => "[1, 2]".to_string(),
             Ty::Rec => "Pt { px: 1, py: 2 }".to_string(),
             Ty::Vart => ["Lf(3)", "Nd(4, 5)", "Mt"][i % 3].to_string(),
+            Ty::MapIS => "map.new()".to_string(),
+            Ty::SetInt => "set.new()".to_string(),
         }
     }
 
@@ -284,9 +322,17 @@ impl Gen {
     }
 
     fn stmt_bind(&mut self, depth: usize) {
-        let ty =
-            [Ty::Int, Ty::Bool, Ty::Str, Ty::OptInt, Ty::ListInt, Ty::Rec, Ty::Vart]
-                [self.rng.below(7)];
+        let ty = [
+            Ty::Int,
+            Ty::Bool,
+            Ty::Str,
+            Ty::OptInt,
+            Ty::ListInt,
+            Ty::Rec,
+            Ty::Vart,
+            Ty::MapIS,
+            Ty::SetInt,
+        ][self.rng.below(9)];
         let name = self.fresh();
         let mutable = self.rng.chance(40);
         let kw = if mutable { "var" } else { "let" };
@@ -486,6 +532,11 @@ struct Tally {
     checker_rejected: usize,
     emit_refused: usize,
     abort_class: usize,
+    /// The ORACLE abstained (interp exit -2 Unsupported / -3 fuel): the
+    /// wasm leg ran but had nothing to compare against. Kept as its own
+    /// VISIBLE class — a growing number here is a growing blind spot
+    /// (the interp's #1226 heap-bridge burn-down shrinks it).
+    oracle_abstained: usize,
     compared: usize,
 }
 
@@ -508,6 +559,10 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
     };
     let interp = almide_spine::s5::run_file(&path, &src)
         .map_err(|e| format!("seed {seed}: interpreter harness error: {e}\n--- src ---\n{src}"))?;
+    if interp.exit == -2 || interp.exit == -3 {
+        tally.oracle_abstained += 1;
+        return Ok(());
+    }
     if interp.exit != 0 {
         // Same policy as the burn-up gate: abort parity is a later slice.
         tally.abort_class += 1;
@@ -538,8 +593,13 @@ fn differential_fuzz_fixed_seed_range() {
         .unwrap_or(200);
     let base: u64 =
         std::env::var("ALMIDE_FUZZ_BASE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let mut tally =
-        Tally { checker_rejected: 0, emit_refused: 0, abort_class: 0, compared: 0 };
+    let mut tally = Tally {
+        checker_rejected: 0,
+        emit_refused: 0,
+        abort_class: 0,
+        oracle_abstained: 0,
+        compared: 0,
+    };
     let mut findings: Vec<String> = Vec::new();
     for seed in base..base + iters {
         if let Err(f) = run_seed(seed, &mut tally) {
@@ -547,8 +607,12 @@ fn differential_fuzz_fixed_seed_range() {
         }
     }
     println!(
-        "fuzz: {} compared / {} abort-class / {} emit-refused / {} checker-rejected (of {iters})",
-        tally.compared, tally.abort_class, tally.emit_refused, tally.checker_rejected
+        "fuzz: {} compared / {} abort-class / {} ORACLE-ABSTAINED / {} emit-refused / {} checker-rejected (of {iters})",
+        tally.compared,
+        tally.abort_class,
+        tally.oracle_abstained,
+        tally.emit_refused,
+        tally.checker_rejected
     );
     assert!(
         findings.is_empty(),

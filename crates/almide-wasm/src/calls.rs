@@ -14,7 +14,7 @@ impl Emitter<'_> {
         target: &CallTarget,
         args: &[IrExpr],
     ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower_call_at(target, args, false)
+        self.lower_call_at(target, args, false, None)
     }
 
     pub(crate) fn lower_call_at(
@@ -22,6 +22,7 @@ impl Emitter<'_> {
         target: &CallTarget,
         args: &[IrExpr],
         tail: bool,
+        ret_hint: Option<SliceTy>,
     ) -> Result<Option<SliceTy>, EmitError> {
         match target {
             CallTarget::Named { name } if name.as_str() == "println" && args.len() == 1 => {
@@ -109,6 +110,12 @@ impl Emitter<'_> {
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
                 self.lower_list_call(func.as_str(), args)
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "map" => {
+                self.lower_map_call(func.as_str(), args, ret_hint)
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "set" => {
+                self.lower_set_call(func.as_str(), args, ret_hint)
             }
             CallTarget::Module { module, func, .. } => {
                 unsup(&format!("call:{}.{}", module.as_str(), func.as_str()))
