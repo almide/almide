@@ -88,6 +88,7 @@ pattern:Err
 pattern:Literal
 pattern:None
 pattern:Ok
+pattern:RecordPattern
 pattern:Some
 pattern:Tuple
 pattern:Wildcard

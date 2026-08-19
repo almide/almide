@@ -979,3 +979,21 @@ is materialized at the call site when the third argument is omitted.
 
 **Burn-up: 140 → 149 / 590**, floor 149, zero divergence — codepoint
 semantics matched the oracle on the first gate run.
+
+---
+
+## Unit 6 — stage 15: record-shaped variant cases (2026-08-20)
+
+`| Scroll { dy: Int, fast: Bool }` — the last variant SHAPE. One shared
+`build_case` now produces every CaseDef (tuple cases carry positional
+names, record cases their declared names), so construction
+(`Record{name: Some("Scroll")}` literals whose type is a Variant become
+tagged-case builds), the tag test, and NAMED field binds
+(`Scroll { dy, fast } =>` RecordPatterns) all run through the same
+machinery as tuple cases. Generic variants with record cases come free
+through the same builder.
+
+**Burn-up: 149 → 150 / 590** (a quarter of the corpus), floor 150, zero
+divergence. The Named wall's remainder is compound with other refusals;
+the shape machinery is now complete for every declared-type form the
+corpus uses.

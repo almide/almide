@@ -131,6 +131,54 @@ fn subst(ty: &Ty, env: &HashMap<Sym, &Ty>) -> Ty {
     }
 }
 
+/// One variant case → CaseDef. Tuple cases get positional names
+/// ("0", "1"); RECORD-shaped cases keep their declared field names —
+/// one CaseDef shape serves construction and patterns for both.
+fn build_case(
+    table: &TypeTable,
+    c: &almide_ir::IrVariantDecl,
+    tag: u32,
+    env: Option<&HashMap<Sym, &Ty>>,
+) -> Option<CaseDef> {
+    let named: Vec<(String, Ty)> = match &c.kind {
+        IrVariantKind::Unit => Vec::new(),
+        IrVariantKind::Tuple { fields } => fields
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (format!("{i}"), t.clone()))
+            .collect(),
+        IrVariantKind::Record { fields } => fields
+            .iter()
+            .map(|f| (f.name.as_str().to_string(), f.ty.clone()))
+            .collect(),
+    };
+    let mut tys: Vec<(String, SliceTy)> = Vec::new();
+    for (fname, t) in &named {
+        let resolved = match env {
+            Some(env) => slice_ty_of(&subst(t, env), table)?,
+            None => slice_ty_of(t, table)?,
+        };
+        tys.push((fname.clone(), resolved));
+    }
+    let widths: Vec<u32> = tys.iter().map(|(_, t)| t.slot_size()).collect();
+    let (offsets, fsize) = almide_layout::pack_fields(&widths);
+    let fields = tys
+        .into_iter()
+        .zip(offsets)
+        .map(|((name, ty), off)| FieldInfo {
+            name,
+            ty,
+            offset: almide_layout::SUM_FIELD + off,
+        })
+        .collect();
+    Some(CaseDef {
+        name: c.name.as_str().to_string(),
+        tag,
+        fields,
+        size: almide_layout::SUM_FIELD + fsize,
+    })
+}
+
 fn build_record_def(
     table: &TypeTable,
     fields: &[almide_ir::IrFieldDecl],
@@ -158,35 +206,7 @@ fn build_variant_def(
 ) -> Option<NamedDef> {
     let mut defs = Vec::new();
     for (tag, c) in cases.iter().enumerate() {
-        let tys: Vec<SliceTy> = match &c.kind {
-            IrVariantKind::Unit => Vec::new(),
-            IrVariantKind::Tuple { fields } => {
-                let mut v = Vec::new();
-                for t in fields {
-                    v.push(slice_ty_of(&subst(t, env), table)?);
-                }
-                v
-            }
-            IrVariantKind::Record { .. } => return None,
-        };
-        let widths: Vec<u32> = tys.iter().map(|t| t.slot_size()).collect();
-        let (offsets, fsize) = almide_layout::pack_fields(&widths);
-        let fields = tys
-            .into_iter()
-            .zip(offsets)
-            .enumerate()
-            .map(|(i, (ty, off))| FieldInfo {
-                name: format!("{i}"),
-                ty,
-                offset: almide_layout::SUM_FIELD + off,
-            })
-            .collect();
-        defs.push(CaseDef {
-            name: c.name.as_str().to_string(),
-            tag: tag as u32,
-            fields,
-            size: almide_layout::SUM_FIELD + fsize,
-        });
+        defs.push(build_case(table, c, tag as u32, Some(env))?);
     }
     Some(NamedDef::Variant(VariantDef { cases: defs }))
 }
@@ -340,52 +360,11 @@ fn add_variant(
     // concern the wasm layout never sees.
     let _ = (boxed_args, boxed_record_fields);
     let mut defs = Vec::new();
-    let mut ok = true;
     for (tag, c) in cases.iter().enumerate() {
-        let tys: Vec<SliceTy> = match &c.kind {
-            IrVariantKind::Unit => Vec::new(),
-            IrVariantKind::Tuple { fields } => {
-                let mut v = Vec::new();
-                for t in fields {
-                    match slice_ty_of(t, table) {
-        Some(st) => v.push(st),
-        None => {
-            ok = false;
-            break;
+        match build_case(table, c, tag as u32, None) {
+            Some(d) => defs.push(d),
+            None => return, // stays Excluded — honest refusal at uses
         }
-                    }
-                }
-                if !ok {
-                    break;
-                }
-                v
-            }
-            IrVariantKind::Record { .. } => {
-                ok = false;
-                break;
-            }
-        };
-        let widths: Vec<u32> = tys.iter().map(|t| t.slot_size()).collect();
-        let (offsets, fsize) = almide_layout::pack_fields(&widths);
-        let fields = tys
-            .into_iter()
-            .zip(offsets)
-            .enumerate()
-            .map(|(i, (ty, off))| FieldInfo {
-                name: format!("{i}"),
-                ty,
-                offset: almide_layout::SUM_FIELD + off,
-            })
-            .collect();
-        defs.push(CaseDef {
-            name: c.name.as_str().to_string(),
-            tag: tag as u32,
-            fields,
-            size: almide_layout::SUM_FIELD + fsize,
-        });
-    }
-    if !ok {
-        return;
     }
     let idx = table.by_name[name];
     for (ci, c) in defs.iter().enumerate() {

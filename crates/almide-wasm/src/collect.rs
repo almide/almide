@@ -220,6 +220,14 @@ pub(crate) fn collect_pattern_binds(
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
             collect_pattern_binds(inner, out, seen, types)
         }
+        IrPattern::RecordPattern { fields, .. } => {
+            for fp in fields {
+                if let Some(p) = &fp.pattern {
+                    collect_pattern_binds(p, out, seen, types)?;
+                }
+            }
+            Ok(())
+        }
         IrPattern::Constructor { args, .. } | IrPattern::Tuple { elements: args } => {
             for a in args {
                 collect_pattern_binds(a, out, seen, types)?;
