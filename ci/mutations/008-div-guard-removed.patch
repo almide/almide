@@ -1,0 +1,18 @@
+diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
+index f0264d039..0f12e3f61 100644
+--- a/crates/almide-wasm/src/emitter.rs
++++ b/crates/almide-wasm/src/emitter.rs
+@@ -568,12 +568,7 @@ impl Emitter<'_> {
+                 let l = self.hold_i64()?;
+                 let mut i = self.f.instructions();
+                 i.local_set(r).local_set(l);
+-                i.local_get(r).i64_eqz().if_(BlockType::Empty);
+-                i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+-                i.local_get(l).i64_const(i64::MIN).i64_eq();
+-                i.local_get(r).i64_const(-1).i64_eq();
+-                i.i32_and().if_(BlockType::Empty);
+-                i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
++                let _ = (div0, ovf);
+                 i.local_get(l).local_get(r);
+                 match op {
+                     DivInt => i.i64_div_s(),

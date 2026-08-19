@@ -97,33 +97,34 @@ const LINE_BUF_MIN: u64 = 65536;
 
 const F_PRINTLN_IMPORT: u32 = 0;
 const F_EPRINTLN_IMPORT: u32 = 1;
-const F_PRINTLN_BLOCK: u32 = 2;
-const F_EPRINTLN_BLOCK: u32 = 3;
-const F_APPEND_COPY: u32 = 4;
-const F_ITOA: u32 = 5;
-const F_APPEND_I64: u32 = 6;
-const F_APPEND_BOOL: u32 = 7;
-const F_ALLOC: u32 = 8;
-const F_INT_TO_STRING: u32 = 9;
-const F_CONCAT: u32 = 10;
-const F_STR_EQ: u32 = 11;
-const F_LIST_GET_8: u32 = 12;
-const F_LIST_GET_4: u32 = 13;
-const F_LIST_PUSH_8: u32 = 14;
-const F_LIST_PUSH_4: u32 = 15;
-const F_LIST_JOIN: u32 = 16;
-const F_BLOCK_COPY: u32 = 17;
-const F_BUF_TO_BLOCK: u32 = 18;
-const F_STR_LEN_CHARS: u32 = 19;
-const F_SCAN_W64: u32 = 20;
-const F_SCAN_W32: u32 = 21;
-const F_SCAN_STR: u32 = 22;
-const F_F16_TO_F64: u32 = 23;
-const F_CP_OFF: u32 = 24;
-const F_STR_SLICE: u32 = 25;
-const F_STR_REPEAT: u32 = 26;
+const F_EXIT_IMPORT: u32 = 2;
+const F_PRINTLN_BLOCK: u32 = 3;
+const F_EPRINTLN_BLOCK: u32 = 4;
+const F_APPEND_COPY: u32 = 5;
+const F_ITOA: u32 = 6;
+const F_APPEND_I64: u32 = 7;
+const F_APPEND_BOOL: u32 = 8;
+const F_ALLOC: u32 = 9;
+const F_INT_TO_STRING: u32 = 10;
+const F_CONCAT: u32 = 11;
+const F_STR_EQ: u32 = 12;
+const F_LIST_GET_8: u32 = 13;
+const F_LIST_GET_4: u32 = 14;
+const F_LIST_PUSH_8: u32 = 15;
+const F_LIST_PUSH_4: u32 = 16;
+const F_LIST_JOIN: u32 = 17;
+const F_BLOCK_COPY: u32 = 18;
+const F_BUF_TO_BLOCK: u32 = 19;
+const F_STR_LEN_CHARS: u32 = 20;
+const F_SCAN_W64: u32 = 21;
+const F_SCAN_W32: u32 = 22;
+const F_SCAN_STR: u32 = 23;
+const F_F16_TO_F64: u32 = 24;
+const F_CP_OFF: u32 = 25;
+const F_STR_SLICE: u32 = 26;
+const F_STR_REPEAT: u32 = 27;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 27;
+const F_FN_BASE: u32 = 28;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
@@ -546,7 +547,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32, ValType::I32], []); // 0: print import (ptr, len)
-    types.ty().function([ValType::I32], []); // 1: block-print(base)
+    types.ty().function([ValType::I32], []); // 1: block-print(base) / exit(code)
     types.ty().function([ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 2: append_copy
     types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 3: append_i64
     types.ty().function([], []); // 4: main
@@ -576,6 +577,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let mut imports = ImportSection::new();
     imports.import("almide", "println", EntityType::Function(0));
     imports.import("almide", "eprintln", EntityType::Function(0));
+    imports.import("almide", "exit", EntityType::Function(1));
 
     let mut functions = FunctionSection::new();
     functions.function(1); // F_PRINTLN_BLOCK

@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Grow-only floor: raise as slices land, never lower.
-const SUPPORTED_FLOOR: usize = 150;
+const SUPPORTED_FLOOR: usize = 167;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
@@ -57,20 +57,19 @@ fn corpus_burn_up() {
             }
         };
         match almide_wasm::emit_program(&ir) {
-            // Abort parity (nonzero exit + stderr message) is a later
-            // slice: the emitter can't know a fixture aborts, so a
-            // successful emit against a nonzero-exit oracle row is
-            // CLASSIFIED, not claimed — and never allowed to pass as a
-            // silent skip of a divergence.
-            Ok(_) if want_exit != 0 => {
-                *unsupported.entry("gate:abort-parity-pending".into()).or_default() += 1;
-            }
+            // Abort parity IS the claim (C-153 family): a nonzero-exit
+            // oracle row is claimed only when the wasm leg reproduces both
+            // the stdout-before-abort hash AND the exit code. The manifest
+            // hashes stdout only, so stderr stays fuzz-verified for now.
             Ok(bytes) => match run_wasm(&bytes) {
-                Ok(out) => {
-                    if normalized_hash(&out) == want_hash {
+                Ok(r) => {
+                    if normalized_hash(&r.stdout) == want_hash && r.exit == want_exit {
                         supported += 1;
                     } else {
-                        divergent.push(rel.to_string());
+                        divergent.push(format!(
+                            "{rel} (exit {} want {want_exit})",
+                            r.exit
+                        ));
                     }
                 }
                 Err(e) => divergent.push(format!("{rel} (runtime: {e})")),

@@ -997,3 +997,31 @@ through the same builder.
 divergence. The Named wall's remainder is compound with other refusals;
 the shape machinery is now complete for every declared-type form the
 corpus uses.
+
+---
+
+## Unit 6 — stage 16: abort parity is a CLAIMED surface (2026-08-20)
+
+The `gate:abort-parity-pending` class is RETIRED. `almide.exit(code)` is a
+third host import — the harness records the code before the unwind, so every
+run yields (stdout, stderr, exit) and a nonzero-exit oracle row is claimed
+only when the wasm leg reproduces both the stdout-before-abort hash AND the
+exit code. `process.exit(n)` lowers to the import + `unreachable`; the
+ALS-T18 assert desugar (eprintln + process.exit) then unlocks the whole
+assert-abort family with no assert-specific code.
+
+**Activation-day catch (C-002, the mission thesis in one fixture):** wasm
+`i64.rem_s` DEFINES `MIN % -1 = 0` — no trap — so `int_mod_overflow` printed
+`0`/exit 0 against the oracle's abort. The incumbent's guard had NOT been
+ported; the gate found the carried-over gap the moment it activated. div/rem
+now guard both operands and abort with the exact native frame
+("Error: division by zero" / "Error: integer overflow" + exit 1), making the
+raw wasm traps unreachable for arithmetic.
+
+Fuzzer: abort rows are compared (stdout + exit), not skipped, and the
+generator now produces sometimes-zero computed divisors — 6 abort-compared
+per 200 seeds, all agreeing. Mutants 007 (exit neutered) and 008 (div guard
+removed) are the slice's teeth.
+
+**Burn-up: 150 → 167 / 590**, floor 167, surface 97 → 103 constructs, zero
+divergence.

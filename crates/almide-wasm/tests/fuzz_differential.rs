@@ -149,9 +149,19 @@ impl Gen {
                     let op = ["+", "-", "*"][self.rng.below(3)];
                     format!("({} {} {})", self.expr(Ty::Int, depth - 1), op, self.expr(Ty::Int, depth - 1))
                 }
-                // Division: keep the divisor a nonzero literal so the
-                // program stays in the compared (exit 0) class most runs.
-                3 => format!("({} / {})", self.expr(Ty::Int, depth - 1), [3, 7, 10][self.rng.below(3)]),
+                // Division/modulo: usually a nonzero literal divisor (the
+                // compared class), sometimes a COMPUTED `(e % 3)` divisor
+                // that CAN be zero — the guarded-abort leg (exit 1 +
+                // stdout-before-abort, C-002) gets fuzz coverage too.
+                3 => {
+                    let op = ["/", "%"][self.rng.below(2)];
+                    let divisor = if self.rng.below(4) == 0 {
+                        format!("({} % 3)", self.expr(Ty::Int, depth - 1))
+                    } else {
+                        [3, 7, 10][self.rng.below(3)].to_string()
+                    };
+                    format!("({} {op} {divisor})", self.expr(Ty::Int, depth - 1))
+                }
                 4 => format!(
                     "(if {} then {} else {})",
                     self.expr(Ty::Bool, depth - 1),
@@ -557,14 +567,15 @@ fn still_diverges(src: &str) -> Option<String> {
     let ir = almide_spine::s5::lower_to_ir("reduce.almd", src).ok()?;
     let bytes = almide_wasm::emit_program(&ir).ok()?;
     let interp = almide_spine::s5::run_file("reduce.almd", src).ok()?;
-    if interp.exit != 0 {
-        return None;
+    if interp.exit < 0 {
+        return None; // oracle abstained — nothing to preserve
     }
     match run_wasm(&bytes) {
         Err(e) => Some(format!("wasm leg failed: {e}")),
-        Ok(out) if out != interp.stdout => {
-            Some(format!("interp:\n{}\nwasm:\n{out}", interp.stdout))
-        }
+        Ok(r) if r.stdout != interp.stdout || r.exit != interp.exit => Some(format!(
+            "interp (exit {}):\n{}\nwasm (exit {}):\n{}",
+            interp.exit, interp.stdout, r.exit, r.stdout
+        )),
         Ok(_) => None,
     }
 }
@@ -601,6 +612,9 @@ fn reduce(src: &str) -> String {
 struct Tally {
     checker_rejected: usize,
     emit_refused: usize,
+    /// Interp exit != 0: compared like any run (stdout-before-abort +
+    /// exit code) — counted apart so generator drift toward aborts stays
+    /// visible in the report.
     abort_class: usize,
     /// The ORACLE abstained (interp exit -2 Unsupported / -3 fuel): the
     /// wasm leg ran but had nothing to compare against. Kept as its own
@@ -633,25 +647,28 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
         tally.oracle_abstained += 1;
         return Ok(());
     }
-    if interp.exit != 0 {
-        // Same policy as the burn-up gate: abort parity is a later slice.
-        tally.abort_class += 1;
-        return Ok(());
-    }
-    let wasm_out = run_wasm(&bytes).map_err(|e| {
+    let run = run_wasm(&bytes).map_err(|e| {
         let reduced = reduce(&src);
         format!(
-            "seed {seed}: interp exit 0 but wasm leg failed: {e}\n--- src ---\n{src}\n--- reduced (V-4) ---\n{reduced}"
+            "seed {seed}: wasm leg failed to run: {e}\n--- src ---\n{src}\n--- reduced (V-4) ---\n{reduced}"
         )
     })?;
-    if wasm_out != interp.stdout {
+    // Abort rows compare too (stdout-before-abort + exit code): abort
+    // parity is a CLAIMED surface now, not a skipped class. stderr stays
+    // out of the comparison until the guarded-abort message contract
+    // (native runtime error text) is emitted on the wasm leg.
+    if run.stdout != interp.stdout || run.exit != interp.exit {
         let reduced = reduce(&src);
         return Err(format!(
-            "seed {seed}: DIVERGENCE\n--- interp ---\n{}\n--- wasm ---\n{}\n--- src ---\n{src}\n--- reduced (V-4) ---\n{reduced}\n(permanence rule V-5: land the reduced case as spec/wasm_cross/fuzz_found_*.almd in the fixing PR)",
-            interp.stdout, wasm_out
+            "seed {seed}: DIVERGENCE\n--- interp (exit {}) ---\n{}\n--- wasm (exit {}) ---\n{}\n--- src ---\n{src}\n--- reduced (V-4) ---\n{reduced}\n(permanence rule V-5: land the reduced case as spec/wasm_cross/fuzz_found_*.almd in the fixing PR)",
+            interp.exit, interp.stdout, run.exit, run.stdout
         ));
     }
-    tally.compared += 1;
+    if interp.exit != 0 {
+        tally.abort_class += 1;
+    } else {
+        tally.compared += 1;
+    }
     Ok(())
 }
 
@@ -677,7 +694,7 @@ fn differential_fuzz_fixed_seed_range() {
         }
     }
     println!(
-        "fuzz: {} compared / {} abort-class / {} ORACLE-ABSTAINED / {} emit-refused / {} checker-rejected (of {iters})",
+        "fuzz: {} compared / {} abort-compared / {} ORACLE-ABSTAINED / {} emit-refused / {} checker-rejected (of {iters})",
         tally.compared,
         tally.abort_class,
         tally.oracle_abstained,

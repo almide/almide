@@ -24,7 +24,9 @@ const SRC: &str = r#"fn main() -> Unit = {
 fn bound_alias_does_not_observe_in_place_push() {
     let ir = almide_spine::s5::lower_to_ir("alias_semantics.almd", SRC).expect("lowers");
     let bytes = almide_wasm::emit_program(&ir).expect("emits");
-    let wasm_out = run_wasm(&bytes).expect("runs");
+    let run = run_wasm(&bytes).expect("runs");
+    assert_eq!(run.exit, 0);
+    let wasm_out = run.stdout;
 
     // The oracle: the interpreter IS the definition (ARCHITECTURE.md §6.6).
     let interp = almide_spine::s5::run_file("alias_semantics.almd", SRC).expect("interp runs");

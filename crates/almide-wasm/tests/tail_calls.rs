@@ -33,6 +33,10 @@ fn run_small_stack(bytes: &[u8]) -> anyhow::Result<String> {
         },
     )?;
     linker.func_wrap("almide", "eprintln", |_: wasmtime::Caller<'_, ()>, _: i32, _: i32| {})?;
+    fn exit_host(_: wasmtime::Caller<'_, ()>, code: i32) -> wasmtime::Result<()> {
+        Err(wasmtime::Error::msg(format!("almide.exit({code}) in a tail-call fixture")))
+    }
+    linker.func_wrap("almide", "exit", exit_host)?;
     let instance = linker.instantiate(&mut store, &module)?;
     let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
     main.call(&mut store, ())?;

@@ -23,6 +23,7 @@ call:bytes.len
 call:bytes.new
 call:bytes.read_f16_le
 call:bytes.set_at
+call:eprintln
 call:float.to_fixed
 call:float.to_string
 call:int.to_string
@@ -44,6 +45,7 @@ call:map.new
 call:map.set
 call:option.to_result__Int_LoadError
 call:println
+call:process.exit
 call:set.contains
 call:set.from_list
 call:set.insert

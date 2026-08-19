@@ -541,22 +541,46 @@ impl Emitter<'_> {
                 };
                 Ok(FLOAT)
             }
-            AddInt | SubInt | MulInt | DivInt | ModInt => {
+            AddInt | SubInt | MulInt => {
                 self.lower(left, Some(INT))?;
                 self.lower(right, Some(INT))?;
                 let mut i = self.f.instructions();
                 match op {
                     AddInt => i.i64_add(),
                     SubInt => i.i64_sub(),
-                    MulInt => i.i64_mul(),
-                    // wasm traps on /0 and MIN/-1 exactly where native
-                    // aborts — abort-parity (exit + stderr) is a later
-                    // slice, so those fixtures are gate-classified, not
-                    // claimed.
-                    DivInt => i.i64_div_s(),
-                    ModInt => i.i64_rem_s(),
-                    _ => unreachable!(),
+                    _ => i.i64_mul(),
                 };
+                Ok(INT)
+            }
+            // C-002: wasm's own div/rem semantics DIFFER from the native
+            // abort contract — `i64.rem_s` defines `MIN % -1 = 0` (no
+            // trap: the silent-divergence case the abort-parity gate
+            // caught on activation day), and a raw trap carries no stderr.
+            // Guard BOTH operands and abort with the exact native frame
+            // ("Error: division by zero" / "Error: integer overflow" +
+            // exit 1) before the op, so the op itself can never trap.
+            DivInt | ModInt => {
+                self.lower(left, Some(INT))?;
+                self.lower(right, Some(INT))?;
+                let div0 = self.pool.intern("Error: division by zero");
+                let ovf = self.pool.intern("Error: integer overflow");
+                let r = self.hold_i64()?;
+                let l = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(r).local_set(l);
+                i.local_get(r).i64_eqz().if_(BlockType::Empty);
+                i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+                i.local_get(l).i64_const(i64::MIN).i64_eq();
+                i.local_get(r).i64_const(-1).i64_eq();
+                i.i32_and().if_(BlockType::Empty);
+                i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+                i.local_get(l).local_get(r);
+                match op {
+                    DivInt => i.i64_div_s(),
+                    _ => i.i64_rem_s(),
+                };
+                self.release_i64();
+                self.release_i64();
                 Ok(INT)
             }
             Lt | Gt | Lte | Gte | Eq | Neq => self.lower_cmp(op, left, right),

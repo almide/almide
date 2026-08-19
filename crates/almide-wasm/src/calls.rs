@@ -113,6 +113,26 @@ impl Emitter<'_> {
             }
             // Stdlib special forms the runtime helpers cover directly.
             CallTarget::Module { module, func, .. }
+                if module.as_str() == "process" && func.as_str() == "exit" =>
+            {
+                // The abort floor (C-153 family): surface the code to the
+                // host import, then trap. The host records the code BEFORE
+                // the unwind, so exit-code parity is exact; the trailing
+                // `unreachable` keeps the stack polymorphic (nothing after
+                // `process.exit` executes on any target).
+                match args.first() {
+                    Some(a) => {
+                        self.lower(a, Some(INT))?;
+                        self.f.instructions().i32_wrap_i64();
+                    }
+                    None => {
+                        self.f.instructions().i32_const(1);
+                    }
+                }
+                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
+                Ok(None)
+            }
+            CallTarget::Module { module, func, .. }
                 if module.as_str() == "int" && func.as_str() == "to_string" && args.len() == 1 =>
             {
                 self.lower(&args[0], Some(INT))?;
