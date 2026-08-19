@@ -14,6 +14,9 @@ jobs:
       # deviation register — only enumerated forward references pass.
       - name: contract port gate
         run: bash scripts/check-contracts-port-gate.sh
+      # SD2 (STDLIB-EXCELLENCE.md): core/effect tier boundary, machine-enforced.
+      - name: stdlib tier gate
+        run: bash scripts/check-stdlib-tiers.sh
       # Rust units (unit 1+): tests include the incumbent golden parity.
       - name: cargo test
         run: cargo test --workspace --locked
