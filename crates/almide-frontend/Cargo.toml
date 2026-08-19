@@ -14,3 +14,21 @@ serde = { version = "1", features = ["derive"] }
 [build-dependencies]
 toml = "1.1"
 serde = { version = "1", features = ["derive"] }
+
+# Crate-scoped allows for verbatim-ported sources (no source edits during a
+# port — PORTLOG.md). New modules in this crate must be written clean.
+[lints.clippy]
+clone_on_copy = "allow"
+collapsible_if = "allow"
+derivable_impls = "allow"
+doc_lazy_continuation = "allow"
+empty_line_after_doc_comments = "allow"
+manual_ignore_case_cmp = "allow"
+needless_return = "allow"
+new_without_default = "allow"
+redundant_closure = "allow"
+should_implement_trait = "allow"
+type_complexity = "allow"
+unnecessary_lazy_evaluations = "allow"
+unnecessary_map_or = "allow"
+unnecessary_sort_by = "allow"
