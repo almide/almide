@@ -118,6 +118,12 @@ impl TypeTable {
 fn subst(ty: &Ty, env: &HashMap<Sym, &Ty>) -> Ty {
     match ty {
         Ty::TypeVar(s) => env.get(s).map(|t| (*t).clone()).unwrap_or_else(|| ty.clone()),
+        // Generic params arrive from the decl lowerer as bare Named
+        // references (`Named("T", [])`), not TypeVar — the param SHADOWS
+        // any like-named type inside its declaration's scope.
+        Ty::Named(n, args) if args.is_empty() && env.contains_key(n) => {
+            (*env[n]).clone()
+        }
         Ty::Applied(c, args) => Ty::Applied(c.clone(), args.iter().map(|a| subst(a, env)).collect()),
         Ty::Named(n, args) => Ty::Named(*n, args.iter().map(|a| subst(a, env)).collect()),
         Ty::Tuple(args) => Ty::Tuple(args.iter().map(|a| subst(a, env)).collect()),

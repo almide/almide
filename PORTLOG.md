@@ -832,3 +832,23 @@ generic FUNCTIONS, which fn_signature still refuses. Function
 monomorphization (the R3 intra-CU mono decision, driven by the IR's
 call-site `type_args`) is the next slice; this commit is its type-side
 half, kept green under the full net (122/590 parity, fuzz, mutants).
+
+---
+
+## Generic instances live: the Named-param encoding discovery (2026-08-20)
+
+Three probe rounds pinned why generic instances stayed Excluded:
+1. `monomorphize` ALREADY RUNS — `link_ir` = optimize_half + link_half,
+   and link_half is `monomorphize + ir_link`. My planned "port the mono
+   pass into s5" was a double-run and was reverted before landing;
+   generic FUNCTIONS arrive as concrete specializations (`unbox__Int`).
+2. What was actually missing: generic TYPE params are encoded by the
+   decl lowerer as bare `Ty::Named("T", [])`, NOT `Ty::TypeVar` — the
+   substitution only replaced TypeVar, every instance built as Excluded,
+   and `instance()` still returned the index (refusals honest, cause
+   invisible). One arm fixed it: a bare Named matching a param SHADOWS
+   any like-named type in the declaration's scope.
+3. `debug hooks that print Some(Named(i))` prove nothing about the DEF —
+   the probe had to inspect def-kind to see EXCLUDED.
+
+Burn-up: 122 → **124 / 590**, floor 124, zero divergence.
