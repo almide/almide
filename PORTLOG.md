@@ -235,10 +235,21 @@ by the 1,062-file oracle manifest staying byte-identical):
   (g) 1499x; invalidation exactness unchanged. Full story:
   docs/spikes/S4-stage2-tax-removal.md.
 
+- **Incremental diagnostic scenarios (2026-08-19): GREEN.** Adopted from
+  Zig's `test/incremental/` (unique in the 9-compiler field). The property:
+  for EVERY step of every edit script, incremental diagnostics equal the
+  from-scratch answer — with memoization witnessed (≤1 check per edit, an
+  untouched neighbor file at 0 re-checks throughout), so the equivalence is
+  never vacuous. Six scenarios: error toggle (template-clone state-leak
+  detector), span-only shift (line numbers proven to MOVE), decl add/remove,
+  parse-error recovery, unused-warning toggle, import-set switch (template
+  cache key change). One language fact learned and encoded: `main` must
+  return Unit (E044), so scenario programs use plain fns.
+  `crates/almide-spine/tests/incremental_diag_test.rs`, serialized in one
+  test (the executions counter and template cache are process-global).
 - **Still owed before unit 4 LANDS:** per-decl granularity for the largest
-  files (median payoff now small — entry inference is 0.25 ms — but
-  whole-file inference still scales with file size), Zig-style incremental
-  diagnostic scenarios, E1 wiring (misspellings + recoverable codes).
+  files, E1 wiring (misspellings + recoverable codes — behavioral, will go
+  through the intentional-change protocol).
 
 ---
 
