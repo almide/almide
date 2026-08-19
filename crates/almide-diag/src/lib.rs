@@ -17,5 +17,10 @@ pub mod diagnostic;
 pub mod render;
 pub mod span;
 
+// Greenfield evolution E1 (post-port, survey-driven — see PORTLOG.md):
+pub mod codes;
+pub mod misspellings;
+pub mod multifix;
+
 pub use diagnostic::Diagnostic;
 pub use span::Span;

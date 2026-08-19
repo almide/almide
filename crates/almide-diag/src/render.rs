@@ -161,15 +161,31 @@ pub fn to_json(d: &Diagnostic) -> String {
     // schema break, while `try` / `try_replace` keep serving the existing
     // single-fix consumers. `applicability` is the tag a fixer must branch on:
     // only "machine-applicable" may be applied unattended.
-    let suggestions = match (d.try_replace_span, &d.try_snippet) {
-        (Some((l, c, e)), Some(s)) => format!(
-            r#"[{{"line":{},"col":{},"end_col":{},"replacement":"{}","applicability":"{}"}}]"#,
+    let mut suggestion_items: Vec<String> = Vec::new();
+    if let (Some((l, c, e)), Some(s)) = (d.try_replace_span, &d.try_snippet) {
+        suggestion_items.push(format!(
+            r#"{{"line":{},"col":{},"end_col":{},"replacement":"{}","applicability":"{}"}}"#,
             l, c, e,
             s.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n"),
             d.try_applicability.as_str(),
-        ),
-        _ => "[]".to_string(),
-    };
+        ));
+    }
+    // Post-port extension (E1): a multi-part fix serializes as one entry whose
+    // "parts" array is the atomic edit set — same shape rustc's JSON uses.
+    // Absent (`multi_fix: None`) this block emits nothing, so every diagnostic
+    // the incumbent could produce keeps its byte-identical JSON.
+    if let Some(mf) = &d.multi_fix {
+        let parts: Vec<String> = mf.parts.iter().map(|p| format!(
+            r#"{{"line":{},"col":{},"end_col":{},"replacement":"{}"}}"#,
+            p.line, p.col, p.end_col,
+            p.snippet.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n"),
+        )).collect();
+        suggestion_items.push(format!(
+            r#"{{"parts":[{}],"applicability":"{}"}}"#,
+            parts.join(","), mf.applicability.as_str(),
+        ));
+    }
+    let suggestions = format!("[{}]", suggestion_items.join(","));
     // Manual JSON to avoid serde dependency in this module
     format!(
         r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,

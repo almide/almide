@@ -152,6 +152,11 @@ pub struct Diagnostic {
     /// unattended (#1312). `Unspecified` whenever no span is attached — a
     /// display-only `try:` is never applied by anything.
     pub try_applicability: Applicability,
+    /// POST-PORT EXTENSION (greenfield E1, rustc `Substitution.parts` model):
+    /// one atomic fix that touches several sites. `None` on every diagnostic
+    /// the incumbent could produce, so incumbent-parity output is unchanged.
+    /// Builders, read path, and apply engine live in `crate::multifix`.
+    pub multi_fix: Option<crate::multifix::MultiFix>,
 }
 
 impl Diagnostic {
@@ -162,6 +167,7 @@ impl Diagnostic {
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
             try_applicability: Applicability::Unspecified,
+            multi_fix: None,
         }
     }
 
@@ -172,6 +178,7 @@ impl Diagnostic {
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
             try_applicability: Applicability::Unspecified,
+            multi_fix: None,
         }
     }
 
