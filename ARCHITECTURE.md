@@ -1,0 +1,103 @@
+# Greenfield Architecture — Almide on a Query Spine
+
+Status: DRAFT — load-bearing decisions listed in §6 are ratified one-by-one (○×).
+Origin: full audit of almide v0.57.2 + ../almide-references (2026-08-19).
+
+## 0. Premise
+
+- **The language is still Almide.** Surface, dialect-epoch lineage, llms.txt,
+  CHEATSHEET, and the `spec/` corpus are the crown-jewel assets and port over.
+  This is a new engine under the same language, not a new language.
+- **Mission unchanged:** modification survival rate (MSR). Every decision below
+  is scored against "does an LLM's edit survive".
+- **The analogy:** current almide is a steam locomotive fitted with the world's
+  best instruments and safety systems (diagnostics, Lean belts, contract
+  ledger, 3-way oracle). Greenfield moves those finished instruments — one at a
+  time, unmodified where possible — onto an electric drivetrain (query core,
+  single semantics). We replace the propulsion, never the instruments.
+
+## 1. The two laws this architecture exists to enforce
+
+1. **Everything derived is a query.** No batch pipeline; `check`, LSP, MCP are
+   thin clients over the same memoized query graph. (Fixes: keystroke-cost
+   LSP, dead `.almdi`, phantom cache, `slope_check 1.144`.)
+2. **There is exactly one semantics.** One lowering, one canonical target.
+   Cross-target equivalence stops being a 280-contract liability and becomes a
+   2-point bind: executable spec ↔ the single backend.
+
+## 2. Layers
+
+```
+L5  clients      almide-cli / almide-lsp / almide-mcp     (thin; no logic)
+L4  execution    wasmtime JIT (dev) | cranelift AOT .cwasm (dist)
+L3  lowering     IR → WASM Component (wasm-encoder, structural; Perceus,
+                 emit-time certificates)                   [single semantics]
+L2  spec         almide-spec: the interpreter over linked IR = the semantics.
+                 Contracts bind L2 ↔ L3 output.
+L1  query core   salsa DB: parse / interface / typecheck / lower as queries
+L0  evidence     spec/ corpus, contracts.toml, Lean belts, dialect epochs,
+                 MSR harness (Dojo) — gates every layer above
+```
+
+Diagnostics (`almide-diag`) is a leaf library used by L1–L3; it is ported
+verbatim first because everything else reports through it.
+
+## 3. Crate map
+
+| crate | role | provenance |
+|---|---|---|
+| `almide-diag` | Diagnostic struct, 60+ codes, `try_replace`, JSON | **ported verbatim** (almide-base/diagnostic) |
+| `almide-spine` | salsa database, query definitions, invalidation | new |
+| `almide-syntax` | lexer/parser, AST | ported, re-cut as queries |
+| `almide-sema` | type checker (per-function queries) | logic ported, structure new |
+| `almide-spec` | interpreter over linked IR = executable semantics | **ported** (almide-interp), re-anchored as the spec |
+| `almide-ir` | linked IR schema | ported |
+| `almide-wasm` | IR → wasm component, Perceus, certificates | Perceus+certificates ported; emission new (no WAT text, no TOML templates) |
+| `almide-run` | wasmtime embed: JIT dev loop, cranelift AOT dist | new |
+| `almide-cli` / `almide-lsp` / `almide-mcp` | clients | MCP ported; CLI/LSP thin rewrites |
+| `proofs/` | Lean belts (perceus/race/edit), contract ledger, sealed releases | ported |
+| `spec/` | .almd corpus (1098 tests) | ported, arrives FIRST |
+
+Explicitly **not ported**: v0 codegen, dual native renderers + wall fallback,
+TOML string templates, WAT-text emission, WASI p1 shims, whole-program
+`ir_link`-last ordering, package-level 7-category permissions.
+
+## 4. Porting doctrine
+
+- **Only world-class finished units.** A unit qualifies if the audit rated it
+  frontier (c) and it has its own test evidence.
+- **One unit at a time.** Each port lands as one PR-sized unit with its tests.
+- **The incumbent is the oracle.** Acceptance gate for every executable unit:
+  A/B against released almide v0.57.2 — identical stdout/stderr/exit over the
+  relevant `spec/` slice. A port is "done" when the released binary can no
+  longer be distinguished from it on its slice.
+- Adaptation at the boundary is allowed (query wrapping, error-type lift);
+  rewriting the unit's internals during port is not. Rewrite = separate, later.
+
+## 5. Porting order
+
+| # | unit | gate |
+|---|---|---|
+| 0 | `spec/` corpus + contracts.toml schema + checker scripts | ledger checker green on ported set |
+| 1 | `almide-diag` | unit tests + JSON snapshot parity |
+| 2 | `almide-syntax` | corpus parses; AST JSON parity vs v0.57.2 `--emit-ast` |
+| 3 | `almide-spec` (interpreter) + `almide-ir` | corpus output parity vs v0.57.2 native |
+| 4 | `almide-spine` + `almide-sema` | corpus diagnostics parity; keystroke re-check touches only edited function's queries (measured) |
+| 5 | Lean belts + dialect epochs + llms.txt gate | lean-proofs green; llm-surface gate green |
+| 6 | `almide-wasm` (Perceus + certificates onto new emission) | corpus parity interpreter ↔ wasm; wasmparser-validate wall |
+| 7 | `almide-run` (JIT + AOT) + `almide-cli` | `almide run` end-to-end on corpus |
+| 8 | `almide-mcp` + `almide-lsp` | MCP tool tests; LSP over queries (no full re-analyze) |
+| 9 | stdlib self-host, `fan`, ratchet scripts, release sealing | tiered suite green |
+
+## 6. Ratification ledger (○× one at a time)
+
+| id | decision | recommendation | status |
+|---|---|---|---|
+| R1 | Single semantics: canonical target = WASM Component; native = cranelift AOT of the same artifact; Rust-transpile demoted to optional future opt tier | adopt | **PENDING** |
+| R2 | Query core = salsa (crates.io, 2024+ rewrite), not hand-rolled | adopt | PENDING |
+| R3 | Module-boundary ABI = dictionary passing; monomorphization is an intra-CU optimization only (separate compilation preserved) | adopt | PENDING |
+| R4 | `T ! E` from day one; tail ok-lift owned by fallibility, not by notation (ADR-0002/0012 as founding law) | adopt | PENDING |
+| R5 | WASI 0.3 component from day one; no Preview-1 compatibility layer | adopt | PENDING |
+
+Each ratified R gets its status flipped here in the same commit as any code it
+gates. A rejected R gets its alternative written in, not deleted.
