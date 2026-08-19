@@ -553,6 +553,39 @@ impl LowerCtx {
                             ),
                         ));
                     }
+                    // #1537: a Result/Option-typed tail in an EXECUTED unit arm is an
+                    // early-return VALUE with no channel — the checker types
+                    // statement-if arms Unit, so this shape is (near-)exclusively
+                    // `desugar_guard`'s rewrite of a `guard … else err(e)` nested
+                    // inside a statement `if`. Deferring it as elided calls dropped
+                    // the err and fell through to the ok tail (teastia's
+                    // `aiapp.assemble`: wasm answered ok where native errs, exit 0,
+                    // no wall — and the else carries no Call node, so the #1124 gate
+                    // above never fired). Wall it instead.
+                    if crate::lower::strict_values()
+                        && self.unit_arm_depth > 0
+                        && matches!(
+                            tail.ty,
+                            Ty::Applied(
+                                almide_lang::types::constructor::TypeConstructorId::Result
+                                    | almide_lang::types::constructor::TypeConstructorId::Option,
+                                _
+                            )
+                        )
+                    {
+                        return Err(LowerError::at(
+                            tail.span,
+                            format!(
+                                "a Result/Option-typed arm tail ({}) in an executed \
+                                 unit branch has no value channel — a `guard … else \
+                                 err(…)` inside a statement `if` is a function \
+                                 early-return the executed branch cannot express \
+                                 (#1537); deferring it would drop the err and fall \
+                                 through",
+                                crate::lower::kind_name(other)
+                            ),
+                        ));
+                    }
                     self.record_elided_calls(tail)
                 }
         }
