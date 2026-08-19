@@ -12,3 +12,17 @@ serde_json = "1"
 
 [dev-dependencies]
 sha2 = "0.10"
+
+# Crate-scoped allows for the verbatim-ported sources (no source edits
+# during a port — PORTLOG.md unit 2). Future NEW modules in this crate
+# should be written clean regardless.
+[lints.clippy]
+clone_on_copy = "allow"
+collapsible_if = "allow"
+derivable_impls = "allow"
+empty_line_after_doc_comments = "allow"
+needless_return = "allow"
+new_without_default = "allow"
+should_implement_trait = "allow"
+type_complexity = "allow"
+unnecessary_map_or = "allow"
