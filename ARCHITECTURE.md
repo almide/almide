@@ -96,7 +96,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 | R1 | Single semantics: canonical target = WASM Component; native = cranelift AOT of the same artifact; Rust-transpile demoted to a future non-canonical tier | adopt | **RATIFIED 2026-08-19** |
 | R1a | The future Rust-transpile tier is the **certification seat**, not a perf seat: aviation-grade builds go IR → Rust → qualified rustc (Ferrocene-class), with interp ↔ wasm ↔ cert-build output identity proven by the ported oracle machinery. Canonical semantics stays wasm-only. No implementation obligation today; later design must not foreclose this seat (certificate chain must remain extendable to the cert tier). | adopt | **RATIFIED 2026-08-19** |
 | R1b | Second certification seat on the wasm side: cert profile is **AOT-only (no JIT)**, last mile is wasm → C via a small-TCB translator (wasm2c-class, verifiable against the mechanized wasm semantics) → qualified/verified C compiler (CompCert-class). Coexists with R1a under the same oracle gates; which seat becomes primary is decided later on ecosystem maturity. Canonical semantics unchanged. | adopt | **RATIFIED 2026-08-19** |
-| R2 | Query core = salsa (crates.io, 2024+ rewrite), not hand-rolled | adopt | PENDING |
+| R2 | Query core = salsa (crates.io, 2024+ rewrite), not hand-rolled | adopt | **RATIFIED 2026-08-19** |
 | R3 | Module-boundary ABI = dictionary passing; monomorphization is an intra-CU optimization only (separate compilation preserved) | adopt | PENDING |
 | R4 | `T ! E` from day one; tail ok-lift owned by fallibility, not by notation (ADR-0002/0012 as founding law) | adopt | PENDING |
 | R5 | WASI 0.3 component from day one; no Preview-1 compatibility layer | adopt | PENDING |
