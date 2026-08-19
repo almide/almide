@@ -555,17 +555,22 @@ impl Emitter<'_> {
                     SliceTy::Option(s) => s,
                     other => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
                 };
-                // tmp cannot be clobbered by the inner lowering: nested
-                // allocating constructors would need Option[Option]/
-                // Result-in-sum types, which slice_ty_of refuses.
+                // The base lives in a HOLD local (stack-disciplined),
+                // never the shared tmp: the inner expression can contain
+                // its own `some(...)`/`ok(...)` as a SUBEXPRESSION even
+                // when the types forbid nested sums — the differential
+                // fuzzer falsified the old shared-tmp argument on day one
+                // (seed 79: the outer `some` returned the inner block).
+                let hold = self.hold_i32()?;
                 self.f
                     .instructions()
                     .i32_const(s.slot_size() as i32)
                     .call(F_ALLOC)
-                    .local_tee(self.tmp_i32_local);
+                    .local_tee(hold);
                 self.lower(expr, Some(SliceTy::Scalar(s)))?;
                 self.store_slot(s, almide_layout::OPTION_FIELD);
-                self.f.instructions().local_get(self.tmp_i32_local);
+                self.f.instructions().local_get(hold);
+                self.release_i32();
                 SliceTy::Option(s)
             }
             IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
@@ -575,17 +580,21 @@ impl Emitter<'_> {
                     other => return unsup(&format!("ty-mismatch:result-vs-{other:?}")),
                 };
                 let side = if is_ok { o } else { er };
+                // Hold-local, not shared tmp — same seed-79 lesson as
+                // OptionSome above.
+                let hold = self.hold_i32()?;
                 self.f
                     .instructions()
                     .i32_const(16)
                     .call(F_ALLOC)
-                    .local_tee(self.tmp_i32_local)
+                    .local_tee(hold)
                     .i32_const(i32::from(!is_ok))
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                self.f.instructions().local_get(self.tmp_i32_local);
+                self.f.instructions().local_get(hold);
                 self.lower(expr, Some(SliceTy::Scalar(side)))?;
                 self.store_slot(side, almide_layout::SUM_FIELD);
-                self.f.instructions().local_get(self.tmp_i32_local);
+                self.f.instructions().local_get(hold);
+                self.release_i32();
                 SliceTy::Result(o, er)
             }
             // `!` — ABORT form only. In a pure fn returning Option/Result

@@ -516,3 +516,37 @@ ratified `.codopsyrc.json` (now committed at the greenfield root):
   `Ctx`. Pure mechanical restructuring — the 590-fixture net, first
   light, and the alias referee ran green after every batch, and strict
   clippy stayed at zero.
+
+---
+
+## Unit 6 — differential fuzzing of the wasm leg (flight-gap A-1) (2026-08-19)
+
+User ○: quality gaps before more features, fuzzing first. The first
+verification net INDEPENDENT of the hand-picked corpus:
+
+- `tests/fuzz_differential.rs`: a zero-dependency seeded xorshift RNG +
+  type-directed generator producing Almide SOURCE over the supported
+  surface (scalars, Option, List[Int], interp println, if/for/match,
+  push, concat, int.to_string). FIXED seed range 0..200 in CI — a green
+  run is a ratchet, not a dice roll; `ALMIDE_FUZZ_ITERS`/`_BASE` extend
+  for exploration. Policy mirrors the burn-up gate: checker-reject and
+  emit-refusal are counted classes, interp exit≠0 is abort-pending, and
+  a compared-count floor (≥ iters/4) stops silent generator drift.
+- **It caught a real miscompile on day one** (seed 79, in the fixed CI
+  range): `some(A - (some(10) ?? 10))` — sum construction held its block
+  base in the SHARED tmp local, and the inner `some(10)`'s construction
+  clobbered it, so the outer `some` returned the INNER block. The
+  emitter comment ARGUED this impossible ("nested sums are untyped") —
+  wrong: nested constructors appear as subexpressions of the inner
+  VALUE. Exactly the "comment-argued invariant" class the flight-gap
+  review flagged. Fix: OptionSome/ResultOk/ResultErr now use the
+  stack-disciplined hold pool like every other aggregate; 590-corpus +
+  3,000-seed burst green after.
+- Generator falsehoods fixed along the way (its own honest costs): bare
+  `a..b` is not surface syntax (`..<` only), `match none` has no type
+  context, `i64::MIN` is not writable as one literal.
+- **Mutation evidence, and the net-vs-net comparison**: the
+  `$append_bool` select swap is caught by the fuzzer at seeds 1/3/4
+  (three hits in five seeds) and by the corpus in exactly ONE fixture of
+  590 — the fuzzer's detection density on the shared surface is orders
+  denser, which is the point of independence.
