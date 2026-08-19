@@ -347,3 +347,49 @@ WAT-text/TOML-template/dual-renderer emission).
   incumbent implementation paths (`crates/almide-mir/...`) that greenfield
   will never create; retiring them at unit-6 completion requires an
   intentional-change edit to the contract STATEMENTS, not a port.
+
+---
+
+## Unit 6 — stage 2: the scalar-program slice (Bind → calls) (2026-08-19)
+
+User directive: "Bind スライスいこう". The ×368 `stmt:Bind` wall — and the
+walls it revealed behind itself — fell in one slice, entirely NEW
+CONSTRUCTION (no incumbent renderer consulted):
+
+- **Value model**: Int/Int64→i64, Bool→i32, String→i32 = block BASE address
+  (payload/len always derived through `almide-layout`, never a bare
+  payload pointer). let/var/assign → wasm locals (VarIds pre-resolve
+  shadowing).
+- **Semantics kept honest at birth** (not retrofitted): `and`/`or`
+  SHORT-CIRCUIT via `if` blocks (a strict bitop would evaluate — and
+  possibly trap — the dead operand); the emitted-wasm itoa works in the
+  NEGATIVE domain so `i64::MIN` never overflows; value-`if` arm types are
+  inferred before emission (wasm block types are up-front).
+- **User functions**: scalar-signature fns become real wasm functions
+  (params = leading locals, direct calls, recursion free). A body that
+  doesn't lower yet gets an `unreachable` stub; emission REFUSES the
+  program iff such a stub is reachable from `main` (call-graph BFS) — a
+  stub can never fire.
+- **Top-level lets**: lowered as `main`'s eager prelude — observably
+  identical while `main` is the only entry and cross-function global reads
+  are refused (`var:unmapped`).
+- **Runtime helpers emitted as wasm** (never templates): block-print
+  (println/eprintln imports), append_copy/append_i64/append_bool (line
+  buffer for `${}` interpolation), itoa, **bump allocator** (`$alloc`:
+  layout-true header rc=1/len/cap, memory.grow, OOM traps loud),
+  int_to_string, concat. Memory map: null guard · itoa scratch · pool ·
+  line buffer (global 0) · heap (mutable global 1).
+- **Gate policy sharpened**: a successful emit against a NONZERO-exit
+  oracle row is classified `gate:abort-parity-pending`, not claimed and
+  not skippable-as-divergence — abort parity (exit + stderr) is its own
+  future slice. The div-by-zero/overflow family (×9) lands there.
+- **Burn-up**: supported 1 → **18 / 590**, floor re-pinned 18, zero
+  divergence. Claims include short-circuit, `i64::MIN`, mutual recursion,
+  while loops, concat chains, default params. Next walls, measured:
+  `bind-ty:Applied ×216 → bind-ty:Named ×65 → expr:Match ×30 →
+  bind-ty:Bytes ×23` (heap aggregates + match = the next slice).
+- **Mutation evidence** (aviation rule: every gate proves it can catch):
+  (1) concat copies b-first → 3 fixtures red; (2) itoa sign write dropped
+  → 4 fixtures red (`i64_min_literal` among them). Both reverted; suite
+  green. Strict-tier clippy extended to `-p almide-layout -p almide-wasm`
+  in CI (zero findings).

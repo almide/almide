@@ -9,6 +9,7 @@ description = "Unit 6: typed IR -> structural wasm emission (wasm-encoder; no WA
 [dependencies]
 almide-ir = { path = "../almide-ir" }
 almide-base = { path = "../almide-base" }
+almide-types = { path = "../almide-types" }
 almide-layout = { path = "../almide-layout" }
 wasm-encoder = "0.256"
 

@@ -84,7 +84,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 | 3 | `almide-spec` (interpreter) + `almide-ir` | corpus output parity vs the port-SHA oracle — **LANDED 2026-08-19**: 451/451 comparable contract fixtures identical (stdout+exit), 138+1 doctrine-consistent skips ceilinged shrink-only, see PORTLOG.md |
 | 4 | `almide-spine` + `almide-sema` | corpus diagnostics parity; keystroke re-check touches only edited function's queries (measured); **diagnostic stability across edits** (Zig-style incremental scenarios — survey steal, RESEARCH-diagnostics.md) |
 | 5 | Lean belts + dialect epochs + llms.txt gate | lean-proofs green; llm-surface gate green |
-| 6 | `almide-wasm` (Perceus + certificates onto new emission) | corpus parity interpreter ↔ wasm; wasmparser-validate wall |
+| 6 | `almide-wasm` (Perceus + certificates onto new emission) | corpus parity interpreter ↔ wasm; wasmparser-validate wall — **IN PROGRESS**: stage 0 (layout DSL) + stage 1 (first light) + stage 2 (scalar programs: Bind/If/While/user fns/top-lets/interp/alloc) landed 2026-08-19; burn-up 18/590 claimed at 0 divergence (grow-only floor), see PORTLOG.md |
 | 7 | `almide-run` (JIT + AOT) + `almide-cli` | `almide run` end-to-end on corpus |
 | 8 | `almide-mcp` + `almide-lsp` | MCP tool tests; LSP over queries (no full re-analyze) |
 | 9 | stdlib self-host, `fan`, ratchet scripts, release sealing | tiered suite green |

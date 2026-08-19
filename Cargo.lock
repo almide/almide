@@ -170,6 +170,7 @@ dependencies = [
  "almide-ir",
  "almide-layout",
  "almide-spine",
+ "almide-types",
  "anyhow",
  "sha2",
  "wasm-encoder 0.256.0",
