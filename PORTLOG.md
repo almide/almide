@@ -163,3 +163,10 @@ still matches the incumbent golden byte-for-byte; every new capability is
 - **Deferred from E1 into later units (unchanged):** misspelling-catalogue
   and recoverable-code wiring need the diagnostic-emitting driver, which
   arrives with sema (unit 4) — the bare parser port stays verbatim.
+- **CI verdict: GREEN** (run 32214450860). Two clippy rounds on the way:
+  2 lints in the base facade's verbatim modules (scoped `#[allow]` on the
+  module decls) and 9 style lints across the 8,054-line syntax crate
+  (crate-scoped `[lints.clippy]` allows in its Cargo.toml — zero source
+  edits). The oracle build worktree was removed after golden generation;
+  regeneration is one `scripts/gen-ast-manifest.sh` run against a fresh
+  a877d2138 build.
