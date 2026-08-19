@@ -36,6 +36,11 @@ pub(crate) struct VariantDef {
 pub(crate) enum NamedDef {
     Record(RecordDef),
     Variant(VariantDef),
+    /// Declared but outside the slice (generic, record-shaped case,
+    /// unmappable field): NAME-resolvable so other layouts can hold a
+    /// slot for it (every composite field is an i32 address — a slot
+    /// never needs the pointee's layout), but every USE refuses.
+    Excluded,
 }
 
 pub(crate) struct TypeTable {
@@ -100,10 +105,14 @@ impl TypeTable {
 }
 
 impl TypeTable {
-    /// Build the table from the program's declarations. A declaration any
-    /// part of which is outside the slice (generic, recursive/boxed,
-    /// record-shaped case, non-slice field) is simply EXCLUDED — its uses
-    /// then refuse with the honest `bind-ty:Named` family of reasons.
+    /// Build the table from the program's declarations — TWO PHASES so
+    /// forward references and (mutually) recursive types resolve: every
+    /// name is REGISTERED first (a slot for a composite field is an i32
+    /// address, never the pointee's layout), then definitions are built;
+    /// a declaration outside the slice becomes `Excluded` (uses refuse,
+    /// but other layouts holding slots of it stay valid — constructing a
+    /// value of an excluded type is impossible, so those slots are
+    /// unreachable).
     pub(crate) fn build(ir: &IrProgram) -> TypeTable {
         let mut table = TypeTable {
             by_name: HashMap::new(),
@@ -114,6 +123,16 @@ impl TypeTable {
             tuples: RefCell::new(Vec::new()),
             tuple_ids: RefCell::new(HashMap::new()),
         };
+        // Phase 1: every declaration gets an index (Excluded placeholder).
+        for decl in &ir.type_decls {
+            if matches!(decl.kind, IrTypeDeclKind::Alias { .. }) {
+                continue;
+            }
+            let idx = table.defs.len() as u32;
+            table.defs.push(NamedDef::Excluded);
+            table.by_name.insert(decl.name.as_str().to_string(), idx);
+        }
+        // Phase 2: build definitions in place.
         for decl in &ir.type_decls {
             if decl.generics.is_some() {
                 continue;
@@ -157,9 +176,8 @@ fn add_record(table: &mut TypeTable, name: &str, fields: &[almide_ir::IrFieldDec
         .zip(offsets)
         .map(|((name, ty), offset)| FieldInfo { name, ty, offset })
         .collect();
-    let idx = table.defs.len() as u32;
-    table.defs.push(NamedDef::Record(RecordDef { fields, size }));
-    table.by_name.insert(name.to_string(), idx);
+    let idx = table.by_name[name];
+    table.defs[idx as usize] = NamedDef::Record(RecordDef { fields, size });
                 }
 
 /// One variant declaration → tagged-case layouts (excluded when generic,
@@ -172,9 +190,10 @@ fn add_variant(
     boxed_record_fields: &std::collections::HashSet<(String, String)>,
 ) {
 
-    if !boxed_args.is_empty() || !boxed_record_fields.is_empty() {
-        return; // recursive — needs boxing, later slice
-    }
+    // Recursive variants are fine here: every case field is a SLOT
+    // (composites are i32 addresses), so "boxing" is a Rust-target
+    // concern the wasm layout never sees.
+    let _ = (boxed_args, boxed_record_fields);
     let mut defs = Vec::new();
     let mut ok = true;
     for (tag, c) in cases.iter().enumerate() {
@@ -223,10 +242,9 @@ fn add_variant(
     if !ok {
         return;
     }
-    let idx = table.defs.len() as u32;
+    let idx = table.by_name[name];
     for (ci, c) in defs.iter().enumerate() {
         table.ctors.insert(c.name.clone(), (idx, ci as u32));
     }
-    table.defs.push(NamedDef::Variant(VariantDef { cases: defs }));
-    table.by_name.insert(name.to_string(), idx);
+    table.defs[idx as usize] = NamedDef::Variant(VariantDef { cases: defs });
                 }

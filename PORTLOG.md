@@ -787,3 +787,28 @@ records.
   blind spot, visible by class).
 - **Burn-up: 87 → 109 / 590** (+22), floor re-pinned 109, zero
   divergence; surface manifest 69 → 81 constructs.
+
+---
+
+## Unit 6 — stage 11: two-phase type table (forward refs + recursion) (2026-08-20)
+
+The Named wall's biggest component was an ORDERING artifact: the type
+table built in declaration order, so `type A = { b: List[B] }` before
+`type B` excluded BOTH (and mutual recursion deadlocked structurally).
+The insight that ends it: a composite field is a SLOT (an i32 address) —
+a layout never needs its pointee's layout, only its NAME.
+
+- Phase 1 registers every declaration (Excluded placeholder); phase 2
+  builds definitions in place. Forward references and arbitrary
+  (mutual) recursion now resolve; the variants' `boxed_args` exclusion
+  is lifted (boxing is a Rust-target concern the wasm slot never sees).
+- `Excluded` stays name-resolvable so OTHER layouts can hold slots of
+  it: constructing a value of an excluded type is impossible (its ctors
+  refuse), so such slots are unreachable — refusal stays sound without
+  poisoning whole type graphs.
+- Defaulted record fields: a literal supplying fewer fields than the
+  layout is refused (`record-defaults`) until the checker's omission-
+  filling is verified — a missing store would leave header garbage.
+- **Burn-up: 109 → 122 / 590** (+13), floor 122, zero divergence;
+  Named 48 → 29. Remaining walls: Named ×29 (generics + record-shaped
+  cases), Applied ×28, Bytes ×24, Float ×19, Matrix ×12, Fn ×10.

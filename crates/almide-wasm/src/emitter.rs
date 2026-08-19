@@ -832,6 +832,13 @@ impl Emitter<'_> {
                 let NamedDef::Record(def) = &self.types.defs[ti as usize] else {
                     return unsup("record-of-variant-ty");
                 };
+                // Defaulted fields: until we verify the checker fills
+                // omissions into the literal, a literal that supplies
+                // fewer fields than the layout is REFUSED — a missing
+                // store would leave header-garbage in the slot.
+                if fields.len() != def.fields.len() {
+                    return unsup("record-defaults");
+                }
                 let size = def.size;
                 // (name → (offset, ty)) resolved up front to end the borrow.
                 let mut slots = Vec::new();
