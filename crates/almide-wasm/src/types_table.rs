@@ -259,13 +259,18 @@ impl TypeTable {
         };
         // Phase 1: every CONCRETE declaration gets an index (Excluded
         // placeholder); generic declarations are kept whole for on-demand
-        // instantiation.
-        for decl in &ir.type_decls {
+        // instantiation. Module-owned declarations join the same table.
+        let all_decls: Vec<&IrTypeDecl> = ir
+            .type_decls
+            .iter()
+            .chain(ir.modules.iter().flat_map(|m| m.type_decls.iter()))
+            .collect();
+        for decl in &all_decls {
             if matches!(decl.kind, IrTypeDeclKind::Alias { .. }) {
                 continue;
             }
             if decl.generics.is_some() {
-                table.generic_decls.insert(decl.name.as_str().to_string(), decl.clone());
+                table.generic_decls.insert(decl.name.as_str().to_string(), (*decl).clone());
                 continue;
             }
             let idx = table.defs.borrow().len() as u32;
@@ -273,7 +278,7 @@ impl TypeTable {
             table.by_name.insert(decl.name.as_str().to_string(), idx);
         }
         // Phase 2: build definitions in place.
-        for decl in &ir.type_decls {
+        for decl in &all_decls {
             if decl.generics.is_some() {
                 continue;
             }

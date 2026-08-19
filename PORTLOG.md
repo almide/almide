@@ -874,3 +874,23 @@ fixture's IR carries ONE function). That linkage is the next major arc:
 it unlocks Float, Bytes, and the self-hosted string/int surface at once.
 
 Burn-up: 124 → **125 / 590**, floor 125, zero divergence.
+
+---
+
+## Unit 6 — linked-module functions (self-host arc, part 1) (2026-08-20)
+
+Probing the self-host plan surfaced where module functions actually LIVE:
+`ir.modules` (the interp resolves `CallTarget::Module` against them at
+runtime) — `ir.functions` never held them, which is why even fully-linked
+modules (url) stayed refused. The emitter now flattens every linked
+module's functions into the call table under their QUALIFIED name
+("url.encode_component") — exactly the Module-call lookup key — and
+module-owned type declarations join the type table. Modules carrying
+top-level lets are excluded whole (module init order is its own slice).
+
+Burn-up: 125 → **126 / 590** (imported pure modules like url). The big
+half of the arc remains: s5 loading self-host REGISTRY modules (they are
+fully-bodied but never imported, so resolve never sees them) plus the
+prim floor (~25 direct-mapping ops) — that combination unlocks the
+oracle's own Dragon4 float formatting, Bytes, and the self-hosted
+string surface.

@@ -415,18 +415,38 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let Some(main) = ir.functions.iter().find(|f| f.name.as_str() == "main") else {
         return unsup("no main function");
     };
-    let program_fns: Vec<&IrFunction> =
-        ir.functions.iter().filter(|f| !f.is_test && f.name.as_str() != "main").collect();
+    // Program functions PLUS every linked module's functions — module fns
+    // register under their QUALIFIED name ("url.encode_component"), which
+    // is exactly the `CallTarget::Module` lookup key. A module carrying
+    // top-level lets is excluded whole (its init order is a later slice).
+    let mut program_fns: Vec<(&IrFunction, Option<String>)> = ir
+        .functions
+        .iter()
+        .filter(|f| !f.is_test && f.name.as_str() != "main")
+        .map(|f| (f, None))
+        .collect();
+    for m in &ir.modules {
+        if !m.top_lets.is_empty() {
+            continue;
+        }
+        for f in &m.functions {
+            if !f.is_test {
+                program_fns
+                    .push((f, Some(format!("{}.{}", m.name.as_str(), f.name.as_str()))));
+            }
+        }
+    }
     let types = TypeTable::build(ir);
 
     // Signature table first: call sites need indices and types up front.
     let mut table = FnTable { by_name: HashMap::new(), infos: Vec::new() };
-    for (i, f) in program_fns.iter().enumerate() {
+    for (i, (f, qual)) in program_fns.iter().enumerate() {
         let (params, ret, refuse) = match fn_signature(f, &types) {
             Ok((p, r)) => (p, r, None),
             Err(reason) => (Vec::new(), None, Some(reason)),
         };
-        table.by_name.insert(f.name.as_str().to_string(), i);
+        let key = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
+        table.by_name.insert(key, i);
         table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse });
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
@@ -439,7 +459,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // Lower every callable function; a body that doesn't lower yet is
     // recorded (not fatal) — fatal only if `main` can reach it.
     let mut lowered: Vec<Result<(Function, HashSet<String>), String>> = Vec::new();
-    for (i, f) in program_fns.iter().enumerate() {
+    for (i, (f, _)) in program_fns.iter().enumerate() {
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
             continue;

@@ -127,7 +127,30 @@ impl Emitter<'_> {
                 self.lower_set_call(func.as_str(), args, ret_hint)
             }
             CallTarget::Module { module, func, .. } => {
-                unsup(&format!("call:{}.{}", module.as_str(), func.as_str()))
+                // Linked module functions live in the table under their
+                // qualified name; anything else is an honest wall.
+                let key = format!("{}.{}", module.as_str(), func.as_str());
+                let Some(&i) = self.table.by_name.get(&key) else {
+                    return unsup(&format!("call:{key}"));
+                };
+                let info = &self.table.infos[i];
+                if let Some(r) = &info.refuse {
+                    return unsup(&format!("call-fn:{key}:{r}"));
+                }
+                if args.len() != info.params.len() {
+                    return unsup(&format!("call-arity:{key}"));
+                }
+                let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
+                for (a, want) in args.iter().zip(params) {
+                    self.lower(a, Some(want))?;
+                }
+                self.calls.insert(key);
+                if tail && ret.is_some() && ret == self.fn_ret {
+                    self.f.instructions().return_call(index);
+                } else {
+                    self.f.instructions().call(index);
+                }
+                Ok(ret)
             }
             _ => unsup("call:computed-or-method"),
         }
