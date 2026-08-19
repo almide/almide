@@ -539,6 +539,7 @@ evidence  = [
   { path = "spec/wasm_cross/playground_default.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_container_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_payload_string_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_default_field_omitted.almd", class = "fixture" },
 ]
 
 [[contract]]

@@ -1,0 +1,35 @@
+// @contract: C-036
+// A record literal that OMITS a defaulted field still constructs it — the
+// default expr is evaluated at the construction site on every leg. The interp
+// used to build only the fields the literal wrote, so the first `.maybe`
+// access aborted "no field on record" where both backends read the default
+// (surfaced by #1226 slice 2 opening the codec chain; the fix is the
+// interp-side twin of codegen's default_fields pass, incl. record-VARIANT
+// ctor defaults and defaults nested under other defaulted siblings).
+type P = { x: Int, tag: String = "anon", hits: Int = 0 }
+
+type Shape =
+  | Dot { x: Int, y: Int = 7 }
+  | Blank
+
+fn show(p: P) -> String = p.tag + ":" + int.to_string(p.x) + ":" + int.to_string(p.hits)
+
+fn main() -> Unit = {
+  // all defaulted fields omitted
+  println(show(P { x: 1 }))
+  // one default overridden, one omitted
+  println(show(P { x: 2, tag: "named" }))
+  // every field written — defaults must not clobber
+  println(show(P { x: 3, tag: "full", hits: 9 }))
+  // record-variant ctor with its defaulted field omitted / written
+  let d = Dot { x: 5 }
+  println(match d {
+    Dot { x, y } => int.to_string(x) + "/" + int.to_string(y),
+    Blank => "blank",
+  })
+  let e = Dot { x: 6, y: 8 }
+  println(match e {
+    Dot { x, y } => int.to_string(x) + "/" + int.to_string(y),
+    Blank => "blank",
+  })
+}

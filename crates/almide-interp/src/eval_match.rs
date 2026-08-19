@@ -28,7 +28,12 @@ impl<'a> Interpreter<'a> {
                 return self.eval_expr(&arm.body, &frame);
             }
         }
-        Flow::Abort("internal: non-exhaustive match (no arm matched)".into())
+        // Name the scrutinee: a checked program's match IS exhaustive, so
+        // landing here means the interp built a value shape the arms never
+        // anticipated — the value is the diagnosis.
+        Flow::Abort(format!(
+            "internal: non-exhaustive match (no arm matched scrutinee {subj:?})"
+        ))
     }
 
     /// Attempt to match `value` against `pattern`, accumulating bindings.
@@ -373,7 +378,19 @@ impl<'a> Interpreter<'a> {
 
     /// `ConcatStr` / `ConcatList`. String concat is the one arithmetic form
     /// that charges determinism fuel by RESULT SIZE, so it needs `self`.
+    ///
+    /// An `Int` operand under these ops is a BLOCK ADDRESS by construction —
+    /// the lowering already typed the concat, so `ConcatStr` on an Int means
+    /// a pool body concatenated a value that flowed through the
+    /// address-uniform tier (`__rx_sub(..) + rep` in the regex engine). It is
+    /// coerced through the arena here; an Int that is NOT a live block keeps
+    /// the loud abort, because that genuinely is an interp bug.
     fn apply_binop_concat(&mut self, op: BinOp, l: Value, r: Value) -> Flow {
+        let (l, r) = match op {
+            BinOp::ConcatStr => (self.coerce_block_str(l), self.coerce_block_str(r)),
+            BinOp::ConcatList => (self.coerce_block_list(l), self.coerce_block_list(r)),
+            _ => (l, r),
+        };
         match (op, l, r) {
             (BinOp::ConcatStr, Value::Str(a), Value::Str(b)) => {
                 let out = format!("{}{}", a, b);

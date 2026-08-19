@@ -115,6 +115,32 @@ pub struct Interpreter<'a> {
     /// threads, and a shared arena would let one fixture observe another's
     /// blocks.
     pub(crate) heap: heap::Heap,
+    /// Names that resolved to POOL bodies (stdlib self-host, not shadowed by
+    /// a program fn). The pool tier is address-uniform (#1226 slice 2): a
+    /// heap value inside it IS its block address, and only the boundary back
+    /// into fixture-tier code rebuilds addresses into `Value`s —
+    /// `pool_depth` tracks that boundary. Syncing pool-INTERNAL calls was a
+    /// proven wrong vote in both directions: an eager rebuild snapshots a
+    /// fresh-alloc-still-to-be-filled (`set_union`'s `__set_alloc` came back
+    /// as eight zeros), and no rebuild at all leaks addresses into native
+    /// ops (`regex_split`'s pieces printed as integers).
+    pub(crate) pool_fns: HashSet<Sym>,
+    pub(crate) pool_depth: u32,
+    /// The STATIC type of `prim.handle`'s argument at the current call site,
+    /// stashed by `eval_module_call` and consumed by `heap_prim_handle`. This
+    /// is what disambiguates a byte block from a slot block: the VALUE
+    /// `[1,2,3]` is one interp `List` whether the source typed it `Bytes` or
+    /// `List[Int]`, but the two spell different memory — 3 payload bytes vs
+    /// 3 i64 slots — and a body's `load64` on the wrong one reads garbage
+    /// (list_chunk_windows printed 2^56 for 3).
+    pub(crate) handle_arg_ty: Option<Ty>,
+    /// Field-declaration lists (decl order + default exprs) for record types
+    /// and record-variant ctors, keyed by type/ctor name — the interp-side
+    /// twin of codegen's `default_fields` pass: a record literal that OMITS a
+    /// defaulted field (`maybe: Bool? = none`) must still construct it, or
+    /// every later `.maybe` access aborts where both backends read the
+    /// default (codec_empty_and_bool, surfaced by #1226 slice 2).
+    pub(crate) record_decls: HashMap<Sym, &'a [almide_ir::IrFieldDecl]>,
     /// Named record types keyed by their SORTED field-name set, mapping to
     /// `(type name, declaration-order field names)`. Lets the repr recover the
     /// nominal name + declaration order for a record LITERAL whose inferred type
@@ -328,8 +354,12 @@ impl<'a> Interpreter<'a> {
         // fn can never be shadowed by a pool body; the pool's own intra-source
         // helper calls (`__sext`) resolve through this same table, and `__`
         // names cannot collide with user code (#868 rejects the prefix).
+        let mut pool_fns: HashSet<Sym> = HashSet::new();
         for f in stdlib_pool::pool().fns.values() {
-            fns.entry(f.name).or_insert(f);
+            if let std::collections::hash_map::Entry::Vacant(e) = fns.entry(f.name) {
+                e.insert(f);
+                pool_fns.insert(f.name);
+            }
         }
         let mut module_fns = HashMap::new();
         for m in &program.modules {
@@ -363,6 +393,26 @@ impl<'a> Interpreter<'a> {
         }
         let named_records = index_named_records(program);
         let variant_ctors = index_variant_ctors(program);
+        let mut record_decls: HashMap<Sym, &'a [almide_ir::IrFieldDecl]> = HashMap::new();
+        for td in program
+            .type_decls
+            .iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        {
+            match &td.kind {
+                almide_ir::IrTypeDeclKind::Record { fields } => {
+                    record_decls.entry(td.name).or_insert(fields);
+                }
+                almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                    for c in cases {
+                        if let almide_ir::IrVariantKind::Record { fields } = &c.kind {
+                            record_decls.entry(c.name).or_insert(fields);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         Interpreter {
             program,
@@ -371,6 +421,10 @@ impl<'a> Interpreter<'a> {
             heap: heap::Heap::new(),
             fns,
             module_fns,
+            pool_fns,
+            pool_depth: 0,
+            handle_arg_ty: None,
+            record_decls,
             named_records,
             variant_ctors,
             globals: env::Scope::root(),
@@ -842,6 +896,7 @@ impl<'a> Interpreter<'a> {
             }
         };
 
+        let result = normalize_option_fn_return(&callee, result);
         let result = self.fold_pending_try(result, &pending);
         self.det_in_user.set(det_was_user);
         self.depth.set(self.depth.get() - 1);
@@ -948,6 +1003,30 @@ fn bind_hop_frame<'a>(
 pub(crate) enum TailCallee<'a> {
     Fn(&'a IrFunction),
     Clo(Rc<Closure>),
+}
+
+/// C-211 (#1067): `!` on a None inside a PURE Option-returning fn propagates
+/// as `none`, not as the Result-fn `err("none")`. `try_unwrap_value` cannot
+/// see the enclosing fn, so it always manufactures the Result-fn shape and
+/// this boundary — where the declared return type IS known — translates it.
+/// Exact by construction: in a pure Option fn the checker rejects `err(..)`,
+/// so a returned `Result(Err("none"))` has no other source. Effect fns keep
+/// the Err (their fail channel IS the effect Result, C-216), and closures are
+/// left as-is (an effect lambda is indistinguishable from a pure one here).
+fn normalize_option_fn_return(callee: &TailCallee<'_>, flow: Flow) -> Flow {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    let TailCallee::Fn(f) = callee else { return flow };
+    if f.is_effect || !matches!(&f.ret_ty, Ty::Applied(C::Option, a) if a.len() == 1) {
+        return flow;
+    }
+    match flow {
+        Flow::Return(Value::Result(Err(e)))
+            if matches!(&*e, Value::Str(s) if s.as_str() == "none") =>
+        {
+            Flow::Return(Value::Option(None))
+        }
+        other => other,
+    }
 }
 
 /// One hop's verdict from the tail-spine walker.
