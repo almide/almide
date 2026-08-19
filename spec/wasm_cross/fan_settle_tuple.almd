@@ -1,0 +1,46 @@
+// @contract: C-206
+// T2-4: fan.settle block returns a TUPLE of per-arm Results in arm order —
+// heterogeneous arm types, plain arms wrapped in Ok, an effect arm's Err
+// CAPTURED into its slot (never propagated). The tail is the fan-v2
+// health_report shape: a tuple-pattern match over the settled pair.
+import fs
+
+fn check_net(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("net down")
+
+fn label(n: Int) -> String = "disk-" + int.to_string(n)
+
+effect fn read_cfg() -> Result[String, String] = {
+  let t = fs.read_text("__definitely_missing__.txt")!
+  ok(t)
+}
+
+effect fn main() -> Unit = {
+  let (net, disk, cfg) = fan.settle {
+    check_net(5)
+    label(7)
+    read_cfg()
+  }
+  match net {
+    ok(v) => println(int.to_string(v)),
+    err(e) => println(e),
+  }
+  match disk {
+    ok(s) => println(s),
+    err(e) => println(e),
+  }
+  match cfg {
+    ok(_) => println("cfg ok"),
+    err(_) => println("cfg failed"),
+  }
+  let (a, b) = fan.settle {
+    check_net(0)
+    check_net(2)
+  }
+  let report = match (a, b) {
+    (ok(_), ok(_)) => "healthy",
+    (err(n), ok(_)) => "net degraded: " + n,
+    (ok(_), err(d)) => "disk degraded: " + d,
+    (err(n), err(d)) => "down: " + n + " / " + d,
+  }
+  println(report)
+}

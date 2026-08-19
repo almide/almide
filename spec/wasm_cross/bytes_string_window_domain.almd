@@ -1,0 +1,73 @@
+// @contract: C-054
+// THE WINDOW RULE for the four length-prefixed / windowed string readers:
+//
+//   A read answers only when its window lies WHOLLY inside the data region.
+//   Otherwise it is the empty result — "" for a string, [] for a list, the
+//   UNCHANGED position for a cursor. Never a partial read, never a neighbouring
+//   field, never an abort.
+//
+// All four broke it, in the same two ways, and both ways are the phrasing of the
+// guard rather than its intent:
+//
+// 1. THE ADDITIVE GUARD. `pos + 4 <= blen` is defeated by its own arithmetic in a
+//    wrapping-Int language. `read_string_at(b, -1, 3)` computed `-1 + 3 = 2`, found
+//    2 <= blen, and copied three bytes starting one byte BEFORE the data region —
+//    the block's cap field, returned as text, exit 0, no diagnostic on either leg.
+//    A `pos` near i64::MAX wrapped the sum negative and passed the same way. Every
+//    guard is now SUBTRACTIVE (`pos > blen - len`), which cannot wrap once the sign
+//    tests have run, and the native leg routes all five readers through the single
+//    `window()` helper that already encoded this for the writers (#1408).
+//
+// 2. `count as usize`. A negative count became ~1.8e19 on the native leg:
+//    `skip_length_prefixed_le` skipped to EOF where the self-host returned `pos`
+//    unchanged, and `read_length_prefixed_strings_le`'s `Vec::with_capacity` died
+//    on a raw `capacity overflow` panic — exit 101, the form ALS-T6 forbids —
+//    against the other leg's `Error: out of memory`.
+//
+// What makes this one worth reading twice: `stdlib/bytes_skip.almd` had CARRIED a
+// comment naming the native `count as usize` skip-until-EOF a "non-semantic
+// overflow" while leaving it in place. The divergence was known, written down in
+// prose, and not fixed for as long as the comment existed — which is the argument
+// for `proofs/domain-edges.toml`. A divergence recorded in a comment is not
+// recorded. Only a gate that fails is.
+import bytes
+
+fn main() -> Unit = {
+  // [3][abc][2][de] — two length-prefixed entries, 13 bytes.
+  let b = bytes.from_list([
+    3,
+    0,
+    0,
+    0,
+    97,
+    98,
+    99,
+    2,
+    0,
+    0,
+    0,
+    100,
+    101
+  ])
+  // read_string_at: the window, and the four ways out of it.
+  println("at_ok=[" + bytes.read_string_at(b, 4, 3) + "]")
+  // Was `[<cap bytes>]` on the wasm leg — the silent-wrong cell.
+  println("at_neg=[" + bytes.read_string_at(b, 0 - 1, 3) + "]")
+  println("at_maxpos=[" + bytes.read_string_at(b, 9223372036854775807, 3) + "]")
+  println("at_neglen=[" + bytes.read_string_at(b, 4, 0 - 1) + "]")
+  println("at_maxlen=[" + bytes.read_string_at(b, 4, 9223372036854775807) + "]")
+  // read_string_be: prefix and body each get the subtractive test.
+  println("be_neg=[" + bytes.read_string_be(b, 0 - 1) + "]")
+  println("be_maxpos=[" + bytes.read_string_be(b, 9223372036854775807) + "]")
+  // skip: a negative count is ZERO entries, not skip-to-EOF (was 13 vs 0).
+  println("skip_ok=" + int.to_string(bytes.skip_length_prefixed_le(b, 0, 2)))
+  println("skip_negcount=" + int.to_string(bytes.skip_length_prefixed_le(b, 0, 0 - 1)))
+  println("skip_neg=" + int.to_string(bytes.skip_length_prefixed_le(b, 0 - 1, 1)))
+  println("skip_maxpos=" + int.to_string(bytes.skip_length_prefixed_le(b, 9223372036854775807, 1)))
+  // read_length_prefixed_strings_le: same count rule; the huge count must be
+  // bounded by what the buffer could hold rather than reserved outright.
+  println("lps_ok=" + list.join(bytes.read_length_prefixed_strings_le(b, 0, 2), ","))
+  println("lps_negcount=" + int.to_string(list.len(bytes.read_length_prefixed_strings_le(b, 0, 0 - 1))))
+  println("lps_maxcount=" + int.to_string(list.len(bytes.read_length_prefixed_strings_le(b, 0, 9223372036854775807))))
+  println("lps_maxpos=" + int.to_string(list.len(bytes.read_length_prefixed_strings_le(b, 9223372036854775807, 2))))
+}

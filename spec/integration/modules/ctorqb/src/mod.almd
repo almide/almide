@@ -1,0 +1,6 @@
+type Signal = | Mark(String) | Go
+
+fn describe(s: Signal) -> String = match s {
+  Mark(t) => "b-mark:${t}",
+  Go => "b-go",
+}

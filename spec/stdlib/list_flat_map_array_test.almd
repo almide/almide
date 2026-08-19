@@ -1,0 +1,94 @@
+// flat_map with a FIXED-ARITY tail literal (#1337).
+//
+// `RustLoweringPass::lower_flat_map_arrays` retargets
+// `list.flat_map(xs, (x) => … [a, b])` at `almide_rt_list_flat_map_arr`, whose
+// closure returns a Rust ARRAY instead of a per-element heap `Vec`. That is a
+// representation change only, so every shape below must produce exactly what
+// the `Vec`-returning form produced. The rows walk both sides of each of the
+// rewrite's guards — arity, tail shape, block nesting, element type — because a
+// lowering that silently declines is invisible except as the perf regression it
+// was written to remove.
+//
+// Expectations are spelled as joined strings rather than long list literals:
+// the assertion stays one readable line, and a wrong ORDER (the failure mode a
+// per-element container change could plausibly introduce) reads straight off
+// the diff.
+fn show(xs: List[Int]) -> String = xs |> list.map((v) => int.to_string(v)) |> list.join(",")
+
+fn pair(v: Int) -> List[Int] = [v, v * 10]
+
+test "flat_map fixed-arity tail literal — the rewritten shape" {
+  // Arity 2: the shape the CHEATSHEET's build idiom produces.
+  assert_eq(show([1, 2, 3] |> list.flat_map((v) => [v, v * 10])), "1,10,2,20,3,30")
+  // Arity 1 and 3: the band's other in-range members.
+  assert_eq(show([1, 2] |> list.flat_map((v) => [v])), "1,2")
+  assert_eq(show([1, 2] |> list.flat_map((v) => [v, v, v])), "1,1,1,2,2,2")
+  // Empty source: no iteration, so the arity never materializes.
+  assert_eq(list.len([] |> list.flat_map((v: Int) => [v, v])), 0)
+}
+
+test "flat_map tail literal under a block body" {
+  // The tail is nested inside the lambda's block — the rewrite walks to it.
+  let scaled = [1, 2, 3] |> list.flat_map((v) => {
+    let a = v * 2
+    let b = v * 3
+    [a, b]
+  })
+  assert_eq(show(scaled), "2,3,4,6,6,9")
+}
+
+test "flat_map tail literal of heap elements" {
+  // Strings, not scalars: the array carries owned values, and every element
+  // must survive the move through `extend` intact.
+  let words = ["ab", "cd"] |> list.flat_map((s) => [s, string.to_upper(s)])
+  assert_eq(list.join(words, "|"), "ab|AB|cd|CD")
+  // Lists of lists: the element type is itself heap and nested.
+  let nested = [1, 2] |> list.flat_map((v) => [
+    [v],
+    [v, v]
+  ])
+  assert_eq(nested |> list.map((g) => show(g)) |> list.join("/"), "1/1,1/2/2,2")
+}
+
+test "flat_map array elements that look like template placeholders" {
+  // The array form is emitted as an InlineRust template whose placeholders are
+  // `{e0}`, `{e1}`, … A STRING LITERAL spelling one of those names is ordinary
+  // source, and it must survive as data: substituting one argument must never
+  // make the next argument's pass reinterpret the text it just inserted. This
+  // printed "s,A,s,B" before the substitution became single-pass.
+  let out = ["A", "B"] |> list.flat_map((s) => ["{e1}", s])
+  assert_eq(list.join(out, ","), "{e1},A,{e1},B")
+  // Same hazard from the other side: a literal naming the FIRST placeholder,
+  // and one naming a placeholder that does not exist.
+  let mixed = ["x"] |> list.flat_map((s) => [s, "{e0}", "{zz}"])
+  assert_eq(list.join(mixed, ","), "x,{e0},{zz}")
+  // An unbalanced brace is data too.
+  assert_eq(list.join(["y"] |> list.flat_map((s) => [s, "{e1"]), ","), "y,{e1")
+}
+
+test "flat_map shapes the rewrite declines — same answers" {
+  // Tail is a CALL, not a literal: stays on the Vec-returning form.
+  assert_eq(show([1, 2, 3] |> list.flat_map(pair)), "1,10,2,20,3,30")
+  assert_eq(show([1, 2] |> list.flat_map((v) => pair(v))), "1,10,2,20")
+  // Tail is a BRANCH whose arms have different arity.
+  let branched = [1, 2, 3] |> list.flat_map((v) => match v == 2 {
+    true => [v],
+    false => [v, v],
+  })
+  assert_eq(show(branched), "1,1,2,3,3")
+  // Tail is an empty literal — outside the band, and the identity element.
+  let empty_tail: List[Int] = [1, 2] |> list.flat_map((v: Int) => ([]: List[Int]))
+  assert_eq(list.len(empty_tail), 0)
+}
+
+test "flat_map fixed-arity result feeds the consumers that materialize it" {
+  let built = list.range(0, 4) |> list.flat_map((i) => [i, i + 100])
+  assert_eq(list.len(built), 8)
+  assert_eq(list.get_or(built, 0, -1), 0)
+  assert_eq(list.get_or(built, 7, -1), 103)
+  assert_eq(list.sum(built), 0 + 100 + 1 + 101 + 2 + 102 + 3 + 103)
+  // Chained after another combinator: the source is a fused producer, not a
+  // bound variable.
+  let chained = list.range(0, 3) |> list.map((i) => i * 2) |> list.flat_map((i) => [i, -i])
+  assert_eq(show(chained), "0,0,2,-2,4,-4")
+}

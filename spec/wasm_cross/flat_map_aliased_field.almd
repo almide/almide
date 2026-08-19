@@ -1,0 +1,21 @@
+// @contract: C-297
+type P = { name: String, evidence: List[String] }
+
+fn show(xs: List[String]) -> String = list.join(xs, ",")
+
+effect fn main() -> Unit = {
+  let ps = [
+    P { name: "a", evidence: ["machine", "log"] },
+    P { name: "b", evidence: ["interview"] }
+  ]
+  // The closure returns the element's OWN List field — an aliased sublist.
+  let a = ps |> list.flat_map((p) => p.evidence)
+  println("A " + int.to_string(list.len(a)) + " " + show(a))
+  // The fresh-sublist form rides the same route and must stay balanced.
+  let b = ps |> list.flat_map((p) => [
+    p.name
+  ])
+  println("B " + show(b))
+  // Source intact after both flattenings (its drops balance at scope end).
+  println("P " + int.to_string(list.len(ps)))
+}

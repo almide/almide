@@ -1,0 +1,89 @@
+test "escaped dollar-brace is not interpolation" {
+  let x = 42
+  let s = "literal \${x} here"
+  assert_eq(s, "literal \${x} here")
+}
+
+test "interpolation with conditional expression" {
+  let x = 1
+  let s = "value: ${if x > 0 then "positive" else "negative"}"
+  assert_eq(s, "value: positive")
+}
+
+test "interpolation with block expression" {
+  let s = "result: ${int.to_string({
+    let x = 10
+    x * 2
+  })}"
+  assert_eq(s, "result: 20")
+}
+
+test "interpolation with lambda in call" {
+  let s = "count: ${int.to_string(list.len([1, 2, 3, 4].filter((x) => x > 2)))}"
+  assert_eq(s, "count: 2")
+}
+
+test "interpolation adjacent to text" {
+  let n = 5
+  assert_eq("x${int.to_string(n)}y", "x5y")
+}
+
+test "interpolation only" {
+  let s = "hello"
+  assert_eq("${s}", "hello")
+}
+
+test "multiple escaped dollars" {
+  let s = "\${a} and \${b}"
+  assert_eq(s, "\${a} and \${b}")
+}
+
+test "interpolation with nested braces" {
+  let xs = [1, 2, 3]
+  let s = "len=${int.to_string(list.len(xs.filter((x) => { x > 1 })))}"
+  assert_eq(s, "len=2")
+}
+
+// ── #1073: string literals inside ${...} ──
+// (the habit spelling \"..\" is pinned at the lexer level — `almide fmt`
+// canonicalizes it to bare quotes, so it cannot survive in a spec file)
+test "bare quotes inside interpolation" {
+  let parent: String? = none
+  assert_eq("parent=${parent ?? "<none>"}", "parent=<none>")
+}
+
+test "closing brace inside nested string literal" {
+  let x: String? = none
+  assert_eq("v=${x ?? "}"} end", "v=} end")
+}
+
+test "opening brace inside nested string literal" {
+  let x: String? = none
+  assert_eq("v=${x ?? "{"} end", "v={ end")
+}
+
+test "escaped quote inside a bare nested string" {
+  assert_eq("n=${int.to_string(string.len('a"b'))}", "n=3")
+}
+
+test "single-quote literal inside interpolation" {
+  let x: String? = none
+  assert_eq("v=${x ?? "<sq>"}", "v=<sq>")
+}
+
+test "two habit-escaped holes in one string" {
+  let a: String? = some("A")
+  let b: String? = none
+  assert_eq("${a ?? "?"}/${b ?? "?"}", "A/?")
+}
+
+// ── #1076: escaped \${ coexisting with real holes ──
+test "escaped dollar-brace next to a real hole stays literal" {
+  let a = "A"
+  assert_eq("${a} \${b}", "A \${b}")
+}
+
+test "escaped backslash before a real hole keeps the hole" {
+  let x = "X"
+  assert_eq("\\${x}", "\\X")
+}

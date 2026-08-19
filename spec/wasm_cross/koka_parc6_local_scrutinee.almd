@@ -1,0 +1,45 @@
+// @contract: C-292
+// koka parc5/6/11/12 + parc2: match on a LOCALLY-built list (the scrutinee
+// is fresh, its drop belongs to the match); one arm returns the whole
+// scrutinee (parc11 — the dup-at-return shape); match on x+1 with a literal
+// arm returning the ORIGINAL x (parc12 — scalar dup across the derived
+// scrutinee); and the self-append dup (parc2, xs + xs).
+type IList = | INil | ICons(Int, IList)
+
+fn ilen(xs: IList) -> Int = match xs {
+  ICons(_, rest) => 1 + ilen(rest),
+  INil => 0,
+}
+
+fn local_head(y: Int) -> Int = {
+  let xs = ICons(1, INil)
+  match xs {
+    ICons(x, _) => x,
+    INil => y,
+  }
+}
+
+fn whole_or_empty(x: IList) -> IList = match x {
+  ICons(_, _) => x,
+  INil => INil,
+}
+
+fn derived(x: Int) -> Int = match x + 1 {
+  2 => 3,
+  _ => x,
+}
+
+fn main() -> Unit = {
+  println(int.to_string(local_head(9)))
+  let ys = ICons(4, ICons(5, INil))
+  println(int.to_string(ilen(whole_or_empty(ys))))
+  println(int.to_string(ilen(whole_or_empty(INil))))
+  println(int.to_string(derived(1)))
+  println(int.to_string(derived(7)))
+  // parc2: self-append dups every element reference
+  let zs = [1, 2, 3]
+  let dz = zs + zs
+  println(int.to_string(list.len(dz)))
+  let ss = ["a", "b"]
+  println(list.join(ss + ss, ""))
+}

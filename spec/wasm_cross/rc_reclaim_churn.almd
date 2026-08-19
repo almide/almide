@@ -1,0 +1,19 @@
+// @contract: C-066
+// The frees flip (0.27.0): the default wasm heap is RECLAIMED — construct+drop
+// churn reuses freed blocks instead of growing the bump frontier linearly.
+// 50k iterations of a record with a fresh (computed, non-data-section) string
+// field plus a same-shape rebuild loop; the checksum pins value correctness
+// byte-identical native == wasm, and the spec/churn/ gates pin the O(1)-memory
+// claim at 2M+ iterations (scripts/check-frees-churn.sh).
+type R = { name: String, n: Int }
+
+fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 50000 {
+    let r = R { name: "k" + int.to_string(i % 100), n: i }
+    sink = sink + r.n % 7 + string.len(r.name)
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}

@@ -1,0 +1,9 @@
+// @contract: C-011
+// PR-3 queue item (#533): float string-interpolation forms that historically
+// diverged — `${0.0}`, negative zero, and the shortest-roundtrip 0.3 — pinned
+// byte-identical native == wasm.
+fn main() -> Unit = {
+  println("${0.0} ${1.5} ${-0.0}")
+  println("${0.3}")
+  println("${1.0 / 3.0}")
+}

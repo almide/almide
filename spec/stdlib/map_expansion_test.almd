@@ -1,0 +1,34 @@
+test "map.fold sums values" {
+  let m = ["a": 1, "b": 2, "c": 3]
+  let total = map.fold(m, 0, (acc, k, v) => acc + v)
+  assert_eq(total, 6)
+}
+
+test "map.any finds match" {
+  let m = ["alice": 90, "bob": 75]
+  assert_eq(map.any(m, (k, v) => v >= 90), true)
+  assert_eq(map.any(m, (k, v) => v >= 100), false)
+}
+
+test "map.all checks all" {
+  let m = ["a": 1, "b": 2]
+  assert_eq(map.all(m, (k, v) => v > 0), true)
+  assert_eq(map.all(m, (k, v) => v > 1), false)
+}
+
+test "map.count counts matching" {
+  let m = ["a": 10, "b": 5, "c": 20]
+  assert_eq(map.count(m, (k, v) => v >= 10), 2)
+}
+
+test "map.find returns first match" {
+  let m = ["x": 1, "y": 2, "z": 3]
+  let found = map.find(m, (k, v) => v > 1)
+  assert_eq(option.is_some(found), true)
+}
+
+test "map.update modifies value" {
+  let m = ["a": 10, "b": 20]
+  let updated = map.update(m, "a", (v) => v + 5)
+  assert_eq(map.get(updated, "a"), some(15))
+}

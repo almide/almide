@@ -1,0 +1,12 @@
+// @contract: C-154
+// ALS-T6: `int.clamp(n, lo, hi)` with an INVERTED range (lo > hi) is a domain
+// error aborting with `Error: clamp requires min <= max` + exit 1 on both
+// targets. Before: native leaked the raw Rust clamp panic (exit 101, "min >
+// max…" banner) while wasm's un-checked min/max chain silently returned a
+// value (fuzz seed-20260718 index 5). The valid-range calls before it run.
+fn main() -> Unit = {
+  println(int.to_string(int.clamp(5, 1, 10)))
+  println(int.to_string(int.clamp(-7, 0, 3)))
+  println(int.to_string(int.clamp(4, 3, 1)))
+  println("unreachable")
+}

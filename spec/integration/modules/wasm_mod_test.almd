@@ -1,0 +1,5 @@
+import dmod_d
+
+test "wasm int from module" {
+  assert_eq(dmod_d.value(), 42)
+}

@@ -1,0 +1,22 @@
+// Compound-drop churn — Map entries (heap key + heap value).
+//
+// Every iteration constructs a fresh Map[String, String] (two heap-string keys
+// and two heap-string values) and drops it at scope end. This exercises
+// emit_typed_rc_dec's Map-entry branch, where the key and value sub-pointers are
+// dropped SEPARATELY (emit_wasm/statements.rs). That recursive drop schedule is
+// re-decided in the wasm renderer today (the v1 §643 class); stage 2 moves it to
+// flat MIR Drop nodes. This is the targeted regression baseline for that move:
+// it must stay byte-identical native == wasm and never double-free under churn.
+//
+// Deliberately uses NO `?? ` (UnwrapOr) so it stays a DISTINCT shape from the
+// open #643 some-box leak — this fixture pins the Map-entry drop in isolation.
+fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 200000 {
+    let m = map.set(map.set(map.new(), "k" + int.to_string(i % 10), "v" + int.to_string(i % 7)), "b", "y")
+    sink = sink + map.len(m)
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}

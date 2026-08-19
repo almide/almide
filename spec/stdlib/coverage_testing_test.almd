@@ -1,0 +1,31 @@
+// Coverage tests for testing module
+import testing
+
+test "testing.assert_contains" {
+  testing.assert_contains("hello world", "world")
+  testing.assert_contains("almide", "mid")
+}
+
+test "testing.assert_approx" {
+  testing.assert_approx(3.14, 3.14159, 0.01)
+  testing.assert_approx(1.0, 1.0, 0.001)
+}
+
+test "testing.assert_gt" {
+  testing.assert_gt(10, 5)
+  testing.assert_gt(1, 0)
+}
+
+test "testing.assert_lt" {
+  testing.assert_lt(3, 7)
+  testing.assert_lt(0, 1)
+}
+
+test "testing.assert_some" {
+  testing.assert_some(some("value"))
+}
+
+test "testing.assert_ok" {
+  let r: Result[String, String] = ok("success")
+  testing.assert_ok(r)
+}

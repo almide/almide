@@ -1,0 +1,135 @@
+// @contract: C-271
+// #1375: `<carrier> ?? <call>!` — a `??` whose FALLBACK is an inline
+// propagating unwrap — taking the FALLBACK arm, for a HANDLE-carrying payload.
+//
+// `spec/wasm_cross/declaration_forms.almd` already carried this shape, but only
+// on the OK path, where the fallback arm never runs. The generative fuzzer
+// perturbed the parsed literal into something unparseable and the err arm
+// finally executed: wasm printed `true` for
+// `json.parse("hi") ?? json.parse("[1,2]")!` — `stringify` reading the ok
+// DISCRIMINANT `1` out of the `Result` block the arm yielded instead of the
+// parsed handle. A silent wrong value on one leg, on a program that compiled,
+// ran and exited 0.
+//
+// Mechanism: the heap-arm lowering treats an `e!` arm as the identity `e`
+// (true in a Result-typed arm, which propagates the Result verbatim). Here the
+// arm is PAYLOAD-typed, so the whole `Result` block landed where the merge
+// expects the payload handle. Both spellings are pinned below — the `??` one
+// AND the `match` one that reaches the same arm.
+//
+// Every non-json carrier is a PURE Result-returning fn (`!` in a pure fn is
+// C-247) rather than an effect fn: the interp returns an effect call's success
+// value bare, so a `match` over one cannot vote. One cell per fn — a body with
+// several heap-branch binds is the bounded-duplication region, an orthogonal
+// concern this fixture deliberately does not ride on.
+import json
+
+fn take_bytes(n: Int) -> Result[Bytes, String] = if n > 0 then ok(bytes.from_list([65, 66, 67 + n]))
+else err("no bytes")
+
+fn take_list(n: Int) -> Result[List[Int], String] = if n > 0 then ok([n, n + 1])
+else err("no list")
+
+fn take_word(n: Int) -> Result[String, String] = if n > 0 then ok("word${n}")
+else err("no word")
+
+// The reported shape: the fallback arm runs and must yield the PARSED handle.
+fn miss_json(text: String) -> Result[String, String] = {
+  let a = json.parse("hi") ?? json.parse(text)!
+  ok(json.stringify(a))
+}
+
+// The OK path: the carrier holds a value, so the fallback (which would fail) is
+// never evaluated — `??` stays lazy in its fallback.
+fn hit_json() -> Result[String, String] = {
+  let a = json.parse("[3,4]") ?? json.parse("nope")!
+  ok(json.stringify(a))
+}
+
+// The `match` spelling of the same arm.
+fn miss_json_match() -> Result[String, String] = {
+  let a = match json.parse("hi") {
+    ok(p) => p,
+    err(_) => json.parse("[8,9]")!,
+  }
+  ok(json.stringify(a))
+}
+
+// An OPTION carrier over the same handle payload.
+fn miss_option() -> Result[String, String] = {
+  let vs: List[Value] = [value.int(1)]
+  let a = list.get(vs, 9) ?? json.parse("[5]")!
+  ok(json.stringify(a))
+}
+
+// `?` (Result -> Option) followed by `??`.
+fn miss_via_option() -> Result[String, String] = {
+  let a = json.parse("hi")? ?? json.parse("[6]")!
+  ok(json.stringify(a))
+}
+
+// Nested `??`: the inner one supplies the outer one's fallback.
+fn miss_nested() -> Result[String, String] = {
+  let a = json.parse("hi") ?? (json.parse("also bad") ?? json.parse("[7]")!)
+  ok(json.stringify(a))
+}
+
+// The other heap carriers: String, List and Bytes payloads.
+fn pick_word(n: Int) -> Result[String, String] = {
+  let w = take_word(0) ?? take_word(n)!
+  ok("picked ${w}")
+}
+
+fn pick_list() -> Result[String, String] = {
+  let xs = take_list(0) ?? take_list(5)!
+  ok(xs |> list.map((x) => int.to_string(x)) |> list.join(","))
+}
+
+fn pick_bytes() -> Result[String, String] = {
+  let bs = take_bytes(0) ?? take_bytes(1)!
+  ok("${bytes.len(bs)}:${bytes.to_string(bs)!}")
+}
+
+// SCALAR control: the same shape over an Int payload, which never took the
+// handle path and must keep its own route.
+fn pick_int() -> Result[String, String] = {
+  let n = int.parse("x") ?? int.parse("7")!
+  ok(int.to_string(n))
+}
+
+// The Result is bound to an ANNOTATED `let` before it is rendered: a
+// Result-returning call passed straight as an argument is propagated at the
+// call site, which would take the whole cell out of the fixture.
+fn show(label: String, r: Result[String, String]) -> String = match r {
+  ok(v) => "${label}: ${v}",
+  err(e) => "${label}: propagated ${e}",
+}
+
+effect fn main() -> Unit = {
+  let r_array: Result[String, String] = miss_json("[1,2]")
+  println(show("array", r_array))
+  let r_object: Result[String, String] = miss_json("{\"k\":1}")
+  println(show("object", r_object))
+  let r_number: Result[String, String] = miss_json("7")
+  println(show("number", r_number))
+  let r_hit: Result[String, String] = hit_json()
+  println(show("hit", r_hit))
+  let r_match: Result[String, String] = miss_json_match()
+  println(show("match", r_match))
+  let r_option: Result[String, String] = miss_option()
+  println(show("option", r_option))
+  let r_via: Result[String, String] = miss_via_option()
+  println(show("via-option", r_via))
+  let r_nested: Result[String, String] = miss_nested()
+  println(show("nested", r_nested))
+  let r_word: Result[String, String] = pick_word(3)
+  println(show("word", r_word))
+  let r_word_err: Result[String, String] = pick_word(0)
+  println(show("word-both-err", r_word_err))
+  let r_list: Result[String, String] = pick_list()
+  println(show("list", r_list))
+  let r_bytes: Result[String, String] = pick_bytes()
+  println(show("bytes", r_bytes))
+  let r_int: Result[String, String] = pick_int()
+  println(show("int", r_int))
+}

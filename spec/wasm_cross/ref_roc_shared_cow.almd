@@ -1,0 +1,33 @@
+// @contract: C-292
+// roc rc_conformance: shared vs unique heap values through every
+// copy-on-write op — the holder list pins refcount > 1, so any
+// in-place-when-unique optimization firing on a shared value corrupts
+// the twin. Plus record update must copy, and may read the old field.
+type Person = { name: String, age: Int, country: String }
+
+fn main() -> Unit = {
+  let shared = "  a string long enough to live on the heap  " + "plus tail  "
+  let holder = [shared, shared]
+  let trimmed = string.trim(shared)
+  let upper = string.to_upper(shared)
+  println("[${shared}]")
+  println("[${trimmed}]")
+  println(int.to_string(string.len(upper)))
+  println(int.to_string(list.len(holder)))
+  // concat-with-empty fast path must still be a fresh reference
+  let empty = string.repeat("x", 0)
+  let tail = shared + empty
+  let tail2 = empty + shared
+  println(if tail == shared then "same" else "diff")
+  println(if tail2 == shared then "same" else "diff")
+  // record update: copy, not alias; new field may read the old one
+  let past = Person { name: "Quinn", age: 27, country: "CA" }
+  let present = Person { name: past.name, age: past.age + 1, country: "US" }
+  println("${past.name} ${int.to_string(past.age)} ${past.country}")
+  println("${present.name} ${int.to_string(present.age)} ${present.country}")
+  // list cow: push onto an aliased list must not mutate the twin
+  let base = ["a", "b"]
+  var grow = base
+  list.push(grow, "c")
+  println("${int.to_string(list.len(base))} ${int.to_string(list.len(grow))}")
+}

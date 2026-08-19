@@ -1,0 +1,28 @@
+// #484: a variant whose payload type comes from another module must emit
+// the qualified (mangled) type name in the generated enum declaration.
+// Covers all three payload shapes that resolved env-less before the fix:
+// tuple payload, record-variant field, and a generic payload.
+import varlib
+
+type Tag = | PolicyTag(varlib.Policy) | SetPolicy { p: varlib.Policy } | Wrapped(List[varlib.Policy])
+
+fn describe(t: Tag) -> String = match t {
+  PolicyTag(_) => "tag",
+  SetPolicy { .. } => "set",
+  Wrapped(ps) => "wrap:" + int.to_string(list.len(ps)),
+}
+
+test "cross-module tuple variant payload (#484)" {
+  assert_eq(describe(PolicyTag(varlib.Never)), "tag")
+}
+
+test "cross-module record-variant payload field (#484)" {
+  assert_eq(describe(SetPolicy { p: varlib.Always }), "set")
+}
+
+test "cross-module generic variant payload (#484)" {
+  assert_eq(describe(Wrapped([
+    varlib.Never,
+    varlib.Always
+  ])), "wrap:2")
+}

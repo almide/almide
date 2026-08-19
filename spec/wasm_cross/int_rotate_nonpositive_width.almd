@@ -1,0 +1,13 @@
+// @contract: C-047
+// `int.rotate_left`/`rotate_right` are TOTAL: a non-positive `bits` width has no
+// register to rotate (and the native `n % bits` would divide by zero), so it
+// aborts with "Error: rotate width must be positive" + exit 1 on BOTH targets —
+// never a native rem-by-zero panic (exit 101) nor a wasm `i64.rem_s` trap (134).
+// `zero(7)` shields the width; the leading print locks stdout/stderr order.
+fn zero(x: Int) -> Int = x - x
+
+fn main() -> Unit = {
+  println("before")
+  let r = int.rotate_right(255, 2, zero(7))
+  println(int.to_string(r))
+}

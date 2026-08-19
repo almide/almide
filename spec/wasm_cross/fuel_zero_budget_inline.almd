@@ -1,0 +1,39 @@
+// @contract: C-294
+// ADR-0001 S5 zero-budget edge × the shared-MIR inliner: charge sites are
+// defined over the SHARED MIR (「charge site」, ADR-0001), so a loop-free
+// non-recursive callee is inlined into its region ENTRY CHARGE AND ALL —
+// `{ w1() }`..`{ w3(1) }` carry zero surviving charges and a 0ns budget
+// still admits them (check-then-charge: 最初の charge を踏む式は exhaust).
+// Only the loop-carrying `w4` keeps charges (its loop head) and exhausts.
+// The reference interpreter mirrors the same exemption; before it did, it
+// voted exhaust on all four (xtarget-fuzz seed=20260817 index=578, a
+// time_saturate mutation whose dynamic budget collapsed to zero).
+fn w1() -> Int = 42
+
+fn w2() -> Int = {
+  let x = 40
+  x + 2
+}
+
+fn w3(n: Int) -> Int = if n > 0 then n + 41 else 42
+
+fn w4() -> Int = {
+  var i = 0
+  while i < 1 {
+    i = i + 1
+  }
+  42
+}
+
+fn pick(n: Int) -> Int = 0
+
+effect fn main() -> Unit = {
+  let a = fan.bounded(compute.ms(0)) { w1() } ?? -1
+  let b = fan.bounded(compute.ms(0)) { w2() } ?? -1
+  let c = fan.bounded(compute.ms(0)) { w3(1) } ?? -1
+  let d = fan.bounded(compute.ms(0)) { w4() } ?? -1
+  // the dynamic path (budget through a call) lands on the same edge
+  let e = fan.bounded(compute.h(pick(9000000))) { w1() } ?? -1
+  // 42 42 42 -1 42
+  println("${int.to_string(a)} ${int.to_string(b)} ${int.to_string(c)} ${int.to_string(d)} ${int.to_string(e)}")
+}

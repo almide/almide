@@ -1,0 +1,9 @@
+// @contract: C-100
+// string.to_upper — SELF-HOSTED ASCII fold (a-z -> A-Z); byte-matches v0's to_uppercase for ASCII.
+// Was UNLINKED on v1 (string.to_lower existed but not to_upper).
+effect fn main() -> Unit = {
+  println(string.to_upper("abc"))
+  println(string.to_upper("aB3z!"))
+  println(string.to_upper("hello world"))
+  println("[" + string.to_upper("") + "]")
+}

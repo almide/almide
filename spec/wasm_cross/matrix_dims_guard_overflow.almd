@@ -1,0 +1,17 @@
+// @contract: C-161
+// #849, over-ceiling half: an element count above the shared 2^28 ceiling
+// ABORTS in the unified T6 form — one `Error: matrix dimensions too large`
+// line on stderr and exit 1, byte-identical native == wasm. Before, native
+// took a raw-vec `capacity overflow` panic (exit 101) or an OOM kill and wasm
+// took an out-of-bounds memory fault (exit 134).
+//
+// The ceiling is 2^28 f64 = 2 GiB, inside wasm32's address space, so BOTH
+// targets accept exactly the same dimensions — the guard fires before either
+// allocator is asked for anything, so the fixture costs no memory to run.
+effect fn main() -> Unit = {
+  let small = matrix.ones(4, 4)
+  let (r, c) = matrix.shape(small)
+  println("ok: " + int.to_string(r) + " x " + int.to_string(c))
+  let huge = matrix.ones(100000, 100000)
+  println("unreachable: " + int.to_string(matrix.rows(huge)))
+}

@@ -1,0 +1,1 @@
+fn greet(name: String) -> String = "hello from deep: " + name

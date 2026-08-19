@@ -1,0 +1,36 @@
+// #1049: `!` on an effect call is position-independent. On a can-err call it
+// unwraps and propagates; on a NEVER-ERR call (random.int, fs.exists) it is a
+// silent no-op — the never-err/can-err split is the lifted ABI's business
+// (#840/#841) and must not leak into what the writer can spell.
+import random
+import fs
+
+effect fn pick() -> Int = random.int(0, 5)
+
+test "! is a no-op on a never-err stdlib effect call" {
+  let h = random.int(0, 5)!
+  assert(h >= 0, "lower bound")
+  assert(h <= 5, "upper bound")
+}
+
+test "! is a no-op on a never-err Bool-returning effect call" {
+  let missing = fs.exists("/almide_i1049_definitely_missing")!
+  assert_eq(missing, false)
+}
+
+test "! still unwraps a can-err effect call" {
+  // fs.temp_dir(), never a literal "/tmp": the platform-correct temp root
+  // (%TMP% on Windows native, the /tmp preopen on the wasm leg). A fixed
+  // file name overwritten per run needs no cleanup — that is what a temp
+  // dir is for, and fs.remove would push this off the wasm test leg.
+  let dir = fs.temp_dir()
+  let path = "${dir}/almide_i1049_probe.txt"
+  fs.write(path, "abc")!
+  let s = fs.read_text(path)!
+  assert_eq(string.len(s), 3)
+}
+
+test "! on a user effect fn call" {
+  let v = pick()!
+  assert(v >= 0, "user effect fn unwraps")
+}

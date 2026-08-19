@@ -1,0 +1,27 @@
+// #1053: runtime-backed stdlib nominals (`HttpRequest`/`HttpResponse`,
+// `JsonPath`) are annotatable in USER signatures — bare or module-qualified —
+// whenever the owner module is imported. The stdlib's own docs spell these
+// types, so a typed helper over them must be writable.
+import http
+import json
+
+fn tag(resp: HttpResponse) -> http.HttpResponse = http.set_header(resp, "x-t", "1")
+
+fn extend(p: JsonPath, k: String) -> json.JsonPath = json.field(p, k)
+
+test "HttpResponse is annotatable in a typed helper" {
+  let r = tag(http.response(200, "body"))
+  assert_eq(http.get_header(r, "x-t") ?? "", "1")
+  assert_eq(http.body(r), "body")
+}
+
+test "JsonPath is annotatable in a typed helper" {
+  let obj = value.object([
+    ("a", value.object([("b", value.int(3))]))
+  ])
+  let p = extend(extend(json.root(), "a"), "b")
+  match json.get_path(obj, p) {
+    some(v) => assert_eq(value.as_int(v)?, some(3)),
+    none => assert(false, "path should hit"),
+  }
+}

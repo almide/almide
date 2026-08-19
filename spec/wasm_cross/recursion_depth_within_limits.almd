@@ -1,0 +1,11 @@
+// @contract: C-196
+// The CONVERGENT boundary of the stack-resource contract: NON-TAIL recursion within
+// both targets' limits is byte-identical. Beyond-limit termination is the contracted
+// divergence (one leg's optimizer may transform the recursion to iteration while the
+// other traps) — demonstrated by Wave 4 finding 57's replay and classified by the
+// oracle's C-196 rule; by definition it cannot run as an equivalence fixture.
+fn depth(n: Int) -> Int = if n <= 0 then 0 else 1 + depth(n - 1)
+
+fn main() -> Unit = {
+  println(int.to_string(depth(1000)))
+}

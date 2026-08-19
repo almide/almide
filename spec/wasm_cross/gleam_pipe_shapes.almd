@@ -1,0 +1,35 @@
+// @contract: C-292
+// gleam test/language/pipe_test.gleam (portable half): pipe into a named
+// fn, into an inline lambda, chained pipes through both, and pipe feeding
+// the FIRST argument of a two-arg fn via a lambda (the `pair(2, _)` capture
+// is inexpressible — E046 pins that placeholders are not call arguments).
+fn identity(x: Int) -> Int = x
+
+fn pair(a: Int, b: Int) -> (Int, Int) = (a, b)
+
+fn show(p: (Int, Int)) -> String = match p {
+  (a, b) => "${int.to_string(a)},${int.to_string(b)}"
+}
+
+fn hundred() -> Int = 100
+
+fn main() -> Unit = {
+  let p1 = hundred() |> identity
+  println(int.to_string(p1))
+  let p2 = hundred() |> ((x) => x)
+  println(int.to_string(p2))
+  // pipe value lands as FIRST arg
+  let one = hundred() / 100
+  let p3 = one |> ((x) => pair(x, 2))
+  println(show(p3))
+  // and as SECOND arg via the lambda spelling of gleam's `pair(2, _)`
+  let p4 = one |> ((x) => pair(2, x))
+  println(show(p4))
+  // chained (>=2-stage) pipes into a scalar binding are a pinned wall —
+  // walls/pipe_chain_scalar_bind.almd — so the chain is spelled one stage
+  // per binding here.
+  let three = one + 2
+  let p5a = three |> ((x) => x * 10)
+  let p5 = p5a |> identity
+  println(int.to_string(p5))
+}

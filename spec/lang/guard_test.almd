@@ -1,0 +1,151 @@
+// do_guard_test — do block and guard statement edge cases
+test "do block with guard break" {
+  var i = 0
+  while i < 5 {
+    i = i + 1
+  }
+  assert_eq(i, 5)
+}
+
+test "do block single iteration" {
+  var count = 0
+  while true {
+    count = count + 1
+    if not (false) then break
+    else ()
+  }
+  assert_eq(count, 1)
+}
+
+test "do block accumulator" {
+  var sum = 0
+  var i = 1
+  while i <= 10 {
+    sum = sum + i
+    i = i + 1
+  }
+  assert_eq(sum, 55)
+}
+
+test "do block with complex guard" {
+  var x = 0
+  while true {
+    x = x + 1
+    if not (x < 100 and x % 7 != 0) then break
+    else ()
+  }
+  assert_eq(x, 7)
+}
+
+test "do block string building" {
+  var s = ""
+  var i = 0
+  while i < 4 {
+    s = s + int.to_string(i)
+    i = i + 1
+  }
+  assert_eq(s, "0123")
+}
+
+test "nested do blocks" {
+  var total = 0
+  var i = 0
+  while i < 3 {
+    var j = 0
+    while j < 3 {
+      total = total + 1
+      j = j + 1
+    }
+    i = i + 1
+  }
+  assert_eq(total, 9)
+}
+
+test "guard with continue in for" {
+  var sum = 0
+  for i in 0..<10 {
+    guard i % 2 == 0 else continue
+    sum = sum + i
+  }
+  assert_eq(sum, 20)
+}
+
+test "do block never enters on false guard" {
+  var count = 0
+  while false {
+    count = count + 1
+  }
+  assert_eq(count, 0)
+}
+
+test "guard in while" {
+  var result: List[Int] = []
+  var i = 0
+  while i < 10 {
+    i = i + 1
+    guard i % 3 == 0 else continue
+    result = result + [i]
+  }
+  assert_eq(result, [3, 6, 9])
+}
+
+// ── guard at the tail of a SCALAR-returning effect fn ──
+// The declared return is the bare scalar, so the compiled carrier is the
+// synthetic `Result[T, String]` (the auto-wrap ABI). `guard c else err(e)` — with
+// NO `!` — leaves a bare `err(…)` arm against a scalar sibling arm; both paths
+// must produce the same value on the native and wasm legs.
+effect fn checked_double(n: Int) -> Int = {
+  guard n > 0 else err("must be positive")
+  n * 2
+}
+
+test "scalar-tail guard passes through" {
+  assert_eq(checked_double(5), ok(10))
+}
+
+test "scalar-tail guard takes the else-err early return" {
+  assert_eq(checked_double(-1), err("must be positive"))
+}
+
+// The same shape with the explicit raise spelling — one meaning, two spellings.
+effect fn checked_double_raise(n: Int) -> Int = {
+  guard n > 0 else err("must be positive")!
+  n * 2
+}
+
+test "scalar-tail guard with explicit raise agrees with the bare form" {
+  assert_eq(checked_double_raise(5), checked_double(5))
+  assert_eq(checked_double_raise(-1), checked_double(-1))
+}
+
+// A String tail, and a CHAINED guard: the whole if-chain folds into one carrier.
+effect fn sign_label(n: Int) -> String = {
+  guard n != 0 else err("zero")
+  guard n > -100 else err("too small")
+  if n > 0 then "pos" else "neg"
+}
+
+test "string scalar-tail guard chain passes through" {
+  assert_eq(sign_label(3), ok("pos"))
+  assert_eq(sign_label(-3), ok("neg"))
+}
+
+test "string scalar-tail guard chain reports the first failing guard" {
+  assert_eq(sign_label(0), err("zero"))
+  assert_eq(sign_label(-500), err("too small"))
+}
+
+// Statements BEFORE the guard stay unconditional, and a plain `if` tail with an
+// `err` arm (the hand-written form the guard restructures into) lowers the same.
+effect fn offset_checked(n: Int) -> Int = {
+  let m = n + 1
+  if m > 0 then m * 2 else err("must be positive")
+}
+
+test "scalar if-tail with an err arm passes through" {
+  assert_eq(offset_checked(4), ok(10))
+}
+
+test "scalar if-tail with an err arm returns the err" {
+  assert_eq(offset_checked(-9), err("must be positive"))
+}

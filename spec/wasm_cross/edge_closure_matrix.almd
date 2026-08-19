@@ -1,0 +1,38 @@
+// @contract: C-292
+// Closures: captured vars, closures stored in lists, closures returning
+// closures, local fn recursion, higher-order over heap payloads.
+fn make_adder(k: Int) -> (Int) -> Int = (x) => x + k
+
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => f(g(x))
+
+fn sum_to(n: Int) -> Int = if n <= 0 then 0 else n + sum_to(n - 1)
+
+fn main() -> Unit = {
+  let fs = [make_adder(1), make_adder(10), make_adder(100)]
+  var total = 0
+  var i = 0
+  while i < list.len(fs) {
+    let f = list.get(fs, i) ?? ((x) => x)
+    total = total + f(i)
+    i = i + 1
+  }
+  println(int.to_string(total))
+  let h = compose(make_adder(5), (x) => x * 3)
+  println(int.to_string(h(4)))
+  // closure capturing a heap value that then gets shadowed
+  let tag = "cap"
+  let shout = (s: String) => "${tag}:${s}"
+  let tag = "shadowed"
+  println(shout(tag))
+  println(int.to_string(sum_to(10)))
+  // map over closures built in a loop body (fresh capture per iteration)
+  var gs: List[(Int) -> Int] = []
+  var j = 0
+  while j < 3 {
+    let jj = j * 7
+    list.push(gs, (x) => x + jj)
+    j = j + 1
+  }
+  let applied = list.map(gs, (g) => g(1))
+  println(list.join(list.map(applied, (v) => int.to_string(v)), ","))
+}

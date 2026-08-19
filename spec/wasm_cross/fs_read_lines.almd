@@ -1,0 +1,35 @@
+// @contract: C-225
+// fs.read_lines materializes a file's lines with `str::lines()` semantics on
+// BOTH targets: split on '\n', one trailing '\r' stripped per line (CRLF), no
+// phantom empty line after a trailing newline, a final newline-less line still
+// yielded, the empty file an empty list, and a missing file the same
+// err(message) channel. The wasm leg self-hosts the native oracle's exact
+// composition (read_to_string + lines → prim.read_text_file + string.lines,
+// stdlib/fs_read_lines.almd); before it, every program touching fs.read_lines
+// fell off the wasm leg entirely (a COMPILER_FRONTIER row in
+// proofs/wasm-reachability-baseline.txt).
+//
+// SELF-CONTAINED: creates its own temp dir (the path itself is never printed —
+// create_temp_dir's suffix differs per run), removes it at the end.
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("xt_read_lines")!
+  let p = dir + "/probe.txt"
+  let _w1 = fs.write(p, "alpha\nbeta\r\ngamma")!
+  let a = fs.read_lines(p)!
+  println("mixed=${list.len(a)} [${a[0]}|${a[1]}|${a[2]}]")
+  let _w2 = fs.write(p, "x\ny\n")!
+  println("trailing_nl=${list.len(fs.read_lines(p)!)}")
+  let _w3 = fs.write(p, "")!
+  println("empty=${list.len(fs.read_lines(p)!)}")
+  let _w4 = fs.write(p, "\n")!
+  let d = fs.read_lines(p)!
+  println("lone_nl=${list.len(d)} first='${d[0]}'")
+  let absent = fs.read_lines(dir + "/absent.txt")
+  match absent {
+    ok(_) => println("absent=ok"),
+    err(_) => println("absent=err"),
+  }
+  let _rm = fs.remove_all(dir)!
+}

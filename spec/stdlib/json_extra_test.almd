@@ -1,0 +1,154 @@
+import json
+
+// json extra tests — get, keys, as_*, null, stringify_pretty, path API
+test "value.field existing key" {
+  let obj = value.object([("name", value.str("Alice"))])
+  let v = value.field(obj, "name")?
+  assert_eq(option.is_some(v), true)
+}
+
+test "value.field missing key" {
+  let obj = value.object([("name", value.str("Alice"))])
+  let v = value.field(obj, "age")?
+  assert_eq(option.is_none(v), true)
+}
+
+test "value.keys of object" {
+  let obj = value.object([("a", value.int(1)), ("b", value.int(2))])
+  let ks = value.keys(obj)
+  assert_eq(list.len(ks), 2)
+  assert_eq(list.contains(ks, "a"), true)
+  assert_eq(list.contains(ks, "b"), true)
+}
+
+test "value.keys of empty object" {
+  let obj = value.object([])
+  let ks = value.keys(obj)
+  assert_eq(list.len(ks), 0)
+}
+
+test "value.as_string on string value" {
+  let v = value.str("hello")
+  assert_eq(value.as_string(v)?, some("hello"))
+}
+
+test "value.as_string on non-string" {
+  let v = value.int(42)
+  assert_eq(value.as_string(v)?, none)
+}
+
+test "value.as_int on int value" {
+  let v = value.int(99)
+  assert_eq(value.as_int(v)?, some(99))
+}
+
+test "value.as_int on non-int" {
+  let v = value.str("99")
+  assert_eq(value.as_int(v)?, none)
+}
+
+test "value.as_bool on bool value" {
+  let v = value.bool(true)
+  assert_eq(value.as_bool(v)?, some(true))
+}
+
+test "value.as_bool on non-bool" {
+  let v = value.int(1)
+  assert_eq(value.as_bool(v)?, none)
+}
+
+test "value.as_float on float value" {
+  let v = value.float(2.71)
+  let r = value.as_float(v)?
+  assert_eq(option.is_some(r), true)
+}
+
+test "value.as_float on non-float" {
+  let v = value.str("2.71")
+  assert_eq(value.as_float(v)?, none)
+}
+
+test "value.as_array on array value" {
+  let v = value.array([value.int(1), value.int(2)])
+  let r = value.as_array(v)?
+  assert_eq(option.is_some(r), true)
+}
+
+test "value.as_array on non-array" {
+  let v = value.int(42)
+  assert_eq(value.as_array(v)?, none)
+}
+
+test "value.null creates null value" {
+  let v = value.null()
+  assert_eq(json.stringify(v), "null")
+}
+
+test "json.stringify_pretty formats" {
+  let obj = value.object([("key", value.int(1))])
+  let s = json.stringify_pretty(obj)
+  assert_eq(string.contains(s, "key"), true)
+  assert_eq(string.contains(s, "1"), true)
+}
+
+test "value.object empty" {
+  let obj = value.object([])
+  assert_eq(json.stringify(obj), "{}")
+}
+
+test "json.parse roundtrip array" {
+  let arr = value.array([value.str("a"), value.str("b")])
+  let text = json.stringify(arr)
+  match json.parse(text) {
+    ok(v) => {
+      let items = value.as_array(v)?
+      assert_eq(option.is_some(items), true)
+    },
+    err(_) => assert(false, "roundtrip failed"),
+  }
+}
+
+test "json.parse nested object" {
+  match json.parse('{"user": {"name": "Alice", "age": 30}}') {
+    ok(v) => {
+      let user = value.field(v, "user")?
+      assert_eq(option.is_some(user), true)
+    },
+    err(_) => assert(false, "should parse"),
+  }
+}
+
+test "json.parse array of objects" {
+  match json.parse('[{"id": 1}, {"id": 2}]') {
+    ok(v) => {
+      let items = value.as_array(v)?
+      assert_eq(option.is_some(items), true)
+    },
+    err(_) => assert(false, "should parse"),
+  }
+}
+
+test "json.stringify_pretty on nested" {
+  let inner = value.object([("x", value.int(1))])
+  let outer = value.object([("data", inner)])
+  let s = json.stringify_pretty(outer)
+  assert_eq(string.contains(s, "data"), true)
+  assert_eq(string.contains(s, "x"), true)
+}
+
+test "value.str empty" {
+  let v = value.str("")
+  let s = json.stringify(v)
+  assert_eq(s, '""')
+}
+
+test "value.int zero" {
+  let v = value.int(0)
+  assert_eq(json.stringify(v), "0")
+}
+
+test "value.int negative" {
+  let v = value.int(-42)
+  let s = json.stringify(v)
+  assert_eq(string.contains(s, "-42"), true)
+}

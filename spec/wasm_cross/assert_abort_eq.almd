@@ -1,0 +1,11 @@
+// @contract: C-153
+// ALS-T18: a failing `assert_eq` OUTSIDE a test block aborts with ONE stderr
+// line + exit 1 on both targets. Before: native leaked the raw Rust panic
+// (exit 101, the panic banner) while wasm printed a value-less line with
+// exit 1 (fuzz seed-20260718 index 10). The operands appear in the line.
+fn main() -> Unit = {
+  let x: Int = 1
+  println("before")
+  assert_eq(x, 2)
+  println("unreachable")
+}

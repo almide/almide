@@ -1,0 +1,75 @@
+var counter = 0
+
+var label = "init"
+
+var items: List[Int] = []
+
+fn bump() -> Unit = {
+  counter = counter + 1
+}
+
+fn set_label(s: String) -> Unit = {
+  label = s
+}
+
+// #501: a single-element self-append INSIDE a module fn must keep its
+// Assign form — the push rewrite pushed onto a discarded clone of the
+// ModuleRc read accessor and silently lost the write.
+fn append_item(n: Int) -> Unit = {
+  items = items + [n]
+}
+
+// Pins the alias-safety of the Assign route: the RHS reads the same var
+// it assigns (evaluates before borrow_mut is taken).
+fn append_len() -> Unit = {
+  items = items + [list.len(items)]
+}
+
+test "module var Int read/write" {
+  assert(counter == 0)
+  bump()
+  assert(counter == 1)
+  bump()
+  bump()
+  assert(counter == 3)
+}
+
+test "module var String read/write" {
+  set_label("hello")
+  assert(label == "hello")
+  set_label("world")
+  assert(label == "world")
+}
+
+test "module var List assignment" {
+  items = [10, 20]
+  assert(list.len(items) == 2)
+  assert(items[0] == 10)
+  items = [10, 20, 30]
+  assert(list.len(items) == 3)
+}
+
+test "module var list.push" {
+  items = []
+  list.push(items, 100)
+  list.push(items, 200)
+  assert(list.len(items) == 2)
+  assert(items[0] == 100)
+  assert(items[1] == 200)
+}
+
+test "module var direct assignment in test" {
+  counter = 100
+  assert(counter == 100)
+  counter = counter + 1
+  assert(counter == 101)
+}
+
+test "module var append through fn keeps the write (#501)" {
+  items = [1, 2]
+  append_item(9)
+  assert(list.len(items) == 3)
+  append_len()
+  assert(list.len(items) == 4)
+  assert((list.get(items, 3) ?? -1) == 3)
+}

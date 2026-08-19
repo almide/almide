@@ -1,0 +1,10 @@
+// @contract: C-292
+// Trap corner in isolation: i64::MIN / -1 through variables — native idiv
+// faults, wasm i64.div_s traps; both must surface the SAME guarded abort.
+fn main() -> Unit = {
+  println("before")
+  let m = (0 - 9223372036854775807) - 1
+  let d = 0 - 1
+  println(int.to_string(m / d))
+  println("after")
+}

@@ -1,0 +1,185 @@
+// The executable Codec field-type matrix (#1062, containers widened by #1065).
+// Every ACCEPTED cell of the field grammar is pinned here — wire bytes on
+// encode, state on decode:
+//
+//   field  := scalar | Value | named | Option[field'] | List[field']
+//   scalar := String | Int | Float | Bool
+//
+// Containers nest arbitrarily; the rejections are SEMANTIC, not depth-based:
+// Option[Option[..]] (void on the wire once none omits/folds), Option[Value]
+// anywhere but field root (elements have no "absent"), and non-wire leaves
+// (Map/Set, sized numerics, Bytes, tuples, fn types, Result) — all rejected at
+// declaration with E023, pinned in tests/diagnostics/e023-codec-*. Passing
+// `check` and dying in codegen is the one forbidden outcome (#1061).
+//
+// The none/null law (C-209): encode omits a none field; decode folds
+// missing/null to none; decode∘encode = id (retraction — encode∘decode
+// normalizes). `Value` never interprets the wire, so `Option[Value]` is the
+// 3-state escape hatch and List elements keep null (positions cannot be
+// omitted).
+import json
+
+type Scalars: Codec = { s: String, i: Int, f: Float, b: Bool }
+
+type Opts: Codec = { s: String?, i: Int?, f: Float?, b: Bool? }
+
+type Inner: Codec = { n: Int }
+
+type Nested: Codec = { one: Inner, many: List[Inner], maybe: Inner? }
+
+type Vals: Codec = { v: Value, ov: Value?, lv: List[Value], ol: List[Int]? }
+
+type Defaults: Codec = { host: String = "localhost", port: Int = 8080, name: String }
+
+type Aliased: Codec = { trace_id as "traceId": String, count: Int }
+
+type Shape: Codec = | Circle(Float) | Point | Label { text: String, hint: String? }
+
+type Deep: Codec = { lo: List[Int?], ll: List[List[Int]], dp: List[String?]?, lc: List[Inner?] }
+
+fn enc_scalars(x: Scalars) -> String = json.stringify(Scalars.encode(x))
+
+fn enc_opts(x: Opts) -> String = json.stringify(Opts.encode(x))
+
+fn enc_vals(x: Vals) -> String = json.stringify(Vals.encode(x))
+
+fn parse(s: String) -> Value = json.parse(s) ?? value.null()
+
+test "scalars: wire bytes and roundtrip" {
+  let x = Scalars { s: "x", i: -3, f: 1.5, b: true }
+  assert_eq(enc_scalars(x), '{"s":"x","i":-3,"f":1.5,"b":true}')
+  assert_eq(Scalars.decode(Scalars.encode(x)), ok(x))
+}
+
+test "scalars: integral Float encodes without decimal point and widens back" {
+  let x = Scalars { s: "x", i: 0, f: 2.0, b: false }
+  assert_eq(enc_scalars(x), '{"s":"x","i":0,"f":2,"b":false}')
+  assert_eq(Scalars.decode(Scalars.encode(x)), ok(x))
+}
+
+test "scalars: decode strictness — Int rejects a fractional number, missing field errs" {
+  match Scalars.decode(parse('{"s":"x","i":1.5,"f":1.0,"b":true}')) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "expected Int"),
+  }
+  match Scalars.decode(parse('{"i":1,"f":1.0,"b":true}')) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "missing field 's'"),
+  }
+}
+
+test "Option: none omits the key, some emits in declaration position" {
+  assert_eq(enc_opts(Opts { s: none, i: none, f: none, b: none }), "{}")
+  assert_eq(enc_opts(Opts { s: some("v"), i: none, f: some(0.5), b: none }), '{"s":"v","f":0.5}')
+  assert_eq(enc_opts(Opts { s: none, i: some(7), f: none, b: some(false) }), '{"i":7,"b":false}')
+}
+
+test "Option: decode folds missing and explicit null to none" {
+  let want = Opts { s: none, i: none, f: none, b: none }
+  assert_eq(Opts.decode(parse("{}")), ok(want))
+  assert_eq(Opts.decode(parse('{"s":null,"i":null,"f":null,"b":null}')), ok(want))
+  let x = Opts { s: some("v"), i: some(1), f: some(2.5), b: some(true) }
+  assert_eq(Opts.decode(Opts.encode(x)), ok(x))
+}
+
+test "nested Codec: direct field, list elements, Option none omission" {
+  let x = Nested { one: Inner { n: 1 }, many: [
+    Inner { n: 2 },
+    Inner { n: 3 }
+  ], maybe: none }
+  assert_eq(json.stringify(Nested.encode(x)), '{"one":{"n":1},"many":[{"n":2},{"n":3}]}')
+  assert_eq(Nested.decode(Nested.encode(x)), ok(x))
+  let y = Nested { one: Inner { n: 1 }, many: [], maybe: some(Inner { n: 9 }) }
+  assert_eq(json.stringify(Nested.encode(y)), '{"one":{"n":1},"many":[],"maybe":{"n":9}}')
+  assert_eq(Nested.decode(Nested.encode(y)), ok(y))
+}
+
+test "Value passes through verbatim, including nested and explicit null" {
+  let sub = parse('{"a":[1,2],"b":null}')
+  let x = Vals { v: sub, ov: none, lv: [value.int(1), value.null()], ol: none }
+  assert_eq(enc_vals(x), '{"v":{"a":[1,2],"b":null},"lv":[1,null]}')
+}
+
+test "Option[Value] is 3-state: missing → none, null → some(null), value → some(v)" {
+  match Vals.decode(parse('{"v":1,"lv":[]}')) {
+    ok(d) => assert_eq(d.ov, none),
+    err(_) => assert(false),
+  }
+  match Vals.decode(parse('{"v":1,"lv":[],"ov":null}')) {
+    ok(d) => assert_eq(d.ov, some(value.null())),
+    err(_) => assert(false),
+  }
+  let x = Vals { v: value.int(1), ov: some(value.null()), lv: [], ol: none }
+  assert_eq(enc_vals(x), '{"v":1,"ov":null,"lv":[]}')
+  assert_eq(Vals.decode(Vals.encode(x)), ok(x))
+}
+
+test "Option[List]: none omits, missing/null decode to none, some roundtrips" {
+  let x = Vals { v: value.int(1), ov: none, lv: [], ol: some([1, 2]) }
+  assert_eq(enc_vals(x), '{"v":1,"lv":[],"ol":[1,2]}')
+  assert_eq(Vals.decode(Vals.encode(x)), ok(x))
+  match Vals.decode(parse('{"v":1,"lv":[],"ol":null}')) {
+    ok(d) => assert_eq(d.ol, none),
+    err(_) => assert(false),
+  }
+}
+
+test "defaults: always emitted on encode, filled on missing decode" {
+  let x = Defaults { name: "svc" }
+  assert_eq(json.stringify(Defaults.encode(x)), '{"host":"localhost","port":8080,"name":"svc"}')
+  match Defaults.decode(parse('{"name":"svc"}')) {
+    ok(d) => {
+      assert_eq(d.host, "localhost")
+      assert_eq(d.port, 8080)
+    },
+    err(_) => assert(false),
+  }
+}
+
+test "field alias `as` renames on both directions" {
+  let x = Aliased { trace_id: "abc", count: 2 }
+  assert_eq(json.stringify(Aliased.encode(x)), '{"traceId":"abc","count":2}')
+  match Aliased.decode(parse('{"traceId":"xyz","count":7}')) {
+    ok(d) => assert_eq(d.trace_id, "xyz"),
+    err(_) => assert(false),
+  }
+}
+
+test "variant wire shapes: externally tagged; unit → null; tuple → array" {
+  assert_eq(json.stringify(Shape.encode(Circle(2.5))), '{"Circle":[2.5]}')
+  assert_eq(json.stringify(Shape.encode(Point)), '{"Point":null}')
+  assert_eq(Shape.decode(Shape.encode(Circle(2.5))), ok(Circle(2.5)))
+  assert_eq(Shape.decode(Shape.encode(Point)), ok(Point))
+  match Shape.decode(parse('{"Nope":null}')) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "unknown variant for Shape"),
+  }
+}
+
+test "nested containers: List[Option], List[List], deep Option[List[Option]]" {
+  let x = Deep { lo: [some(1), none, some(3)], ll: [
+    [1],
+    [2, 3]
+  ], dp: some([some("a"), none]), lc: [
+    some(Inner { n: 9 }),
+    none
+  ] }
+  assert_eq(json.stringify(Deep.encode(x)), '{"lo":[1,null,3],"ll":[[1],[2,3]],"dp":["a",null],"lc":[{"n":9},null]}')
+  assert_eq(Deep.decode(Deep.encode(x)), ok(x))
+  // dp omitted when none; element null decodes to none; element type errors propagate
+  let y = Deep { lo: [], ll: [], dp: none, lc: [] }
+  assert_eq(json.stringify(Deep.encode(y)), '{"lo":[],"ll":[],"lc":[]}')
+  assert_eq(Deep.decode(Deep.encode(y)), ok(y))
+  match Deep.decode(parse('{"lo":["bad"],"ll":[],"lc":[]}')) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "expected Int"),
+  }
+}
+
+test "variant record case: Option field omits none, folds missing/null to none" {
+  assert_eq(json.stringify(Shape.encode(Label { text: "a", hint: none })), '{"Label":{"text":"a"}}')
+  assert_eq(json.stringify(Shape.encode(Label { text: "b", hint: some("h") })), '{"Label":{"text":"b","hint":"h"}}')
+  assert_eq(Shape.decode(parse('{"Label":{"text":"a"}}')), ok(Label { text: "a", hint: none }))
+  assert_eq(Shape.decode(parse('{"Label":{"text":"a","hint":null}}')), ok(Label { text: "a", hint: none }))
+  assert_eq(Shape.decode(Shape.encode(Label { text: "c", hint: some("h") })), ok(Label { text: "c", hint: some("h") }))
+}

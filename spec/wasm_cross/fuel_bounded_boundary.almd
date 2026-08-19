@@ -1,0 +1,25 @@
+// @contract: C-204, C-207
+// Exact deterministic boundary at CM-1 v0.3 (3ns/unit): heavy(1000) costs
+// 1002 charge units (fn entry + 1001 loop-head checks) = 3006ns on the
+// declared clock. The sweep must exhaust through ns=3005 and succeed from
+// ns=3006 — a 1ns budget difference flips the verdict, at the SAME
+// nanosecond on both targets.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+
+effect fn main() -> Unit = {
+  var ns = 3000
+  while ns < 3012 {
+    let r = fan.bounded(compute.ns(ns)) { heavy(1000) } ?? -1
+    let flag = if r == -1 then 1 else 0
+    println(int.to_string(ns * 10 + flag))
+    ns = ns + 1
+  }
+}

@@ -1,0 +1,9 @@
+// @contract: C-153
+// ALS-T18: a failing `assert_ne` outside a test block — `Error: assertion
+// failed: both = <l>` + exit 1, byte-identical across targets.
+fn main() -> Unit = {
+  let s: String = "x"
+  println("before")
+  assert_ne(s, "x")
+  println("unreachable")
+}

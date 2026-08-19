@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let factor = 3
+  let xs = [1, 2, 3, 4]
+  let scaled = list.map(xs, (x) => x * factor)
+  let evens = list.filter(scaled, (x) => x % 2 == 0)
+  println("${scaled}")
+  println("${evens}")
+}

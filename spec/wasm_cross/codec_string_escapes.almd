@@ -1,0 +1,17 @@
+// @contract: C-298
+// String escapes and unicode through stringify -> parse -> decode: quotes,
+// backslash, newline, tab, multibyte and astral-plane characters all
+// round-trip byte-equal, and the ENCODED document escapes them identically
+// on both targets.
+import json
+
+type S: Codec = { txt: String, tag: String }
+
+effect fn main() -> Unit = {
+  let s = S { txt: "a\"b\\c\nd\te", tag: "あ🦀é" }
+  let enc = json.stringify(S.encode(s))
+  println(enc)
+  let d = S.decode(json.parse(enc)!)!
+  println(if d.txt == s.txt and d.tag == s.tag then "rt-eq" else "RT-DRIFT")
+  println(int.to_string(string.len(d.tag)))
+}

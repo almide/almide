@@ -1,0 +1,54 @@
+// @contract: C-292
+// grain pattern_matching.re — tuple_match_1/2 (flat tuple patterns;
+// nested ones are a pinned wall), destructure_tuple, destructure_mut_tuple/5 (a
+// destructured binding SNAPSHOTS its source: later writes to the source var
+// are invisible), inline_rec_pattern_1/2 (record-variant patterns with
+// permuted field order and the `_` open row).
+type E = | Rec { x: Int, y: String } | Tup(String, Int)
+
+fn main() -> Unit = {
+  let t1 = match (1, 2) {
+    (a, _) => a
+  }
+  println(int.to_string(t1))
+  let t2 = match (1, 2, 3) {
+    (a, b, c) => a + b + c
+  }
+  println(int.to_string(t2))
+  // NB: NESTED tuple patterns (`(a, (d, e), c)`) are a pinned wall —
+  // walls/nested_tuple_pattern.almd; flat tuples of any width vote.
+  let (a, b) = (3, 4)
+  println(int.to_string(a + b))
+  // snapshot semantics: the destructured pair copies, later var writes invisible
+  var p = 1
+  var q = 2
+  let (x, y) = (p, q)
+  q = 7
+  println(int.to_string(y))
+  println(int.to_string(q))
+  // record-variant patterns: permuted fields, open row, tuple-ctor sibling
+  let r = Rec { x: 123, y: "abc" }
+  // (matches over a heap subject are LET-bound first: in call-argument
+  // position they are outside the wasm executable subset)
+  let m1 = match r {
+    Rec { y, x } => x,
+    _ => 0 - 1,
+  }
+  println(int.to_string(m1))
+  // (an open row `Rec { y, _ }` does not parse — fields are named or `_`-bound)
+  let m2 = match r {
+    Rec { y, x: _ } => y,
+    Tup(s, _) => s,
+  }
+  println(m2)
+  let m3 = match r {
+    Rec { x: _, y: _ } => "record",
+    _ => "other",
+  }
+  println(m3)
+  let m4 = match Tup("t", 9) {
+    Rec { y, x: _ } => y,
+    Tup(s, _) => s,
+  }
+  println(m4)
+}

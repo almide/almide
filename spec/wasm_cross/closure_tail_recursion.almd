@@ -1,0 +1,21 @@
+// @contract: C-178
+// The INDIRECT twin of mutual_tail_recursion: `step`'s `next(k - 1)` is a
+// function-tail CallIndirect and renders as `return_call_indirect` (pinned
+// at the instruction level by crates/almide-mir/tests/tail_call_indirect_test.rs);
+// the lifted lambda's `spin(j)` tail renders as `return_call`. The cycle
+// still costs ONE frame per hop — `spin` allocates the closure and must
+// drop it after `step` returns, so ITS call correctly declines the
+// transfer (a transferred frame would leak the closure) — which is why
+// the depth here is one both targets survive rather than C-178's
+// overflow-proving 1,000,000 (the wasm default stack keeps ~one spin frame per hop): a pure-indirect unbounded cycle needs a
+// creator-free closure chain, and no spine-lowerable construction of one
+// exists today (while-heap-accumulator wall; the CPS build shape is
+// non-tail on its own construction side).
+fn step(next: (Int) -> Int, k: Int) -> Int = if k <= 0 then 42 else next(k - 1)
+
+fn spin(k: Int) -> Int = step((j) => spin(j), k)
+
+fn main() -> Unit = {
+  println(int.to_string(spin(2000)))
+  println(int.to_string(step((j) => j * 3, 8)))
+}

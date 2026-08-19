@@ -1,0 +1,10 @@
+// @contract: C-101
+// list.sort over a List[String] sorts by CONTENT (lexicographic byte order = v0's Rust String Ord),
+// not by the i64 handle address the generic list_sort compared (→ arbitrary order, a silent bug).
+// rc-copies the elements (co-own) so result+source don't double-free.
+effect fn main() -> Unit = {
+  println(list.join(list.sort(["c", "a", "b"]), ","))
+  println(list.join(list.sort(["banana", "apple", "cherry", "apple"]), ","))
+  println(list.join(list.sort(["ab", "a", "abc"]), ","))
+  println(list.join(list.sort(["Z", "a", "B", "1"]), ","))
+}

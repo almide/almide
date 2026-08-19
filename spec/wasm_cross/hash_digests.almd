@@ -1,0 +1,27 @@
+// @contract: C-299
+// #1467: the hash module's cross-target promise. FNV-1a 32-bit (offset basis
+// 2166136261, prime 16777619, masked per step) and SHA-256 (FIPS 180-4) are
+// byte-identical native == wasm, pinned against the published vectors: the
+// FNV basis for "", the classic "a"/"foobar" values, the NIST "" / "abc" /
+// quick-brown-fox digests, and the padding EDGES (55/56 straddle the
+// length-trailer boundary, 63/64 the block boundary, 119/120 the two-block
+// boundary) — the cells where a padding bug lives.
+import hash
+import hex
+
+fn main() -> Unit = {
+  println(int.to_string(hash.fnv1a32("")))
+  println(int.to_string(hash.fnv1a32("a")))
+  println(int.to_string(hash.fnv1a32("foobar")))
+  println(int.to_string(hash.fnv1a32_bytes(bytes.from_string("hello"))))
+  println(hash.sha256_hex(""))
+  println(hash.sha256_hex("abc"))
+  println(hash.sha256_hex("The quick brown fox jumps over the lazy dog"))
+  println(hex.encode(hash.sha256(bytes.from_string("abc"))))
+  println(hash.sha256_hex(string.repeat("a", 55)))
+  println(hash.sha256_hex(string.repeat("a", 56)))
+  println(hash.sha256_hex(string.repeat("a", 63)))
+  println(hash.sha256_hex(string.repeat("a", 64)))
+  println(hash.sha256_hex(string.repeat("a", 119)))
+  println(hash.sha256_hex(string.repeat("a", 120)))
+}

@@ -1,0 +1,42 @@
+// #1033: an ordering comparison on strings must agree about ownership on BOTH
+// sides. A `String` parameter is emitted as `&str` natively and a literal as an
+// owned `String`; whether the bare variable also got `.to_string()` was decided
+// per-USE by clone insertion, so in `c >= "0" and c <= "9"` the first `c` was
+// cloned and the second (its last use) was moved — leaving one comparison with
+// mismatched sides. rustc rejected what `almide check` had accepted, on the
+// native leg only.
+fn in_digit_range(c: String) -> Bool = c >= "0" and c <= "9"
+
+// The chain is not the trigger, only what made the inconsistency visible in one
+// expression: a SINGLE comparison is a single use, so clone insertion moves it
+// and the operand stays `&str` against an owned literal. The issue reported the
+// chain; this shape was broken too.
+fn at_least(c: String) -> Bool = c >= "0"
+
+fn between(c: String, lo: String, hi: String) -> Bool = c >= lo and c <= hi
+
+test "a single comparison against a literal (#1033)" {
+  assert_eq(at_least("5"), true)
+  assert_eq(at_least("!"), false)
+}
+
+test "a chained string range holds on both sides (#1033)" {
+  assert_eq(in_digit_range("5"), true)
+  assert_eq(in_digit_range("0"), true)
+  assert_eq(in_digit_range("9"), true)
+  assert_eq(in_digit_range("x"), false)
+}
+
+// The variable-on-both-sides shape: neither operand is a literal, so the
+// coercion cannot be keyed off literal-ness.
+test "a chained range between two string parameters (#1033)" {
+  assert_eq(between("m", "a", "z"), true)
+  assert_eq(between("A", "a", "z"), false)
+}
+
+test "each ordering operator round-trips (#1033)" {
+  assert_eq("a" < "b", true)
+  assert_eq("b" <= "b", true)
+  assert_eq("c" > "b", true)
+  assert_eq("b" >= "c", false)
+}

@@ -1,0 +1,15 @@
+// @contract: C-066
+// The Perceus Rule-1 (alias-Inc) applies to ASSIGN exactly as to let-binds:
+// `var c = fresh; c = <alias>` keeps c's scope-end Dec, so the alias-shaped
+// RHS must acquire its own reference — the Assign chain arm bypassed the
+// rule and double-freed the shared element (rc==0 sentinel trap). Also pins
+// the MOVE exception: a TCO-temp Var RHS donates its reference (no inc).
+fn main() -> Unit = {
+  let xs = ["a" + "a", "bb" + ""]
+  var c1 = "x" + "y"
+  var c2 = "p" + "q"
+  c1 = list.get_or(xs, 0, "d")
+  c2 = list.get_or(xs, 0, "d")
+  println(c1)
+  println(c2)
+}

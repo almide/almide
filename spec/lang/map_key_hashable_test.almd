@@ -1,0 +1,16 @@
+// #598: unhashable Map keys are rejected by the checker for EVERY construction
+// syntax (literal, map.new/set, from_list), not just literals — closing the
+// builder-API bypass that let a Float key reach codegen (wasm silently
+// collapsed distinct float keys / emitted an invalid module). Hashable keys
+// (Int, Int64, String, Bool) are accepted everywhere. This test exercises the
+// ACCEPT side; the REJECT side is a compile-error and lives in the Rust
+// diagnostic harness.
+test "hashable keys via every construction" {
+  let lit = ["a": 1, "b": 2]
+  let built = map.from_list([("x", 10), ("y", 20)])
+  var inc: Map[Int, String] = map.new()
+  inc = map.set(inc, 1, "one")
+  assert_eq(map.len(lit), 2)
+  assert_eq(map.len(built), 2)
+  assert_eq(map.len(inc), 1)
+}

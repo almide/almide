@@ -1,0 +1,27 @@
+// @contract: C-179
+// The UInt64 UPPER HALF (`i64::MAX+1 ..= u64::MAX`), which the i64 slot carries
+// as a bit pattern: division, remainder, ordering, printing and float widening
+// all read it UNSIGNED, identically on both targets (#872).
+fn probe(x: UInt64) -> String = {
+  let d: UInt64 = x / 3
+  let m: UInt64 = x % 7
+  "${uint64.to_string(x)} d=${uint64.to_string(d)} m=${uint64.to_string(m)} f=${float.to_string(float.from_float64(uint64.to_float64(x)))}"
+}
+
+fn main() -> Unit = {
+  // Through a fn boundary: the RUNTIME lane (IntOp::DivU / i64.div_u).
+  println(probe(18446744073709551615))
+  println(probe(9223372036854775808))
+  println(probe(9223372036854775807))
+  println(probe(0))
+  // Inline: the CONSTANT lane (the propagated-literal re-fold).
+  let big: UInt64 = 18446744073709551615
+  let dv: UInt64 = big / 2
+  let md: UInt64 = big % 10
+  println("${uint64.to_string(dv)}|${uint64.to_string(md)}|${uint64.to_string(big)}")
+  // Ordering is unsigned; add wraps in two's complement (both bit patterns).
+  let one: UInt64 = 1
+  println(if big > one then "GT-OK" else "GT-BAD")
+  println(if one < big then "LT-OK" else "LT-BAD")
+  println(uint64.to_string(big + one))
+}

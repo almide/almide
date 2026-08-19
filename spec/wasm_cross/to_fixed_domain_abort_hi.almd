@@ -1,0 +1,12 @@
+// @contract: C-155
+// The HIGH side of the to_fixed decimals domain: 1e6 was formerly in-domain
+// but NOT total — Rust's format! caps runtime precision at u16::MAX, so
+// native panicked raw ("Formatting argument out of range", exit 101) while
+// the wasm dragon expansion trapped (exit 134) — differential-fuzz. The bound
+// is now 0..=4096 (an f64's exact expansion is ≤ ~1074 fractional digits) and
+// the excess aborts in the T6 form, byte-identical.
+fn main() -> Unit = {
+  println("pre = ${float.to_fixed(1.5, 4096) |> string.take(6)}")
+  println("${float.to_fixed(1.5, 1000000)}")
+  println("unreachable")
+}

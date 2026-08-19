@@ -1,0 +1,15 @@
+// @contract: C-233
+// ALS-E4 (docs/specs/als/expressions.md): the unit literal `()` — the sole
+// value of type Unit; expression position, binding position, the value of a
+// Unit-returning function, and reflexive equality (constant-folded in the
+// v1 lowering: one inhabitant means Eq is statically true), identical on
+// both targets.
+fn mk() -> Unit = ()
+
+effect fn main() -> Unit = {
+  let u = ()
+  let eq = u == ()
+  let ne = u != ()
+  println("${eq} ${ne}")
+  mk()
+}

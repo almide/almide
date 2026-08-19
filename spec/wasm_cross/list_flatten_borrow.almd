@@ -1,0 +1,36 @@
+// @contract: C-168
+// `list.flatten` BORROWS its argument, so it can appear alongside another
+// borrow of the same binding in one expression.
+//
+// It was declared `@consume(xss)` and the runtime took an owned `Vec`, so
+// `list.get_or(xs, 0, list.flatten(xs))` moved `xs` into `flatten` while
+// `get_or` borrowed it: `check` accepted and native rustc rejected with E0505
+// (differential fuzz). The element type is already `Clone`, so consuming bought
+// nothing — the runtime now takes a slice like every other read-only list fn,
+// and an owned `Vec` still deref-coerces into it.
+fn main() -> Unit = {
+  let xs: List[List[Int]] = [
+    [1, 2],
+    [3]
+  ]
+  // The shape that failed: `xs` borrowed and flattened in one expression.
+  println(int.to_string(list.len(list.get_or(xs, 0, list.flatten(xs)))))
+  // Flatten is non-destructive: the source is still readable afterwards.
+  println(int.to_string(list.len(list.flatten(xs))))
+  println(int.to_string(list.len(xs)))
+  // An empty outer list flattens to empty, and an empty inner list contributes
+  // nothing.
+  let e: List[List[Int]] = []
+  println(int.to_string(list.len(list.flatten(e))))
+  println(int.to_string(list.len(list.flatten([
+    [],
+    [7],
+    []
+  ]))))
+  // String elements take the same path.
+  let ss: List[List[String]] = [
+    ["a"],
+    ["b", "c"]
+  ]
+  println(list.join(list.flatten(ss), "-"))
+}

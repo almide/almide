@@ -1,0 +1,18 @@
+// @pass: none
+// #1487 isolated fixture for the m2-drop-err-turbofish mutation path
+// (codegen/walker/expressions.rs render_expr_result_err): an `err` ctor whose
+// Ok side only the turbofish pins — dropping it is rustc E0282, so the mutant
+// kills as a compile failure, loudly.
+fn pick(flag: Bool) -> Result[List[String], String] = if flag then ok(["a", "b"])
+else err("no")
+
+fn main() -> Unit = {
+  match pick(true) {
+    ok(xs) => println(string.join(xs, "+")),
+    err(e) => println(e),
+  }
+  match pick(false) {
+    ok(xs) => println(string.join(xs, "+")),
+    err(e) => println(e),
+  }
+}

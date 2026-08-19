@@ -1,0 +1,35 @@
+// @contract: C-172
+// `??` / `unwrap_or` over ANY heap payload produces the same value on both
+// targets, whether the container carries the value or the fallback.
+//
+// The catch-all names `option.unwrap_or_hx` / `result.unwrap_or_hx` were
+// UNREGISTERED, so every payload without a shape-specific variant walled:
+// `Option[Map[String, Int]]`, `Option[(String, Int)]`, `Option[Option[String]]`
+// and their Result twins were the top remaining subset debt in the fuzz wall
+// histogram (#812). A heap payload is ONE i32 handle whatever block it points
+// at, and neither the tag read nor the handle load inspects it, so one
+// type-erased implementation per CONTAINER covers all of them.
+effect fn main() -> Unit = {
+  // Map payload, both arms.
+  let m: Map[String, Int] = ["a": 1, "b": 2]
+  let o1: Map[String, Int]? = some(m)
+  println(int.to_string(map.len(option.unwrap_or(o1, [:]))))
+  let o1n: Map[String, Int]? = none
+  println(int.to_string(map.len(option.unwrap_or(o1n, ["k": 7]))))
+  // Mixed-repr tuple payload.
+  let o2: (String, Int)? = some(("a", 1))
+  println(option.unwrap_or(o2, ("", 0)).0)
+  // Nested Option payload.
+  let o3: (String?)? = some(some("x"))
+  println(option.unwrap_or(o3, none) ?? "d")
+  // The Result twins, both arms.
+  let r1: Result[Map[String, Int], String] = err("boom")
+  println(int.to_string(map.len(result.unwrap_or(r1, ["z": 9]))))
+  let r2: Result[(String, Int), String] = ok(("a", 1))
+  println(result.unwrap_or(r2, ("", 0)).0)
+  let r3: Result[String?, String] = ok(some("v"))
+  println(result.unwrap_or(r3, none) ?? "d")
+  // The source stays readable after the unwrap — the payload is borrowed and
+  // acquired, not moved out.
+  println(int.to_string(map.len(m)))
+}

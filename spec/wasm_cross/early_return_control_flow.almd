@@ -1,0 +1,47 @@
+// @contract: C-035
+// Early-return control flow — `guard cond else E` and a `!` let-bind — takes the
+// exit path with the right value on BOTH targets. Both were honest walls on the
+// v1 leg (#861): the guard arm was an unconditional wall after the old
+// always-continue deferral was found to miscompile the `!cond` path, and a
+// `let v = expr!` needed early-return-on-Err. Each case below exercises BOTH
+// paths, so a wrong-branch lowering shows up as a value difference rather than
+// only as a wall.
+fn clamp_pos(x: Int) -> Int = {
+  guard x > 0 else 0
+  x * 2
+}
+
+fn label(s: String) -> String = {
+  guard string.len(s) > 3 else "short"
+  "long:" + s
+}
+
+effect fn doubled(s: String) -> Result[Int, String] = {
+  let v = int.parse(s)!
+  ok(v * 2)
+}
+
+// The Err path must short-circuit BEFORE the second parse runs.
+effect fn sum_two(a: String, b: String) -> Result[Int, String] = {
+  let x = int.parse(a)!
+  let y = int.parse(b)!
+  ok(x + y)
+}
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok=" + int.to_string(v),
+  err(e) => "err=" + e,
+}
+
+effect fn main() -> Unit = {
+  println("guard.pass  = " + int.to_string(clamp_pos(5)))
+  println("guard.exit  = " + int.to_string(clamp_pos(-1)))
+  println("guard.zero  = " + int.to_string(clamp_pos(0)))
+  println("guard.heap  = " + label("abcdef"))
+  println("guard.hexit = " + label("ab"))
+  println("bind.ok     = " + show(doubled("21")))
+  println("bind.err    = " + show(doubled("zz")))
+  println("bind.both   = " + show(sum_two("1", "2")))
+  println("bind.first  = " + show(sum_two("zz", "2")))
+  println("bind.second = " + show(sum_two("1", "zz")))
+}

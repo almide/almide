@@ -1,0 +1,22 @@
+// Compound-drop churn — closure environments holding a heap capture.
+//
+// Every iteration builds a closure that captures a fresh heap String `s`, calls
+// it once, and drops the closure at scope end. Dropping the closure must recurse
+// into its environment and release the captured String. emit_typed_rc_dec walks
+// the closure-env layout to schedule that drop (emit_wasm/statements.rs) — the
+// recursive schedule v1 stage 2 flattens into MIR Drop nodes. This pins the
+// closure-env drop in isolation: byte-identical native == wasm, no double-free,
+// flat RSS under churn (a leaked env grows; a double-freed env traps).
+//
+// No `?? ` (UnwrapOr) — kept distinct from the open #643 some-box shape.
+fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 200000 {
+    let s = "cap" + int.to_string(i % 10)
+    let f = (x) => string.len(s) + x
+    sink = sink + f(1)
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}

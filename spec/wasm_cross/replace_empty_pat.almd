@@ -1,0 +1,11 @@
+// @contract: C-100
+// string.replace with an EMPTY `from`: Rust inserts `to` at every char boundary — "abc".replace(
+// "","-") = "-a-b-c-", "".replace("","-") = "-", multibyte chars stay whole. v1 had returned a bare
+// copy of s (silently wrong); now it byte-matches native (a leading `to`, then each char ++ `to`).
+effect fn main() -> Unit = {
+  println(string.replace("abc", "", "-"))
+  println("[" + string.replace("", "", "-") + "]")
+  println(string.replace("aé", "", "*"))
+  println(string.replace("ab", "", "XY"))
+  println(string.replace("a.b.c", ".", "-"))
+}

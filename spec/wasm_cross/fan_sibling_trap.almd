@@ -1,0 +1,31 @@
+// @contract: C-200
+// A TRAP inside a `fan` sibling terminates the program through the unified main-error
+// abort — `Error: <msg>` + exit 1 — and does so identically on both targets, including
+// which sibling output reaches stdout first.
+//
+// #1026 reported this as an uncontracted exit: the block's documented outcomes (a tuple,
+// or the first Err) are not the only ways out, and a trapping sibling bypasses the Err
+// route entirely. That is true, and it needed writing down. What it does NOT need is a
+// convergence fix: measured with a deliberately SLOW second sibling (1.5s sleep), both
+// targets abort in ~0s with an empty stdout, so neither waits for the in-flight sibling
+// and neither flushes its output. The design note for this Unit had proposed buffering
+// per-arm output to force convergence — the measurement says the trap case already
+// converges, so that work belongs to the separate interleaving question (C-004's
+// EXCEPTION clause), not here.
+//
+// The trap is a division by zero routed through `int.parse` so constant folding cannot
+// see the zero at compile time.
+effect fn crash() -> Result[Int, String] = {
+  let zero = int.parse("0") ?? 1
+  ok(100 / zero)
+}
+
+effect fn quiet(n: Int) -> Result[Int, String] = ok(n)
+
+effect fn main() -> Unit = {
+  let (a, b) = fan {
+    crash()
+    quiet(2)
+  }
+  println("unreachable " + int.to_string(a) + " " + int.to_string(b))
+}

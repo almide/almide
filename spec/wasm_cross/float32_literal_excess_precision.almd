@@ -1,0 +1,9 @@
+// @contract: C-182
+// A Float32-typed literal with excess decimal precision narrows AT BIRTH to the value
+// an f32 can hold, on every judge: both backends fold the literal to f32, and the
+// interp (the third vote) narrows at literal evaluation. Wave 4 L3 caught the interp
+// keeping the f64 spelling and dissenting against two agreeing backends.
+fn main() -> Unit = {
+  let p: Float32 = 123456789.12345679
+  println(float32.to_string(p))
+}

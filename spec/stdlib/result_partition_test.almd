@@ -1,0 +1,32 @@
+// result.partition tests. (The collect / collect_map twins this file once
+// covered were REMOVED — ADR-0007: partition is the substance for all-errors
+// collection; first-err traversal is `list.map(xs, (x) => f(x)!)!`.)
+test "result.partition mixed" {
+  let rs: List[Result[Int, String]] = [ok(1), err("x"), ok(2), err("y")]
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [1, 2])
+  assert_eq(errs, ["x", "y"])
+}
+
+test "result.partition all ok" {
+  let rs: List[Result[Int, String]] = [ok(1), ok(2), ok(3)]
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [1, 2, 3])
+  assert_eq(errs, [])
+}
+
+test "result.partition all err" {
+  let rs: List[Result[Int, String]] = [err("a"), err("b")]
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [])
+  assert_eq(errs, ["a", "b"])
+}
+
+test "result.partition empty" {
+  let rs: List[Result[Int, String]] = []
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [])
+  assert_eq(errs, [])
+}
+
+// ── result.collect_map ──

@@ -1,0 +1,15 @@
+// @contract: C-202
+// ADR-0001 S3 / S6-5: an overflowing time construction SATURATES to i64::MAX
+// instead of wrapping — on the dynamic path (first let: 9e12 hours through a
+// call) and the literal fold (second let). A wrapped-negative budget would
+// exhaust instantly; saturation admits the work, so both print 42.
+fn work() -> Int = 42
+
+fn pick(n: Int) -> Int = n * 1000000
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.h(pick(9000000))) { work() } ?? -1
+  let s = fan.bounded(compute.h(9000000000000)) { work() } ?? -1
+  println(int.to_string(r))
+  println(int.to_string(s))
+}

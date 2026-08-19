@@ -1,0 +1,28 @@
+// @contract: C-298
+// Decode error surface beyond C-084's set: NULL for a required scalar, a
+// TYPE MISMATCH inside a list ELEMENT, and a non-object where a NESTED
+// record is required — each a distinct err text, byte-identical across
+// targets (the Swift DecodingError.typeMismatch/valueNotFound split).
+import json
+
+type Inner: Codec = { k: Int }
+
+type T: Codec = { name: String, ns: List[Int], inner: Inner }
+
+effect fn main() -> Unit = {
+  let null_req = json.parse('{"name": null, "ns": [], "inner": {"k": 1}}')!
+  println(match T.decode(null_req) {
+    ok(_) => "ok",
+    err(e) => "E1:" + e,
+  })
+  let elem_bad = json.parse('{"name": "x", "ns": [1, "two", 3], "inner": {"k": 1}}')!
+  println(match T.decode(elem_bad) {
+    ok(_) => "ok",
+    err(e) => "E2:" + e,
+  })
+  let inner_bad = json.parse('{"name": "x", "ns": [], "inner": 5}')!
+  println(match T.decode(inner_bad) {
+    ok(_) => "ok",
+    err(e) => "E3:" + e,
+  })
+}

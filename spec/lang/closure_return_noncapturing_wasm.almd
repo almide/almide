@@ -1,0 +1,26 @@
+// wasm:enabled
+// Locks in RETURNING a NON-CAPTURING lambda as a first-class function value — `fn mk() -> (Int) ->
+// Int = (x) => x + 1`. The trust-spine lifts the lambda (with the uniform leading env param) and
+// returns its CLOSURE BLOCK (the k = 0 degenerate env — fnidx in slot 0); the caller tracks the
+// bound result so a later `f(args)` dispatches through Op::CallIndirect with the block as the
+// borrowed env arg. Byte-identical to v0 --target wasm. (CAPTURING closures ride the same block
+// with their scalar captures in slots 1… — see closure_capturing_wasm.almd.)
+fn inc() -> (Int) -> Int = (x) => x + 1
+
+fn scale() -> (Int) -> Int = (x) => x * 10
+
+fn twice_plus(x: Int) -> Int = x * 2 + 3
+
+fn getter() -> (Int) -> Int = twice_plus
+
+// a bare fn reference returned
+effect fn main() -> Unit = {
+  let f = inc()
+  println(int.to_string(f(5)))
+  println(int.to_string(f(41)))
+  // reuse the returned funcref
+  let g = scale()
+  println(int.to_string(g(3)) + "," + int.to_string(g(4)))
+  let h = getter()
+  println(int.to_string(h(6)))
+}

@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  let xs = [3, 7, 2, 9, 4]
+  let total = list.fold(xs, 0, (a, x) => a + x)
+  let maxv = list.fold(xs, 0, (a, x) => if x > a then x else a)
+  let n = list.len(xs)
+  println("n=" + int.to_string(n) + " sum=" + int.to_string(total) + " max=" + int.to_string(maxv))
+}

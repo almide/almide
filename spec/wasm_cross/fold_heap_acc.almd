@@ -1,0 +1,13 @@
+// @contract: C-101
+// list.fold with a HEAP (String) accumulator — C1 defunctionalizes the closure inline, so the
+// accumulator `acc = acc + s` becomes a loop-carried slot drop-old + SetLocal (the proven i(id)m
+// append-accumulator pattern), reclaiming each transient String. Over a List[String] OR a List[Int].
+// Was walled (the heap accumulator deferred). Byte-matches native; leak-free.
+effect fn main() -> Unit = {
+  println(["a", "b", "c"] |> list.fold("", (acc, s) => acc + s))
+  println(["a", "b", "c"] |> list.fold("|", (acc, s) => acc + s + "|"))
+  println([1, 2, 3] |> list.fold("", (acc, n) => acc + int.to_string(n)))
+  println(["x", "y"] |> list.fold("PRE:", (acc, s) => acc + s))
+  let empty: List[String] = []
+  println(empty |> list.fold("seed", (acc, s) => acc + s))
+}

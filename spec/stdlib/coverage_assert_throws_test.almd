@@ -1,0 +1,11 @@
+// Coverage tests for testing.assert_throws
+// wasm:skip — WASM cannot catch panics (unreachable trap)
+import testing
+
+test "testing.assert_throws catches panic" {
+  testing.assert_throws(() => panic("oh no"), "oh no")
+}
+
+test "testing.assert_throws partial match" {
+  testing.assert_throws(() => panic("something went wrong"), "went wrong")
+}

@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let xs = [1, 2, 3, 4, 5]
+  let sq = list.map(xs, (x) => x * x)
+  let total = list.fold(sq, 0, (a, x) => a + x)
+  println(int.to_string(total))
+}

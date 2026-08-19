@@ -1,0 +1,24 @@
+// @contract: C-004
+// Wave 1 respelling of the #599 fixture: the var-bound thunk-LIST spelling was
+// retired with the thunk-list surface (E027 — the block form is the only
+// spelling, and it synthesizes a literal list the inliner always handled).
+// What this fixture still pins from #599's fallout: MIXED arm kinds — an
+// effect call and pure named-fn calls — through any AND settle, list-order
+// deterministic on both targets, with the Ok-adapter applied once per arm.
+effect fn one() -> Result[Int, String] = ok(1)
+
+fn ra() -> Int = 1
+
+fn rb() -> Int = 2
+
+effect fn main() -> Unit = {
+  let r = fan.any {
+    one()
+  }!
+  println("any_var=${r}")
+  let (sa, sb) = fan.settle {
+    ra()
+    rb()
+  }
+  println("settle=${sa} ${sb}")
+}

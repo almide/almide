@@ -1,0 +1,22 @@
+fn nested(x: Int) -> Int = {
+  if x < 0 then -1
+  else {
+    if x == 0 then 0
+    else {
+      var count = 0
+      var i = 0
+      while i < x {
+        count = count + 1
+        i = i + 1
+      }
+      count
+    }
+  }
+}
+
+test "nested if returns correct value" {
+  assert_eq(nested(-1), -1)
+  assert_eq(nested(0), 0)
+  assert_eq(nested(3), 3)
+  assert_eq(nested(5), 5)
+}

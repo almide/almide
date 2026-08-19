@@ -1,0 +1,46 @@
+// @contract: C-216
+// #1125: the spelled `!` on a declared-Option effect call must be the implicit
+// auto-? strip's identical twin on BOTH targets. Before the fix the wasm leg
+// left the Unwrap unstripped, fed desugar_effect_unwrap's err/ok match a RAW
+// Option block (the never-err v1 ABI), and read it as a Result — a wrong value
+// (hit=999) then an rc_dec trap. Four cells: never-err scalar payload, can-err
+// scalar payload, never-err heap (String) payload, and the pure `-> T?!`
+// composition.
+// never-err declared-Option effect fn — the raw-Option v1 ABI cell
+effect fn lookup(k: String) -> Int? = if k == "a" then some(42) else none
+
+// can-err declared-Option effect fn — the real-Result-block cell
+effect fn parse_pos(k: String) -> Int? = {
+  let n = int.parse(k)!
+  if n > 0 then some(n) else none
+}
+
+// heap Some payload
+effect fn find_name(k: String) -> String? = if k == "a" then some("yes") else none
+
+// pure ?! composition: Result[Option[Int], String]
+fn parse_opt(s: String) -> Int?! = if s == "" then ok(none)
+else match int.parse(s) {
+  ok(n) => ok(some(n)),
+  err(e) => err(e),
+}
+
+effect fn main() -> Unit = {
+  let miss = lookup("missing")!
+  println("miss=" + int.to_string(miss ?? 999))
+  let hit = lookup("a")!
+  println("hit=" + int.to_string(hit ?? 999))
+  let ok_case = parse_pos("42")!
+  println("canerr_some=" + int.to_string(ok_case ?? 999))
+  let neg = parse_pos("-1")!
+  println("canerr_none=" + int.to_string(neg ?? 999))
+  let name = find_name("a")!
+  println("heap=" + (name ?? "-"))
+  let missing_name = find_name("z")!
+  match missing_name {
+    some(s) => println("m=" + s),
+    none => println("m=NONE"),
+  }
+  let p = parse_opt("7")!
+  println("pure=" + int.to_string(p ?? 999))
+}

@@ -1,0 +1,13 @@
+// @contract: C-047
+// `math.pow` is TOTAL like integer `/`/`%`: a NEGATIVE exponent has no integer
+// result, so it aborts with "Error: negative exponent" + exit 1 on BOTH targets
+// — never the old `exp as u32` u32-wrap (native garbage) nor the wasm "return 1".
+// `neg(2)` shields the exponent so neither target const-folds it; the leading
+// print locks stdout/stderr interleaving across the abort.
+fn neg(x: Int) -> Int = (x - x) - x
+
+fn main() -> Unit = {
+  println("before")
+  let r = math.pow(5, neg(3))
+  println(int.to_string(r))
+}

@@ -1,0 +1,18 @@
+// Toplets whose inits REFERENCE this module's own RECORD toplets. The record
+// referents never enter the const-fold env (only scalar literals do), so
+// under the shared-env bug the stale SAME-NUMBERED constfleet literals stood
+// in for `_white`/`_black` inside `_default` — ceangal's scroll
+// `BOUNCING`/`FRICTION` replacing view's `_transparent`/`_white` Colors.
+type Color = { r: Float }
+
+type Style = { fg: Color, bg: Color }
+
+let _white = { r: 1.0 }
+
+let _black = { r: 0.5 }
+
+let _default: Style = { fg: _white, bg: _black }
+
+fn fg_r() -> Float = _default.fg.r
+
+fn bg_r() -> Float = _default.bg.r

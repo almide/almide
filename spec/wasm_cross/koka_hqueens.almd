@@ -1,0 +1,32 @@
+// @contract: C-292
+// koka hqueens (hand-tuned tail-recursive lane): n-queens over
+// List[List[Int]] accumulators — safe? recursion with a diagonal offset,
+// append-safe / extend / find-solutions all tail-shaped. Counts for n=4..6.
+fn is_safe(queen: Int, xs: List[Int], diag: Int) -> Bool = if list.len(xs) == 0 then true
+else {
+  let q = list.get(xs, 0) ?? 0
+  if queen == q or queen == q + diag or queen == q - diag then false
+  else is_safe(queen, list.slice(xs, 1, list.len(xs)), diag + 1)
+}
+
+fn append_safe(queen: Int, xs: List[Int], xss: List[List[Int]]) -> List[List[Int]] = if queen <= 0 then xss
+else if is_safe(queen, xs, 1) then append_safe(queen - 1, xs, [
+  [queen] + xs
+] + xss)
+else append_safe(queen - 1, xs, xss)
+
+fn extend(queen: Int, acc: List[List[Int]], xss: List[List[Int]]) -> List[List[Int]] = if list.len(xss) == 0 then acc
+else extend(queen, append_safe(queen, list.get(xss, 0) ?? [], acc), list.slice(xss, 1, list.len(xss)))
+
+fn find_solutions(n: Int, i: Int) -> List[List[Int]] = if i == 0 then [
+  []
+]
+else extend(n, [], find_solutions(n, i - 1))
+
+fn queens(n: Int) -> Int = list.len(find_solutions(n, n))
+
+fn main() -> Unit = {
+  println(int.to_string(queens(4)))
+  println(int.to_string(queens(5)))
+  println(int.to_string(queens(6)))
+}

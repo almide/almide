@@ -1,0 +1,33 @@
+// @contract: C-292
+// koka parc-guard-uaf: a heap value whose ONLY use is inside a match guard
+// must stay live through arm dispatch; fresh allocation in the scrutinee
+// position tries to reuse its block. Plus variant equality in guard position.
+type Box2 = | B2(String)
+
+fn probe(x: Box2, junk: String) -> Bool = match B2(junk) {
+  B2(_) if match x {
+    B2(s) => s == "hello"
+  } => true,
+  _ => false,
+}
+
+type Pair = | P(Int, String)
+
+fn main() -> Unit = {
+  let x = B2(string.repeat("hello", 1))
+  println(if probe(x, string.repeat("wrongwrong", 1)) then "T" else "F")
+  // same-payload different-ctor equality, in guard AND expression position
+  let a = P(1, "s")
+  let b = P(1, "s")
+  let c = P(1, "t")
+  println(if a == b then "eq" else "ne")
+  println(if a == c then "eq" else "ne")
+  println(match 0 {
+    _ if a == b => "geq",
+    _ => "gne",
+  })
+  println(match 0 {
+    _ if a == c => "geq",
+    _ => "gne",
+  })
+}

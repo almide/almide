@@ -1,0 +1,8 @@
+type State = | Pending | Idle
+
+fn start() -> State = Idle
+
+fn show(s: State) -> String = match s {
+  Pending => "b-pending",
+  Idle => "b-idle",
+}

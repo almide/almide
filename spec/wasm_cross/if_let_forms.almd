@@ -1,0 +1,12 @@
+// @contract: C-251
+// ALS-E21 (docs/specs/als/expressions.md): Swift-style `if let` — a BARE
+// binder that implicitly unwraps an Option scrutinee (`if let x = o { … }
+// else { … }`); the some path binds the inner value, the none path takes
+// else. (`if let some(x) = o` is a parse error — the binder is bare by
+// design.) Identical observables on both targets.
+effect fn main() -> Unit = {
+  let o: Int? = some(5)
+  if let x = o { println(int.to_string(x * 2)) } else { println("none") }
+  let n: Int? = none
+  if let y = n { println(int.to_string(y)) } else { println("empty") }
+}

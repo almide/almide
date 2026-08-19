@@ -1,0 +1,45 @@
+// @contract: C-291
+// ADR-0005 D1 (#1107): each error-channel operator IS its defining function.
+// The spec's desugar table (docs/specs/result-option-effect.md) states four
+// equivalences; this fixture evaluates BOTH spellings of each over ok/err
+// and some/none operands and prints them side by side — the pairs must agree
+// with each other and byte-identically across targets, or the operator has
+// drifted from its own definition.
+type P = { v: Int }
+
+fn oi2s(o: Int?) -> String = match o {
+  some(i) => int.to_string(i),
+  none => "n",
+}
+
+effect fn main() -> Unit = {
+  let rok: Result[Int, String] = ok(7)
+  let rerr: Result[Int, String] = err("boom")
+  // x ?? d  ≡  unwrap_or_else, both operand families
+  let a1 = rok ?? (0 - 1)
+  let a2 = result.unwrap_or_else(rok, (_) => 0 - 1)
+  let a3 = rerr ?? (0 - 1)
+  let a4 = result.unwrap_or_else(rerr, (_) => 0 - 1)
+  println("qq_result ${int.to_string(a1)}=${int.to_string(a2)} ${int.to_string(a3)}=${int.to_string(a4)}")
+  let os: Int? = some(5)
+  let on: Int? = none
+  let b1 = os ?? (0 - 1)
+  let b2 = option.unwrap_or_else(os, () => 0 - 1)
+  let b3 = on ?? (0 - 1)
+  let b4 = option.unwrap_or_else(on, () => 0 - 1)
+  println("qq_option ${int.to_string(b1)}=${int.to_string(b2)} ${int.to_string(b3)}=${int.to_string(b4)}")
+  // r?  ≡  result.to_option(r)
+  let c1 = oi2s(rok?)
+  let c2 = oi2s(result.to_option(rok))
+  let c3 = oi2s(rerr?)
+  let c4 = oi2s(result.to_option(rerr))
+  println("toopt ${c1}=${c2} ${c3}=${c4}")
+  // o?.x  ≡  option.map(o, (v) => v.x)
+  let ps: P? = some(P { v: 9 })
+  let pn: P? = none
+  let d1 = oi2s(ps?.v)
+  let d2 = oi2s(option.map(ps, (p) => p.v))
+  let d3 = oi2s(pn?.v)
+  let d4 = oi2s(option.map(pn, (p) => p.v))
+  println("chain ${d1}=${d2} ${d3}=${d4}")
+}

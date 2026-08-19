@@ -1,0 +1,42 @@
+// @contract: C-034
+// list.slice with out-of-range / past-the-end indices must clamp identically
+// on native and wasm (no OOB heap reads). Native oracle: end clamps to len,
+// start >= effective_end yields []. See runtime/rs/src/list.rs almide_rt_list_slice.
+fn main() -> Unit = {
+  let xs = [10, 20, 30, 40, 50]
+  // end past len → clamp to len
+  println(list.join(list.slice(xs, 2, 6) |> list.map((x) => int.to_string(x)), ","))
+  println(list.join(list.slice(xs, 2, 10) |> list.map((x) => int.to_string(x)), ","))
+  // start past len → empty
+  println("[" + list.join(list.slice(xs, 10, 20) |> list.map((x) => int.to_string(x)), ",") + "]")
+  // length of a clamped slice
+  println(int.to_string(list.len(list.slice(xs, 2, 99))))
+  // String elements ride the v1 `slice_str` twin (deep copy, same clamp edges):
+  // the Int twin's raw i64 element copy aliased the handles un-owned — correct
+  // output, then a scope-end double free (fuzz seed-20260718 index 680, via
+  // `list.slice(list.intersperse(...), 2, 4)`).
+  let r1 = "sep"
+  let ss = list.slice(list.intersperse([r1, "a", "b"], r1), 2, 4)
+  println(list.join(ss, ","))
+  println(list.join(list.slice(["p", "q", "r"], 1, 99), ","))
+  // NEGATIVE start on every element family: the doctrine is v0's `as usize`
+  // — negative start -> EMPTY, negative end -> len — and the hshare twin
+  // (List[List[Int]] / List[T?] elements) had INVENTED start<0 -> 0 instead,
+  // so a recursion shrinking via `slice(xs, <negative>, len)` terminated
+  // natively and looped forever on wasm (#1532 smoke night, seed
+  // 514313080935/326, a koka_beans has_none mutation). One doctrine, four
+  // implementations.
+  println("[" + list.join(list.slice(xs, -2147483648, 5) |> list.map((x) => int.to_string(x)), ",") + "]")
+  println("[" + list.join(list.slice(["h", "i"], -1, 2), ",") + "]")
+  let nested = [
+    [1, 2],
+    [3]
+  ]
+  println(int.to_string(list.len(list.slice(nested, -2147483648, 2))))
+  println(int.to_string(list.len(list.slice(nested, -1, 2))))
+  let opts = [some(1), none, some(3)]
+  println(int.to_string(list.len(list.slice(opts, -2147483648, 3))))
+  // negative END -> len (the other half of the doctrine), heap elements too
+  println(int.to_string(list.len(list.slice(nested, 0, -1))))
+  println(int.to_string(list.len(list.slice(opts, 1, -5))))
+}

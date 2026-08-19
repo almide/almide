@@ -1,0 +1,31 @@
+// #846 regression: LICM hoisted cross-module calls to module fns that mutate
+// module globals (non-effect, no mut params), collapsing N stateful calls in
+// a loop into one. ceangal's scroll physics (tick loops) surfaced it.
+import gstate
+
+test "while-loop cross-module scalar accumulation" {
+  gstate.reset()
+  var i = 0
+  while i < 10 {
+    gstate.bump_scalar(0.5)
+    i = i + 1
+  }
+  assert_eq(gstate.get_scalar(), 5.0)
+}
+
+test "for-loop cross-module list-slot accumulation" {
+  gstate.reset()
+  for _ in 0..<8 {
+    gstate.bump_at(1, 0.25)
+  }
+  assert_eq(gstate.get_at(1), 2.0)
+  assert_eq(gstate.get_at(0), 0.0)
+}
+
+test "sequential calls still accumulate" {
+  gstate.reset()
+  gstate.bump_scalar(0.5)
+  gstate.bump_scalar(0.5)
+  gstate.bump_scalar(0.5)
+  assert_eq(gstate.get_scalar(), 1.5)
+}

@@ -1,0 +1,19 @@
+// @contract: C-187
+// A SCALAR `var` global assigned by name from an effect fn — the UPPERCASE
+// module-global convention. The Ident-only assignment lookahead used to send
+// `COUNT = 1` down the expression path to die as "Assignments return Unit"
+// (#1517 sweep, 2026-08-18); the statement parser now accepts TypeName
+// targets and the checker adjudicates them (assignable var here; E009 for a
+// `let`, E003 for a name with no binding). Reads after the write must see it
+// on both targets — the scalar sibling of C-187's buffer-slot writes.
+var COUNT = 0
+
+effect fn bump() -> Unit = {
+  COUNT = COUNT + 2
+}
+
+effect fn main() -> Unit = {
+  COUNT = 1
+  bump()!
+  println(int.to_string(COUNT))
+}

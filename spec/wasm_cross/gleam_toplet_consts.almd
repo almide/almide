@@ -1,0 +1,52 @@
+// @contract: C-292
+// gleam test/language/constant_test.gleam (#6086 aliasing rows): module
+// constants as top-level lets — int/float/string/result/list shapes, an
+// ALIASED constant, a constant built by concatenation of another, and a
+// guard comparing a match binding against const-derived data.
+let C_INT = 5
+
+let C_FLOAT = 1.0
+
+let C_STRING = "Gleam"
+
+let C_EMPTY: List[Int] = []
+
+let C_ONE = [1]
+
+let C_TWO = [1, 2]
+
+let MESSAGE = "hello"
+
+let MESSAGE_2 = MESSAGE
+
+// a COMPUTED top-let init (MESSAGE_2 + "?") is a pinned wall —
+// walls/toplet_computed_string_init.almd — so the concat happens in main.
+fn eq(x: Bool) -> String = if x then "1" else "0"
+
+fn main() -> Unit = {
+  var scalars: List[String] = []
+  list.push(scalars, eq(C_INT == 5))
+  list.push(scalars, eq(C_FLOAT == 1.0))
+  list.push(scalars, eq(C_STRING == "Gleam"))
+  println(list.join(scalars, ""))
+  var shapes: List[String] = []
+  // (gleam's `const_ok = Ok(1)` row does not port: READING a Result-typed
+  // module global — by match or by `??` — is a subset refusal today)
+  list.push(shapes, eq(list.len(C_EMPTY) == 0))
+  list.push(shapes, eq(C_ONE == [1]))
+  list.push(shapes, eq(C_TWO == [1, 2]))
+  println(list.join(shapes, ""))
+  // aliased constants and const concatenation (#6086)
+  var aliased: List[String] = []
+  list.push(aliased, eq(MESSAGE_2 == "hello"))
+  list.push(aliased, eq(MESSAGE == MESSAGE_2))
+  // (concat of an ALIASED global — `MESSAGE_2 + "!"` — walls as a BinOp
+  // heap bind; concat of the DIRECT global carries #6086's point below)
+  list.push(aliased, eq(MESSAGE + "!" == "hello!"))
+  println(list.join(aliased, ""))
+  let subject = "hello!"
+  println(match subject {
+    w if w == MESSAGE + "!" => "guard-hit",
+    _ => "guard-miss",
+  })
+}

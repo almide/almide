@@ -1,0 +1,65 @@
+// @contract: C-273
+// The fs WRITE-side floors answer a failure with the SAME native std::io Display
+// text on both legs: fs.write onto a directory / through a file component,
+// fs.mkdir_p through a file component, fs.remove_all of a missing path,
+// fs.list_dir of a plain file and of a missing path, fs.rename of a missing
+// source. Before #1385 the wasm leg collapsed each of these to one fixed string
+// per floor ("write failed" / "mkdir failed" / "remove failed" / "directory not
+// found"), so the Result BRANCH agreed while the PAYLOAD diverged. The write_all
+// loop is exercised too (a 12800-byte body round-trips, and the empty write is
+// the zero-iteration edge) — fd_write's errno used to be dropped outright, so a
+// short write or ENOSPC read as Ok(()). Temp-dir paths carry entropy suffixes
+// and are never printed.
+import fs
+
+fn rep(s: String, n: Int) -> String = if n <= 0 then "" else s + rep(s, n - 1)
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("wer")!
+  let f = d + "/f.txt"
+  fs.write(f, "hi")!
+  let w_dir = fs.write(d, "x")
+  match w_dir {
+    ok(_) => println("write_dir=OK"),
+    err(e) => println("write_dir=ERR[${e}]"),
+  }
+  let w_thru = fs.write(f + "/x.txt", "x")
+  match w_thru {
+    ok(_) => println("write_thru_file=OK"),
+    err(e) => println("write_thru_file=ERR[${e}]"),
+  }
+  let mk_thru = fs.mkdir_p(f + "/sub")
+  match mk_thru {
+    ok(_) => println("mkdir_thru_file=OK"),
+    err(e) => println("mkdir_thru_file=ERR[${e}]"),
+  }
+  let rm_missing = fs.remove_all(d + "/nope")
+  match rm_missing {
+    ok(_) => println("remove_missing=ERR-NONE"),
+    err(e) => println("remove_missing=ERR[${e}]"),
+  }
+  let ld_file = fs.list_dir(f)
+  match ld_file {
+    ok(_) => println("list_plain_file=OK"),
+    err(e) => println("list_plain_file=ERR[${e}]"),
+  }
+  let ld_missing = fs.list_dir(d + "/nope")
+  match ld_missing {
+    ok(_) => println("list_missing=OK"),
+    err(e) => println("list_missing=ERR[${e}]"),
+  }
+  let rn_missing = fs.rename(d + "/nope", d + "/x")
+  match rn_missing {
+    ok(_) => println("rename_missing=OK"),
+    err(e) => println("rename_missing=ERR[${e}]"),
+  }
+  // the write_all loop: a body far past any single-iteration assumption, and the
+  // zero-length edge that never enters the loop at all.
+  let big = rep("0123456789abcdef", 800)
+  fs.write(d + "/big.txt", big)!
+  let back = fs.read_text(d + "/big.txt")!
+  println("big_len=${string.len(back)} same=${back == big}")
+  fs.write(d + "/empty.txt", "")!
+  println("empty_len=${string.len(fs.read_text(d + "/empty.txt")!)}")
+  fs.remove_all(d)!
+}

@@ -1,0 +1,76 @@
+// @contract: C-187
+// A module-level `var` buffer written in place — nendo's VRM viewer keeps its whole
+// scratch arena in one module-level `bytes` block and writes matrices into it, and
+// every one of those writes walled the wasm renderer (#906). A mutable global is read
+// FRESH from its storage slot on every reference (it is never cached in `value_of`),
+// so the in-place-mutator receiver check asked `value_for` and got "use of unbound
+// var" — the receiver was never a local to begin with.
+//
+// The block is owned by the SLOT, so the COW is the slot's: borrow the slot handle,
+// `MakeUnique` it (at rc > 1 the render's rc_dec releases the slot's reference and a
+// fresh uniquely-owned copy takes its place), store the unique handle BACK into the
+// slot. The mutator's own receiver arg then re-reads the slot and writes the
+// uniquely-owned block, so every later read of the global sees the write.
+//
+// The aliasing half is the sharp end and is what `snap` pins: native models the global
+// as an RcCow whose `make_mut` COWs a SHARED block, so a snapshot taken BEFORE a write
+// must keep the pre-write bytes. Eliding the COW would print the post-write value here
+// and diverge silently; COWing unconditionally would lose every write in `fill_slot`,
+// where the slot's block is unshared and the mutation must land in place.
+var arena = bytes.new(32)
+
+var log: List[Int] = []
+
+// Cross-function writes: `main` never touches the receiver, so the write has to reach
+// the module's storage slot rather than a callee-local copy.
+fn fill_slot(base: Int, a: Float, b: Float) -> Unit = {
+  bytes.set_f32_le(arena, base, a)
+  bytes.set_f32_le(arena, base + 4, b)
+}
+
+fn show(pos: Int) -> String = float.to_string(bytes.read_f32_le(arena, pos))
+
+fn main() -> Unit = {
+  fill_slot(0, 1.5, 2.25)
+  fill_slot(8, -3.0, 0.5)
+  // A byte-granular mutator over the same slot, at the far end of the block.
+  bytes.set_at(arena, 31, 200)
+  bytes.set_at(arena, 30, 7)
+  println(show(0))
+  println(show(4))
+  println(show(8))
+  println(show(12))
+  println(int.to_string(bytes.get_or(arena, 31, -1)))
+  println(int.to_string(bytes.get_or(arena, 30, -1)))
+  println(int.to_string(bytes.len(arena)))
+  // THE ALIASING PROBE: `snap` co-owns the slot's block, so the next write must COW
+  // and leave `snap` holding the pre-write bytes — the native RcCow semantics.
+  let snap = arena
+  bytes.set_f32_le(arena, 0, 99.5)
+  println(float.to_string(bytes.read_f32_le(snap, 0)))
+  println(show(0))
+  // The earlier slots survive the COW: it copies the whole block, not just the word
+  // being written.
+  println(show(8))
+  println(int.to_string(bytes.get_or(snap, 31, -1)))
+  // A write in a LOOP, so the slot round-trip (load, make-unique, store) runs many
+  // times against a block that is unshared after the first COW — a spurious copy per
+  // iteration would still print the right answer, but a lost store would not.
+  var i = 0
+  while i < 8 {
+    bytes.set_at(arena, i, i * 3)
+    i = i + 1
+  }
+  var sum = 0
+  var j = 0
+  while j < 8 {
+    sum = sum + bytes.get_or(arena, j, 0)
+    j = j + 1
+  }
+  println(int.to_string(sum))
+  // A mutable global of LIST type takes the same slot COW through `list.pop`.
+  log = [10, 20, 30]
+  let popped = list.pop(log)
+  println(int.to_string(popped ?? -1))
+  println(int.to_string(list.len(log)))
+}

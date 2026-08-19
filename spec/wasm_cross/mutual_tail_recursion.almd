@@ -1,0 +1,19 @@
+// @contract: C-178
+// MUTUAL tail recursion at a depth (1,000,000) that overflows a plain-call
+// chain: the renderer emits `return_call` for a function-tail CallFn whose
+// result flows unmodified through only if-merges to the return (#864).
+// Self tail-recursion is the upstream TCO loop; this is the cross-fn chain
+// the loop rewrite cannot reach.
+fn is_even(n: Int) -> Bool = if n == 0 then true else is_odd(n - 1)
+
+fn is_odd(n: Int) -> Bool = if n == 0 then false else is_even(n - 1)
+
+fn ping(n: Int, acc: Int) -> Int = if n == 0 then acc else pong(n - 1, acc + 1)
+
+fn pong(n: Int, acc: Int) -> Int = if n == 0 then acc else ping(n - 1, acc + 2)
+
+fn main() -> Unit = {
+  println(if is_even(1000000) then "even" else "odd")
+  println(if is_odd(999999) then "odd-hit" else "miss")
+  println(int.to_string(ping(1000000, 0)))
+}

@@ -1,0 +1,9 @@
+// @contract: C-154
+// ALS-T6: `float.clamp` with lo > hi (or a NaN bound — `!(lo <= hi)` covers
+// both in one IEEE comparison) aborts in the same T6 form on both targets.
+fn main() -> Unit = {
+  println(float.to_string(float.clamp(0.5, 0.0, 1.0)))
+  println(float.to_string(float.clamp(2.5, 1.0, 2.0)))
+  println(float.to_string(float.clamp(0.5, 3.0, 1.0)))
+  println("unreachable")
+}

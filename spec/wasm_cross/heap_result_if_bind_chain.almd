@@ -1,0 +1,45 @@
+// @contract: C-106
+//
+// LET-BOUND heap-result `if` chains, pinned cross-target — and the standing
+// regression trap for the bind-position JOIN work (arc v1-join-completeness,
+// track J). Today these lower by tail-duplicating the continuation into both
+// arms; a future J1 slice reroutes them through the merge join. The two
+// shapes below are the ones that told those routes apart under adversarial
+// audit (2026-07-28), so keeping BOTH green is the gate on any rerouting.
+//
+// `clobber` is the sharp one: the binder `j` is NOT a shadow of the else-arm
+// variable `b`, and `b` is READ AFTER the bind. A join attempt that lets this
+// shape reach the identity-else accumulator slot fold
+// (`try_lower_line_cond_acc`, whose guard checks only that the else arm is an
+// owned scope-tracked Var — never that the binder shadows it) rebinds `b`'s
+// SLOT in place and every later read of `b` returns the wrong block: native
+// `sB/A` vs wasm `A/A`, exit 0 on both, ownership cert ACCEPT. Two links is
+// deliberate — at four or more the dense branch-lift outlines each bind into
+// a helper and hides the defect.
+//
+// `describe` is the depth case: six chained binds, each reading the previous
+// ones, all four cond arrangements enumerated.
+fn clobber(c: Bool, seed: String) -> String = {
+  let b = seed + "B"
+  let j = if c then "A" else b
+  b + "/" + j
+}
+
+fn describe(hot: Bool, wet: Bool) -> String = {
+  let temp = if hot then "hot" else "cold"
+  let sky = if wet then "rain" else "clear"
+  let a = if hot then temp + "!" else temp + "."
+  let b = if wet then sky + "/" + a else a + "/" + sky
+  let c = if hot then b + b else b
+  let d = if wet then c + "~" else c
+  temp + " " + sky + " " + d
+}
+
+effect fn main() -> Unit = {
+  println(clobber(true, "s"))
+  println(clobber(false, "s"))
+  println(describe(true, true))
+  println(describe(true, false))
+  println(describe(false, true))
+  println(describe(false, false))
+}

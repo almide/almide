@@ -1,0 +1,31 @@
+// construct-from-temp churn — the #518/#911 class, RETIRED. The v0 emitter's
+// `emit_stored_field` Inc'd an alias being move-stored while the moved-out temp
+// was exempted from its scope Dec: +1 permanent reference per construction,
+// ~48 MB over 2M iterations. The v1 MIR path decides ownership once under
+// `verify_ownership` and the class did NOT re-derive: RSS measured FLAT at
+// 200k / 2M / 10M iterations (~10 MB each, 2026-07-28). This fixture keeps the
+// shape in the churn family so a re-derivation would surface as divergence or
+// a hang under the gate's wall-clock kill.
+import env
+
+type Inner = { tag: String }
+
+type Outer = { inner: Inner, label: String }
+
+fn build(i: Int) -> Int = {
+  let t1 = "t-" + int.to_string(i - (i / 7) * 7)
+  let t2 = "l-" + int.to_string(i - (i / 13) * 13)
+  let o = Outer { inner: Inner { tag: t1 }, label: t2 }
+  string.len(o.inner.tag) + string.len(o.label)
+}
+
+effect fn main() -> Unit = {
+  let n = option.unwrap_or(int.parse(option.unwrap_or(list.get(env.args(), 0), "1000")) |> result.to_option, 1000)
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = acc + build(i)
+    i = i + 1
+  }
+  println(int.to_string(n + acc - acc))
+}

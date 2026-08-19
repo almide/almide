@@ -1,0 +1,46 @@
+// @contract: C-292
+// koka #186 (reused-names): merge-sort run detection where a nested pattern
+// REBINDS the outer scrutinee's name (`ICons(b, xs)` shadowing param `xs`)
+// while a sibling arm still refers to the OUTER binding — uniquify must not
+// substitute across arms. Closure accumulation in the ascending path.
+type IList = | INil | ICons(Int, IList)
+
+fn show(xs: List[List[Int]]) -> String = list.join(list.map(xs, (r) => "[${list.join(list.map(r, (v) => int.to_string(v)), ",")}]"), "")
+
+fn to_ilist(xs: List[Int], i: Int) -> IList = if i >= list.len(xs) then INil
+else ICons(list.get(xs, i) ?? 0, to_ilist(xs, i + 1))
+
+fn to_list(xs: IList) -> List[Int] = match xs {
+  ICons(h, t) => [h] + to_list(t),
+  INil => [],
+}
+
+fn sequences(xs: IList) -> List[List[Int]] = match xs {
+  ICons(a, ICons(b, xs)) => if a > b then descending(b, [a], xs)
+  else ascending(b, (x) => ICons(a, x), xs),
+  ICons(_, _) => [to_list(xs)],
+  INil => [to_list(xs)],
+}
+
+fn descending(a: Int, acc: List[Int], bs: IList) -> List[List[Int]] = match bs {
+  ICons(b, rest) if a > b => descending(b, [a] + acc, rest),
+  ICons(_, _) => [
+    [a] + acc
+  ] + sequences(bs),
+  INil => [
+    [a] + acc
+  ] + sequences(bs),
+}
+
+fn ascending(a: Int, acc: (IList) -> IList, bs: IList) -> List[List[Int]] = match bs {
+  ICons(b, rest) if a <= b => ascending(b, (ys) => acc(ICons(a, ys)), rest),
+  ICons(_, _) => [to_list(acc(ICons(a, INil)))] + sequences(bs),
+  INil => [to_list(acc(ICons(a, INil)))] + sequences(bs),
+}
+
+fn main() -> Unit = {
+  println(show(sequences(to_ilist([0, 1, 2, 3], 0))))
+  println(show(sequences(to_ilist([3, 2, 1, 0], 0))))
+  println(show(sequences(to_ilist([1, 3, 2, 2, 5], 0))))
+  println(show(sequences(INil)))
+}

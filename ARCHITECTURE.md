@@ -78,7 +78,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 
 | # | unit | gate |
 |---|---|---|
-| 0 | `spec/` corpus + contracts.toml schema + checker scripts | ledger checker green on ported set |
+| 0 | `spec/` corpus + contracts.toml schema + checker scripts | ledger checker green on ported set — **LANDED 2026-08-19**, see PORTLOG.md |
 | 1 | `almide-diag` | unit tests + JSON snapshot parity |
 | 2 | `almide-syntax` | corpus parses; AST JSON parity vs v0.57.2 `--emit-ast` |
 | 3 | `almide-spec` (interpreter) + `almide-ir` | corpus output parity vs v0.57.2 native |

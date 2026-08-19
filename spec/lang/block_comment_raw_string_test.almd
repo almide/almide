@@ -1,0 +1,20 @@
+fn main() -> Unit = {
+  let x = 42
+  let path = "C:\\Users\\test\\file.txt"
+  let regex = "^\\d{3}-\\d{4}$"
+  println(path)
+  println(regex)
+}
+
+test "raw strings" {
+  let s = "hello\\nworld"
+  assert_eq(s, "hello\\nworld")
+}
+
+test "block comments" {
+  /* an own-line block comment — fmt must preserve it (#1318) */
+  let x = 1 + 3
+  /* a multi-line block comment
+     with a second line, still preserved */
+  assert_eq(x, 4)
+}

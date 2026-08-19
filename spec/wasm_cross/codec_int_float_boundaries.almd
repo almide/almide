@@ -1,0 +1,19 @@
+// @contract: C-298
+// Numeric boundaries through the Codec round trip (the Swift 5928-class
+// numeric fidelity checks): i64::MAX / i64::MIN survive exactly, 0.1 and
+// 1e15 + 0.5 round-trip bit-equal, and an integral JSON number widens into
+// a Float field (C-085's rule exercised at the boundary).
+import json
+
+type N: Codec = { big: Int, small: Int, f: Float, g: Float }
+
+effect fn main() -> Unit = {
+  let n = N { big: 9223372036854775807, small: (0 - 9223372036854775807) - 1, f: 0.1, g: 1000000000000000.5 }
+  let enc = json.stringify(N.encode(n))
+  println(enc)
+  let d = N.decode(json.parse(enc)!)!
+  println(if d.big == n.big and d.small == n.small then "int-rt" else "INT-DRIFT")
+  println(if d.f == 0.1 and d.g == n.g then "float-rt" else "FLOAT-DRIFT")
+  let widened = N.decode(json.parse('{"big": 1, "small": 2, "f": 7, "g": 8}')!)!
+  println(float.to_string(widened.f) + "/" + float.to_string(widened.g))
+}

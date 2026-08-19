@@ -1,0 +1,25 @@
+// @contract: C-187, C-193
+// REPEATED in-place writes through a mutable module-level buffer in ONE body:
+// every write lands, and a snapshot taken between writes keeps its pre-write
+// bytes (the slot COW fires exactly when the block is genuinely shared). The
+// perf half of the same machinery — the receiver borrow that keeps the block
+// at rc == 1 between writes — is pinned structurally in almide-mir's op tests;
+// here the OBSERVABLE promise is pinned: values, aliasing, both targets.
+var arena = bytes.new(8)
+
+fn main() -> Unit = {
+  bytes.set_at(arena, 0, 7)
+  let snap = arena
+  bytes.set_at(arena, 0, 99)
+  println(int.to_string(bytes.get_or(snap, 0, 0 - 1)))
+  println(int.to_string(bytes.get_or(arena, 0, 0 - 1)))
+  bytes.set_at(arena, 1, 10)
+  bytes.set_at(arena, 2, 20)
+  let snap2 = arena
+  bytes.set_at(arena, 1, 11)
+  bytes.set_at(arena, 2, 22)
+  println(int.to_string(bytes.get_or(snap2, 1, 0 - 1)))
+  println(int.to_string(bytes.get_or(snap2, 2, 0 - 1)))
+  println(int.to_string(bytes.get_or(arena, 1, 0 - 1)))
+  println(int.to_string(bytes.get_or(arena, 2, 0 - 1)))
+}

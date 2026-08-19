@@ -1,0 +1,132 @@
+// Statement-position break/continue in loop bodies (#1277).
+// `continue` lowers as the guarded rest (the same restructure `guard … else
+// continue` desugars to), so the for-range STEP still runs on the continue
+// path; a mid-body `break` exits IMMEDIATELY — statements after it in the
+// same iteration must NOT run (the deferred-break flag form is positionally
+// gated to the trailing statement spine).
+// ── the #1277 repro shape: continue + break in one while body ──
+fn while_continue_break() -> Int = {
+  var i = 0
+  var s = 0
+  while i < 10 {
+    i = i + 1
+    if i == 3 then continue
+    else ()
+    if i > 6 then break
+    else ()
+    s = s + i
+  }
+  s * 100 + i
+}
+
+test "while continue+break (issue #1277 repro)" {
+  // s = 1+2+4+5+6 = 18 (i=3 skipped), i = 7 (break before s += 7)
+  assert_eq(while_continue_break(), 1807)
+}
+
+// ── while: mid-body break is immediate ──
+fn while_break_immediate() -> Int = {
+  var i = 0
+  var s = 0
+  while i < 100 {
+    i = i + 1
+    if i > 6 then break
+    else ()
+    s = s + i
+  }
+  s * 100 + i
+}
+
+test "while mid-body break skips the rest of the iteration" {
+  // s = 1+..+6 = 21, i = 7
+  assert_eq(while_break_immediate(), 2107)
+}
+
+// ── for-range: continue must still run the index step ──
+fn for_range_continue() -> Int = {
+  var acc = 0
+  for j in 0..<5 {
+    if j == 2 then continue
+    else ()
+    acc = acc + j
+  }
+  acc
+}
+
+test "for-range continue still steps" {
+  assert_eq(for_range_continue(), 8)
+}
+
+// ── for-range: mid-body break is immediate ──
+fn for_range_break_immediate() -> Int = {
+  var last = 0
+  for k in 0..<10 {
+    if k > 3 then break
+    else ()
+    last = k
+  }
+  last
+}
+
+test "for-range mid-body break skips the rest of the iteration" {
+  assert_eq(for_range_break_immediate(), 3)
+}
+
+// ── for over a list: continue ──
+fn for_list_continue() -> Int = {
+  var acc = 0
+  for x in [1, 2, 3, 4] {
+    if x == 2 then continue
+    else ()
+    acc = acc + x
+  }
+  acc
+}
+
+test "for-list continue" {
+  assert_eq(for_list_continue(), 8)
+}
+
+// ── nested: inner while carries both continue and break ──
+fn nested_continue_break() -> Int = {
+  var total = 0
+  for _k in 0..<3 {
+    var m = 0
+    while m < 10 {
+      m = m + 1
+      if m == 2 then continue
+      else ()
+      if m > 4 then break
+      else ()
+      total = total + m
+    }
+  }
+  total
+}
+
+test "nested loops: inner continue+break" {
+  // inner sum per outer pass = 1+3+4 = 8; three passes = 24
+  assert_eq(nested_continue_break(), 24)
+}
+
+// ── interleaved continues around a break ──
+fn interleaved() -> Int = {
+  var s = 0
+  var n = 0
+  while n < 20 {
+    n = n + 1
+    if n % 2 == 0 then continue
+    else ()
+    if n > 10 then break
+    else ()
+    if n % 3 == 0 then continue
+    else ()
+    s = s + n
+  }
+  s * 100 + n
+}
+
+test "interleaved continue/break/continue" {
+  // odd n up to 10, minus multiples of 3: 1+5+7 = 13; break at n=11
+  assert_eq(interleaved(), 1311)
+}

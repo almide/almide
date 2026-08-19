@@ -1,0 +1,77 @@
+// @contract: C-014
+// The wasm Set[Int] block carries a BUCKET INDEX past 16 elements (#1219), mirroring
+// map_core. The element array stays authoritative and the index is a sidecar, so
+// insertion order and dedup must survive every path: from_list dedup, the insert grow
+// loop, re-inserting a present element, remove, remove-then-reinsert (where a stale
+// index would resurrect a dead element), and the whole set algebra.
+fn show(label: String, s: Set[Int]) -> String = {
+  let xs = set.to_list(s) |> list.map((x) => int.to_string(x)) |> list.join(",")
+  "${label}: [${xs}]"
+}
+
+fn ints(n: Int, stride: Int, base: Int) -> List[Int] = {
+  var xs: List[Int] = []
+  for i in 0..<n {
+    xs = xs + [base + i * stride]
+  }
+  xs
+}
+
+fn probe(label: String, s: Set[Int], n: Int, stride: Int) -> String = {
+  var hit = 0
+  var miss = 0
+  for i in 0..<n {
+    let inside = set.contains(s, i * stride)
+    let outside = set.contains(s, i * stride + 1)
+    hit = hit + (if inside then 1 else 0)
+    miss = miss + (if outside then 1 else 0)
+  }
+  "${label}: hit=${int.to_string(hit)} bogus=${int.to_string(miss)}"
+}
+
+fn main() -> Unit = {
+  // grow across the flat -> indexed threshold: 15, 16, 17 elements
+  println(show("t15", set.from_list(ints(15, 7, 0))))
+  println(show("t16", set.from_list(ints(16, 7, 0))))
+  println(show("t17", set.from_list(ints(17, 7, 0))))
+  // from_list DEDUPS in first-seen order past the threshold
+  let a = set.from_list(ints(40, 3, 0) + ints(40, 3, 0))
+  println(show("dedup", a))
+  println(probe("dedup", a, 40, 3))
+  // insert grow loop, then re-inserting present elements must not change len/order
+  var b: Set[Int] = set.new()
+  for i in 0..<40 {
+    b = set.insert(b, i * 5)
+  }
+  for i in 0..<20 {
+    b = set.insert(b, i * 5)
+  }
+  println(show("insert", b))
+  println(probe("insert", b, 40, 5))
+  // REMOVE then RE-INSERT: a stale index would report a removed element as present
+  var c = set.from_list(ints(40, 2, 0))
+  for i in 0..<15 {
+    c = set.remove(c, i * 4)
+  }
+  println(show("remove", c))
+  for i in 0..<15 {
+    c = set.insert(c, i * 4)
+  }
+  println(show("reinsert", c))
+  // algebra past the threshold: order is a's then b-only, in each side's own order
+  let u1 = set.from_list(ints(30, 1, 0))
+  let u2 = set.from_list(ints(30, 1, 15))
+  println(show("union", set.union(u1, u2)))
+  println(show("inter", set.intersection(u1, u2)))
+  println(show("diff", set.difference(u1, u2)))
+  println(show("sym", set.symmetric_difference(u1, u2)))
+  let sub = set.is_subset(set.intersection(u1, u2), u1)
+  let dis = set.is_disjoint(set.difference(u1, u2), u2)
+  println("subset=${if sub then "true" else "false"} disjoint=${if dis then "true" else "false"}")
+  // filter keeps order; map re-dedups collapsed images in first-seen order
+  println(show("filter", set.filter(u1, (x) => x % 3 == 0)))
+  println(show("map", set.map(u1, (x) => x / 2)))
+  // adversarial elements: power-of-two stride (all low bits equal) and negatives
+  println(probe("pow2", set.from_list(ints(32, 1024, 0)), 32, 1024))
+  println(show("negative", set.from_list(ints(32, 0 - 3, 0))))
+}

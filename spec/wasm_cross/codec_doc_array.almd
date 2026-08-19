@@ -1,0 +1,28 @@
+// @contract: C-298
+// A top-level ARRAY document: value.as_array over the parsed array, per-element
+// record decode, and an element-level failure surfaces as that element's err
+// while the others decode (the Swift unkeyed-container per-element walk).
+import json
+
+type Row: Codec = { id: Int, tag: String }
+
+effect fn main() -> Unit = {
+  let doc = json.parse('[{"id": 1, "tag": "a"}, {"id": 2, "tag": "b"}]')!
+  let rows = value.as_array(doc)! |> (xs) => list.map(xs, (v) => Row.decode(v))
+  let oks = list.filter(rows, (r) => match r {
+    ok(_) => true,
+    err(_) => false,
+  })
+  println(int.to_string(list.len(oks)))
+  let tags = list.map(oks, (r) => match r {
+    ok(row) => row.tag,
+    err(_) => "?",
+  })
+  println(list.join(tags, "+"))
+  let mixed = json.parse('[{"id": 1, "tag": "a"}, {"id": "bad", "tag": "b"}]')!
+  let rs = value.as_array(mixed)! |> (xs) => list.map(xs, (v) => Row.decode(v))
+  println(list.join(list.map(rs, (r) => match r {
+    ok(row) => row.tag,
+    err(e) => "<" + e + ">",
+  }), "|"))
+}

@@ -1,0 +1,49 @@
+// #1067: `!` propagates in PURE fns whose declared return type is Result or
+// Option — the same lowering (`?`) the effect-fn body always had; propagation
+// is pure control flow. The rejects that remain: a fn with any other return
+// type (tests/diagnostics/e022-bang-outside-effect), and the closure boundary
+// (`!` never propagates out of a lambda, #489).
+fn parse_two(a: String, b: String) -> Result[Int, String] = {
+  let x = int.parse(a)!
+  let y = int.parse(b)!
+  ok(x + y)
+}
+
+fn first_char(s: String) -> String? = {
+  let c = string.get(s, 0)!
+  some(c)
+}
+
+fn head_plus(xs: List[Int]) -> Result[Int, String] = {
+  let h = list.get(xs, 0)!
+  ok(h + 10)
+}
+
+fn digits_sum(parts: List[String]) -> Result[Int, String] = {
+  let a = list.get(parts, 0) ?? ""
+  let b = list.get(parts, 1) ?? ""
+  let x = int.parse(a)!
+  let y = int.parse(b)!
+  ok(x + y)
+}
+
+test "Result operand in a pure Result fn: ok path and err propagation" {
+  assert_eq(parse_two("3", "4"), ok(7))
+  assert_eq(parse_two("3", "z"), err("invalid digit found in string"))
+}
+
+test "Option operand in a pure Option fn: some unwraps, none propagates as none" {
+  assert_eq(first_char("hi"), some("h"))
+  assert_eq(first_char(""), none)
+}
+
+test "Option operand in a pure Result fn: none becomes err(none) — the effect-fn rule" {
+  assert_eq(head_plus([5]), ok(15))
+  assert_eq(head_plus([]), err("none"))
+}
+
+test "multiple propagation points short-circuit at the first failure" {
+  assert_eq(digits_sum(["1", "2"]), ok(3))
+  assert_eq(digits_sum(["x", "2"]), err("invalid digit found in string"))
+  assert_eq(digits_sum(["1"]), err("cannot parse integer from empty string"))
+}

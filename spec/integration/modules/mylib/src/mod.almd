@@ -1,0 +1,3 @@
+fn hello() -> String = "hello from mod.almd"
+
+fn add(a: Int, b: Int) -> Int = a + b

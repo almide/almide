@@ -1,0 +1,43 @@
+// @contract: C-190
+// A closure captures ANY scalar, not just Int and Bool. The env's scalar region is
+// raw 64-bit slots, so every non-heap type rides it: a `Float` carries its bits
+// there (a MIR float local already holds them in an i64 — the float ops reinterpret
+// around themselves, not around the slot), and each sized int width carries its
+// value. The class test used to restate `Int | Bool` instead of reading the crate's
+// `is_heap_ty`, so all of these walled the ENCLOSING function — a lambda outside
+// the liftable subset in a call-argument position refuses the whole render (#954,
+// surfaced by the nightly differential fuzz through `result.unwrap_or_else`).
+fn apply_float(f: (Int) -> Float) -> Float = f(1)
+
+fn apply_i8(f: (Int) -> Int8) -> Int8 = f(1)
+
+fn apply_u32(f: (Int) -> UInt32) -> UInt32 = f(1)
+
+// A capture the const-folder cannot turn back into a literal — the point is that the
+// value travels through an env SLOT, so a folded literal would prove nothing.
+fn main() -> Unit = {
+  let d: Float = float.sqrt(2.0)
+  println(float.to_string(apply_float((s) => d)))
+  let e: Int8 = int.to_int8(7)
+  println(int.to_string(int.from_int8(apply_i8((s) => e))))
+  let g: UInt32 = int.to_uint32(4294967295)
+  println(int.to_string(int.from_uint32(apply_u32((s) => g))))
+  // The stdlib higher-order path over the same capture: `scale` is read out of the
+  // env once per element.
+  let scale: Float = float.sqrt(2.0)
+  let xs: List[Float] = [1.0, 2.0, 3.0]
+  println(float.to_string(xs |> list.map((x) => x * scale) |> list.fold(0.0, ((a, b) => a + b))))
+  // The Result combinator the fuzz finding actually came in through: the recovery
+  // closure returns a captured Float, and the err arm is the one that runs.
+  let fallback: Float = float.sqrt(3.0)
+  let v: Result[Float, String] = err("boom")
+  println(float.to_string(result.unwrap_or_else(v, (s) => fallback)))
+  // The ok arm, so the capture is proven live on the path that does NOT use it.
+  let w: Result[Float, String] = ok(0.5)
+  println(float.to_string(result.unwrap_or_else(w, (s) => fallback)))
+  // A closure capturing scalars of MIXED widths at once — they share the scalar
+  // region and each slot must read back as its own value.
+  let base: Int = 10
+  let bump: Int16 = int.to_int16(3)
+  println(int.to_string(int.from_int8(apply_i8((s) => int.to_int8(base + int.from_int16(bump))))))
+}

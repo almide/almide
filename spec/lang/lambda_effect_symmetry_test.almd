@@ -1,0 +1,25 @@
+// #1051: lambda effect-capability is CONTEXTUAL and uniform. A lambda
+// inherits the enclosing fn's effect capability — the same rule for every
+// higher-order callee (list.map, http.serve's handler, …), never decided by
+// the parameter's spelling. Inside an effect fn the lambda may call effect
+// fns and sees their results as EXPLICIT Result values (auto-? never crosses
+// a closure boundary, #489); in a pure fn the same lambda is an E006
+// (pinned by tests/diagnostics/e006-effect-call-in-pure-fn-lambda).
+import fs
+
+effect fn count_readable(paths: List[String]) -> Int = {
+  let rs = paths |> list.map((p) => fs.read_text(p))
+  rs |> list.filter((r) => result.is_ok(r)) |> list.len
+}
+
+test "list.map lambda may call effect fns inside an effect fn" {
+  // fs.temp_dir(), never a literal "/tmp" (%TMP% on Windows native, the
+  // /tmp preopen on the wasm leg). Fixed name, overwritten per run — a
+  // temp dir needs no cleanup, and fs.remove would push this off the
+  // wasm test leg.
+  let dir = fs.temp_dir()
+  let path = "${dir}/almide_i1051_sym.txt"
+  fs.write(path, "x")!
+  let n = count_readable([path, "almide_i1051_missing"])
+  assert_eq(n!, 1)
+}

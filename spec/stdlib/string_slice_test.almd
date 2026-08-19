@@ -1,0 +1,29 @@
+test "string.first" {
+  assert_eq(string.first("hello"), some("h"))
+  assert_eq(string.first(""), none)
+}
+
+test "string.last" {
+  assert_eq(string.last("hello"), some("o"))
+  assert_eq(string.last(""), none)
+}
+
+test "string.take" {
+  assert_eq(string.take("hello", 3), "hel")
+  assert_eq(string.take("hi", 10), "hi")
+}
+
+test "string.take_end" {
+  assert_eq(string.take_end("hello", 3), "llo")
+  assert_eq(string.take_end("hi", 10), "hi")
+}
+
+test "string.drop" {
+  assert_eq(string.drop("hello", 2), "llo")
+  assert_eq(string.drop("hi", 10), "")
+}
+
+test "string.drop_end" {
+  assert_eq(string.drop_end("hello", 2), "hel")
+  assert_eq(string.drop_end("hi", 10), "")
+}

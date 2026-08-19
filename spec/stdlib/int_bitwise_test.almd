@@ -1,0 +1,175 @@
+// int bitwise and wrapping operations tests
+test "int.band basic" {
+  assert_eq(int.band(12, 10), 8)
+}
+
+test "int.band with zero" {
+  assert_eq(int.band(255, 0), 0)
+}
+
+test "int.band identity" {
+  assert_eq(int.band(42, 42), 42)
+}
+
+test "int.bor basic" {
+  assert_eq(int.bor(12, 10), 14)
+}
+
+test "int.bor with zero" {
+  assert_eq(int.bor(42, 0), 42)
+}
+
+test "int.bxor basic" {
+  assert_eq(int.bxor(12, 10), 6)
+}
+
+test "int.bxor self is zero" {
+  assert_eq(int.bxor(42, 42), 0)
+}
+
+test "int.bshl basic" {
+  assert_eq(int.bshl(1, 3), 8)
+}
+
+test "int.bshl by zero" {
+  assert_eq(int.bshl(42, 0), 42)
+}
+
+test "int.bshr basic" {
+  assert_eq(int.bshr(8, 2), 2)
+}
+
+test "int.bshr by zero" {
+  assert_eq(int.bshr(42, 0), 42)
+}
+
+test "int.bnot zero" {
+  assert_eq(int.bnot(0), -1)
+}
+
+test "int.bnot minus one" {
+  assert_eq(int.bnot(-1), 0)
+}
+
+test "int.to_float roundtrip" {
+  let f = int.to_float(100)
+  assert_eq(float.to_int(f), 100)
+}
+
+test "int.to_float basic" {
+  assert_eq(int.to_float(42), 42.0)
+}
+
+test "int.to_float zero" {
+  assert_eq(int.to_float(0), 0.0)
+}
+
+test "int.to_float negative" {
+  assert_eq(int.to_float(-5), -5.0)
+}
+
+test "int.abs zero" {
+  assert_eq(int.abs(0), 0)
+}
+
+test "int.abs positive" {
+  assert_eq(int.abs(5), 5)
+}
+
+test "int.abs negative" {
+  assert_eq(int.abs(-5), 5)
+}
+
+test "int.min equal" {
+  assert_eq(int.min(5, 5), 5)
+}
+
+test "int.max equal" {
+  assert_eq(int.max(5, 5), 5)
+}
+
+test "int.clamp within range" {
+  assert_eq(int.clamp(5, 0, 10), 5)
+}
+
+test "int.clamp at boundaries" {
+  assert_eq(int.clamp(0, 0, 10), 0)
+  assert_eq(int.clamp(10, 0, 10), 10)
+}
+
+// ── Bit introspection ──
+test "int.count_leading_zeros" {
+  assert_eq(int.count_leading_zeros(0), 64)
+  assert_eq(int.count_leading_zeros(1), 63)
+  assert_eq(int.count_leading_zeros(256), 55)
+}
+
+test "int.count_trailing_zeros" {
+  assert_eq(int.count_trailing_zeros(1), 0)
+  assert_eq(int.count_trailing_zeros(8), 3)
+  assert_eq(int.count_trailing_zeros(256), 8)
+}
+
+test "int.pop_count" {
+  assert_eq(int.pop_count(0), 0)
+  assert_eq(int.pop_count(1), 1)
+  assert_eq(int.pop_count(7), 3)
+  assert_eq(int.pop_count(255), 8)
+}
+
+test "int.bit_reverse" {
+  assert_eq(int.bit_reverse(0), 0)
+  // 1 reversed in 64 bits = 1 << 63
+  assert_eq(int.bit_reverse(1), int.bshl(1, 63))
+}
+
+test "int.byte_swap" {
+  assert_eq(int.byte_swap(0), 0)
+  // 0x0102030405060708 → 0x0807060504030201
+  assert_eq(int.byte_swap(int.byte_swap(42)), 42)
+}
+
+test "int.bit_width" {
+  assert_eq(int.bit_width(0), 0)
+  assert_eq(int.bit_width(1), 1)
+  assert_eq(int.bit_width(2), 2)
+  assert_eq(int.bit_width(3), 2)
+  assert_eq(int.bit_width(255), 8)
+  assert_eq(int.bit_width(256), 9)
+}
+
+test "int.log2_floor" {
+  assert_eq(int.log2_floor(0), -1)
+  assert_eq(int.log2_floor(1), 0)
+  assert_eq(int.log2_floor(2), 1)
+  assert_eq(int.log2_floor(3), 1)
+  assert_eq(int.log2_floor(8), 3)
+  assert_eq(int.log2_floor(9), 3)
+}
+
+test "int.log2_ceil" {
+  assert_eq(int.log2_ceil(0), 0)
+  assert_eq(int.log2_ceil(1), 0)
+  assert_eq(int.log2_ceil(2), 1)
+  assert_eq(int.log2_ceil(3), 2)
+  assert_eq(int.log2_ceil(8), 3)
+  assert_eq(int.log2_ceil(9), 4)
+}
+
+test "int.next_power_of_two" {
+  assert_eq(int.next_power_of_two(0), 1)
+  assert_eq(int.next_power_of_two(1), 1)
+  assert_eq(int.next_power_of_two(2), 2)
+  assert_eq(int.next_power_of_two(3), 4)
+  assert_eq(int.next_power_of_two(5), 8)
+  assert_eq(int.next_power_of_two(1024), 1024)
+}
+
+test "int.prev_power_of_two" {
+  assert_eq(int.prev_power_of_two(0), 0)
+  assert_eq(int.prev_power_of_two(1), 1)
+  assert_eq(int.prev_power_of_two(2), 2)
+  assert_eq(int.prev_power_of_two(3), 2)
+  assert_eq(int.prev_power_of_two(5), 4)
+  assert_eq(int.prev_power_of_two(1024), 1024)
+}

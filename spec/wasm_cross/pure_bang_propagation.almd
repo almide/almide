@@ -1,0 +1,51 @@
+// @contract: C-211
+// `!` in PURE Result/Option-returning fns (#1067): ok/some unwraps, err
+// propagates, none propagates as none in an Option fn and as err("none") in a
+// Result fn — byte-identical native == wasm. The Option-fn cell is the one a
+// naive lowering gets wrong: manufacturing err("none") there types the fail
+// arm as a Result inside an Option fn (native E0277; the wasm leg read the
+// mistyped block back as some("none") — a silent wrong value).
+// (Cells are consumed with `match`, not `??` — a user Option-returning call as
+// a `??` operand trips a pre-existing caps-accounting breach, #1079.)
+fn parse_two(a: String, b: String) -> Result[Int, String] = {
+  let x = int.parse(a)!
+  let y = int.parse(b)!
+  ok(x + y)
+}
+
+fn first_char(s: String) -> String? = {
+  let c = string.get(s, 0)!
+  some(c)
+}
+
+fn head_plus(xs: List[Int]) -> Result[Int, String] = {
+  let h = list.get(xs, 0)!
+  ok(h + 10)
+}
+
+fn main() -> Unit = {
+  println(match parse_two("3", "4") {
+    ok(n) => int.to_string(n),
+    err(e) => "err:" + e,
+  })
+  println(match parse_two("3", "z") {
+    ok(_) => "?",
+    err(e) => "err:" + e,
+  })
+  println(match first_char("hi") {
+    some(c) => c,
+    none => "<none>",
+  })
+  println(match first_char("") {
+    some(c) => c,
+    none => "<none>",
+  })
+  println(match head_plus([5]) {
+    ok(n) => int.to_string(n),
+    err(e) => "err:" + e,
+  })
+  println(match head_plus([]) {
+    ok(_) => "?",
+    err(e) => "err:" + e,
+  })
+}

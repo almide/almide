@@ -1,0 +1,57 @@
+// Negative literal patterns (#897).
+//
+// A negative literal arrives as `Unary { op: "-", operand: Int|Float }` — the
+// parser has no signed-literal token — and both halves of the pipeline used to
+// mishandle it:
+//
+//   * the exhaustiveness checker lowered it to a WILDCARD, so `-1 => ...`
+//     swallowed every later arm and the real `_` arm was reported unreachable
+//     (E014);
+//   * pattern lowering sent it down the expression path, where a pattern has no
+//     TypeMap entry, so the literal came out `ty=Unknown` and the build died
+//     with "[COMPILER BUG] internal type resolution failed before codegen".
+//
+// Both are fixed by folding the sign into the literal at both sites.
+fn describe(n: Int) -> String = match n {
+  0 => "zero",
+  1 => "one",
+  -1 => "negative one",
+  -2 => "negative two",
+  _ => "other",
+}
+
+// No wildcard arm: the case that passed `check` and then failed to build.
+fn sign_word(n: Int) -> String = match n {
+  -1 => "minus",
+  1 => "plus",
+  _ => "zero-ish",
+}
+
+fn scale(f: Float) -> String = match f {
+  -1.5 => "minus one point five",
+  1.5 => "one point five",
+  _ => "other",
+}
+
+test "negative int literal patterns match their own value" {
+  assert_eq(describe(-1), "negative one")
+  assert_eq(describe(-2), "negative two")
+  assert_eq(describe(0), "zero")
+  assert_eq(describe(1), "one")
+  assert_eq(describe(7), "other")
+}
+
+test "a negative literal does not swallow later arms" {
+  // The E014 symptom: if `-1` were a wildcard, `1` could never be reached
+  // through an arm placed after it and `other` would be dead.
+  assert_eq(describe(-3), "other")
+  assert_eq(sign_word(-1), "minus")
+  assert_eq(sign_word(1), "plus")
+  assert_eq(sign_word(0), "zero-ish")
+}
+
+test "negative float literal patterns match their own value" {
+  assert_eq(scale(-1.5), "minus one point five")
+  assert_eq(scale(1.5), "one point five")
+  assert_eq(scale(2.5), "other")
+}

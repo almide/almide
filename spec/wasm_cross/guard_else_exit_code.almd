@@ -1,0 +1,34 @@
+// @contract: C-219
+// A DIVERGING call in a branch arm runs, and its exit code is the process's.
+//
+// `process.exit(code)` is the stdlib's only `-> Never`. The arm-tail dispatch
+// in `lower_branch_arm` executed a `Call` only when its type was `Ty::Unit`, so
+// a `Never` call fell through to the deferred-value path — which records the
+// call as a capability marker and EMITS NOTHING. The arm lowered to zero ops
+// and reported success, so this program built clean and exited 0 (#1124).
+//
+// That is the silent-wrong class reached through a TYPE the match forgot to
+// name rather than through an unsupported shape: no wall, no diagnostic, just a
+// different answer than the source asks for.
+//
+// TWO THINGS THIS FIXTURE HAS TO GET RIGHT, both learned the hard way:
+//
+//   1. The condition must be RUNTIME-valued. `string.len("ab")` const-folds,
+//      which routes the guard through the #1117 constant path instead — and
+//      then the fixture passes with the bug present. Reading it through an
+//      `effect fn` keeps the value opaque to the folder.
+//   2. It must not touch a host capability the reference interpreter cannot
+//      model. The first version read `process.args()`, whose
+//      `prim.args_get_list_full` made the fixture ABSTAIN from the 3-way oracle
+//      and cost a line in interp-abstain-ledger.txt. The bug is about the arm,
+//      not about where the number comes from.
+import process
+
+effect fn width(s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = {
+  println("before-guard")
+  let n = width("ab")!
+  guard n > 99 else process.exit(3)
+  println("unreachable")
+}

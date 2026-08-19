@@ -1,0 +1,45 @@
+// @contract: C-293
+// List[List[String]] — heap elements inside heap elements: every slot is an
+// owned handle, so drops route through the nested class. Build, reshape,
+// join, shadow-drop, and rebuild from split strings.
+fn show(xss: List[List[String]]) -> String = list.join(list.map(xss, (xs) => "<${list.join(xs, "+")}>"), " ")
+
+fn main() -> Unit = {
+  var grid: List[List[String]] = []
+  var i = 0
+  while i < 3 {
+    var row: List[String] = []
+    var j = 0
+    while j < 2 {
+      list.push(row, "c${int.to_string(i)}${int.to_string(j)}")
+      j = j + 1
+    }
+    list.push(grid, row)
+    i = i + 1
+  }
+  println(show(grid))
+  // rebuild from split: List[List[String]] out of string.split twice
+  let doc = "a,b;c,d;e,f"
+  let rows = list.map(string.split(doc, ";"), (r) => string.split(r, ","))
+  println(show(rows))
+  println(int.to_string(list.len(rows)))
+  // fold both levels into one string
+  println(list.fold(rows, "", (acc, r) => acc + list.join(r, "")))
+  // shadow the whole grid (old rows with heap payloads drop here)
+  var grid2 = rows
+  grid2 = [
+    ["solo"]
+  ]
+  println(show(grid2))
+  // equality with multibyte payloads
+  println(if [
+    ["あ", "い"]
+  ] == [
+    ["あ", "い"]
+  ] then "eq" else "ne")
+  println(if [
+    ["あ"]
+  ] == [
+    ["い"]
+  ] then "eq" else "ne")
+}

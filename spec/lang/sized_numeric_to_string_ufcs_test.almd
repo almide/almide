@@ -1,0 +1,25 @@
+// UFCS `to_string` on every sized-numeric receiver (#893): the resolver's
+// candidate table decides the method when `env.functions` has no entry for it
+// — the case an EMBEDDER hits (a bare source handed to the renderer, no
+// resolved bundled modules), where `big.to_string()` used to report
+// "undefined method 'to_string' on uint64" while the CLI accepted it.
+test "UFCS to_string on unsigned receivers" {
+  let a: UInt8 = 200
+  let b: UInt16 = 60000
+  let c: UInt32 = 4000000000
+  let d: UInt64 = 18446744073709551615
+  assert_eq(a.to_string(), "200")
+  assert_eq(b.to_string(), "60000")
+  assert_eq(c.to_string(), "4000000000")
+  assert_eq(d.to_string(), "18446744073709551615")
+}
+
+test "UFCS to_string on signed and float receivers" {
+  let a: Int8 = -128
+  let b: Int32 = -2147483648
+  let n: Int = 42
+  assert_eq(a.to_string(), "-128")
+  assert_eq(b.to_string(), "-2147483648")
+  assert_eq(n.to_string(), "42")
+  assert_eq((2.5).to_string(), "2.5")
+}

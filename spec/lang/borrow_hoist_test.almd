@@ -1,0 +1,26 @@
+import bytes
+
+test "set_at with read from same buffer" {
+  var buf: Bytes = bytes.from_list([10, 20, 30, 40])
+  bytes.set_at(buf, 0, bytes.read_u8(buf, 2))
+  assert_eq(buf[0], 30)
+}
+
+test "set_at with expression from same buffer" {
+  var buf: Bytes = bytes.from_list([10, 20, 30, 40])
+  bytes.set_at(buf, 1, int.bxor(bytes.read_u8(buf, 3), 0xFF))
+  assert_eq(buf[1], int.bxor(40, 0xFF))
+}
+
+test "push with read from same buffer" {
+  var buf: Bytes = bytes.from_list([0xAA, 0xBB])
+  bytes.push(buf, bytes.read_u8(buf, 0))
+  assert_eq(bytes.len(buf), 3)
+  assert_eq(buf[2], 0xAA)
+}
+
+test "index write with index read same buffer" {
+  var buf: Bytes = bytes.from_list([1, 2, 3, 4])
+  buf[0] = buf[3]
+  assert_eq(buf[0], 4)
+}

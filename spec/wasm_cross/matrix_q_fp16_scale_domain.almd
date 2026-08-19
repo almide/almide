@@ -1,0 +1,77 @@
+// @contract: C-270
+// The fp16 BLOCK SCALE that Q1_0 and Q8_0 share decodes the whole fp16 domain
+// identically on both targets, and a dequantized element of zero magnitude is
+// +0.0 on both. Native decodes the scale in `fp16_bits_to_f32`
+// (runtime/rs/src/matrix_p2.rs); wasm decodes it in `__fp16_bits`/`__q10_scale`
+// (stdlib/matrix_activations.almd). They were three separate answers apart:
+// subnormals (wasm flushed them to zero — a silent MAGNITUDE error), exp==31
+// (wasm produced a finite 2^16-scaled value instead of Inf/NaN), and the sign of
+// a zero (#1358). Every observation below is spelled through float.to_string, so
+// a sign bit is a diff and not an invisible bit-pattern difference that `==`
+// agrees with.
+import matrix
+import bytes
+
+fn sgn(x: Float) -> String = float.to_string(x)
+
+// Decode one 18-byte Q1_0 block whose fp16 scale is `hi*256 + lo`, with weight 0
+// on sign bit 1 (→ +scale) and weight 1 on sign bit 0 (→ -scale), through BOTH
+// q1_0 entry points — the row selector and the full-matrix loader, which are
+// twin decoders over the same bytes and must not drift apart.
+effect fn scale_row(name: String, lo: Int, hi: Int) -> Unit = {
+  var b = bytes.new(18)
+  bytes.set_at(b, 0, lo)
+  bytes.set_at(b, 1, hi)
+  bytes.set_at(b, 2, 1)
+  let sel = list.get(matrix.to_lists(matrix.select_rows_q1_0(b, 0, 128, [0])), 0) ?? []
+  let full = list.get(matrix.to_lists(matrix.from_q1_0_bytes(b, 0, 1, 128)), 0) ?? []
+  println("${name} sel=${sgn(list.get(sel, 0) ?? 9.9)}/${sgn(list.get(sel, 1) ?? 9.9)} full=${sgn(list.get(full, 0) ?? 9.9)}/${sgn(list.get(full, 1) ?? 9.9)}")
+}
+
+effect fn main() -> Unit = {
+  // ── The fp16 domain, low to high (raw = hi*256 + lo) ──
+  // 0x0000 +0 and 0x8000 -0: BOTH sign-bit branches land on +0.0 (the ruling).
+  scale_row("zero", 0, 0)!
+  scale_row("negzero", 0, 128)!
+  // 0x0001 = 2^-24 and 0x03FF, the smallest and largest SUBNORMALS — wasm used
+  // to flush this whole range to zero.
+  scale_row("sub_min", 1, 0)!
+  scale_row("sub_max", 255, 3)!
+  // 0x0400 = 2^-14, the smallest normal — the other side of that boundary.
+  scale_row("norm_min", 0, 4)!
+  // 0x3C00 = 1.0 and 0x7BFF = 65504: ordinary values, signs intact.
+  scale_row("one", 0, 60)!
+  scale_row("fp16_max", 255, 123)!
+  // exp==31: +Inf, -Inf and a NaN payload — wasm used to decode these as the
+  // finite 65536 / 65600. The -scale branch of an Inf is the opposite Inf.
+  scale_row("inf", 0, 124)!
+  scale_row("neg_inf", 0, 252)!
+  scale_row("nan", 1, 124)!
+  // ── Q8_0 reaches zero from EITHER factor; both must be +0.0 ──
+  // scale 0.5 (fp16 0x3800), quants [0, 10, -10] then a zero-scale block.
+  var r8 = bytes.new(34)
+  bytes.set_at(r8, 1, 56)
+  bytes.set_at(r8, 3, 10)
+  bytes.set_at(r8, 4, 246)
+  let rr = list.get(matrix.to_lists(matrix.select_rows_q8_0_dq(r8, 0, 32, [0])), 0) ?? []
+  println("q8_real q0=${sgn(list.get(rr, 0) ?? 9.9)} q+=${sgn(list.get(rr, 1) ?? 9.9)} q-=${sgn(list.get(rr, 2) ?? 9.9)}")
+  // fp16 scale -0.0 over a positive and a negative quant: -0.0 * 10 and
+  // -0.0 * -10 are the two sign-xor cells that used to leak a sign bit.
+  var n8 = bytes.new(34)
+  bytes.set_at(n8, 1, 128)
+  bytes.set_at(n8, 2, 10)
+  bytes.set_at(n8, 3, 246)
+  let nr = list.get(matrix.to_lists(matrix.select_rows_q8_0_dq(n8, 0, 32, [0])), 0) ?? []
+  println("q8_negzeroscale q+=${sgn(list.get(nr, 0) ?? 9.9)} q-=${sgn(list.get(nr, 1) ?? 9.9)}")
+  // ── The CONTRAST: from_bytes_f16_le is a float DECODER, not a dequantizer ──
+  // A stored -0.0 is the datum there, so its sign is information and survives on
+  // both targets. The ruling above governs dequantization products only.
+  var h = bytes.new(4)
+  bytes.set_at(h, 1, 128)
+  let hr = list.get(matrix.to_lists(matrix.from_bytes_f16_le(h, 0, 1, 2)), 0) ?? []
+  println("f16_stored=${sgn(list.get(hr, 0) ?? 9.9)},${sgn(list.get(hr, 1) ?? 9.9)}")
+  var f = bytes.new(8)
+  bytes.set_f32_le(f, 0, 0.0 * (0.0 - 1.0))
+  let fr = list.get(matrix.to_lists(matrix.from_bytes_f32_le(f, 0, 1, 2)), 0) ?? []
+  println("f32_stored=${sgn(list.get(fr, 0) ?? 9.9)},${sgn(list.get(fr, 1) ?? 9.9)}")
+}
