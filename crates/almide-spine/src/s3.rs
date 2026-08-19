@@ -1,12 +1,14 @@
 //! Unit 4 stage 1: the REAL checker behind a per-file salsa query.
 //!
-//! `check_file_json` reproduces the incumbent's
-//! `resolve_and_typecheck_for_check` (almide@a877d2138, src/cli/check.rs:46-88)
-//! faithfully — resolve imports (bundled stdlib), canonicalize,
-//! `Checker::from_env`, `refresh_module_toplets` (#785), `infer_program`,
-//! then the #862 per-module inference loop — with two adaptations, recorded:
-//! process::exit sites become returned output, and stderr rendering becomes
-//! returned JSON lines (`almide_diag::render::to_json`, the `--json` shape).
+//! `check_file_json` reproduces the incumbent's `cmd_check_json`
+//! (almide@a877d2138, src/cli/check.rs: parse_for_json → 
+//! resolve_and_typecheck_for_check → JSON lines → IR lowering for
+//! unused-variable warnings) faithfully. `diags` is exactly the oracle's
+//! stdout line sequence: parse errors, checker diagnostics, then — when
+//! there are no parse errors and no type errors — the unused-var warnings
+//! from `lower_program` + `collect_unused_var_warnings`. Adaptations,
+//! recorded: process::exit sites become returned output (`fatal` marks the
+//! resolve/module exits whose stdout the oracle never reaches).
 //!
 //! PURITY CONTRACT: callers may only pass files whose imports are all
 //! stdlib modules — local-module imports would make `resolve` read the file
@@ -74,13 +76,14 @@ pub fn check_file_json(db: &dyn salsa::Database, file: SourceFile) -> CheckOutpu
 
     let tokens = almide::lexer::Lexer::tokenize(&source_text);
     let mut parser = almide::parser::Parser::new(tokens).with_file(&path);
-    let mut program = match parser.parse() {
-        Ok(p) => p,
-        Err(e) => {
-            return CheckOutput { fatal: Some(e), diags: Vec::new(), module_diags: Vec::new() };
-        }
-    };
+    let parsed = parser.parse().ok();
     let parse_errors = std::mem::take(&mut parser.errors);
+    let Some(mut program) = parsed else {
+        // cmd_check_json's fatal-parse path: the accumulated parser errors
+        // ARE the stdout (the Err value itself is discarded), exit 1.
+        let diags = parse_errors.iter().map(almide::diagnostic_render::to_json).collect();
+        return CheckOutput { fatal: None, diags, module_diags: Vec::new() };
+    };
 
     let mut resolved = match almide::resolve::resolve_imports_with_deps(&path, &program, &[]) {
         Ok(r) => r,
@@ -118,6 +121,13 @@ pub fn check_file_json(db: &dyn salsa::Database, file: SourceFile) -> CheckOutpu
     let mut diags: Vec<String> = Vec::new();
     for d in parse_errors.iter().chain(diagnostics.iter()) {
         diags.push(almide::diagnostic_render::to_json(d));
+    }
+    let has_type_errors = diagnostics.iter().any(|d| d.level == almide::diagnostic::Level::Error);
+    if parse_errors.is_empty() && !has_type_errors {
+        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        for d in &almide::ir::collect_unused_var_warnings(&ir, &path) {
+            diags.push(almide::diagnostic_render::to_json(d));
+        }
     }
     let mut module_lines = Vec::new();
     for (mpath, _msrc, ds) in &module_diags {

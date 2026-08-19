@@ -202,10 +202,22 @@ still matches the incumbent golden byte-for-byte; every new capability is
   restored byte-identically (verified via `git status` clean), and one
   python edit aborted harmlessly on a missing path. Rule adopted: every
   greenfield shell command starts with an explicit `cd` into the worktree.
-- **Still owed before unit 4 LANDS:** diagnostics parity vs oracle
-  (`almide check --json` A/B manifest), per-decl granularity (S2a shape
-  fused into the real checker), Zig-style incremental diagnostic scenarios,
-  E1 wiring (misspellings + recoverable codes).
+- **Diagnostics parity (2026-08-19): GREEN — 1,062/1,062 byte-identical.**
+  `check_file_json` was made fully `cmd_check_json`-faithful first (two gaps
+  found by reading the oracle before hashing it: the fatal-parse path prints
+  the ACCUMULATED parser errors and discards the `Err` value; and after a
+  clean check the oracle lowers to IR and appends unused-variable warnings —
+  `lower_program` + `collect_unused_var_warnings`). Manifest:
+  `scripts/gen-check-manifest.sh` hashed oracle `almide check <f> --json`
+  stdout for 1,095/1,098 files (3 oracle exclusions, same unresolvable
+  multi-package imports as the AST manifest); gate:
+  `crates/almide-spine/tests/check_parity.rs` — every corpus file in exactly
+  one of manifest/exclusions, 33 purity-skipped (non-stdlib imports, printed
+  not silent), **1,062 compared, 0 divergent**, >900 floor asserted.
+  Gate mutation test: one hash flipped → red ✓, restored → green ✓.
+- **Still owed before unit 4 LANDS:** per-decl granularity (S2a shape fused
+  into the real checker — stage 2, structure new), Zig-style incremental
+  diagnostic scenarios, E1 wiring (misspellings + recoverable codes).
 
 ### Lint policy change (2026-08-19): two tiers, structural
 

@@ -176,6 +176,12 @@ no-edit). All §6.5 criteria are now green: 8/8. Still owed before unit 4
 LANDS: diagnostics parity vs oracle, per-decl granularity, incremental
 diagnostic scenarios, E1 wiring. Report: docs/spikes/S3-real-checker-query.md.**
 
+**Diagnostics parity (2026-08-19): GREEN — 1,062/1,062 files byte-identical
+to oracle `almide check --json` stdout (checker diagnostics, ordering, and
+the post-check unused-variable warning stage included); 33 purity-skips
+printed, 3 oracle exclusions. The speed numbers are now backed by proven
+behavioral identity on the check path. Details: PORTLOG.md unit 4.**
+
 ## 7. Certification trajectory (R1a + R1b)
 
 Aviation-grade (DO-178C-class) is a declared destination, reached from either
