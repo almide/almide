@@ -435,3 +435,45 @@ All new construction:
   `Named ×69` (user records/variants) → `Bytes ×23` → `Float ×16` →
   list module calls. The LIST slice (layout for element arrays, ForIn,
   list.len/join) is the next big mechanism.
+
+---
+
+## Unit 6 — stage 4: the List slice (2026-08-19)
+
+The biggest wall (`bind-ty:Applied ×193`, dominated by lists) — and the
+slice where the burn-up net earned its keep three times in one sitting:
+
+- **Repr**: `List[scalar]` = one block, payload = the element array,
+  len = count × stride (stride = the scalar's slot size), cap = capacity
+  bytes. `xs ++ ys` is `$concat` UNCHANGED — byte-concat of payloads IS
+  element concat. `==` on List[Int/Bool] is `$str_eq` (bytes are values);
+  List[String] holds addresses, so equality is refused, not faked.
+- **`infer` now reads the checker's annotation** (`IrExpr.ty`) instead of
+  re-deriving structurally — one authority, and `none`/`ok`/`err` work in
+  any typed position without the hint plumbing.
+- **Hold pools**: stack-disciplined scratch locals for constructs that
+  keep an address live ACROSS sub-expression lowering (list literals,
+  index bases, for-in state). Depth beyond the pool is an honest unsup —
+  never a silent clobber.
+- **Three bugs the net caught, in order**:
+  1. `$list_get_4` declared `(i32,i32)` but its body treats the index as
+     i64 → wasmparser refused EVERY module (helpers are omnipresent).
+     Fix: the index is ALWAYS i64; only the slot width differs.
+  2. `list.push` lowered as copy-append with the result dropped — but the
+     oracle MUTATES through the `mut` param (the 100k growth fixture went
+     len=0 and trapped out-of-bounds). Fix: write-back form
+     `var = $push(var, v)`.
+  3. Copy-per-push is quadratic in BYTES — the 100k fixture needs ~40GB
+     and hit the $alloc OOM trap. Fix: amortized growth (in-place while
+     `cap - len >= stride`, else doubled capacity) — the layout's `cap`
+     field earning its seat.
+- **Value semantics by construction**: every List bind/assign deep-copies
+  (`$block_copy`), so a local's block is uniquely its own and in-place
+  growth is unobservable through aliases (the checker already restricts
+  `push` to mut vars). The corpus does NOT yet witness this (the
+  bind-copy mutation stayed green — alias fixtures are still refused), so
+  **tests/alias_semantics.rs is the dedicated referee**: alias → push →
+  len observation vs the interpreter, mutation-verified red/green.
+- **Burn-up**: 27 → **43 / 590**, floor re-pinned 43, zero divergence.
+  ForIn (list + `..`/`..<` ranges), list.len/get/get_or/push/join,
+  ConcatList, list literals all landed.

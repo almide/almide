@@ -95,14 +95,21 @@ const F_ALLOC: u32 = 8;
 const F_INT_TO_STRING: u32 = 9;
 const F_CONCAT: u32 = 10;
 const F_STR_EQ: u32 = 11;
+const F_LIST_GET_8: u32 = 12;
+const F_LIST_GET_4: u32 = 13;
+const F_LIST_PUSH_8: u32 = 14;
+const F_LIST_PUSH_4: u32 = 15;
+const F_LIST_JOIN: u32 = 16;
+const F_BLOCK_COPY: u32 = 17;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 12;
+const F_FN_BASE: u32 = 18;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
 /// 7 (i32)→i32 (alloc); program-function types start after.
 const T_MAIN: u32 = 4;
-const T_FN_BASE: u32 = 8;
+/// (i32,i64)→i32: list_get_8 / list_push_8.
+const T_FN_BASE: u32 = 9;
 /// Immutable i32 global: the line-buffer start (= align16(pool end)).
 const G_LINE_START: u32 = 0;
 /// Mutable i32 global: the bump-allocator head.
@@ -144,6 +151,11 @@ enum SliceTy {
     Option(Scalar),
     /// `Result[ok, err]` — i32 tagged block.
     Result(Scalar, Scalar),
+    /// `List[scalar]` — i32 block; payload = the element array, block len
+    /// = count × stride (stride = the scalar's slot size). No COW is
+    /// needed because in-place mutation (IndexAssign) is refused — every
+    /// list op yields a fresh block, so sharing is unobservable.
+    List(Scalar),
 }
 
 const STR: SliceTy = SliceTy::Scalar(Scalar::Str);
@@ -154,7 +166,7 @@ impl SliceTy {
     fn val_type(self) -> ValType {
         match self {
             SliceTy::Scalar(s) => s.val_type(),
-            SliceTy::Option(_) | SliceTy::Result(..) => ValType::I32,
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::List(_) => ValType::I32,
         }
     }
 }
@@ -181,6 +193,9 @@ fn slice_ty_of(ty: &Ty) -> Option<SliceTy> {
                 (Some(o), Some(e)) => Some(SliceTy::Result(o, e)),
                 _ => None,
             }
+        }
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            scalar_of(&args[0]).map(SliceTy::List)
         }
         _ => None,
     }
@@ -352,10 +367,11 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     types.ty().function([ValType::I32, ValType::I32], [ValType::I32]); // 5: append_bool / concat / str_eq
     types.ty().function([ValType::I64], [ValType::I32]); // 6: itoa / int_to_string
     types.ty().function([ValType::I32], [ValType::I32]); // 7: alloc
+    types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 8: list_get/push (8-byte)
     for (i, info) in table.infos.iter().enumerate() {
         // Refused functions keep a placeholder type — their stub body is
         // `unreachable` and no call site ever targets them.
-        debug_assert_eq!(T_FN_BASE as usize + i, 8 + i);
+        debug_assert_eq!(T_FN_BASE as usize + i, 9 + i);
         if info.refuse.is_some() {
             types.ty().function([], []);
         } else {
@@ -380,6 +396,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     functions.function(6); // F_INT_TO_STRING
     functions.function(5); // F_CONCAT
     functions.function(5); // F_STR_EQ
+    functions.function(8); // F_LIST_GET_8
+    functions.function(8); // F_LIST_GET_4 (idx is ALWAYS i64 — only the slot width differs)
+    functions.function(8); // F_LIST_PUSH_8
+    functions.function(5); // F_LIST_PUSH_4
+    functions.function(5); // F_LIST_JOIN
+    functions.function(7); // F_BLOCK_COPY
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -419,6 +441,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_int_to_string());
     code.function(&emit_concat());
     code.function(&emit_str_eq());
+    code.function(&emit_list_get(Scalar::Int));
+    code.function(&emit_list_get(Scalar::Str));
+    code.function(&emit_list_push(Scalar::Int));
+    code.function(&emit_list_push(Scalar::Str));
+    code.function(&emit_list_join());
+    code.function(&emit_block_copy());
     for l in &lowered {
         match l {
             Ok((f, _)) => {
@@ -490,6 +518,14 @@ fn lower_fn(
         (base, base + 1, base + 2, base + 3);
     local_decls.push((3, ValType::I32)); // cursor, tmp, scr_i32
     local_decls.push((1, ValType::I64)); // scr_i64
+    // Hold pools: stack-disciplined scratch for constructs that must keep
+    // an address/counter live ACROSS sub-expression lowering (list
+    // literals, index bases, for-in state). Depth beyond the pool is an
+    // honest unsup, never a corruption.
+    let hold_i32_base = base + 4;
+    let hold_i64_base = base + 4 + HOLD_I32_POOL;
+    local_decls.push((HOLD_I32_POOL, ValType::I32));
+    local_decls.push((HOLD_I64_POOL, ValType::I64));
 
     let mut f = Function::new(local_decls);
     let mut calls: HashSet<String> = HashSet::new();
@@ -504,11 +540,18 @@ fn lower_fn(
             tmp_i32_local,
             scr_i32_local,
             scr_i64_local,
+            hold_i32_base,
+            hold_i32_depth: 0,
+            hold_i64_base,
+            hold_i64_depth: 0,
             f: &mut f,
         };
         for tl in top_lets {
             let (idx, declared) = em.locals[&tl.var];
             em.lower(&tl.value, Some(declared))?;
+            if matches!(declared, SliceTy::List(_)) {
+                em.f.instructions().call(F_BLOCK_COPY);
+            }
             em.f.instructions().local_set(idx);
         }
         match ret {
@@ -754,6 +797,135 @@ fn emit_str_eq() -> Function {
     f
 }
 
+/// `$list_get_{8,4}(list: i32, idx: i64) -> i32`: `list.get` — a fresh
+/// `some` block holding element `idx`, or NULL_ADDR when out of bounds.
+fn emit_list_get(s: Scalar) -> Function {
+    // params: 0=list i32, 1=idx i64; locals: 2=base i32
+    let (list, idx, base) = (0u32, 1u32, 2u32);
+    let stride = s.slot_size();
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    // out of bounds (idx < 0 or idx >= count) → none
+    i.local_get(idx).i64_const(0).i64_lt_s();
+    i.local_get(idx);
+    i.local_get(list).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
+    i.i64_extend_i32_u().i64_ge_s();
+    i.i32_or().if_(BlockType::Empty);
+    i.i32_const(almide_layout::NULL_ADDR as i32).return_();
+    i.end();
+    // some(element)
+    i.i32_const(stride as i32).call(F_ALLOC).local_set(base);
+    i.local_get(base);
+    i.local_get(list).i64_extend_i32_u().local_get(idx).i64_const(i64::from(stride)).i64_mul().i64_add().i32_wrap_i64();
+    match s {
+        Scalar::Int => i.i64_load(slot_memarg(almide_layout::OPTION_FIELD)),
+        _ => i.i32_load(slot_memarg(almide_layout::OPTION_FIELD)),
+    };
+    match s {
+        Scalar::Int => i.i64_store(slot_memarg(almide_layout::OPTION_FIELD)),
+        _ => i.i32_store(slot_memarg(almide_layout::OPTION_FIELD)),
+    };
+    i.local_get(base);
+    i.end();
+    f
+}
+
+/// `$list_push_{8,4}(list: i32, v) -> i32`: append with AMORTIZED growth.
+/// In-place when `cap - len >= stride` (sound because every List bind/
+/// assign deep-copies — a local's block is uniquely its own, and the
+/// checker only lets `push` target mut vars); otherwise a fresh block
+/// with doubled capacity. Returns the (possibly new) base for write-back.
+fn emit_list_push(s: Scalar) -> Function {
+    // params: 0=list i32, 1=v; locals: 2=la i32, 3=cap i32, 4=base i32
+    let (list, v, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let stride = s.slot_size();
+    let payload = almide_layout::PAYLOAD as i32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(list).i32_load(len_memarg()).local_set(la);
+    i.local_get(list).i32_load(word(almide_layout::CAP.offset)).local_set(cap);
+    // fast path: room in cap → store at len, bump len, return same block
+    i.local_get(cap).local_get(la).i32_sub().i32_const(stride as i32).i32_ge_u().if_(BlockType::Empty);
+    i.local_get(list).local_get(la).i32_add();
+    i.local_get(v);
+    match s {
+        Scalar::Int => i.i64_store(slot_memarg(0)),
+        _ => i.i32_store(slot_memarg(0)),
+    };
+    i.local_get(list).local_get(la).i32_const(stride as i32).i32_add().i32_store(word(almide_layout::LEN.offset));
+    i.local_get(list).return_();
+    i.end();
+    // grow: newcap = max(cap * 2, 4 * stride)
+    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    i.local_get(cap).i32_const((4 * stride) as i32).i32_lt_u().if_(BlockType::Empty);
+    i.i32_const((4 * stride) as i32).local_set(cap);
+    i.end();
+    i.local_get(cap).call(F_ALLOC).local_set(base); // len = cap = newcap for now
+    i.local_get(base).i32_const(payload).i32_add();
+    i.local_get(list).i32_const(payload).i32_add();
+    i.local_get(la);
+    i.memory_copy(0, 0);
+    i.local_get(base).local_get(la).i32_add();
+    i.local_get(v);
+    match s {
+        Scalar::Int => i.i64_store(slot_memarg(0)),
+        _ => i.i32_store(slot_memarg(0)),
+    };
+    // live len = old len + stride (cap field keeps newcap from $alloc)
+    i.local_get(base).local_get(la).i32_const(stride as i32).i32_add().i32_store(word(almide_layout::LEN.offset));
+    i.local_get(base);
+    i.end();
+    f
+}
+
+/// `$block_copy(src: i32) -> i32`: a fresh block with src's live bytes —
+/// the deep copy behind List value semantics at every bind/assign.
+fn emit_block_copy() -> Function {
+    // params: 0=src i32; locals: 1=len i32, 2=base i32
+    let (src, len, base) = (0u32, 1u32, 2u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(src).i32_load(len_memarg()).local_set(len);
+    i.local_get(len).call(F_ALLOC).local_set(base);
+    i.local_get(base).i32_const(payload).i32_add();
+    i.local_get(src).i32_const(payload).i32_add();
+    i.local_get(len);
+    i.memory_copy(0, 0);
+    i.local_get(base);
+    i.end();
+    f
+}
+
+/// `$list_join(list: i32, sep: i32) -> i32`: join a List[String]'s blocks
+/// with `sep` — repeated `$concat` (quadratic, fine for fixture scale).
+fn emit_list_join() -> Function {
+    // params: 0=list i32, 1=sep i32; locals: 2=n i32, 3=i i32, 4=acc i32
+    let (list, sep, n, idx, acc) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(list).i32_load(len_memarg()).i32_const(4).i32_div_u().local_set(n);
+    i.i32_const(0).call(F_ALLOC).local_set(acc); // ""
+    i.i32_const(0).local_set(idx);
+    i.loop_(BlockType::Empty);
+    i.local_get(idx).local_get(n).i32_ge_u().if_(BlockType::Empty);
+    i.local_get(acc).return_();
+    i.end();
+    i.local_get(idx).i32_const(0).i32_ne().if_(BlockType::Empty);
+    i.local_get(acc).local_get(sep).call(F_CONCAT).local_set(acc);
+    i.end();
+    i.local_get(acc);
+    i.local_get(list).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0));
+    i.call(F_CONCAT).local_set(acc);
+    i.local_get(idx).i32_const(1).i32_add().local_set(idx);
+    i.br(0);
+    i.end();
+    i.unreachable();
+    i.end();
+    f
+}
+
 // ── pre-pass: Binds → locals ────────────────────────────────────────────
 
 /// Collect every Bind the lowering traversal can reach, in first-bind
@@ -786,6 +958,43 @@ fn collect_binds(
                 collect_binds_stmt(s, out, seen)?;
             }
             Ok(())
+        }
+        IrExprKind::ForIn { var, iterable, body, .. } => {
+            // The loop variable is a local; its type comes from the
+            // iterable's checker annotation (Range iterates Int).
+            let var_ty = if matches!(iterable.kind, IrExprKind::Range { .. }) {
+                Some(INT)
+            } else {
+                match slice_ty_of(&iterable.ty) {
+                    Some(SliceTy::List(s)) => Some(SliceTy::Scalar(s)),
+                    _ => None,
+                }
+            };
+            let Some(var_ty) = var_ty else {
+                return unsup(&format!("forin-iter-ty:{}", ty_name(&iterable.ty)));
+            };
+            if seen.insert(*var) {
+                out.push((*var, var_ty));
+            }
+            collect_binds(iterable, out, seen)?;
+            for s in body {
+                collect_binds_stmt(s, out, seen)?;
+            }
+            Ok(())
+        }
+        IrExprKind::List { elements } => {
+            for el in elements {
+                collect_binds(el, out, seen)?;
+            }
+            Ok(())
+        }
+        IrExprKind::IndexAccess { object, index } => {
+            collect_binds(object, out, seen)?;
+            collect_binds(index, out, seen)
+        }
+        IrExprKind::Range { start, end, .. } => {
+            collect_binds(start, out, seen)?;
+            collect_binds(end, out, seen)
         }
         IrExprKind::Match { subject, arms } => {
             collect_binds(subject, out, seen)?;
@@ -889,10 +1098,44 @@ struct Emitter<'a> {
     /// before any nested match/unwrap in a SELECTED arm's body runs.
     scr_i32_local: u32,
     scr_i64_local: u32,
+    hold_i32_base: u32,
+    hold_i32_depth: u32,
+    hold_i64_base: u32,
+    hold_i64_depth: u32,
     f: &'a mut Function,
 }
 
+/// Hold-pool sizes: nesting deeper than this is refused, never corrupted.
+const HOLD_I32_POOL: u32 = 8;
+const HOLD_I64_POOL: u32 = 4;
+
 impl Emitter<'_> {
+    fn hold_i32(&mut self) -> Result<u32, EmitError> {
+        if self.hold_i32_depth >= HOLD_I32_POOL {
+            return unsup("hold-depth-i32");
+        }
+        let idx = self.hold_i32_base + self.hold_i32_depth;
+        self.hold_i32_depth += 1;
+        Ok(idx)
+    }
+
+    fn release_i32(&mut self) {
+        self.hold_i32_depth -= 1;
+    }
+
+    fn hold_i64(&mut self) -> Result<u32, EmitError> {
+        if self.hold_i64_depth >= HOLD_I64_POOL {
+            return unsup("hold-depth-i64");
+        }
+        let idx = self.hold_i64_base + self.hold_i64_depth;
+        self.hold_i64_depth += 1;
+        Ok(idx)
+    }
+
+    fn release_i64(&mut self) {
+        self.hold_i64_depth -= 1;
+    }
+
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
     fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
         match &e.kind {
@@ -937,6 +1180,96 @@ impl Emitter<'_> {
                 Ok(())
             }
             IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
+            // for x in <list> / for i in a..b
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                if var_tuple.is_some() {
+                    return unsup("forin-tuple");
+                }
+                let Some(&(var_idx, var_ty)) = self.locals.get(var) else {
+                    return unsup("bind:unmapped");
+                };
+                if let IrExprKind::Range { start, end, inclusive } = &iterable.kind {
+                    // Range: var runs start..end directly, no list at all.
+                    if var_ty != INT {
+                        return unsup("forin-range-nonint");
+                    }
+                    self.lower(start, Some(INT))?;
+                    self.f.instructions().local_set(var_idx);
+                    self.lower(end, Some(INT))?;
+                    let stop = self.hold_i64()?;
+                    self.f.instructions().local_set(stop);
+                    self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                    self.f.instructions().local_get(var_idx).local_get(stop);
+                    if *inclusive {
+                        self.f.instructions().i64_gt_s();
+                    } else {
+                        self.f.instructions().i64_ge_s();
+                    }
+                    self.f.instructions().br_if(1);
+                    for st in body {
+                        self.lower_stmt(st)?;
+                    }
+                    self.f
+                        .instructions()
+                        .local_get(var_idx)
+                        .i64_const(1)
+                        .i64_add()
+                        .local_set(var_idx)
+                        .br(0)
+                        .end()
+                        .end();
+                    self.release_i64();
+                    return Ok(());
+                }
+                let elem = match self.lower(iterable, None)? {
+                    SliceTy::List(s) => s,
+                    other => return unsup(&format!("forin-iter:{other:?}")),
+                };
+                if var_ty != SliceTy::Scalar(elem) {
+                    return unsup("forin-var-ty");
+                }
+                let stride = elem.slot_size();
+                let base = self.hold_i32()?;
+                let count = self.hold_i32()?;
+                let cur = self.hold_i32()?;
+                self.f.instructions().local_set(base);
+                self.f
+                    .instructions()
+                    .local_get(base)
+                    .i32_load(len_memarg())
+                    .i32_const(stride as i32)
+                    .i32_div_u()
+                    .local_set(count)
+                    .i32_const(0)
+                    .local_set(cur);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.f.instructions().local_get(cur).local_get(count).i32_ge_u().br_if(1);
+                self.f
+                    .instructions()
+                    .local_get(base)
+                    .local_get(cur)
+                    .i32_const(stride as i32)
+                    .i32_mul()
+                    .i32_add();
+                self.load_slot(elem, 0);
+                self.f.instructions().local_set(var_idx);
+                for st in body {
+                    self.lower_stmt(st)?;
+                }
+                self.f
+                    .instructions()
+                    .local_get(cur)
+                    .i32_const(1)
+                    .i32_add()
+                    .local_set(cur)
+                    .br(0)
+                    .end()
+                    .end();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(())
+            }
             IrExprKind::Unit => Ok(()),
             other => unsup(&format!("expr:{}", expr_kind_name(other))),
         }
@@ -949,6 +1282,11 @@ impl Emitter<'_> {
                     return unsup("bind:unmapped");
                 };
                 self.lower(value, Some(declared))?;
+                // List value semantics: every bind owns a fresh block, so
+                // in-place push growth can never be observed via aliases.
+                if matches!(declared, SliceTy::List(_)) {
+                    self.f.instructions().call(F_BLOCK_COPY);
+                }
                 self.f.instructions().local_set(idx);
                 Ok(())
             }
@@ -957,6 +1295,9 @@ impl Emitter<'_> {
                     return unsup("assign:unmapped");
                 };
                 self.lower(value, Some(declared))?;
+                if matches!(declared, SliceTy::List(_)) {
+                    self.f.instructions().call(F_BLOCK_COPY);
+                }
                 self.f.instructions().local_set(idx);
                 Ok(())
             }
@@ -1010,10 +1351,104 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_INT_TO_STRING);
                 Ok(Some(STR))
             }
+            CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
+                self.lower_list_call(func.as_str(), args)
+            }
             CallTarget::Module { module, func, .. } => {
                 unsup(&format!("call:{}.{}", module.as_str(), func.as_str()))
             }
             _ => unsup("call:computed-or-method"),
+        }
+    }
+
+    /// `list.*` special forms over the runtime helpers.
+    fn lower_list_call(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
+            ("len", [xs]) => {
+                let elem = match self.lower(xs, None)? {
+                    SliceTy::List(s) => s,
+                    other => return unsup(&format!("list-len-of:{other:?}")),
+                };
+                self.f
+                    .instructions()
+                    .i32_load(len_memarg())
+                    .i32_const(elem.slot_size() as i32)
+                    .i32_div_u()
+                    .i64_extend_i32_u();
+                Ok(Some(INT))
+            }
+            ("get", [xs, idx]) => {
+                let elem = match self.lower(xs, None)? {
+                    SliceTy::List(s) => s,
+                    other => return unsup(&format!("list-get-of:{other:?}")),
+                };
+                self.lower(idx, Some(INT))?;
+                let helper = match elem.slot_size() {
+                    8 => F_LIST_GET_8,
+                    _ => F_LIST_GET_4,
+                };
+                self.f.instructions().call(helper);
+                Ok(Some(SliceTy::Option(elem)))
+            }
+            ("get_or", [xs, idx, default]) => {
+                // (xs.get(idx)) ?? default, inlined via the get helper.
+                let elem = match self.lower(xs, None)? {
+                    SliceTy::List(s) => s,
+                    other => return unsup(&format!("list-get-of:{other:?}")),
+                };
+                self.lower(idx, Some(INT))?;
+                let helper = match elem.slot_size() {
+                    8 => F_LIST_GET_8,
+                    _ => F_LIST_GET_4,
+                };
+                self.f
+                    .instructions()
+                    .call(helper)
+                    .local_tee(self.scr_i32_local)
+                    .i32_eqz()
+                    .if_(BlockType::Result(elem.val_type()));
+                self.lower(default, Some(SliceTy::Scalar(elem)))?;
+                self.f.instructions().else_().local_get(self.scr_i32_local);
+                self.load_slot(elem, almide_layout::OPTION_FIELD);
+                self.f.instructions().end();
+                Ok(Some(SliceTy::Scalar(elem)))
+            }
+            // `list.push` MUTATES through its `mut` param on the oracle
+            // (the growth fixture pushes as bare statements). Lowered as a
+            // write-back: var = $push(var, v). Requires a plain var arg.
+            ("push", [xs, v]) => {
+                let IrExprKind::Var { id } = &xs.kind else {
+                    return unsup("list-push-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                let SliceTy::List(elem) = var_ty else {
+                    return unsup(&format!("list-push-of:{var_ty:?}"));
+                };
+                self.f.instructions().local_get(var_idx);
+                self.lower(v, Some(SliceTy::Scalar(elem)))?;
+                let helper = match elem.slot_size() {
+                    8 => F_LIST_PUSH_8,
+                    _ => F_LIST_PUSH_4,
+                };
+                self.f.instructions().call(helper).local_set(var_idx);
+                Ok(None)
+            }
+            ("join", [xs, sep]) => {
+                match self.lower(xs, None)? {
+                    SliceTy::List(Scalar::Str) => {}
+                    other => return unsup(&format!("list-join-of:{other:?}")),
+                }
+                self.lower(sep, Some(STR))?;
+                self.f.instructions().call(F_LIST_JOIN);
+                Ok(Some(STR))
+            }
+            _ => unsup(&format!("call:list.{func}")),
         }
     }
 
@@ -1145,7 +1580,7 @@ impl Emitter<'_> {
                 self.lower(cond, Some(BOOL))?;
                 let ty = match want {
                     Some(w) => w,
-                    None => self.infer(then).or_else(|_| self.infer(else_))?,
+                    None => self.infer(e)?,
                 };
                 self.f.instructions().if_(BlockType::Result(ty.val_type()));
                 self.lower(then, Some(ty))?;
@@ -1157,28 +1592,23 @@ impl Emitter<'_> {
             IrExprKind::Match { subject, arms } => {
                 let ty = match want {
                     Some(w) => w,
-                    None => self.infer_arms(arms)?,
+                    None => self.infer(e)?,
                 };
                 self.lower_match(subject, arms, Some(ty))?;
                 ty
             }
             // Sum constructors — `none`/`ok`/`err` REQUIRE the hint.
-            IrExprKind::OptionNone => match want {
-                Some(SliceTy::Option(s)) => {
+            IrExprKind::OptionNone => match want.map_or_else(|| self.infer(e), Ok)? {
+                SliceTy::Option(s) => {
                     self.f.instructions().i32_const(almide_layout::NULL_ADDR as i32);
                     SliceTy::Option(s)
                 }
-                Some(other) => return unsup(&format!("ty-mismatch:none-vs-{other:?}")),
-                None => return unsup("option-none-needs-context"),
+                other => return unsup(&format!("ty-mismatch:none-vs-{other:?}")),
             },
             IrExprKind::OptionSome { expr } => {
-                let s = match want {
-                    Some(SliceTy::Option(s)) => s,
-                    Some(other) => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
-                    None => match self.infer(expr)? {
-                        SliceTy::Scalar(s) => s,
-                        other => return unsup(&format!("option-of:{other:?}")),
-                    },
+                let s = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::Option(s) => s,
+                    other => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
                 };
                 // tmp cannot be clobbered by the inner lowering: nested
                 // allocating constructors would need Option[Option]/
@@ -1195,10 +1625,9 @@ impl Emitter<'_> {
             }
             IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
                 let is_ok = matches!(&e.kind, IrExprKind::ResultOk { .. });
-                let (o, er) = match want {
-                    Some(SliceTy::Result(o, er)) => (o, er),
-                    Some(other) => return unsup(&format!("ty-mismatch:result-vs-{other:?}")),
-                    None => return unsup("result-needs-context"),
+                let (o, er) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::Result(o, er) => (o, er),
+                    other => return unsup(&format!("ty-mismatch:result-vs-{other:?}")),
                 };
                 let side = if is_ok { o } else { er };
                 self.f
@@ -1282,6 +1711,58 @@ impl Emitter<'_> {
                 }
                 other => return unsup(&format!("unwrap-or-of:{other:?}")),
             },
+            // List literal: alloc, then store each element through a hold
+            // local (kept live across element lowering — the pool makes
+            // nesting safe by construction).
+            IrExprKind::List { elements } => {
+                let elem = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::List(s) => s,
+                    other => return unsup(&format!("ty-mismatch:list-vs-{other:?}")),
+                };
+                let stride = elem.slot_size();
+                let hold = self.hold_i32()?;
+                self.f
+                    .instructions()
+                    .i32_const((elements.len() as u32 * stride) as i32)
+                    .call(F_ALLOC)
+                    .local_set(hold);
+                for (i, el) in elements.iter().enumerate() {
+                    self.f.instructions().local_get(hold);
+                    self.lower(el, Some(SliceTy::Scalar(elem)))?;
+                    self.store_slot(elem, i as u32 * stride);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                SliceTy::List(elem)
+            }
+            // xs[i]: bounds-checked element load. Out of bounds aborts on
+            // the oracle — the trap lands in the abort-parity bucket.
+            IrExprKind::IndexAccess { object, index } => {
+                let elem = match self.lower(object, None)? {
+                    SliceTy::List(s) => s,
+                    other => return unsup(&format!("index-of:{other:?}")),
+                };
+                let stride = elem.slot_size();
+                let hold = self.hold_i32()?;
+                self.f.instructions().local_set(hold);
+                self.lower(index, Some(INT))?;
+                let idx = self.hold_i64()?;
+                self.f.instructions().local_tee(idx);
+                // idx < 0 || idx >= count → trap
+                let mut i = self.f.instructions();
+                i.i64_const(0).i64_lt_s();
+                i.local_get(idx);
+                i.local_get(hold).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
+                i.i64_extend_i32_u().i64_ge_s();
+                i.i32_or().if_(BlockType::Empty).unreachable().end();
+                // element address: hold + idx*stride, slot at offset PAYLOAD
+                i.local_get(hold);
+                i.local_get(idx).i32_wrap_i64().i32_const(stride as i32).i32_mul().i32_add();
+                self.load_slot(elem, 0);
+                self.release_i64();
+                self.release_i32();
+                SliceTy::Scalar(elem)
+            }
             other => return unsup(&format!("expr:{}", expr_kind_name(other))),
         };
         if let Some(w) = want
@@ -1510,88 +1991,16 @@ impl Emitter<'_> {
 
     // ── inference (non-emitting) ────────────────────────────────────────
 
-    /// Non-emitting slice-type inference — used where wasm needs a block
-    /// type before the arm is lowered. Must agree with `lower`; a
-    /// disagreement surfaces as a lowering unsup, never a bad module.
+    /// Non-emitting slice-type resolution — used where wasm needs a block
+    /// type before an arm is lowered. Reads the CHECKER's annotation
+    /// (`IrExpr.ty`), the authoritative type on every node; an unmappable
+    /// annotation is an honest reason, and `lower`'s own result is still
+    /// verified against the hint afterwards (defense in depth).
     fn infer(&self, e: &IrExpr) -> Result<SliceTy, EmitError> {
-        match &e.kind {
-            IrExprKind::LitInt { .. } => Ok(INT),
-            IrExprKind::LitBool { .. } => Ok(BOOL),
-            IrExprKind::LitStr { .. } => Ok(STR),
-            IrExprKind::Var { id } => match self.locals.get(id) {
-                Some(&(_, ty)) => Ok(ty),
-                None => unsup("var:unmapped"),
-            },
-            IrExprKind::UnOp { op, .. } => match op {
-                UnOp::NegInt => Ok(INT),
-                UnOp::Not => Ok(BOOL),
-                UnOp::NegFloat => unsup("unop:NegFloat"),
-            },
-            IrExprKind::BinOp { op, .. } => match op.result_ty().as_ref().and_then(slice_ty_of) {
-                Some(ty) => Ok(ty),
-                None => unsup(&format!("binop:{op:?}")),
-            },
-            IrExprKind::Call { target, .. } => match target {
-                CallTarget::Named { name } => {
-                    let name = name.as_str();
-                    let Some(&i) = self.table.by_name.get(name) else {
-                        return unsup(&format!("call:{name}"));
-                    };
-                    let info = &self.table.infos[i];
-                    if let Some(r) = &info.refuse {
-                        return unsup(&format!("call-fn:{name}:{r}"));
-                    }
-                    match info.ret {
-                        Some(ty) => Ok(ty),
-                        None => unsup("call-unit-in-value"),
-                    }
-                }
-                CallTarget::Module { module, func, .. }
-                    if module.as_str() == "int" && func.as_str() == "to_string" =>
-                {
-                    Ok(STR)
-                }
-                CallTarget::Module { module, func, .. } => {
-                    unsup(&format!("call:{}.{}", module.as_str(), func.as_str()))
-                }
-                _ => unsup("call:computed-or-method"),
-            },
-            IrExprKind::If { then, else_, .. } => {
-                self.infer(then).or_else(|_| self.infer(else_))
-            }
-            IrExprKind::Block { expr, .. } => match expr {
-                Some(tail) => self.infer(tail),
-                None => unsup("expr:Block-no-tail"),
-            },
-            IrExprKind::Match { arms, .. } => self.infer_arms(arms),
-            IrExprKind::OptionSome { expr } => match self.infer(expr)? {
-                SliceTy::Scalar(s) => Ok(SliceTy::Option(s)),
-                other => unsup(&format!("option-of:{other:?}")),
-            },
-            IrExprKind::OptionNone => unsup("option-none-needs-context"),
-            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => {
-                unsup("result-needs-context")
-            }
-            IrExprKind::Unwrap { expr } => match self.infer(expr)? {
-                SliceTy::Option(s) => Ok(SliceTy::Scalar(s)),
-                SliceTy::Result(o, _) => Ok(SliceTy::Scalar(o)),
-                other => unsup(&format!("unwrap-of:{other:?}")),
-            },
-            IrExprKind::UnwrapOr { fallback, .. } => self.infer(fallback),
-            other => unsup(&format!("expr:{}", expr_kind_name(other))),
+        match slice_ty_of(&e.ty) {
+            Some(t) => Ok(t),
+            None => unsup(&format!("infer-ty:{}", ty_name(&e.ty))),
         }
-    }
-
-    /// First inferable arm body wins (arms share one type by checking).
-    fn infer_arms(&self, arms: &[IrMatchArm]) -> Result<SliceTy, EmitError> {
-        let mut last = unsup("match:no-arms");
-        for arm in arms {
-            match self.infer(&arm.body) {
-                Ok(t) => return Ok(t),
-                e @ Err(_) => last = e,
-            }
-        }
-        last
     }
 
     fn lower_binop(
@@ -1643,7 +2052,10 @@ impl Emitter<'_> {
                     BOOL => {
                         self.f.instructions().i32_eq();
                     }
-                    STR => {
+                    // Block byte-equality: strings, and lists of ints/
+                    // bools (their bytes ARE their values). List[String]
+                    // holds addresses — identity is NOT equality: refuse.
+                    STR | SliceTy::List(Scalar::Int) | SliceTy::List(Scalar::Bool) => {
                         self.f.instructions().call(F_STR_EQ);
                     }
                     other => return unsup(&format!("binop:eq-{other:?}")),
@@ -1675,6 +2087,17 @@ impl Emitter<'_> {
                 self.lower(right, Some(STR))?;
                 self.f.instructions().call(F_CONCAT);
                 Ok(STR)
+            }
+            // List ++ List: byte-concat of the element arrays IS element
+            // concat (same stride both sides).
+            ConcatList => {
+                let lt = self.lower(left, None)?;
+                let SliceTy::List(_) = lt else {
+                    return unsup(&format!("concat-list-of:{lt:?}"));
+                };
+                self.lower(right, Some(lt))?;
+                self.f.instructions().call(F_CONCAT);
+                Ok(lt)
             }
             other => unsup(&format!("binop:{other:?}")),
         }
