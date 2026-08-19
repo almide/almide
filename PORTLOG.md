@@ -606,3 +606,23 @@ applying = code drift must REFRESH the mutant, never silently retire it
 (roc's discipline). First full run: 5/5 caught, tree clean after.
 New-slice rule going forward: each slice's mutation evidence lands as a
 new patch here in the same PR, so the manual step cannot be forgotten.
+
+---
+
+## V-7 landed: the exercised-surface manifest (requirements matrix) (2026-08-20)
+
+`tests/surface_matrix.rs` + `tests/golden/wasm-exercised-surface.txt`
+(61 constructs): for every fixture the backend can emit, the IR is walked
+and each lowered construct recorded (expr kinds, operators, stdlib
+calls — fixture-local fn/ctor names normalized to `call:user-fn` so the
+manifest carries surface, not noise; patterns; stmt kinds). The golden is
+the committed, reviewed matrix of what the wasm leg CLAIMS to exercise:
+
+- a construct DISAPPEARING is a failure — the silent-regression class
+  the supported-count floor cannot see (rust's `target_policy.rs` shape:
+  declared-vs-tested diff, holes must be named);
+- growth requires a deliberate `ALMIDE_UPDATE_SURFACE=1` regeneration —
+  a reviewed diff, never drift.
+- The refused half of the matrix needs no second registry: the burn-up
+  histogram already names every wall.
+- Mutation-verified in both directions (planted `binop:FakeOp` → red).
