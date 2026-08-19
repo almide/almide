@@ -16,6 +16,7 @@ pub struct EnvKeySnapshot {
     top_lets: std::collections::HashSet<Sym>,
 }
 
+#[derive(Clone)]
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
     pub types: std::collections::HashMap<Sym, Ty>,

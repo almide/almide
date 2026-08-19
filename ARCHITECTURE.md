@@ -182,6 +182,15 @@ the post-check unused-variable warning stage included); 33 purity-skips
 printed, 3 oracle exclusions. The speed numbers are now backed by proven
 behavioral identity on the check path. Details: PORTLOG.md unit 4.**
 
+**Stage 2 tax removal (2026-08-19): a phase probe showed 89% of every check
+was stdlib tax (63% bundled-stdlib re-inference + 25.5% canonicalize/env);
+two parity-adjudicated variants removed both — warm keystroke check is now
+0.62 ms (was 4.42), batch 7.4x cheaper, (g) at 1499x, all three variants
+1,062/1,062 byte-identical to the oracle. Structural (non-port) changes:
+split canonicalize (modules/entry halves; verbatim fn untouched) + three
+Clone derives. Per-decl granularity remains open for the largest files.
+Report: docs/spikes/S4-stage2-tax-removal.md.**
+
 ## 7. Certification trajectory (R1a + R1b)
 
 Aviation-grade (DO-178C-class) is a declared destination, reached from either

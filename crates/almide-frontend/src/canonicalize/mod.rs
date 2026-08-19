@@ -108,3 +108,72 @@ pub fn canonicalize_program<'a>(
     CanonicalizationResult { env, diagnostics }
 }
 
+
+// ── Stage-2 split (greenfield structure-new code; ARCHITECTURE.md §6.5) ──
+//
+// `canonicalize_program` above is the incumbent's, verbatim and untouched.
+// The two functions below split the same work at the module/entry seam so a
+// caller can CACHE the module half per import set (it re-registers every
+// bundled stdlib module — 25% of a per-file check, measured by s4_probe) and
+// run only the entry half per file. Validity domain: entries whose imports
+// are all stdlib modules (an entry with dependency-package imports seeds
+// `dep_root_modules` BEFORE module registration in the verbatim path, which
+// this split does not reproduce). Byte-equivalence over that domain is
+// adjudicated by the 1,062-file oracle parity gate.
+
+/// Module half: builtin protocols + bundled type registration + module
+/// registration — everything that depends only on the resolved module set.
+pub fn canonicalize_modules_env<'a>(
+    modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
+) -> CanonicalizationResult {
+    let mut env = TypeEnv::new();
+    let mut diagnostics = Vec::new();
+    protocols::register_builtin_protocols(&mut env);
+    for module_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+        crate::bundled_sigs::register_bundled_types(module_name, &mut env);
+    }
+    for (name, mod_prog, is_self) in modules {
+        for imp in &mod_prog.imports {
+            if let ast::Decl::Import { path, .. } = imp {
+                if let Some(root) = path.first() {
+                    if root.as_str() != "self"
+                        && !almide_lang::stdlib_info::is_stdlib_module(root.as_str())
+                    {
+                        env.dep_root_modules.insert(*root);
+                    }
+                }
+            }
+        }
+        crate::dialect_check::check_dialect_stamp_in(Some(name), mod_prog, &mut diagnostics);
+        register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
+    }
+    CanonicalizationResult { env, diagnostics }
+}
+
+/// Entry half: the per-file steps (2b–5 of the verbatim path) applied onto a
+/// modules env. Appends its diagnostics in the verbatim order.
+pub fn canonicalize_entry_onto(
+    env: &mut TypeEnv,
+    diagnostics: &mut Vec<Diagnostic>,
+    program: &ast::Program,
+) {
+    for imp in &program.imports {
+        if let ast::Decl::Import { path, .. } = imp {
+            if let Some(root) = path.first() {
+                if root.as_str() != "self"
+                    && !almide_lang::stdlib_info::is_stdlib_module(root.as_str())
+                {
+                    env.dep_root_modules.insert(*root);
+                }
+            }
+        }
+    }
+    crate::dialect_check::check_dialect_stamp(program, diagnostics);
+    let self_name = env.self_module_name.map(|s| s.to_string());
+    let (table, import_diags) = build_import_table(program, self_name.as_deref(), &env.user_modules);
+    env.import_table = table;
+    diagnostics.extend(import_diags);
+    registration::register_decls(env, diagnostics, &program.decls, None);
+    env.failed_fn_names.extend(program.failed_fn_names.iter().cloned());
+    diagnostics.extend(std::mem::take(&mut env.attr_diagnostics));
+}

@@ -71,6 +71,7 @@ pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Int
     Diagnostic::error(msg, hint, ctx)
 }
 
+#[derive(Clone)]
 pub struct Checker {
     pub env: TypeEnv,
     pub type_map: crate::types::TypeMap,

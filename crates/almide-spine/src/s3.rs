@@ -154,3 +154,132 @@ pub fn stdlib_only(program: &almide::ast::Program) -> bool {
         }
     })
 }
+
+/// Stage 2, step 1: the #862 stdlib-module loop re-infers every bundled
+/// stdlib module on every check (63% of per-file cost, measured by s4_probe)
+/// and, for a stdlib-only entry, produces NO output: bundled modules carry
+/// no user file to blame (the incumbent's own words — "compiled in and
+/// CI-gated"), so `infer_module_capturing` pushes nothing, and any checker
+/// mutations it makes come AFTER the entry's diagnostics are already taken.
+/// The one remaining coupling candidate is the unused-var pass reading
+/// `env`/`type_map` after the loop — which is exactly what the 1,062-file
+/// parity manifest adjudicates. This query is v1 minus that loop; adopting
+/// it requires the full parity gate to stay green.
+#[salsa::tracked]
+pub fn check_file_json_v2(db: &dyn salsa::Database, file: SourceFile) -> CheckOutput {
+    FILE_CHECK_EXECUTIONS.fetch_add(1, Ordering::Relaxed);
+    let path = file.path(db).clone();
+    let source_text = file.text(db).clone();
+
+    let tokens = almide::lexer::Lexer::tokenize(&source_text);
+    let mut parser = almide::parser::Parser::new(tokens).with_file(&path);
+    let parsed = parser.parse().ok();
+    let parse_errors = std::mem::take(&mut parser.errors);
+    let Some(mut program) = parsed else {
+        let diags = parse_errors.iter().map(almide::diagnostic_render::to_json).collect();
+        return CheckOutput { fatal: None, diags, module_diags: Vec::new() };
+    };
+
+    let resolved = match almide::resolve::resolve_imports_with_deps(&path, &program, &[]) {
+        Ok(r) => r,
+        Err(e) => {
+            return CheckOutput { fatal: Some(e), diags: Vec::new(), module_diags: Vec::new() };
+        }
+    };
+
+    let canon = almide::canonicalize::canonicalize_program(
+        &program,
+        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+    );
+    let mut checker = almide::check::Checker::from_env(canon.env);
+    checker.set_source(&path, &source_text);
+    checker.diagnostics = canon.diagnostics;
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
+    let diagnostics = checker.infer_program(&mut program);
+
+    let mut diags: Vec<String> = Vec::new();
+    for d in parse_errors.iter().chain(diagnostics.iter()) {
+        diags.push(almide::diagnostic_render::to_json(d));
+    }
+    let has_type_errors = diagnostics.iter().any(|d| d.level == almide::diagnostic::Level::Error);
+    if parse_errors.is_empty() && !has_type_errors {
+        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        for d in &almide::ir::collect_unused_var_warnings(&ir, &path) {
+            diags.push(almide::diagnostic_render::to_json(d));
+        }
+    }
+    CheckOutput { fatal: None, diags, module_diags: Vec::new() }
+}
+
+/// Stage 2, step 2: per-import-set env template. The module half of
+/// canonicalization plus `Checker::from_env` + `refresh_module_toplets`
+/// depends only on the resolved module set (constant bundled sources), so it
+/// is computed once per distinct module list and CLONED per file check —
+/// removing the second tax layer (canon 25.5% of per-file cost, s4_probe).
+/// Cache legitimacy: a pure function of embedded constants + the module
+/// list; the salsa dependency edges still flow through the file's text via
+/// resolve. Byte-equivalence adjudicated by the oracle parity gate.
+static TEMPLATE_CACHE: std::sync::Mutex<
+    Option<std::collections::HashMap<String, std::sync::Arc<(almide::check::Checker, Vec<Diagnostic>)>>>,
+> = std::sync::Mutex::new(None);
+
+#[salsa::tracked]
+pub fn check_file_json_v3(db: &dyn salsa::Database, file: SourceFile) -> CheckOutput {
+    FILE_CHECK_EXECUTIONS.fetch_add(1, Ordering::Relaxed);
+    let path = file.path(db).clone();
+    let source_text = file.text(db).clone();
+
+    let tokens = almide::lexer::Lexer::tokenize(&source_text);
+    let mut parser = almide::parser::Parser::new(tokens).with_file(&path);
+    let parsed = parser.parse().ok();
+    let parse_errors = std::mem::take(&mut parser.errors);
+    let Some(mut program) = parsed else {
+        let diags = parse_errors.iter().map(almide::diagnostic_render::to_json).collect();
+        return CheckOutput { fatal: None, diags, module_diags: Vec::new() };
+    };
+
+    let resolved = match almide::resolve::resolve_imports_with_deps(&path, &program, &[]) {
+        Ok(r) => r,
+        Err(e) => {
+            return CheckOutput { fatal: Some(e), diags: Vec::new(), module_diags: Vec::new() };
+        }
+    };
+
+    let key: String = resolved.modules.iter().map(|(n, _, _, _)| n.as_str()).collect::<Vec<_>>().join(",");
+    let template = {
+        let mut guard = TEMPLATE_CACHE.lock().unwrap();
+        let map = guard.get_or_insert_with(Default::default);
+        if let Some(t) = map.get(&key) {
+            t.clone()
+        } else {
+            let canon = almide::canonicalize::canonicalize_modules_env(
+                resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+            );
+            let mut checker = almide::check::Checker::from_env(canon.env);
+            almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
+            let t = std::sync::Arc::new((checker, canon.diagnostics));
+            map.insert(key.clone(), t.clone());
+            t
+        }
+    };
+
+    let mut checker = template.0.clone();
+    let mut canon_diags = template.1.clone();
+    almide::canonicalize::canonicalize_entry_onto(&mut checker.env, &mut canon_diags, &program);
+    checker.set_source(&path, &source_text);
+    checker.diagnostics = canon_diags;
+    let diagnostics = checker.infer_program(&mut program);
+
+    let mut diags: Vec<String> = Vec::new();
+    for d in parse_errors.iter().chain(diagnostics.iter()) {
+        diags.push(almide::diagnostic_render::to_json(d));
+    }
+    let has_type_errors = diagnostics.iter().any(|d| d.level == almide::diagnostic::Level::Error);
+    if parse_errors.is_empty() && !has_type_errors {
+        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        for d in &almide::ir::collect_unused_var_warnings(&ir, &path) {
+            diags.push(almide::diagnostic_render::to_json(d));
+        }
+    }
+    CheckOutput { fatal: None, diags, module_diags: Vec::new() }
+}

@@ -11,7 +11,7 @@
 //! Purity contract: only stdlib-only-import files qualify (s3.rs); the rest
 //! are counted and reported as excluded, never silently dropped.
 
-use almide_spine::s3::{check_file_json, stdlib_only, FILE_CHECK_EXECUTIONS};
+use almide_spine::s3::{check_file_json_v3 as check_file_json, stdlib_only, FILE_CHECK_EXECUTIONS};
 use almide_spine::{SourceFile, SpineDb};
 use salsa::Setter;
 use std::path::{Path, PathBuf};

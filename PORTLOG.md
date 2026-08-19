@@ -215,8 +215,29 @@ still matches the incumbent golden byte-for-byte; every new capability is
   one of manifest/exclusions, 33 purity-skipped (non-stdlib imports, printed
   not silent), **1,062 compared, 0 divergent**, >900 floor asserted.
   Gate mutation test: one hash flipped → red ✓, restored → green ✓.
-- **Still owed before unit 4 LANDS:** per-decl granularity (S2a shape fused
-  into the real checker — stage 2, structure new), Zig-style incremental
+### Stage 2 (2026-08-19) — structure-new changes, parity-adjudicated
+
+First stage-2 structural edits to ported code (all diff-visible, all judged
+by the 1,062-file oracle manifest staying byte-identical):
+
+- `#[derive(Clone)]` on `Checker` (check/mod.rs), `TypeEnv` (type_env.rs),
+  `Constraint` (check/types.rs) — the whole cascade.
+- New split functions in almide-frontend/canonicalize/mod.rs:
+  `canonicalize_modules_env` (module half) + `canonicalize_entry_onto`
+  (entry half); the verbatim `canonicalize_program` is UNTOUCHED and remains
+  the v1/v2 path. Validity domain (stdlib-only entries) documented at the
+  definitions. These live in a clippy-frozen crate; reviewed by hand.
+- almide-spine s3: `check_file_json_v2` (drops the #862 stdlib loop —
+  measured 63.3% of per-file cost, observably inert for stdlib-only entries)
+  and `check_file_json_v3` (per-import-set env template: module-canonicalize
+  + from_env + refresh computed once, `Checker` cloned per file).
+- Numbers: warm keystroke check 4.42 → **0.62 ms**; batch 6,807 → **924 ms**;
+  (g) 1499x; invalidation exactness unchanged. Full story:
+  docs/spikes/S4-stage2-tax-removal.md.
+
+- **Still owed before unit 4 LANDS:** per-decl granularity for the largest
+  files (median payoff now small — entry inference is 0.25 ms — but
+  whole-file inference still scales with file size), Zig-style incremental
   diagnostic scenarios, E1 wiring (misspellings + recoverable codes).
 
 ### Lint policy change (2026-08-19): two tiers, structural

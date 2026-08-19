@@ -106,3 +106,75 @@ fn spec_corpus_check_matches_oracle_hashes() {
     );
     assert!(compared > 900, "suspiciously few files compared ({compared}) — purity filter too broad?");
 }
+
+/// The stage-2 variant (no #862 stdlib loop) must ALSO match the oracle
+/// byte-for-byte — this is the adjudication that the skipped loop has no
+/// observable effect on stdlib-only entries.
+#[test]
+fn stage2_variant_matches_oracle_hashes() {
+    let root = workspace_root();
+    let golden = root.join("crates/almide-spine/tests/golden");
+    let mut manifest: BTreeMap<String, String> = BTreeMap::new();
+    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).unwrap().lines() {
+        let mut it = l.splitn(3, '\t');
+        let h = it.next().unwrap().to_string();
+        let _rc = it.next().unwrap();
+        manifest.insert(it.next().unwrap().to_string(), h);
+    }
+    let db = almide_spine::SpineDb::default();
+    let mut compared = 0usize;
+    let mut mismatches = Vec::new();
+    for (rel, want) in &manifest {
+        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        let tokens = almide::lexer::Lexer::tokenize(&text);
+        let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
+        match parser.parse() {
+            Ok(prog) if !almide_spine::s3::stdlib_only(&prog) => continue,
+            _ => {}
+        }
+        let file = almide_spine::SourceFile::new(&db, rel.clone(), text);
+        let out = almide_spine::s3::check_file_json_v2(&db, file);
+        if out.fatal.is_some() { continue; }
+        let stdout = if out.diags.is_empty() { String::new() } else { format!("{}\n", out.diags.join("\n")) };
+        if sha(&stdout) != *want { mismatches.push(rel.clone()); }
+        compared += 1;
+    }
+    println!("stage2 parity: {compared} compared");
+    assert!(mismatches.is_empty(), "{} of {compared} diverge without the #862 loop, first: {}", mismatches.len(), mismatches[0]);
+    assert!(compared > 900);
+}
+
+/// v3 (env template + split canonicalize) must also match byte-for-byte.
+#[test]
+fn stage2_v3_template_matches_oracle_hashes() {
+    let root = workspace_root();
+    let golden = root.join("crates/almide-spine/tests/golden");
+    let mut manifest: BTreeMap<String, String> = BTreeMap::new();
+    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).unwrap().lines() {
+        let mut it = l.splitn(3, '\t');
+        let h = it.next().unwrap().to_string();
+        let _rc = it.next().unwrap();
+        manifest.insert(it.next().unwrap().to_string(), h);
+    }
+    let db = almide_spine::SpineDb::default();
+    let mut compared = 0usize;
+    let mut mismatches = Vec::new();
+    for (rel, want) in &manifest {
+        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        let tokens = almide::lexer::Lexer::tokenize(&text);
+        let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
+        match parser.parse() {
+            Ok(prog) if !almide_spine::s3::stdlib_only(&prog) => continue,
+            _ => {}
+        }
+        let file = almide_spine::SourceFile::new(&db, rel.clone(), text);
+        let out = almide_spine::s3::check_file_json_v3(&db, file);
+        if out.fatal.is_some() { continue; }
+        let stdout = if out.diags.is_empty() { String::new() } else { format!("{}\n", out.diags.join("\n")) };
+        if sha(&stdout) != *want { mismatches.push(rel.clone()); }
+        compared += 1;
+    }
+    println!("stage2 v3 parity: {compared} compared");
+    assert!(mismatches.is_empty(), "{} of {compared} diverge with the env template, first: {}", mismatches.len(), mismatches[0]);
+    assert!(compared > 900);
+}
