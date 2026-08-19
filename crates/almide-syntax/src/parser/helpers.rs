@@ -1,0 +1,543 @@
+/// Token helpers: position tracking, lookahead, expect, advance, newline/comment skipping.
+
+use crate::lexer::{Token, TokenType};
+use crate::intern::{Sym, sym};
+use crate::ast::{Span, Stmt};
+use super::Parser;
+
+impl Parser {
+    pub(crate) fn current_span(&self) -> Span {
+        let tok = self.current();
+        Span { line: tok.line, col: tok.col, end_col: tok.end_col }
+    }
+
+    /// `start` widened to the last CONSUMED token's end — same-line only, so a
+    /// multi-line decl keeps its head span and line-anchored fixes stay exact.
+    /// Import decls use it so the E060 deletion span covers `import a.b as c`,
+    /// not just the keyword (#1486).
+    pub(crate) fn span_to_prev_end(&self, start: Span) -> Span {
+        let mut s = start;
+        if self.pos > 0 {
+            let t = &self.tokens[self.pos - 1];
+            if t.line == s.line && t.end_col > s.end_col {
+                s.end_col = t.end_col;
+            }
+        }
+        s
+    }
+
+    pub(crate) fn current(&self) -> &Token {
+        if self.pos < self.tokens.len() {
+            &self.tokens[self.pos]
+        } else if let Some(last) = self.tokens.last() {
+            last
+        } else {
+            static EOF_TOKEN: Token = Token {
+                token_type: TokenType::EOF,
+                value: String::new(),
+                line: 0,
+                col: 0,
+                end_col: 0,
+                raw: None,
+            };
+            &EOF_TOKEN
+        }
+    }
+
+    pub(crate) fn peek_at(&self, offset: usize) -> Option<&Token> {
+        self.tokens.get(self.pos + offset)
+    }
+
+    pub(crate) fn newline_before_current(&self) -> bool {
+        if self.pos == 0 { return false; }
+        self.tokens[self.pos - 1].line < self.current().line
+    }
+
+    /// Peek ahead: current is Ident, next is `.`, then TypeName → module-qualified type.
+    /// True when the current `Ident` heads a module-qualified type name:
+    /// one or more `ident '.'` segments ending in a `TypeName` —
+    /// `binary.Instr`, and the package-submodule form `snaidhm.ttf.CubicBez`
+    /// the drop/repr generators render for cross-package types (#881).
+    pub(crate) fn peek_dot_type_name(&self) -> bool {
+        let mut i = 1;
+        loop {
+            if !self.peek_at(i).map(|t| t.token_type == TokenType::Dot).unwrap_or(false) {
+                return false;
+            }
+            match self.peek_at(i + 1).map(|t| t.token_type) {
+                Some(TokenType::TypeName) => return true,
+                Some(TokenType::Ident) => i += 2,
+                _ => return false,
+            }
+        }
+    }
+
+    pub(crate) fn peek_type_args_call(&self) -> bool {
+        if self.current().token_type != TokenType::LBracket { return false; }
+        let mut depth = 0;
+        let mut i = 0;
+        let mut has_typename = false;
+        loop {
+            let tok = match self.peek_at(i) {
+                Some(t) => t,
+                None => return false,
+            };
+            match tok.token_type {
+                TokenType::LBracket => depth += 1,
+                TokenType::RBracket => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // `<expr>[...]( ` is a *type-args* call (e.g. `parse[Int](s)`)
+                        // ONLY when the brackets actually name a type. Otherwise the
+                        // brackets are a value INDEX and the parens a call on the
+                        // indexed element: `fs[0]()` is `(fs[0])()`, not `fs::<0>()`.
+                        // Without the TypeName gate, `[0]` (an int index) was misread
+                        // as a const-generic type argument, so calling a closure out
+                        // of a list (`fs[0]()`) emitted an invalid bare-name call.
+                        return has_typename
+                            && self.peek_at(i + 1).map(|t| t.token_type == TokenType::LParen).unwrap_or(false);
+                    }
+                }
+                TokenType::TypeName => has_typename = true,
+                TokenType::EOF => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    /// Peek past optional newlines for `{ <name> :` — named record. `<name>` is
+    /// any token `expect_any_name` accepts (ident, TypeName, or a soft keyword),
+    /// so a `Foo { ok: … }` first field enters the record path instead of being
+    /// mis-read as a block. Also matches `{ ...spread }` and `{ }` (all-default).
+    pub(crate) fn peek_named_record(&self) -> bool {
+        let mut i = 0;
+        while self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::Newline) { i += 1; }
+        self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::LBrace)
+            && {
+                let mut j = i + 1;
+                while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
+                // { name: ... } or { ...spread } or { } (empty record with all defaults)
+                (self.peek_at(j).map_or(false, |t| Self::is_name_token(&t.token_type))
+                    && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon))
+                || self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
+                || self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::RBrace)
+            }
+    }
+
+    pub(crate) fn peek_paren_lambda(&self) -> bool {
+        if self.current().token_type != TokenType::LParen { return false; }
+        let mut depth = 1;
+        let mut i = 1;
+        loop {
+            let tok = match self.peek_at(i) {
+                Some(t) => t,
+                None => return false,
+            };
+            match tok.token_type {
+                TokenType::LParen => depth += 1,
+                TokenType::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self.peek_at(i + 1)
+                            .map(|t| t.token_type == TokenType::FatArrow)
+                            .unwrap_or(false);
+                    }
+                }
+                TokenType::EOF => return false,
+                // A token that can NEVER appear in a lambda parameter list
+                // (names, commas, `:` + type syntax only) un-commits the
+                // lookahead. Without this, a guard `if not (a > b)` before a
+                // match arm's `=>` read `(a > b) =>` as a lambda head and
+                // died on the `>` (#1509) — balanced-parens-then-arrow alone
+                // cannot tell a parenthesized guard tail from parameters.
+                TokenType::RAngle | TokenType::LAngle | TokenType::GtEq | TokenType::LtEq
+                | TokenType::EqEq | TokenType::BangEq
+                | TokenType::Plus | TokenType::Minus | TokenType::Star
+                | TokenType::Slash | TokenType::Percent | TokenType::PlusPlus
+                | TokenType::And | TokenType::Or | TokenType::Not
+                | TokenType::PipeArrow | TokenType::QuestionQuestion
+                | TokenType::Int | TokenType::Float | TokenType::String => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    pub(crate) fn check(&self, token_type: TokenType) -> bool {
+        self.current().token_type == token_type
+    }
+
+    pub(crate) fn check_ident(&self, name: &str) -> bool {
+        self.current().token_type == TokenType::Ident && self.current().value == name
+    }
+
+    pub(crate) fn advance(&mut self) -> &Token {
+        let pos = self.pos;
+        if self.pos < self.tokens.len() {
+            match self.tokens[pos].token_type {
+                TokenType::LParen | TokenType::LBracket => self.delim_depth += 1,
+                TokenType::RParen | TokenType::RBracket => {
+                    self.delim_depth = self.delim_depth.saturating_sub(1)
+                }
+                _ => {}
+            }
+            self.pos += 1;
+        }
+        &self.tokens[pos]
+    }
+
+    pub(crate) fn advance_and_get_value(&mut self) -> String {
+        let val = self.current().value.clone();
+        self.advance();
+        val
+    }
+
+    pub(crate) fn advance_and_get_sym(&mut self) -> Sym {
+        let val = sym(&self.current().value);
+        self.advance();
+        val
+    }
+
+    pub(crate) fn expect(&mut self, token_type: TokenType) -> Result<&Token, String> {
+        if !self.check(token_type.clone()) {
+            let tok = self.current();
+            let hint = self.hint_for_expected(&token_type, tok);
+            let mut msg = format!(
+                "Expected {:?} at line {}:{} (got {:?} '{}')",
+                token_type, tok.line, tok.col, tok.token_type, tok.value
+            );
+            if !hint.is_empty() {
+                msg.push_str(&format!("\n  Hint: {}", hint));
+            }
+            return Err(msg);
+        }
+        Ok(self.advance())
+    }
+
+    fn hint_for_expected(&self, expected: &TokenType, got: &Token) -> String {
+        // Targeted cascade hint: when parser expected something else and
+        // ran into a `test` token, the prior decl is likely unclosed (or
+        // the code shouldn't contain a test block at all in harness
+        // contexts). Surface a specific nudge so LLM retries know to
+        // either close the prior decl or remove the test block.
+        if got.token_type == TokenType::Test {
+            return "`test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block is in a context (e.g. harness-submitted code) that doesn't accept one. Remove the test block or close the prior declaration.".to_string();
+        }
+        // Haskell/OCaml/Elm cons pattern `head :: tail` → user typed an
+        // Ident followed by `::` in a match arm. The parser saw `:` where
+        // a `=>` was expected; if the token after is another `:`, that's
+        // almost certainly a cons pattern.
+        if *expected == TokenType::FatArrow
+            && got.token_type == TokenType::Colon
+            && self.peek_at(1).map(|t| t.token_type == TokenType::Colon).unwrap_or(false)
+        {
+            return "`head :: tail` (cons pattern) is Haskell/OCaml/Elm syntax. Almide list patterns use [] / [a, b] literals only. For head/tail recursion, use `list.first(xs)` and `list.drop(xs, 1)` on the non-empty arm.".to_string();
+        }
+        // Rust/OCaml or-pattern `A | B =>` → the parser saw `|` where a `=>`
+        // was expected. One arm per pattern is the Almide form (#1461).
+        if *expected == TokenType::FatArrow && got.token_type == TokenType::Pipe {
+            return "`A | B =>` (or-pattern) is not supported in Almide match arms. Write one arm per pattern — `Red => expr, Green => expr` — extracting a shared body into a helper fn if it is long.".to_string();
+        }
+        // Rust `pat @ name` as-pattern → `@` where a `=>` was expected. Almide
+        // has no as-binding; bind the whole value and destructure inside (#1461).
+        if *expected == TokenType::FatArrow && got.token_type == TokenType::At {
+            return "`pattern @ name` (as-pattern) is not supported in Almide. Bind the whole value with a variable arm (`whole => ...`) and match again inside the body, or destructure what you need there.".to_string();
+        }
+        // Rust/Swift range pattern `1..<5 =>` / `1...5 =>` → a range operator
+        // where a `=>` was expected. Match arms take literals only (#1461).
+        if *expected == TokenType::FatArrow
+            && matches!(got.token_type, TokenType::DotDotLt | TokenType::DotDotDot)
+        {
+            return "range patterns (`1..<5 =>`, `1...5 =>`) are not supported in Almide match arms. Use a guard: `n if n >= 1 and n < 5 => expr`.".to_string();
+        }
+        if let Some(result) = self.check_hint(Some(expected.clone()), super::hints::HintScope::Expression) {
+            result.hint
+        } else {
+            String::new()
+        }
+    }
+
+    pub(crate) fn expect_ident(&mut self) -> Result<Sym, String> {
+        if self.check(TokenType::Ident) {
+            return Ok(self.advance_and_get_sym());
+        }
+        let tok = self.current();
+        let hint = match (&tok.token_type, tok.value.as_str()) {
+            (TokenType::Underscore, _) => "\n  Hint: '_' can only be used in match patterns, not as a variable name.",
+            (TokenType::Test, _) => "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file at all (harness-submitted code).",
+            // A backtick lands here only as a MALFORMED escape — the lexer
+            // declines one enclosing no identifier character (#1457). Binding
+            // position never reaches `unknown_char_error`, so the hint that
+            // names the construct has to be repeated here.
+            (TokenType::Unknown, "`") => "\n  Hint: A backtick escape takes ASCII letters, digits and '_', and cannot be empty. It makes a KEYWORD usable as a name (`type`, `protocol`) — it does not make a non-ASCII name writable.",
+            (TokenType::Unknown, _) => "\n  Hint: This character is not Almide syntax. Full-width or invisible Unicode characters often sneak in from copy-paste — delete it, or move it into a string or comment.",
+            _ => "",
+        };
+        Err(format!(
+            "Expected identifier at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
+        ))
+    }
+
+    pub(crate) fn expect_ident_or_underscore(&mut self) -> Result<Sym, String> {
+        if self.check(TokenType::Ident) {
+            return Ok(self.advance_and_get_sym());
+        }
+        if self.check(TokenType::Underscore) {
+            self.advance();
+            return Ok(sym("_"));
+        }
+        self.expect_ident() // delegate for error message
+    }
+
+    pub(crate) fn expect_type_name(&mut self) -> Result<Sym, String> {
+        if self.check(TokenType::TypeName) {
+            return Ok(self.advance_and_get_sym());
+        }
+        let tok = self.current();
+        let hint = if tok.token_type == TokenType::Ident {
+            "\n  Hint: Type names must start with an uppercase letter, e.g. Int, String, MyType"
+        } else {
+            ""
+        };
+        Err(format!(
+            "Expected type name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
+        ))
+    }
+
+    /// The soft keywords: words the lexer tokenizes as value-constructor
+    /// keywords (`ok`/`err`/`some`/`none`) or the `todo` marker, but which are
+    /// valid NAMEs in field/member position (NOT binding position — a bound
+    /// soft-keyword local could never be read, since in value position the
+    /// lexeme is the constructor again). Single source of truth for that set —
+    /// `is_soft_keyword_name`, `is_name_token`, and the `peek_named_record`
+    /// lookahead all consult it, so adding a soft keyword in one place keeps
+    /// every name position in sync.
+    pub(crate) fn is_soft_keyword_token(tt: &TokenType) -> bool {
+        matches!(
+            tt,
+            TokenType::Ok | TokenType::Err | TokenType::Some | TokenType::None | TokenType::Todo
+        )
+    }
+
+    /// The token kinds accepted in "any name" position (record/struct field,
+    /// member access, field assignment, record-pattern field): a plain
+    /// identifier, a `TypeName` (a capitalized field name is permitted), or a
+    /// soft keyword. `expect_any_name` advances exactly this set and
+    /// `peek_named_record` recognizes a record by the same set, so the lookahead
+    /// can never disagree with what the field loop will go on to accept.
+    pub(crate) fn is_name_token(tt: &TokenType) -> bool {
+        matches!(tt, TokenType::Ident | TokenType::TypeName) || Self::is_soft_keyword_token(tt)
+    }
+
+    /// True if the current token is a soft keyword used here as a NAME — lets
+    /// `{ ok: Bool }`, `r.ok`, `Ack { ok: true }` parse. See `is_soft_keyword_token`.
+    pub(crate) fn is_soft_keyword_name(&self) -> bool {
+        Self::is_soft_keyword_token(&self.current().token_type)
+    }
+
+    pub(crate) fn expect_any_name(&mut self) -> Result<Sym, String> {
+        if Self::is_name_token(&self.current().token_type) {
+            return Ok(self.advance_and_get_sym());
+        }
+        let tok = self.current();
+        let hint: String = match &tok.token_type {
+            TokenType::Int | TokenType::Float | TokenType::String => {
+                "\n  Hint: Expected a name (identifier), not a literal value".into()
+            }
+            TokenType::Test => {
+                "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either a previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file (harness-submitted code).".into()
+            }
+            _ if tok.value == "=" || tok.value == ":" => {
+                "\n  Hint: A name is required before '='. Example: fn my_func() -> Int = ...".into()
+            }
+            _ => String::new(),
+        };
+        Err(format!(
+            "Expected name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
+        ))
+    }
+
+    pub(crate) fn expect_any_fn_name(&mut self) -> Result<Sym, String> {
+        // Convention method: fn Dog.eq(...) → name = "Dog.eq"
+        if self.check(TokenType::TypeName)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
+        {
+            let type_name = self.advance_and_get_value();
+            self.advance(); // skip .
+            let method = if self.check(TokenType::Ident) || self.check(TokenType::Ident) {
+                self.advance_and_get_value()
+            } else {
+                let tok = self.current();
+                return Err(format!("Expected method name after '{}.', got {:?} at line {}:{}", type_name, tok.token_type, tok.line, tok.col));
+            };
+            return Ok(sym(&format!("{}.{}", type_name, method)));
+        }
+        if self.check(TokenType::Ident) || self.check(TokenType::Ident) {
+            return Ok(self.advance_and_get_sym());
+        }
+        let tok = self.current();
+        let hint = if tok.token_type == TokenType::TypeName {
+            "\n  Hint: Function names must start with a lowercase letter. Use camelCase, e.g. fn myFunc()"
+        } else {
+            ""
+        };
+        Err(format!(
+            "Expected function name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
+        ))
+    }
+
+    pub(crate) fn expect_any_param_name(&mut self) -> Result<Sym, String> {
+        if self.check(TokenType::Ident) || self.check(TokenType::Var) {
+            return Ok(self.advance_and_get_sym());
+        }
+        let tok = self.current();
+        let hint = if tok.token_type == TokenType::TypeName {
+            "\n  Hint: Parameter names must start with a lowercase letter. Example: fn greet(name: String)"
+        } else if tok.value == ")" {
+            "\n  Hint: Trailing comma before ')' is not allowed"
+        } else {
+            ""
+        };
+        Err(format!(
+            "Expected parameter name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
+        ))
+    }
+
+    pub(crate) fn expect_closing(&mut self, close: TokenType, open_line: usize, open_col: usize, context: &str) -> Result<&Token, String> {
+        if self.check(close.clone()) { return Ok(self.advance()); }
+        let (tok_line, tok_col) = (self.current().line, self.current().col);
+
+        // Detect bare lambda `c =>` inside a function call — LLMs often write
+        // `list.map(xs, c => ...)` instead of `list.map(xs, (c) => ...)`.
+        if close == TokenType::RParen && self.check(TokenType::FatArrow) {
+            // Walk backwards from the current position to find the bare identifier
+            let msg = "Lambda parameter must be wrapped in parentheses";
+            let hint = "Almide lambdas require parentheses around parameters. Write `(x) => expr` instead of `x => expr`";
+            let diag = self.diag_error(msg, hint, "lambda syntax");
+            self.errors.push(diag);
+            return Err(format!("{} at line {}:{}", msg, tok_line, tok_col));
+        }
+
+        let (close_name, open_name) = match close {
+            TokenType::RParen => ("')'", "'('"),
+            TokenType::RBracket => ("']'", "'['"),
+            TokenType::RBrace => ("'}'", "'{'"),
+            _ => ("closing delimiter", "opening delimiter"),
+        };
+        let msg = format!("Expected {} to close {} opened at line {}:{}", close_name, context, open_line, open_col);
+        let hint = format!("Add {} or check for a missing delimiter inside the {}", close_name, context);
+        let mut diag = self.diag_error(&msg, &hint, "");
+        diag.secondary.push(crate::diagnostic::SecondarySpan {
+            line: open_line, col: Some(open_col),
+            label: format!("{} opened here", open_name),
+        });
+        self.errors.push(diag);
+        Err(format!("{} at line {}:{}", msg, tok_line, tok_col))
+    }
+
+    // ── Newline / comment skipping ────────────────────────────────
+
+    pub(crate) fn skip_newlines(&mut self) {
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+    }
+
+    /// Skip newlines only if the next non-newline token matches `tt`.
+    /// This allows multiline continuation for operators like `|>`.
+    pub(crate) fn skip_newlines_if_followed_by(&mut self, tt: TokenType) {
+        let saved = self.pos;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+        if !self.check(tt) {
+            self.pos = saved; // restore — the newlines are significant
+        }
+    }
+
+    /// Skip newlines if the next non-newline token matches any of the given types.
+    /// Enables multiline expression continuation when a line starts with a binary operator.
+    pub(crate) fn skip_newlines_if_followed_by_any(&mut self, tts: &[TokenType]) {
+        let saved = self.pos;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+        if !tts.iter().any(|tt| self.check(tt.clone())) {
+            self.pos = saved;
+        }
+    }
+
+    /// Skip newlines only when the next line begins a method chain — a `.`
+    /// followed by a NAME. This is the `.`-continuation half of SPEC.md §2.1
+    /// "Line Continuation Rules" (#1091), and it mirrors
+    /// `skip_newlines_if_followed_by_any` for infix operators.
+    ///
+    /// The name test is what keeps the skip unambiguous: `.` followed by an
+    /// integer is a tuple index, so continuing there would silently join
+    /// `let x = 1` and a following `.5` into `1.5`-as-tuple-index instead of
+    /// reporting the stray token. Nothing else in the grammar starts a line
+    /// with a bare `.`, so no other program changes meaning.
+    pub(crate) fn skip_newlines_if_method_chain(&mut self) {
+        let saved = self.pos;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+        let continues = self.check(TokenType::Dot)
+            && self
+                .tokens
+                .get(self.pos + 1)
+                .is_some_and(|t| Self::is_name_token(&t.token_type));
+        if !continues {
+            self.pos = saved; // restore — the newlines are significant
+        }
+    }
+
+    pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<Stmt>) {
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                stmts.push(Stmt::Comment { text: self.current().value.clone() });
+            }
+            self.advance();
+        }
+    }
+
+    /// Skip newlines, returning any comments passed over. Use this instead of
+    /// `skip_newlines` wherever the comment has an owner in the AST — a
+    /// comment is the one artifact the compiler cannot reconstruct, so
+    /// discarding it makes the formatter lossy (#1090).
+    pub(crate) fn skip_newlines_take_comments(&mut self) -> Vec<String> {
+        let mut comments = Vec::new();
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                comments.push(self.current().value.clone());
+            }
+            self.advance();
+        }
+        comments
+    }
+
+    /// Skip newlines and collect comments. Returns (comments, blank_line_count).
+    /// A blank line is detected when 2+ consecutive Newline tokens appear.
+    pub(crate) fn skip_newlines_collect_comments(&mut self) -> (Vec<String>, u32) {
+        let mut comments = Vec::new();
+        let mut consecutive_newlines = 0u32;
+        let mut max_gap = 0u32;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                comments.push(self.current().value.clone());
+                consecutive_newlines = 0;
+            } else {
+                consecutive_newlines += 1;
+                max_gap = max_gap.max(consecutive_newlines);
+            }
+            self.advance();
+        }
+        (comments, max_gap.saturating_sub(1))
+    }
+}

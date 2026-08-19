@@ -1,0 +1,19 @@
+[package]
+name = "almide-base"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Foundation facade: interned Sym + profiling (verbatim), span/diagnostic delegated to almide-diag"
+
+[dependencies]
+almide-diag = { path = "../almide-diag" }
+lasso = { version = "0.7", features = ["multi-threaded"] }
+serde = "1"
+
+# NOT [lints] workspace = true: the workspace forbids unsafe_code, but the
+# verbatim-ported interner carries the one sound unsafe in the foundation —
+# `resolve()` returning `&'static str` from a never-deallocating
+# ThreadedRodeo (src/intern.rs:31). Scoped exemption, recorded in PORTLOG.
+[lints.rust]
+unsafe_code = "allow"
