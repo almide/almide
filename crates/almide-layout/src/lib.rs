@@ -44,8 +44,10 @@ pub const NULL_ADDR: u32 = 0;
 //
 // Option[T]: `none` IS `NULL_ADDR` — no block, no tag. `some(v)` is a block
 // whose payload holds the value slot directly at `OPTION_FIELD`.
-// (Consequence, by design: nested Option cannot be represented and must be
-// refused by any consumer until a tagged Option layout is ratified.)
+// Nesting is representable: `some(none)` is a block whose slot holds
+// NULL_ADDR — distinct from the OUTER `none` (which is no block at all).
+// (An earlier revision of this comment overclaimed unrepresentability;
+// corrected 2026-08-20 when the wasm backend generalized element types.)
 //
 // Result[T, E]: a block with a 4-byte tag at `SUM_TAG` (0 = Ok, 1 = Err)
 // and the value slot at `SUM_FIELD` (8-byte slot, uniform for both sides).

@@ -48,7 +48,7 @@ pub(crate) fn collect_binds(
                 Some(INT)
             } else {
                 match slice_ty_of(&iterable.ty, types) {
-                    Some(SliceTy::List(s)) => Some(SliceTy::Scalar(s)),
+                    Some(SliceTy::List(h)) => Some(types.el(h)),
                     _ => None,
                 }
             };

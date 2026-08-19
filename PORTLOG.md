@@ -639,3 +639,35 @@ line coverage 86.9% → 90.0%, package total 92.8% → 94.0%, never-run
 functions 3 → 2; floor re-pinned 90 → 92. Fixed-range claim rate 84% →
 89%; a 2,000-seed exploration burst on the extended surface found no
 divergence.
+
+---
+
+## Unit 6 — stage 6: interned element types (the nested-Applied slice) (2026-08-20)
+
+The Applied wall's remaining mass was NESTING (List[Named], List[List[Int]],
+Option[composite], Result with composite sides, composite record fields).
+One architecture ends it piecemeal-free: element types are now INTERNED —
+`SliceTy`'s composite payloads hold `ETy` arena handles (dedup on intern,
+so handle equality IS type equality and every existing `==` comparison
+stays exact across arbitrary nesting; the arena lives in the TypeTable
+behind interior mutability so no signature moved). rustc's TyCtxt shape,
+at slice scale.
+
+- List/Option/Result/record-fields are now parametric in ANY slice type;
+  the wasm level only ever cared about slot width (i64 vs i32-word), so
+  the runtime helpers needed zero changes.
+- Byte-equality rule recomputed honestly: `==` stays for Str and lists
+  whose payload bytes ARE values (Int/Bool elements); any address-holding
+  element makes byte-compare an identity test — refused, not faked.
+- Literal patterns inside some()/ok()/err() require scalar slots — the
+  non-scalar case is its own honest reason, not a wrong compare.
+- **Corrected a layout-doc overclaim**: nested Option was ALWAYS
+  representable (`some(none)` = a block holding NULL_ADDR ≠ outer NULL);
+  the comment said otherwise and slice_ty_of's refusal had hidden it.
+  Comment fixed (no constant changed — digest untouched).
+- Mutant 003 drifted in the refactor and was REFRESHED, not retired
+  (the gate doctrine working as designed on its second day).
+- **Burn-up: 50 → 57 / 590**, floor re-pinned 57, zero divergence; fuzz
+  fixed range green. Next walls: bind-ty:Applied ×80 (Map/Set/remaining),
+  Named ×46 (record-shaped variant cases, generics), Bytes ×24,
+  list.map ×20 (closures), Tuple ×17, Float ×16, StringInterp-as-value ×12.

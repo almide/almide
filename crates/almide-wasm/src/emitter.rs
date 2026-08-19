@@ -201,10 +201,10 @@ impl Emitter<'_> {
                     return Ok(());
                 }
                 let elem = match self.lower(iterable, None)? {
-                    SliceTy::List(s) => s,
+                    SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("forin-iter:{other:?}")),
                 };
-                if var_ty != SliceTy::Scalar(elem) {
+                if var_ty != elem {
                     return unsup("forin-var-ty");
                 }
                 let stride = elem.slot_size();
@@ -230,7 +230,7 @@ impl Emitter<'_> {
                     .i32_const(stride as i32)
                     .i32_mul()
                     .i32_add();
-                self.load_slot(elem, 0);
+                self.load_ty_slot(elem, 0);
                 self.f.instructions().local_set(var_idx);
                 for st in body {
                     self.lower_stmt(st)?;
@@ -327,8 +327,8 @@ impl Emitter<'_> {
             // local (kept live across element lowering — the pool makes
             // nesting safe by construction).
             IrExprKind::List { elements } => {
-                let elem = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::List(s) => s,
+                let (hty, elem) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::List(h) => (SliceTy::List(h), self.types.el(h)),
                     other => return unsup(&format!("ty-mismatch:list-vs-{other:?}")),
                 };
                 let stride = elem.slot_size();
@@ -340,18 +340,18 @@ impl Emitter<'_> {
                     .local_set(hold);
                 for (i, el) in elements.iter().enumerate() {
                     self.f.instructions().local_get(hold);
-                    self.lower(el, Some(SliceTy::Scalar(elem)))?;
-                    self.store_slot(elem, i as u32 * stride);
+                    self.lower(el, Some(elem))?;
+                    self.store_ty_slot(elem, i as u32 * stride);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();
-                SliceTy::List(elem)
+                hty
             }
             // xs[i]: bounds-checked element load. Out of bounds aborts on
             // the oracle — the trap lands in the abort-parity bucket.
             IrExprKind::IndexAccess { object, index } => {
                 let elem = match self.lower(object, None)? {
-                    SliceTy::List(s) => s,
+                    SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("index-of:{other:?}")),
                 };
                 let stride = elem.slot_size();
@@ -370,29 +370,13 @@ impl Emitter<'_> {
                 // element address: hold + idx*stride, slot at offset PAYLOAD
                 i.local_get(hold);
                 i.local_get(idx).i32_wrap_i64().i32_const(stride as i32).i32_mul().i32_add();
-                self.load_slot(elem, 0);
+                self.load_ty_slot(elem, 0);
                 self.release_i64();
                 self.release_i32();
-                SliceTy::Scalar(elem)
+                elem
             }            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
         };
         Ok(got)
-    }
-
-    pub(crate) fn store_slot(&mut self, s: Scalar, payload_relative: u32) {
-        let m = slot_memarg(payload_relative);
-        match s {
-            Scalar::Int => self.f.instructions().i64_store(m),
-            Scalar::Bool | Scalar::Str => self.f.instructions().i32_store(m),
-        };
-    }
-
-    pub(crate) fn load_slot(&mut self, s: Scalar, payload_relative: u32) {
-        let m = slot_memarg(payload_relative);
-        match s {
-            Scalar::Int => self.f.instructions().i64_load(m),
-            Scalar::Bool | Scalar::Str => self.f.instructions().i32_load(m),
-        };
     }
 
     pub(crate) fn store_ty_slot(&mut self, t: SliceTy, payload_relative: u32) {
@@ -522,7 +506,19 @@ impl Emitter<'_> {
             BOOL => {
                 self.f.instructions().i32_eq();
             }
-            STR | SliceTy::List(Scalar::Int) | SliceTy::List(Scalar::Bool) => {
+            // Block byte-equality: strings, and lists whose PAYLOAD bytes
+            // ARE the values (Int/Bool elements). Any element that is an
+            // address (Str, lists, sums, records) makes byte-compare an
+            // identity test, not equality: refused.
+            STR => {
+                self.f.instructions().call(F_STR_EQ);
+            }
+            SliceTy::List(h)
+                if matches!(
+                    self.types.el(h),
+                    SliceTy::Scalar(Scalar::Int) | SliceTy::Scalar(Scalar::Bool)
+                ) =>
+            {
                 self.f.instructions().call(F_STR_EQ);
             }
             other => return unsup(&format!("binop:eq-{other:?}")),
@@ -551,8 +547,8 @@ impl Emitter<'_> {
                 other => return unsup(&format!("ty-mismatch:none-vs-{other:?}")),
             },
             IrExprKind::OptionSome { expr } => {
-                let s = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::Option(s) => s,
+                let (hty, s) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::Option(h) => (SliceTy::Option(h), self.types.el(h)),
                     other => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
                 };
                 // The base lives in a HOLD local (stack-disciplined),
@@ -567,19 +563,19 @@ impl Emitter<'_> {
                     .i32_const(s.slot_size() as i32)
                     .call(F_ALLOC)
                     .local_tee(hold);
-                self.lower(expr, Some(SliceTy::Scalar(s)))?;
-                self.store_slot(s, almide_layout::OPTION_FIELD);
+                self.lower(expr, Some(s))?;
+                self.store_ty_slot(s, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
-                SliceTy::Option(s)
+                hty
             }
             IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
                 let is_ok = matches!(&e.kind, IrExprKind::ResultOk { .. });
-                let (o, er) = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::Result(o, er) => (o, er),
+                let (hty, o, er) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::Result(o, er) => (SliceTy::Result(o, er), o, er),
                     other => return unsup(&format!("ty-mismatch:result-vs-{other:?}")),
                 };
-                let side = if is_ok { o } else { er };
+                let side = self.types.el(if is_ok { o } else { er });
                 // Hold-local, not shared tmp — same seed-79 lesson as
                 // OptionSome above.
                 let hold = self.hold_i32()?;
@@ -591,11 +587,11 @@ impl Emitter<'_> {
                     .i32_const(i32::from(!is_ok))
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
                 self.f.instructions().local_get(hold);
-                self.lower(expr, Some(SliceTy::Scalar(side)))?;
-                self.store_slot(side, almide_layout::SUM_FIELD);
+                self.lower(expr, Some(side))?;
+                self.store_ty_slot(side, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
-                SliceTy::Result(o, er)
+                hty
             }
             // `!` — ABORT form only. In a pure fn returning Option/Result
             // the oracle PROPAGATES instead (#1410 family): refuse those.
@@ -604,7 +600,8 @@ impl Emitter<'_> {
                     return unsup("unwrap-propagating");
                 }
                 match self.lower(expr, None)? {
-                    SliceTy::Option(s) => {
+                    SliceTy::Option(h) => {
+                        let et = self.types.el(h);
                         self.f
                             .instructions()
                             .local_tee(self.scr_i32_local)
@@ -613,10 +610,11 @@ impl Emitter<'_> {
                             .unreachable()
                             .end()
                             .local_get(self.scr_i32_local);
-                        self.load_slot(s, almide_layout::OPTION_FIELD);
-                        SliceTy::Scalar(s)
+                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                        et
                     }
                     SliceTy::Result(o, _) => {
+                        let et = self.types.el(o);
                         self.f
                             .instructions()
                             .local_tee(self.scr_i32_local)
@@ -627,8 +625,8 @@ impl Emitter<'_> {
                             .unreachable()
                             .end()
                             .local_get(self.scr_i32_local);
-                        self.load_slot(o, almide_layout::SUM_FIELD);
-                        SliceTy::Scalar(o)
+                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                        et
                     }
                     other => return unsup(&format!("unwrap-of:{other:?}")),
                 }
@@ -637,31 +635,33 @@ impl Emitter<'_> {
             // the scratch, but the branch that reads the scratch is the
             // exclusive other path.
             IrExprKind::UnwrapOr { expr, fallback } => match self.lower(expr, None)? {
-                SliceTy::Option(s) => {
+                SliceTy::Option(h) => {
+                    let et = self.types.el(h);
                     self.f
                         .instructions()
                         .local_tee(self.scr_i32_local)
                         .i32_eqz()
-                        .if_(BlockType::Result(s.val_type()));
-                    self.lower(fallback, Some(SliceTy::Scalar(s)))?;
+                        .if_(BlockType::Result(et.val_type()));
+                    self.lower(fallback, Some(et))?;
                     self.f.instructions().else_().local_get(self.scr_i32_local);
-                    self.load_slot(s, almide_layout::OPTION_FIELD);
+                    self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                     self.f.instructions().end();
-                    SliceTy::Scalar(s)
+                    et
                 }
                 SliceTy::Result(o, _) => {
+                    let et = self.types.el(o);
                     self.f
                         .instructions()
                         .local_tee(self.scr_i32_local)
                         .i32_load(slot_memarg(almide_layout::SUM_TAG))
                         .i32_const(0)
                         .i32_ne()
-                        .if_(BlockType::Result(o.val_type()));
-                    self.lower(fallback, Some(SliceTy::Scalar(o)))?;
+                        .if_(BlockType::Result(et.val_type()));
+                    self.lower(fallback, Some(et))?;
                     self.f.instructions().else_().local_get(self.scr_i32_local);
-                    self.load_slot(o, almide_layout::SUM_FIELD);
+                    self.load_ty_slot(et, almide_layout::SUM_FIELD);
                     self.f.instructions().end();
-                    SliceTy::Scalar(o)
+                    et
                 }
                 other => return unsup(&format!("unwrap-or-of:{other:?}")),
             },

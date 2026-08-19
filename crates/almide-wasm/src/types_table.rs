@@ -1,10 +1,11 @@
 //! User-type table: records and variants resolved to packed layouts.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use almide_ir::{IrProgram, IrTypeDeclKind, IrVariantKind};
 
-use crate::{slice_ty_of, SliceTy};
+use crate::{slice_ty_of, ETy, SliceTy};
 
 // ── user-type table ─────────────────────────────────────────────────────
 
@@ -42,6 +43,29 @@ pub(crate) struct TypeTable {
     pub(crate) defs: Vec<NamedDef>,
     /// Variant constructor name → (type index, case index).
     pub(crate) ctors: HashMap<String, (u32, u32)>,
+    /// Element-type arena (interior mutability so every `&TypeTable`
+    /// signature stays put): dedup on intern makes handles canonical, so
+    /// `ETy` equality IS type equality.
+    arena: RefCell<Vec<SliceTy>>,
+    interned: RefCell<HashMap<SliceTy, ETy>>,
+}
+
+impl TypeTable {
+    pub(crate) fn intern(&self, t: SliceTy) -> ETy {
+        if let Some(&h) = self.interned.borrow().get(&t) {
+            return h;
+        }
+        let mut arena = self.arena.borrow_mut();
+        let h = ETy::from_index(arena.len());
+        arena.push(t);
+        self.interned.borrow_mut().insert(t, h);
+        h
+    }
+
+    /// Resolve an element handle back to its type.
+    pub(crate) fn el(&self, h: ETy) -> SliceTy {
+        self.arena.borrow()[h.index()]
+    }
 }
 
 impl TypeTable {
@@ -50,7 +74,13 @@ impl TypeTable {
     /// record-shaped case, non-slice field) is simply EXCLUDED — its uses
     /// then refuse with the honest `bind-ty:Named` family of reasons.
     pub(crate) fn build(ir: &IrProgram) -> TypeTable {
-        let mut table = TypeTable { by_name: HashMap::new(), defs: Vec::new(), ctors: HashMap::new() };
+        let mut table = TypeTable {
+            by_name: HashMap::new(),
+            defs: Vec::new(),
+            ctors: HashMap::new(),
+            arena: RefCell::new(Vec::new()),
+            interned: RefCell::new(HashMap::new()),
+        };
         for decl in &ir.type_decls {
             if decl.generics.is_some() {
                 continue;

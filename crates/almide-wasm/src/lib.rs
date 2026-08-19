@@ -126,7 +126,7 @@ const G_HEAP: u32 = 1;
 
 // ── slice value model ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Scalar {
     /// Almide Int/Int64 — wasm i64.
     Int,
@@ -153,18 +153,38 @@ impl Scalar {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Interned handle to an element `SliceTy` in the `TypeTable`'s arena.
+/// Deduplicated on intern, so handle equality IS type equality — which
+/// keeps `SliceTy`'s derived `==` exact across arbitrary nesting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ETy(u32);
+
+impl ETy {
+    pub(crate) fn from_index(i: usize) -> ETy {
+        ETy(i as u32)
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum SliceTy {
     Scalar(Scalar),
-    /// `Option[scalar]` — i32, NULL_ADDR = none.
-    Option(Scalar),
+    /// `Option[T]` — i32, NULL_ADDR = none; `some` is a block whose slot
+    /// holds T's word. Nesting is fine: `some(none)` is a block holding
+    /// NULL_ADDR, distinct from the outer NULL_ADDR.
+    Option(ETy),
     /// `Result[ok, err]` — i32 tagged block.
-    Result(Scalar, Scalar),
-    /// `List[scalar]` — i32 block; payload = the element array, block len
-    /// = count × stride (stride = the scalar's slot size). No COW is
-    /// needed because in-place mutation (IndexAssign) is refused — every
-    /// list op yields a fresh block, so sharing is unobservable.
-    List(Scalar),
+    Result(ETy, ETy),
+    /// `List[T]` — i32 block; payload = the element array, block len
+    /// = count × stride (stride = T's slot size). No COW is needed
+    /// because in-place mutation (IndexAssign) is refused — every list
+    /// op yields a fresh block, so sharing is unobservable; the bind
+    /// deep-copy copies ONE level, sound because inner blocks are never
+    /// mutated in place (push needs a plain var, member/index are reads).
+    List(ETy),
     /// A user-defined record or variant — i32 block; the definition lives
     /// in the `TypeTable` at this index. Records are field blocks laid
     /// out by `almide_layout::pack_fields`; variants are tagged blocks
@@ -189,8 +209,8 @@ impl SliceTy {
         }
     }
 
-    /// Slot width of this value inside an aggregate (record field or
-    /// variant case field).
+    /// Slot width of this value inside an aggregate (record field, variant
+    /// case field, option slot, list element).
     fn slot_size(self) -> u32 {
         match self.val_type() {
             ValType::I64 => 8,
@@ -214,16 +234,17 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
     }
     match ty {
         Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
-            scalar_of(&args[0]).map(SliceTy::Option)
+            let e = slice_ty_of(&args[0], types)?;
+            Some(SliceTy::Option(types.intern(e)))
         }
         Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
-            match (scalar_of(&args[0]), scalar_of(&args[1])) {
-                (Some(o), Some(e)) => Some(SliceTy::Result(o, e)),
-                _ => None,
-            }
+            let o = slice_ty_of(&args[0], types)?;
+            let e = slice_ty_of(&args[1], types)?;
+            Some(SliceTy::Result(types.intern(o), types.intern(e)))
         }
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-            scalar_of(&args[0]).map(SliceTy::List)
+            let e = slice_ty_of(&args[0], types)?;
+            Some(SliceTy::List(types.intern(e)))
         }
         Ty::Named(name, args) if args.is_empty() => {
             types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i))

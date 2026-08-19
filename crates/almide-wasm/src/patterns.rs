@@ -84,35 +84,31 @@ impl Emitter<'_> {
             (IrPattern::Literal { expr }, SliceTy::Scalar(s)) => {
                 self.f.instructions().local_get(scr);
                 self.lower(expr, Some(SliceTy::Scalar(s)))?;
-                match s {
-                    Scalar::Int => self.f.instructions().i64_eq(),
-                    Scalar::Bool => self.f.instructions().i32_eq(),
-                    Scalar::Str => self.f.instructions().call(F_STR_EQ),
-                };
+                self.emit_scalar_eq(s);
                 Ok(())
             }
             (IrPattern::None, SliceTy::Option(_)) => {
                 self.f.instructions().local_get(scr).i32_eqz();
                 Ok(())
             }
-            (IrPattern::Some { inner }, SliceTy::Option(s)) => {
+            (IrPattern::Some { inner }, SliceTy::Option(h)) => {
                 if pattern_irrefutable(inner) {
                     self.f.instructions().local_get(scr).i32_const(0).i32_ne();
                     return Ok(());
                 }
-                // some(<literal>): non-null AND field == literal.
+                // some(<literal>): non-null AND slot == literal (scalar slots only).
                 let IrPattern::Literal { expr } = inner.as_ref() else {
                     return unsup(&format!("pattern:some-{}", pattern_name(inner)));
                 };
+                let et = self.types.el(h);
+                let SliceTy::Scalar(sc) = et else {
+                    return unsup("pattern:some-lit-nonscalar");
+                };
                 self.f.instructions().local_get(scr).if_(BlockType::Result(ValType::I32));
                 self.f.instructions().local_get(scr);
-                self.load_slot(s, almide_layout::OPTION_FIELD);
-                self.lower(expr, Some(SliceTy::Scalar(s)))?;
-                match s {
-                    Scalar::Int => self.f.instructions().i64_eq(),
-                    Scalar::Bool => self.f.instructions().i32_eq(),
-                    Scalar::Str => self.f.instructions().call(F_STR_EQ),
-                };
+                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.lower(expr, Some(et))?;
+                self.emit_scalar_eq(sc);
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
             }
@@ -134,16 +130,16 @@ impl Emitter<'_> {
                 let IrPattern::Literal { expr } = inner.as_ref() else {
                     return unsup(&format!("pattern:sum-{}", pattern_name(inner)));
                 };
+                let et = self.types.el(o);
+                let SliceTy::Scalar(sc) = et else {
+                    return unsup("pattern:sum-lit-nonscalar");
+                };
                 // tag matches AND field == literal.
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
                 self.f.instructions().local_get(scr);
-                self.load_slot(o, almide_layout::SUM_FIELD);
-                self.lower(expr, Some(SliceTy::Scalar(o)))?;
-                match o {
-                    Scalar::Int => self.f.instructions().i64_eq(),
-                    Scalar::Bool => self.f.instructions().i32_eq(),
-                    Scalar::Str => self.f.instructions().call(F_STR_EQ),
-                };
+                self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                self.lower(expr, Some(et))?;
+                self.emit_scalar_eq(sc);
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
             }
@@ -282,7 +278,7 @@ impl Emitter<'_> {
     pub(crate) fn bind_inner(
         &mut self,
         inner: &IrPattern,
-        s: Scalar,
+        h: ETy,
         field: u32,
         scr: u32,
     ) -> Result<(), EmitError> {
@@ -292,13 +288,23 @@ impl Emitter<'_> {
                 let Some(&(idx, _)) = self.locals.get(var) else {
                     return unsup("bind:unmapped");
                 };
+                let et = self.types.el(h);
                 self.f.instructions().local_get(scr);
-                self.load_slot(s, field);
+                self.load_ty_slot(et, field);
                 self.f.instructions().local_set(idx);
                 Ok(())
             }
             other => unsup(&format!("pattern:inner-{}", pattern_name(other))),
         }
+    }
+
+    /// Scalar equality: i64/i32 compare, byte-equality for strings.
+    pub(crate) fn emit_scalar_eq(&mut self, s: Scalar) {
+        match s {
+            Scalar::Int => self.f.instructions().i64_eq(),
+            Scalar::Bool => self.f.instructions().i32_eq(),
+            Scalar::Str => self.f.instructions().call(F_STR_EQ),
+        };
     }
 
 }

@@ -101,7 +101,7 @@ impl Emitter<'_> {
         match (func, args) {
             ("len", [xs]) => {
                 let elem = match self.lower(xs, None)? {
-                    SliceTy::List(s) => s,
+                    SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("list-len-of:{other:?}")),
                 };
                 self.f
@@ -113,17 +113,17 @@ impl Emitter<'_> {
                 Ok(Some(INT))
             }
             ("get", [xs, idx]) => {
-                let elem = match self.lower(xs, None)? {
-                    SliceTy::List(s) => s,
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
                     other => return unsup(&format!("list-get-of:{other:?}")),
                 };
                 self.lower(idx, Some(INT))?;
-                let helper = match elem.slot_size() {
+                let helper = match self.types.el(h).slot_size() {
                     8 => F_LIST_GET_8,
                     _ => F_LIST_GET_4,
                 };
                 self.f.instructions().call(helper);
-                Ok(Some(SliceTy::Option(elem)))
+                Ok(Some(SliceTy::Option(h)))
             }
             ("get_or", [xs, idx, default]) => self.lower_list_get_or(xs, idx, default),
             // `list.push` MUTATES through its `mut` param on the oracle
@@ -136,11 +136,12 @@ impl Emitter<'_> {
                 let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
                     return unsup("var:unmapped");
                 };
-                let SliceTy::List(elem) = var_ty else {
+                let SliceTy::List(h) = var_ty else {
                     return unsup(&format!("list-push-of:{var_ty:?}"));
                 };
+                let elem = self.types.el(h);
                 self.f.instructions().local_get(var_idx);
-                self.lower(v, Some(SliceTy::Scalar(elem)))?;
+                self.lower(v, Some(elem))?;
                 let helper = match elem.slot_size() {
                     8 => F_LIST_PUSH_8,
                     _ => F_LIST_PUSH_4,
@@ -150,7 +151,7 @@ impl Emitter<'_> {
             }
             ("join", [xs, sep]) => {
                 match self.lower(xs, None)? {
-                    SliceTy::List(Scalar::Str) => {}
+                    SliceTy::List(h) if self.types.el(h) == STR => {}
                     other => return unsup(&format!("list-join-of:{other:?}")),
                 }
                 self.lower(sep, Some(STR))?;
@@ -170,7 +171,7 @@ impl Emitter<'_> {
         default: &IrExpr,
     ) -> Result<Option<SliceTy>, EmitError> {
         let elem = match self.lower(xs, None)? {
-            SliceTy::List(s) => s,
+            SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-get-of:{other:?}")),
         };
         self.lower(idx, Some(INT))?;
@@ -184,11 +185,11 @@ impl Emitter<'_> {
             .local_tee(self.scr_i32_local)
             .i32_eqz()
             .if_(BlockType::Result(elem.val_type()));
-        self.lower(default, Some(SliceTy::Scalar(elem)))?;
+        self.lower(default, Some(elem))?;
         self.f.instructions().else_().local_get(self.scr_i32_local);
-        self.load_slot(elem, almide_layout::OPTION_FIELD);
+        self.load_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().end();
-        Ok(Some(SliceTy::Scalar(elem)))
+        Ok(Some(elem))
     }
 
     /// `println`/`eprintln`: interpolations build in the line buffer;
