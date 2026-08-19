@@ -35,10 +35,19 @@ impl Emitter<'_> {
             }
             CallTarget::Named { name } => {
                 let name = name.as_str();
-                // Variant constructor? (checker keeps ctor and fn names apart)
-                if let Some(&(ti, ci)) = self.types.ctors.get(name) {
+                // Variant constructor? Concrete ctors resolve by the global
+                // map; GENERIC instances resolve by name within the call's
+                // annotated type (the ret hint) — ctor names are ambiguous
+                // across instances, the type context is not.
+                let ctor = self.types.ctors.get(name).copied().or_else(|| {
+                    let SliceTy::Named(ti) = ret_hint? else { return None };
+                    let NamedDef::Variant(v) = self.types.def(ti) else { return None };
+                    let ci = v.cases.iter().position(|c| c.name == name)?;
+                    Some((ti, ci as u32))
+                });
+                if let Some((ti, ci)) = ctor {
                     let (size, tag, fields) = {
-                        let NamedDef::Variant(v) = &self.types.defs[ti as usize] else {
+                        let NamedDef::Variant(v) = &self.types.def(ti) else {
                             return unsup("ctor-of-record");
                         };
                         let c = &v.cases[ci as usize];

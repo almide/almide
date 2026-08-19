@@ -812,3 +812,23 @@ a layout never needs its pointee's layout, only its NAME.
 - **Burn-up: 109 → 122 / 590** (+13), floor 122, zero divergence;
   Named 48 → 29. Remaining walls: Named ×29 (generics + record-shaped
   cases), Applied ×28, Bytes ×24, Float ×19, Matrix ×12, Fn ×10.
+
+---
+
+## Unit 6 — generic TYPE instances (groundwork) (2026-08-20)
+
+Generic declarations (`type Box[T]`, `type Either[L, R]`, mutually
+recursive `Tree[A]`/`Forest[A]`) now monomorphize ON DEMAND: instances
+are keyed by (name, resolved args), their index RESERVED before fields
+build (the same trick that ended the forward-reference wall, so
+recursive generic instances resolve), and `Ty::TypeVar` substitution
+happens at the Ty level before field resolution. Variant constructor
+resolution moved from the global name map to BY NAME WITHIN THE
+SUBJECT'S/ANNOTATED type — exact for concrete types and the only
+unambiguous route for generic instances (ctor names repeat across them).
+
+Honest yield note: +0 fixtures — every generic-type fixture also calls
+generic FUNCTIONS, which fn_signature still refuses. Function
+monomorphization (the R3 intra-CU mono decision, driven by the IR's
+call-site `type_args`) is the next slice; this commit is its type-side
+half, kept green under the full net (122/590 parity, fuzz, mutants).

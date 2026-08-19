@@ -829,7 +829,7 @@ impl Emitter<'_> {
                 let SliceTy::Named(ti) = ty else {
                     return unsup(&format!("ty-mismatch:record-vs-{ty:?}"));
                 };
-                let NamedDef::Record(def) = &self.types.defs[ti as usize] else {
+                let NamedDef::Record(def) = &self.types.def(ti) else {
                     return unsup("record-of-variant-ty");
                 };
                 // Defaulted fields: until we verify the checker fills
@@ -866,7 +866,7 @@ impl Emitter<'_> {
                 let SliceTy::Named(ti) = ty else {
                     return unsup(&format!("spread-of:{ty:?}"));
                 };
-                let NamedDef::Record(def) = &self.types.defs[ti as usize] else {
+                let NamedDef::Record(def) = &self.types.def(ti) else {
                     return unsup("spread-of-variant");
                 };
                 let mut slots = Vec::new();
@@ -893,7 +893,7 @@ impl Emitter<'_> {
                 let SliceTy::Named(ti) = ty else {
                     return unsup(&format!("member-of:{ty:?}"));
                 };
-                let NamedDef::Record(def) = &self.types.defs[ti as usize] else {
+                let NamedDef::Record(def) = &self.types.def(ti) else {
                     return unsup("member-of-variant");
                 };
                 let Some(fi) = def.fields.iter().find(|fi| fi.name == field.as_str()) else {

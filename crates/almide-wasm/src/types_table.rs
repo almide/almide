@@ -3,12 +3,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use almide_ir::{IrProgram, IrTypeDeclKind, IrVariantKind};
+use almide_ir::{IrProgram, IrTypeDecl, IrTypeDeclKind, IrVariantKind};
+use almide_base::intern::Sym;
+use almide_types::types::Ty;
 
 use crate::{slice_ty_of, ETy, SliceTy};
 
 // ── user-type table ─────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub(crate) struct FieldInfo {
     pub(crate) name: String,
     pub(crate) ty: SliceTy,
@@ -17,11 +20,13 @@ pub(crate) struct FieldInfo {
     pub(crate) offset: u32,
 }
 
+#[derive(Clone)]
 pub(crate) struct RecordDef {
     pub(crate) fields: Vec<FieldInfo>,
     pub(crate) size: u32,
 }
 
+#[derive(Clone)]
 pub(crate) struct CaseDef {
     pub(crate) name: String,
     pub(crate) tag: u32,
@@ -29,10 +34,12 @@ pub(crate) struct CaseDef {
     pub(crate) size: u32,
 }
 
+#[derive(Clone)]
 pub(crate) struct VariantDef {
     pub(crate) cases: Vec<CaseDef>,
 }
 
+#[derive(Clone)]
 pub(crate) enum NamedDef {
     Record(RecordDef),
     Variant(VariantDef),
@@ -45,7 +52,11 @@ pub(crate) enum NamedDef {
 
 pub(crate) struct TypeTable {
     pub(crate) by_name: HashMap<String, u32>,
-    pub(crate) defs: Vec<NamedDef>,
+    pub(crate) defs: RefCell<Vec<NamedDef>>,
+    /// Generic declarations kept whole for on-demand monomorph
+    /// instantiation; instances are indexed by (name, resolved args).
+    generic_decls: HashMap<String, IrTypeDecl>,
+    instances: RefCell<HashMap<(String, Vec<SliceTy>), u32>>,
     /// Variant constructor name → (type index, case index).
     pub(crate) ctors: HashMap<String, (u32, u32)>,
     /// Element-type arena (interior mutability so every `&TypeTable`
@@ -57,6 +68,121 @@ pub(crate) struct TypeTable {
     /// equality is shape equality. Layout from `pack_fields`.
     tuples: RefCell<Vec<TupleDef>>,
     tuple_ids: RefCell<HashMap<Vec<SliceTy>, u32>>,
+}
+
+impl TypeTable {
+    /// A definition by index (cloned — defs are small).
+    pub(crate) fn def(&self, i: u32) -> NamedDef {
+        self.defs.borrow()[i as usize].clone()
+    }
+
+    /// Monomorph instance of a generic declaration, built on demand.
+    /// The index is RESERVED before fields build, so mutually recursive
+    /// generic types (Tree[A] / Forest[A]) resolve like concrete ones.
+    pub(crate) fn instance(&self, name: &str, args: &[Ty]) -> Option<u32> {
+        let mut resolved = Vec::new();
+        for a in args {
+            resolved.push(slice_ty_of(a, self)?);
+        }
+        let key = (name.to_string(), resolved);
+        if let Some(&i) = self.instances.borrow().get(&key) {
+            return Some(i);
+        }
+        let decl = self.generic_decls.get(name)?.clone();
+        let params = decl.generics.as_ref()?;
+        if params.len() != args.len() {
+            return None;
+        }
+        let env: HashMap<Sym, &Ty> =
+            params.iter().map(|p| p.name).zip(args.iter()).collect();
+        let i = {
+            let mut defs = self.defs.borrow_mut();
+            let i = defs.len() as u32;
+            defs.push(NamedDef::Excluded);
+            i
+        };
+        self.instances.borrow_mut().insert(key, i);
+        let built = match &decl.kind {
+            IrTypeDeclKind::Record { fields } => build_record_def(self, fields, &env),
+            IrTypeDeclKind::Variant { cases, .. } => build_variant_def(self, cases, &env),
+            IrTypeDeclKind::Alias { .. } => None,
+        };
+        if let Some(def) = built {
+            self.defs.borrow_mut()[i as usize] = def;
+        }
+        Some(i)
+    }
+}
+
+/// Substitute type variables per the instantiation environment.
+fn subst(ty: &Ty, env: &HashMap<Sym, &Ty>) -> Ty {
+    match ty {
+        Ty::TypeVar(s) => env.get(s).map(|t| (*t).clone()).unwrap_or_else(|| ty.clone()),
+        Ty::Applied(c, args) => Ty::Applied(c.clone(), args.iter().map(|a| subst(a, env)).collect()),
+        Ty::Named(n, args) => Ty::Named(*n, args.iter().map(|a| subst(a, env)).collect()),
+        Ty::Tuple(args) => Ty::Tuple(args.iter().map(|a| subst(a, env)).collect()),
+        other => other.clone(),
+    }
+}
+
+fn build_record_def(
+    table: &TypeTable,
+    fields: &[almide_ir::IrFieldDecl],
+    env: &HashMap<Sym, &Ty>,
+) -> Option<NamedDef> {
+    let mut infos = Vec::new();
+    for f in fields {
+        let t = slice_ty_of(&subst(&f.ty, env), table)?;
+        infos.push((f.name.as_str().to_string(), t));
+    }
+    let widths: Vec<u32> = infos.iter().map(|(_, t)| t.slot_size()).collect();
+    let (offsets, size) = almide_layout::pack_fields(&widths);
+    let fields = infos
+        .into_iter()
+        .zip(offsets)
+        .map(|((name, ty), offset)| FieldInfo { name, ty, offset })
+        .collect();
+    Some(NamedDef::Record(RecordDef { fields, size }))
+}
+
+fn build_variant_def(
+    table: &TypeTable,
+    cases: &[almide_ir::IrVariantDecl],
+    env: &HashMap<Sym, &Ty>,
+) -> Option<NamedDef> {
+    let mut defs = Vec::new();
+    for (tag, c) in cases.iter().enumerate() {
+        let tys: Vec<SliceTy> = match &c.kind {
+            IrVariantKind::Unit => Vec::new(),
+            IrVariantKind::Tuple { fields } => {
+                let mut v = Vec::new();
+                for t in fields {
+                    v.push(slice_ty_of(&subst(t, env), table)?);
+                }
+                v
+            }
+            IrVariantKind::Record { .. } => return None,
+        };
+        let widths: Vec<u32> = tys.iter().map(|t| t.slot_size()).collect();
+        let (offsets, fsize) = almide_layout::pack_fields(&widths);
+        let fields = tys
+            .into_iter()
+            .zip(offsets)
+            .enumerate()
+            .map(|(i, (ty, off))| FieldInfo {
+                name: format!("{i}"),
+                ty,
+                offset: almide_layout::SUM_FIELD + off,
+            })
+            .collect();
+        defs.push(CaseDef {
+            name: c.name.as_str().to_string(),
+            tag: tag as u32,
+            fields,
+            size: almide_layout::SUM_FIELD + fsize,
+        });
+    }
+    Some(NamedDef::Variant(VariantDef { cases: defs }))
 }
 
 #[derive(Clone)]
@@ -116,20 +242,28 @@ impl TypeTable {
     pub(crate) fn build(ir: &IrProgram) -> TypeTable {
         let mut table = TypeTable {
             by_name: HashMap::new(),
-            defs: Vec::new(),
+            defs: RefCell::new(Vec::new()),
+            generic_decls: HashMap::new(),
+            instances: RefCell::new(HashMap::new()),
             ctors: HashMap::new(),
             arena: RefCell::new(Vec::new()),
             interned: RefCell::new(HashMap::new()),
             tuples: RefCell::new(Vec::new()),
             tuple_ids: RefCell::new(HashMap::new()),
         };
-        // Phase 1: every declaration gets an index (Excluded placeholder).
+        // Phase 1: every CONCRETE declaration gets an index (Excluded
+        // placeholder); generic declarations are kept whole for on-demand
+        // instantiation.
         for decl in &ir.type_decls {
             if matches!(decl.kind, IrTypeDeclKind::Alias { .. }) {
                 continue;
             }
-            let idx = table.defs.len() as u32;
-            table.defs.push(NamedDef::Excluded);
+            if decl.generics.is_some() {
+                table.generic_decls.insert(decl.name.as_str().to_string(), decl.clone());
+                continue;
+            }
+            let idx = table.defs.borrow().len() as u32;
+            table.defs.borrow_mut().push(NamedDef::Excluded);
             table.by_name.insert(decl.name.as_str().to_string(), idx);
         }
         // Phase 2: build definitions in place.
@@ -177,7 +311,7 @@ fn add_record(table: &mut TypeTable, name: &str, fields: &[almide_ir::IrFieldDec
         .map(|((name, ty), offset)| FieldInfo { name, ty, offset })
         .collect();
     let idx = table.by_name[name];
-    table.defs[idx as usize] = NamedDef::Record(RecordDef { fields, size });
+    table.defs.borrow_mut()[idx as usize] = NamedDef::Record(RecordDef { fields, size });
                 }
 
 /// One variant declaration → tagged-case layouts (excluded when generic,
@@ -246,5 +380,5 @@ fn add_variant(
     for (ci, c) in defs.iter().enumerate() {
         table.ctors.insert(c.name.clone(), (idx, ci as u32));
     }
-    table.defs[idx as usize] = NamedDef::Variant(VariantDef { cases: defs });
+    table.defs.borrow_mut()[idx as usize] = NamedDef::Variant(VariantDef { cases: defs });
                 }

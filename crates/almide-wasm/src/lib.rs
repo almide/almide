@@ -299,6 +299,7 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         Ty::Named(name, args) if args.is_empty() => {
             types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i))
         }
+        Ty::Named(name, args) => types.instance(name.as_str(), args).map(SliceTy::Named),
         _ => None,
     }
 }

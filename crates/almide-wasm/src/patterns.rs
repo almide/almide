@@ -176,17 +176,16 @@ impl Emitter<'_> {
         scr: u32,
     ) -> Result<(), EmitError> {
 
-                let Some(&(cti, ci)) = self.types.ctors.get(name) else {
-                    return unsup(&format!("pattern:ctor-unknown:{name}"));
-                };
-                if cti != ti {
-                    return unsup("pattern:ctor-ty-mismatch");
-                }
+                // Resolve the case by NAME within the subject's own
+                // definition — exact for concrete types, and the only
+                // unambiguous route for generic instances.
                 let (tag, fields) = {
-                    let NamedDef::Variant(v) = &self.types.defs[ti as usize] else {
+                    let NamedDef::Variant(v) = &self.types.def(ti) else {
                         return unsup("pattern:ctor-of-record");
                     };
-                    let c = &v.cases[ci as usize];
+                    let Some(c) = v.cases.iter().find(|c| c.name == name) else {
+                        return unsup(&format!("pattern:ctor-unknown:{name}"));
+                    };
                     let fs: Vec<(SliceTy, u32)> =
                         c.fields.iter().map(|f| (f.ty, f.offset)).collect();
                     (c.tag, fs)
@@ -289,14 +288,14 @@ impl Emitter<'_> {
                 let SliceTy::Named(ti) = subj_ty else {
                     return unsup("pattern:ctor-on-non-named");
                 };
-                let Some(&(_, ci)) = self.types.ctors.get(name.as_str()) else {
-                    return unsup(&format!("pattern:ctor-unknown:{name}"));
-                };
                 let fields: Vec<(SliceTy, u32)> = {
-                    let NamedDef::Variant(v) = &self.types.defs[ti as usize] else {
+                    let NamedDef::Variant(v) = &self.types.def(ti) else {
                         return unsup("pattern:ctor-of-record");
                     };
-                    v.cases[ci as usize].fields.iter().map(|f| (f.ty, f.offset)).collect()
+                    let Some(c) = v.cases.iter().find(|c| c.name == name.as_str()) else {
+                        return unsup(&format!("pattern:ctor-unknown:{name}"));
+                    };
+                    c.fields.iter().map(|f| (f.ty, f.offset)).collect()
                 };
                 for (ap, (fty, off)) in args.iter().zip(fields) {
                     match ap {
