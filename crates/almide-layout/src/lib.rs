@@ -60,6 +60,24 @@ pub const SUM_TAG: u32 = 0;
 /// aligned pad so an i64 slot never straddles it).
 pub const SUM_FIELD: u32 = 8;
 
+/// THE field-packing rule for user-defined aggregates (records; variant
+/// case payloads pack the same way after the tag pad). Input: each
+/// field's slot width in bytes (8 for i64 slots, 4 for i32 slots).
+/// Output: payload-relative offsets and the total (4-aligned) size.
+/// Every backend derives aggregate layout from THIS function — a packing
+/// change is one edit here plus the pin-test update below.
+pub fn pack_fields(widths: &[u32]) -> (Vec<u32>, u32) {
+    let mut offsets = Vec::with_capacity(widths.len());
+    let mut cursor: u32 = 0;
+    for &w in widths {
+        let align = w.max(4);
+        cursor = cursor.div_ceil(align) * align;
+        offsets.push(cursor);
+        cursor += w;
+    }
+    (offsets, cursor.div_ceil(4) * 4)
+}
+
 /// Stable digest of the layout definition. Any change to the fields above
 /// changes this value and fails the pin test — re-pin ONLY as a deliberate,
 /// reviewed layout change (an intentional-change-protocol event).
@@ -112,6 +130,18 @@ mod tests {
         // SUM_FIELD) for unit-6 stage 3 — an intentional-change event, see
         // PORTLOG.md.
         assert_eq!(layout_digest(), 6642309021484683773, "layout changed — re-pin deliberately");
+    }
+
+    /// Packing pins: mixed widths align 8-byte slots and tail-pad to 4.
+    /// A deliberate packing change must re-pin these expectations.
+    #[test]
+    fn field_packing_is_pinned() {
+        assert_eq!(pack_fields(&[]), (vec![], 0));
+        assert_eq!(pack_fields(&[4]), (vec![0], 4));
+        assert_eq!(pack_fields(&[8]), (vec![0], 8));
+        assert_eq!(pack_fields(&[4, 8]), (vec![0, 8], 16));
+        assert_eq!(pack_fields(&[8, 4]), (vec![0, 8], 12));
+        assert_eq!(pack_fields(&[4, 4, 8]), (vec![0, 4, 8], 16));
     }
 
     #[test]

@@ -248,7 +248,7 @@ pub fn check_file_json_v3(db: &dyn salsa::Database, file: SourceFile) -> CheckOu
 
     let key: String = resolved.modules.iter().map(|(n, _, _, _)| n.as_str()).collect::<Vec<_>>().join(",");
     let template = {
-        let mut guard = TEMPLATE_CACHE.lock().unwrap();
+        let mut guard = TEMPLATE_CACHE.lock().expect("template cache mutex poisoned");
         let map = guard.get_or_insert_with(Default::default);
         if let Some(t) = map.get(&key) {
             t.clone()

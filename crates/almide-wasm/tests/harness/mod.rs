@@ -23,7 +23,7 @@ fn append_line(
         .expect("exported memory");
     let mut buf = vec![0u8; len as usize];
     mem.read(&caller, ptr as usize, &mut buf).expect("in-bounds read");
-    let mut o = sink(caller.data()).lock().unwrap();
+    let mut o = sink(caller.data()).lock().expect("test harness invariant");
     o.push_str(&String::from_utf8_lossy(&buf));
     o.push('\n');
 }
@@ -53,7 +53,7 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<String> {
     let instance = linker.instantiate(&mut store, &module)?;
     let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
     main.call(&mut store, ())?;
-    let s = out.lock().unwrap().clone();
+    let s = out.lock().expect("test harness invariant").clone();
     Ok(s)
 }
 

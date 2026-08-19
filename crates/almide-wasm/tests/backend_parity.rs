@@ -15,10 +15,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Grow-only floor: raise as slices land, never lower.
-const SUPPORTED_FLOOR: usize = 43;
+const SUPPORTED_FLOOR: usize = 50;
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
 }
 
 fn normalized_hash(stdout: &str) -> String {
@@ -44,11 +44,11 @@ fn corpus_burn_up() {
 
     for line in manifest.lines() {
         let mut it = line.splitn(3, '\t');
-        let want_hash = it.next().unwrap();
-        let want_exit: i32 = it.next().unwrap().parse().unwrap();
-        let rel = it.next().unwrap();
+        let want_hash = it.next().expect("test harness invariant");
+        let want_exit: i32 = it.next().expect("test harness invariant").parse().expect("test harness invariant");
+        let rel = it.next().expect("test harness invariant");
         total += 1;
-        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
         let ir = match almide_spine::s5::lower_to_ir(rel, &text) {
             Ok(ir) => ir,
             Err(_) => {

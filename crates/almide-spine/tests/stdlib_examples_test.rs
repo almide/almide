@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
 }
 
 /// Modules that are NOT auto-imported and need an explicit `import` line in
@@ -22,14 +22,14 @@ const NEEDS_IMPORT: &[&str] = &["url", "json", "fs", "http", "env", "io", "rando
 fn every_stdlib_example_evaluates_to_true() {
     let root = workspace_root();
     let mut examples: Vec<(String, String, String)> = Vec::new(); // (module, file, expr)
-    for entry in std::fs::read_dir(root.join("stdlib")).unwrap() {
-        let p = entry.unwrap().path();
+    for entry in std::fs::read_dir(root.join("stdlib")).expect("test harness invariant") {
+        let p = entry.expect("test harness invariant").path();
         if p.extension().is_none_or(|e| e != "almd") {
             continue;
         }
-        let stem = p.file_stem().unwrap().to_string_lossy().to_string();
+        let stem = p.file_stem().expect("test harness invariant").to_string_lossy().to_string();
         let module = stem.split('_').next().unwrap_or(&stem).to_string();
-        for line in std::fs::read_to_string(&p).unwrap().lines() {
+        for line in std::fs::read_to_string(&p).expect("test harness invariant").lines() {
             if let Some(expr) = line.trim().strip_prefix("// Example: ") {
                 examples.push((module.clone(), stem.clone(), expr.trim().to_string()));
             }

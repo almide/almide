@@ -1,0 +1,30 @@
+{
+  "//": "RULING 2026-08-13 (user ○): `no-unsafe` is OFF because almide-kernel's",
+  "//2": "SIMD paths (q1_0.rs, silu.rs, simd_wasm.rs, q1_0_packed.rs) are hand-",
+  "//3": "written intrinsics — `unsafe` there is the POINT, not a smell, and the",
+  "//4": "warnings alone held the crate at B (88) while every other touched crate",
+  "//5": "is A. Turning the rule off repo-wide (codopsy has no per-path scoping)",
+  "//6": "trades a real signal elsewhere for an honest kernel score: if a NON-SIMD",
+  "//7": "crate ever needs `unsafe`, that is a design review question, not a lint",
+  "//8": "one — the trust spine (kernel-proven PCC + corpus wall) is what actually",
+  "//9": "gates memory safety here, and it does not read this file.",
+  "rules": {
+    "no-unsafe": false,
+    "no-any": "warning",
+    "no-console": "info",
+    "no-var": "warning",
+    "eqeqeq": "warning",
+    "no-empty-function": "warning",
+    "no-nested-ternary": "warning",
+    "no-debugger": "error",
+    "no-duplicate-case": "error",
+    "no-self-assign": "warning",
+    "no-eval": "error",
+    "no-unreachable": "error",
+    "max-lines": { "severity": "warning", "max": 800 },
+    "max-depth": { "severity": "warning", "max": 6 },
+    "max-params": { "severity": "warning", "max": 6 },
+    "max-complexity": { "severity": "warning", "max": 20 },
+    "max-cognitive-complexity": { "severity": "warning", "max": 30 }
+  }
+}

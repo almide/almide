@@ -19,8 +19,8 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(dir).unwrap() {
-        let p = e.unwrap().path();
+    for e in std::fs::read_dir(dir).expect("probe-bin invariant") {
+        let p = e.expect("probe-bin invariant").path();
         if p.is_dir() {
             walk(&p, out);
         } else if p.extension().is_some_and(|x| x == "almd") {
@@ -34,7 +34,7 @@ fn pair(k: usize) -> String {
 }
 
 fn main() {
-    let root = std::env::current_dir().unwrap();
+    let root = std::env::current_dir().expect("probe-bin invariant");
     let mut files = Vec::new();
     walk(&root.join("spec"), &mut files);
     files.sort();
@@ -43,8 +43,8 @@ fn main() {
     let mut inputs = Vec::new();
     let mut victims = Vec::new();
     for (i, p) in files.iter().enumerate() {
-        let rel = p.strip_prefix(&root).unwrap().to_string_lossy().to_string();
-        let mut text = std::fs::read_to_string(p).unwrap();
+        let rel = p.strip_prefix(&root).expect("probe-bin invariant").to_string_lossy().to_string();
+        let mut text = std::fs::read_to_string(p).expect("probe-bin invariant");
         // Ten victims, spread across the corpus, get the known pair.
         if i % (files.len() / 10) == 7 && victims.len() < 10 {
             text.push_str(&pair(victims.len()));
@@ -119,7 +119,7 @@ fn main() {
         f_ms.push(t.elapsed().as_secs_f64() * 1e3);
         f_checks += CHECK_EXECUTIONS.load(Ordering::Relaxed);
     }
-    let f_med = { let mut v = f_ms.clone(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
+    let f_med = { let mut v = f_ms.clone(); v.sort_by(|a, b| a.partial_cmp(b).expect("probe-bin invariant")); v[v.len() / 2] };
 
     // ── (d) body edits of __s2_base: digit toggle, iface unchanged ──────────
     let mut d_rounds = Vec::new();
@@ -138,8 +138,8 @@ fn main() {
         d_ms.push(t.elapsed().as_secs_f64() * 1e3);
         d_rounds.push(CHECK_EXECUTIONS.load(Ordering::Relaxed));
     }
-    let d_med = { let mut v = d_ms.clone(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
-    let d_max = *d_rounds.iter().max().unwrap();
+    let d_med = { let mut v = d_ms.clone(); v.sort_by(|a, b| a.partial_cmp(b).expect("probe-bin invariant")); v[v.len() / 2] };
+    let d_max = *d_rounds.iter().max().expect("probe-bin invariant");
 
     // ── (e) interface edits: rename __s2_base ⇄ __s2_basex ──────────────────
     let mut e_rounds = Vec::new();
@@ -155,8 +155,8 @@ fn main() {
         recheck_all(&db, &keys, &mut sink);
         e_rounds.push(CHECK_EXECUTIONS.load(Ordering::Relaxed));
     }
-    let e_max = *e_rounds.iter().max().unwrap();
-    let e_min = *e_rounds.iter().min().unwrap();
+    let e_max = *e_rounds.iter().max().expect("probe-bin invariant");
+    let e_min = *e_rounds.iter().min().expect("probe-bin invariant");
 
     println!("---");
     println!("(d) body edit  → re-checks/round: max {d_max} (want 1); warm re-derive {d_med:.3} ms");

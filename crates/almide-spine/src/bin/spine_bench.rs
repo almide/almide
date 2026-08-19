@@ -10,8 +10,8 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(dir).unwrap() {
-        let p = e.unwrap().path();
+    for e in std::fs::read_dir(dir).expect("probe-bin invariant") {
+        let p = e.expect("probe-bin invariant").path();
         if p.is_dir() {
             walk(&p, out);
         } else if p.extension().is_some_and(|x| x == "almd") {
@@ -21,7 +21,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v.sort_by(|a, b| a.partial_cmp(b).expect("probe-bin invariant"));
     v[v.len() / 2]
 }
 
@@ -39,7 +39,7 @@ fn batch_parse_all(sources: &[(String, String)]) -> u64 {
 }
 
 fn main() {
-    let root = std::env::current_dir().unwrap();
+    let root = std::env::current_dir().expect("probe-bin invariant");
     let mut files = Vec::new();
     walk(&root.join("spec"), &mut files);
     files.sort();
@@ -47,8 +47,8 @@ fn main() {
         .iter()
         .map(|p| {
             (
-                p.strip_prefix(&root).unwrap().to_string_lossy().to_string(),
-                std::fs::read_to_string(p).unwrap(),
+                p.strip_prefix(&root).expect("probe-bin invariant").to_string_lossy().to_string(),
+                std::fs::read_to_string(p).expect("probe-bin invariant"),
             )
         })
         .collect();
@@ -98,7 +98,7 @@ fn main() {
         per_round_execs.push(PARSE_EXECUTIONS.load(Ordering::Relaxed));
     }
     let warm = median(warm_ms);
-    let max_execs = *per_round_execs.iter().max().unwrap();
+    let max_execs = *per_round_execs.iter().max().expect("probe-bin invariant");
     println!("salsa warm re-derive after 1-file edit: {warm:.3} ms (median of {ROUNDS})");
     println!("parses per warm round: max {max_execs} (claim (a) requires 1)");
 

@@ -19,8 +19,8 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(dir).unwrap() {
-        let p = e.unwrap().path();
+    for e in std::fs::read_dir(dir).expect("probe-bin invariant") {
+        let p = e.expect("probe-bin invariant").path();
         if p.is_dir() {
             walk(&p, out);
         } else if p.extension().is_some_and(|x| x == "almd") {
@@ -30,12 +30,12 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v.sort_by(|a, b| a.partial_cmp(b).expect("probe-bin invariant"));
     v[v.len() / 2]
 }
 
 fn main() {
-    let root = std::env::current_dir().unwrap();
+    let root = std::env::current_dir().expect("probe-bin invariant");
     let mut files = Vec::new();
     walk(&root.join("spec"), &mut files);
     files.sort();
@@ -44,8 +44,8 @@ fn main() {
     let mut sources: Vec<(String, String)> = Vec::new();
     let mut excluded = 0usize;
     for p in &files {
-        let rel = p.strip_prefix(&root).unwrap().to_string_lossy().to_string();
-        let text = std::fs::read_to_string(p).unwrap();
+        let rel = p.strip_prefix(&root).expect("probe-bin invariant").to_string_lossy().to_string();
+        let text = std::fs::read_to_string(p).expect("probe-bin invariant");
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(&rel);
         match parser.parse() {

@@ -13,12 +13,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
 }
 
 fn walk_almd(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let p = entry.unwrap().path();
+    for entry in std::fs::read_dir(dir).expect("test harness invariant") {
+        let p = entry.expect("test harness invariant").path();
         if p.is_dir() {
             walk_almd(&p, out);
         } else if p.extension().is_some_and(|e| e == "almd") {
@@ -42,14 +42,14 @@ fn spec_corpus_check_matches_oracle_hashes() {
         .lines()
     {
         let mut it = l.splitn(3, '\t');
-        let h = it.next().unwrap().to_string();
-        let _rc = it.next().unwrap();
-        let p = it.next().unwrap().to_string();
+        let h = it.next().expect("test harness invariant").to_string();
+        let _rc = it.next().expect("test harness invariant");
+        let p = it.next().expect("test harness invariant").to_string();
         assert!(manifest.insert(p, h).is_none(), "duplicate path in manifest");
     }
     let mut exclusions: BTreeMap<String, String> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-check-exclusions.txt")).unwrap().lines() {
-        let (p, r) = l.split_once('\t').unwrap();
+    for l in std::fs::read_to_string(golden.join("spec-check-exclusions.txt")).expect("test harness invariant").lines() {
+        let (p, r) = l.split_once('\t').expect("test harness invariant");
         exclusions.insert(p.to_string(), r.to_string());
     }
 
@@ -57,7 +57,7 @@ fn spec_corpus_check_matches_oracle_hashes() {
     walk_almd(&root.join("spec"), &mut files);
     files.sort();
     for f in &files {
-        let rel = f.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+        let rel = f.strip_prefix(&root).expect("test harness invariant").to_string_lossy().to_string();
         let in_m = manifest.contains_key(&rel);
         let in_e = exclusions.contains_key(&rel);
         assert!(in_m ^ in_e, "{rel}: must be in exactly one of manifest/exclusions");
@@ -69,7 +69,7 @@ fn spec_corpus_check_matches_oracle_hashes() {
     let mut mismatches = Vec::new();
     let mut compared = 0usize;
     for (rel, want) in &manifest {
-        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
         // Purity contract: resolve must not read the FS inside a query.
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
@@ -115,17 +115,17 @@ fn stage2_variant_matches_oracle_hashes() {
     let root = workspace_root();
     let golden = root.join("crates/almide-spine/tests/golden");
     let mut manifest: BTreeMap<String, String> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).unwrap().lines() {
+    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("test harness invariant").lines() {
         let mut it = l.splitn(3, '\t');
-        let h = it.next().unwrap().to_string();
-        let _rc = it.next().unwrap();
-        manifest.insert(it.next().unwrap().to_string(), h);
+        let h = it.next().expect("test harness invariant").to_string();
+        let _rc = it.next().expect("test harness invariant");
+        manifest.insert(it.next().expect("test harness invariant").to_string(), h);
     }
     let db = almide_spine::SpineDb::default();
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
     for (rel, want) in &manifest {
-        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
         match parser.parse() {
@@ -150,17 +150,17 @@ fn stage2_v3_template_matches_oracle_hashes() {
     let root = workspace_root();
     let golden = root.join("crates/almide-spine/tests/golden");
     let mut manifest: BTreeMap<String, String> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).unwrap().lines() {
+    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("test harness invariant").lines() {
         let mut it = l.splitn(3, '\t');
-        let h = it.next().unwrap().to_string();
-        let _rc = it.next().unwrap();
-        manifest.insert(it.next().unwrap().to_string(), h);
+        let h = it.next().expect("test harness invariant").to_string();
+        let _rc = it.next().expect("test harness invariant");
+        manifest.insert(it.next().expect("test harness invariant").to_string(), h);
     }
     let db = almide_spine::SpineDb::default();
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
     for (rel, want) in &manifest {
-        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
         match parser.parse() {

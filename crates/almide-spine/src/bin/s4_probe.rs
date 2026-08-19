@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(dir).unwrap() {
-        let p = e.unwrap().path();
+    for e in std::fs::read_dir(dir).expect("probe-bin invariant") {
+        let p = e.expect("probe-bin invariant").path();
         if p.is_dir() { walk(&p, out); } else if p.extension().is_some_and(|x| x == "almd") { out.push(p); }
     }
 }
 
 fn main() {
-    let root = std::env::current_dir().unwrap();
+    let root = std::env::current_dir().expect("probe-bin invariant");
     let mut files = Vec::new();
     walk(&root.join("spec"), &mut files);
     files.sort();
@@ -19,8 +19,8 @@ fn main() {
     let mut t_infer = 0.0; let mut t_modules = 0.0; let mut t_unused = 0.0;
     let mut n = 0usize;
     for p in files.iter().step_by(5).take(220) {
-        let rel = p.strip_prefix(&root).unwrap().to_string_lossy().to_string();
-        let text = std::fs::read_to_string(p).unwrap();
+        let rel = p.strip_prefix(&root).expect("probe-bin invariant").to_string_lossy().to_string();
+        let text = std::fs::read_to_string(p).expect("probe-bin invariant");
         let t0 = Instant::now();
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(&rel);

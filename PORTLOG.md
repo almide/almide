@@ -477,3 +477,42 @@ slice where the burn-up net earned its keep three times in one sitting:
 - **Burn-up**: 27 → **43 / 590**, floor re-pinned 43, zero divergence.
   ForIn (list + `..`/`..<` ranges), list.len/get/get_or/push/join,
   ConcatList, list literals all landed.
+
+---
+
+## Unit 6 — stage 5: user types (records + variants) (2026-08-19)
+
+- **Field packing ratified into `almide-layout`** (`pack_fields`: 8-byte
+  slots 8-aligned, tail pad to 4, pinned by `field_packing_is_pinned`).
+  Records are field blocks; variants are tagged blocks — SUM_TAG then
+  fields packed after SUM_FIELD's pad, the direct generalisation of the
+  stage-3 Result shape.
+- `TypeTable` resolves declarations to layouts; a declaration ANY part of
+  which is outside the slice (generic, recursive/boxed, record-shaped
+  case, non-slice field) is EXCLUDED whole — its uses then refuse with
+  the honest `bind-ty:Named` reasons, never a partial lowering.
+- Record literals / spreads (`{...r, x: v}` = block-copy + overwrite) /
+  member reads; variant constructors (`Call` targets checked against the
+  ctor map first); `Constructor` patterns with tag test + field binds.
+  FieldAssign refused — the same no-in-place-mutation doctrine as List.
+- **Burn-up: 43 → 50 / 590**, floor re-pinned 50, zero divergence.
+
+## Unit 6 — codopsy A-rank directive (2026-08-19)
+
+Mid-flight user directive: "codopsy A ランクは当然維持". Measured with the
+ratified `.codopsyrc.json` (now committed at the greenfield root):
+
+- almide-layout **A(100)**, almide-base **A(100)**, almide-diag **A(96)**
+  — already A.
+- almide-spine **B(81) → A(94)**: the deficit was `.unwrap()` density in
+  parity tests and probe bins — replaced with `.expect("...")` (which
+  also names each invariant).
+- almide-wasm **C(70) → A(96)**: the 2,500-line monolith split into
+  `lib/emitter/calls/patterns/collect/runtime/types_table` (every file
+  under the 800-line rule); the cc-61 `lower` decomposed along its real
+  seams (`lower_control`/`lower_data`/`lower_sum`/`lower_record`,
+  `lower_cmp`, `lower_forin`, `lower_list_get_or`, `test_ctor_pattern`,
+  `add_record`/`add_variant`); `lower_fn`'s seven params bundled into
+  `Ctx`. Pure mechanical restructuring — the 590-fixture net, first
+  light, and the alias referee ran green after every batch, and strict
+  clippy stayed at zero.

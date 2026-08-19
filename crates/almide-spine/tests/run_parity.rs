@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
 }
 
 /// Mirror the generator's bash normalization: drop NUL bytes (command
@@ -35,9 +35,9 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         .lines()
     {
         let mut it = l.splitn(3, '\t');
-        let h = it.next().unwrap().to_string();
-        let rc: i32 = it.next().unwrap().parse().unwrap();
-        let p = it.next().unwrap().to_string();
+        let h = it.next().expect("test harness invariant").to_string();
+        let rc: i32 = it.next().expect("test harness invariant").parse().expect("test harness invariant");
+        let p = it.next().expect("test harness invariant").to_string();
         assert!(manifest.insert(p, (h, rc)).is_none());
     }
     assert!(manifest.len() > 550, "suspiciously small manifest");
@@ -58,7 +58,7 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     let mut n_fuel = 0usize;
     let mut n_ok = 0usize;
     for (rel, (want_hash, want_exit)) in &manifest {
-        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
         match almide_spine::s5::run_file(rel, &text) {
             Ok(out) if out.exit == -2 => {
                 let reason = out.stderr.lines().next().unwrap_or("?").to_string();
