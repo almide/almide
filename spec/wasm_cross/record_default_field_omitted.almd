@@ -8,9 +8,7 @@
 // ctor defaults and defaults nested under other defaulted siblings).
 type P = { x: Int, tag: String = "anon", hits: Int = 0 }
 
-type Shape =
-  | Dot { x: Int, y: Int = 7 }
-  | Blank
+type Shape = | Dot { x: Int, y: Int = 7 } | Blank
 
 fn show(p: P) -> String = p.tag + ":" + int.to_string(p.x) + ":" + int.to_string(p.hits)
 

@@ -360,6 +360,37 @@ fn prim_float_arith_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "fmul" => |a, b| a * b,
         "fdiv" => |a, b| a / b,
         "fcopysign" => f64::copysign,
+        // The v1 wasm `f64.min` / `f64.max` semantics EXACTLY — these prims
+        // render as FBinOp::Min/Max and the native leg never links them (it
+        // reaches the same observables through its own runtime): NaN
+        // PROPAGATES (unlike Rust's f64::min/max, which return the other
+        // operand), and a ±0 tie answers -0 for min, +0 for max.
+        "fmin" => |a, b| {
+            if a.is_nan() || b.is_nan() {
+                f64::NAN
+            } else if a < b {
+                a
+            } else if b < a {
+                b
+            } else if a.is_sign_negative() {
+                a
+            } else {
+                b
+            }
+        },
+        "fmax" => |a, b| {
+            if a.is_nan() || b.is_nan() {
+                f64::NAN
+            } else if a > b {
+                a
+            } else if b > a {
+                b
+            } else if a.is_sign_negative() {
+                b
+            } else {
+                a
+            }
+        },
         _ => return prim_float_unary_fn(func, args),
     };
     Some(Flow::val(Value::Float(binary(

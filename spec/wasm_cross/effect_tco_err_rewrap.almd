@@ -15,19 +15,17 @@
 // compile time, depth-independent) plus byte-identical answers on both legs.
 import fs
 
-effect fn walk(n: Int, acc: Int) -> Result[Int, String] =
-  if n <= 0 then ok(acc)
-  else match fs.read_text_if_exists("does-not-matter.txt") {
-    err(reason) => err(reason),
-    ok(_) => walk(n - 1, acc + 1),
-  }
+effect fn walk(n: Int, acc: Int) -> Result[Int, String] = if n <= 0 then ok(acc)
+else match fs.read_text_if_exists("does-not-matter.txt") {
+  err(reason) => err(reason),
+  ok(_) => walk(n - 1, acc + 1),
+}
 
-effect fn fail_walk(n: Int) -> Result[Int, String] =
-  if n <= 0 then ok(0)
-  else match fs.read_text("/definitely/missing/file.txt") {
-    err(reason) => err(reason),
-    ok(_) => fail_walk(n - 1),
-  }
+effect fn fail_walk(n: Int) -> Result[Int, String] = if n <= 0 then ok(0)
+else match fs.read_text("/definitely/missing/file.txt") {
+  err(reason) => err(reason),
+  ok(_) => fail_walk(n - 1),
+}
 
 effect fn main() -> Unit = {
   // Clean walk: the rewrap arm never fires; both legs answer 5000.

@@ -1023,6 +1023,20 @@ impl<'a> Interpreter<'a> {
                 Some(Value::Set(Rc::new(self.rebuild_seq(addr, &ts[0])?)))
             }
             Ty::Applied(C::Map, ts) if ts.len() == 2 => self.rebuild_map(addr, &ts[0], &ts[1]),
+            // A tuple block: one slot per element, `len` = the element count.
+            Ty::Tuple(ts) => {
+                if self.heap.kind(addr)? != crate::heap::BlockKind::Slots
+                    || self.heap.block_len(addr)? as usize != ts.len()
+                {
+                    return None;
+                }
+                let elems: Option<Vec<Value>> = ts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| self.rebuild_slot(self.heap.slot(addr, i as u32)?, t))
+                    .collect();
+                Some(Value::tuple(elems?))
+            }
             _ => None,
         }
     }
@@ -1058,6 +1072,7 @@ impl<'a> Interpreter<'a> {
             Ty::Bool => Some(Value::Bool(s != 0)),
             Ty::String
             | Ty::Bytes
+            | Ty::Tuple(_)
             | Ty::Applied(C::List | C::Set | C::Map | C::Option | C::Result, _) => {
                 self.rebuild_addr(u32::try_from(s).ok()?, elem)
             }
@@ -1181,22 +1196,91 @@ impl<'a> Interpreter<'a> {
     /// blocks would miss — a wrong vote (`tm_map_int_lit_print` printed -8 for
     /// 12 in exactly this shape). Scalar containers are the ones the core
     /// impls are CORRECT for; everything else abstains with its shape named.
-    /// [`Self::heap_materialize`] with the call site's STATIC argument type,
-    /// which settles the byte-vs-slot question for a List value: `Bytes`
-    /// spells 1 payload byte per element, `List[Int]` spells an 8-byte slot —
-    /// same interp `Value`, different memory. Without a hint (a generic
-    /// `handle[A]`, recursion into children) inspection decides as before.
+    /// [`Self::heap_materialize`] with the call site's STATIC argument type.
+    ///
+    /// The hint does two jobs. It settles representation questions the value
+    /// alone cannot — `Bytes` spells 1 payload byte per element where
+    /// `List[Int]` spells an 8-byte slot, and a CHILD list's byte-vs-slot
+    /// choice needs the element type, not inspection. And it is the
+    /// IMPL-CORRECTNESS guard for heap elements: the hint IS the resolved
+    /// body's own declared parameter type, so when the untyped pool resolves
+    /// a public name to its scalar core impl and a heap-element container
+    /// arrives, the declaration says `List[Int]`, the value says Strings,
+    /// and the mismatch abstains — while a body genuinely declared over
+    /// `List[(String, Value)]` (value_object) materializes exactly what it
+    /// claims. Without a concrete hint (a generic `handle[A]`), inspection
+    /// decides and stays scalar-only, as before.
     fn heap_materialize_hinted(&mut self, v: &Value, hint: Option<&Ty>) -> Result<i64, String> {
         use crate::heap::rc_key;
         use almide_lang::types::constructor::TypeConstructorId as C;
-        if let (Value::List(rc), Some(Ty::Applied(C::List | C::Set, _))) = (v, hint) {
-            let rc = Rc::clone(rc);
-            let slots = heap_scalar_slots(&rc, "List")?;
-            let a = self.heap.bind_slots(rc_key(&rc), &slots, rc.len() as u32);
-            self.heap.keep(rc);
-            return Ok(a as i64);
+        match (v, hint) {
+            // A declared Bytes is STRICT: a non-byte element under it has no
+            // faithful byte, and falling back to slots would hand a
+            // byte-reading body 8x-strided memory.
+            (Value::List(rc), Some(Ty::Bytes)) => {
+                let bytes: Result<Vec<u8>, String> = rc
+                    .iter()
+                    .map(|v| match v {
+                        Value::Int(i) if (0..=255).contains(i) => Ok(*i as u8),
+                        other => Err(format!(
+                            "prim.handle of a Bytes-typed list holding a non-byte {}",
+                            other.type_name()
+                        )),
+                    })
+                    .collect();
+                let a = self.heap.bind(rc_key(rc), &bytes?, crate::heap::BlockKind::Bytes);
+                self.heap.keep(Rc::clone(rc));
+                Ok(a as i64)
+            }
+            (Value::List(rc), Some(Ty::Applied(C::List | C::Set, ts))) if ts.len() == 1 => {
+                let rc = Rc::clone(rc);
+                let slots: Result<Vec<i64>, String> =
+                    rc.iter().map(|e| self.heap_slot_hinted(e, &ts[0])).collect();
+                let a = self.heap.bind_slots(rc_key(&rc), &slots?, rc.len() as u32);
+                self.heap.keep(rc);
+                Ok(a as i64)
+            }
+            (Value::Set(rc), Some(Ty::Applied(C::Set | C::List, ts))) if ts.len() == 1 => {
+                let rc = Rc::clone(rc);
+                let slots: Result<Vec<i64>, String> =
+                    rc.iter().map(|e| self.heap_slot_hinted(e, &ts[0])).collect();
+                let a = self.heap.bind_slots(rc_key(&rc), &slots?, rc.len() as u32);
+                self.heap.keep(rc);
+                Ok(a as i64)
+            }
+            // NOT here: tuple materialization. Physically a tuple is one more
+            // slot block (value_object reads `(String, Value)` pairs as
+            // `load64(tup+12)` / `load64(tup+20)`), and an arm for it was
+            // measured: it unlocks the codec/value DECODE chains, whose
+            // results then flow into fixture-level `==` and repr — and the
+            // interp's native eq/repr on a bare address votes WRONG (value_eq
+            // printed F for T, value_repr printed the address). Those need a
+            // typed dynamic-Value carrier first (slice 2 increment 3); until
+            // then a tuple element abstains before the wrong vote can form.
+            _ => self.heap_materialize(v),
         }
-        self.heap_materialize(v)
+    }
+
+    /// One container element as its slot i64, driven by the DECLARED element
+    /// type: scalars inline (NaN still abstains — #1403), heap elements as
+    /// recursively-materialized children under their own hint. An Int under
+    /// ANY declared type is the address-identity (an opaque `Value` element
+    /// is exactly that).
+    fn heap_slot_hinted(&mut self, e: &Value, ty: &Ty) -> Result<i64, String> {
+        match e {
+            Value::Int(_) | Value::Float(_) | Value::Bool(_) => heap_scalar_slot(e, "container"),
+            Value::Str(_) | Value::List(_) | Value::Set(_) | Value::Map(_)
+                if heap_slot_is_child(ty) && !matches!(ty, Ty::TypeVar(_) | Ty::Unknown) =>
+            {
+                self.heap_materialize_hinted(e, Some(ty))
+            }
+            other => Err(format!(
+                "prim.handle of a container holding a {} element under the \
+                 declared element type {} (no faithful slot repr)",
+                other.type_name(),
+                ty_short(ty)
+            )),
+        }
     }
 
     fn heap_materialize(&mut self, v: &Value) -> Result<i64, String> {
@@ -1601,6 +1685,7 @@ fn heap_modeled_ty(ty: &Ty) -> bool {
         Ty::String | Ty::Bytes => true,
         Ty::Applied(C::List | C::Set, ts) if ts.len() == 1 => heap_slot_ty(&ts[0]),
         Ty::Applied(C::Map, ts) if ts.len() == 2 => heap_slot_ty(&ts[0]) && heap_slot_ty(&ts[1]),
+        Ty::Tuple(ts) => ts.iter().all(heap_slot_ty),
         _ => false,
     }
 }
@@ -1650,6 +1735,10 @@ fn ty_short(ty: &Ty) -> String {
             format!("Map[{}, {}]", ty_short(&ts[0]), ty_short(&ts[1]))
         }
         Ty::Applied(C::Option, ts) if ts.len() == 1 => format!("{}?", ty_short(&ts[0])),
+        Ty::Tuple(ts) => format!(
+            "({})",
+            ts.iter().map(ty_short).collect::<Vec<_>>().join(", ")
+        ),
         Ty::Int => "Int".into(),
         Ty::Float => "Float".into(),
         Ty::Bool => "Bool".into(),
