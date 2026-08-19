@@ -162,6 +162,12 @@ separated from body-check query) and MoonBit's relative positions (Rloc).
   the same corpus slice.
 Same fold clause as S1: any red → freeze and backport.
 
+**S2a VERDICT (2026-08-19): (d) PASS max-1 re-check on body edits; (e) PASS
+exactly decl+true-dependents on interface edits; (f) PASS 0 re-checks on
+span-only edits (20 rounds) — on the real corpus graph (6,973 decls, 5,408
+symbols, 15,673 edges). (g) remains open and becomes unit 4's acceptance
+bar. Unit 4 is GO. Full report: docs/spikes/S2a-sema-mechanics.md.**
+
 ## 7. Certification trajectory (R1a + R1b)
 
 Aviation-grade (DO-178C-class) is a declared destination, reached from either

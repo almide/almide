@@ -42,6 +42,7 @@ version = "0.0.1"
 dependencies = [
  "almide-syntax",
  "salsa",
+ "serde_json",
 ]
 
 [[package]]

@@ -5,6 +5,8 @@
 //!   (c) warm re-derive beats batch front-end re-parse by ≥10x.
 //! It deliberately proves nothing about the check phase — that is unit 4.
 
+pub mod s2;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Global count of actual `parse_digest` EXECUTIONS (not memo hits) — the

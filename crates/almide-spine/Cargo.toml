@@ -9,6 +9,7 @@ description = "SPIKE S1: salsa query spine over the ported parser (ARCHITECTURE.
 [dependencies]
 almide-syntax = { path = "../almide-syntax" }
 salsa = "0.23"
+serde_json = "1"
 
 [lints]
 workspace = true
