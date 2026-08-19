@@ -1,0 +1,260 @@
+// url — CORE-TIER pure URL handling (RFC 3986-lite).
+//
+// First module authored under the stdlib-excellence constitution
+// (STDLIB-EXCELLENCE.md, SD1–SD3): pure algorithms only, family-complete
+// (parse ⇄ to_string, encode ⇄ decode, query_pairs ⇄ build_query), no
+// panicking variants — parse/decode failures are Results with reasons
+// (the int.parse precedent), and every public fn carries an evaluable
+// `// Example:` line executed by the interpreter examples harness.
+//
+// Scope (documented limits, not accidents): schemes with an authority only
+// (`scheme://…`); no userinfo, no IPv6 bracket hosts, no punycode. `+` is
+// NOT decoded as space (that is form-encoding, not RFC 3986). A URL whose
+// query/fragment is present but empty (`http://h?`) round-trips to the
+// separator-free form.
+
+// A parsed URL. `port` is absent when the authority carries no `:port`;
+// `path` is "" when the authority is not followed by `/`; `query` and
+// `fragment` are "" when their separators are absent.
+type Url = {
+  scheme: String,
+  host: String,
+  port: Int?,
+  path: String,
+  query: String,
+  fragment: String,
+}
+
+// Split at the FIRST occurrence of `sep`: (before, after, found).
+fn __url_split_once(s: String, sep: String) -> (String, String, Bool) =
+  match string.index_of(s, sep) {
+    some(i) => (string.slice(s, 0, i), string.slice(s, i + string.len(sep), string.len(s)), true),
+    none => (s, "", false),
+  }
+
+fn __url_hex_char(n: Int) -> String = string.slice("0123456789ABCDEF", n, n + 1)
+
+// RFC 3986 unreserved: ALPHA / DIGIT / "-" / "." / "_" / "~"
+fn __url_is_unreserved(cp: Int) -> Bool =
+  (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (cp >= 48 and cp <= 57)
+    or cp == 45 or cp == 46 or cp == 95 or cp == 126
+
+fn __url_enc_byte(b: Int) -> String = "%" + __url_hex_char(b / 16) + __url_hex_char(b % 16)
+
+// UTF-8 encode one scalar value as %XX escapes (pure arithmetic — the
+// bytes module is deliberately not used, so this module stays fully
+// interpreter-coverable while the #1226 bridge slices land).
+fn __url_enc_cp(cp: Int) -> String =
+  if cp < 128 then __url_enc_byte(cp)
+  else if cp < 2048 then __url_enc_byte(192 + cp / 64) + __url_enc_byte(128 + cp % 64)
+  else if cp < 65536 then
+    __url_enc_byte(224 + cp / 4096) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64)
+  else
+    __url_enc_byte(240 + cp / 262144) + __url_enc_byte(128 + (cp / 4096) % 64)
+      + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64)
+
+fn __url_enc_char(c: String) -> String =
+  match string.codepoint(c) {
+    some(cp) => if __url_is_unreserved(cp) then c else __url_enc_cp(cp),
+    none => "",
+  }
+
+// Percent-encode a single component (query key, query value, path segment).
+// Total: every input has an encoding. Unreserved characters pass through;
+// every other scalar is UTF-8-encoded and escaped as %XX per byte.
+// See also: url.decode_component (the inverse), url.build_query.
+// Example: url.encode_component("a b") == "a%20b"
+// Example: url.encode_component("A-z_.~09") == "A-z_.~09"
+fn encode_component(s: String) -> String =
+  s |> string.chars |> list.map((c) => __url_enc_char(c)) |> list.join("")
+
+fn __url_hex_val(c: String) -> Int? =
+  match string.codepoint(c) {
+    some(cp) =>
+      if cp >= 48 and cp <= 57 then some(cp - 48)
+      else if cp >= 65 and cp <= 70 then some(cp - 55)
+      else if cp >= 97 and cp <= 102 then some(cp - 87)
+      else none,
+    none => none,
+  }
+
+fn __url_hex2(a: String, b: String) -> Int? =
+  match (__url_hex_val(a), __url_hex_val(b)) {
+    (some(x), some(y)) => some(x * 16 + y),
+    _ => none,
+  }
+
+// End index of the %XX-run starting at i, or a sentinel: -1 = truncated
+// escape, -2 = non-hex escape. (Int sentinels are internal-only: a
+// Result[(List[Int], Int), _] payload trips the interpreter's #1226 bridge
+// slice today — see STDLIB-EXCELLENCE queue #4; restructure when it lands.)
+fn __url_pct_end(cs: List[String], i: Int, n: Int) -> Int =
+  if i >= n or (list.get(cs, i) ?? "") != "%" then i
+  else if i + 3 > n then 0 - 1
+  else match __url_hex2(list.get(cs, i + 1) ?? "", list.get(cs, i + 2) ?? "") {
+    some(_) => __url_pct_end(cs, i + 3, n),
+    none => 0 - 2,
+  }
+
+// Byte value of the %XX escape whose '%' sits at char index p, or -1.
+fn __url_pbyte(cs: List[String], p: Int) -> Int =
+  match __url_hex2(list.get(cs, p + 1) ?? "", list.get(cs, p + 2) ?? "") {
+    some(b) => b,
+    none => 0 - 1,
+  }
+
+fn __url_cont(b: Int) -> Bool = b >= 128 and b <= 191
+
+// Strict UTF-8 decode of the %XX-run occupying char range [p, end): every
+// byte is read straight from its hex pair (no intermediate byte list — a
+// List[Int] crossing the interpreter bridge trips #1226 today; see
+// STDLIB-EXCELLENCE queue #4). Rejects continuation errors, overlong
+// forms, surrogates, and > U+10FFFF.
+fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[String, String] =
+  if p >= end then ok(acc)
+  else {
+    let b0 = __url_pbyte(cs, p)
+    if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
+    else if b0 >= 194 and b0 <= 223 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      if p + 6 <= end and __url_cont(b1)
+      then __url_utf8_go(cs, p + 6, end, acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)))
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    }
+    else if b0 >= 224 and b0 <= 239 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      let b2 = __url_pbyte(cs, p + 6)
+      let lo1 = if b0 == 224 then 160 else 128
+      let hi1 = if b0 == 237 then 159 else 191
+      if p + 9 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2)
+      then __url_utf8_go(cs, p + 9, end, acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)))
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    }
+    else if b0 >= 240 and b0 <= 244 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      let b2 = __url_pbyte(cs, p + 6)
+      let b3 = __url_pbyte(cs, p + 9)
+      let lo1 = if b0 == 240 then 144 else 128
+      let hi1 = if b0 == 244 then 143 else 191
+      if p + 12 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) and __url_cont(b3)
+      then __url_utf8_go(cs, p + 12, end, acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)))
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    }
+    else err("url.decode_component: invalid UTF-8 in percent data")
+  }
+
+fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String, String] =
+  if i >= n then ok(acc)
+  else {
+    let c = list.get(cs, i) ?? ""
+    if c == "%" then {
+      let e = __url_pct_end(cs, i, n)
+      if e == 0 - 1 then err("url.decode_component: truncated percent escape")
+      else if e == 0 - 2 then err("url.decode_component: invalid percent escape")
+      else match __url_utf8_go(cs, i, e, "") {
+        ok(dec) => __url_dec_go(cs, e, n, acc + dec),
+        err(er) => err(er),
+      }
+    }
+    else __url_dec_go(cs, i + 1, n, acc + c)
+  }
+
+// Decode a percent-encoded component. Fails with a reason on a truncated or
+// non-hex escape and on percent data that is not valid UTF-8 (strict:
+// overlong forms and surrogates are rejected). `+` is left as `+`
+// (RFC 3986; form-encoding is a different codec).
+// See also: url.encode_component (the inverse).
+// Example: match url.decode_component("a%20b") { ok(v) => v == "a b", err(_) => false }
+// Example: match url.decode_component("%zz") { ok(_) => false, err(_) => true }
+// Example: match url.decode_component(url.encode_component("日本語 ok~")) { ok(v) => v == "日本語 ok~", err(_) => false }
+fn decode_component(s: String) -> Result[String, String] = {
+  let cs = string.chars(s)
+  __url_dec_go(cs, 0, list.len(cs), "")
+}
+
+// Parse `scheme://host[:port][/path][?query][#fragment]`. Fails with a
+// reason on a missing scheme separator, empty scheme or host, or a port
+// that is not an integer in 0..=65535. The port is validated here so no
+// later consumer needs to re-check it.
+// See also: url.to_string (the inverse), url.query_pairs.
+// Example: match url.parse("https://example.com:8080/a/b?x=1&y=2#top") { ok(u) => u.scheme == "https" and u.host == "example.com" and u.port == some(8080) and u.path == "/a/b" and u.query == "x=1&y=2" and u.fragment == "top", err(_) => false }
+// Example: match url.parse("http://x") { ok(u) => u.host == "x" and u.path == "" and u.port == none, err(_) => false }
+// Example: match url.parse("not a url") { ok(_) => false, err(_) => true }
+// Example: match url.parse("http://h:99999") { ok(_) => false, err(_) => true }
+fn parse(s: String) -> Result[Url, String] =
+  match string.index_of(s, "://") {
+    none => err("url.parse: missing '://' scheme separator"),
+    some(i) => {
+      if i == 0 then err("url.parse: empty scheme")
+      else {
+        let scheme = string.slice(s, 0, i)
+        let rest = string.slice(s, i + 3, string.len(s))
+        let hf = __url_split_once(rest, "#")
+        let qs = __url_split_once(hf.0, "?")
+        let ps = __url_split_once(qs.0, "/")
+        let authority = ps.0
+        let path = if ps.2 then "/" + ps.1 else ""
+        if string.len(authority) == 0 then err("url.parse: empty host")
+        else {
+          let hp = __url_split_once(authority, ":")
+          if hp.2 then {
+            match int.parse(hp.1) {
+              ok(p) =>
+                if p >= 0 and p <= 65535
+                then ok(Url { scheme: scheme, host: hp.0, port: some(p), path: path, query: qs.1, fragment: hf.1 })
+                else err("url.parse: port out of range: " + hp.1),
+              err(_) => err("url.parse: invalid port: " + hp.1),
+            }
+          }
+          else ok(Url { scheme: scheme, host: authority, port: none, path: path, query: qs.1, fragment: hf.1 })
+        }
+      }
+    },
+  }
+
+// Render a Url back to its string form. Total; `parse ∘ to_string` is the
+// identity on every value `parse` produces.
+// See also: url.parse (the inverse).
+// Example: match url.parse("https://example.com:8080/a?x=1#t") { ok(u) => url.to_string(u) == "https://example.com:8080/a?x=1#t", err(_) => false }
+fn to_string(u: Url) -> String = {
+  let port_part = match u.port { some(p) => ":" + int.to_string(p), none => "" }
+  let query_part = if string.len(u.query) == 0 then "" else "?" + u.query
+  let frag_part = if string.len(u.fragment) == 0 then "" else "#" + u.fragment
+  u.scheme + "://" + u.host + port_part + u.path + query_part + frag_part
+}
+
+// Split a raw query string into key/value pairs. Total and lenient: empty
+// segments are dropped, a segment without `=` becomes (key, ""). Values are
+// returned RAW (not percent-decoded) — decode per pair when needed, so one
+// malformed value cannot fail the whole query.
+// See also: url.build_query (the inverse), url.decode_component.
+// Example: url.query_pairs("a=1&b=two") == [("a", "1"), ("b", "two")]
+// Example: url.query_pairs("") == []
+// Example: url.query_pairs("flag&x=1") == [("flag", ""), ("x", "1")]
+fn query_pairs(query: String) -> List[(String, String)] =
+  if string.len(query) == 0 then []
+  else query
+    |> string.split("&")
+    |> list.filter((part) => string.len(part) > 0)
+    |> list.map((part) => {
+      let kv = __url_split_once(part, "=")
+      (kv.0, kv.1)
+    })
+
+// Build a query string from pairs, percent-encoding every key and value.
+// Total. `query_pairs(build_query(ps))` recovers the ENCODED forms.
+// See also: url.query_pairs, url.encode_component.
+// Example: url.build_query([("q", "a b"), ("lang", "ja")]) == "q=a%20b&lang=ja"
+// Example: url.build_query([]) == ""
+fn build_query(pairs: List[(String, String)]) -> String =
+  pairs
+    |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v))
+    |> list.join("&")
+
+
+// TEMP probes
+fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))
+fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.chars(s), 0)
+fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.chars(s), 0, string.len(s), "") { ok(v) => v, err(e) => "E:" + e }
+fn __url_t_fcp(b: Int) -> String = string.from_codepoint(b)
+fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(string.chars(s), 0, string.len(s), "") { ok(v) => v, err(e) => "E:" + e }

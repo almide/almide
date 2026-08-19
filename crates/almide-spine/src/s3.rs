@@ -42,7 +42,7 @@ pub struct CheckOutput {
 
 /// Verbatim copy of src/compile_driver.rs::infer_module_capturing
 /// (almide@a877d2138) — see module doc for why it is copied, not imported.
-fn infer_module_capturing(
+pub(crate) fn infer_module_capturing(
     checker: &mut almide::check::Checker,
     name: &str,
     mod_prog: &mut almide::ast::Program,

@@ -23,7 +23,7 @@ pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {
         return Err(format!("parse errors: {}", parser.errors.len()));
     }
 
-    let resolved = almide::resolve::resolve_imports_with_deps(path, &program, &[])
+    let mut resolved = almide::resolve::resolve_imports_with_deps(path, &program, &[])
         .map_err(|e| format!("resolve: {e}"))?;
 
     let canon = almide::canonicalize::canonicalize_program(
@@ -41,6 +41,42 @@ pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {
     }
 
     let mut ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+    // Lower every resolved module into the program before linking — the
+    // incumbent's lower_one_user_module loop (src/compile_driver.rs:172-222,
+    // essential steps replicated with attribution; pkg versioning is inert
+    // for stdlib-only entries). Without this, calls into bundled PURE-Almide
+    // modules reach the interpreter as unresolved bridge lookups.
+    let sources = std::mem::take(&mut resolved.sources);
+    let mut module_diags = Vec::new();
+    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+        if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) {
+            continue;
+        }
+        // Bridge-vs-link boundary: a module containing ANY bodyless decl
+        // (`= _`) is a self-host SURFACE — its implementations live behind
+        // the interpreter's registry bridge, and lowering the surface would
+        // shadow the bridge with garbage stubs (found by probe: string.slice
+        // inside a linked stub returned the codepoint). Only fully
+        // self-contained modules (every fn has a real body — url, html) are
+        // lowered and linked; everything else stays bridge-resolved.
+        let has_bodyless = mod_prog.decls.iter().any(|d| matches!(d, almide::ast::Decl::Fn { body: None, .. }));
+        if has_bodyless {
+            continue;
+        }
+        let saved_self = checker.env.self_module_name;
+        if let Some(pid) = pkg_id.as_ref() {
+            checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+        }
+        crate::s3::infer_module_capturing(&mut checker, name, mod_prog, &sources, &mut module_diags);
+        let self_name = checker.env.self_module_name.map(|s| s.to_string());
+        let import_table_name = self_name.as_deref().unwrap_or(name);
+        let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+        let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
+        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, None);
+        checker.env.import_table = saved_table;
+        checker.env.self_module_name = saved_self;
+        ir.modules.push(mod_ir_module);
+    }
     almide_driver::link_ir(&mut ir);
     let out = almide::interp::Interpreter::new(&ir).run_main();
     // Surface the distinguished-outcome reason (Unsupported carries it in the
