@@ -1,0 +1,149 @@
+// http — bundled-Almide stdlib module.
+//
+// Migrated to `@intrinsic` + per-fn borrow overrides. `HttpRequest` /
+// `HttpResponse` are nominal types backed by Rust structs in
+// `runtime/rs/src/http.rs`. They are NOT named `Request`/`Response` so the
+// emitted Rust aliases never collide with a user/dependency `enum Response`.
+//
+// ABI split (drives the `@borrow_ref` / `@consume` sprinkling below):
+// - Accessors (`get_body` / `get_header` / `req_*` / `query_params`)
+//   take `&AlmideHttp{Response,Request}` + `&str` keys — plain
+//   `@intrinsic` resolves the `&str` via the default `String → RefStr`
+//   inference; the struct param needs `@borrow_ref`.
+// - Mutators (`set_status` / `set_header` / `set_cookie`) take the
+//   struct owned (`mut resp: AlmideHttpResponse`) — the default Ref
+//   would break, so `@consume(resp)`.
+// - HTTP client (`get`/`post`/...) take `&str` URLs and bodies —
+//   plain pass-through once `Map` heads get `@borrow_ref(headers)`.
+//
+// `serve`'s handler slot is EFFECT-typed (#1055): the lambda checked against
+// it gets effect-fn body ergonomics (`!` with propagation, effect calls), and
+// its lowered shape is the effect carrier `Fn(...) -> Result<HttpResponse,
+// String>` — exactly the contract the TCP listener loop has always expected.
+// A handler `Err` becomes the loop's 500 response; a pure handler is
+// Ok-wrapped by the checker's carrier typing, so both spellings arrive
+// uniform.
+@intrinsic("almide_rt_http_serve")
+effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
+
+// ── Response builders ──
+@intrinsic("almide_rt_http_response")
+fn response(status: Int, body: String) -> HttpResponse = _
+
+// Safe HTML response — body must be SafeHtml (XSS-proof by construction).
+// Use html.escape() or html.raw() to create SafeHtml values.
+// Note: http is a bundled stdlib module and cannot import html directly.
+// Users call: http.response(status, html.to_string(body))
+// A convenience wrapper will be added when cross-bundled-module calls are supported.
+@intrinsic("almide_rt_http_json")
+fn json(status: Int, body: String) -> HttpResponse = _
+
+@intrinsic("almide_rt_http_with_headers")
+@borrow_ref(headers)
+fn with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse = _
+
+@intrinsic("almide_rt_http_redirect")
+fn redirect(url: String) -> HttpResponse = _
+
+// ── Response accessors/mutators ──
+@intrinsic("almide_http_set_status")
+@consume(resp)
+fn status(resp: HttpResponse, code: Int) -> HttpResponse = _
+
+@intrinsic("almide_http_get_body")
+@borrow_ref(resp)
+fn body(resp: HttpResponse) -> String = _
+
+@intrinsic("almide_http_set_header")
+@consume(resp)
+fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse = _
+
+@intrinsic("almide_http_get_header")
+@borrow_ref(resp)
+fn get_header(resp: HttpResponse, key: String) -> String? = _
+
+// ── Request accessors (pure) ──
+@intrinsic("almide_http_req_method")
+@borrow_ref(req)
+fn req_method(req: HttpRequest) -> String = _
+
+@intrinsic("almide_http_req_path")
+@borrow_ref(req)
+fn req_path(req: HttpRequest) -> String = _
+
+@intrinsic("almide_http_req_body")
+@borrow_ref(req)
+fn req_body(req: HttpRequest) -> String = _
+
+@intrinsic("almide_http_req_header")
+@borrow_ref(req)
+fn req_header(req: HttpRequest, key: String) -> String? = _
+
+@intrinsic("almide_http_query_params")
+@borrow_ref(req)
+fn query_params(req: HttpRequest) -> Map[String, String] = _
+
+// Percent-decode a URL component (`+` → space, `%XX` → byte). `query_params`
+// already decodes its values; use this for manually-extracted query/form text.
+@intrinsic("almide_http_url_decode")
+fn url_decode(s: String) -> String = _
+
+// ── HTTP client (effect) ──
+@intrinsic("almide_http_get")
+effect fn get(url: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_post")
+effect fn post(url: String, body: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_put")
+effect fn put(url: String, body: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_patch")
+effect fn patch(url: String, body: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_delete")
+effect fn delete(url: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_request")
+@borrow_ref(headers)
+effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
+
+// Binary client: returns the raw response body as `Bytes` with no UTF-8
+// conversion, so binary payloads (images, audio — e.g. TTS mp3/wav) survive
+// byte-identical. The String client above corrupts non-UTF-8 bodies.
+@intrinsic("almide_http_get_bytes")
+effect fn get_bytes(url: String) -> Result[Bytes, String] = _
+
+@intrinsic("almide_http_request_bytes")
+@borrow_ref(headers)
+effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = _
+
+// Streaming HTTP request. The on_chunk callback is invoked with each
+// raw body chunk as it arrives on the wire. Supports `Transfer-Encoding:
+// chunked` (Server-Sent Events shape) and plain bodies. The callback is
+// the caller's job to do SSE line splitting / event parsing.
+@intrinsic("almide_http_request_stream")
+@borrow_ref(headers)
+effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: fn(String) -> Unit) -> Result[Unit, String] = _
+
+// OpenAI-compatible /chat/completions SSE helper. The runtime opens the
+// stream, parses each `data: {...}` event, calls `on_text_delta` with
+// each new content fragment for live rendering, and accumulates
+// content / tool_calls / usage on its own. Returns a JSON string shaped
+// like a non-streaming LLMResponse:
+//
+//   {"content":"...","model":"...","usage":{...},"finish_reason":"...",
+//    "tool_calls":[{"id":"...","name":"...","arguments":"..."}]}
+//
+// `body_json` must already include `"stream": true`. The almai layer
+// (or any caller) is expected to `json.parse` the result.
+@intrinsic("almide_rt_sse_openai_chat")
+effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: fn(String) -> Unit) -> Result[String, String] = _
+
+// Anthropic Messages API streaming. Same return shape as
+// `openai_streaming_call`; the runtime translates Anthropic's distinct
+// SSE event format (`event: content_block_delta` etc.) into the same
+// LLMResponse-shaped JSON ({content, model, usage, finish_reason,
+// tool_calls}).
+@intrinsic("almide_rt_sse_anthropic_messages")
+effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: fn(String) -> Unit) -> Result[String, String] = _

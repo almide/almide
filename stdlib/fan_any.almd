@@ -1,0 +1,86 @@
+// fan_any — SELF-HOSTED `fan.any` MAPPER form (Wave 2): apply the callback IN LIST ORDER and
+// return the FIRST Ok — an element's Err disqualifies that element only (deterministic skip,
+// never wall-clock). The EARLY CUT is structural: the recursion returns at the first Ok, so
+// later elements are never evaluated. All-fail (and the empty list) is the ledger-constant Err.
+// Monomorphic per (input element A, output element B) like fan_map; the trust spine routes by
+// type (`fan_call_name`); an unsupported pairing walls.
+// ── (Int → Int) ──
+fn __fan_any_go(xs: List[Int], f: fn(Int) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? 0) {
+  ok(y) => ok(y),
+  err(_) => __fan_any_go(xs, f, i + 1),
+}
+
+fn fan_any(xs: List[Int], f: fn(Int) -> Result[Int, String]) -> Result[Int, String] = __fan_any_go(xs, f, 0)
+
+// ── (Int → String) ──
+fn __fan_any_is_go(xs: List[Int], f: fn(Int) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? 0) {
+  ok(y) => ok(y),
+  err(_) => __fan_any_is_go(xs, f, i + 1),
+}
+
+fn fan_any_is(xs: List[Int], f: fn(Int) -> Result[String, String]) -> Result[String, String] = __fan_any_is_go(xs, f, 0)
+
+// ── (String → String) ──
+fn __fan_any_ss_go(xs: List[String], f: fn(String) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? "") {
+  ok(y) => ok(y),
+  err(_) => __fan_any_ss_go(xs, f, i + 1),
+}
+
+fn fan_any_ss(xs: List[String], f: fn(String) -> Result[String, String]) -> Result[String, String] = __fan_any_ss_go(xs, f, 0)
+
+// ── (String → Int) ──
+fn __fan_any_si_go(xs: List[String], f: fn(String) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? "") {
+  ok(y) => ok(y),
+  err(_) => __fan_any_si_go(xs, f, i + 1),
+}
+
+fn fan_any_si(xs: List[String], f: fn(String) -> Result[Int, String]) -> Result[Int, String] = __fan_any_si_go(xs, f, 0)
+
+// ── (Int → Float) ──
+fn __fan_any_if_go(xs: List[Int], f: fn(Int) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? 0) {
+  ok(y) => ok(y),
+  err(_) => __fan_any_if_go(xs, f, i + 1),
+}
+
+fn fan_any_if(xs: List[Int], f: fn(Int) -> Result[Float, String]) -> Result[Float, String] = __fan_any_if_go(xs, f, 0)
+
+// ── (Float → Int) ──
+fn __fan_any_fi_go(xs: List[Float], f: fn(Float) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? 0.0) {
+  ok(y) => ok(y),
+  err(_) => __fan_any_fi_go(xs, f, i + 1),
+}
+
+fn fan_any_fi(xs: List[Float], f: fn(Float) -> Result[Int, String]) -> Result[Int, String] = __fan_any_fi_go(xs, f, 0)
+
+// ── (Float → Float) ──
+fn __fan_any_ff_go(xs: List[Float], f: fn(Float) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? 0.0) {
+  ok(y) => ok(y),
+  err(_) => __fan_any_ff_go(xs, f, i + 1),
+}
+
+fn fan_any_ff(xs: List[Float], f: fn(Float) -> Result[Float, String]) -> Result[Float, String] = __fan_any_ff_go(xs, f, 0)
+
+// ── (Float → String) ──
+fn __fan_any_fs_go(xs: List[Float], f: fn(Float) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? 0.0) {
+  ok(y) => ok(y),
+  err(_) => __fan_any_fs_go(xs, f, i + 1),
+}
+
+fn fan_any_fs(xs: List[Float], f: fn(Float) -> Result[String, String]) -> Result[String, String] = __fan_any_fs_go(xs, f, 0)
+
+// ── (String → Float) ──
+fn __fan_any_sf_go(xs: List[String], f: fn(String) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
+else match f(list.get(xs, i) ?? "") {
+  ok(y) => ok(y),
+  err(_) => __fan_any_sf_go(xs, f, i + 1),
+}
+
+fn fan_any_sf(xs: List[String], f: fn(String) -> Result[Float, String]) -> Result[Float, String] = __fan_any_sf_go(xs, f, 0)

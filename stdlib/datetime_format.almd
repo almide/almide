@@ -1,0 +1,103 @@
+// datetime_format — SELF-HOSTED datetime.to_iso for v1. v0 = format!("{:04}-{:02}-{:02}T{:02}:
+// {:02}:{:02}Z", y, m, d, h, mi, s). The layout is CONSTANT-width (20 bytes), so NO runtime concat:
+// allocate a 20-byte String and store each ASCII byte (zero-padded digit or separator) at its fixed
+// offset — the proven int_to_string / base64 digit-writing discipline. Components come from the
+// already-self-hosted datetime.year/month/day (datetime_calendar) and hour/minute/second
+// (datetime_arith) — all CROSS-file, so no intra-file link cycle.
+//
+// The year field is VARIABLE width, exactly as Rust's `{:04}` is: at least four columns,
+// zero-padded, and the sign counts as one of them. This file used to declare `SCOPE: years
+// 0..9999` and write a fixed 20-byte buffer, which for anything outside that range did not
+// fail — it wrote GARBAGE. `to_iso(i64::MAX)` answered `292277026596-...` natively and the
+// low four digits `6596-...` here; `to_iso(i64::MIN)` answered a correct negative year
+// natively and the bytes `.*+)` here, because `48 + digit` with a negative digit is not an
+// ASCII character at all — a String containing non-UTF-8 bytes, produced silently, exit 0.
+// A documented scope that produces a malformed value outside itself is not a scope.
+// Write n (>= 0) as `width` zero-padded decimal digits ending at pos+width-1 (least-significant
+// last). Returns Int (the __itos_fill discipline: a Unit return would elide the call).
+fn __iso_pad(pos: Int, width: Int, n: Int) -> Int = if width <= 0 then 0
+else {
+  let digit = n % 10
+  prim.store8(pos + width - 1, 48 + digit)
+  __iso_pad(pos, width - 1, n / 10)
+}
+
+// Decimal digit count of n (>= 0); __iso_digits(0) = 1.
+fn __iso_digits(n: Int) -> Int = if n < 10 then 1 else 1 + __iso_digits(n / 10)
+
+fn datetime_to_iso(ts: Int) -> String = {
+  let y = datetime.year(ts)
+  let mo = datetime.month(ts)
+  let d = datetime.day(ts)
+  let h = datetime.hour(ts)
+  let mi = datetime.minute(ts)
+  let s = datetime.second(ts)
+  // `{:04}`: four columns minimum, zero-padded, the sign occupying one of them.
+  // `-5` is `-005`; a 12-digit year takes all twelve. The tail after the year is a
+  // constant 16 bytes ("-MM-DDTHH:MM:SSZ"), so only the head varies.
+  let neg = y < 0
+  let mag = if neg then 0 - y else y
+  let sign = if neg then 1 else 0
+  let dw = __iso_digits(mag) + sign
+  let yw = if dw > 4 then dw else 4
+  let out = prim.alloc_str(yw + 16)
+  let base = prim.handle(out) + 12
+  if neg then prim.store8(base, 45) else ()
+  // '-' when the year is negative; the magnitude fills the remaining columns
+  let _y = __iso_pad(base + sign, yw - sign, mag)
+  prim.store8(base + yw, 45)
+  // '-'
+  let _mo = __iso_pad(base + yw + 1, 2, mo)
+  prim.store8(base + yw + 3, 45)
+  // '-'
+  let _d = __iso_pad(base + yw + 4, 2, d)
+  prim.store8(base + yw + 6, 84)
+  // 'T'
+  let _h = __iso_pad(base + yw + 7, 2, h)
+  prim.store8(base + yw + 9, 58)
+  // ':'
+  let _mi = __iso_pad(base + yw + 10, 2, mi)
+  prim.store8(base + yw + 12, 58)
+  // ':'
+  let _s = __iso_pad(base + yw + 13, 2, s)
+  prim.store8(base + yw + 15, 90)
+  // 'Z'
+  out
+}
+
+// Build n (>= 0) as a fresh `width`-byte zero-padded decimal String (reusing the proven __iso_pad).
+// __dt_pad(2, 7) = "07", __dt_pad(4, 1970) = "1970". A value wider than `width` keeps only its low
+// `width` digits — fine for the conventional date-field ranges below.
+fn __dt_pad(width: Int, n: Int) -> String = {
+  let out = prim.alloc_str(width)
+  let _x = __iso_pad(prim.handle(out) + 12, width, n)
+  out
+}
+
+// datetime.format(ts, pattern): substitute the strftime specifiers %Y %m %d %H %M %S in `pattern`
+// with the zero-padded date fields, in the SAME SEQUENTIAL string.replace order used by the native
+// and v0-wasm backends — so all three are byte-identical by construction. Each field is built by
+// __dt_pad and substituted by the already-self-hosted string.replace (cross-file — no intra-file
+// link cycle). `%` is special ONLY before one of these specifiers; there is no `%%` escape (see
+// docs/stdlib/datetime.md). SCOPE: byte-matches for year 0..9999 (a 5-digit year exceeds the 4-wide
+// field, the same documented edge as to_iso) and the <100 field ranges.
+fn datetime_format(ts: Int, pattern: String) -> String = {
+  let y = datetime.year(ts)
+  let mo = datetime.month(ts)
+  let d = datetime.day(ts)
+  let h = datetime.hour(ts)
+  let mi = datetime.minute(ts)
+  let s = datetime.second(ts)
+  let ys = __dt_pad(4, y)
+  let p1 = string.replace(pattern, "%Y", ys)
+  let ms = __dt_pad(2, mo)
+  let p2 = string.replace(p1, "%m", ms)
+  let ds = __dt_pad(2, d)
+  let p3 = string.replace(p2, "%d", ds)
+  let hs = __dt_pad(2, h)
+  let p4 = string.replace(p3, "%H", hs)
+  let mis = __dt_pad(2, mi)
+  let p5 = string.replace(p4, "%M", mis)
+  let ss = __dt_pad(2, s)
+  string.replace(p5, "%S", ss)
+}

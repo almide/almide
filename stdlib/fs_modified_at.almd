@@ -1,0 +1,13 @@
+// fs_modified_at — SELF-HOSTED `fs.modified_at(path)` over the WASI full-stat
+// floor (prim.path_filestat), the fs_stat.almd machinery narrowed to the mtime
+// field: mtim@48 is nanoseconds, divided to Unix seconds exactly as native
+// `metadata.modified() → duration_since(UNIX_EPOCH).as_secs()`. The Ok payload
+// is a SCALAR Int (the int.parse-class scalar-Result rails). Reaching
+// prim.path_filestat carries Capability::FsRead.
+effect fn fs_modified_at(path: String) -> Result[Int, String] = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat(p, path)
+  if errno != 0 then err("stat failed: " + path)
+  else ok(prim.load64(p + 48) / 1000000000)
+}

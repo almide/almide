@@ -1,0 +1,7 @@
+// fs_temp_dir — SELF-HOSTED `fs.temp_dir()` for the v1 trust-spine WASM target.
+// The same observable as env.temp_dir (one temp-dir answer, two spellings —
+// C-189 bounds the platform-reporting exemption to exactly this surface):
+// `$TMPDIR` first, the "/tmp" preopen convention as the fallback.
+import env
+
+effect fn fs_temp_dir() -> String = env.get("TMPDIR") ?? "/tmp"

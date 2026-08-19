@@ -1,0 +1,10 @@
+// fs_exists — SELF-HOSTED `fs.exists(path)` over the WASI path-stat floor
+// (prim.path_exists), the v1 trust-spine realization of the effectful `fs.exists`.
+// Returns `true` if a file or directory exists at `path`, else `false`, matching native
+// `fs.exists` (std::path::Path::exists). The prim packages the `path_filestat_get` WASI
+// query (errno 0 = exists) and yields a SCALAR Bool (NOT a Result/heap — no allocation,
+// no scope-end drop). Because this body reaches prim.path_exists, its cap_witness carries
+// Capability::FsRead (a stat IS a filesystem READ — the SAME capability as fs.read_text,
+// NOT a new one) — so a caller is caps-verified ONLY if it declares FsRead (an `effect fn`);
+// a pure `fn` reaching it is a frontend error AND would REJECT at the gate.
+effect fn fs_exists(path: String) -> Bool = prim.path_exists(path)

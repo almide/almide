@@ -1,0 +1,14 @@
+// fs_remove_all — SELF-HOSTED `fs.remove_all(path)` over the WASI recursive-remove floor
+// (prim.remove_all), the v1 trust-spine realization of the effectful `fs.remove_all`. Removes the
+// tree rooted at `path` — a directory is emptied recursively (each child file unlinked, each child
+// directory removed) then removed, a file is unlinked directly — returning `Ok(())` on success or
+// `Err(message)` on a removal error, matching native `fs.remove_all` (remove_dir_all for a dir,
+// remove_file otherwise). The prim packages the recursive `path_remove_directory`/
+// `path_unlink_file` WASI sequence and the `Result[Unit, String]` construction (the cap-as-tag
+// block — Ok carries no payload at len@4=0, Err owns one message String @12, Ok/Err tag @16); the
+// result is a fresh OWNED Result dropped at scope end (the flat DropListStr — Ok frees nothing,
+// Err frees its one message: no leak). Because this body reaches prim.remove_all, its cap_witness
+// carries Capability::FsWrite (a recursive remove IS a filesystem write — the SAME capability as
+// fs.write, NOT a new one) — so a caller is caps-verified ONLY if it declares FsWrite (an
+// `effect fn`); a pure `fn` reaching it is a frontend error AND would REJECT at the gate.
+effect fn fs_remove_all(path: String) -> Result[Unit, String] = prim.remove_all(path)

@@ -1,0 +1,49 @@
+// string_split_once — SELF-HOSTED `string.split_once` for v1 over the prim floor.
+// s.split_once(sep) = Some((before, after)) at the FIRST occurrence of sep, None when
+// sep is absent (Rust semantics: an empty sep matches at position 0, so the result is
+// Some(("", s)) — including Some(("", "")) for the empty source). BYTE-level separator
+// match, same as string_split (sep is a full string, so both pieces stay valid UTF-8).
+// Each piece is a FRESH owned String; source + sep are borrowed.
+// Does sep (seplen bytes at seph+12) occur at byte position p in s (sh+12)?
+fn __so_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool = if j >= seplen then true
+else if p + j >= slen then false
+else {
+  let sb = prim.load8(sh + 12 + p + j)
+  let tb = prim.load8(seph + 12 + j)
+  if sb == tb then __so_at(sh, slen, seph, seplen, p, j + 1)
+  else false
+}
+
+// First byte index >= `from` where sep occurs, or -1 if sep is absent. An empty sep
+// hits immediately at `from` (j >= seplen on the first probe), mirroring Rust.
+fn __so_find(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int = if from + seplen > slen then 0 - 1
+else {
+  let hit = __so_at(sh, slen, seph, seplen, from, 0)
+  if hit then from
+  else __so_find(sh, slen, seph, seplen, from + 1)
+}
+
+fn __so_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __so_copy(dst, src, n, i + 1)
+}
+
+// A FRESH owned String = s[start .. start+n] (byte range).
+fn __so_sub(s: String, start: Int, n: Int) -> String = {
+  let sh = prim.handle(s)
+  let out = prim.alloc_str(n)
+  let _x = __so_copy(prim.handle(out) + 12, sh + 12 + start, n, 0)
+  out
+}
+
+fn string_split_once(s: String, sep: String) -> (String, String)? = {
+  let sh = prim.handle(s)
+  let seph = prim.handle(sep)
+  let slen = prim.load32(sh + 4)
+  let seplen = prim.load32(seph + 4)
+  let pos = __so_find(sh, slen, seph, seplen, 0)
+  if pos < 0 then none
+  else some((__so_sub(s, 0, pos), __so_sub(s, pos + seplen, slen - pos - seplen)))
+}

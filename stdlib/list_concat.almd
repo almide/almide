@@ -1,0 +1,129 @@
+// Self-hosted list concatenation — the `+` operator over SCALAR-element lists
+// (`List[Int]` / `List[Float]` / `List[Bool]`, i64 element slots) lowers to a CallFn to
+// __list_concat. Allocates a fresh List[Int] of len(a)+len(b) slots and byte-copies both
+// element ranges (each an i64 slot, a plain value — no nested ownership), the list sibling
+// of __str_concat. len@4 is the element count; data at handle+12, 8 bytes/slot. A
+// monomorphic List[Int] impl serves any SCALAR-element list (handles are type-agnostic i32;
+// the i64 slot round-trips an Int, a Float's f64 bits, or a Bool 0/1 losslessly). Pure
+// (prim memory ops, no Stdout). The inputs are BORROWED; the result is a fresh owned list.
+//
+// HEAP-element lists (`List[String]`) are NOT served here — their slots are owned String
+// handles that a copy would alias (double-free on drop). That needs an rc-incrementing,
+// recursively-dropped variant; until then a `List[String] + …` stays deferred (the lowering
+// gates __list_concat to scalar-element lists).
+// GEOMETRIC capacity for a concat RESULT (churn-friendliness, C-131): pad the block to the
+// next power of two >= n (floor 4) and PATCH len down (the filtermap over-allocate/patch-len
+// precedent). Successive append-accumulator concats (`xs = xs + [e]` in a loop) then request
+// the SAME padded size within each pow2 class, so the freed previous buffer is an EXACT-size
+// free-list match — churn stays O(n) memory. An exact-size result (the old behavior) made
+// every growing request a fresh bump: the free-list's exact-match policy could never reuse a
+// smaller freed block, and the doubling workload OOM'd at 4GB (loop_buffer_churn, #696).
+fn __lc_cap(n: Int, c: Int) -> Int = if c >= n then c else __lc_cap(n, c * 2)
+
+fn __lc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store64(dst + i * 8, prim.load64(src + i * 8))
+  __lc_copy(dst, src, n, i + 1)
+}
+
+fn __list_concat(a: List[Int], b: List[Int]) -> List[Int] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let out = prim.alloc_list(__lc_cap(la + lb, 4))
+  let ho = prim.handle(out)
+  prim.store32(ho + 4, la + lb)
+  let _x = __lc_copy(ho + 12, ha + 12, la, 0)
+  let _y = __lc_copy(ho + 12 + la * 8, hb + 12, lb, 0)
+  out
+}
+
+// HEAP-ELEMENT concat (the rc-incrementing variant prim.rc_inc was written for): each slot is an
+// OWNED heap handle (a String, a Value, a scalar-aggregate), so the new list must ACQUIRE its own
+// reference per element (rc_inc) — then dropping the source (DropListStr / DropListValue, recursive
+// rc_dec per element) does not free what the new list now co-owns. This serves `List[String] + …`,
+// `List[Value] + …`, `List[(k,v)] + …` (the heap-loop-carried append accumulators). The raw rc_inc is
+// cert-INVISIBLE (a Prim), so the per-element leak-safety is the differential/leak-loop's burden; the
+// list BLOCK's `i(id)m` is the proven part. Self-hosted (reuses $rc_inc), so §4.1 holds.
+fn __lc_copy_rc(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let e = prim.load64(src + i * 8)
+  prim.rc_inc(e)
+  prim.store64(dst + i * 8, e)
+  __lc_copy_rc(dst, src, n, i + 1)
+}
+
+fn __list_concat_rc(a: List[Int], b: List[Int]) -> List[Int] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let out = prim.alloc_list(__lc_cap(la + lb, 4))
+  let ho = prim.handle(out)
+  prim.store32(ho + 4, la + lb)
+  let _x = __lc_copy_rc(ho + 12, ha + 12, la, 0)
+  let _y = __lc_copy_rc(ho + 12 + la * 8, hb + 12, lb, 0)
+  out
+}
+
+// SELF-APPEND (`x = x + [e]`, incl. the v1 `list.push` desugar — see
+// concat_to_append.rs for the window rewrite that calls this): value-semantics
+// append that BORROWS `a`; the caller's `Drop x` right after releases the old
+// reference either way, so the result must carry its OWN reference.
+// - rc == 1 && len < cap: the caller's dying handle is the object's sole
+//   owner, so appending in place is unobservable; the value-semantics return
+//   of `a` Dups it (rc → 2) and the caller's Drop rebalances to 1 on the
+//   rebound slot. This is what makes the accumulator loop amortized O(1):
+//   __lc_cap's geometric blocks leave cap > len headroom on every grow.
+// - else: a fresh geometric-capacity copy (the concat path's exact physics);
+//   the caller's Drop releases the old reference as before.
+// SELF-APPEND, heap-element edition (`x = x + [e]` over OWNED-handle slots —
+// List[Value], List[String], List[(k,v)]; the v1 `list.push` desugar): the same
+// physics as __list_append1 plus the rc variant's reference arithmetic. `b` is
+// the 1-element temp the lowering built for `[e]`; its slot is COPIED with an
+// acquire (__lc_copy_rc's rc_inc), and the caller still drops the temp (the
+// recursive DropListValue/DropListStr walk rc_decs the element once) — net one
+// reference owned by `a`, exactly the balance __list_concat_rc leaves. Without
+// this fn the rc window had NO append fast path at all: every `list.push` on a
+// heap-element accumulator full-copied the list (O(n^2)) — json.parse's array
+// loop at 103 KiB went from 5 ms to minutes on exactly that (#939).
+fn __list_append1_rc(a: List[Int], b: List[Int]) -> List[Int] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  if prim.load32(ha) == 1 and la < prim.load32(ha + 8) then {
+    let _x = __lc_copy_rc(ha + 12 + la * 8, hb + 12, 1, 0)
+    prim.store32(ha + 4, la + 1)
+    a
+  } else {
+    let out = prim.alloc_list(la * 2 + 8)
+    let ho = prim.handle(out)
+    prim.store32(ho + 4, la + 1)
+    let _x = __lc_copy_rc(ho + 12, ha + 12, la, 0)
+    let _y = __lc_copy_rc(ho + 12 + la * 8, hb + 12, 1, 0)
+    out
+  }
+}
+
+fn __list_append1(a: List[Int], v: Int) -> List[Int] = {
+  let ha = prim.handle(a)
+  let la = prim.load32(ha + 4)
+  if prim.load32(ha) == 1 and la < prim.load32(ha + 8) then {
+    prim.store64(ha + 12 + la * 8, v)
+    prim.store32(ha + 4, la + 1)
+    a
+  } else {
+    // Growth uses 2·len + 8 (NOT __lc_cap's pow2): an append-built list then
+    // walks the SAME size sequence on every rebuild, so the freed previous
+    // block is an exact free-list match (the C-131 churn argument, applied to
+    // this fn's own size class) — and the resulting block placement measured
+    // ~15% faster than pow2 blocks on spectralnorm's read-streamed vectors.
+    let out = prim.alloc_list(la * 2 + 8)
+    let ho = prim.handle(out)
+    prim.store32(ho + 4, la + 1)
+    let _x = __lc_copy(ho + 12, ha + 12, la, 0)
+    prim.store64(ho + 12 + la * 8, v)
+    out
+  }
+}

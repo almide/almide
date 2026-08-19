@@ -1,0 +1,38 @@
+// io_write — the SELF-HOSTED `io.write(data)` / `io.write_bytes(data)` implementations for
+// v1, written in ALMIDE over the `prim` primitive floor, the trust-spine realization of the
+// two byte-oriented stdout writers. Sibling of io_print.almd: same single-iovec `fd_write`,
+// same preamble layout (NWRITTEN@0, IOVEC@8 {ptr,len}), and the SAME Capability::Stdout —
+// a stdout write is a stdout write, whether the payload is a String or raw bytes.
+//
+// Before these landed, `io.write` was admitted on NEITHER leg of the wasm gate: it walled as
+// "effectful/impure stdlib Module call io.write needs a declared capability", so any program
+// streaming bytes to stdout (the mandelbrot/PPM-style benches) was native-only.
+// A `Bytes` block is the SAME [rc][len][cap][bytes] layout a String uses, so its payload is
+// already a contiguous byte run — one iovec, no copy.
+fn io_write(data: Bytes) -> Unit = {
+  let h = prim.handle(data)
+  let len = prim.load32(h + 4)
+  prim.store32(8, h + 12)
+  prim.store32(12, len)
+  let _w = prim.fd_write(1, 8, 1, 0)
+}
+
+// Pack a `List[Int]`'s low bytes into the freshly allocated byte block at `dh`.
+fn __io_pack_bytes(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dh + 12 + i, prim.band(prim.load64(sh + 12 + i * 8), 255))
+  __io_pack_bytes(dh, sh, n, i + 1)
+}
+
+// A `List[Int]` stores one i64 per element, so it must be narrowed to a byte run before the
+// iovec can point at it. Native `almide_rt_io_write_bytes` does the identical `b as u8` map.
+fn io_write_bytes(data: List[Int]) -> Unit = {
+  let sh = prim.handle(data)
+  let n = prim.load32(sh + 4)
+  let buf = prim.alloc_bytes(n)
+  let dh = prim.handle(buf)
+  let _p = __io_pack_bytes(dh, sh, n, 0)
+  prim.store32(8, dh + 12)
+  prim.store32(12, n)
+  let _w = prim.fd_write(1, 8, 1, 0)
+}

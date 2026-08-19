@@ -1,0 +1,536 @@
+// set_core — SELF-HOSTED Set[Int] core for v1. A v1 `Set[Int]` IS a v1 List block
+// [rc][len@4][cap@8][data@12] holding UNIQUE, INSERTION-ORDERED Int elements — exactly v0's
+// dense de-duplicated insertion-ordered AlmideSet (native == wasm == self-host observably).
+// from_list dedups (first-seen order); len/is_empty/contains read; to_list copies to a List[Int].
+// Source borrowed; constructed sets/lists owned. Int elements only (scalar slots); Set[String]
+// (heap elements, nested ownership) is a later refinement.
+// Is x already among the first `count` Int elements at block-handle `dh`? Linear membership,
+// the same O(n) scan v0's AlmideSet uses.
+fn __set_has(dh: Int, count: Int, x: Int, i: Int) -> Bool = if i >= count then false
+else {
+  let e = prim.load64(dh + 12 + i * 8)
+  if e == x then true
+  else __set_has(dh, count, x, i + 1)
+}
+
+// ── BUCKET INDEX SIDECAR (#1219) ── the Set[Int] mirror of map_core's index, same
+// discipline: the element array stays AUTHORITATIVE (insertion-ordered, `len` governs
+// iteration/eq/repr) and the buckets are a pure sidecar, so nothing observable changes.
+//
+//   cap (the block's i64 slot count) is CANONICAL — every producer allocates through
+//   `__set_alloc`, so cap is a function of the element capacity E alone:
+//     E <  16 (FLAT)    cap = E        ∈ {0, 1, 2, 4, 8}  — no index, linear scan
+//     E >= 16 (INDEXED) cap = 2E + 1   ∈ {33, 65, 129, …}
+//   Disjoint ladders (8 < 33), so `cap >= 33` decides the shape and E = (cap-1)/2.
+//   An indexed block lays out
+//     slots [0, E)       the elements
+//     slot   E           ilen — the element count the buckets were built for
+//     slots [E+1, 2E+1)  2E i32 buckets, each `element_index + 1` (0 = EMPTY)
+//   Load factor is at most 1/2, so the linear probe always terminates on an empty bucket.
+//
+// The index is VALID iff `ilen == len`, and `__set_alloc` stamps every fresh block with
+// ilen = -1: a producer that writes elements without touching the buckets yields an
+// INVALID index that the next read rebuilds, so the two can never silently disagree.
+fn __set_pow2(n: Int, e: Int) -> Int = if e >= n then e
+else __set_pow2(n, e * 2)
+
+fn __set_cap_for(need: Int) -> Int = if need <= 0 then 0
+else {
+  let e = __set_pow2(need, 1)
+  if e >= 16 then e * 2 + 1 else e
+}
+
+fn __set_ecap(cap: Int) -> Int = if cap >= 33 then (cap - 1) / 2
+else cap
+
+fn __set_il(h: Int, ecap: Int) -> Int = h + 12 + ecap * 8
+
+fn __set_bb(h: Int, ecap: Int) -> Int = h + 12 + ecap * 8 + 8
+
+// xorshift64 avalanche (shifts/xors only — no Int overflow, and the high bits fold down
+// into the masked low bits so strided elements do not all collide).
+fn __set_mix(x: Int) -> Int = {
+  let a = prim.bxor(x, prim.bshl(x, 13))
+  let b = prim.bxor(a, prim.bshr_u(a, 7))
+  let c = prim.bxor(b, prim.bshl(b, 17))
+  prim.bxor(c, prim.bshr_u(c, 32))
+}
+
+fn __set_probe(h: Int, bb: Int, mask: Int, x: Int, j: Int) -> Int = {
+  let b = prim.load32(bb + j * 4)
+  if b == 0 then 0 - 1
+  else {
+    let e = b - 1
+    let xx = prim.load64(h + 12 + e * 8)
+    if xx == x then e
+    else __set_probe(h, bb, mask, x, prim.band(j + 1, mask))
+  }
+}
+
+fn __set_probe_free(bb: Int, mask: Int, j: Int) -> Int = {
+  let b = prim.load32(bb + j * 4)
+  if b == 0 then j
+  else __set_probe_free(bb, mask, prim.band(j + 1, mask))
+}
+
+fn __set_idx_put(bb: Int, mask: Int, x: Int, e: Int) -> Int = {
+  let j = __set_probe_free(bb, mask, prim.band(__set_mix(x), mask))
+  prim.store32(bb + j * 4, e + 1)
+  0
+}
+
+fn __set_idx_clear(bb: Int, nb: Int, j: Int) -> Int = if j >= nb then 0
+else {
+  prim.store32(bb + j * 4, 0)
+  __set_idx_clear(bb, nb, j + 1)
+}
+
+fn __set_idx_load(h: Int, bb: Int, mask: Int, len: Int, i: Int) -> Int = if i >= len then 0
+else {
+  let x = prim.load64(h + 12 + i * 8)
+  let _p = __set_idx_put(bb, mask, x, i)
+  __set_idx_load(h, bb, mask, len, i + 1)
+}
+
+// Rebuild the buckets from the `len` authoritative elements and stamp them VALID.
+// $alloc hands back reused (non-zeroed) blocks, so clear before filling.
+fn __set_reindex(h: Int, ecap: Int, len: Int) -> Int = {
+  let bb = __set_bb(h, ecap)
+  let _c = __set_idx_clear(bb, ecap * 2, 0)
+  let _f = __set_idx_load(h, bb, ecap * 2 - 1, len, 0)
+  prim.store64(__set_il(h, ecap), len)
+  0
+}
+
+// Start a half-built block with an EMPTY but VALID index, so a dedup fill can probe and
+// extend it element by element (`__set_add_ix`) instead of rescanning.
+fn __set_idx_init(h: Int, ecap: Int) -> Int = if ecap < 16 then 0
+else {
+  let _c = __set_idx_clear(__set_bb(h, ecap), ecap * 2, 0)
+  prim.store64(__set_il(h, ecap), 0)
+  0
+}
+
+// READ-SIDE membership: O(1) probe, building the index on demand. The rebuild writes to a
+// borrowed block, which is sound because the buckets are not part of the value — elements,
+// len and cap are untouched, so every observable read is identical either way.
+fn __set_has_ix(h: Int, len: Int, cap: Int, x: Int) -> Bool = {
+  let ecap = __set_ecap(cap)
+  if ecap < 16 then __set_has(h, len, x, 0)
+  else {
+    let ilen = prim.load64(__set_il(h, ecap))
+    let _r = if ilen == len then 0 else __set_reindex(h, ecap, len)
+    let mask = ecap * 2 - 1
+    __set_probe(h, __set_bb(h, ecap), mask, x, prim.band(__set_mix(x), mask)) >= 0
+  }
+}
+
+// Membership against a FINISHED block (handle + its own len/cap header).
+fn __set_member(h: Int, x: Int) -> Bool = {
+  let len = prim.load32(h + 4)
+  let cap = prim.load32(h + 8)
+  __set_has_ix(h, len, cap, x)
+}
+
+// PRODUCER-SIDE membership: probe when the index is ALREADY valid, else linear scan.
+// Never builds — a grow loop throws its result away every call, so building an index for
+// it would cost more than the scan it replaces.
+fn __set_has_soft(h: Int, len: Int, cap: Int, x: Int) -> Bool = {
+  let ecap = __set_ecap(cap)
+  if ecap < 16 then __set_has(h, len, x, 0)
+  else {
+    let ilen = prim.load64(__set_il(h, ecap))
+    if ilen == len then {
+      let mask = ecap * 2 - 1
+      __set_probe(h, __set_bb(h, ecap), mask, x, prim.band(__set_mix(x), mask)) >= 0
+    } else __set_has(h, len, x, 0)
+  }
+}
+
+// Membership in the first `w` elements of a HALF-BUILT block whose index was primed by
+// `__set_idx_init` and kept exact by `__set_add_ix`.
+fn __set_has_at(h: Int, ecap: Int, w: Int, x: Int) -> Bool = if ecap < 16 then __set_has(h, w, x, 0)
+else {
+  let mask = ecap * 2 - 1
+  __set_probe(h, __set_bb(h, ecap), mask, x, prim.band(__set_mix(x), mask)) >= 0
+}
+
+// Append x at position w of a half-built block, keeping its index exact. Returns w+1.
+fn __set_add_ix(h: Int, ecap: Int, w: Int, x: Int) -> Int = {
+  prim.store64(h + 12 + w * 8, x)
+  let _i = if ecap < 16 then 0
+  else {
+    let _p = __set_idx_put(__set_bb(h, ecap), ecap * 2 - 1, x, w)
+    prim.store64(__set_il(h, ecap), w + 1)
+    0
+  }
+  w + 1
+}
+
+fn __set_copy_slots(sh: Int, rh: Int, start: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let w = prim.load64(sh + 12 + (start + i) * 8)
+  prim.store64(rh + 12 + (start + i) * 8, w)
+  __set_copy_slots(sh, rh, start, n, i + 1)
+}
+
+// The ONLY allocator for a Set[Int] block: canonical cap + an INVALID index stamp.
+fn __set_alloc_cap(cap: Int) -> Set[Int] = {
+  let r = prim.alloc_set(cap)
+  let ecap = __set_ecap(cap)
+  let _i = if ecap < 16 then 0
+  else {
+    prim.store64(__set_il(prim.handle(r), ecap), 0 - 1)
+    0
+  }
+  r
+}
+
+fn __set_alloc(need: Int) -> Set[Int] = __set_alloc_cap(__set_cap_for(need))
+
+// Append each not-yet-present element of list `xh` (length xlen) into the set block `sh`,
+// growing the unique count `w`. Returns the final unique count (= the set's len).
+fn __set_fill(xh: Int, xlen: Int, sh: Int, ecap: Int, i: Int, w: Int) -> Int = if i >= xlen then w
+else {
+  let x = prim.load64(xh + 12 + i * 8)
+  let present = __set_has_at(sh, ecap, w, x)
+  if present then __set_fill(xh, xlen, sh, ecap, i + 1, w)
+  else __set_fill(xh, xlen, sh, ecap, i + 1, __set_add_ix(sh, ecap, w, x))
+}
+
+fn set_from_list(xs: List[Int]) -> Set[Int] = {
+  let xh = prim.handle(xs)
+  let xlen = prim.load32(xh + 4)
+  let s = __set_alloc(xlen)
+  // over-alloc xlen slots; patch len to the unique count
+  let sh = prim.handle(s)
+  let ecap = __set_ecap(prim.load32(sh + 8))
+  let _i = __set_idx_init(sh, ecap)
+  let u = __set_fill(xh, xlen, sh, ecap, 0, 0)
+  prim.store32(sh + 4, u)
+  // len field := unique count
+  s
+}
+
+fn set_len(s: Set[Int]) -> Int = prim.load32(prim.handle(s) + 4)
+
+fn set_is_empty(s: Set[Int]) -> Bool = prim.load32(prim.handle(s) + 4) == 0
+
+fn set_contains(s: Set[Int], x: Int) -> Bool = {
+  let h = prim.handle(s)
+  let len = prim.load32(h + 4)
+  let cap = prim.load32(h + 8)
+  __set_has_ix(h, len, cap, x)
+}
+
+// Copy the set's first `len` Int elements into a fresh List block.
+fn __set_copy(sh: Int, oh: Int, len: Int, i: Int) -> Int = if i >= len then 0
+else {
+  let e = prim.load64(sh + 12 + i * 8)
+  prim.store64(oh + 12 + i * 8, e)
+  __set_copy(sh, oh, len, i + 1)
+}
+
+fn set_to_list(s: Set[Int]) -> List[Int] = {
+  let h = prim.handle(s)
+  let len = prim.load32(h + 4)
+  let out = prim.alloc_list(len)
+  let oh = prim.handle(out)
+  let _x = __set_copy(h, oh, len, 0)
+  out
+}
+
+// ── Set algebra (closure-free, Int) ── a and b are already unique; results preserve v0's
+// observable order. Each op over-allocs, fills, and patches len. Helpers share __set_has.
+// Append b's elements (handle bh, len blen) NOT already in the a-portion (first `alen` slots of
+// result rh), growing the unique count w. Used by union (a already copied into rh).
+// b's own elements are already unique, so probing the WHOLE built prefix `w` (the copied
+// a-portion plus the b-elements already appended) decides membership exactly as the
+// a-portion-only scan did — and it lets the incremental index answer in O(1).
+fn __set_addb(bh: Int, blen: Int, rh: Int, ecap: Int, j: Int, w: Int) -> Int = if j >= blen then w
+else {
+  let x = prim.load64(bh + 12 + j * 8)
+  let inA = __set_has_at(rh, ecap, w, x)
+  if inA then __set_addb(bh, blen, rh, ecap, j + 1, w)
+  else __set_addb(bh, blen, rh, ecap, j + 1, __set_add_ix(rh, ecap, w, x))
+}
+
+fn set_union(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = __set_alloc(alen + blen)
+  let rh = prim.handle(r)
+  let ecap = __set_ecap(prim.load32(rh + 8))
+  let _c = __set_copy(ah, rh, alen, 0)
+  // a's elements first (a's order)
+  let _i = if ecap < 16 then 0 else __set_reindex(rh, ecap, alen)
+  let w = __set_addb(bh, blen, rh, ecap, 0, alen)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements that ARE in b (intersection, a's order).
+fn __set_inter(ah: Int, alen: Int, bh: Int, rh: Int, i: Int, w: Int) -> Int = if i >= alen then w
+else {
+  let x = prim.load64(ah + 12 + i * 8)
+  let inB = __set_member(bh, x)
+  if inB then {
+    prim.store64(rh + 12 + w * 8, x)
+    __set_inter(ah, alen, bh, rh, i + 1, w + 1)
+  } else __set_inter(ah, alen, bh, rh, i + 1, w)
+}
+
+fn set_intersection(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let r = __set_alloc(alen)
+  let rh = prim.handle(r)
+  let w = __set_inter(ah, alen, bh, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements NOT in b (difference, a's order).
+fn __set_diff(ah: Int, alen: Int, bh: Int, rh: Int, i: Int, w: Int) -> Int = if i >= alen then w
+else {
+  let x = prim.load64(ah + 12 + i * 8)
+  let inB = __set_member(bh, x)
+  if inB then __set_diff(ah, alen, bh, rh, i + 1, w)
+  else {
+    prim.store64(rh + 12 + w * 8, x)
+    __set_diff(ah, alen, bh, rh, i + 1, w + 1)
+  }
+}
+
+fn set_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let r = __set_alloc(alen)
+  let rh = prim.handle(r)
+  let w = __set_diff(ah, alen, bh, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// All of a's first `alen` elements present in b?
+fn __set_all_in(ah: Int, alen: Int, bh: Int, i: Int) -> Bool = if i >= alen then true
+else {
+  let x = prim.load64(ah + 12 + i * 8)
+  let inB = __set_member(bh, x)
+  if inB then __set_all_in(ah, alen, bh, i + 1)
+  else false
+}
+
+fn set_is_subset(a: Set[Int], b: Set[Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  __set_all_in(ah, alen, bh, 0)
+}
+
+// None of a's first `alen` elements present in b?
+fn __set_none_in(ah: Int, alen: Int, bh: Int, i: Int) -> Bool = if i >= alen then true
+else {
+  let x = prim.load64(ah + 12 + i * 8)
+  let inB = __set_member(bh, x)
+  if inB then false
+  else __set_none_in(ah, alen, bh, i + 1)
+}
+
+fn set_is_disjoint(a: Set[Int], b: Set[Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  __set_none_in(ah, alen, bh, 0)
+}
+
+// ── Set construction (closure-free, Int) ── new/insert/remove/symmetric_difference. Each
+// returns a fresh owned Set (v0's insert/remove clone-then-mutate).
+// An empty Set[Int] — a 0-length block. alloc_set(0) already sets len=0.
+fn set_new() -> Set[Int] = __set_alloc_cap(0)
+
+// Carry a VALID source index into the same-shape result (element indices survive a full
+// copy) and extend it with the appended element. A stale source index, or a grow that
+// changed the bucket count, leaves the result INVALID for the next read to rebuild.
+fn __set_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, present: Bool, x: Int) -> Int = if necap < 16 then 0
+else if necap != secap then 0
+else {
+  let ilen = prim.load64(__set_il(sh, secap))
+  if ilen != len then 0
+  else {
+    let _c = __set_copy_slots(sh, rh, secap, secap + 1, 0)
+    if present then 0
+    else {
+      let _p = __set_idx_put(__set_bb(rh, necap), necap * 2 - 1, x, len)
+      prim.store64(__set_il(rh, necap), len + 1)
+      0
+    }
+  }
+}
+
+// GEOMETRIC capacity (#1219), same reasoning as map_core's map_set: a `s = set.insert(s, x)`
+// grow loop with exact-size allocs defeats the $alloc exact-size free-list (O(n^2) bytes, O(n)
+// dead-list walk per alloc); the `__set_cap_for` doubling ladder makes the previously freed
+// block an exact head match. Slack past len is never read (len governs iteration/eq/repr).
+fn set_insert(s: Set[Int], x: Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let scap = prim.load32(sh + 8)
+  let present = __set_has_soft(sh, slen, scap, x)
+  let want = __set_cap_for(if present then slen else slen + 1)
+  let cap = if want > scap then want else scap
+  let r = __set_alloc_cap(cap)
+  let rh = prim.handle(r)
+  let _c = __set_copy(sh, rh, slen, 0)
+  let w = if present then slen
+  else {
+    prim.store64(rh + 12 + slen * 8, x)
+    slen + 1
+  }
+  prim.store32(rh + 4, w)
+  let _x = __set_idx_carry(sh, rh, __set_ecap(scap), __set_ecap(cap), slen, present, x)
+  r
+}
+
+// Copy s's elements EXCEPT x into result rh (preserving the survivors' order); return the count.
+fn __set_remove_fill(sh: Int, slen: Int, rh: Int, x: Int, i: Int, w: Int) -> Int = if i >= slen then w
+else {
+  let e = prim.load64(sh + 12 + i * 8)
+  if e == x then __set_remove_fill(sh, slen, rh, x, i + 1, w)
+  else {
+    prim.store64(rh + 12 + w * 8, e)
+    __set_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+  }
+}
+
+// The result is a FRESH block, so its index is born invalid — removal shifts every
+// survivor's element index, and the next read rebuilds. An index cannot rot here
+// because it is never carried across a removal.
+fn set_remove(s: Set[Int], x: Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let r = __set_alloc(slen)
+  let rh = prim.handle(r)
+  let w = __set_remove_fill(sh, slen, rh, x, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append b's elements NOT in the ORIGINAL a (handle ah, len alen), growing count w. Used by
+// symmetric_difference after the a-not-in-b part is already written (disjoint, so no re-dedup).
+fn __set_addb_nota(ah: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int = if j >= blen then w
+else {
+  let x = prim.load64(bh + 12 + j * 8)
+  let inA = __set_member(ah, x)
+  if inA then __set_addb_nota(ah, bh, blen, rh, j + 1, w)
+  else {
+    prim.store64(rh + 12 + w * 8, x)
+    __set_addb_nota(ah, bh, blen, rh, j + 1, w + 1)
+  }
+}
+
+fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = __set_alloc(alen + blen)
+  let rh = prim.handle(r)
+  let w1 = __set_diff(ah, alen, bh, rh, 0, 0)
+  // a not in b (a's order)
+  let w2 = __set_addb_nota(ah, bh, blen, rh, 0, w1)
+  // then b not in a (b's order)
+  prim.store32(rh + 4, w2)
+  r
+}
+
+// ── Higher-order Set[Int] (closures machinery) ── the predicate f is invoked via CallIndirect.
+// A pure predicate byte-matches v0 (single pass, no short-circuit). filter keeps a subset of an
+// already-unique set, so the result stays unique (no re-dedup).
+fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+else {
+  let x = prim.load64(sh + 12 + i * 8)
+  let keep = f(x)
+  if keep then {
+    prim.store64(dh + 12 + di * 8, x)
+    __set_filter_fill(dh, sh, f, n, i + 1, di + 1)
+  } else {
+    __set_filter_fill(dh, sh, f, n, i + 1, di)
+  }
+}
+
+fn set_filter(s: Set[Int], f: (Int) -> Bool) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = __set_alloc(n)
+  let rh = prim.handle(r)
+  let count = __set_filter_fill(rh, sh, f, n, 0, 0)
+  prim.store32(rh + 4, count)
+  r
+}
+
+// Sum the predicate's 0/1 over all elements (a Bool is an i64 0/1) → the hit COUNT.
+fn __set_count_hits(sh: Int, f: (Int) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let x = prim.load64(sh + 12 + i * 8)
+  let h = f(x)
+  if h then __set_count_hits(sh, f, n, i + 1, acc + 1)
+  else __set_count_hits(sh, f, n, i + 1, acc)
+}
+
+fn set_all(s: Set[Int], f: (Int) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_count_hits(sh, f, n, 0, 0)
+  hits >= n
+}
+
+fn set_any(s: Set[Int], f: (Int) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_count_hits(sh, f, n, 0, 0)
+  hits > 0
+}
+
+// set.map — apply f to each element, collecting UNIQUE results (f may collapse distinct inputs
+// to the same output, so the mapped values MUST be re-deduped, exactly v0's `.map(f).collect()`
+// into an AlmideSet). Append f(x) iff not already present; first-seen order. Int->Int.
+fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, ecap: Int, n: Int, i: Int, w: Int) -> Int = if i >= n then w
+else {
+  let x = prim.load64(sh + 12 + i * 8)
+  let y = f(x)
+  let present = __set_has_at(dh, ecap, w, y)
+  if present then __set_map_fill(dh, sh, f, ecap, n, i + 1, w)
+  else __set_map_fill(dh, sh, f, ecap, n, i + 1, __set_add_ix(dh, ecap, w, y))
+}
+
+fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = __set_alloc(n)
+  let rh = prim.handle(r)
+  let ecap = __set_ecap(prim.load32(rh + 8))
+  let _i = __set_idx_init(rh, ecap)
+  let w = __set_map_fill(rh, sh, f, ecap, n, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// set.fold — left fold with a TWO-arity closure f : (Acc, Int) -> Acc (acc first, element
+// second — v0's fold(s, init, f)). Int accumulator. The set walk order = insertion order.
+fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let x = prim.load64(sh + 12 + i * 8)
+  let nacc = f(acc, x)
+  __set_fold_loop(sh, f, n, i + 1, nacc)
+}
+
+fn set_fold(s: Set[Int], init: Int, f: (Int, Int) -> Int) -> Int = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  __set_fold_loop(sh, f, n, 0, init)
+}

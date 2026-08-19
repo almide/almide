@@ -1,0 +1,93 @@
+// bytes_append_multi — SELF-HOSTED functional forms of the MULTI-BYTE bytes appends
+// (`bytes.append_{u16,i16,u32,i32,i64,f32,f64}_{le,be}`), byte-matching native
+// runtime/rs/src/bytes.rs (`(val as uN/iN).to_le_bytes()/to_be_bytes()` — the
+// band/bshr_u byte extraction of the i64 two's-complement is exactly those bytes for
+// every width and sign; f32 demotes first via prim.f2f32, f64 uses prim.fbits).
+// v0's forms are IN-PLACE (`mut b -> Unit`); v1 has value semantics, so the statement
+// call `bytes.append_u32_le(buf, x)` is REWRITTEN to the rebind
+// `buf = bytes.append_u32_le(buf, x)` (mod_p3's bytes.push arm) and these functional
+// impls alloc n+k, copy, and store the k bytes.
+fn __bam_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __bam_copy(dst, src, n, i + 1)
+}
+
+// little-endian: byte i = bits >> (8*i)
+fn __bam_le(p: Int, bits: Int, k: Int, i: Int) -> Int = if i >= k then 0
+else {
+  prim.store8(p + i, prim.band(prim.bshr_u(bits, i * 8), 255))
+  __bam_le(p, bits, k, i + 1)
+}
+
+// big-endian: byte i = bits >> (8*(k-1-i))
+fn __bam_be(p: Int, bits: Int, k: Int, i: Int) -> Int = if i >= k then 0
+else {
+  prim.store8(p + i, prim.band(prim.bshr_u(bits, (k - 1 - i) * 8), 255))
+  __bam_be(p, bits, k, i + 1)
+}
+
+// fresh Bytes = b ++ k bytes of `bits` in the given order (le = true → little-endian).
+fn __bam(b: Bytes, bits: Int, k: Int, le: Bool) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_bytes(n + k)
+  let dst = prim.handle(out) + 12
+  let _c = __bam_copy(dst, prim.handle(b) + 12, n, 0)
+  let _w = if le then __bam_le(dst + n, bits, k, 0)
+  else __bam_be(dst + n, bits, k, 0)
+  out
+}
+
+fn bytes_append_u16_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, true)
+
+fn bytes_append_u16_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, false)
+
+fn bytes_append_i16_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, true)
+
+fn bytes_append_i16_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, false)
+
+fn bytes_append_u32_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, true)
+
+fn bytes_append_u32_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, false)
+
+fn bytes_append_i32_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, true)
+
+fn bytes_append_i32_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, false)
+
+fn bytes_append_i64_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 8, true)
+
+fn bytes_append_i64_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 8, false)
+
+// Float writes are NaN-OBSERVATION boundaries (C-210): NaN collapses to the
+// canonical pattern (f64 via the one `float.to_bits` rule, f32 0x7FC00000)
+// before the reinterpret.
+fn __f32_obs_bits(v: Float) -> Int = if float.is_nan(v) then 0x7FC00000 else prim.f32bits(prim.f2f32(v))
+
+fn bytes_append_f32_le(b: Bytes, v: Float) -> Bytes = __bam(b, __f32_obs_bits(v), 4, true)
+
+fn bytes_append_f32_be(b: Bytes, v: Float) -> Bytes = __bam(b, __f32_obs_bits(v), 4, false)
+
+fn bytes_append_f64_le(b: Bytes, v: Float) -> Bytes = __bam(b, float.to_bits(v), 8, true)
+
+fn bytes_append_f64_be(b: Bytes, v: Float) -> Bytes = __bam(b, float.to_bits(v), 8, false)
+
+// The BE serialization CURSOR (`bytes.write_*` — v0 runtime/rs/src/bytes.rs):
+// `write_u8` is the 1-byte push (routed to `bytes.append` by the rewrite, like
+// `append_u8`); `write_u32_be` / `write_i64_be` / `write_f64_be` ARE the
+// `append_*_be` fns under the cursor's name (the rewrite maps them, no twin
+// needed); the two below have no append twin. `write_bool` appends 1/0.
+// `write_string_be` appends a u32 BE BYTE-length prefix, then the UTF-8 bytes
+// (`s.as_bytes()` — a multibyte char counts its bytes).
+fn bytes_write_bool(b: Bytes, v: Bool) -> Bytes = __bam(b, if v then 1 else 0, 1, true)
+
+fn bytes_write_string_be(b: Bytes, s: String) -> Bytes = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let n0 = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_bytes(n0 + 4 + n)
+  let dst = prim.handle(out) + 12
+  let _c = __bam_copy(dst, prim.handle(b) + 12, n0, 0)
+  let _l = __bam_be(dst + n0, n, 4, 0)
+  let _s = __bam_copy(dst + n0 + 4, sh + 12, n, 0)
+  out
+}

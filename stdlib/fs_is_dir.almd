@@ -1,0 +1,17 @@
+// fs_is_dir — SELF-HOSTED `fs.is_dir(path)` / `fs.is_file(path)` over the WASI
+// full-stat floor (prim.path_filestat): filetype@16 is 3 for a directory, 4 for a
+// regular file. A stat FAILURE (missing path) is `false` for both, matching native
+// `Path::is_dir()` / `Path::is_file()` (which swallow the io error). SCALAR Bool
+// results — no allocation tracked beyond the scratch, no Result rails (the
+// fs.exists shape). Reaching prim.path_filestat carries Capability::FsRead.
+fn __ftype(path: String) -> Int = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat(p, path)
+  if errno != 0 then 0
+  else prim.load8(p + 16)
+}
+
+effect fn fs_is_dir(path: String) -> Bool = __ftype(path) == 3
+
+effect fn fs_is_file(path: String) -> Bool = __ftype(path) == 4

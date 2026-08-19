@@ -1,0 +1,63 @@
+// int64 — bundled-Almide sized-numeric conversion module.
+//
+// See `int8.almd` for the routing rationale (dimensional pivot via
+// canonical `int`).
+//
+// `Int64` and the canonical `Int` share a representation but not a type, so
+// this module exists for the same reason `int32` does: without it a reader who
+// has used `int32.to_string` finds no `int64.to_string` and has to know the
+// `int.to_string(int.from_int64(x))` pivot (#894). There is no `to_int64` —
+// that is the identity on this type.
+fn to_int8(x: Int64) -> Int8 = int.to_int8(int.from_int64(x))
+
+fn to_int16(x: Int64) -> Int16 = int.to_int16(int.from_int64(x))
+
+fn to_int32(x: Int64) -> Int32 = int.to_int32(int.from_int64(x))
+
+fn to_uint8(x: Int64) -> UInt8 = int.to_uint8(int.from_int64(x))
+
+fn to_uint16(x: Int64) -> UInt16 = int.to_uint16(int.from_int64(x))
+
+fn to_uint32(x: Int64) -> UInt32 = int.to_uint32(int.from_int64(x))
+
+fn to_uint64(x: Int64) -> UInt64 = int.to_uint64(int.from_int64(x))
+
+fn to_float32(x: Int64) -> Float32 = int.to_float32(int.from_int64(x))
+
+fn to_float64(x: Int64) -> Float64 = int.to_float64(int.from_int64(x))
+
+fn to_string(x: Int64) -> String = int.to_string(int.from_int64(x))
+
+// ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
+fn to_int8_checked(x: Int64) -> Int8? = int.to_int8_checked(int.from_int64(x))
+
+fn to_int8_saturating(x: Int64) -> Int8 = int.to_int8_saturating(int.from_int64(x))
+
+fn to_int16_checked(x: Int64) -> Int16? = int.to_int16_checked(int.from_int64(x))
+
+fn to_int16_saturating(x: Int64) -> Int16 = int.to_int16_saturating(int.from_int64(x))
+
+fn to_int32_checked(x: Int64) -> Int32? = int.to_int32_checked(int.from_int64(x))
+
+fn to_int32_saturating(x: Int64) -> Int32 = int.to_int32_saturating(int.from_int64(x))
+
+fn to_uint8_checked(x: Int64) -> UInt8? = int.to_uint8_checked(int.from_int64(x))
+
+fn to_uint8_saturating(x: Int64) -> UInt8 = int.to_uint8_saturating(int.from_int64(x))
+
+fn to_uint16_checked(x: Int64) -> UInt16? = int.to_uint16_checked(int.from_int64(x))
+
+fn to_uint16_saturating(x: Int64) -> UInt16 = int.to_uint16_saturating(int.from_int64(x))
+
+fn to_uint32_checked(x: Int64) -> UInt32? = int.to_uint32_checked(int.from_int64(x))
+
+fn to_uint32_saturating(x: Int64) -> UInt32 = int.to_uint32_saturating(int.from_int64(x))
+
+fn to_uint64_checked(x: Int64) -> UInt64? = int.to_uint64_checked(int.from_int64(x))
+
+fn to_uint64_saturating(x: Int64) -> UInt64 = int.to_uint64_saturating(int.from_int64(x))
+
+// ── Bounds ──
+fn min_value() -> Int64 = int.to_int64(-9223372036854775807 - 1)
+
+fn max_value() -> Int64 = int.to_int64(9223372036854775807)

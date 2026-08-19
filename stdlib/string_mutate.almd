@@ -1,0 +1,5 @@
+// string_mutate — SELF-HOSTED in-place fixed-size string mutation for v1. `string.clear` truncates
+// the String to length 0 (Vec::clear): a BORROW + a single store of the byte-length field to 0 (the
+// cap/data are untouched). No ownership change (no alloc/drop), no host capability — sound, and the
+// caller sees it (shared block). v0: `s.clear()`. (string.push GROWS the buffer → deferred.)
+fn string_clear(s: String) -> Unit = prim.store32(prim.handle(s) + 4, 0)

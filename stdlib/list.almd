@@ -1,0 +1,354 @@
+// list — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 3c).
+//
+// Migrated mechanically from `stdlib/defs/list.toml` (60 fns). Closure-
+// bearing ops that `pass_stdlib_lowering::try_lower_to_iter_chain`
+// recognises (`map`, `filter`, `flat_map`, `filter_map`, `fold`, `find`,
+// `any`, `all`, `count`) are intercepted before the `@inline_rust`
+// dispatch fires — the Rust emitter produces a fused
+// `into_iter().<step>().<collect>()` chain, preserving zero-copy on
+// isolated calls. All other ops (non-closure, mutable, and the closure
+// ops not in the IterChain list) go through the declarative bundled
+// path.
+// ── basic accessors ──
+@intrinsic("almide_rt_list_len")
+fn len[A](xs: List[A]) -> Int = _
+
+@intrinsic("almide_rt_list_len")
+fn length[A](xs: List[A]) -> Int = _
+
+@intrinsic("almide_rt_list_get")
+fn get[A](xs: List[A], i: Int) -> A? = _
+
+@intrinsic("almide_rt_list_get_or")
+fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
+
+@intrinsic("almide_rt_list_set")
+fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
+
+@intrinsic("almide_rt_list_swap")
+fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_sort")
+fn sort[A](xs: List[A]) -> List[A] = _
+
+@intrinsic("almide_rt_list_reverse")
+fn reverse[A](xs: List[A]) -> List[A] = _
+
+@intrinsic("almide_rt_list_contains")
+fn contains[A](xs: List[A], x: A) -> Bool = _
+
+@intrinsic("almide_rt_list_enumerate")
+@consume(xs)
+fn enumerate[A](xs: List[A]) -> List[(Int, A)] = _
+
+@intrinsic("almide_rt_list_zip")
+@consume(xs, ys)
+fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
+
+// Borrows: the runtime takes a slice and clones each element out, so `flatten`
+// can appear alongside another borrow of the same binding in one expression.
+// Consuming it made `list.get_or(xs, 0, list.flatten(xs))` move `xs` into
+// `flatten` while `get_or` borrowed it — `check` accepted, rustc rejected with
+// E0505 (differential fuzz).
+@intrinsic("almide_rt_list_flatten")
+fn flatten[T](xss: List[List[T]]) -> List[T] = _
+
+@intrinsic("almide_rt_list_take")
+@consume(xs)
+fn take[A](xs: List[A], n: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_drop")
+@consume(xs)
+fn drop[A](xs: List[A], n: Int) -> List[A] = _
+
+fn tail[A](xs: List[A]) -> List[A] = list.drop(xs, 1)
+
+@intrinsic("almide_rt_list_unique")
+fn unique[A](xs: List[A]) -> List[A] = _
+
+@intrinsic("almide_rt_list_index_of")
+fn index_of[A](xs: List[A], x: A) -> Int? = _
+
+@intrinsic("almide_rt_list_last")
+fn last[A](xs: List[A]) -> A? = _
+
+@intrinsic("almide_rt_list_chunk")
+fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
+
+@intrinsic("almide_rt_list_sum")
+fn sum(xs: List[Int]) -> Int = _
+
+@intrinsic("almide_rt_list_product")
+fn product(xs: List[Int]) -> Int = _
+
+@intrinsic("almide_rt_list_first")
+fn first[A](xs: List[A]) -> A? = _
+
+@intrinsic("almide_rt_list_is_empty")
+fn is_empty[A](xs: List[A]) -> Bool = _
+
+@intrinsic("almide_rt_list_min")
+fn min[A](xs: List[A]) -> A? = _
+
+@intrinsic("almide_rt_list_max")
+fn max[A](xs: List[A]) -> A? = _
+
+@intrinsic("almide_rt_list_join")
+fn join(xs: List[String], sep: String) -> String = _
+
+// ── closure-bearing (IterChain-handled: map, filter, find, any, all,
+//    count, flat_map, filter_map, fold — the `try_lower_to_iter_chain`
+//    intercept in `pass_stdlib_lowering` fires before the `@inline_rust`
+//    dispatch below and produces a fused iterator chain) ──
+@intrinsic("almide_rt_list_map")
+@consume(xs)
+fn map[A, B](xs: List[A], f: fn(A) -> B) -> List[B] = _
+
+@intrinsic("almide_rt_list_filter")
+@consume(xs)
+fn filter[A](xs: List[A], f: fn(A) -> Bool) -> List[A] = _
+
+@intrinsic("almide_rt_list_find")
+@consume(xs)
+fn find[A](xs: List[A], f: fn(A) -> Bool) -> A? = _
+
+@intrinsic("almide_rt_list_any")
+fn any[A](xs: List[A], f: fn(A) -> Bool) -> Bool = _
+
+@intrinsic("almide_rt_list_all")
+fn all[A](xs: List[A], f: fn(A) -> Bool) -> Bool = _
+
+@intrinsic("almide_rt_list_count")
+fn count[A](xs: List[A], f: fn(A) -> Bool) -> Int = _
+
+@intrinsic("almide_rt_list_flat_map")
+@consume(xs)
+fn flat_map[A, B](xs: List[A], f: fn(A) -> List[B]) -> List[B] = _
+
+@intrinsic("almide_rt_list_filter_map")
+@consume(xs)
+fn filter_map[A, B](xs: List[A], f: fn(A) -> B?) -> List[B] = _
+
+@intrinsic("almide_rt_list_fold")
+@consume(xs)
+fn fold[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> B = _
+
+// ── closure-bearing (not IterChain-handled — direct runtime dispatch) ──
+@intrinsic("almide_rt_list_sort_by")
+@consume(xs)
+fn sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A] = _
+
+@intrinsic("almide_rt_list_take_while")
+@consume(xs)
+fn take_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A] = _
+
+@intrinsic("almide_rt_list_drop_while")
+@consume(xs)
+fn drop_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A] = _
+
+@intrinsic("almide_rt_list_partition")
+@consume(xs)
+fn partition[A](xs: List[A], f: fn(A) -> Bool) -> (List[A], List[A]) = _
+
+@intrinsic("almide_rt_list_reduce")
+@consume(xs)
+fn reduce[A](xs: List[A], f: fn(A, A) -> A) -> A? = _
+
+@intrinsic("almide_rt_list_group_by")
+@consume(xs)
+fn group_by[A, B](xs: List[A], f: fn(A) -> B) -> Map[B, List[A]] = _
+
+@intrinsic("almide_rt_list_find_index")
+@consume(xs)
+fn find_index[A](xs: List[A], f: fn(A) -> Bool) -> Int? = _
+
+@intrinsic("almide_rt_list_update")
+@consume(xs)
+fn update[A](xs: List[A], i: Int, f: fn(A) -> A) -> List[A] = _
+
+@intrinsic("almide_rt_list_scan")
+@consume(xs)
+fn scan[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> List[B] = _
+
+@intrinsic("almide_rt_list_zip_with")
+@consume(xs, ys)
+fn zip_with[A, B, C](xs: List[A], ys: List[B], f: fn(A, B) -> C) -> List[C] = _
+
+@intrinsic("almide_rt_list_unique_by")
+@consume(xs)
+fn unique_by[A, K](xs: List[A], f: fn(A) -> K) -> List[A] = _
+
+// ── non-closure constructors / slicing ──
+@intrinsic("almide_rt_list_range")
+fn range(start: Int, end: Int) -> List[Int] = _
+
+@intrinsic("almide_rt_list_slice")
+@consume(xs)
+fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_insert")
+@consume(xs)
+fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
+
+@intrinsic("almide_rt_list_remove_at")
+@consume(xs)
+fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_repeat")
+fn repeat[A](val: A, n: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_intersperse")
+@consume(xs)
+fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
+
+@intrinsic("almide_rt_list_windows")
+fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
+
+@intrinsic("almide_rt_list_dedup")
+fn dedup[A](xs: List[A]) -> List[A] = _
+
+@intrinsic("almide_rt_list_take_end")
+@consume(xs)
+fn take_end[A](xs: List[A], n: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_drop_end")
+@consume(xs)
+fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_shuffle")
+@consume(xs)
+fn shuffle[A](xs: List[A]) -> List[A] = _
+
+@intrinsic("almide_rt_list_window")
+@consume(xs)
+fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
+
+@intrinsic("almide_rt_list_binary_search")
+fn binary_search(xs: List[Int], target: Int) -> Int? = _
+
+// ── mutable (in-place) ──
+@intrinsic("almide_rt_list_push")
+fn push[A](mut xs: List[A], x: A) -> Unit = _
+
+// Create an empty list with preallocated capacity. Subsequent `push`es
+// up to `cap` avoid the repeated Vec doublings that dominate tight
+// decode loops. Use when the final length is known ahead of time.
+@intrinsic("almide_rt_list_with_capacity")
+fn with_capacity[A](cap: Int) -> List[A] = _
+
+@intrinsic("almide_rt_list_pop")
+fn pop[A](mut xs: List[A]) -> A? = _
+
+@intrinsic("almide_rt_list_clear")
+fn clear[A](mut xs: List[A]) -> Unit = _
+
+// ── bundled-Almide extensions (non-TOML, pure Almide body) ──
+// Smoke fn: covered by spec/stdlib/list_bundled_test.almd as a regression
+// guard for the bundled-dispatch pipeline. Do not remove.
+fn bundled_probe(n: Int) -> Int = n + 1
+
+// Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
+// Demonstrates bundled-Almide calling existing stdlib fns.
+fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
+
+// Build [seed, f(seed), f(f(seed)), ...] of length `n`.
+// Pure-Almide recursion using the bundled-dispatch path end-to-end.
+fn iterate[T](seed: T, f: fn(T) -> T, n: Int) -> List[T] = if n <= 0 then []
+else [seed] + iterate(f(seed), f, n - 1)
+
+// ── the try_* family (#1041): effectful pipelines keep the combinator shape ──
+//
+// Each try_<core> takes the SAME callback as its core, lifted to
+// `-> Result[_, E]`, and short-circuits on the FIRST err — so a body that
+// calls effect fns yields `Result[List[B], E]` instead of `List[Result[B, E]]`
+// and the writer never falls back to `var + for`. Pure-Almide SELF-recursion
+// over `list.get`/`list.drop` (the `iterate` bundled-dispatch precedent — a
+// sibling `__` helper would not monomorphize from a bundled body today);
+// elements after the first err are NEVER evaluated (the short-circuit is
+// observable). Cost is the bundled-recursion norm (`iterate`'s O(n²) copy
+// shape) — fine at tool scale, self-host later if a hot path appears.
+//
+// INTERNAL CARRIERS (ADR-0006 D3, v0.56.0): the public try_ family is
+// REMOVED — the core HOF is fallibility-polymorphic and the checker routes a
+// fallible callback to these __-prefixed bodies (`list.map(xs, (x) => f(x)!)`
+// runs `__fallible_map(xs, stripped-callback)`). Deliberate omissions unchanged:
+// `any` / `all` / `count` (an erring predicate query is the find-form's
+// domain) and `sort_by` (an erring key extractor has no partial order).
+// The gate tests/list_try_family_gate_test.rs asserts the surface is EMPTY
+// and the seven carriers exist.
+fn __fallible_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(b) => match __fallible_map(list.drop(xs, 1), f) {
+      ok(rest) => ok([b] + rest),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn __fallible_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(keep) => match __fallible_filter(list.drop(xs, 1), f) {
+      ok(rest) => ok(if keep then [x] + rest
+      else rest),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn __fallible_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(bs) => match __fallible_flat_map(list.drop(xs, 1), f) {
+      ok(rest) => ok(bs + rest),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn __fallible_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[B?, E]) -> Result[List[B], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(kept) => match __fallible_filter_map(list.drop(xs, 1), f) {
+      ok(rest) => ok(match kept {
+        some(b) => [b] + rest,
+        none => rest,
+      }),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn __fallible_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E] = match list.get(xs, 0) {
+  none => ok(init),
+  some(x) => match f(init, x) {
+    ok(b) => __fallible_fold(list.drop(xs, 1), b, f),
+    err(e) => err(e),
+  },
+}
+
+// The first element the (erring) predicate ACCEPTS, `none` when no element
+// matches — or the first err. `__fallible_find(xs, p)` also answers the any/all/
+// count shapes, which is why those have no try_ twins.
+fn __fallible_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[A?, E] = match list.get(xs, 0) {
+  none => ok(none),
+  some(x) => match f(x) {
+    ok(true) => ok(some(x)),
+    ok(false) => __fallible_find(list.drop(xs, 1), f),
+    err(e) => err(e),
+  },
+}
+
+// Run an effectful step per element for its effect, stopping at the first err.
+fn __fallible_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E] = match list.get(xs, 0) {
+  none => ok(()),
+  some(x) => match f(x) {
+    ok(_) => __fallible_each(list.drop(xs, 1), f),
+    err(e) => err(e),
+  },
+}

@@ -1,0 +1,26 @@
+// fs_write_bytes_raw — SELF-HOSTED `fs.write_bytes_raw(path, data)` for the
+// wasm leg: byte-copy the Bytes block into a fresh String buffer (both are raw
+// byte blocks — len @4, payload @12 — but the write floor's argument type is
+// String, so the copy keeps the type system honest without a reinterpret
+// escape hatch), then write it through prim.write_text_file (O_CREAT|O_TRUNC,
+// exactly `std::fs::write`). Reaching the write floor carries
+// Capability::FsWrite.
+fn __wbr_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __wbr_copy(dst, src, n, i + 1)
+}
+
+effect fn fs_write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = {
+  let h = prim.handle(data)
+  let n = prim.load32(h + 4)
+  let s = prim.alloc_str(n)
+  let _c = __wbr_copy(prim.handle(s) + 12, h + 12, n, 0)
+  let w: Result[Unit, String] = prim.write_text_file(path, s)
+  let wh = prim.handle(w)
+  if prim.load32(wh + 16) != 0 then {
+    let m: String = prim.load_handle(wh + 12)
+    err(m)
+  } else ok(())
+}

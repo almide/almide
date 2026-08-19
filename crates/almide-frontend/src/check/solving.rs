@@ -1,0 +1,456 @@
+/// Constraint solving: unification via Union-Find.
+
+use crate::types::Ty;
+use super::Checker;
+use super::err;
+use super::types::{is_inference_var, resolve_ty, FixHint, IfArm};
+
+impl Checker {
+    pub(super) fn solve_constraints(&mut self) {
+        let constraints = std::mem::take(&mut self.constraints);
+        // Union-Find makes constraint solving order-independent, and a
+        // successful unification is stable — re-running it is a no-op and a
+        // failed one cannot become a success (partial component unions stay
+        // either way). So ONE pass both unifies and reports; the former
+        // second full pass re-unified every constraint just to find the
+        // failures again (#1232's double-pass row, measured equivalent).
+        for c in &constraints {
+            if !self.unify_infer(&c.expected, &c.actual) {
+                self.report_constraint_mismatch(c);
+            }
+        }
+    }
+
+    /// Emit the E001 for one constraint that could not be satisfied.
+    ///
+    /// A side that resolves to `Unknown` is suppressed: `Unknown` is the
+    /// checker's own error-recovery type, so the real diagnostic was already
+    /// emitted where inference failed and reporting the derived mismatch would
+    /// be a cascade.
+    fn report_constraint_mismatch(&mut self, c: &super::types::Constraint) {
+        let exp = resolve_ty(&c.expected, &self.uf);
+        let act = resolve_ty(&c.actual, &self.uf);
+        if exp == Ty::Unknown || act == Ty::Unknown {
+            return;
+        }
+        // #1108 Phase 2b-iii: a fallible callback handed to a container HOF the
+        // name-keyed normalization does not cover. `list.map(xs, (x) => f(x)!)`
+        // is rewritten to the `__fallible_*` twin before inference; `set.map`,
+        // `option.map`, `map.map`, and every user HOF have no twin, so the
+        // callback's Result rides through the container and the mismatch
+        // surfaces here as `Set[Result[..]]` vs `Result[Set[..]]` — under the
+        // generic "fix the expression type", which names neither the cause nor
+        // a way out. Detect the SHAPE (a Result nested one level inside the
+        // actual where the expected has it outside) and say what happened.
+        let hint = match fallible_callback_shape_hint(&exp, &act) {
+            Some(h) => h,
+            None => Self::hint_with_conversion(mismatch_hint(&c.context), &exp, &act),
+        };
+        // Context-specific try: snippet for the "Unit leak" failure mode — a
+        // statement (assignment / lone `let`) slips into a position expected to
+        // produce a value. dojo data shows this is the top E001 pattern for both
+        // 70b and 8b.
+        let try_snippet = unit_leak_snippet(&c.context, &exp, &act, c.fix_hint.as_ref());
+        // Temporarily swap in the constraint's own span so the error is reported
+        // at the call site where the constraint was introduced, not at wherever
+        // checking happened to end up.
+        let saved_span = self.current_span;
+        if c.span.is_some() {
+            self.current_span = c.span;
+        }
+        let mut diag = err(mismatch_message(&c.context, &exp, &act), hint, c.context.clone())
+            .with_code("E001");
+        if let Some(snippet) = try_snippet {
+            diag = diag.with_try(snippet);
+        }
+        self.emit(diag);
+        self.current_span = saved_span;
+    }
+
+    pub(crate) fn unify_infer(&mut self, a: &Ty, b: &Ty) -> bool {
+        // Inference vars: union/bind immediately, always succeeds.
+        // Conflicting concrete bindings are unified structurally when possible,
+        // but the inference var case never returns false — matching HashMap semantics.
+        match (is_inference_var(a), is_inference_var(b)) {
+            (Some(ia), Some(ib)) => {
+                self.uf.union(ia.0, ib.0);
+                true
+            }
+            (Some(ia), None) => {
+                let b_resolved = resolve_ty(b, &self.uf);
+                if !self.uf.occurs(ia.0, &b_resolved) {
+                    if let Some(existing) = self.uf.bind(ia.0, b_resolved.clone()) {
+                        // Existing binding — try structural unify but don't fail
+                        self.unify_infer(&existing, &b_resolved);
+                    }
+                }
+                true
+            }
+            (None, Some(ib)) => {
+                let a_resolved = resolve_ty(a, &self.uf);
+                if !self.uf.occurs(ib.0, &a_resolved) {
+                    if let Some(existing) = self.uf.bind(ib.0, a_resolved.clone()) {
+                        self.unify_infer(&a_resolved, &existing);
+                    }
+                }
+                true
+            }
+            (None, None) => {
+                let a_resolved = resolve_ty(a, &self.uf);
+                let b_resolved = resolve_ty(b, &self.uf);
+                self.unify_structural(&a_resolved, &b_resolved)
+            }
+        }
+    }
+
+    /// Unify two types that are both already resolved to concrete shapes.
+    ///
+    /// The four groups are tried in the order the single table used, so
+    /// dispatch is unchanged. Each returns `None` for "this pair is not mine",
+    /// which is distinct from `Some(false)` — "mine, and they do not unify".
+    /// Collapsing those two would make the first group that recognised a shape
+    /// swallow the pair and report a spurious mismatch.
+    fn unify_structural(&mut self, a: &Ty, b: &Ty) -> bool {
+        // `Unknown` is the checker's error-recovery type. It unifies with
+        // everything so one upstream failure does not cascade.
+        if *a == Ty::Unknown || *b == Ty::Unknown { return true; }
+        if let Some(out) = self.unify_composite(a, b) { return out; }
+        if let Some(out) = self.unify_record_like(a, b) { return out; }
+        if let Some(out) = self.unify_nominal(a, b) { return out; }
+        if let Some(out) = self.unify_const_carrier(a, b) { return out; }
+        // `compatible` is DIRECTIONAL for the numeric widths (#867: a sized
+        // value does not flow into an `Int` slot). Constraints reaching here
+        // are PEER joins as often as expected/actual pairs — list elements,
+        // if branches, `assert_eq` args — where which side got picked as
+        // "expected" is an accident of visit order (`[1, u8v]` must join the
+        // same as `[u8v, 1]`). So numeric scalar pairs unify if EITHER
+        // direction coerces; the one-way discipline is enforced where the
+        // direction is real — `types_mismatch` (call args, annotations).
+        a.compatible(b)
+            || (is_numeric_scalar(a) && is_numeric_scalar(b) && b.compatible(a))
+    }
+
+    /// Applied constructors, tuples and function types: same shape, same arity,
+    /// unify positionally.
+    fn unify_composite(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
+            (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
+                args1.iter().zip(args2.iter()).all(|(x, y)| self.unify_infer(x, y))
+            }
+            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() =>
+                a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
+            (Ty::Fn { is_effect: ae, params: ap, ret: ar }, Ty::Fn { is_effect: be, params: bp, ret: br }) if ap.len() == bp.len() => {
+                if !ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) {
+                    return Some(false);
+                }
+                // #1055 carrier acceptance, tried BEFORE the plain ret unify so
+                // a failed attempt cannot contaminate the bindings (#547): an
+                // `effect (A) -> B` slot's return B matches a fallible
+                // counterpart's `Result[B, String]` — the effect carrier IS
+                // Result[_, String]. Fires only when exactly one side carries
+                // the effect bit, so peer joins of ordinary fns are untouched.
+                let carrier_ok = |me: &mut Self, slot_ret: &Ty, other_ret: &Ty| -> bool {
+                    match resolve_ty(other_ret, &me.uf) {
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, args)
+                            if args.len() == 2 && matches!(resolve_ty(&args[1], &me.uf), Ty::String) =>
+                        {
+                            me.unify_infer(slot_ret, &args[0])
+                        }
+                        _ => false,
+                    }
+                };
+                if *ae && !*be && carrier_ok(self, ar, br) {
+                    return Some(true);
+                }
+                if *be && !*ae && carrier_ok(self, br, ar) {
+                    return Some(true);
+                }
+                self.unify_infer(ar, br)
+            }
+            _ => return None,
+        })
+    }
+
+    /// Records and open records. A closed pair must agree on every field; an
+    /// open row only requires its own fields to be present and to unify.
+    fn unify_record_like(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
+            (Ty::Record { fields: fa }, Ty::Record { fields: fb }) => {
+                fa.len() == fb.len() && fa.iter().all(|(n, t)| fb.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
+            }
+            (Ty::OpenRecord { fields: req, .. }, Ty::Record { fields: actual })
+            | (Ty::OpenRecord { fields: req, .. }, Ty::OpenRecord { fields: actual, .. }) => {
+                req.iter().all(|(n, t)| actual.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
+            }
+            _ => return None,
+        })
+    }
+
+    /// Nominal types, on either or both sides.
+    fn unify_nominal(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
+            (Ty::Named(na, args_a), Ty::Named(nb, args_b)) if na == nb => {
+                args_a.len() == args_b.len()
+                    && args_a.iter().zip(args_b.iter()).all(|(ta, tb)| self.unify_infer(ta, tb))
+                    || (args_a.is_empty() || args_b.is_empty())
+            }
+            (Ty::Named(na, _), Ty::Named(nb, _)) => self.unify_distinct_nominals(a, b, *na, *nb),
+            (Ty::Named(_, _), _) => {
+                let resolved = self.env.resolve_named(a);
+                if resolved != *a { self.unify_infer(&resolved, b) } else { a.compatible(b) }
+            }
+            (_, Ty::Named(_, _)) => {
+                let resolved = self.env.resolve_named(b);
+                if resolved != *b { self.unify_infer(a, &resolved) } else { a.compatible(b) }
+            }
+            _ => return None,
+        })
+    }
+
+    /// Unify two nominal types with DIFFERENT names by expanding both to their
+    /// structural forms.
+    ///
+    /// Expanding and recursing into the fields loops forever on a RECURSIVE type
+    /// — `El = { children: List[El] }` against its module twin `lib.El`
+    /// re-reaches the `El` × `lib.El` pair inside `children`, which is the svg
+    /// cross-module `render(group(..))` stack overflow. So the unification is
+    /// equi-recursive: the pair is marked in progress and a re-encounter counts
+    /// as success. That is sound because the pair unifies iff every OTHER field
+    /// path unifies, and the outer frames still check those.
+    fn unify_distinct_nominals(
+        &mut self,
+        a: &Ty,
+        b: &Ty,
+        na: almide_base::intern::Sym,
+        nb: almide_base::intern::Sym,
+    ) -> bool {
+        let key = if na.as_str() <= nb.as_str() { (na, nb) } else { (nb, na) };
+        if !self.unify_named_in_progress.insert(key) {
+            return true;
+        }
+        let ra = self.env.resolve_named(a);
+        let rb = self.env.resolve_named(b);
+        let out = if ra != *a || rb != *b {
+            self.unify_infer(&ra, &rb)
+        } else {
+            a.compatible(b)
+        };
+        self.unify_named_in_progress.remove(&key);
+        out
+    }
+
+    /// `ConstParam` / `ConstValue` unify with their underlying type on either
+    /// side.
+    fn unify_const_carrier(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
+            (Ty::ConstParam { ty, .. }, other) | (other, Ty::ConstParam { ty, .. }) => {
+                self.unify_infer(ty, other)
+            }
+            (Ty::ConstValue { ty, .. }, other) | (other, Ty::ConstValue { ty, .. }) => {
+                self.unify_infer(ty, other)
+            }
+            _ => return None,
+        })
+    }
+}
+
+/// The numeric scalar widths whose `compatible` rules are directional
+/// (#867) — the set the symmetric peer-join fallback in `unify_structural`
+/// applies to, and no other types. Also used by
+/// `validate_numeric_narrowing` (post_solve_validation.rs) to scope the annotation-site check.
+pub(crate) fn is_numeric_scalar(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int | Ty::Float
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64
+    )
+}
+
+/// `Some(hint)` when the mismatch is the Phase 2b-iii shape: the expected type
+/// is `Result[C[T], E]` while the actual is `C[Result[T, E]]` — i.e. a fallible
+/// callback's Result stayed INSIDE the container instead of the whole traversal
+/// becoming fallible.
+///
+/// Only the core `list` HOFs get the fallible form today (a pre-inference
+/// rewrite to the hand-written `__fallible_*` twins, keyed by name in
+/// `infer_calls_closures.rs`). Every other container — and every user-defined
+/// HOF — leaves the bit where the callback put it, which is correct for the
+/// types and useless as a message. Naming the two spellings that DO work is the
+/// difference between a dead end and a five-second fix.
+fn fallible_callback_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
+    use crate::types::TypeConstructorId as C;
+    // expected: Result[Container[T], E]
+    let Ty::Applied(C::Result, exp_args) = expected else { return None };
+    let exp_ok = exp_args.first()?;
+    // actual: Container[Result[T, E]] — the SAME container, Result one level in.
+    let (act_ctor, act_args) = match actual {
+        Ty::Applied(c, args) if matches!(c, C::List | C::Set | C::Option) => (c, args),
+        _ => return None,
+    };
+    if !act_args.first()?.is_result() {
+        return None;
+    }
+    // Same container kind on both sides, or this is an unrelated mismatch.
+    match exp_ok {
+        Ty::Applied(c, _) if c == act_ctor => {}
+        _ => return None,
+    }
+    Some(
+        "The callback is FALLIBLE, so its Result stayed INSIDE the container \
+         instead of the traversal itself becoming fallible. Only the core list \
+         HOFs (map / filter / flat_map / filter_map / fold / find / each) and \
+         the fs streaming walkers (fs.fold_lines / fs.for_each_line) accept \
+         a fallible callback natively today. Either traverse via `list.*` — \
+         convert with `set.to_list` first — or handle the error inside the \
+         callback (`?? fallback`, or match on ok/err). Transparency for the \
+         other containers and for user HOFs is #1108 Phase 2b-iii."
+            .to_string(),
+    )
+}
+
+/// The actionable half of an E001 hint, chosen by the constraint's context.
+fn mismatch_hint(context: &str) -> &'static str {
+    match context {
+        "fan.map callback" => "Return ok(value) / err(reason) from the mapper",
+        "match arm" => "All match arms must share the same type. Change the mismatched arm to return the same type as the others, or change the first arm",
+        "if branches" | "if arm" => "Both branches of `if/then/else` must have the same type",
+        _ => "Fix the expression type or change the expected type",
+    }
+}
+
+/// The E001 headline.
+///
+/// #547: post-unify rendering is CONTAMINATED for rule-bearing constraints
+/// (pass 1 partially binds vars even on failure, so both sides print with each
+/// other's pieces — the `fan.map` case showed `expected fn(Result[..]) -> ..`
+/// where the param is Int). A constraint that ENCODES a language rule states
+/// the rule instead of the resolved pair.
+fn mismatch_message(context: &str, exp: &Ty, act: &Ty) -> String {
+    if context == "fan.map callback" {
+        return "fan.map callback must return Result[T, String] — \
+                wrap the value: `(x) => ok(x * 10)`. (race/any/settle \
+                thunks auto-wrap pure values; map mappers are \
+                effectful by contract and do not.)".to_string();
+    }
+    format!("type mismatch in {}: expected {} but got {}", context, exp.display(), act.display())
+}
+
+/// Produce a `try:` snippet for the "Unit leak" E001 pattern — the top
+/// failure mode in dojo data: a statement (`let` binding without a tail,
+/// or an assignment inside an if/match arm) ends up where a value was
+/// expected. Only fires when `act == Unit` and `exp != Unit`, and the
+/// context pins the leak to a specific syntactic hole.
+fn unit_leak_snippet(context: &str, exp: &Ty, act: &Ty, fix_hint: Option<&FixHint>) -> Option<String> {
+    // For fn-body context the constraint direction is fixed: expected is the
+    // declared ret type, actual is the body type. But for if/match arm
+    // contexts the sides are arbitrary (arm[i] vs arm[j]), so accept either
+    // direction — the "real" type is whichever isn't Unit.
+    let is_arm_ctx = context == "if branches" || context == "if arm" || context == "match arm";
+    let real_ty = match (*exp == Ty::Unit, *act == Ty::Unit) {
+        (false, true) => exp,
+        (true, false) if is_arm_ctx => act,
+        _ => return None,
+    };
+    let exp_str = real_ty.display();
+    if context.starts_with("fn '") {
+        return fn_body_unit_leak(&exp_str, fix_hint);
+    }
+    if context == "if branches" || context == "if arm" {
+        return if_arm_unit_leak(&exp_str, fix_hint);
+    }
+    if context == "match arm" {
+        return match_arm_unit_leak(&exp_str);
+    }
+    None
+}
+
+/// The fn-body form: the body's last statement produced no value.
+///
+/// When the AST gave us the name of that last `let`, the snippet names it, so
+/// the fix is copy-pasteable rather than a template to fill in.
+fn fn_body_unit_leak(exp_str: &str, fix_hint: Option<&FixHint>) -> Option<String> {
+    // Try to specialize using the real binding name from the fn body
+    // AST — turns a generic "add a final expression" template into
+    // copy-pasteable code like `result` on its own line.
+    if let Some(FixHint::LastLetName(name)) = fix_hint {
+        return Some(format!(
+            "// fn body ends with `let {n} = ...` (a statement, returns Unit).\n\
+            // Add `{n}` as the trailing expression so the fn returns {t}:\n\
+            //\n\
+            //   let {n} = <computation>\n\
+            //   {n}                         // <-- add this line\n\
+            //\n\
+            // Or inline the computation as the tail expression directly.",
+            n = name, t = exp_str
+        ));
+    }
+    Some(format!(
+        "// fn body ends with a statement (returns Unit); \
+        add a final expression that evaluates to {t}:\n\
+        //   let tmp = <computation>\n\
+        //   tmp                            // <-- the returned value\n\
+        // Or inline:\n\
+        //   <expression>                   // must have type {t}",
+        t = exp_str
+    ))
+}
+
+/// The if-branch form: one branch assigns instead of yielding.
+///
+/// Two specialisations, by how much the AST captured: one arm's assigned
+/// variable, or both arms'. Naming the real variable turns a generic template
+/// into the actual rewrite.
+fn if_arm_unit_leak(exp_str: &str, fix_hint: Option<&FixHint>) -> Option<String> {
+    // Specialize when we captured the actual variable being assigned in
+    // the Unit arm — turns the generic template into a rewrite that
+    // names the real variable so the LLM can copy-paste the structure.
+    if let Some(FixHint::IfArmAssign { arm, var_name }) = fix_hint {
+        let (unit_arm, _good_arm) = match arm {
+            IfArm::Then => ("then", "else"),
+            IfArm::Else => ("else", "then"),
+        };
+        return Some(format!(
+            "// the {unit_arm}-arm is `{v} = ...` (assignment, returns Unit).\n\
+            // if/else is an *expression*: both arms must produce {t}.\n\
+            // Rewrite as a rebinding of `{v}`:\n\
+            //\n\
+            //   let new_{v} = if cond then <new-value-for-{v}> else {v}\n\
+            //\n\
+            // Or, if {v} is a loop-like accumulator, use recursion instead of mutation.",
+            unit_arm = unit_arm, v = var_name, t = exp_str
+        ));
+    }
+    if let Some(FixHint::IfArmsAssign { then_var, else_var }) = fix_hint {
+        let primary = then_var.as_deref().or(else_var.as_deref()).unwrap_or("x");
+        return Some(format!(
+            "// both arms are assignments (each returns Unit).\n\
+            // if/else is an *expression*: rebind `{v}` instead of mutating it:\n\
+            //\n\
+            //   let new_{v} = if cond then <value-when-true> else <value-when-false>",
+            v = primary
+        ));
+    }
+    Some(format!(
+        "// an if-arm is a statement (e.g. `x = y` or a bare `let`) — returns Unit.\n\
+        // if/else is an *expression*: both arms must produce {t}. Rebind via let instead:\n\
+        //   let new_x = if cond then <then-value> else <else-value>\n\
+        // Or for loop-like state, use recursion:\n\
+        //   fn step(x: {t}) -> {t} = if cond then step(<update>) else x",
+        t = exp_str
+    ))
+}
+
+/// The match-arm form.
+fn match_arm_unit_leak(exp_str: &str) -> Option<String> {
+    Some(format!(
+        "// a match arm is a statement (returns Unit). \
+        Each arm must produce {t}.\n\
+        //   match expr {{\n\
+        //     PatA => value_a,   // <-- must be {t}\n\
+        //     PatB => value_b,\n\
+        //   }}",
+        t = exp_str
+    ))
+}

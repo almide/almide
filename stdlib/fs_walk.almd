@@ -1,0 +1,83 @@
+// fs_walk — SELF-HOSTED `fs.walk(dir)` for the wasm leg: the recursive
+// directory listing over the WASI read_dir floor. Every entry's FULL path
+// (`dir/entry`) is collected — directories included, exactly native's
+// walk_recursive — and the flat result is sorted ONCE at the end (per-level
+// read_dir order is already sorted, but native sorts the flattened full-path
+// list, which interleaves levels differently). A read_dir error anywhere
+// (including the root) propagates on the err channel like native's `?`.
+// Reaching read_dir + path_filestat carries Capability::FsRead.
+import env
+
+fn __walk_ftype(path: String) -> Int = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat(p, path)
+  if errno != 0 then 0
+  else prim.load8(p + 16)
+}
+
+effect fn __walk_entries(dir: String, entries: List[String], i: Int, acc: List[String]) -> Result[List[String], String] = if i >= list.len(entries) then ok(acc)
+else {
+  let name = list.get(entries, i) ?? ""
+  let p = dir + "/" + name
+  let acc2 = acc + [p]
+  if __walk_ftype(p) == 3 then {
+    let sub = __walk_into(p, acc2)!
+    __walk_entries(dir, entries, i + 1, sub)
+  } else __walk_entries(dir, entries, i + 1, acc2)
+}
+
+effect fn __walk_into(dir: String, acc: List[String]) -> Result[List[String], String] = {
+  let r: Result[List[String], String] = prim.read_dir(dir)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let entries: List[String] = prim.load_handle(rh + 12)
+    __walk_entries(dir, entries, 0, acc)
+  }
+}
+
+effect fn fs_walk(dir: String) -> Result[List[String], String] = {
+  let all = __walk_into(dir, [])!
+  let sorted = list.sort(all)
+  ok(sorted)
+}
+
+// fs.glob(pattern) — the same simple `*`-wildcard matcher native implements
+// (split on '*', require each literal part in order, anchor a non-empty FIRST
+// part at position 0), applied to every full path under the current directory
+// (native canonicalizes "." and recurses the whole tree; here the C-137 cwd —
+// the PWD variable — is the same absolute base the fs floors resolve against),
+// sorted like native. Shares the walk machinery above (one compilation unit —
+// registry sources compile standalone, so a sibling-file impl is unreachable).
+// (`import env` sits at the top of this file — imports precede declarations.)
+
+fn __glob_parts_match(name: String, parts: List[String], i: Int, pos: Int) -> Bool = if i >= list.len(parts) then true
+else {
+  let part = list.get(parts, i) ?? ""
+  if string.len(part) == 0 then __glob_parts_match(name, parts, i + 1, pos)
+  else {
+    let rest = string.slice(name, pos, string.len(name))
+    match string.index_of(rest, part) {
+      some(idx) => if i == 0 and idx != 0 then false
+      else __glob_parts_match(name, parts, i + 1, pos + idx + string.len(part)),
+      none => false,
+    }
+  }
+}
+
+fn __glob_match(pattern: String, name: String) -> Bool = {
+  let parts = string.split(pattern, "*")
+  if list.len(parts) == 1 then name == pattern
+  else __glob_parts_match(name, parts, 0, 0)
+}
+
+effect fn fs_glob(pattern: String) -> Result[List[String], String] = {
+  let base = env.get("PWD") ?? "/"
+  let all = __walk_into(base, [])!
+  let matched = all |> list.filter((n) => __glob_match(pattern, n))
+  let sorted = list.sort(matched)
+  ok(sorted)
+}

@@ -1,0 +1,26 @@
+// hash — bundled-Almide stdlib module: non-cryptographic digests + SHA-256
+// (#1467, the one category the small-language cohort filled and we did not).
+//
+// `fnv1a32` is the 32-BIT FNV-1a on purpose: every step is `(h ^ byte) *
+// 16777619` masked to 32 bits, so the largest intermediate stays under 2^56
+// and the wasm self-host reproduces it exactly in i64 arithmetic — a 64-bit
+// variant would need a wrapping 64-bit multiply the self-host floor does not
+// have. The result is the unsigned 32-bit hash as a non-negative Int.
+//
+// `sha256` / `sha256_hex` are FIPS 180-4, byte-identical across targets
+// (spec/wasm_cross/hash_digests.almd pins the NIST vectors on both legs).
+//
+// Templates route the Rust target to `runtime/rs/src/hash.rs`; on WASM all
+// four are SELF-HOSTED in `stdlib/hash_impl.almd`, registered in
+// `crates/almide-types/src/self_host_registry.rs`.
+@intrinsic("almide_rt_hash_fnv1a32")
+fn fnv1a32(s: String) -> Int = _
+
+@intrinsic("almide_rt_hash_fnv1a32_bytes")
+fn fnv1a32_bytes(b: Bytes) -> Int = _
+
+@intrinsic("almide_rt_hash_sha256")
+fn sha256(b: Bytes) -> Bytes = _
+
+@intrinsic("almide_rt_hash_sha256_hex")
+fn sha256_hex(s: String) -> String = _

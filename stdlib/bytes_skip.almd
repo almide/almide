@@ -1,0 +1,27 @@
+// Self-hosted bytes.skip_length_prefixed_le — advance past `count` length-prefixed entries.
+// Each entry = [u32 LE length][length bytes]. Returns the position after the last skipped
+// entry, or the current position if a length prefix would read past the end. prim.load32 is
+// a little-endian 4-byte read (= u32::from_le_bytes).
+//
+// count < 0 returns pos: a negative count is zero entries, not "keep going". This leg always
+// said so, and the comment here used to name the OTHER leg's `count as usize` skip-until-EOF a
+// "non-semantic overflow" while leaving it in place — a divergence recorded in a comment
+// instead of in a gate, which is the same as not recording it. Native now agrees.
+//
+// The position guard is SUBTRACTIVE. `p + 4 > total` admitted a NEGATIVE p whenever the buffer
+// held four bytes (`-1 + 4 = 3`), and prim.load32 then read the block's cap field as a length
+// prefix and recursed on the garbage; and it wrapped for a p near i64::MAX. `p > total - 4` is
+// exact for every p, and total is a u32-derived length so the subtraction cannot underflow.
+fn __skip_lp(h: Int, total: Int, p: Int, remaining: Int) -> Int = if remaining <= 0 then p
+else if p < 0 then p
+else if p > total - 4 then p
+else {
+  let l = prim.load32(h + 12 + p)
+  __skip_lp(h, total, p + 4 + l, remaining - 1)
+}
+
+fn bytes_skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = {
+  let h = prim.handle(b)
+  let total = prim.load32(h + 4)
+  __skip_lp(h, total, pos, count)
+}

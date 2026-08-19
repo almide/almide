@@ -1,0 +1,349 @@
+//! Variable substitution for IR expressions and statements.
+//!
+//! Replaces all occurrences of a `VarId` with a given expression,
+//! respecting variable shadowing in lambda parameters and loop bindings.
+
+use super::*;
+
+/// Substitute all occurrences of `var` with `replacement` in an expression.
+/// Respects shadowing: if a lambda or for-in rebinds `var`, substitution stops.
+pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -> IrExpr {
+    let sub = |e: &IrExpr| substitute_var_in_expr(e, var, replacement);
+    let sub_stmt = |s: &IrStmt| substitute_var_in_stmt(s, var, replacement);
+
+    match &expr.kind {
+        IrExprKind::Var { id } if *id == var => replacement.clone(),
+
+        // ── Structural recursion ──
+        IrExprKind::Call { target, args, type_args } => IrExpr {
+            kind: IrExprKind::Call {
+                target: substitute_var_in_target(target, var, replacement),
+                args: args.iter().map(sub).collect(),
+                type_args: type_args.clone(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::TailCall { target, args } => IrExpr {
+            kind: IrExprKind::TailCall {
+                target: substitute_var_in_target(target, var, replacement),
+                args: args.iter().map(sub).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::RuntimeCall { symbol, args } => IrExpr {
+            kind: IrExprKind::RuntimeCall {
+                symbol: *symbol,
+                args: args.iter().map(sub).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::BinOp { op, left, right } => IrExpr {
+            kind: IrExprKind::BinOp {
+                op: *op,
+                left: Box::new(sub(left)),
+                right: Box::new(sub(right)),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::UnOp { op, operand } => IrExpr {
+            kind: IrExprKind::UnOp { op: *op, operand: Box::new(sub(operand)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::If { cond, then, else_ } => IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(sub(cond)),
+                then: Box::new(sub(then)),
+                else_: Box::new(sub(else_)),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Match { subject, arms } => IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(sub(subject)),
+                arms: arms.iter().map(|arm| IrMatchArm {
+                    pattern: arm.pattern.clone(),
+                    guard: arm.guard.as_ref().map(sub),
+                    body: sub(&arm.body),
+                }).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Block { stmts, expr: tail } => IrExpr {
+            kind: IrExprKind::Block {
+                stmts: stmts.iter().map(sub_stmt).collect(),
+                expr: tail.as_ref().map(|e| Box::new(sub(e))),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+
+        IrExprKind::Lambda { params, body, lambda_id } => {
+            if params.iter().any(|(p, _)| *p == var) {
+                expr.clone() // shadowed
+            } else {
+                IrExpr {
+                    kind: IrExprKind::Lambda {
+                        params: params.clone(),
+                        body: Box::new(sub(body)),
+                        lambda_id: *lambda_id,
+                    },
+                    ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+                }
+            }
+        }
+        IrExprKind::ForIn { var: loop_var, var_tuple, iterable, body } => IrExpr {
+            kind: IrExprKind::ForIn {
+                var: *loop_var,
+                var_tuple: var_tuple.clone(),
+                iterable: Box::new(sub(iterable)),
+                body: if *loop_var == var { body.clone() } else {
+                    body.iter().map(sub_stmt).collect()
+                },
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::While { cond, body } => IrExpr {
+            kind: IrExprKind::While {
+                cond: Box::new(sub(cond)),
+                body: body.iter().map(sub_stmt).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+
+        // ── Single-child wrappers ──
+        IrExprKind::Member { object, field } => IrExpr {
+            kind: IrExprKind::Member { object: Box::new(sub(object)), field: field.clone() },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::OptionalChain { expr: inner, field } => IrExpr {
+            kind: IrExprKind::OptionalChain { expr: Box::new(sub(inner)), field: field.clone() },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::TupleIndex { object, index } => IrExpr {
+            kind: IrExprKind::TupleIndex { object: Box::new(sub(object)), index: *index },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::IndexAccess { object, index } => IrExpr {
+            kind: IrExprKind::IndexAccess {
+                object: Box::new(sub(object)),
+                index: Box::new(sub(index)),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::MapAccess { object, key } => IrExpr {
+            kind: IrExprKind::MapAccess {
+                object: Box::new(sub(object)),
+                key: Box::new(sub(key)),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::OptionSome { expr: inner } => IrExpr {
+            kind: IrExprKind::OptionSome { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::ResultOk { expr: inner } => IrExpr {
+            kind: IrExprKind::ResultOk { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::ResultErr { expr: inner } => IrExpr {
+            kind: IrExprKind::ResultErr { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Try { expr: inner } => IrExpr {
+            kind: IrExprKind::Try { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Unwrap { expr: inner } => IrExpr {
+            kind: IrExprKind::Unwrap { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExpr {
+            kind: IrExprKind::UnwrapOr { expr: Box::new(sub(inner)), fallback: Box::new(sub(fallback)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::ToOption { expr: inner } => IrExpr {
+            kind: IrExprKind::ToOption { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Clone { expr: inner } => IrExpr {
+            kind: IrExprKind::Clone { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Deref { expr: inner } => IrExpr {
+            kind: IrExprKind::Deref { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Borrow { expr: inner, as_str, mutable } => IrExpr {
+            kind: IrExprKind::Borrow { expr: Box::new(sub(inner)), as_str: *as_str, mutable: *mutable },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::BoxNew { expr: inner } => IrExpr {
+            kind: IrExprKind::BoxNew { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::RcWrap { expr: inner, cast_ty, wrap } => IrExpr {
+            kind: IrExprKind::RcWrap { expr: Box::new(sub(inner)), cast_ty: cast_ty.clone(), wrap: *wrap },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::ToVec { expr: inner } => IrExpr {
+            kind: IrExprKind::ToVec { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+
+        // ── Collection literals ──
+        IrExprKind::List { elements } => IrExpr {
+            kind: IrExprKind::List { elements: elements.iter().map(sub).collect() },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Tuple { elements } => IrExpr {
+            kind: IrExprKind::Tuple { elements: elements.iter().map(sub).collect() },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Fan { exprs } => IrExpr {
+            kind: IrExprKind::Fan { exprs: exprs.iter().map(sub).collect() },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Record { name, fields } => IrExpr {
+            kind: IrExprKind::Record {
+                name: name.clone(),
+                fields: fields.iter().map(|(k, v)| (k.clone(), sub(v))).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::SpreadRecord { base, fields } => IrExpr {
+            kind: IrExprKind::SpreadRecord {
+                base: Box::new(sub(base)),
+                fields: fields.iter().map(|(k, v)| (k.clone(), sub(v))).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::MapLiteral { entries } => IrExpr {
+            kind: IrExprKind::MapLiteral {
+                entries: entries.iter().map(|(k, v)| (sub(k), sub(v))).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::Range { start, end, inclusive } => IrExpr {
+            kind: IrExprKind::Range {
+                start: Box::new(sub(start)),
+                end: Box::new(sub(end)),
+                inclusive: *inclusive,
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::StringInterp { parts } => IrExpr {
+            kind: IrExprKind::StringInterp {
+                parts: parts.iter().map(|p| match p {
+                    IrStringPart::Expr { expr: e } => IrStringPart::Expr { expr: sub(e) },
+                    other => other.clone(),
+                }).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::RustMacro { name, args } => IrExpr {
+            kind: IrExprKind::RustMacro {
+                name: name.clone(),
+                args: args.iter().map(sub).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+        IrExprKind::InlineRust { template, args } => IrExpr {
+            kind: IrExprKind::InlineRust {
+                template: template.clone(),
+                args: args.iter().map(|(n, a)| (*n, sub(a))).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+
+        IrExprKind::IterChain { source, consume, steps, collector } => IrExpr {
+            kind: IrExprKind::IterChain {
+                source: Box::new(sub(source)),
+                consume: *consume,
+                steps: steps.iter().map(|step| match step {
+                    IterStep::Map { lambda } => IterStep::Map { lambda: Box::new(sub(lambda)) },
+                    IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(sub(lambda)) },
+                    IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(sub(lambda)) },
+                    IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(sub(lambda)) },
+                }).collect(),
+                collector: match collector {
+                    IterCollector::Collect => IterCollector::Collect,
+                    IterCollector::Fold { init, lambda } => IterCollector::Fold {
+                        init: Box::new(sub(init)), lambda: Box::new(sub(lambda)),
+                    },
+                    IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(sub(lambda)) },
+                    IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(sub(lambda)) },
+                    IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(sub(lambda)) },
+                    IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(sub(lambda)) },
+                },
+            },
+            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
+        },
+
+        // ── True leaf nodes ──
+        IrExprKind::Var { .. }
+        | IrExprKind::FnRef { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::EmptyMap | IrExprKind::OptionNone
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Hole | IrExprKind::Todo { .. }
+        | IrExprKind::RenderedCall { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::ClosureCreate { .. } => expr.clone(),
+    }
+}
+
+/// Substitute a variable inside a call target (Method objects, Computed callees).
+fn substitute_var_in_target(target: &CallTarget, var: VarId, replacement: &IrExpr) -> CallTarget {
+    match target {
+        CallTarget::Method { object, method } => CallTarget::Method {
+            object: Box::new(substitute_var_in_expr(object, var, replacement)),
+            method: method.clone(),
+        },
+        CallTarget::Computed { callee } => CallTarget::Computed {
+            callee: Box::new(substitute_var_in_expr(callee, var, replacement)),
+        },
+        other => other.clone(),
+    }
+}
+
+/// Substitute all occurrences of `var` with `replacement` in a statement.
+pub fn substitute_var_in_stmt(stmt: &IrStmt, var: VarId, replacement: &IrExpr) -> IrStmt {
+    let sub = |e: &IrExpr| substitute_var_in_expr(e, var, replacement);
+    let kind = match &stmt.kind {
+        IrStmtKind::Bind { var: v, mutability, ty, value } => IrStmtKind::Bind {
+            var: *v, mutability: *mutability, ty: ty.clone(), value: sub(value),
+        },
+        IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
+            pattern: pattern.clone(), value: sub(value),
+        },
+        IrStmtKind::Assign { var: v, value } => IrStmtKind::Assign {
+            var: *v, value: sub(value),
+        },
+        IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
+            target: *target, index: sub(index), value: sub(value),
+        },
+        IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
+            target: *target, key: sub(key), value: sub(value),
+        },
+        IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
+            target: *target, field: field.clone(), value: sub(value),
+        },
+        IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
+            cond: sub(cond), else_: sub(else_),
+        },
+        IrStmtKind::ListSwap { target, a, b } => IrStmtKind::ListSwap {
+            target: *target, a: sub(a), b: sub(b),
+        },
+        IrStmtKind::ListReverse { target, end } => IrStmtKind::ListReverse {
+            target: *target, end: sub(end),
+        },
+        IrStmtKind::ListRotateLeft { target, end } => IrStmtKind::ListRotateLeft {
+            target: *target, end: sub(end),
+        },
+        IrStmtKind::ListCopySlice { dst, src, len } => IrStmtKind::ListCopySlice {
+            dst: *dst, src: *src, len: sub(len),
+        },
+        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: sub(expr) },
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => stmt.kind.clone(),
+    };
+    IrStmt { kind, span: stmt.span }
+}

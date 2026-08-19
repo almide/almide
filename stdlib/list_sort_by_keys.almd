@@ -1,0 +1,77 @@
+// list_sort_by_keys — SELF-HOSTED stable sort of a List[Int] by a PARALLEL key array
+// (the v0 `sort_by_cached_key` shape: keys are computed ONCE per element, before the
+// sort — the `list.sort_by` desugar builds `keys = list.map(xs, f)` and calls this,
+// so an EFFECTFUL key fn observes exactly n calls on both targets, C-055). Stable
+// bottom-up mergesort over paired (key, value) slots (#1459); both lists borrowed, result owned.
+// ── stable bottom-up mergesort over the paired (value, key) buffers (#1459):
+// O(n log n) in place of the O(n^2) insertion shift; `<=` takes the left run
+// first, so equal keys keep their order (same stability contract as before).
+fn __sbk_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
+else {
+  let takel = if j >= hi then true
+    else if i >= mid then false
+    else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
+  if takel then {
+    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
+    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
+    __sbk_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
+  } else {
+    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
+    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
+    __sbk_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+  }
+}
+
+fn __sbk_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
+else {
+  let m0 = lo + width
+  let mid = if m0 > n then n else m0
+  let h0 = lo + width * 2
+  let hi = if h0 > n then n else h0
+  let _r = __sbk_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
+  __sbk_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
+}
+
+fn __sbk_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int = if width >= n then cvh
+else {
+  let _p = __sbk_mpass(cvh, ckh, ovh, okh, n, width, 0)
+  __sbk_mrounds(ovh, okh, cvh, ckh, n, width * 2)
+}
+
+fn __sbk_mcopy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store64(dsth + 12 + i * 8, prim.load64(srch + 12 + i * 8))
+  __sbk_mcopy(srch, dsth, n, i + 1)
+}
+
+// Sorted values are guaranteed to END in bvh (and the keys in bkh): a final
+// ping-pong landing in the scratch is copied back, so an OWNED key list (the
+// String-key twin) never holds a stale handle at its recursive scope-end drop.
+fn __sbk_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
+  let fin = __sbk_mrounds(bvh, bkh, tvh, tkh, n, 1)
+  if fin == bvh then 0 else {
+    let _v = __sbk_mcopy(tvh, bvh, n, 0)
+    __sbk_mcopy(tkh, bkh, n, 0)
+  }
+}
+
+fn __sbk_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store64(dst + i * 8, prim.load64(src + i * 8))
+  __sbk_copy(dst, src, n, i + 1)
+}
+
+fn list_sort_by_keys(xs: List[Int], keys: List[Int]) -> List[Int] = {
+  let sh = prim.handle(xs)
+  let n = prim.load32(sh + 4)
+  let out = prim.alloc_list(n)
+  let oh = prim.handle(out)
+  let _c = __sbk_copy(oh + 12, sh + 12, n, 0)
+  let kcopy = prim.alloc_list(n)
+  let kch = prim.handle(kcopy)
+  let _k = __sbk_copy(kch + 12, prim.handle(keys) + 12, n, 0)
+  let tv = prim.alloc_list(n)
+  let tk = prim.alloc_list(n)
+  let _s = __sbk_msort(oh, kch, prim.handle(tv), prim.handle(tk), n)
+  out
+}

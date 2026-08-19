@@ -1,0 +1,10 @@
+// env_temp_dir — SELF-HOSTED `env.temp_dir()` for the v1 trust-spine WASM target.
+// The Go/Python WASI convention: honor the HOST's `$TMPDIR` claim first (the
+// runner passes the host env through, so the guest converges on the native
+// answer wherever the host sets it), falling back to the WASI preopen
+// convention "/tmp". Rust's std punts here (`panic!("not supported by WASI
+// yet")`); Go's wasip1 is exactly this rule. The native target's real host
+// read (GetTempPath on Windows) lives in the runtime intrinsic.
+import env
+
+effect fn env_temp_dir() -> String = env.get("TMPDIR") ?? "/tmp"

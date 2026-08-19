@@ -7,6 +7,7 @@ license.workspace = true
 description = "SPIKE S1: salsa query spine over the ported parser (ARCHITECTURE.md §6.5)"
 
 [dependencies]
+almide = { path = "../almide" }
 almide-syntax = { path = "../almide-syntax" }
 salsa = "0.23"
 serde_json = "1"

@@ -1,0 +1,159 @@
+// fs — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4c).
+//
+// Migrated mechanically from `stdlib/defs/fs.toml` (27 fns + the
+// `FileStat` record). Runtime impls stay in `runtime/rs/src/fs.rs`.
+//
+// Runtime ABI: every `path` / `content` / `src` / `dst` / `prefix` /
+// `dir` / `pattern` param on the runtime side takes owned `String`,
+// so the templates pass arguments by value. The TOML's `&*{path}`
+// looked like a borrow but was really an `ArgTransform::Direct`
+// signal (runtime string → owned); the bundled path writes the
+// owned form directly so no special-case stripping is needed.
+type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
+
+@intrinsic("almide_rt_fs_read_text")
+effect fn read_text(path: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs_read_bytes")
+effect fn read_bytes(path: String) -> Result[List[Int], String] = _
+
+@intrinsic("almide_rt_fs_write")
+effect fn write(path: String, content: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_write_bytes")
+effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_write_bytes_raw")
+effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_append")
+effect fn append(path: String, content: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_mkdir_p")
+effect fn mkdir_p(path: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_exists")
+effect fn exists(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_read_lines")
+effect fn read_lines(path: String) -> Result[List[String], String] = _
+
+// Streaming line readers: walk the file line-by-line without materializing a
+// List[String] — peak memory is O(longest line), not O(file). Line semantics
+// byte-match read_lines. The family is exactly {fold_lines, for_each_line,
+// fold_lines_range, fold_lines_chunked} (tests/fs_streaming_family_gate):
+// map/filter over lines are intentional omissions (a transforming pipeline
+// belongs on fold_lines; an eager List belongs to read_lines), and for_each
+// has no range/chunked cell (chunk workers accumulate — fold is their shape).
+//
+// ADR-0006 fallible callback forms (#1144): the two CALLBACK-DRIVEN cells
+// carry them — `fs.fold_lines(p, z, (a, l) => g(a, l)!)!` and
+// `fs.for_each_line(p, (l) => g(l)!)!` route to the `__fallible_*` carriers
+// below, which stop the reader at the first err (the callback is not invoked
+// again and the rest of the file is never read). The range/chunked cells do
+// NOT have fallible forms: a chunk worker's err has no defined stop point
+// across a parallel partition (which chunk's err wins is a thread-schedule
+// observable), so an erring chunk body handles its own error — an intentional
+// omission the family gate pins.
+@intrinsic("almide_rt_fs_fold_lines")
+effect fn fold_lines[A](path: String, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
+
+@intrinsic("almide_rt_fs_for_each_line")
+effect fn for_each_line(path: String, f: fn(String) -> Unit) -> Result[Unit, String] = _
+
+// The ADR-0006 fallible carriers. NOT spellings: the checker rewrites
+// `fs.fold_lines`/`fs.for_each_line` to these when the callback is fallible
+// (`infer_calls_closures.rs::normalize_fallible_hof_callback`), exactly as
+// `list.map` becomes `list.__fallible_map`; naming one in source is E043.
+@intrinsic("almide_rt_fs_fold_lines_effect")
+effect fn __fallible_fold_lines[A, E](path: String, init: A, f: fn(A, String) -> Result[A, E]) -> Result[A, E] = _
+
+@intrinsic("almide_rt_fs_for_each_line_effect")
+effect fn __fallible_for_each_line[E](path: String, f: fn(String) -> Result[Unit, E]) -> Result[Unit, E] = _
+
+// The chunk worker's walker: fold exactly the lines owned by the byte range
+// [start, end) — a line belongs to the chunk containing the byte before its
+// first byte — so folding a partition of [0, file_size) visits every line
+// exactly once, and per-chunk partials merge afterwards.
+@intrinsic("almide_rt_fs_fold_lines_range")
+effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
+
+// Chunk-PARALLEL fold: N workers each fold their byte-range partition on
+// real threads inside the runtime, returning the partials in CHUNK ORDER —
+// the merge stays with the caller, so the result is deterministic whatever
+// the thread schedule. The callback must not capture mutable state (the
+// emitted program's Send + Sync bounds make a violation a compile error).
+@intrinsic("almide_rt_fs_fold_lines_chunked")
+effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: fn(A, String) -> A) -> Result[List[A], String] = _
+
+// Absence-as-Option content readers (#1106 / ADR-0004 D4): none ⇔ the path
+// does not exist (parents included); err = permission / directory / IO. The
+// family covers exactly the content readers — metadata (stat/file_size/
+// modified_at) and directory ops (list_dir/walk/glob) keep their exists/
+// is_dir predicates, writes create, and remove has rm -f semantics of its
+// own; those omissions are intentional (tests/fs_if_exists_family_gate).
+@intrinsic("almide_rt_fs_read_text_if_exists")
+effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
+
+@intrinsic("almide_rt_fs_read_bytes_if_exists")
+effect fn read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = _
+
+@intrinsic("almide_rt_fs_read_lines_if_exists")
+effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
+
+@intrinsic("almide_rt_fs_read_bytes_raw_if_exists")
+effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
+
+@intrinsic("almide_rt_fs_remove")
+effect fn remove(path: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_list_dir")
+effect fn list_dir(path: String) -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_fs_is_dir")
+effect fn is_dir(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_is_file")
+effect fn is_file(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_copy")
+effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_rename")
+effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_walk")
+effect fn walk(dir: String) -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_fs_remove_all")
+effect fn remove_all(path: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_file_size")
+effect fn file_size(path: String) -> Result[Int, String] = _
+
+// Effect fn: the answer is a host read (`$TMPDIR` / GetTempPath), not a
+// constant — the bare-`fn` spelling was a misdeclaration (env.temp_dir was
+// always declared effect).
+@intrinsic("almide_rt_fs_temp_dir")
+effect fn temp_dir() -> String = _
+
+@intrinsic("almide_rt_fs_stat")
+effect fn stat(path: String) -> Result[FileStat, String] = _
+
+@intrinsic("almide_rt_fs_glob")
+effect fn glob(pattern: String) -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_fs_create_temp_file")
+effect fn create_temp_file(prefix: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs_create_temp_dir")
+effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs_is_symlink")
+effect fn is_symlink(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_modified_at")
+effect fn modified_at(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_fs_read_bytes_raw")
+effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _

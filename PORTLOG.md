@@ -170,3 +170,39 @@ still matches the incumbent golden byte-for-byte; every new capability is
   edits). The oracle build worktree was removed after golden generation;
   regeneration is one `scripts/gen-ast-manifest.sh` run against a fresh
   a877d2138 build.
+
+---
+
+## Unit 4 STAGE 1 — checker stack + per-file check query (2026-08-19)
+
+- **Source:** `almide@a877d2138` (`git archive` / `git show`).
+- **Ported verbatim, ZERO source edits:** `crates/almide-types` (incl.
+  build.rs stdlib embedding), `crates/almide-lang`, `crates/almide-ir`,
+  `crates/almide-frontend` (25,327 lines), `stdlib/` (309 `.almd` sources as
+  build inputs; data only — self-host runtime gating stays unit 9),
+  `src/resolve.rs` + `src/project.rs`.
+- **Boundary adaptations (recorded):**
+  - New root facade crate `almide` reproducing the incumbent's src/lib.rs
+    re-export map, trimmed to ported crates; `diagnostic_render` resolves to
+    almide-diag's render (unit 1). resolve/project verbatim inside it.
+  - Cargo deps `toml`/`semver` added to the facade (project.rs needs them).
+  - `infer_module_capturing` copied verbatim into `almide-spine/src/s3.rs`
+    with attribution (its home, compile_driver.rs, sits beside unported
+    codegen); exit/stderr sites of the check driver become returned values.
+  - Purity contract: `check_file_json` only accepts stdlib-only-import files
+    (resolve must not read the FS inside a query); harnesses prefilter.
+- **Gate (g) verdict: PASS — 1539x** (see docs/spikes/S3-real-checker-query.md):
+  batch 6,807 ms vs warm 4.42 ms over 1,062 files / 53,943 lines, 100 real
+  diagnostics, max 1 check/edit, 0 on no-edit.
+- **Register shrink, first firing:** porting `stdlib/` satisfied 29 forward
+  references; the stale-deviation check flagged all 29; register 96 → **67**,
+  ceiling lowered. 0 unexplained.
+- **Process incidents (recorded):** the incumbent repo was touched twice by
+  cwd slips — its workspace `Cargo.toml` members line was overwritten and
+  restored byte-identically (verified via `git status` clean), and one
+  python edit aborted harmlessly on a missing path. Rule adopted: every
+  greenfield shell command starts with an explicit `cd` into the worktree.
+- **Still owed before unit 4 LANDS:** diagnostics parity vs oracle
+  (`almide check --json` A/B manifest), per-decl granularity (S2a shape
+  fused into the real checker), Zig-style incremental diagnostic scenarios,
+  E1 wiring (misspellings + recoverable codes).

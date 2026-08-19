@@ -1,0 +1,8 @@
+// json_ctor — SELF-HOSTED json.stringify: a thin delegation to the PROVEN
+// value_core implementation (the native runtime does exactly the same:
+// `almide_rt_json_stringify` forwards to `almide_rt_value_stringify`).
+// Registered as a separate impl fn because the auto-link renames one impl to
+// one call name. The `json_object` / `json_array` twins that lived here were
+// the retired `json.object` / `json.array` aliases, dropped with the E040
+// window — construction is `value.object` / `value.array`.
+fn json_stringify(v: Value) -> String = value.stringify(v)

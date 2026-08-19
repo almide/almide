@@ -1,0 +1,24 @@
+// io_read_all — SELF-HOSTED `io.read_all()` over the WASI stdin floor: read fd 0 to
+// EOF in 4096-byte chunks (prim.read_n_bytes — the same fd-0 floor io.read_n_bytes
+// rides; it returns fewer than n only at EOF, and a 0-length chunk IS EOF) into one
+// growing Bytes buffer (bytes.push is the in-place append — linear, no quadratic
+// concat), decoded ONCE at the end. The decode is lossy (invalid UTF-8 → U+FFFD via
+// the registered bytes.to_string_lossy), which byte-matches native `read_to_string`
+// for any valid-UTF-8 stdin — the only stdin a fixture pins; the invalid-UTF-8 edge
+// is native-murky (`unwrap_or(0)` leaves a partial buffer) and stdin is
+// NON-DETERMINISTIC by contract, so no byte promise exists there. Because this body
+// reaches prim.read_n_bytes, its cap_witness carries Capability::Stdin — a caller is
+// caps-verified only if it declares Stdin (an `effect fn`). Matches io.almd's
+// `effect fn read_all() -> String`.
+effect fn io_read_all() -> String = {
+  var buf = bytes.new(0)
+  var n = 1
+  while n > 0 {
+    let chunk = prim.read_n_bytes(4096)
+    n = list.len(chunk)
+    for v in chunk {
+      bytes.push(buf, v)
+    }
+  }
+  bytes.to_string_lossy(buf)
+}

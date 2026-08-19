@@ -168,6 +168,14 @@ span-only edits (20 rounds) — on the real corpus graph (6,973 decls, 5,408
 symbols, 15,673 edges). (g) remains open and becomes unit 4's acceptance
 bar. Unit 4 is GO. Full report: docs/spikes/S2a-sema-mechanics.md.**
 
+**Unit 4 STAGE 1 VERDICT (2026-08-19): (g) PASS — 1539x (4.42 ms warm vs
+6,807 ms batch, 1,062 files / 53,943 lines) with the REAL checker (the full
+~35k-line types/lang/ir/frontend stack ported verbatim, zero source edits)
+behind a per-file query; invalidation exact (max 1 check/edit, 0 on
+no-edit). All §6.5 criteria are now green: 8/8. Still owed before unit 4
+LANDS: diagnostics parity vs oracle, per-decl granularity, incremental
+diagnostic scenarios, E1 wiring. Report: docs/spikes/S3-real-checker-query.md.**
+
 ## 7. Certification trajectory (R1a + R1b)
 
 Aviation-grade (DO-178C-class) is a declared destination, reached from either

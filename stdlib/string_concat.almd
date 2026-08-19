@@ -1,0 +1,53 @@
+// Self-hosted string concatenation — the `+` operator (BinOp::ConcatStr) lowers to a CallFn
+// to __str_concat. Allocates a fresh String of byte-len(a)+byte-len(b) and byte-copies both
+// halves (both are valid UTF-8, so the result is valid UTF-8 — string.len decodes codepoints
+// from it). len@4 is the BYTE length; data at handle+12. Pure (prim memory ops, no Stdout).
+fn __sc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __sc_copy(dst, src, n, i + 1)
+}
+
+fn __str_concat(a: String, b: String) -> String = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let out = prim.alloc_str(la + lb)
+  let ho = prim.handle(out)
+  let _x = __sc_copy(ho + 12, ha + 12, la, 0)
+  let _y = __sc_copy(ho + 12 + la, hb + 12, lb, 0)
+  out
+}
+
+// SELF-APPEND (`x = x + s` — the string accumulator loop; the exact window
+// concat_to_append.rs rewrites): value-semantics append that BORROWS `a`; the
+// caller's `Drop x` right after releases the old reference either way.
+// - rc == 1 && the bytes fit the block's cap (cap@8 is in 8-byte slots): the
+//   caller's dying handle is the sole owner, so appending in place is
+//   unobservable; the return of `a` Dups it and the caller's Drop rebalances.
+//   This is what makes the string accumulator amortized O(1) per append —
+//   without it every `acc + "x"` whole-copied the accumulator, and a 100k-append
+//   loop peaked at 1.27 GB (#910/#519; 400k died outright).
+// - else: a fresh geometric block ((la+lb)*2 + 16 bytes of cap, true len
+//   stored after) — the same growth physics as __list_append1.
+// `x = x + x` stays correct in the fast path: the copy reads [12, 12+la) and
+// writes [12+la, 12+2la) — disjoint forward ranges of the same block.
+fn __str_append1(a: String, b: String) -> String = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if prim.load32(ha) == 1 and la + lb <= prim.load32(ha + 8) * 8 then {
+    let _x = __sc_copy(ha + 12 + la, hb + 12, lb, 0)
+    prim.store32(ha + 4, la + lb)
+    a
+  } else {
+    let out = prim.alloc_str((la + lb) * 2 + 16)
+    let ho = prim.handle(out)
+    prim.store32(ho + 4, la + lb)
+    let _x = __sc_copy(ho + 12, ha + 12, la, 0)
+    let _y = __sc_copy(ho + 12 + la, hb + 12, lb, 0)
+    out
+  }
+}

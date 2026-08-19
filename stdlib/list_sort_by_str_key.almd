@@ -1,0 +1,132 @@
+// list_sort_by_str_key — SELF-HOSTED `list.sort_by` with a STRING key over SCALAR
+// elements (`list.sort_by([3, 1, 20], (x) => int.to_string(x))` — the #560/C-055
+// class). The same cached-key STABLE insertion sort as list_sortby: f is called
+// EXACTLY ONCE per element into a scratch key list; ordering is byte-lexicographic
+// via string.cmp (v0's String Ord); strict `> 0` keeps equal keys stable. The
+// scratch keys are fresh OWNED Strings in a List[String] (its recursive scope-end
+// drop frees each); slot shuffles move the raw handles WITHIN that list (no
+// ownership event). The result value list is returned owned; the source borrowed.
+fn __sbs_init(bh: Int, sh: Int, kh: Int, f: fn(Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let v = prim.load64(sh + 12 + i * 8)
+  let k = f(v)
+  prim.store64(bh + 12 + i * 8, v)
+  prim.store_str(kh + 12 + i * 8, k)
+  __sbs_init(bh, sh, kh, f, n, i + 1)
+}
+
+// Byte-lexicographic `a > b` (v0's String Ord — the string_cmp discipline, inlined:
+// the dispatch name `string.cmp` is self-host-only and unknown to the checker).
+fn __sbs_cmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la and k >= lb then 0
+else if k >= la then 0 - 1
+else if k >= lb then 1
+else {
+  let ba = prim.load8(ah + k)
+  let bb = prim.load8(bh + k)
+  if ba < bb then 0 - 1
+  else if ba > bb then 1
+  else __sbs_cmp_at(ah, bh, la, lb, k + 1)
+}
+
+fn __sbs_gt(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  __sbs_cmp_at(ha + 12, hb + 12, prim.load32(ha + 4), prim.load32(hb + 4), 0) > 0
+}
+
+// Byte-lexicographic `a <= b` on raw String handles — the merge's stability test.
+fn __sbs_le_h(ah: Int, bh: Int) -> Bool =
+  __sbs_cmp_at(ah + 12, bh + 12, prim.load32(ah + 4), prim.load32(bh + 4), 0) <= 0
+
+// ── stable bottom-up mergesort over the paired (value, key) buffers (#1459):
+// O(n log n) in place of the O(n^2) insertion shift; `<=` takes the left run
+// first, so equal keys keep their order (same stability contract as before).
+fn __sbs_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
+else {
+  let takel = if j >= hi then true
+    else if i >= mid then false
+    else __sbs_le_h(prim.load64(skh + 12 + i * 8), prim.load64(skh + 12 + j * 8))
+  if takel then {
+    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
+    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
+    __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
+  } else {
+    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
+    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
+    __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+  }
+}
+
+fn __sbs_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
+else {
+  let m0 = lo + width
+  let mid = if m0 > n then n else m0
+  let h0 = lo + width * 2
+  let hi = if h0 > n then n else h0
+  let _r = __sbs_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
+  __sbs_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
+}
+
+fn __sbs_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int = if width >= n then cvh
+else {
+  let _p = __sbs_mpass(cvh, ckh, ovh, okh, n, width, 0)
+  __sbs_mrounds(ovh, okh, cvh, ckh, n, width * 2)
+}
+
+fn __sbs_mcopy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store64(dsth + 12 + i * 8, prim.load64(srch + 12 + i * 8))
+  __sbs_mcopy(srch, dsth, n, i + 1)
+}
+
+// Sorted values are guaranteed to END in bvh (and the keys in bkh): a final
+// ping-pong landing in the scratch is copied back, so an OWNED key list (the
+// String-key twin) never holds a stale handle at its recursive scope-end drop.
+fn __sbs_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
+  let fin = __sbs_mrounds(bvh, bkh, tvh, tkh, n, 1)
+  if fin == bvh then 0 else {
+    let _v = __sbs_mcopy(tvh, bvh, n, 0)
+    __sbs_mcopy(tkh, bkh, n, 0)
+  }
+}
+
+fn list_sort_by_str_key(xs: List[Int], f: fn(Int) -> String) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let keys: List[String] = prim.alloc_list_str(n)
+  let _a = __sbs_init(prim.handle(buf), prim.handle(xs), prim.handle(keys), f, n, 0)
+  let tv = prim.alloc_list(n)
+  let tk = prim.alloc_list(n)
+  let _s = __sbs_msort(prim.handle(buf), prim.handle(keys), prim.handle(tv), prim.handle(tk), n)
+  buf
+}
+
+// HEAP-element variant of the String-key sort (`sort_by(xs, (r) => r.name)` over a
+// List[String]/List[List[…]]/List[R]): the SAME cached-key stable insertion sort,
+// but each element handle copied into the result is ACQUIRED (rc_inc) — the result
+// list CO-OWNS every element, so both lists' recursive drops are balanced. The
+// raw-copy `__sbs_init` above shares without acquiring, and the two deep drops
+// double-free (rc_dec trap in the caller's epilogue). Mirrors list_sort_by_rc /
+// list_sort_by_float_rc; the merge phase is shared verbatim (moving raw handles
+// BETWEEN the owned key list and the flat scratch is not an ownership event,
+// and __sbs_msort guarantees the owned list ends holding each handle once).
+fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: fn(Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let v = prim.load64(sh + 12 + i * 8)
+  let k = f(v)
+  prim.rc_inc(v)
+  prim.store64(bh + 12 + i * 8, v)
+  prim.store_str(kh + 12 + i * 8, k)
+  __sbsr_init(bh, sh, kh, f, n, i + 1)
+}
+
+fn list_sort_by_str_key_rc(xs: List[Int], f: fn(Int) -> String) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let keys: List[String] = prim.alloc_list_str(n)
+  let _a = __sbsr_init(prim.handle(buf), prim.handle(xs), prim.handle(keys), f, n, 0)
+  let tv = prim.alloc_list(n)
+  let tk = prim.alloc_list(n)
+  let _s = __sbs_msort(prim.handle(buf), prim.handle(keys), prim.handle(tv), prim.handle(tk), n)
+  buf
+}

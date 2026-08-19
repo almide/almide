@@ -1,0 +1,84 @@
+// http_response — SELF-HOSTED HttpResponse builder family (PURE data ctors on
+// the blanket-impure http module; serve/network stay walled). v0's
+// AlmideHttpResponse { status, body, headers: Vec<(String,String)> } is opaque
+// nominal — the v1 self-host owns the rep (the JsonPath precedent): a
+// List[String] `[int.to_string(status), body, k1, v1, k2, v2, …]` — header
+// pairs flat from slot 2, insertion-ordered exactly like v0's Vec pushes.
+// get_header scans pairs first-match; set_header overwrites in place or
+// appends (v0 upsert). The newtype eraser publishes
+// Named("HttpResponse") → List[String].
+//
+// FIELD NAMES ARE CASE-INSENSITIVE (RFC 9110 §5.1) — every name comparison in
+// this file goes through __hr_ci_eq, and every write goes through __hr_set, so
+// the list carries AT MOST ONE entry per field name and set-then-get always
+// round-trips. #1352: get_header used to compare with `==` here while v0 used
+// `eq_ignore_ascii_case`, so a wasm-target program reading back a header it had
+// just written under a different spelling silently got `none`.
+fn http_response(status: Int, body: String) -> List[String] = {
+  let st = int.to_string(status)
+  [st, body, "Content-Type", "text/plain"]
+}
+
+fn http_json(status: Int, body: String) -> List[String] = {
+  let st = int.to_string(status)
+  [st, body, "Content-Type", "application/json"]
+}
+
+fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
+
+// ASCII-only case fold of ONE character — RFC 9110 field names are `token`s
+// (ASCII), and v0 compares with `eq_ignore_ascii_case`, so reaching for the
+// Unicode string.to_lower here would DISAGREE with native on a non-ASCII name.
+// A non-ASCII char is not in the table and falls through unchanged, which is
+// exactly what the byte-wise fold does to a UTF-8 lead/continuation byte.
+// Spelled with chars/index_of/slice rather than a byte walk on purpose: the
+// interp oracle bridges those three, while string.to_bytes bottoms out in
+// prim.handle and would make every http fixture ABSTAIN from the 3-way vote.
+fn __hr_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
+  none => c,
+}
+
+fn __hr_ci_at(a: List[String], b: List[String], i: Int) -> Bool = if i >= list.len(a) then true
+else if __hr_fold(list.get(a, i) ?? "") != __hr_fold(list.get(b, i) ?? "") then false
+else __hr_ci_at(a, b, i + 1)
+
+fn __hr_ci_eq(x: String, y: String) -> Bool = {
+  let a = string.chars(x)
+  let b = string.chars(y)
+  if list.len(a) != list.len(b) then false else __hr_ci_at(a, b, 0)
+}
+
+// Fold the caller's map over __hr_set: EXACTLY the given headers (no seeded
+// Content-Type), map order, later case-variant spellings upserting the earlier
+// entry rather than appending a shadowed duplicate.
+fn __hr_hdrs(headers: Map[String, String], ks: List[String], i: Int, acc: List[String]) -> List[String] = if i >= list.len(ks) then acc
+else {
+  let k = list.get(ks, i) ?? ""
+  let v = map.get(headers, k) ?? ""
+  __hr_hdrs(headers, ks, i + 1, __hr_set(acc, 2, k, v))
+}
+
+fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
+  let st = int.to_string(status)
+  __hr_hdrs(headers, map.keys(headers), 0, [st, body])
+}
+
+fn http_status(resp: List[String], code: Int) -> List[String] = {
+  let st = int.to_string(code)
+  [st] + list.drop(resp, 1)
+}
+
+fn http_body(resp: List[String]) -> String = list.get(resp, 1) ?? ""
+
+fn http_get_header(resp: List[String], key: String) -> String? = __hr_find(resp, 2, key)
+
+fn __hr_find(resp: List[String], i: Int, key: String) -> String? = if i >= list.len(resp) then none
+else if __hr_ci_eq(list.get(resp, i) ?? "", key) then list.get(resp, i + 1)
+else __hr_find(resp, i + 2, key)
+
+fn http_set_header(resp: List[String], key: String, value: String) -> List[String] = __hr_set(resp, 2, key, value)
+
+fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[String] = if i >= list.len(resp) then resp + [key, value]
+else if __hr_ci_eq(list.get(resp, i) ?? "", key) then list.set(resp, i + 1, value)
+else __hr_set(resp, i + 2, key, value)

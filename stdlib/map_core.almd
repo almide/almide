@@ -1,0 +1,560 @@
+// map_core — SELF-HOSTED Map[Int,Int] core for v1. A v1 `Map[Int,Int]` IS a v1 List block of
+// PAIRED slots [rc][len@4 = ENTRY count][cap@8][k0@12,v0@20,k1@28,v1@36,...] — entry i has its
+// key at h+12+i*16 and value at h+12+i*16+8. INSERTION-ORDERED (v0's AlmideMap = Vec<(K,V)>:
+// set updates a key's value in place keeping its position, appends new keys; remove preserves
+// survivors' order; keys/values iterate insertion order). Int keys+values only (both scalar);
+// String keys/values are a heap-element refinement. Source borrowed; constructed maps owned.
+// Index of key k among the first `len` entries at block-handle h, or -1 if absent.
+fn __map_find(h: Int, len: Int, k: Int, i: Int) -> Int = if i >= len then 0 - 1
+else {
+  let kk = prim.load64(h + 12 + i * 16)
+  if kk == k then i
+  else __map_find(h, len, k, i + 1)
+}
+
+// ── BUCKET INDEX SIDECAR (#1219, the wasm-leg twin of native's fingerprint index) ──
+// Past a threshold entry capacity the block carries an open-addressed bucket array AFTER
+// the pair region, so keyed reads are O(1) probes instead of the O(n) `__map_find` scan.
+// The entry array stays AUTHORITATIVE (iteration/eq/repr read `len` pairs in insertion
+// order); the index is a pure sidecar, so nothing observable changes.
+//
+//   cap (the block's i64 slot count) is CANONICAL — every producer allocates through
+//   `__map_alloc`, so cap is a function of the entry capacity E alone:
+//     E <  16 (FLAT)    cap = 2E          ∈ {0, 2, 4, 8, 16}   — no index, linear scan
+//     E >= 16 (INDEXED) cap = 3E + 1      ∈ {49, 97, 193, …}
+//   The two ladders are disjoint (16 < 49), so `cap >= 49` alone decides the shape and
+//   E is recoverable: E = (cap-1)/3 indexed, cap/2 flat. An indexed block lays out
+//     slots [0, 2E)        the k/v pairs
+//     slot   2E            ilen — the entry count the buckets were built for
+//     slots [2E+1, 3E+1)   2E i32 buckets, each `entry_index + 1` (0 = EMPTY)
+//   Load factor is at most 1/2 (E entries in 2E buckets), so the linear probe always
+//   terminates on an empty bucket.
+//
+// STALENESS, not synchronization, is how the index stays honest: it is VALID iff
+// `ilen == len`, and `__map_alloc` stamps every fresh block with ilen = -1. Any producer
+// that writes entries without touching the index therefore yields an INVALID index that
+// the next read rebuilds — an index can never silently disagree with the entries. Only
+// two paths claim validity: `__map_reindex` (read-side, on demand) and the carry in
+// `map_set`/`map_merge`, which update the buckets in the same step that appends the entry.
+fn __map_pow2(n: Int, e: Int) -> Int = if e >= n then e else __map_pow2(n, e * 2)
+
+// The canonical slot count for a block that must hold `need` entries.
+fn __map_cap_for(need: Int) -> Int = if need <= 0 then 0
+else {
+  let e = __map_pow2(need, 1)
+  if e >= 16 then e * 3 + 1 else e * 2
+}
+
+// Entry capacity E of a block with `cap` slots (0 when the block is empty).
+fn __map_ecap(cap: Int) -> Int = if cap >= 49 then (cap - 1) / 3 else cap / 2
+
+// Byte address of the first bucket (indexed blocks only).
+fn __map_bb(h: Int, ecap: Int) -> Int = h + 12 + ecap * 16 + 8
+
+// Byte address of the ilen validity stamp (indexed blocks only).
+fn __map_il(h: Int, ecap: Int) -> Int = h + 12 + ecap * 16
+
+// xorshift64 avalanche — shifts and xors only, so no Int overflow is possible and the
+// high bits fold down into the masked low bits (strided keys like `i * 1024` would
+// otherwise all land in one bucket).
+fn __map_mix(k: Int) -> Int = {
+  let a = prim.bxor(k, prim.bshl(k, 13))
+  let b = prim.bxor(a, prim.bshr_u(a, 7))
+  let c = prim.bxor(b, prim.bshl(b, 17))
+  prim.bxor(c, prim.bshr_u(c, 32))
+}
+
+// Entry index of key k via the buckets, or -1. Stops at the first EMPTY bucket.
+fn __map_probe(h: Int, bb: Int, mask: Int, k: Int, j: Int) -> Int = {
+  let b = prim.load32(bb + j * 4)
+  if b == 0 then 0 - 1
+  else {
+    let e = b - 1
+    let kk = prim.load64(h + 12 + e * 16)
+    if kk == k then e
+    else __map_probe(h, bb, mask, k, prim.band(j + 1, mask))
+  }
+}
+
+// First empty bucket at or after j (terminates: load factor <= 1/2).
+fn __map_probe_free(bb: Int, mask: Int, j: Int) -> Int = {
+  let b = prim.load32(bb + j * 4)
+  if b == 0 then j
+  else __map_probe_free(bb, mask, prim.band(j + 1, mask))
+}
+
+// Bind key k to entry index e. The caller guarantees k is not already indexed.
+fn __map_idx_put(bb: Int, mask: Int, k: Int, e: Int) -> Int = {
+  let j = __map_probe_free(bb, mask, prim.band(__map_mix(k), mask))
+  prim.store32(bb + j * 4, e + 1)
+  0
+}
+
+fn __map_idx_clear(bb: Int, nb: Int, j: Int) -> Int = if j >= nb then 0
+else {
+  prim.store32(bb + j * 4, 0)
+  __map_idx_clear(bb, nb, j + 1)
+}
+
+fn __map_idx_load(h: Int, bb: Int, mask: Int, len: Int, i: Int) -> Int = if i >= len then 0
+else {
+  let k = prim.load64(h + 12 + i * 16)
+  let _p = __map_idx_put(bb, mask, k, i)
+  __map_idx_load(h, bb, mask, len, i + 1)
+}
+
+// Rebuild the buckets from the `len` authoritative entries and stamp them VALID.
+// A freshly allocated block is NOT zeroed ($alloc reuses freed blocks), so clear first.
+fn __map_reindex(h: Int, ecap: Int, len: Int) -> Int = {
+  let bb = __map_bb(h, ecap)
+  let _c = __map_idx_clear(bb, ecap * 2, 0)
+  let _f = __map_idx_load(h, bb, ecap * 2 - 1, len, 0)
+  prim.store64(__map_il(h, ecap), len)
+  0
+}
+
+// READ-SIDE lookup: O(1) probe, building the index on demand for an indexed block.
+// The rebuild WRITES to a borrowed block, which is sound because the buckets are not
+// part of the value — entries, len and cap are untouched, so every observable read
+// (order, contents, repr) is identical whether or not the index happens to be built.
+fn __map_lookup(h: Int, len: Int, cap: Int, k: Int) -> Int = {
+  let ecap = __map_ecap(cap)
+  if ecap < 16 then __map_find(h, len, k, 0)
+  else {
+    let ilen = prim.load64(__map_il(h, ecap))
+    let _r = if ilen == len then 0
+    else __map_reindex(h, ecap, len)
+    let mask = ecap * 2 - 1
+    __map_probe(h, __map_bb(h, ecap), mask, k, prim.band(__map_mix(k), mask))
+  }
+}
+
+// PRODUCER-SIDE lookup: probe when the index is ALREADY valid, else fall back to the
+// linear scan. Never builds. A grow loop (`m[k] = v`) allocates a fresh result every
+// call, so building an index the loop then throws away would cost more than the scan.
+fn __map_find_soft(h: Int, len: Int, cap: Int, k: Int) -> Int = {
+  let ecap = __map_ecap(cap)
+  if ecap < 16 then __map_find(h, len, k, 0)
+  else {
+    let ilen = prim.load64(__map_il(h, ecap))
+    if ilen == len then {
+      let mask = ecap * 2 - 1
+      __map_probe(h, __map_bb(h, ecap), mask, k, prim.band(__map_mix(k), mask))
+    } else __map_find(h, len, k, 0)
+  }
+}
+
+// Copy `n` raw i64 slots starting at slot `start` (used to carry a valid index across
+// a same-shape rebuild — entry indices are preserved by a full copy, so the buckets are
+// still exact).
+fn __map_copy_slots(sh: Int, rh: Int, start: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let w = prim.load64(sh + 12 + (start + i) * 8)
+  prim.store64(rh + 12 + (start + i) * 8, w)
+  __map_copy_slots(sh, rh, start, n, i + 1)
+}
+
+// The ONLY allocator for a Map[Int,Int] block: canonical cap + an INVALID index stamp.
+fn __map_alloc_cap(cap: Int) -> Map[Int, Int] = {
+  let r = prim.alloc_map(cap)
+  let ecap = __map_ecap(cap)
+  let _i = if ecap < 16 then 0
+  else {
+    prim.store64(__map_il(prim.handle(r), ecap), 0 - 1)
+    0
+  }
+  r
+}
+
+fn __map_alloc(need: Int) -> Map[Int, Int] = __map_alloc_cap(__map_cap_for(need))
+
+fn map_new() -> Map[Int, Int] = __map_alloc_cap(0)
+
+fn map_len(m: Map[Int, Int]) -> Int = prim.load32(prim.handle(m) + 4)
+
+fn map_is_empty(m: Map[Int, Int]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
+
+fn map_contains(m: Map[Int, Int], k: Int) -> Bool = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let cap = prim.load32(h + 8)
+  let idx = __map_lookup(h, len, cap, k)
+  idx >= 0
+}
+
+fn map_get_or(m: Map[Int, Int], k: Int, default: Int) -> Int = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let cap = prim.load32(h + 8)
+  let idx = __map_lookup(h, len, cap, k)
+  if idx < 0 then default else prim.load64(h + 12 + idx * 16 + 8)
+}
+
+// Copy all `len` entries (key+value pairs) from sh to rh.
+fn __map_copy(sh: Int, rh: Int, len: Int, i: Int) -> Int = if i >= len then 0
+else {
+  let k = prim.load64(sh + 12 + i * 16)
+  let v = prim.load64(sh + 12 + i * 16 + 8)
+  prim.store64(rh + 12 + i * 16, k)
+  prim.store64(rh + 12 + i * 16 + 8, v)
+  __map_copy(sh, rh, len, i + 1)
+}
+
+// Put (k,v) into the copied result rh (holding `len` entries): if idx>=0 overwrite that entry's
+// value in place (len unchanged); else append a fresh entry (len+1). Returns the new entry count.
+fn __map_put(rh: Int, len: Int, idx: Int, k: Int, v: Int) -> Int = if idx < 0 then {
+  prim.store64(rh + 12 + len * 16, k)
+  prim.store64(rh + 12 + len * 16 + 8, v)
+  len + 1
+} else {
+  prim.store64(rh + 12 + idx * 16 + 8, v)
+  len
+}
+
+// Carry a VALID source index into the same-shape result (entry indices survive a full
+// copy, so the buckets stay exact) and extend it with the appended key. A stale source
+// index, or a grow that changed the bucket count, simply leaves the result INVALID for
+// the next read to rebuild. Returns 0 (a statement helper).
+fn __map_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, idx: Int, k: Int) -> Int = if necap < 16 then 0
+else if necap != secap then 0
+else {
+  let ilen = prim.load64(__map_il(sh, secap))
+  if ilen != len then 0
+  else {
+    let _c = __map_copy_slots(sh, rh, secap * 2, secap + 1, 0)
+    if idx >= 0 then 0
+    else {
+      let _p = __map_idx_put(__map_bb(rh, necap), necap * 2 - 1, k, len)
+      prim.store64(__map_il(rh, necap), len + 1)
+      0
+    }
+  }
+}
+
+// GEOMETRIC capacity (#1219): the slot count comes from `__map_cap_for`, a doubling ladder
+// keyed on the entry capacity, instead of the exact (len+1)*2. The $alloc free-list reuses
+// only EXACT-size blocks, so an exact-size grow loop (`m = map.set(m, k, v)`, the lowered
+// form of `m[k] = v` / `map.insert`) frees a never-reusable block every call — O(n^2) bytes
+// and an O(n) dead-list walk per alloc. With a stable epoch size the block freed by the
+// PREVIOUS rebind is an exact head match: O(1) reuse, O(n) total memory. Slack slots past
+// 2*len are never read (len governs iteration/eq/repr — filter/remove results already carry
+// cap slack), so observable behavior is unchanged.
+fn map_set(m: Map[Int, Int], k: Int, v: Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let cap = prim.load32(sh + 8)
+  let idx = __map_find_soft(sh, len, cap, k)
+  let need = if idx < 0 then len + 1 else len
+  let want = __map_cap_for(need)
+  let slots = if want > cap then want else cap
+  let r = __map_alloc_cap(slots)
+  let rh = prim.handle(r)
+  let _c = __map_copy(sh, rh, len, 0)
+  let w = __map_put(rh, len, idx, k, v)
+  prim.store32(rh + 4, w)
+  let _x = __map_idx_carry(sh, rh, __map_ecap(cap), __map_ecap(slots), len, idx, k)
+  r
+}
+
+// Copy all entries EXCEPT the one keyed k (preserving survivors' order); return the new count.
+fn __map_remove_fill(sh: Int, len: Int, rh: Int, k: Int, i: Int, w: Int) -> Int = if i >= len then w
+else {
+  let kk = prim.load64(sh + 12 + i * 16)
+  if kk == k then __map_remove_fill(sh, len, rh, k, i + 1, w)
+  else {
+    let vv = prim.load64(sh + 12 + i * 16 + 8)
+    prim.store64(rh + 12 + w * 16, kk)
+    prim.store64(rh + 12 + w * 16 + 8, vv)
+    __map_remove_fill(sh, len, rh, k, i + 1, w + 1)
+  }
+}
+
+// The result is a FRESH block, so its index is born invalid — removal shifts every
+// survivor's entry index, and rebuilding on the next read is exactly as cheap as
+// patching would be. This is why an index here cannot rot: it is never carried.
+fn map_remove(m: Map[Int, Int], k: Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let r = __map_alloc(len)
+  let rh = prim.handle(r)
+  let w = __map_remove_fill(sh, len, rh, k, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Copy each entry's key into the List block oh.
+fn __map_keys_fill(sh: Int, oh: Int, len: Int, i: Int) -> Int = if i >= len then 0
+else {
+  let k = prim.load64(sh + 12 + i * 16)
+  prim.store64(oh + 12 + i * 8, k)
+  __map_keys_fill(sh, oh, len, i + 1)
+}
+
+fn map_keys(m: Map[Int, Int]) -> List[Int] = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let out = prim.alloc_list(len)
+  let oh = prim.handle(out)
+  let _x = __map_keys_fill(h, oh, len, 0)
+  out
+}
+
+// Copy each entry's value into the List block oh.
+fn __map_values_fill(sh: Int, oh: Int, len: Int, i: Int) -> Int = if i >= len then 0
+else {
+  let v = prim.load64(sh + 12 + i * 16 + 8)
+  prim.store64(oh + 12 + i * 8, v)
+  __map_values_fill(sh, oh, len, i + 1)
+}
+
+fn map_values(m: Map[Int, Int]) -> List[Int] = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let out = prim.alloc_list(len)
+  let oh = prim.handle(out)
+  let _x = __map_values_fill(h, oh, len, 0)
+  out
+}
+
+// map.get — Some(value) when the key is present, None otherwise (a materialized Option[Int]).
+// Each arm is built in a HELPER TAIL (the materialized-Option layout, mirroring list.max/min:
+// a `__none()` helper for None, a `__some_at` helper for Some), so the result is a real Option.
+fn __map_none() -> Int? = none
+
+fn __map_get_some(h: Int, idx: Int) -> Int? = {
+  let v = prim.load64(h + 12 + idx * 16 + 8)
+  some(v)
+}
+
+fn map_get(m: Map[Int, Int], k: Int) -> Int? = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let cap = prim.load32(h + 8)
+  let idx = __map_lookup(h, len, cap, k)
+  if idx < 0 then __map_none() else __map_get_some(h, idx)
+}
+
+// map.merge — clone a, then insert every entry of b (b's keys override a's value in place,
+// b's new keys append). Result order: a's order (overridden values) then b's new keys (b order).
+// Append (k,v) to the half-built result and keep its index EXACT in the same step: an
+// overwrite touches no key, an append binds the new key to its entry index and advances
+// the ilen stamp. The index therefore stays valid for the whole merge — without this the
+// per-key `__map_find` would make merge O(a*b).
+fn __map_merge_put(rh: Int, ecap: Int, w: Int, idx: Int, k: Int, v: Int) -> Int = {
+  let w2 = __map_put(rh, w, idx, k, v)
+  let _i = if ecap < 16 then 0
+  else if idx >= 0 then 0
+  else {
+    let _p = __map_idx_put(__map_bb(rh, ecap), ecap * 2 - 1, k, w)
+    prim.store64(__map_il(rh, ecap), w + 1)
+    0
+  }
+  w2
+}
+
+fn __map_merge_addb(rh: Int, ecap: Int, bh: Int, blen: Int, j: Int, w: Int) -> Int = if j >= blen then w
+else {
+  let k = prim.load64(bh + 12 + j * 16)
+  let v = prim.load64(bh + 12 + j * 16 + 8)
+  let mask = ecap * 2 - 1
+  let idx = if ecap < 16 then __map_find(rh, w, k, 0)
+  else __map_probe(rh, __map_bb(rh, ecap), mask, k, prim.band(__map_mix(k), mask))
+  let w2 = __map_merge_put(rh, ecap, w, idx, k, v)
+  __map_merge_addb(rh, ecap, bh, blen, j + 1, w2)
+}
+
+fn map_merge(a: Map[Int, Int], b: Map[Int, Int]) -> Map[Int, Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = __map_alloc(alen + blen)
+  let rh = prim.handle(r)
+  let ecap = __map_ecap(prim.load32(rh + 8))
+  let _c = __map_copy(ah, rh, alen, 0)
+  let _i = if ecap < 16 then 0
+  else __map_reindex(rh, ecap, alen)
+  let w = __map_merge_addb(rh, ecap, bh, blen, 0, alen)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// map.update — if k is present, replace its value with f(old); else the map is unchanged. f is a
+// one-arity closure (Int)->Int invoked via CallIndirect. update never changes the entry count.
+fn __map_update_at(rh: Int, idx: Int, f: (Int) -> Int) -> Int = if idx < 0 then 0
+else {
+  let old = prim.load64(rh + 12 + idx * 16 + 8)
+  let nv = f(old)
+  prim.store64(rh + 12 + idx * 16 + 8, nv)
+  0
+}
+
+fn map_update(m: Map[Int, Int], k: Int, f: (Int) -> Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let cap = prim.load32(sh + 8)
+  let r = __map_alloc(len)
+  let rh = prim.handle(r)
+  let _c = __map_copy(sh, rh, len, 0)
+  let idx = __map_find_soft(sh, len, cap, k)
+  let _u = __map_update_at(rh, idx, f)
+  prim.store32(rh + 4, len)
+  r
+}
+
+// ── Higher-order Map[Int,Int] (closures machinery) ── the predicate f is a TWO-arity closure
+// f : (Key, Value) -> Bool invoked via CallIndirect $closure_fn2. A pure predicate byte-matches
+// v0 (single pass, insertion order). filter keeps a subset of entries (still unique keys).
+fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int = if i >= len then w
+else {
+  let k = prim.load64(sh + 12 + i * 16)
+  let v = prim.load64(sh + 12 + i * 16 + 8)
+  let keep = f(k, v)
+  if keep then {
+    prim.store64(rh + 12 + w * 16, k)
+    prim.store64(rh + 12 + w * 16 + 8, v)
+    __map_filter_fill(sh, len, rh, f, i + 1, w + 1)
+  } else {
+    __map_filter_fill(sh, len, rh, f, i + 1, w)
+  }
+}
+
+fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let r = __map_alloc(len)
+  let rh = prim.handle(r)
+  let w = __map_filter_fill(sh, len, rh, f, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Sum the predicate's 0/1 over all entries → the hit COUNT (a Bool is an i64 0/1).
+fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int = if i >= len then acc
+else {
+  let k = prim.load64(sh + 12 + i * 16)
+  let v = prim.load64(sh + 12 + i * 16 + 8)
+  let h = f(k, v)
+  if h then __map_count_hits(sh, len, f, i + 1, acc + 1)
+  else __map_count_hits(sh, len, f, i + 1, acc)
+}
+
+fn map_all(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let hits = __map_count_hits(sh, len, f, 0, 0)
+  hits >= len
+}
+
+fn map_any(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let hits = __map_count_hits(sh, len, f, 0, 0)
+  hits > 0
+}
+
+fn map_count(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Int = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  __map_count_hits(sh, len, f, 0, 0)
+}
+
+// map.fold — left fold with a THREE-arity closure f : (Acc, Key, Value) -> Acc (v0's
+// fold(m, init, f), acc first). Int accumulator. The closure dispatches via $closure_fn3 (the
+// render generates one closure type per arity that appears — 3-arity needs no new machinery).
+fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int = if i >= len then acc
+else {
+  let k = prim.load64(sh + 12 + i * 16)
+  let v = prim.load64(sh + 12 + i * 16 + 8)
+  let nacc = f(acc, k, v)
+  __map_fold_loop(sh, f, len, i + 1, nacc)
+}
+
+fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  __map_fold_loop(sh, f, len, 0, init)
+}
+
+// map.from_list — build a scalar-KV map from a pairs list via the generic map.set
+// (the map_if composition; FIRST position with LAST value = set's replace-in-place).
+// Wide scalar keys (Int64/UInt64 — map_wide_int_key) are i64 slots like Int, so the
+// one twin serves every scalar-key/scalar-value instantiation.
+fn __map_from_list_at(pairs: List[(Int, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(pairs) then m
+else match list.get(pairs, i) {
+  some(p) => {
+    let (k, v) = p
+    __map_from_list_at(pairs, i + 1, map.set(m, k, v))
+  },
+  none => m,
+}
+
+fn map_from_list(pairs: List[(Int, Int)]) -> Map[Int, Int] = {
+  let m: Map[Int, Int] = map.new()
+  __map_from_list_at(pairs, 0, m)
+}
+
+// ── The find/map/upsert trio (frontier burn-down, #1423) ────────────────────
+// The String-key (skv) instantiations existed; the scalar-key CORE lacked all
+// three, so `map.find([1: 1], ..)` walled on wasm while `map.find(["a": 1], ..)`
+// linked. Layout: interleaved 16-byte entries (key @ 12+i*16, value @ +8).
+// map.find — first entry the predicate accepts, in insertion order, as
+// `some((k, v))`; `none` when nothing hits. The some/none ctor helpers keep the
+// heap-result-if out of the loop arm (the map_skv.almd __skv_find_* split).
+fn __map_find_some(k: Int, v: Int) -> (Int, Int)? = some((k, v))
+
+fn __map_find_none() -> (Int, Int)? = none
+
+fn __map_find_at(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)? = {
+  let k = prim.load64(sh + 12 + i * 16)
+  let v = prim.load64(sh + 12 + i * 16 + 8)
+  let hit = f(k, v)
+  if hit then __map_find_some(k, v)
+  else __map_find_loop(sh, len, f, i + 1)
+}
+
+fn __map_find_loop(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)? = if i >= len then __map_find_none()
+else __map_find_at(sh, len, f, i)
+
+fn map_find(m: Map[Int, Int], f: (Int, Int) -> Bool) -> (Int, Int)? = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  __map_find_loop(sh, len, f, 0)
+}
+
+// map.map — every VALUE through `f` (once per entry, in order), keys copied.
+fn __map_map_fill(sh: Int, len: Int, rh: Int, f: (Int) -> Int, i: Int) -> Int = if i >= len then 0
+else {
+  let k = prim.load64(sh + 12 + i * 16)
+  let nv = f(prim.load64(sh + 12 + i * 16 + 8))
+  prim.store64(rh + 12 + i * 16, k)
+  prim.store64(rh + 12 + i * 16 + 8, nv)
+  __map_map_fill(sh, len, rh, f, i + 1)
+}
+
+fn map_map(m: Map[Int, Int], f: (Int) -> Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let r = __map_alloc(len)
+  let rh = prim.handle(r)
+  let _c = __map_map_fill(sh, len, rh, f, 0)
+  prim.store32(rh + 4, len)
+  r
+}
+
+// map.upsert — existing key takes f(old) IN PLACE (position kept), a new key
+// appends (key, init) — the map_set path already implements both halves
+// (native AlmideMap upsert semantics; mirrors map_upsert_skv's set-based body).
+fn __map_upsert_find(sh: Int, len: Int, key: Int, i: Int) -> Int = if i >= len then 0 - 1
+else {
+  if prim.load64(sh + 12 + i * 16) == key then i
+  else __map_upsert_find(sh, len, key, i + 1)
+}
+
+fn map_upsert(m: Map[Int, Int], key: Int, init: Int, f: (Int) -> Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let idx = __map_upsert_find(sh, len, key, 0)
+  let v = if idx < 0 then init else f(prim.load64(sh + 12 + idx * 16 + 8))
+  map_set(m, key, v)
+}

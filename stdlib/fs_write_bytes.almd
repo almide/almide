@@ -1,0 +1,25 @@
+// fs_write_bytes — SELF-HOSTED `fs.write_bytes(path, bytes)` for the wasm leg:
+// materialize the List[Int]'s low bytes into a fresh String buffer (Almide
+// Strings are raw byte strings; each element is masked to its low 8 bits,
+// matching native's `b as u8`), then write it through the WASI write floor
+// (prim.write_text_file — O_CREAT|O_TRUNC, exactly `std::fs::write`). The
+// sibling fs_write_bytes_raw covers the Bytes-typed source. Reaching the write
+// floor carries Capability::FsWrite.
+fn __wb_fill(dst: Int, xs: List[Int], n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = xs[i]
+  prim.store8(dst + i, int.band(b, 255))
+  __wb_fill(dst, xs, n, i + 1)
+}
+
+effect fn fs_write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = {
+  let n = list.len(bytes)
+  let s = prim.alloc_str(n)
+  let _f = __wb_fill(prim.handle(s) + 12, bytes, n, 0)
+  let w: Result[Unit, String] = prim.write_text_file(path, s)
+  let wh = prim.handle(w)
+  if prim.load32(wh + 16) != 0 then {
+    let m: String = prim.load_handle(wh + 12)
+    err(m)
+  } else ok(())
+}

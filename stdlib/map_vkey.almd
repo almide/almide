@@ -1,0 +1,85 @@
+// map_vkey — SELF-HOSTED Map with a NULLARY-ONLY-VARIANT key (`Map[Direction, Int]`
+// — the hash_protocol deriving-Hash shape). A nullary variant's IDENTITY IS its tag
+// (slot0 i64 of the variant block), so the key NORMALIZES to a raw i64 and the map
+// is the plain scalar-scalar paired-slot block, built through the GENERIC map.set
+// (the map_core machinery — the map_if.almd discipline; from_list keeps FIRST
+// position with LAST value, matching native AlmideMap's insert-in-place). The Value
+// spelling is TYPE-ERASED (the bytes_typed/list_fold_hrec precedent): the router
+// (mod_p4's map repr dispatch) only admits nullary-only variant keys with scalar
+// values, where the tag read is total and the flat block drop is exact.
+fn __vtag(k: Value) -> Int = prim.load64(prim.handle(k) + 12)
+
+fn __mvt_at(pairs: List[(Value, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(pairs) then m
+else match list.get(pairs, i) {
+  some(p) => {
+    let (k, v) = p
+    __mvt_at(pairs, i + 1, map.set(m, __vtag(k), v))
+  },
+  none => m,
+}
+
+fn map_from_list_vtag(pairs: List[(Value, Int)]) -> Map[Int, Int] = {
+  let m: Map[Int, Int] = map.new()
+  __mvt_at(pairs, 0, m)
+}
+
+fn map_get_vtag(m: Map[Int, Int], k: Value) -> Int? = map.get(m, __vtag(k))
+
+// ── ALL-SCALAR-record key (`Map[Color, String]`) ──
+// The key block is [len@4 = n slots] + raw i64 slots (probed layout), so content
+// identity NORMALIZES to the comma-joined decimal string of its slots
+// (`int.to_string` is injective on i64 — string equality ⇔ slot-wise equality),
+// and the map is the plain `_str` family (Map[String, String] — full fn set +
+// existing drop). The router admits only Int/Bool-field record keys: a Float
+// field's bits-to-string would split -0.0/NaN from native's f64 PartialEq.
+fn __srec_key_go(h: Int, n: Int, i: Int, acc: String) -> String = if i >= n then acc
+else __srec_key_go(h, n, i + 1, acc + int.to_string(prim.load64(h + 12 + i * 8)) + ",")
+
+fn __srec_key(k: Value) -> String = {
+  let h = prim.handle(k)
+  let n = prim.load32(h + 4)
+  __srec_key_go(h, n, 0, "")
+}
+
+fn __msr_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] = if i >= list.len(pairs) then m
+else match list.get(pairs, i) {
+  some(p) => {
+    let (k, v) = p
+    __msr_at(pairs, i + 1, map.set(m, __srec_key(k), v))
+  },
+  none => m,
+}
+
+fn map_from_list_srec(pairs: List[(Value, String)]) -> Map[String, String] = {
+  let m: Map[String, String] = map.new()
+  __msr_at(pairs, 0, m)
+}
+
+fn map_get_srec(m: Map[String, String], k: Value) -> String? = map.get(m, __srec_key(k))
+
+// ── FLAT all-scalar TUPLE key (`Map[(Int, Int), String]` — the C-015 compound-eq
+// class) ── the tuple block is [len@4] + raw i64 slots, physically identical to
+// the all-scalar record __srec_key walks, so the SAME normalizer + _str family
+// serve it. set/contains complete the fn set the fixture exercises; len routes
+// straight to map.len_str (the backing map IS the str flavor).
+fn map_set_srec(m: Map[String, String], k: Value, v: String) -> Map[String, String] = map.set(m, __srec_key(k), v)
+
+fn map_contains_srec(m: Map[String, String], k: Value) -> Bool = map.contains(m, __srec_key(k))
+
+// ── Set of flat all-scalar tuples (`Set[(Int, Int)]`) ── normalize each element
+// into a Set[String] (content dedup via the _str family). Iteration-returning fns
+// (to_list) are NOT admitted by the router — the normalized form is lookup-only.
+fn __sfl_srec_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] = if i >= list.len(xs) then acc
+else match list.get(xs, i) {
+  some(x) => __sfl_srec_at(xs, i + 1, set.insert(acc, __srec_key(x))),
+  none => acc,
+}
+
+fn set_from_list_srec(xs: List[Value]) -> Set[String] = {
+  let acc: Set[String] = set.new()
+  __sfl_srec_at(xs, 0, acc)
+}
+
+fn set_insert_srec(s: Set[String], x: Value) -> Set[String] = set.insert(s, __srec_key(x))
+
+fn set_contains_srec(s: Set[String], x: Value) -> Bool = set.contains(s, __srec_key(x))

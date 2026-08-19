@@ -1,0 +1,56 @@
+// process — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4c).
+//
+// Migrated mechanically from `stdlib/defs/process.toml` (13 fns + the
+// `ProcessStatus` record). Runtime impls stay in
+// `runtime/rs/src/process.rs`; every runtime param is owned
+// (`String`, `Vec<String>`), so templates pass by value.
+type ProcessStatus = { code: Int, stdout: String, stderr: String }
+
+@intrinsic("almide_rt_process_exec")
+effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
+
+@intrinsic("almide_rt_process_exit")
+effect fn exit(code: Int) -> Never = _
+
+@intrinsic("almide_rt_process_args")
+fn args() -> List[String] = _
+
+@intrinsic("almide_rt_process_stdin_lines")
+effect fn stdin_lines() -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_process_exec_in")
+effect fn exec_in(dir: String, cmd: String, args: List[String]) -> Result[String, String] = _
+
+@intrinsic("almide_rt_process_exec_with_stdin")
+effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_process_exec_status")
+effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = _
+
+// #1040: the timeout twin — admissible EXACTLY here, because spawning a
+// process is already outside the byte-identity contract (bounding it adds no
+// nondeterminism the spawn did not; bounding a pure computation would, which
+// is why the wall-clock `fan.timeout` of old stayed removed and its successor
+// is the deterministic omega-replay form). IF the deadline fires the child is
+// killed and the err is exactly `exec timed out after <ms>ms`; WHETHER it
+// fires is a function of the host (C-214).
+@intrinsic("almide_rt_process_exec_status_timeout")
+effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = _
+
+@intrinsic("almide_rt_process_pid")
+fn pid() -> Int = _
+
+@intrinsic("almide_rt_process_env")
+fn env(key: String) -> String? = _
+
+@intrinsic("almide_rt_process_spawn")
+effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_process_kill")
+effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_process_sleep")
+fn sleep(ms: Int) -> Unit = _
+
+@intrinsic("almide_rt_process_is_alive")
+fn is_alive(pid: Int) -> Bool = _

@@ -1,0 +1,8 @@
+// process_args — SELF-HOSTED `process.args()` over the WASI CLI-args floor
+// (prim.args_get_list_full), the argv[0]-INCLUSIVE twin of env.args: native
+// `std::env::args()` = the program path followed by the program args, built on
+// wasm from the SAME args_sizes_get/args_get bridge with skip=0 (C-096). The
+// result is a fresh OWNED `List[String]` (recursive DropListStr, no leak); the
+// prim carries Capability::CliArgs, so a caller is caps-verified only if it
+// declares it (an `effect fn`).
+fn process_args() -> List[String] = prim.args_get_list_full()

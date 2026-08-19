@@ -1,0 +1,176 @@
+// list_sort_float — SELF-HOSTED `list.sort` over a List[Float], ordered by IEEE-754 totalOrder
+// (the ordering twin of f64::total_cmp): -0.0 < +0.0, NaN is the greatest (after +inf), negatives
+// sort by magnitude-with-sign. The plain list.sort compares the i64 SLOT bits with SIGNED-int `<`,
+// which is garbage for f64 patterns. Here each slot's raw f64 bits are mapped to a MONOTONE i64 key
+//   key = bits ^ ((bits >>_s 63) >>_u 1)
+// (arithmetic shift broadcasts the sign, logical shift drops the sign bit, XOR flips the lower 63
+// bits of a negative) and the keys are compared as signed i64 = totalOrder. The STORED elements stay
+// the original f64 bits — only the comparison key is transformed. Stable bottom-up mergesort (#1459); List[Float] only.
+fn __ftotal_sf(b: Int) -> Int = {
+  let s = prim.bshr(b, 63)
+  let m = prim.bshr_u(s, 1)
+  prim.bxor(b, m)
+}
+
+fn __sortf_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
+
+// ── stable bottom-up mergesort by the monotone totalOrder key (#1459):
+// O(n log n) in place of the O(n^2) selection scan. The key transform is
+// applied per comparison; the stored slots stay the original f64 bits.
+fn __sortf_mrun(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
+else {
+  let takel = if j >= hi then true
+    else if i >= mid then false
+    else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
+  if takel then {
+    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, i))
+    __sortf_mrun(srch, dsth, mid, hi, i + 1, j, k + 1)
+  } else {
+    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, j))
+    __sortf_mrun(srch, dsth, mid, hi, i, j + 1, k + 1)
+  }
+}
+
+fn __sortf_mpass(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
+else {
+  let m0 = lo + width
+  let mid = if m0 > n then n else m0
+  let h0 = lo + width * 2
+  let hi = if h0 > n then n else h0
+  let _r = __sortf_mrun(srch, dsth, mid, hi, lo, mid, lo)
+  __sortf_mpass(srch, dsth, n, width, lo + width * 2)
+}
+
+fn __sortf_mrounds(curh: Int, othh: Int, n: Int, width: Int) -> Int = if width >= n then curh
+else {
+  let _p = __sortf_mpass(curh, othh, n, width, 0)
+  __sortf_mrounds(othh, curh, n, width * 2)
+}
+
+fn __sortf_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let e = prim.load64(srch + 12 + i * 8)
+  prim.store64(dsth + 12 + i * 8, e)
+  __sortf_copy(srch, dsth, n, i + 1)
+}
+
+fn list_sort_float(xs: List[Float]) -> List[Float] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_f64(n)
+  let bh = prim.handle(buf)
+  let _c = __sortf_copy(h, bh, n, 0)
+  let tmp = prim.alloc_list_f64(n)
+  let th = prim.handle(tmp)
+  let fin = __sortf_mrounds(bh, th, n, 1)
+  let _cb = if fin == bh then 0 else __sortf_copy(fin, bh, n, 0)
+  buf
+}
+
+// ── the Float EQUALITY family (#924 finding 2026-08-16, the `list.unique`
+// cell): the generic scalar twins compare raw i64 slot BITS, which diverges
+// from native's f64 `==` at exactly two cells — `-0.0 == 0.0` (bits differ,
+// floats equal) and `NaN != NaN` (bits can match, floats never equal). These
+// twins compare with `prim.feq` (wasm f64.eq — native's `==` exactly); the
+// stored slots stay the raw bits throughout.
+fn __feq_slots(a: Int, b: Int) -> Bool = prim.feq(prim.ffrombits(a), prim.ffrombits(b))
+
+fn __uniqf_first(sh: Int, v: Int, i: Int, j: Int) -> Bool = if j >= i then true
+else {
+  let e = prim.load64(sh + 12 + j * 8)
+  if __feq_slots(e, v) then false
+  else __uniqf_first(sh, v, i, j + 1)
+}
+
+fn __uniqf_count(sh: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let v = prim.load64(sh + 12 + i * 8)
+  let f = __uniqf_first(sh, v, i, 0)
+  let keep = if f then 1 else 0
+  __uniqf_count(sh, n, i + 1, acc + keep)
+}
+
+fn __uniqf_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = if i >= n then 0
+else {
+  let v = prim.load64(sh + 12 + i * 8)
+  let f = __uniqf_first(sh, v, i, 0)
+  if f then {
+    prim.store64(dh + 12 + di * 8, v)
+    __uniqf_fill(sh, dh, n, i + 1, di + 1)
+  } else __uniqf_fill(sh, dh, n, i + 1, di)
+}
+
+fn list_unique_float(xs: List[Float]) -> List[Float] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let count = __uniqf_count(h, n, 0, 0)
+  let buf = prim.alloc_list_f64(count)
+  let _f = __uniqf_fill(h, prim.handle(buf), n, 0, 0)
+  buf
+}
+
+// dedup: drop CONSECUTIVE f64-equal elements. A NaN never equals its
+// neighbour, so runs of NaN are all kept — native's behaviour.
+fn __dedupf_count(h: Int, n: Int, i: Int, prev: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let cur = prim.load64(h + 12 + i * 8)
+  let keep = if __feq_slots(cur, prev) then 0 else 1
+  __dedupf_count(h, n, i + 1, cur, acc + keep)
+}
+
+fn __dedupf_fill(sh: Int, dh: Int, n: Int, i: Int, prev: Int, di: Int) -> Int = if i >= n then 0
+else {
+  let cur = prim.load64(sh + 12 + i * 8)
+  if __feq_slots(cur, prev) then __dedupf_fill(sh, dh, n, i + 1, prev, di)
+  else {
+    prim.store64(dh + 12 + di * 8, cur)
+    __dedupf_fill(sh, dh, n, i + 1, cur, di + 1)
+  }
+}
+
+fn __dedupf_empty() -> List[Float] = {
+  let buf = prim.alloc_list_f64(0)
+  buf
+}
+
+fn __dedupf_build(h: Int, n: Int) -> List[Float] = {
+  let first = prim.load64(h + 12)
+  let count = __dedupf_count(h, n, 1, first, 1)
+  let buf = prim.alloc_list_f64(count)
+  let dh = prim.handle(buf)
+  prim.store64(dh + 12, first)
+  let _f = __dedupf_fill(h, dh, n, 1, first, 1)
+  buf
+}
+
+fn list_dedup_float(xs: List[Float]) -> List[Float] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then __dedupf_empty() else __dedupf_build(h, n)
+}
+
+// contains / index_of: f64-equality search. `contains([NaN], NaN)` is false
+// on both targets (NaN equals nothing), `contains([-0.0], 0.0)` is true.
+fn __idxf_find(h: Int, len: Int, x: Float, i: Int) -> Int = if i >= len then -1
+else {
+  let e = prim.load64(h + 12 + i * 8)
+  if prim.feq(prim.ffrombits(e), x) then i
+  else __idxf_find(h, len, x, i + 1)
+}
+
+fn list_contains_float(xs: List[Float], x: Float) -> Bool = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  __idxf_find(h, len, x, 0) >= 0
+}
+
+fn __liof_none() -> Int? = none
+
+fn __liof_some(i: Int) -> Int? = some(i)
+
+fn list_index_of_float(xs: List[Float], x: Float) -> Int? = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let idx = __idxf_find(h, len, x, 0)
+  if idx < 0 then __liof_none() else __liof_some(idx)
+}

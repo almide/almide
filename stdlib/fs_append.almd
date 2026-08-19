@@ -1,0 +1,34 @@
+// fs_append — SELF-HOSTED `fs.append(path, content)` for the wasm leg, composed
+// as read-concat-write over the existing WASI floors: the current content (empty
+// when the file is missing — native's `.create(true)`) plus `content`, written
+// back through prim.write_text_file (O_CREAT|O_TRUNC). Native appends through
+// O_APPEND in place; the byte-level observable (final file content) is identical
+// — the single-threaded WASI runtime has no interleaving writer to distinguish
+// the two. A read error on an EXISTING file yields the empty seed (the write
+// then surfaces any real fs problem on its own err channel); a missing file is
+// the empty seed, exactly `.create(true)`. The helper owns its result (`t ++ ""`
+// severs the borrow of the read Result's payload); the concat and the empty
+// literal are LET-BOUND before reaching the prim (a prim argument must be a
+// scalar/handle, not an unmaterialized concat). Reaching both floors carries
+// Capability::FsRead + Capability::FsWrite.
+fn __app_read(path: String) -> String = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then "" else {
+    let t: String = prim.load_handle(rh + 12)
+    t + ""
+  }
+}
+
+fn __app_old(path: String) -> String = if prim.path_exists(path) then __app_read(path) else ""
+
+effect fn fs_append(path: String, content: String) -> Result[Unit, String] = {
+  let old = __app_old(path)
+  let joined = old + content
+  let w: Result[Unit, String] = prim.write_text_file(path, joined)
+  let wh = prim.handle(w)
+  if prim.load32(wh + 16) != 0 then {
+    let m: String = prim.load_handle(wh + 12)
+    err(m)
+  } else ok(())
+}

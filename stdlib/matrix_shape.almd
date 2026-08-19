@@ -1,0 +1,11 @@
+// matrix_shape — SELF-HOSTED `matrix.shape` for v1: `(rows, cols)` as a flat scalar
+// tuple over the DynListStr matrix block (outer len@4 = rows; row 0's len@4 = cols;
+// (0, 0) for the empty matrix — matrix_cols' convention). This is a SEPARATE file from
+// matrix_core.almd on purpose: both callees (matrix.rows / matrix.cols) live THERE, so
+// calling them from here is cross-file (an intra-file module call would re-trigger the
+// auto-linker forever). Pure; the result is a fresh owned 2-slot tuple block.
+fn matrix_shape(m: Matrix) -> (Int, Int) = {
+  let r = matrix.rows(m)
+  let c = matrix.cols(m)
+  (r, c)
+}

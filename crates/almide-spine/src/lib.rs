@@ -6,6 +6,7 @@
 //! It deliberately proves nothing about the check phase — that is unit 4.
 
 pub mod s2;
+pub mod s3;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
