@@ -104,6 +104,42 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 Each ratified R gets its status flipped here in the same commit as any code it
 gates. A rejected R gets its alternative written in, not deleted.
 
+## 6.5 Re-scoping decision (ratified 2026-08-19): spike before port
+
+The port order in §5 is SUSPENDED after unit 2 in favor of validating the
+highest-risk, highest-value bet first. Rationale: units 0–2 produced faithful
+copies plus transferable wins; the value that only greenfield can deliver
+(R1/R2/R3) had zero experimental evidence, and the reference corpus's own
+stability survey warns that rewrites die exactly here.
+
+**Spike S1 — salsa spine over the ported parser, measured on the real corpus**
+(spec/, 1,098 files / 55,089 lines) against the incumbent's own edit-loop
+ladder (scripts/edit-loop-scale-baseline.txt: check 65.99ms + front-end at
+30k lines, slope_check 1.144, LSP full re-analysis per keystroke).
+
+What S1 can prove (front-end slice only — sema is not ported):
+- (a) per-edit re-derivation touches ONLY the edited file's queries (measured,
+  not asserted);
+- (b) salsa's cold overhead over raw batch parsing is small (<20%);
+- (c) warm re-derive after a one-file edit beats batch front-end re-parse by
+  ≥10x on the corpus.
+
+What S1 cannot prove: the check phase (73% of the incumbent's loop) stays
+unvalidated until sema-as-queries (unit 4) — S1 de-risks the mechanics, not
+the end number. Explicitly: full-loop speedup TODAY would be ~1.4x; the big
+number requires unit 4.
+
+Decision gate: all three of (a)(b)(c) green → continue greenfield with unit 4
+(sema spike next, before the interp port). Any red → fold greenfield: keep
+the branch frozen as evidence, backport the transferable wins to develop.
+Independent of the gate: E1 (misspellings/codes/multifix) and ADR-0002/0012
+are develop-eligible and are NOT counted as greenfield returns.
+
+**VERDICT (2026-08-19): (a) PASS max-1-parse/edit, 0 on no-edit; (b) PASS
++9.0% cold overhead; (c) PASS 351x warm vs batch (0.182ms vs 63.81ms,
+1,098 files / 55,089 lines). Greenfield CONTINUES; next = unit-4 sema spike.
+Full report: docs/spikes/S1-salsa-spine.md.**
+
 ## 7. Certification trajectory (R1a + R1b)
 
 Aviation-grade (DO-178C-class) is a declared destination, reached from either
