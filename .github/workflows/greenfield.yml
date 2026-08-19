@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       # Evidence machinery (unit 0): incumbent contract gate under the
       # deviation register — only enumerated forward references pass.
       - name: contract port gate
@@ -41,6 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: emitter coverage floor
         run: bash scripts/check-wasm-coverage.sh
@@ -54,6 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       - name: wasm nets in release shape
         run: cargo test --release -p almide-wasm --locked
 
@@ -64,5 +67,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       - name: mutants must be caught
         run: bash scripts/check-mutation-gate.sh
