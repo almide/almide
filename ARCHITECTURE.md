@@ -95,6 +95,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 |---|---|---|---|
 | R1 | Single semantics: canonical target = WASM Component; native = cranelift AOT of the same artifact; Rust-transpile demoted to a future non-canonical tier | adopt | **RATIFIED 2026-08-19** |
 | R1a | The future Rust-transpile tier is the **certification seat**, not a perf seat: aviation-grade builds go IR → Rust → qualified rustc (Ferrocene-class), with interp ↔ wasm ↔ cert-build output identity proven by the ported oracle machinery. Canonical semantics stays wasm-only. No implementation obligation today; later design must not foreclose this seat (certificate chain must remain extendable to the cert tier). | adopt | **RATIFIED 2026-08-19** |
+| R1b | Second certification seat on the wasm side: cert profile is **AOT-only (no JIT)**, last mile is wasm → C via a small-TCB translator (wasm2c-class, verifiable against the mechanized wasm semantics) → qualified/verified C compiler (CompCert-class). Coexists with R1a under the same oracle gates; which seat becomes primary is decided later on ecosystem maturity. Canonical semantics unchanged. | adopt | **RATIFIED 2026-08-19** |
 | R2 | Query core = salsa (crates.io, 2024+ rewrite), not hand-rolled | adopt | PENDING |
 | R3 | Module-boundary ABI = dictionary passing; monomorphization is an intra-CU optimization only (separate compilation preserved) | adopt | PENDING |
 | R4 | `T ! E` from day one; tail ok-lift owned by fallibility, not by notation (ADR-0002/0012 as founding law) | adopt | PENDING |
@@ -102,3 +103,27 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 
 Each ratified R gets its status flipped here in the same commit as any code it
 gates. A rejected R gets its alternative written in, not deleted.
+
+## 7. Certification trajectory (R1a + R1b)
+
+Aviation-grade (DO-178C-class) is a declared destination, reached from either
+of two seats — never by qualifying wasmtime/cranelift, which stay dev/dist
+only:
+
+```
+canonical (always):  IR ──certificates──▶ wasm component ──▶ wasmtime JIT/AOT
+cert seat A (R1a):   IR ──▶ Rust ──▶ qualified rustc (Ferrocene-class)
+cert seat B (R1b):   IR ──▶ wasm ──▶ C (small-TCB translator) ──▶ CompCert-class
+```
+
+- Both seats sit under the same oracle gates: interp ↔ wasm ↔ cert-build
+  output identity over `spec/`.
+- Seat B's structural advantage: wasm is the only mainstream target with a
+  complete mechanized formal semantics (WasmCert), so the wasm → C link is
+  *verifiable*, not merely qualifiable (DO-333 credit).
+- Route-independent prerequisites, owned by the language/runtime side and
+  deferred to their own R items: a certification language profile (static
+  allocation bounds, bounded recursion), WCET-analyzable output, MC/DC
+  coverage measured on `.almd`, stack bounds. No later design decision may
+  foreclose these.
+
