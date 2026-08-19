@@ -30,3 +30,17 @@ jobs:
         run: |
           rustup toolchain install 1.89 --profile minimal
           cargo +1.89 check --workspace --locked
+
+  # Flight-gap A-2: structural coverage of the wasm backend's emitter under
+  # its full net (590-fixture parity + 200-seed differential fuzz + first
+  # light + alias referee), held by a grow-only floor. Honest scope note in
+  # scripts/check-wasm-coverage.sh: this instruments the emitter's Rust;
+  # the EMITTED wasm helpers' witnesses are the corpus + fuzzer + mutation
+  # evidence.
+  wasm-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: emitter coverage floor
+        run: bash scripts/check-wasm-coverage.sh
