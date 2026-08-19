@@ -49,11 +49,14 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Offset of the payload inside a canonical String/Bytes block.
-pub(crate) const PAYLOAD: u32 = 12;
+// GREENFIELD §6.6: layout constants now derive from the single source
+// (crates/almide-layout). A drift between this arena and the wasm backend
+// is henceforth a compile error, not a stale comment.
+pub(crate) const PAYLOAD: u32 = almide_layout::PAYLOAD;
 /// Offset of the `len` field.
-const LEN_OFF: u32 = 4;
+const LEN_OFF: u32 = almide_layout::LEN.offset;
 /// Offset of the `cap` field.
-const CAP_OFF: u32 = 8;
+const CAP_OFF: u32 = almide_layout::CAP.offset;
 
 /// What a block's payload bytes mean, so the return sync can rebuild the right
 /// `Value`. Only the flat-payload kinds are modeled (see the module note).

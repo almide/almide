@@ -7,6 +7,7 @@ description = "Almide IR tree-walking interpreter — the executable spec / thir
 
 [dependencies]
 almide-base = { path = "../almide-base" }
+almide-layout = { path = "../almide-layout" }
 almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
 almide-frontend = { path = "../almide-frontend" }
