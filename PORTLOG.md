@@ -90,4 +90,9 @@ wildcarded, and may only shrink. This log is append-only.
   regenerated from incumbent → green ✓.
 - Contract port gate: unchanged (126 registered forward refs, 0 unexplained).
 - clippy `-D warnings` + MSRV (`cargo +1.89 check`) run in CI (local sandbox
-  has no rustup); verdict recorded by the `greenfield` workflow on this push.
+  has no rustup). First run flagged 6 style lints in the verbatim modules
+  (collapsible_if ×3, empty_line_after_doc_comments ×2,
+  manual_ignore_case_cmp); resolved with **scoped `#[allow]` on the two
+  ported module declarations only** (`src/lib.rs`) — bodies untouched,
+  scaffolding fully linted. **CI verdict: GREEN** (run 32211750565:
+  port gate + tests + clippy + MSRV, 53s).
