@@ -2,8 +2,42 @@
 
 The port doctrine carries incumbent content bug-compatibly; the user has
 directed that CONTENT (stdlib first) must instead land at world-best quality.
-This ledger is that directive made executable. It does not weaken the parity
-net — it adds the protocol for changing what the net protects.
+This ledger is that directive made executable. The design bar below derives
+from the 9-compiler stdlib survey (`../almide-references/RESEARCH-stdlib.md`,
+SHA-pinned); its 15 laws are the canon this program answers to.
+
+## Design constitution (survey-derived)
+
+Adopted as law (already aligned with ratified Almide doctrine, no fork):
+
+- **L-matrix** (canon 3): API families ship whole, gated by a machine-checked
+  verb×container matrix — Grain's missing `Map.map` (while `List.map` exists)
+  is the exact hole an LLM falls into; the incumbent's family rule becomes an
+  executable gate, universal.
+- **L-docs** (canon 9): every public stdlib fn carries a doc block with an
+  `Example:` written as an evaluable assertion; a harness runs the examples
+  through the interpreter (`s5::run_file` machinery) — Roc's doc≡test≡spec,
+  executable because the greenfield already executes.
+- **L-prohibit** (canon 7): every deliberate omission ships as a named
+  diagnostic with the correct alternative in the message (extends E027/E041/
+  E043 retirement style to stdlib surface decisions).
+- **L-handles** (canon 11): opaque handle types, never raw integers; prefer
+  Koka-shaped scoped whole-operations (Almide's `fs.read_text` already has
+  this shape — `net` is the violation, queue #3).
+- **L-evolution** (canon 15): `@deprecated(since, use)` gains a
+  type-changed marker; docstrings cross-link sibling variants; this file is
+  the regret ledger.
+- **L-inline** (canon 14): the hot Result combinators are compiler-known
+  (Almide's `!`-propagation already is; extend as needed, Gleam's list is 5
+  functions in 20 lines).
+
+Pending ratification (genuine forks, ○× one at a time):
+
+| id | decision | recommendation | status |
+|---|---|---|---|
+| SD1 | **Scope stance = Grain–Roc hybrid**: fund pure-algorithm DEPTH in the stdlib (codecs, url, regex, math — correctness-hard pure functions), keep ALL effectful surface capability-gated `effect fn` modules, add no ambient state (no async I/O before the fan-world arc), vendor APIs permanently banned | adopt | PENDING |
+| SD2 | **Two tiers, machine-enforced**: `core` tier (pure+total modules: string/list/int/float/bytes/math/option/result/…) may contain no `effect fn` and may not import an effect-tier module (fs/net/http/env/io/process/random); enforced by a gate script, Rust-tidy style | adopt | PENDING |
+| SD3 | **Fallibility alphabet frozen**: bare name = total; `_checked` → Option; `_saturating` / `_wrapping` where lossy — whole matrices or nothing; NO panicking variant on the stdlib surface (runtime abort is reserved for logic failure per Swift's four-kind taxonomy: domain absence → Option, recoverable → Result in effect fns, logic failure → abort with E-coded diagnostic, universal → out of band) | adopt | PENDING |
 
 ## The intentional-change protocol
 
