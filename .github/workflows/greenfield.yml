@@ -17,8 +17,12 @@ jobs:
       # Rust units (unit 1+): tests include the incumbent golden parity.
       - name: cargo test
         run: cargo test --workspace --locked
-      - name: clippy (zero warnings)
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Two-tier lint policy (PORTLOG.md): greenfield-authored crates are held
+      # to zero warnings; verbatim-ported crates keep the incumbent's lint
+      # state, frozen — they are built and tested, not clippy-gated. A ported
+      # module rebuilt as new structure moves into the strict tier with it.
+      - name: clippy (zero warnings, greenfield-authored tier)
+        run: cargo clippy -p almide-spine -p almide-diag -p almide-base --all-targets --locked -- -D warnings
       - name: MSRV honesty
         run: |
           rustup toolchain install 1.89 --profile minimal

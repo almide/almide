@@ -206,3 +206,20 @@ still matches the incumbent golden byte-for-byte; every new capability is
   (`almide check --json` A/B manifest), per-decl granularity (S2a shape
   fused into the real checker), Zig-style incremental diagnostic scenarios,
   E1 wiring (misspellings + recoverable codes).
+
+### Lint policy change (2026-08-19): two tiers, structural
+
+The growing per-crate `[lints.clippy]` allow tables were heading toward
+"checked in appearance only" — and a blanket allow list on a ported crate
+would also blunt the linter for NEW code added there later. Replaced by a
+structural policy, enforced in CI shape rather than allow lists:
+
+- **Greenfield-authored tier** (`almide-spine`, `almide-diag`,
+  `almide-base`): `clippy -D warnings`, zero tolerance. (The two
+  verbatim-ported leaf modules inside diag/base keep their narrow
+  module-scoped `#[allow]`s.)
+- **Verbatim-ported tier** (`almide-syntax`, `almide-types`, `almide-ir`,
+  `almide-frontend`, `almide`): the incumbent's lint state, frozen — built
+  and tested, not clippy-gated. All allow tables removed. When a ported
+  module is rebuilt as new structure (unit 4 stage 2+), it moves into the
+  strict tier with that rebuild.
