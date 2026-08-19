@@ -550,3 +550,28 @@ verification net INDEPENDENT of the hand-picked corpus:
   (three hits in five seeds) and by the corpus in exactly ONE fixture of
   590 — the fuzzer's detection density on the shared surface is orders
   denser, which is the point of independence.
+
+---
+
+## Verification survey → outlook ratified into the queue (2026-08-19)
+
+User directive: "../almide-references から解決方法の見通しを立てておく".
+Three-lens survey (backend-correctness nets / CI gate culture / spec
+traceability) across the 9 reference compilers, synthesized as
+`../almide-references/RESEARCH-verification.md` (V-1..V-15 canon, SHAs
+pinned). Key validations and adoptions:
+
+- Much of greenfield's net is ISOMORPHIC to the field's best practice:
+  the burn-up gate is roc's `parallel_runner` in 2-leg form, the fuzzer
+  is roc's typed-generator `fuzz-build` + rustlantis' compare-legs shape,
+  per-slice mutation evidence is roc's `*_mutation_check` done manually.
+- Adopted same-day: roc's coverage instrumentation-broken guard (zero
+  measured lines must FAIL, never pass) into check-wasm-coverage.sh.
+- Queued, priority order: V-4 finding auto-reduction, V-5 finding→
+  fixture permanence, V-1 release-shape test lane, V-6 mutation-gate
+  permanence (`ci/mutations/`), V-7 declared-vs-tested surface diff with
+  named shrink-only exceptions (= the requirements matrix), V-10
+  debug-assert density on hold/scr discipline, V-15 maxrss gate.
+- The field's answer to comment-argued safety is to make the argument
+  EXECUTABLE (verifier passes, certifiers, mutation gates) — never
+  thicker review. seed-79 is this survey's living example.

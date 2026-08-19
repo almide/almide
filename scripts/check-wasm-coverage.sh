@@ -30,8 +30,18 @@ SUMMARY=$(cargo llvm-cov --package almide-wasm --json --summary-only 2>/dev/null
 LINE_PCT=$(printf '%s' "$SUMMARY" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-print(f\"{d['data'][0]['totals']['lines']['percent']:.1f}\")
+totals = d['data'][0]['totals']['lines']
+# Instrumentation-broken guard (stolen from roc build.zig:1696): a zero
+# line count means the MEASUREMENT died, which must never read as a pass.
+if totals['count'] == 0:
+    print('BROKEN')
+else:
+    print(f\"{totals['percent']:.1f}\")
 ")
+if [ "$LINE_PCT" = "BROKEN" ]; then
+  echo "FAIL: coverage instrumentation reported zero lines — measurement is broken, not passing" >&2
+  exit 1
+fi
 
 echo "almide-wasm emitter line coverage: ${LINE_PCT}% (floor ${FLOOR}%)"
 
