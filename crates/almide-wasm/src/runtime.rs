@@ -127,6 +127,48 @@ pub(crate) fn emit_scan_str() -> Function {
     f
 }
 
+/// `$f16_to_f64(bits: i32) -> f64`: EXACT half-float widening by bit
+/// construction — sign/exponent/mantissa re-based into the f64 fields
+/// (normals and inf/nan), subnormals via exact integer-to-float scaling
+/// (m × 2⁻²⁴ is exactly representable).
+pub(crate) fn emit_f16_to_f64() -> Function {
+    // params: 0=bits i32; locals: 1=s i64, 2=e i64, 3=m i64
+    let (bits, sgn, e, m) = (0u32, 1u32, 2u32, 3u32);
+    let mut f = Function::new([(3, ValType::I64)]);
+    let mut i = f.instructions();
+    i.local_get(bits).i64_extend_i32_u().i64_const(15).i64_shr_u().i64_const(1).i64_and().local_set(sgn);
+    i.local_get(bits).i64_extend_i32_u().i64_const(10).i64_shr_u().i64_const(0x1F).i64_and().local_set(e);
+    i.local_get(bits).i64_extend_i32_u().i64_const(0x3FF).i64_and().local_set(m);
+    // e == 0: zero/subnormal → ±(m × 2⁻²⁴), exact in f64. The sign is a
+    // ±1.0 factor picked by select (an inner block would start with an
+    // EMPTY stack — the validator caught the f64_neg draft).
+    i.local_get(e).i64_eqz().if_(BlockType::Empty);
+    i.local_get(m).f64_convert_i64_u();
+    i.f64_const(f64::powi(2.0, -24).into());
+    i.f64_mul();
+    i.f64_const(1.0f64.into());
+    i.f64_const((-1.0f64).into());
+    i.local_get(sgn).i64_eqz();
+    i.select();
+    i.f64_mul();
+    i.return_();
+    i.end();
+    // e == 31: inf/nan → f64 bits with e=0x7FF, mantissa shifted
+    i.local_get(e).i64_const(31).i64_eq().if_(BlockType::Empty);
+    i.local_get(sgn).i64_const(63).i64_shl();
+    i.i64_const(0x7FF).i64_const(52).i64_shl().i64_or();
+    i.local_get(m).i64_const(42).i64_shl().i64_or();
+    i.f64_reinterpret_i64().return_();
+    i.end();
+    // normal: f64 bits = s<<63 | (e-15+1023)<<52 | m<<42
+    i.local_get(sgn).i64_const(63).i64_shl();
+    i.local_get(e).i64_const(1008).i64_add().i64_const(52).i64_shl().i64_or();
+    i.local_get(m).i64_const(42).i64_shl().i64_or();
+    i.f64_reinterpret_i64();
+    i.end();
+    f
+}
+
 /// `$str_len_chars(base: i32) -> i64`: codepoint count — the oracle's
 /// `string.len` is `chars().count()`, i.e. bytes that are NOT UTF-8
 /// continuation bytes (`b & 0xC0 != 0x80`).

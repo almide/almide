@@ -67,6 +67,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
     Err(EmitError::Unsupported(what.to_string()))
 }
 
+mod bytes;
 mod calls;
 mod collect;
 mod collections;
@@ -117,16 +118,18 @@ const F_STR_LEN_CHARS: u32 = 19;
 const F_SCAN_W64: u32 = 20;
 const F_SCAN_W32: u32 = 21;
 const F_SCAN_STR: u32 = 22;
+const F_F16_TO_F64: u32 = 23;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 23;
+const F_FN_BASE: u32 = 24;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
 /// 7 (i32)→i32 (alloc); program-function types start after.
 const T_MAIN: u32 = 4;
 /// (i32,i64)→i32: list_get_8 / list_push_8; 9: (i32)→i64 str_len_chars;
-/// 10: (i32,i32,i32,i64)→i32 scan_w64; 11: (i32,i32,i32,i32)→i32 scan_w32/str.
-const T_FN_BASE: u32 = 12;
+/// 10: (i32,i32,i32,i64)→i32 scan_w64; 11: (i32,i32,i32,i32)→i32 scan_w32/str;
+/// 12: (i32)→f64 f16_to_f64.
+const T_FN_BASE: u32 = 13;
 // Global 0 is the immutable line-buffer start (= align16(pool end)); it
 // is emitted for inspectability but no instruction references it since
 // the build cursor (global 2) took over.
@@ -155,6 +158,10 @@ enum Scalar {
     Bool,
     /// Almide String — wasm i32 holding the block BASE address.
     Str,
+    /// Almide Bytes — a byte-packed block (String's twin without the
+    /// UTF-8 reading); len = byte count. In-place `set_*` is sound under
+    /// the bind-deep-copy doctrine (a local's block is uniquely its own).
+    Bytes,
 }
 
 impl Scalar {
@@ -162,7 +169,7 @@ impl Scalar {
         match self {
             Scalar::Int => ValType::I64,
             Scalar::Float => ValType::F64,
-            Scalar::Bool | Scalar::Str => ValType::I32,
+            Scalar::Bool | Scalar::Str | Scalar::Bytes => ValType::I32,
         }
     }
 
@@ -170,7 +177,7 @@ impl Scalar {
     fn slot_size(self) -> u32 {
         match self {
             Scalar::Int | Scalar::Float => 8,
-            Scalar::Bool | Scalar::Str => 4,
+            Scalar::Bool | Scalar::Str | Scalar::Bytes => 4,
         }
     }
 }
@@ -266,6 +273,7 @@ fn scalar_of(ty: &Ty) -> Option<Scalar> {
         Ty::Float => Some(Scalar::Float),
         Ty::Bool => Some(Scalar::Bool),
         Ty::String => Some(Scalar::Str),
+        Ty::Bytes => Some(Scalar::Bytes),
         _ => None,
     }
 }
@@ -545,10 +553,11 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     types.ty().function([ValType::I32], [ValType::I64]); // 9: str_len_chars
     types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I64], [ValType::I32]); // 10: scan_w64
     types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 11: scan_w32/str
+    types.ty().function([ValType::I32], [ValType::F64]); // 12: f16_to_f64
     for (i, info) in table.infos.iter().enumerate() {
         // Refused functions keep a placeholder type — their stub body is
         // `unreachable` and no call site ever targets them.
-        debug_assert_eq!(T_FN_BASE as usize + i, 12 + i);
+        debug_assert_eq!(T_FN_BASE as usize + i, 13 + i);
         if info.refuse.is_some() {
             types.ty().function([], []);
         } else {
@@ -584,6 +593,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     functions.function(10); // F_SCAN_W64
     functions.function(11); // F_SCAN_W32
     functions.function(11); // F_SCAN_STR
+    functions.function(12); // F_F16_TO_F64
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -642,6 +652,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_scan_w64());
     code.function(&emit_scan_w32());
     code.function(&emit_scan_str());
+    code.function(&emit_f16_to_f64());
     for l in &lowered {
         match l {
             Ok((f, _)) => {
@@ -754,7 +765,13 @@ fn lower_fn(
         for tl in top_lets {
             let (idx, declared) = em.locals[&tl.var];
             em.lower(&tl.value, Some(declared))?;
-            if matches!(declared, SliceTy::List(_) | SliceTy::Map(..) | SliceTy::Set(_)) {
+            if matches!(
+                declared,
+                SliceTy::List(_)
+                    | SliceTy::Map(..)
+                    | SliceTy::Set(_)
+                    | SliceTy::Scalar(Scalar::Bytes)
+            ) {
                 em.f.instructions().call(F_BLOCK_COPY);
             }
             em.f.instructions().local_set(idx);

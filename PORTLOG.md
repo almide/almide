@@ -938,3 +938,29 @@ by a referee:
 **Burn-up: 128 → 137 / 590**, floor 137, zero divergence; fuzz surface
 includes float arithmetic + formatting; interp leg re-verified at
 468/121/0 after every s5 change.
+
+---
+
+## Unit 6 — stage 13: Bytes core (2026-08-20)
+
+Bytes is String's layout twin (byte-packed block, len = byte count),
+implemented as native special forms — the incumbent's Bytes travels as
+an 8-byte-slot List[Int] behind the bridge, so registry impls stay
+excluded and the ops mirror ORACLE OUTPUT directly: new (zero-filled by
+the bump allocator's fresh-page guarantee), from_list/from_string,
+len/get_or/read_u8, in-place set_at/set_u8/set_f32_le (sound under the
+bind-deep-copy doctrine), and read_f16_le through `$f16_to_f64` — EXACT
+half-float widening by bit construction (normals and inf/nan re-based
+into f64 fields; subnormals via exact m × 2⁻²⁴ scaling).
+
+Referees earned their keep three times in one slice:
+- the validator killed the first f16 draft (an inner `if` block starts
+  with an EMPTY stack — f64_neg reached for a value outside it);
+- the f16 fixture caught the select's inverted sign order;
+- `mutable_global_repeat_writes` (a bytes-snapshot fixture) exposed that
+  the Bind/Assign deep-copy rule in the MAIN path still said List-only —
+  the Map/Set extension had only landed in the top-let prelude. All four
+  container classes now copy in both paths; mutant 004 refreshed to the
+  new shape.
+
+**Burn-up: 137 → 140 / 590**, floor 140, zero divergence.

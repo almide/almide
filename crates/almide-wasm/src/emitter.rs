@@ -149,9 +149,18 @@ impl Emitter<'_> {
                     return unsup("bind:unmapped");
                 };
                 self.lower(value, Some(declared))?;
-                // List value semantics: every bind owns a fresh block, so
-                // in-place push growth can never be observed via aliases.
-                if matches!(declared, SliceTy::List(_)) {
+                // Container value semantics: every bind owns a fresh
+                // block, so in-place mutation (push growth, bytes.set_*)
+                // can never be observed through aliases. Bytes joined
+                // when the snapshot fixture showed `let snap = arena`
+                // observing later set_at writes.
+                if matches!(
+                    declared,
+                    SliceTy::List(_)
+                        | SliceTy::Map(..)
+                        | SliceTy::Set(_)
+                        | SliceTy::Scalar(Scalar::Bytes)
+                ) {
                     self.f.instructions().call(F_BLOCK_COPY);
                 }
                 self.f.instructions().local_set(idx);
@@ -162,7 +171,13 @@ impl Emitter<'_> {
                     return unsup("assign:unmapped");
                 };
                 self.lower(value, Some(declared))?;
-                if matches!(declared, SliceTy::List(_)) {
+                if matches!(
+                    declared,
+                    SliceTy::List(_)
+                        | SliceTy::Map(..)
+                        | SliceTy::Set(_)
+                        | SliceTy::Scalar(Scalar::Bytes)
+                ) {
                     self.f.instructions().call(F_BLOCK_COPY);
                 }
                 self.f.instructions().local_set(idx);

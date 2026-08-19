@@ -345,7 +345,7 @@ impl Emitter<'_> {
             Scalar::Int => self.f.instructions().i64_eq(),
             Scalar::Float => self.f.instructions().f64_eq(),
             Scalar::Bool => self.f.instructions().i32_eq(),
-            Scalar::Str => self.f.instructions().call(F_STR_EQ),
+            Scalar::Str | Scalar::Bytes => self.f.instructions().call(F_STR_EQ),
         };
     }
 

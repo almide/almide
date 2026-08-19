@@ -128,6 +128,16 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_STR_LEN_CHARS);
                 Ok(Some(INT))
             }
+            CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
+                self.lower_bytes_call(func.as_str(), args)
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "to_bytes" && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                self.f.instructions().call(F_BLOCK_COPY);
+                Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
                 self.lower_list_call(func.as_str(), args)
             }

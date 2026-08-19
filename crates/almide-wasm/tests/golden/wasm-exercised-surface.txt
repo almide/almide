@@ -17,6 +17,12 @@ binop:Neq
 binop:Or
 binop:SubFloat
 binop:SubInt
+call:bytes.from_list
+call:bytes.get_or
+call:bytes.len
+call:bytes.new
+call:bytes.read_f16_le
+call:bytes.set_at
 call:float.to_fixed
 call:float.to_string
 call:int.to_string
