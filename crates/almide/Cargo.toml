@@ -19,3 +19,10 @@ toml = "1.1"
 [lints.rust]
 unsafe_code = "forbid"
 
+
+# Verbatim-ported tier (PORTLOG.md "two-tier lint policy"): this crate's
+# sources are the incumbent's, frozen — clippy is off wholesale rather than
+# curated into a fake-precision allow list. Modules rebuilt as new structure
+# move to the strict tier (workspace lints) with that rebuild.
+[lints.clippy]
+all = { level = "allow", priority = -1 }
