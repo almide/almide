@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/runtime.rs b/crates/almide-wasm/src/runtime.rs
+index c6d5a987f..bd81387fa 100644
+--- a/crates/almide-wasm/src/runtime.rs
++++ b/crates/almide-wasm/src/runtime.rs
+@@ -173,9 +173,9 @@ pub(crate) fn emit_concat() -> Function {
+     i.local_get(a).i32_load(len_memarg()).local_set(la);
+     i.local_get(b).i32_load(len_memarg()).local_set(lb);
+     i.local_get(la).local_get(lb).i32_add().call(F_ALLOC).local_set(base);
+-    // copy a
++    // copy a  [MUTANT: copies b]
+     i.local_get(base).i32_const(payload).i32_add();
+-    i.local_get(a).i32_const(payload).i32_add();
++    i.local_get(b).i32_const(payload).i32_add();
+     i.local_get(la);
+     i.memory_copy(0, 0);
+     // copy b (dst offset by la)

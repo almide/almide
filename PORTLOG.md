@@ -592,3 +592,17 @@ pinned). Key validations and adoptions:
   1-line minimal repro `println("${(42 >= 42)}|${false}")`.
 - **V-5** is now a stated rule in the finding message itself: a reduced
   divergence lands as `spec/wasm_cross/fuzz_found_*.almd` in the fixing PR.
+
+---
+
+## V-6 landed: the mutation gate is standing, not manual (2026-08-20)
+
+The five slice-proven mutations (concat b-first, itoa sign drop, Result
+tag invert, List bind-copy skip, bool select swap) are now pre-authored
+patches in `ci/mutations/`, and `scripts/check-mutation-gate.sh` (CI job
+`mutation-gate`) applies each against the release-shape net and requires
+RED. A surviving mutant = the net lost a tooth; a patch that stops
+applying = code drift must REFRESH the mutant, never silently retire it
+(roc's discipline). First full run: 5/5 caught, tree clean after.
+New-slice rule going forward: each slice's mutation evidence lands as a
+new patch here in the same PR, so the manual step cannot be forgotten.

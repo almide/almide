@@ -56,3 +56,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: wasm nets in release shape
         run: cargo test --release -p almide-wasm --locked
+
+  # V-6: verification of the verifier as a STANDING gate. Every pre-authored
+  # mutant in ci/mutations/ must be CAUGHT by the release-shape net; a
+  # surviving mutant or a no-longer-applying patch is red.
+  mutation-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: mutants must be caught
+        run: bash scripts/check-mutation-gate.sh

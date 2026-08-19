@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
+index 39b231842..c8692e648 100644
+--- a/crates/almide-wasm/src/emitter.rs
++++ b/crates/almide-wasm/src/emitter.rs
+@@ -126,9 +126,7 @@ impl Emitter<'_> {
+                 self.lower(value, Some(declared))?;
+                 // List value semantics: every bind owns a fresh block, so
+                 // in-place push growth can never be observed via aliases.
+-                if matches!(declared, SliceTy::List(_)) {
+-                    self.f.instructions().call(F_BLOCK_COPY);
+-                }
++                // [MUTANT: copy skipped]
+                 self.f.instructions().local_set(idx);
+                 Ok(())
+             }
