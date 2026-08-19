@@ -54,6 +54,7 @@ expr:Range
 expr:Record
 expr:ResultErr
 expr:ResultOk
+expr:SpreadRecord
 expr:StringInterp
 expr:Tuple
 expr:TupleIndex
