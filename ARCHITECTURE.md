@@ -82,7 +82,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 | 1 | `almide-diag` | unit tests + JSON snapshot parity — **LANDED 2026-08-19**, see PORTLOG.md |
 | 2 | `almide-syntax` | corpus parses; AST JSON parity vs v0.57.2 `--emit-ast` |
 | 3 | `almide-spec` (interpreter) + `almide-ir` | corpus output parity vs v0.57.2 native |
-| 4 | `almide-spine` + `almide-sema` | corpus diagnostics parity; keystroke re-check touches only edited function's queries (measured) |
+| 4 | `almide-spine` + `almide-sema` | corpus diagnostics parity; keystroke re-check touches only edited function's queries (measured); **diagnostic stability across edits** (Zig-style incremental scenarios — survey steal, RESEARCH-diagnostics.md) |
 | 5 | Lean belts + dialect epochs + llms.txt gate | lean-proofs green; llm-surface gate green |
 | 6 | `almide-wasm` (Perceus + certificates onto new emission) | corpus parity interpreter ↔ wasm; wasmparser-validate wall |
 | 7 | `almide-run` (JIT + AOT) + `almide-cli` | `almide run` end-to-end on corpus |

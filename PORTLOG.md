@@ -96,3 +96,21 @@ wildcarded, and may only shrink. This log is append-only.
   ported module declarations only** (`src/lib.rs`) — bodies untouched,
   scaffolding fully linted. **CI verdict: GREEN** (run 32211750565:
   port gate + tests + clippy + MSRV, 53s).
+
+### Evolution E1 — survey-driven adoptions (2026-08-19)
+
+Post-port, diff-visible evolution of the landed unit, driven by the
+9-compiler diagnostics survey (`../almide-references/RESEARCH-diagnostics.md`,
+all citations SHA-pinned). Incumbent-parity is PRESERVED: the shared battery
+still matches the incumbent golden byte-for-byte; every new capability is
+`None`/unused on any diagnostic the incumbent could produce.
+
+| steal | from | landed as |
+|---|---|---|
+| Multi-part atomic fixes | rustc `Substitution.parts` | `src/multifix.rs`: `with_machine_fix_parts` / `machine_multi_fix()` single read path / atomic `apply_multi_to` (reverse-order), overlap + guessed-span refusal; JSON `suggestions[].parts` entry (emitted only when present). 11 unit tests |
+| Cross-language misspelling catalogue | Roc `common_misspellings.zig` | `src/misspellings.rs`: 74 curated entries (token/keyword/type/function), each grounded in CHEATSHEET/llms.txt normative text, `machine_fix` flag under #1312 discipline. Wiring obligations: tokenizer (unit 2), resolver (unit 4). 4 invariant tests incl. "valid Almide spellings never match" |
+| Versioned code lifecycle | Lean 4 `ErrorExplanation.Metadata` | `src/codes.rs`: `CodeInfo { since_dialect, removed_dialect, … }` keyed to dialect epochs; 59 legacy rows frozen at `None` behind a shrink-only ratchet (`LEGACY_NONE_ROWS`) — every new code must state its lifecycle |
+| Recoverability signal | MoonBit code band 3800–3999 | `CodeInfo.recoverable` field (explicit, not a numeric band); same legacy ratchet; parser-recovery consumer arrives at unit 2 |
+| Battery exhaustiveness | Roc comptime-enumerated parity suite | `tests/golden_parity.rs::battery_witnesses_every_incumbent_field_and_variant`: full no-`..` destructure (new field ⇒ compile error ⇒ forced battery review) + runtime witnesses for every field/variant in populated AND absent form |
+| Registry↔docs bidirectional sync | (incumbent contract-ledger doctrine) | `tests/codes_docs_sync.rs`: every code has a page, every page a row, titles byte-identical |
+| Incremental diagnostic stability | Zig `test/incremental/` (unique in the field) | **Obligation recorded** in ARCHITECTURE.md §5 unit 4 gate — implementable only once the query core exists |
