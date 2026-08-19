@@ -34,6 +34,7 @@ impl Emitter<'_> {
     fn hold_for(&mut self, t: SliceTy) -> Result<u32, EmitError> {
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.hold_i64(),
+            wasm_encoder::ValType::F64 => self.hold_f64(),
             _ => self.hold_i32(),
         }
     }
@@ -41,6 +42,7 @@ impl Emitter<'_> {
     fn release_for(&mut self, t: SliceTy) {
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.release_i64(),
+            wasm_encoder::ValType::F64 => self.release_f64(),
             _ => self.release_i32(),
         }
     }
@@ -397,6 +399,7 @@ impl Emitter<'_> {
         let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_load(m),
+            wasm_encoder::ValType::F64 => self.f.instructions().f64_load(m),
             _ => self.f.instructions().i32_load(m),
         };
     }
@@ -406,6 +409,7 @@ impl Emitter<'_> {
         let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_store(m),
+            wasm_encoder::ValType::F64 => self.f.instructions().f64_store(m),
             _ => self.f.instructions().i32_store(m),
         };
     }

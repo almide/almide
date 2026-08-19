@@ -76,7 +76,7 @@ mod runtime;
 mod types_table;
 
 use collect::collect_binds;
-use emitter::{Emitter, HOLD_I32_POOL, HOLD_I64_POOL};
+use emitter::{Emitter, HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
 use runtime::*;
 use types_table::TypeTable;
 
@@ -145,6 +145,11 @@ const G_LINE_END: u32 = 3;
 enum Scalar {
     /// Almide Int/Int64 — wasm i64.
     Int,
+    /// Almide Float — wasm f64 (bit-exact with the oracle's f64; the
+    /// numeric-determinism obligation is carried by using the SAME
+    /// self-hosted Dragon4 formatting the oracle uses, never a host
+    /// printf).
+    Float,
     /// Almide Bool — wasm i32, 0/1.
     Bool,
     /// Almide String — wasm i32 holding the block BASE address.
@@ -155,6 +160,7 @@ impl Scalar {
     fn val_type(self) -> ValType {
         match self {
             Scalar::Int => ValType::I64,
+            Scalar::Float => ValType::F64,
             Scalar::Bool | Scalar::Str => ValType::I32,
         }
     }
@@ -162,7 +168,7 @@ impl Scalar {
     /// Byte width of this scalar's slot inside a sum block.
     fn slot_size(self) -> u32 {
         match self {
-            Scalar::Int => 8,
+            Scalar::Int | Scalar::Float => 8,
             Scalar::Bool | Scalar::Str => 4,
         }
     }
@@ -225,6 +231,7 @@ enum SliceTy {
 const STR: SliceTy = SliceTy::Scalar(Scalar::Str);
 const INT: SliceTy = SliceTy::Scalar(Scalar::Int);
 const BOOL: SliceTy = SliceTy::Scalar(Scalar::Bool);
+const FLOAT: SliceTy = SliceTy::Scalar(Scalar::Float);
 
 impl SliceTy {
     fn val_type(self) -> ValType {
@@ -253,6 +260,7 @@ impl SliceTy {
 fn scalar_of(ty: &Ty) -> Option<Scalar> {
     match ty {
         Ty::Int | Ty::Int64 => Some(Scalar::Int),
+        Ty::Float => Some(Scalar::Float),
         Ty::Bool => Some(Scalar::Bool),
         Ty::String => Some(Scalar::Str),
         _ => None,
@@ -647,18 +655,21 @@ fn lower_fn(
         local_decls.push((1, ty.val_type()));
     }
     let base = (params.len() + binds.len()) as u32;
-    let (cursor_local, tmp_i32_local, scr_i32_local, scr_i64_local) =
-        (base, base + 1, base + 2, base + 3);
+    let (cursor_local, tmp_i32_local, scr_i32_local, scr_i64_local, scr_f64_local) =
+        (base, base + 1, base + 2, base + 3, base + 4);
     local_decls.push((3, ValType::I32)); // cursor, tmp, scr_i32
     local_decls.push((1, ValType::I64)); // scr_i64
+    local_decls.push((1, ValType::F64)); // scr_f64
     // Hold pools: stack-disciplined scratch for constructs that must keep
     // an address/counter live ACROSS sub-expression lowering (list
     // literals, index bases, for-in state). Depth beyond the pool is an
     // honest unsup, never a corruption.
-    let hold_i32_base = base + 4;
-    let hold_i64_base = base + 4 + HOLD_I32_POOL;
+    let hold_i32_base = base + 5;
+    let hold_i64_base = hold_i32_base + HOLD_I32_POOL;
+    let hold_f64_base = hold_i64_base + HOLD_I64_POOL;
     local_decls.push((HOLD_I32_POOL, ValType::I32));
     local_decls.push((HOLD_I64_POOL, ValType::I64));
+    local_decls.push((HOLD_F64_POOL, ValType::F64));
 
     let mut f = Function::new(local_decls);
     let mut calls: HashSet<String> = HashSet::new();
@@ -678,6 +689,9 @@ fn lower_fn(
             hold_i32_depth: 0,
             hold_i64_base,
             hold_i64_depth: 0,
+            hold_f64_base,
+            hold_f64_depth: 0,
+            scr_f64_local,
             in_tail: false,
             f: &mut f,
         };

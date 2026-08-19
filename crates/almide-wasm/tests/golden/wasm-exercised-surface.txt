@@ -44,6 +44,7 @@ expr:IndexAccess
 expr:Lambda
 expr:List
 expr:LitBool
+expr:LitFloat
 expr:LitInt
 expr:LitStr
 expr:Match

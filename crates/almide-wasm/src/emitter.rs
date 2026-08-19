@@ -35,12 +35,16 @@ pub(crate) struct Emitter<'a> {
     pub(crate) hold_i32_depth: u32,
     pub(crate) hold_i64_base: u32,
     pub(crate) hold_i64_depth: u32,
+    pub(crate) hold_f64_base: u32,
+    pub(crate) hold_f64_depth: u32,
+    pub(crate) scr_f64_local: u32,
     pub(crate) f: &'a mut Function,
 }
 
 /// Hold-pool sizes: nesting deeper than this is refused, never corrupted.
 pub(crate) const HOLD_I32_POOL: u32 = 12;
 pub(crate) const HOLD_I64_POOL: u32 = 4;
+pub(crate) const HOLD_F64_POOL: u32 = 4;
 
 impl Emitter<'_> {
     pub(crate) fn hold_i32(&mut self) -> Result<u32, EmitError> {
@@ -67,6 +71,19 @@ impl Emitter<'_> {
 
     pub(crate) fn release_i64(&mut self) {
         self.hold_i64_depth -= 1;
+    }
+
+    pub(crate) fn hold_f64(&mut self) -> Result<u32, EmitError> {
+        if self.hold_f64_depth >= HOLD_F64_POOL {
+            return unsup("hold-depth-f64");
+        }
+        let idx = self.hold_f64_base + self.hold_f64_depth;
+        self.hold_f64_depth += 1;
+        Ok(idx)
+    }
+
+    pub(crate) fn release_f64(&mut self) {
+        self.hold_f64_depth -= 1;
     }
 
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
@@ -296,6 +313,10 @@ impl Emitter<'_> {
                 self.f.instructions().i64_const(*value);
                 INT
             }
+            IrExprKind::LitFloat { value } => {
+                self.f.instructions().f64_const((*value).into());
+                FLOAT
+            }
             IrExprKind::LitBool { value } => {
                 self.f.instructions().i32_const(i32::from(*value));
                 BOOL
@@ -331,7 +352,11 @@ impl Emitter<'_> {
                     self.f.instructions().i32_eqz();
                     BOOL
                 }
-                UnOp::NegFloat => return unsup("unop:NegFloat"),
+                UnOp::NegFloat => {
+                    self.lower(operand, Some(FLOAT))?;
+                    self.f.instructions().f64_neg();
+                    FLOAT
+                }
             },
             IrExprKind::BinOp { op, left, right } => self.lower_binop(*op, left, right)?,
             IrExprKind::Block { stmts, expr } => {
@@ -449,6 +474,7 @@ impl Emitter<'_> {
         let m = slot_memarg(payload_relative);
         match t.val_type() {
             ValType::I64 => self.f.instructions().i64_store(m),
+            ValType::F64 => self.f.instructions().f64_store(m),
             _ => self.f.instructions().i32_store(m),
         };
     }
@@ -457,6 +483,7 @@ impl Emitter<'_> {
         let m = slot_memarg(payload_relative);
         match t.val_type() {
             ValType::I64 => self.f.instructions().i64_load(m),
+            ValType::F64 => self.f.instructions().f64_load(m),
             _ => self.f.instructions().i32_load(m),
         };
     }
@@ -483,6 +510,19 @@ impl Emitter<'_> {
     ) -> Result<SliceTy, EmitError> {
         use BinOp::*;
         match op {
+            AddFloat | SubFloat | MulFloat | DivFloat => {
+                self.lower(left, Some(FLOAT))?;
+                self.lower(right, Some(FLOAT))?;
+                let mut i = self.f.instructions();
+                match op {
+                    AddFloat => i.f64_add(),
+                    SubFloat => i.f64_sub(),
+                    MulFloat => i.f64_mul(),
+                    DivFloat => i.f64_div(),
+                    _ => unreachable!(),
+                };
+                Ok(FLOAT)
+            }
             AddInt | SubInt | MulInt | DivInt | ModInt => {
                 self.lower(left, Some(INT))?;
                 self.lower(right, Some(INT))?;
@@ -551,15 +591,19 @@ impl Emitter<'_> {
     ) -> Result<SliceTy, EmitError> {
         use BinOp::*;
         if matches!(op, Lt | Gt | Lte | Gte) {
-            self.lower(left, Some(INT))?;
-            self.lower(right, Some(INT))?;
+            let lt = self.lower(left, None)?;
+            self.lower(right, Some(lt))?;
             let mut i = self.f.instructions();
-            match op {
-                Lt => i.i64_lt_s(),
-                Gt => i.i64_gt_s(),
-                Lte => i.i64_le_s(),
-                Gte => i.i64_ge_s(),
-                _ => unreachable!(),
+            match (lt, op) {
+                (INT, Lt) => i.i64_lt_s(),
+                (INT, Gt) => i.i64_gt_s(),
+                (INT, Lte) => i.i64_le_s(),
+                (INT, Gte) => i.i64_ge_s(),
+                (FLOAT, Lt) => i.f64_lt(),
+                (FLOAT, Gt) => i.f64_gt(),
+                (FLOAT, Lte) => i.f64_le(),
+                (FLOAT, Gte) => i.f64_ge(),
+                (other, _) => return unsup(&format!("binop:cmp-{other:?}")),
             };
             return Ok(BOOL);
         }
@@ -568,6 +612,9 @@ impl Emitter<'_> {
         match lt {
             INT => {
                 self.f.instructions().i64_eq();
+            }
+            FLOAT => {
+                self.f.instructions().f64_eq();
             }
             BOOL => {
                 self.f.instructions().i32_eq();

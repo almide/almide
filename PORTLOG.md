@@ -852,3 +852,25 @@ Three probe rounds pinned why generic instances stayed Excluded:
    the probe had to inspect def-kind to see EXCLUDED.
 
 Burn-up: 122 → **124 / 590**, floor 124, zero divergence.
+
+---
+
+## Unit 6 — Float values groundwork (2026-08-20)
+
+f64 is now a first-class scalar: literals, arithmetic (f64.add family),
+comparisons and equality (f64.eq — the oracle's own == semantics, NaN
+included), aggregate slots, match scratch, and a dedicated f64 hold
+pool. The parity net immediately caught the first plumbing gap (a
+generic instance carrying a Float field routed f64 through the i32 slot
+arm — wasmparser refused the module) and the two-way val_type dispatches
+are now three-way everywhere.
+
+The REST of the Float wall (float.to_string, `${float}`) is gated on the
+self-host linkage arc: the oracle formats floats via the SELF-HOSTED
+Dragon4 in stdlib/float_to_string.almd (pure Almide over the prim
+floor — load/store/alloc/bit ops, all direct wasm mappings), but s5 does
+not yet link self-host module bodies into the IR (probe: a float
+fixture's IR carries ONE function). That linkage is the next major arc:
+it unlocks Float, Bytes, and the self-hosted string/int surface at once.
+
+Burn-up: 124 → **125 / 590**, floor 125, zero divergence.

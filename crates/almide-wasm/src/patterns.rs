@@ -36,6 +36,7 @@ impl Emitter<'_> {
         let subj_ty = self.lower(subject, None)?;
         let scr = match subj_ty.val_type() {
             ValType::I64 => self.scr_i64_local,
+            ValType::F64 => self.scr_f64_local,
             _ => self.scr_i32_local,
         };
         self.f.instructions().local_set(scr);
@@ -214,11 +215,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(scr);
                     self.load_ty_slot(fty, off);
                     self.lower(expr, Some(fty))?;
-                    match fs {
-                        Scalar::Int => self.f.instructions().i64_eq(),
-                        Scalar::Bool => self.f.instructions().i32_eq(),
-                        Scalar::Str => self.f.instructions().call(F_STR_EQ),
-                    };
+                    self.emit_scalar_eq(fs);
                     self.f.instructions().else_().i32_const(0).end();
                 }
                 Ok(())
@@ -346,6 +343,7 @@ impl Emitter<'_> {
     pub(crate) fn emit_scalar_eq(&mut self, s: Scalar) {
         match s {
             Scalar::Int => self.f.instructions().i64_eq(),
+            Scalar::Float => self.f.instructions().f64_eq(),
             Scalar::Bool => self.f.instructions().i32_eq(),
             Scalar::Str => self.f.instructions().call(F_STR_EQ),
         };
