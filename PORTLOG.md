@@ -114,3 +114,52 @@ still matches the incumbent golden byte-for-byte; every new capability is
 | Battery exhaustiveness | Roc comptime-enumerated parity suite | `tests/golden_parity.rs::battery_witnesses_every_incumbent_field_and_variant`: full no-`..` destructure (new field ⇒ compile error ⇒ forced battery review) + runtime witnesses for every field/variant in populated AND absent form |
 | Registry↔docs bidirectional sync | (incumbent contract-ledger doctrine) | `tests/codes_docs_sync.rs`: every code has a page, every page a row, titles byte-identical |
 | Incremental diagnostic stability | Zig `test/incremental/` (unique in the field) | **Obligation recorded** in ARCHITECTURE.md §5 unit 4 gate — implementable only once the query core exists |
+
+---
+
+## Unit 2 — `almide-syntax` + `almide-base` facade (LANDED 2026-08-19)
+
+- **Source:** `almide@a877d2138` (`git archive` / `git show`).
+- **Ported verbatim:** `crates/almide-syntax` in full (8,054 lines: ast/lexer/
+  parser/parse_cache — **zero edits, zero import adaptations**) and
+  `crates/almide-base/src/{intern,profile}.rs`.
+- **Boundary adaptations (recorded):**
+  - `almide-base` is a **facade**: `intern`/`profile` verbatim + `span`/
+    `diagnostic` re-exported from `almide-diag`, reproducing the incumbent's
+    exact import surface so ported crates compile unchanged.
+  - `almide-base` opts out of the workspace `unsafe_code = "forbid"` for the
+    ONE sound foundation unsafe: `intern.rs:31` returns `&'static str` from a
+    never-deallocating `ThreadedRodeo`. Scoped in that crate's Cargo.toml
+    with rationale; every other crate stays forbidden.
+  - `[dev-dependencies] sha2` appended to the ported syntax Cargo.toml (gate
+    only). (An identical append accidentally hit the INCUMBENT's Cargo.toml
+    mid-session — reverted immediately by deleting the appended lines;
+    incumbent verified clean via `git status`.)
+- **Sym JSON stability verified:** `Sym` serializes by resolved string
+  (`intern.rs:94-98` manual serde impls), so AST JSON is process-independent.
+
+### Gate verdict — AST parity vs clean-SHA oracle
+
+- **Oracle:** `almide` built `--release` from a **clean detached worktree at
+  a877d2138** (not the dirty working tree). `--emit-ast` never runs the
+  checker (`src/cli/emit.rs:131`: `run_check` excludes `emit_ast`), and
+  `parse_file` (src/compile_driver.rs:12-27) is exactly
+  tokenize → `Parser::new(tokens).with_file(f)` → `parse()` — so the gate
+  isolates precisely the ported surface.
+- **Manifest:** `scripts/gen-ast-manifest.sh` hashed the oracle's
+  `--emit-ast` output ("pretty JSON + one \n") for **1,095 of 1,098**
+  `spec/**/*.almd`; 3 exclusions, each with its recorded oracle reason
+  (unresolvable multi-package imports: `dmod_d` ×2, `extlib`). Determinism
+  spot-check: first 25 files re-run, identical. No silent gaps: the gate
+  asserts every corpus file is in exactly one of manifest/exclusions.
+- **Verdict:** `spec_corpus_ast_matches_oracle_hashes` → **GREEN, 1,095/1,095
+  byte-identical**, 2.9s.
+- **Gate mutation test:** corrupted one manifest hash → red ✓; deleted one
+  manifest line → coverage xor red ✓; restored → green ✓.
+- One real gate bug found and fixed during bring-up: the first manifest
+  loader keyed rows by hash, and two byte-identical spec files legitimately
+  share an AST hash — rows are keyed by path now, with a duplicate-path
+  assertion.
+- **Deferred from E1 into later units (unchanged):** misspelling-catalogue
+  and recoverable-code wiring need the diagnostic-emitting driver, which
+  arrives with sema (unit 4) — the bare parser port stays verbatim.
