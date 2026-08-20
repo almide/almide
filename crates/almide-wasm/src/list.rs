@@ -243,6 +243,146 @@ impl Emitter<'_> {
                 Ok(Some(SliceTy::List(h)))
             }
             ("map", [xs, cb]) => self.lower_list_map(xs, cb),
+            ("find", [xs, cb]) => {
+                let (params, body) = self.hof_lambda(cb, 1)?;
+                let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+                let rh = self.hold_i32()?;
+                self.f.instructions().i32_const(0).local_set(rh);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.hof_elem_into(elem, bh, ch, ih, params[0]);
+                self.lower(body, Some(BOOL))?;
+                self.f.instructions().if_(BlockType::Empty);
+                // some(x): the first match wins, then break the scan
+                self.f
+                    .instructions()
+                    .i32_const(elem.slot_size() as i32)
+                    .call(F_ALLOC)
+                    .local_tee(rh)
+                    .local_get(params[0]);
+                self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
+                self.f.instructions().br(2);
+                self.f.instructions().end();
+                self.hof_step(ih);
+                self.f.instructions().local_get(rh);
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+            }
+            // min/max over the scalar orders (Int/Str: Ord; Float: IEEE
+            // totalOrder, the same key transform list.sort uses). Ties are
+            // indistinguishable for scalar VALUES, so first-wins is exact.
+            ("min" | "max", [xs]) => {
+                let is_min = func == "min";
+                let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+                if !matches!(elem, INT | FLOAT | STR | BOOL) {
+                    return unsup(&format!("list-{func}-elem:{elem:?}"));
+                }
+                let wide = elem.slot_size() == 8;
+                let hbest = self.hold_i64()?;
+                let hcur = self.hold_i64()?;
+                let hfound = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.i32_const(0).local_set(hfound);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(ih).local_get(ch).i32_ge_u().br_if(1);
+                i.local_get(bh)
+                    .local_get(ih)
+                    .i32_const(elem.slot_size() as i32)
+                    .i32_mul()
+                    .i32_add();
+                if wide {
+                    i.i64_load(slot_memarg(0));
+                } else {
+                    i.i32_load(slot_memarg(0)).i64_extend_i32_u();
+                }
+                i.local_set(hcur);
+                i.local_get(hfound).i32_eqz().if_(BlockType::Empty);
+                i.local_get(hcur).local_set(hbest);
+                i.i32_const(1).local_set(hfound);
+                i.else_();
+                // beats = cur < best (min) / cur > best (max)
+                match elem {
+                    FLOAT => {
+                        for l in [hcur, hbest] {
+                            i.local_get(l);
+                            i.local_get(l).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
+                            i.i64_xor();
+                        }
+                        if is_min {
+                            i.i64_lt_s();
+                        } else {
+                            i.i64_gt_s();
+                        }
+                    }
+                    INT => {
+                        i.local_get(hcur).local_get(hbest);
+                        if is_min {
+                            i.i64_lt_s();
+                        } else {
+                            i.i64_gt_s();
+                        }
+                    }
+                    BOOL => {
+                        i.local_get(hcur).local_get(hbest);
+                        if is_min {
+                            i.i64_lt_u();
+                        } else {
+                            i.i64_gt_u();
+                        }
+                    }
+                    _ => {
+                        i.local_get(hcur).i32_wrap_i64();
+                        i.local_get(hbest).i32_wrap_i64();
+                        i.call(F_STR_CMP).i32_const(0);
+                        if is_min {
+                            i.i32_lt_s();
+                        } else {
+                            i.i32_gt_s();
+                        }
+                    }
+                }
+                i.if_(BlockType::Empty);
+                i.local_get(hcur).local_set(hbest);
+                i.end();
+                i.end();
+                i.local_get(ih).i32_const(1).i32_add().local_set(ih);
+                i.br(0).end().end();
+                let _ = i;
+                // found ? some(best) : none — best is raw bits in an i64
+                // local; stores are bitwise, so f64 needs no reinterpret.
+                let hres = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_get(hfound).if_(BlockType::Result(ValType::I32));
+                i.i32_const(elem.slot_size() as i32).call(F_ALLOC).local_tee(hres);
+                i.local_get(hbest);
+                let m = slot_memarg(almide_layout::OPTION_FIELD);
+                if wide {
+                    i.i64_store(m);
+                } else {
+                    i.i32_wrap_i64().i32_store(m);
+                }
+                i.local_get(hres);
+                i.else_();
+                i.i32_const(0);
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+            }
+            // sort_by: the key fn runs ONCE PER ELEMENT (native
+            // sort_by_cached_key, #560 — per-comparison was an observable
+            // divergence for side-effectful keys), then the same stable
+            // insertion sort as list.sort moves keys and values in
+            // lockstep.
+            ("sort_by", [xs, cb]) => self.lower_list_sort_by(xs, cb),
             ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
             ("fold", [xs, init, cb]) => self.lower_list_fold(xs, init, cb),
             // ONE allocation, zero copies: the linked self-host impl binds
@@ -643,6 +783,149 @@ impl Emitter<'_> {
 
     fn hof_step(&mut self, ih: u32) {
         self.f.instructions().local_get(ih).i32_const(1).i32_add().local_set(ih).br(0).end().end();
+    }
+
+    /// Keys precomputed ONCE per element into a parallel array (#560 —
+    /// per-comparison evaluation was an observable divergence for
+    /// side-effectful keys), then the list.sort insertion sort moves
+    /// keys and values in lockstep. Stable; key orders are the scalar
+    /// three (Int/Str Ord, Float totalOrder).
+    fn lower_list_sort_by(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let Some(k) = slice_ty_of(&body.ty, self.types) else {
+            return unsup(&format!("list-sort-by-key:{}", ty_name(&body.ty)));
+        };
+        if !matches!(k, INT | FLOAT | STR) {
+            return unsup(&format!("list-sort-by-key:{k:?}"));
+        }
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-sort-by-of:{other:?}")),
+        };
+        let elem = self.types.el(h);
+        let (vstride, kstride) = (elem.slot_size() as i32, k.slot_size() as i32);
+        self.f.instructions().call(F_BLOCK_COPY);
+        let hb = self.hold_i32()?;
+        let hn = self.hold_i32()?;
+        let hkeys = self.hold_i32()?;
+        let hi = self.hold_i32()?;
+        let hj = self.hold_i32()?;
+        let ht = self.hold_i64()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_tee(hb);
+            i.i32_load(len_memarg()).i32_const(vstride).i32_div_u().local_set(hn);
+            i.local_get(hn).i32_const(kstride).i32_mul().call(F_ALLOC).local_set(hkeys);
+            i.i32_const(0).local_set(hi);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hi).local_get(hn).i32_ge_u().br_if(1);
+            i.local_get(hb).local_get(hi).i32_const(vstride).i32_mul().i32_add();
+        }
+        self.load_ty_slot(elem, 0);
+        self.f.instructions().local_set(params[0]);
+        self.f
+            .instructions()
+            .local_get(hkeys)
+            .local_get(hi)
+            .i32_const(kstride)
+            .i32_mul()
+            .i32_add();
+        self.lower(body, Some(k))?;
+        self.store_ty_slot(k, 0);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+            i.br(0).end().end();
+            // lockstep insertion sort on (keys, vals)
+            let kaddr = |i: &mut wasm_encoder::InstructionSink<'_>, back: i32| {
+                i.local_get(hkeys)
+                    .local_get(hj)
+                    .i32_const(back)
+                    .i32_sub()
+                    .i32_const(kstride)
+                    .i32_mul()
+                    .i32_add();
+            };
+            let vaddr = |i: &mut wasm_encoder::InstructionSink<'_>, back: i32| {
+                i.local_get(hb)
+                    .local_get(hj)
+                    .i32_const(back)
+                    .i32_sub()
+                    .i32_const(vstride)
+                    .i32_mul()
+                    .i32_add();
+            };
+            i.i32_const(1).local_set(hi);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hi).local_get(hn).i32_ge_u().br_if(1);
+            i.local_get(hi).local_set(hj);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hj).i32_eqz().br_if(1);
+            match k {
+                INT | FLOAT => {
+                    let key = |i: &mut wasm_encoder::InstructionSink<'_>, t: u32, float: bool| {
+                        if float {
+                            i.local_set(t);
+                            i.local_get(t);
+                            i.local_get(t).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
+                            i.i64_xor();
+                        }
+                    };
+                    let float = k == FLOAT;
+                    kaddr(&mut i, 1);
+                    i.i64_load(slot_memarg(0));
+                    key(&mut i, ht, float);
+                    kaddr(&mut i, 0);
+                    i.i64_load(slot_memarg(0));
+                    key(&mut i, ht, float);
+                    i.i64_le_s().br_if(1);
+                }
+                _ => {
+                    kaddr(&mut i, 1);
+                    i.i32_load(slot_memarg(0));
+                    kaddr(&mut i, 0);
+                    i.i32_load(slot_memarg(0));
+                    i.call(F_STR_CMP).i32_const(0).i32_le_s().br_if(1);
+                }
+            }
+            // swap keys then vals, both through the i64 bits scratch
+            for (wide, addr) in [
+                (kstride == 8, &kaddr as &dyn Fn(&mut wasm_encoder::InstructionSink<'_>, i32)),
+                (vstride == 8, &vaddr),
+            ] {
+                addr(&mut i, 0);
+                if wide {
+                    i.i64_load(slot_memarg(0)).local_set(ht);
+                } else {
+                    i.i32_load(slot_memarg(0)).i64_extend_i32_u().local_set(ht);
+                }
+                addr(&mut i, 0);
+                addr(&mut i, 1);
+                if wide {
+                    i.i64_load(slot_memarg(0)).i64_store(slot_memarg(0));
+                } else {
+                    i.i32_load(slot_memarg(0)).i32_store(slot_memarg(0));
+                }
+                addr(&mut i, 1);
+                if wide {
+                    i.local_get(ht).i64_store(slot_memarg(0));
+                } else {
+                    i.local_get(ht).i32_wrap_i64().i32_store(slot_memarg(0));
+                }
+            }
+            i.local_get(hj).i32_const(1).i32_sub().local_set(hj);
+            i.br(0).end().end();
+            i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+            i.br(0).end().end();
+            i.local_get(hb);
+        }
+        self.release_i64();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(Some(SliceTy::List(h)))
     }
 
     fn lower_list_map(

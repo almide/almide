@@ -1749,3 +1749,22 @@ what caught the miss.
 
 **Burn-up: 319 → 330 / 591**, floor 330, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 45: find/min/max/sort_by, string.take, PowInt (2026-08-21)
+
+Gleaning sweep three. list.find is filter with an early break into a
+some-block. min/max run the scalar three orders (Int/Str Ord, Float
+totalOrder via the sort key transform) with first-wins ties — scalar
+ties are value-identical, so unobservable. sort_by evaluates the key
+ONCE per element into a parallel array (#560: per-comparison keys were
+an observable divergence for side-effectful keys) and the list.sort
+insertion sort moves keys and values in lockstep. string.take is
+chars().take verbatim — a NEGATIVE n takes the WHOLE string
+(deliberately not the C-054 clamp; cp_off clamps past-end). `^` is the
+oracle's wrapping square-multiply with the negative-exponent die.
+All eight probes matched the interp byte-for-byte, stderr included.
+
+**Burn-up: 330 → 340 / 591**, floor 340, zero divergence, workspace 0
+failures.

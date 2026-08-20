@@ -15,6 +15,7 @@ binop:MulFloat
 binop:MulInt
 binop:Neq
 binop:Or
+binop:PowInt
 binop:SubFloat
 binop:SubInt
 call:bytes.from_list
@@ -38,6 +39,7 @@ call:json.stringify
 call:list.chunk
 call:list.enumerate
 call:list.filter
+call:list.find
 call:list.first
 call:list.fold
 call:list.get
@@ -45,10 +47,13 @@ call:list.get_or
 call:list.join
 call:list.len
 call:list.map
+call:list.max
+call:list.min
 call:list.push
 call:list.repeat
 call:list.slice
 call:list.sort
+call:list.sort_by
 call:list.windows
 call:list.with_capacity
 call:map.contains
@@ -68,7 +73,9 @@ call:matrix.row_dot
 call:matrix.rows
 call:matrix.shape
 call:matrix.zeros
+call:option.filter
 call:option.flat_map
+call:option.flatten
 call:option.map
 call:option.or_else
 call:option.to_list
@@ -100,6 +107,7 @@ call:string.repeat
 call:string.replace
 call:string.slice
 call:string.split
+call:string.take
 call:string.to_upper
 call:string.trim
 call:user-fn

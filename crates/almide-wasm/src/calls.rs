@@ -456,6 +456,41 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
                 self.lower_bytes_call(func.as_str(), args)
             }
+            // First n CHARS (native `s.chars().take(n as usize)`): a
+            // NEGATIVE n reinterprets huge and takes the WHOLE string —
+            // deliberately not the C-054 clamp; cp_off clamps past-end.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "take" && args.len() == 2 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                let hs = self.hold_i32()?;
+                self.f.instructions().local_set(hs);
+                self.lower(&args[1], Some(INT))?;
+                let hn = self.hold_i64()?;
+                let hoff = self.hold_i32()?;
+                let hb = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                i.local_get(hn).i64_const(0).i64_lt_s();
+                i.if_(BlockType::Result(ValType::I32));
+                i.local_get(hs).i32_load(len_memarg());
+                i.else_();
+                i.local_get(hs).local_get(hn).call(F_CP_OFF);
+                i.end();
+                i.local_set(hoff);
+                i.local_get(hoff).call(F_ALLOC).local_set(hb);
+                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hoff);
+                i.memory_copy(0, 0);
+                i.local_get(hb);
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(STR))
+            }
             // Rust str::replace / replace_first byte-for-byte via the
             // shared helper (the `first` flag selects the form). The
             // empty-pattern char-boundary rule (C-100) lives in the helper.
