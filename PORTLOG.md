@@ -1491,3 +1491,23 @@ their packed offsets. The incumbent's pinned heap-accumulator wall does
 not bind this backend; the manifest hash judges.
 
 **Burn-up: 269 → 270 / 590**, floor 270, zero divergence.
+
+---
+
+## Unit 6 — stage 35: native string.split, judged mid-slice (2026-08-20)
+
+The incumbent's string_split builds List[String] with 8-byte slots (the
+real coupling class) — so split lands NATIVE: a `$split` helper, Rust
+semantics (byte-level full-separator match, non-overlapping, empty
+pieces kept, count = separators + 1), two passes (count → alloc+fill,
+each piece a fresh owned string). The corpus judged the first version
+mid-slice: `split_empty_sep` (C-100) rejects the empty-separator trap —
+Rust's char-boundary split (leading "" + each CHAR, multibyte whole, +
+trailing "") is IN contract, and now emitted as a dedicated path off the
+same helper. A latent per-helper type bug fell out too: the helper
+assembly gave every helper one (i32,i32)→i32 type — ValueKeys takes one
+param; types are per-helper now. Mutant 024 (final piece mis-based).
+
+First slice landed on the als-mounted corpus: **denominator 590 → 591**.
+
+**Burn-up: 270 → 272 / 591**, floor 272, surface 126, zero divergence.

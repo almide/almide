@@ -1,0 +1,12 @@
+diff --git a/crates/almide-wasm/src/value.rs b/crates/almide-wasm/src/value.rs
+index 4b979f62c..266ed6cc0 100644
+--- a/crates/almide-wasm/src/value.rs
++++ b/crates/almide-wasm/src/value.rs
+@@ -249,6 +249,7 @@ pub(crate) fn emit_string_split_helper() -> Function {
+     i.end();
+     i.end();
+     // final piece [start, slen)
++    i.i32_const(0).local_set(start);
+     i.local_get(slen).local_get(start).i32_sub().call(F_ALLOC).local_set(piece);
+     i.local_get(piece).i32_const(pay).i32_add();
+     i.local_get(sb).i32_const(pay).i32_add().local_get(start).i32_add();

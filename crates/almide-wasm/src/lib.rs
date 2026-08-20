@@ -526,6 +526,11 @@ pub(crate) enum Helper {
     /// `$vkeys(value) -> i32`: the object's keys as a List[String]
     /// (addresses shared — strings are immutable).
     ValueKeys,
+    /// `$split(str, sep) -> i32` — Rust split semantics: byte-level
+    /// full-separator match, non-overlapping left-to-right, empty pieces
+    /// kept, count = separators + 1. Empty separator traps (Rust's
+    /// empty-pattern oddity is out of contract).
+    StringSplit,
 }
 
 /// Pooled fragment addresses the JSON helpers append from.
@@ -878,7 +883,11 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // lowering; the table-entry extras follow.
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for h in &helper_snapshot {
-        let ti = work.itype(vec![ValType::I32, ValType::I32], Some(ValType::I32));
+        let params = match h {
+            Helper::ValueKeys => vec![ValType::I32],
+            _ => vec![ValType::I32, ValType::I32],
+        };
+        let ti = work.itype(params, Some(ValType::I32));
         let f = match h {
             Helper::JsonValue { float_to_string, frags } => value::emit_json_value_helper(
                 work.helper_base.get(),
@@ -889,6 +898,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
             Helper::JsonQuote { frags } => value::emit_json_quote_helper(*frags),
             Helper::ValueField => value::emit_value_field_helper(),
             Helper::ValueKeys => value::emit_value_keys_helper(),
+            Helper::StringSplit => value::emit_string_split_helper(),
         };
         extra_fns.push((ti, f));
     }

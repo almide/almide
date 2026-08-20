@@ -125,6 +125,141 @@ pub(crate) fn emit_value_keys_helper() -> Function {
     f
 }
 
+/// `$split(s, sep) -> List[String]` — two passes: count pieces, then
+/// alloc + fill (each piece a fresh owned string).
+pub(crate) fn emit_string_split_helper() -> Function {
+    let (sb, sep) = (0u32, 1u32);
+    let (slen, seplen, p, j, cnt, dst, slot, start, piece) =
+        (2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
+    let pay = almide_layout::PAYLOAD as i32;
+    let mut f = Function::new([(9, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(sb).i32_load(len_memarg()).local_set(slen);
+    i.local_get(sep).i32_load(len_memarg()).local_set(seplen);
+    // C-100: the EMPTY separator is Rust's char-boundary split — a
+    // leading "", each CHAR (multibyte whole), a trailing "".
+    i.local_get(seplen).i32_eqz().if_(BlockType::Empty);
+    i.local_get(sb).call(F_STR_LEN_CHARS).i32_wrap_i64().i32_const(2).i32_add().local_set(cnt);
+    i.local_get(cnt).i32_const(4).i32_mul().call(F_ALLOC).local_set(dst);
+    i.local_get(dst).i32_const(pay).i32_add().local_set(slot);
+    // leading ""
+    i.i32_const(0).call(F_ALLOC).local_set(piece);
+    i.local_get(slot).local_get(piece).i32_store(raw8());
+    i.local_get(slot).i32_const(4).i32_add().local_set(slot);
+    i.i32_const(0).local_set(p);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(slen).i32_ge_u().br_if(1);
+    // char byte length by lead-byte class
+    i.local_get(sb).i32_const(pay).i32_add().local_get(p).i32_add().i32_load8_u(raw8()).local_set(j);
+    i.local_get(j).i32_const(0x80).i32_lt_u().if_(BlockType::Result(ValType::I32));
+    i.i32_const(1);
+    i.else_();
+    i.local_get(j).i32_const(0xE0).i32_lt_u().if_(BlockType::Result(ValType::I32));
+    i.i32_const(2);
+    i.else_();
+    i.local_get(j).i32_const(0xF0).i32_lt_u().if_(BlockType::Result(ValType::I32));
+    i.i32_const(3);
+    i.else_();
+    i.i32_const(4);
+    i.end();
+    i.end();
+    i.end();
+    i.local_set(j); // j = char byte length
+    i.local_get(j).call(F_ALLOC).local_set(piece);
+    i.local_get(piece).i32_const(pay).i32_add();
+    i.local_get(sb).i32_const(pay).i32_add().local_get(p).i32_add();
+    i.local_get(j);
+    i.memory_copy(0, 0);
+    i.local_get(slot).local_get(piece).i32_store(raw8());
+    i.local_get(slot).i32_const(4).i32_add().local_set(slot);
+    i.local_get(p).local_get(j).i32_add().local_set(p);
+    i.br(0);
+    i.end();
+    i.end();
+    // trailing ""
+    i.i32_const(0).call(F_ALLOC).local_set(piece);
+    i.local_get(slot).local_get(piece).i32_store(raw8());
+    i.local_get(dst).return_();
+    i.end();
+    // Pass shared matcher: at position p, do seplen bytes match?
+    // (emitted twice — once per pass — via this closure)
+    let emit_match = |i: &mut wasm_encoder::InstructionSink, hit_then_else: &mut dyn FnMut(&mut wasm_encoder::InstructionSink)| {
+        // j = 0; loop { j >= seplen -> HIT; bytes differ -> MISS }
+        i.local_set(j); // expects 0 pushed by caller
+        i.block(BlockType::Result(ValType::I32)); // yields 1 hit / 0 miss
+        i.loop_(BlockType::Empty);
+        i.local_get(j).local_get(seplen).i32_ge_u().if_(BlockType::Empty);
+        i.i32_const(1).br(2);
+        i.end();
+        i.local_get(sb).i32_const(pay).i32_add().local_get(p).i32_add().local_get(j).i32_add().i32_load8_u(raw8());
+        i.local_get(sep).i32_const(pay).i32_add().local_get(j).i32_add().i32_load8_u(raw8());
+        i.i32_ne().if_(BlockType::Empty);
+        i.i32_const(0).br(2);
+        i.end();
+        i.local_get(j).i32_const(1).i32_add().local_set(j);
+        i.br(0);
+        i.end();
+        i.i32_const(0); // unreachable filler for the block result
+        i.end();
+        hit_then_else(i);
+    };
+    // ── pass 1: count = 1 + matches ──
+    i.i32_const(1).local_set(cnt);
+    i.i32_const(0).local_set(p);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(seplen).i32_add().local_get(slen).i32_gt_u().br_if(1);
+    i.i32_const(0);
+    emit_match(&mut i, &mut |i| {
+        i.if_(BlockType::Empty);
+        i.local_get(cnt).i32_const(1).i32_add().local_set(cnt);
+        i.local_get(p).local_get(seplen).i32_add().local_set(p);
+        i.else_();
+        i.local_get(p).i32_const(1).i32_add().local_set(p);
+        i.end();
+    });
+    i.br(0);
+    i.end();
+    i.end();
+    // ── alloc the result list (4-byte string slots) ──
+    i.local_get(cnt).i32_const(4).i32_mul().call(F_ALLOC).local_set(dst);
+    i.local_get(dst).i32_const(pay).i32_add().local_set(slot);
+    // ── pass 2: fill ──
+    i.i32_const(0).local_set(p);
+    i.i32_const(0).local_set(start);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(seplen).i32_add().local_get(slen).i32_gt_u().br_if(1);
+    i.i32_const(0);
+    emit_match(&mut i, &mut |i| {
+        i.if_(BlockType::Empty);
+        // piece = s[start, p)
+        i.local_get(p).local_get(start).i32_sub().call(F_ALLOC).local_set(piece);
+        i.local_get(piece).i32_const(pay).i32_add();
+        i.local_get(sb).i32_const(pay).i32_add().local_get(start).i32_add();
+        i.local_get(p).local_get(start).i32_sub();
+        i.memory_copy(0, 0);
+        i.local_get(slot).local_get(piece).i32_store(raw8());
+        i.local_get(slot).i32_const(4).i32_add().local_set(slot);
+        i.local_get(p).local_get(seplen).i32_add().local_set(p);
+        i.local_get(p).local_set(start);
+        i.else_();
+        i.local_get(p).i32_const(1).i32_add().local_set(p);
+        i.end();
+    });
+    i.br(0);
+    i.end();
+    i.end();
+    // final piece [start, slen)
+    i.local_get(slen).local_get(start).i32_sub().call(F_ALLOC).local_set(piece);
+    i.local_get(piece).i32_const(pay).i32_add();
+    i.local_get(sb).i32_const(pay).i32_add().local_get(start).i32_add();
+    i.local_get(slen).local_get(start).i32_sub();
+    i.memory_copy(0, 0);
+    i.local_get(slot).local_get(piece).i32_store(raw8());
+    i.local_get(dst);
+    i.end();
+    f
+}
+
 /// `$vjson(cursor, value) -> cursor` — the recursive serializer.
 pub(crate) fn emit_json_value_helper(
     helper_base: u32,
