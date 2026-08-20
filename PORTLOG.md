@@ -1467,3 +1467,16 @@ submodule `als/`, pinned by commit (R6, ARCHITECTURE.md §6).
   Advancing the judge is a reviewed commit of its own.
 - **Incumbent `develop` untouched** — it keeps its copies until its own cutover
   is decided (user decision 2026-08-20: Stage B for greenfield only).
+
+---
+
+## Unit 6 — stage 33: `?` joins `!`, and the parser's last dependency (2026-08-20)
+
+The oracle dispatches `Try | Unwrap` to ONE eval arm — so does the
+emitter now: `?` gets the same three-shape lowering `!` has (propagate /
+main-abort / pure-abort, C-216 identity included). `string_from_codepoint`
+(the JSON parser's \uXXXX dependency — UTF-8 encoding into its own fresh
+buffer, layout-shared writes only) joins tier 1. The json.parse wall fell
+with it.
+
+**Burn-up: 266 → 269 / 590**, floor 269, zero divergence.

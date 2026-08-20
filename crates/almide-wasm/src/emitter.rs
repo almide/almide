@@ -1340,7 +1340,9 @@ impl Emitter<'_> {
             //   pure fn    -> same abort (the checker forbids propagating
             //                 `!` outside effect fns; a pure-Option/Result
             //                 fn's `!` is #1410-propagating — refused).
-            IrExprKind::Unwrap { expr } => {
+            // `?` (Try) and `!` (Unwrap) are ONE marker in the oracle:
+            // eval.rs dispatches Try | Unwrap to the same eval_try_unwrap.
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
                 // C-216: a marker node TYPED Option is the effect-RESULT-
                 // layer strip on a declared-Option effect call — identity.
                 let node_ty = slice_ty_of(&e.ty, self.types);

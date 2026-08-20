@@ -728,6 +728,9 @@ impl Emitter<'_> {
                 // String->String: byte-level string building; its tuple
                 // helpers are module fns lowered by THIS emitter.
                 "string_to_upper",
+                // (Int) -> String: UTF-8 byte encoding into its own fresh
+                // string buffer — layout-shared writes only.
+                "string_from_codepoint",
             ];
             // Second tier: signatures that TRIP the coupled-type proxy
             // below but whose bodies are AUDITED raw-write-free — every

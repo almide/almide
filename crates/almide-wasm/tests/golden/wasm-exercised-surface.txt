@@ -32,6 +32,8 @@ call:float.to_string
 call:int.from_hex
 call:int.parse
 call:int.to_string
+call:json.parse
+call:json.stringify
 call:list.enumerate
 call:list.filter
 call:list.fold
@@ -63,9 +65,12 @@ call:string.trim
 call:user-fn
 call:value.array
 call:value.as_array
+call:value.as_int
 call:value.as_string
 call:value.bool
+call:value.field
 call:value.int
+call:value.null
 call:value.object
 call:value.str
 call:value.stringify
