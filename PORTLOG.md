@@ -1357,3 +1357,20 @@ flagged the newly-claimed C-108 fixture on the first run. Mutant 022
 (literal entries reversed — insertion order flips).
 
 **Burn-up: 263 → 265 / 590**, floor 265, surface 118, zero divergence.
+
+---
+
+## Stage 30 addendum: the observer-less mutant (2026-08-20)
+
+Mutant 022 (map-literal entries dropped/reversed) survived BOTH nets — and
+the investigation shows why no tooth can exist yet: the parity corpus's
+MapLiteral fixtures all sit behind deeper walls, and the FUZZ oracle
+ABSTAINS on map programs (#1226 interp heap-bridge debt — forcing map
+observers into the generator just moved 14 programs into the
+ORACLE-ABSTAINED class, compared 168→155). An unobservable mechanism must
+not carry a fake mutant: 022 is WITHDRAWN, the generator additions
+reverted, and the gap recorded as an ORACLE debt (the interp's map
+abstention), not a backend one. The literal synthesis path itself reuses
+`map.from_list`'s upsert, which claimed fixtures do exercise. When the
+MapLiteral fixtures' remaining walls fall, the mutant returns WITH its
+observers.
