@@ -503,7 +503,7 @@ impl Emitter<'_> {
     /// VALUES are a later mechanism — the direct-lambda form is the
     /// dominant idiom (153:31 in the corpus) and inlines with zero
     /// closure machinery: captures are just enclosing locals in scope.
-    fn hof_lambda<'e>(
+    pub(crate) fn hof_lambda<'e>(
         &mut self,
         cb: &'e IrExpr,
         arity: usize,

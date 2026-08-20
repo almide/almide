@@ -1480,3 +1480,14 @@ buffer, layout-shared writes only) joins tier 1. The json.parse wall fell
 with it.
 
 **Burn-up: 266 → 269 / 590**, floor 269, zero divergence.
+
+---
+
+## Unit 6 — stage 34: map.fold (2026-08-20)
+
+Fold over entries in insertion order — the (acc, k, v) callback inlines
+through the same HOF machinery, the walk reads entries absolutely at
+their packed offsets. The incumbent's pinned heap-accumulator wall does
+not bind this backend; the manifest hash judges.
+
+**Burn-up: 269 → 270 / 590**, floor 270, zero divergence.

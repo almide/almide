@@ -258,6 +258,55 @@ impl Emitter<'_> {
                 let _ = ret;
                 Ok(None)
             }
+            // fold over entries in insertion order: (acc, k, v) => acc'.
+            ("fold", [m, init, cb]) => {
+                let (params, body) = self.hof_lambda(cb, 3)?;
+                let (acc_p, k_p, v_p) = (params[0], params[1], params[2]);
+                let Some(b) = slice_ty_of(&init.ty, self.types) else {
+                    return unsup(&format!("map-fold-acc:{}", ty_name(&init.ty)));
+                };
+                self.lower(init, Some(b))?;
+                self.f.instructions().local_set(acc_p);
+                let (k, v) = match self.lower(m, None)? {
+                    SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
+                    other => return unsup(&format!("map-fold-of:{other:?}")),
+                };
+                let (koff, voff, esz) = entry_layout(k, v);
+                let bh = self.hold_i32()?;
+                let cur = self.hold_i32()?;
+                let end = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(bh);
+                    i.local_get(bh)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_set(cur);
+                    i.local_get(cur).local_get(bh).i32_load(len_memarg()).i32_add().local_set(end);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+                    i.local_get(cur).i32_const(koff as i32).i32_add();
+                }
+                self.load_ty_slot_at(k);
+                self.f.instructions().local_set(k_p);
+                self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
+                self.load_ty_slot_at(v);
+                self.f.instructions().local_set(v_p);
+                self.lower(body, Some(b))?;
+                self.f.instructions().local_set(acc_p);
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(cur).i32_const(esz as i32).i32_add().local_set(cur);
+                    i.br(0);
+                    i.end();
+                    i.end();
+                    i.local_get(acc_p);
+                }
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(b))
+            }
             ("from_list", [pairs]) => {
                 // Insertion-ordered upsert over (K, V) pairs. The result
                 // is freshly built and uniquely owned, so the overwrite

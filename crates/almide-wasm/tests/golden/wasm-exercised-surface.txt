@@ -45,6 +45,7 @@ call:list.map
 call:list.push
 call:list.slice
 call:map.contains
+call:map.fold
 call:map.from_list
 call:map.get_or
 call:map.len
