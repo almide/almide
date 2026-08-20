@@ -72,12 +72,41 @@ pub(crate) struct TypeTable {
     /// (name, type) field list into synthetic Named defs — construction,
     /// member access, equality and patterns all reuse the Named machinery.
     anon_ids: RefCell<HashMap<Vec<(String, SliceTy)>, u32>>,
+    /// Function-VALUE signatures (`SliceTy::Fn`), interned — handle
+    /// equality is carrier-signature equality. `effect` records the
+    /// carrier flag: an effect slot's body yields the RAW ok value and
+    /// wraps; a pure Result-typed slot's body yields the Result itself.
+    fn_sigs: RefCell<Vec<FnSig>>,
+    fn_sig_ids: RefCell<HashMap<FnSig, u32>>,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub(crate) struct FnSig {
+    pub(crate) params: Vec<SliceTy>,
+    pub(crate) ret: Option<SliceTy>,
+    pub(crate) effect: bool,
 }
 
 impl TypeTable {
     /// A definition by index (cloned — defs are small).
     pub(crate) fn def(&self, i: u32) -> NamedDef {
         self.defs.borrow()[i as usize].clone()
+    }
+
+    /// Intern a function-value signature.
+    pub(crate) fn fn_sig(&self, sig: FnSig) -> u32 {
+        if let Some(&i) = self.fn_sig_ids.borrow().get(&sig) {
+            return i;
+        }
+        let mut sigs = self.fn_sigs.borrow_mut();
+        let i = sigs.len() as u32;
+        sigs.push(sig.clone());
+        self.fn_sig_ids.borrow_mut().insert(sig, i);
+        i
+    }
+
+    pub(crate) fn fn_sig_def(&self, i: u32) -> FnSig {
+        self.fn_sigs.borrow()[i as usize].clone()
     }
 
     /// An anonymous record shape as a synthetic Named def, built on
@@ -309,6 +338,8 @@ impl TypeTable {
             tuples: RefCell::new(Vec::new()),
             tuple_ids: RefCell::new(HashMap::new()),
             anon_ids: RefCell::new(HashMap::new()),
+            fn_sigs: RefCell::new(Vec::new()),
+            fn_sig_ids: RefCell::new(HashMap::new()),
         };
         // Phase 1: every CONCRETE declaration gets an index (Excluded
         // placeholder); generic declarations are kept whole for on-demand

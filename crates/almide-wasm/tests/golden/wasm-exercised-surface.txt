@@ -23,6 +23,7 @@ call:bytes.len
 call:bytes.new
 call:bytes.read_f16_le
 call:bytes.set_at
+call:computed-or-method
 call:eprintln
 call:float.to_fixed
 call:float.to_string

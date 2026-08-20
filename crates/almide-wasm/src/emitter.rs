@@ -29,6 +29,9 @@ pub(crate) struct Emitter<'a> {
     /// Lowering `main`: a propagated `!` error ABORTS (the interp's
     /// main-level Flow::Return(Err) contract — "Error: {msg}" + exit 1).
     pub(crate) in_main: bool,
+    /// Function-value work: funcref-table entries, call_indirect types,
+    /// lifted lambdas (W-1/W-2).
+    pub(crate) work: &'a FnWork,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -90,6 +93,35 @@ impl Emitter<'_> {
 
     pub(crate) fn release_f64(&mut self) {
         self.hold_f64_depth -= 1;
+    }
+
+    /// Does the lambda body reference any OUTER local (a capture)? VarIds
+    /// are unique within a function context, so any Var resolving through
+    /// the enclosing locals map that is not a lambda param is a capture.
+    pub(crate) fn lambda_captures(
+        &self,
+        params: &std::collections::HashSet<VarId>,
+        body: &IrExpr,
+    ) -> bool {
+        struct Scan<'x> {
+            locals: &'x HashMap<VarId, (u32, SliceTy)>,
+            params: &'x std::collections::HashSet<VarId>,
+            captured: bool,
+        }
+        impl almide_ir::visit::IrVisitor for Scan<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Var { id } = &e.kind
+                    && self.locals.contains_key(id)
+                    && !self.params.contains(id)
+                {
+                    self.captured = true;
+                }
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+        let mut sc = Scan { locals: self.locals, params, captured: false };
+        almide_ir::visit::IrVisitor::visit_expr(&mut sc, body);
+        sc.captured
     }
 
     /// `[raw value]` -> `[ok(..) Result block]` (the effect-fn return wrap).
@@ -412,6 +444,87 @@ impl Emitter<'_> {
                     return unsup("var:unmapped");
                 };
                 self.f.instructions().local_get(idx);
+                ty
+            }
+            // A named fn as a VALUE: a (+1-biased) funcref-table slot.
+            // A PURE fn filling an EFFECT slot gets an ok-wrap adapter
+            // (C-221 carrier semantics).
+            IrExprKind::FnRef { name } => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Fn(sig) = ty else {
+                    return unsup(&format!("fnref-vs-{ty:?}"));
+                };
+                let def = self.types.fn_sig_def(sig);
+                let resolved = self
+                    .cur_module
+                    .and_then(|m| self.table.by_name.get(&format!("{m}.{}", name.as_str())))
+                    .or_else(|| self.table.by_name.get(name.as_str()))
+                    .copied();
+                let Some(idx) = resolved else {
+                    return unsup(&format!("fnref:{name}"));
+                };
+                let info = &self.table.infos[idx];
+                if info.refuse.is_some() {
+                    return unsup("fnref-refused-target");
+                }
+                if info.params != def.params {
+                    return unsup("fnref-param-mismatch");
+                }
+                let entry = if info.ret == def.ret {
+                    TableEntry::Fn(idx)
+                } else {
+                    match (info.ret, def.ret) {
+                        (Some(raw), Some(SliceTy::Result(o, er)))
+                            if def.effect
+                                && self.types.el(o) == raw
+                                && self.types.el(er) == STR =>
+                        {
+                            TableEntry::Adapter { target: idx, raw }
+                        }
+                        _ => return unsup("fnref-ret-mismatch"),
+                    }
+                };
+                let slot = self.work.slot(entry);
+                self.f.instructions().i32_const(slot as i32);
+                ty
+            }
+            // A non-capturing lambda as a VALUE: lifted into an extra
+            // function + table slot. Captures are a later mechanism.
+            IrExprKind::Lambda { params, body, .. } => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Fn(sig) = ty else {
+                    return unsup(&format!("lambda-vs-{ty:?}"));
+                };
+                let def = self.types.fn_sig_def(sig);
+                if params.len() != def.params.len() {
+                    return unsup("lambda-arity");
+                }
+                let param_ids: std::collections::HashSet<VarId> =
+                    params.iter().map(|(v, _)| *v).collect();
+                if self.lambda_captures(&param_ids, body) {
+                    return unsup("fn-value-capture");
+                }
+                let ps: Vec<(VarId, SliceTy)> = params
+                    .iter()
+                    .map(|(v, _)| *v)
+                    .zip(def.params.iter().copied())
+                    .collect();
+                let effect_raw = if def.effect {
+                    match def.ret {
+                        Some(SliceTy::Result(o, _)) => Some(self.types.el(o)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let j = self.work.register_lambda(LiftedLambda {
+                    params: ps,
+                    ret: def.ret,
+                    effect_raw,
+                    body: (**body).clone(),
+                });
+                let slot = self.work.slot(TableEntry::Lambda(j));
+                self.f.instructions().i32_const(slot as i32);
                 ty
             }
             IrExprKind::RuntimeCall { symbol, args } => {

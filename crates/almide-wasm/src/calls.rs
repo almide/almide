@@ -25,6 +25,37 @@ impl Emitter<'_> {
         ret_hint: Option<SliceTy>,
     ) -> Result<Option<SliceTy>, EmitError> {
         match target {
+            // Computed callee: a function VALUE — call_indirect through
+            // the funcref table (args first, +1-biased slot last).
+            CallTarget::Computed { callee } => {
+                let got = self.lower(callee, None)?;
+                let SliceTy::Fn(sig) = got else {
+                    return unsup(&format!("computed-callee-{got:?}"));
+                };
+                let def = self.types.fn_sig_def(sig);
+                if args.len() != def.params.len() {
+                    return unsup("computed-arity");
+                }
+                let h = self.hold_i32()?;
+                self.f.instructions().local_set(h);
+                for (a, p) in args.iter().zip(def.params.iter()) {
+                    self.lower(a, Some(*p))?;
+                }
+                self.f.instructions().local_get(h);
+                let ti = self.work.itype(
+                    def.params.iter().map(|t| t.val_type()).collect(),
+                    def.ret.map(SliceTy::val_type),
+                );
+                // Encoder argument order is (table, type).
+                if tail && def.ret.is_some() && def.ret == self.fn_ret {
+                    self.f.instructions().return_call_indirect(0, ti);
+                } else {
+                    self.f.instructions().call_indirect(0, ti);
+                }
+                self.release_i32();
+                let _ = ret_hint;
+                Ok(def.ret)
+            }
             CallTarget::Named { name } if name.as_str() == "println" && args.len() == 1 => {
                 self.lower_print(&args[0], F_PRINTLN_IMPORT, F_PRINTLN_BLOCK)?;
                 Ok(None)

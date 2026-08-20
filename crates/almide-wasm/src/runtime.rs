@@ -9,6 +9,34 @@ use crate::*;
 
 /// `$*_block(base: i32)`: derive (payload, len) from the layout and call
 /// the given host import — the ONLY place a block is unpacked for printing.
+/// C-221: a PURE fn filling an EFFECT slot — forward the params, then
+/// wrap the raw result in an `ok(..)` Result block.
+pub(crate) fn emit_ok_adapter(target_fn: u32, params: &[SliceTy], raw: SliceTy) -> Function {
+    let n = params.len() as u32;
+    let (rawv, blk) = (n, n + 1);
+    let mut f = Function::new([(1, raw.val_type()), (1, ValType::I32)]);
+    let mut i = f.instructions();
+    for k in 0..n {
+        i.local_get(k);
+    }
+    i.call(target_fn);
+    i.local_set(rawv);
+    i.i32_const(16)
+        .call(F_ALLOC)
+        .local_tee(blk)
+        .i32_const(0)
+        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+    i.local_get(blk).local_get(rawv);
+    let m = slot_memarg(almide_layout::SUM_FIELD);
+    match raw.val_type() {
+        ValType::I64 => i.i64_store(m),
+        ValType::F64 => i.f64_store(m),
+        _ => i.i32_store(m),
+    };
+    i.local_get(blk).end();
+    f
+}
+
 pub(crate) fn emit_block_print(import: u32) -> Function {
     let mut f = Function::new([]);
     f.instructions()

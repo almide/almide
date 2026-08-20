@@ -1184,3 +1184,30 @@ layout-reversal (anon field offsets reversed): baseline green, 13 fuzz
 findings under the mutant. Fuzzer additions stay: anonymous-record binds
 print both members immediately, so any placement error is observable in
 every program that binds one.
+
+---
+
+## Unit 6 — stage 23: function VALUES (2026-08-20)
+
+The W-1/W-2 design (RESEARCH-wasm-backends.md) lands: a fn value is an
+i32 funcref-table slot, +1-biased so 0 is the permanently-null trap slot;
+only value-referenced functions enter the table (insertion order = slot
+order, deterministic). Named refs resolve module-qualified-first like
+calls; a PURE fn filling an EFFECT slot synthesizes an ok-wrap ADAPTER
+(C-221 carrier semantics); non-capturing lambdas LIFT into extra
+functions through a fixed-point loop (a lifted body may register further
+lambdas); computed calls go через call_indirect — return_call_indirect in
+tail position — with signature types interned after the per-fn types.
+Capturing lambdas refuse honestly (`fn-value-capture` ×9, the closure-
+block mechanism is the queued follow-up). Reachability BFS extended: a
+table entry's target is a root like any call.
+
+Two authoring bugs the nets caught before landing: the encoder's
+call_indirect argument order is (table, type) — swapped args put the TYPE
+index in the table slot (first_light red, "unknown table 391"); and the
+funcref table must exist whenever ANY body emits call_indirect, entries
+or not — a stdlib body calling its fn param needs the table even when no
+entry was ever registered (221 fixtures briefly red). Mutant 016 (the +1
+bias dropped).
+
+**Burn-up: 221 → 231 / 590**, floor 231, surface 108, zero divergence.

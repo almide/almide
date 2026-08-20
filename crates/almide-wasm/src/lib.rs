@@ -51,9 +51,9 @@ use std::collections::{HashMap, HashSet};
 use almide_ir::{IrExpr, IrExprKind, IrFunction, IrPattern, IrProgram, IrStmtKind, IrTopLet, VarId};
 use almide_types::types::{Ty, TypeConstructorId};
 use wasm_encoder::{
-    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, GlobalSection, GlobalType, ImportSection, MemArg, MemorySection, MemoryType,
-    Module, TypeSection, ValType,
+    CodeSection, ConstExpr, DataSection, ElementSection, Elements, EntityType, ExportKind,
+    ExportSection, Function, FunctionSection, GlobalSection, GlobalType, ImportSection, MemArg,
+    MemorySection, MemoryType, Module, RefType, TableSection, TableType, TypeSection, ValType,
 };
 
 #[derive(Debug)]
@@ -239,6 +239,10 @@ enum SliceTy {
     /// field mutation (FieldAssign) is refused, so sharing addresses is
     /// unobservable — the same doctrine as List.
     Named(u32),
+    /// A function VALUE — an i32 funcref-table slot (+1-biased so 0 is
+    /// the null/trap slot, W-1). The signature lives in the TypeTable's
+    /// fn-sig arena. Only value-referenced functions enter the table.
+    Fn(u32),
 }
 
 const STR: SliceTy = SliceTy::Scalar(Scalar::Str);
@@ -256,7 +260,8 @@ impl SliceTy {
             | SliceTy::Map(..)
             | SliceTy::Set(_)
             | SliceTy::Tuple(_)
-            | SliceTy::Named(_) => ValType::I32,
+            | SliceTy::Named(_)
+            | SliceTy::Fn(_) => ValType::I32,
         }
     }
 
@@ -321,6 +326,34 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
             Some(SliceTy::Tuple(types.tuple(elems)))
         }
         Ty::Record { fields } => types.anon_record(fields).map(SliceTy::Named),
+        Ty::Fn { params, ret, is_effect } => {
+            let mut ps = Vec::new();
+            for p in params {
+                ps.push(slice_ty_of(p, types)?);
+            }
+            let r = match (&**ret, *is_effect) {
+                (Ty::Unit, false) => None,
+                // An effect-Unit slot needs a Unit repr — not yet.
+                (Ty::Unit, true) => return None,
+                (t, eff) => {
+                    let sty = slice_ty_of(t, types)?;
+                    Some(match (sty, eff) {
+                        // Declared-Result slots are single-layer (probe-
+                        // settled, same rule as effect fns).
+                        (rs @ SliceTy::Result(..), _) => rs,
+                        (sty, true) => {
+                            SliceTy::Result(types.intern(sty), types.intern(STR))
+                        }
+                        (sty, false) => sty,
+                    })
+                }
+            };
+            Some(SliceTy::Fn(types.fn_sig(crate::types_table::FnSig {
+                params: ps,
+                ret: r,
+                effect: *is_effect,
+            })))
+        }
         Ty::Named(name, args) if args.is_empty() => {
             types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i))
         }
@@ -399,6 +432,79 @@ struct FnTable {
 pub(crate) struct Ctx<'a> {
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
+    pub(crate) work: &'a FnWork,
+}
+
+/// Function-VALUE work discovered during lowering: funcref-table entries
+/// (+1-biased slots), call_indirect type interning (indices assigned
+/// eagerly after the per-fn types), and non-capturing lambdas lifted into
+/// extra functions (lowered by the fixed-point loop in `emit_program`).
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub(crate) enum TableEntry {
+    /// A program function referenced as a value.
+    Fn(usize),
+    /// An ok-wrapping adapter: a PURE fn filling an EFFECT slot (C-221).
+    Adapter { target: usize, raw: SliceTy },
+    /// A lifted non-capturing lambda (index into `FnWork::lifted`).
+    Lambda(u32),
+}
+
+#[derive(Clone)]
+pub(crate) struct LiftedLambda {
+    pub(crate) params: Vec<(VarId, SliceTy)>,
+    pub(crate) ret: Option<SliceTy>,
+    pub(crate) effect_raw: Option<SliceTy>,
+    pub(crate) body: IrExpr,
+}
+
+/// A call_indirect signature at the wasm value-type level.
+type WasmSig = (Vec<ValType>, Option<ValType>);
+/// A lifted lambda's lowered form: wasm sig halves, body, callee set.
+type LoweredLifted = (Vec<ValType>, Option<ValType>, Function, HashSet<usize>);
+
+#[derive(Default)]
+pub(crate) struct FnWork {
+    pub(crate) entries: std::cell::RefCell<Vec<TableEntry>>,
+    entry_ids: std::cell::RefCell<HashMap<TableEntry, u32>>,
+    itypes: std::cell::RefCell<Vec<WasmSig>>,
+    itype_ids: std::cell::RefCell<HashMap<WasmSig, u32>>,
+    /// First extra type index (15 fixed + one per table fn).
+    pub(crate) itype_base: std::cell::Cell<u32>,
+    pub(crate) lifted: std::cell::RefCell<Vec<LiftedLambda>>,
+}
+
+impl FnWork {
+    /// The +1-biased funcref-table slot for an entry.
+    pub(crate) fn slot(&self, e: TableEntry) -> u32 {
+        if let Some(&i) = self.entry_ids.borrow().get(&e) {
+            return i + 1;
+        }
+        let mut v = self.entries.borrow_mut();
+        let i = v.len() as u32;
+        v.push(e.clone());
+        self.entry_ids.borrow_mut().insert(e, i);
+        i + 1
+    }
+
+    /// The wasm type index for a call_indirect signature.
+    pub(crate) fn itype(&self, params: Vec<ValType>, ret: Option<ValType>) -> u32 {
+        let key = (params, ret);
+        if let Some(&i) = self.itype_ids.borrow().get(&key) {
+            return self.itype_base.get() + i;
+        }
+        let mut v = self.itypes.borrow_mut();
+        let i = v.len() as u32;
+        v.push(key.clone());
+        self.itype_ids.borrow_mut().insert(key, i);
+        self.itype_base.get() + i
+    }
+
+    pub(crate) fn register_lambda(&self, ll: LiftedLambda) -> u32 {
+        let mut v = self.lifted.borrow_mut();
+        let i = v.len() as u32;
+        v.push(ll);
+        i
+    }
 }
 
 /// The registry's implementation-symbol set (unique by design — they are
@@ -510,6 +616,11 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let true_base = pool.intern("true");
     let false_base = pool.intern("false");
 
+    // Function-VALUE work shared by every lowering below (funcref table,
+    // call_indirect types, lifted lambdas).
+    let work = FnWork::default();
+    work.itype_base.set(15 + table.infos.len() as u32);
+
     // Lower every callable function; a body that doesn't lower yet is
     // recorded (not fatal) — fatal only if `main` can reach it.
     let mut lowered: Vec<Result<(Function, HashSet<usize>), String>> = Vec::new();
@@ -520,7 +631,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         }
         let params: Vec<(VarId, SliceTy)> =
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-        let ctx = Ctx { table: &table, types: &types };
+        let ctx = Ctx { table: &table, types: &types, work: &work };
         let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
@@ -544,14 +655,46 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
-    let ctx = Ctx { table: &table, types: &types };
+    let ctx = Ctx { table: &table, types: &types, work: &work };
     let main_plan = FnPlan { ret: None, effect_raw: None, in_main: true };
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, &main.body, &ir.top_lets, None, &ctx, &mut pool)?;
 
+    // Lift lambdas to extra functions (they may register further lambdas
+    // or table entries — iterate to the fixed point).
+    let mut lifted_fns: Vec<LoweredLifted> = Vec::new();
+    loop {
+        let pending: Vec<LiftedLambda> = {
+            let all = work.lifted.borrow();
+            all[lifted_fns.len()..].to_vec()
+        };
+        if pending.is_empty() {
+            break;
+        }
+        for ll in pending {
+            let plan = FnPlan { ret: ll.ret, effect_raw: ll.effect_raw, in_main: false };
+            let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], None, &ctx, &mut pool)?;
+            lifted_fns.push((
+                ll.params.iter().map(|(_, t)| t.val_type()).collect(),
+                ll.ret.map(SliceTy::val_type),
+                f,
+                calls,
+            ));
+        }
+    }
+
     // Reachability: refuse the program iff a call chain from `main` lands
     // on a function whose body did not lower (its stub would trap).
     let mut queue: Vec<usize> = main_calls.iter().copied().collect();
+    for (_, _, _, calls) in &lifted_fns {
+        queue.extend(calls.iter().copied());
+    }
+    for e in work.entries.borrow().iter() {
+        match e {
+            TableEntry::Fn(i) | TableEntry::Adapter { target: i, .. } => queue.push(*i),
+            TableEntry::Lambda(_) => {}
+        }
+    }
     let mut visited: HashSet<usize> = HashSet::new();
     while let Some(i) = queue.pop() {
         if !visited.insert(i) {
@@ -560,6 +703,35 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         match &lowered[i] {
             Err(reason) => return unsup(reason),
             Ok((_, calls)) => queue.extend(calls.iter().copied()),
+        }
+    }
+
+    // Extra functions (ok-wrap adapters + lifted lambdas) resolve BEFORE
+    // the type section is built — their call_indirect/type interning must
+    // land inside it. Indices start right after main.
+    let extra_base = F_FN_BASE + table.infos.len() as u32 + 1;
+    let mut extra_fns: Vec<(u32, Function)> = Vec::new();
+    let mut entry_fn_indices: Vec<u32> = Vec::new();
+    for e in work.entries.borrow().clone() {
+        match e {
+            TableEntry::Fn(i) => entry_fn_indices.push(F_FN_BASE + i as u32),
+            TableEntry::Adapter { target, raw } => {
+                let info = &table.infos[target];
+                let ti = work.itype(
+                    info.params.iter().map(|t| t.val_type()).collect(),
+                    Some(ValType::I32),
+                );
+                let idx = extra_base + extra_fns.len() as u32;
+                extra_fns.push((ti, emit_ok_adapter(F_FN_BASE + target as u32, &info.params, raw)));
+                entry_fn_indices.push(idx);
+            }
+            TableEntry::Lambda(j) => {
+                let (ps, r, f, _) = &lifted_fns[j as usize];
+                let ti = work.itype(ps.clone(), *r);
+                let idx = extra_base + extra_fns.len() as u32;
+                extra_fns.push((ti, f.clone()));
+                entry_fn_indices.push(idx);
+            }
         }
     }
 
@@ -595,6 +767,11 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
             let results: Vec<ValType> = info.ret.iter().map(|t| t.val_type()).collect();
             types.ty().function(params, results);
         }
+    }
+    // Function-value types (call_indirect signatures + extra fns),
+    // indices assigned eagerly during lowering from itype_base.
+    for (ps, r) in work.itypes.borrow().iter() {
+        types.ty().function(ps.clone(), r.iter().copied().collect::<Vec<_>>());
     }
 
     let mut imports = ImportSection::new();
@@ -632,6 +809,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         functions.function(T_FN_BASE + i as u32);
     }
     functions.function(T_MAIN); // main, last
+    for (ti, _) in &extra_fns {
+        functions.function(*ti);
+    }
 
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
@@ -659,6 +839,27 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         GlobalType { val_type: ValType::I32, mutable: false, shared: false },
         &ConstExpr::i32_const(heap_start as i32),
     );
+
+    // The funcref table always exists (a call_indirect in ANY body needs
+    // it, entries or not); slot 0 stays uninitialized — null funcref =
+    // trap — so fn-value slots are +1-biased (W-1).
+    let mut tables = TableSection::new();
+    let mut elements = ElementSection::new();
+    let n = entry_fn_indices.len() as u64 + 1;
+    tables.table(TableType {
+        element_type: RefType::FUNCREF,
+        minimum: n,
+        maximum: Some(n),
+        table64: false,
+        shared: false,
+    });
+    if !entry_fn_indices.is_empty() {
+        elements.active(
+            Some(0),
+            &ConstExpr::i32_const(1),
+            Elements::Functions(entry_fn_indices.clone().into()),
+        );
+    }
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
@@ -704,6 +905,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         }
     }
     code.function(&main_fn);
+    for (_, f) in &extra_fns {
+        code.function(f);
+    }
 
     let mut data = DataSection::new();
     data.active(0, &ConstExpr::i32_const(0), pool.data.iter().copied());
@@ -713,11 +917,14 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         .section(&types)
         .section(&imports)
         .section(&functions)
+        .section(&tables)
         .section(&memories)
         .section(&globals)
-        .section(&exports)
-        .section(&code)
-        .section(&data);
+        .section(&exports);
+    if !entry_fn_indices.is_empty() {
+        module.section(&elements);
+    }
+    module.section(&code).section(&data);
     Ok(module.finish())
 }
 
@@ -810,6 +1017,7 @@ fn lower_fn(
             in_tail: false,
             cur_module,
             in_main,
+            work: ctx.work,
             f: &mut f,
         };
         for tl in top_lets {
