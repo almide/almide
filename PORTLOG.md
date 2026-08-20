@@ -1511,3 +1511,17 @@ param; types are per-helper now. Mutant 024 (final piece mis-based).
 First slice landed on the als-mounted corpus: **denominator 590 → 591**.
 
 **Burn-up: 270 → 272 / 591**, floor 272, surface 126, zero divergence.
+
+---
+
+## Unit 6 — stage 36: the gleanings batch (2026-08-20)
+
+Four small honest walls fall together: statement-position `f()!` / `f()?`
+(the marker machinery runs — propagation/abort — and the ok payload
+drops; the ×14 expr:Try histogram entry was THIS, not a marker gap),
+`{}` empty-map literals (a zero-entry map block), `option.unwrap_or` /
+`result.unwrap_or` as module surfaces (the `??` machinery verbatim), and
+`list.first` (= get(xs, 0), the same Option-returning helper). Mutant
+025 (unwrap_or's null test inverted).
+
+**Burn-up: 272 → 278 / 591**, floor 278, surface 131, zero divergence.

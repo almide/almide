@@ -36,6 +36,7 @@ call:json.parse
 call:json.stringify
 call:list.enumerate
 call:list.filter
+call:list.first
 call:list.fold
 call:list.get
 call:list.get_or
@@ -52,8 +53,10 @@ call:map.len
 call:map.new
 call:map.set
 call:option.to_result__Int_LoadError
+call:option.unwrap_or
 call:println
 call:process.exit
+call:result.unwrap_or
 call:set.contains
 call:set.from_list
 call:set.insert
@@ -79,6 +82,7 @@ call:value.stringify
 expr:BinOp
 expr:Block
 expr:Call
+expr:EmptyMap
 expr:ForIn
 expr:If
 expr:IndexAccess
@@ -88,6 +92,7 @@ expr:LitBool
 expr:LitFloat
 expr:LitInt
 expr:LitStr
+expr:MapLiteral
 expr:Match
 expr:Member
 expr:OptionNone

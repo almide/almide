@@ -237,6 +237,15 @@ impl Emitter<'_> {
                 self.lower_forin(*var, var_tuple.as_deref(), iterable, body)
             }
             IrExprKind::Unit => Ok(()),
+            // Statement-position `f()!` / `f()?`: the marker machinery
+            // runs (propagation/abort), the ok payload is discarded.
+            IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => {
+                self.lower(e, None)?;
+                self.f.instructions().drop();
+                Ok(())
+            }
+            // `{}` in statement position is a no-op value; in value
+            // position the arm below builds the empty map.
             other => unsup(&format!("expr:{}", expr_kind_name(other))),
         }
     }
@@ -569,6 +578,15 @@ impl Emitter<'_> {
                     Some(t) => t,
                     None => return unsup("map-literal-unit"),
                 }
+            }
+            IrExprKind::EmptyMap => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Map(..) = ty else {
+                    return unsup(&format!("ty-mismatch:empty-map-vs-{ty:?}"));
+                };
+                // An empty map block: zero entries, same shape map.new emits.
+                self.f.instructions().i32_const(0).call(F_ALLOC);
+                ty
             }
             // Unit as a VALUE (an effect ok payload, a Unit bind).
             IrExprKind::Unit => {

@@ -188,6 +188,45 @@ impl Emitter<'_> {
                 self.emit_value_stringify()?;
                 Ok(Some(STR))
             }
+            // option.unwrap_or(o, d) IS `o ?? d`; result.unwrap_or too.
+            CallTarget::Module { module, func, .. }
+                if (module.as_str() == "option" || module.as_str() == "result")
+                    && func.as_str() == "unwrap_or"
+                    && args.len() == 2 =>
+            {
+                let got = self.lower(&args[0], None)?;
+                match got {
+                    SliceTy::Option(h) => {
+                        let et = self.types.el(h);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_eqz()
+                            .if_(BlockType::Result(et.val_type()));
+                        self.lower(&args[1], Some(et))?;
+                        self.f.instructions().else_().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                        self.f.instructions().end();
+                        Ok(Some(et))
+                    }
+                    SliceTy::Result(o, _) => {
+                        let et = self.types.el(o);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                            .i32_const(0)
+                            .i32_ne()
+                            .if_(BlockType::Result(et.val_type()));
+                        self.lower(&args[1], Some(et))?;
+                        self.f.instructions().else_().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                        self.f.instructions().end();
+                        Ok(Some(et))
+                    }
+                    other => unsup(&format!("unwrap-or-of:{other:?}")),
+                }
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);
@@ -323,6 +362,20 @@ impl Emitter<'_> {
                 Ok(Some(SliceTy::Option(h)))
             }
             ("get_or", [xs, idx, default]) => self.lower_list_get_or(xs, idx, default),
+            // first = get(xs, 0) — the same Option-returning helper.
+            ("first", [xs]) => {
+                let elem = match self.lower(xs, None)? {
+                    SliceTy::List(h) => self.types.el(h),
+                    other => return unsup(&format!("list-first-of:{other:?}")),
+                };
+                self.f.instructions().i64_const(0);
+                let helper = match elem.slot_size() {
+                    8 => F_LIST_GET_8,
+                    _ => F_LIST_GET_4,
+                };
+                self.f.instructions().call(helper);
+                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+            }
             // `list.push` MUTATES through its `mut` param on the oracle
             // (the growth fixture pushes as bare statements). Lowered as a
             // write-back: var = $push(var, v). Requires a plain var arg.
