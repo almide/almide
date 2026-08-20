@@ -1544,3 +1544,23 @@ display their fields in NAME order. Mutant 026 (record separator
 shortened).
 
 **Burn-up: 278 → 285 / 591**, floor 285, zero divergence.
+
+---
+
+## Unit 6 — stage 37 hotfix: the fuzzer's THIRD real catch (2026-08-20)
+
+CI red on the display-engine landing: 21 seeds showed a NESTED
+interpolation (`${"${a}~${b}"}`) printed TWICE when followed by more
+appends in the same line. Root cause: the value-position StringInterp
+capture restored the GLOBAL line cursor but left the shared cursor LOCAL
+at the inner build's end — the old per-part stack discipline had
+protected the outer cursor on the operand stack, and the display-engine
+refactor removed that push. The corpus never nests an interp beside
+further parts, so the burn-up stayed green; the fuzzer caught it within
+one CI cycle. Fix: restore the cursor local to the captured region's
+start alongside the global. Process lesson re-learned the hard way: the
+amend cycle skipped the full-net rerun — landing checklist is FULL nets
+after ANY amendment, no exceptions. V-5 permanence: the reduced case
+goes to almide/als as a PR (the two-repo rule), pin bump to follow.
+
+Fuzz 146→167 compared, zero findings; parity 285/591 unchanged.

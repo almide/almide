@@ -798,6 +798,14 @@ impl Emitter<'_> {
                     .call(F_BUF_TO_BLOCK)
                     .local_get(start)
                     .global_set(G_LINE_CURSOR);
+                // The build clobbered the shared cursor local — restore it
+                // to the captured region's start, or an ENCLOSING display
+                // append lands past the inner bytes and doubles the text
+                // (fuzz seeds 1/7/9/… the day the display engine landed).
+                self.f
+                    .instructions()
+                    .local_get(start)
+                    .local_set(self.cursor_local);
                 self.release_i32();
                 STR
             }
