@@ -10,7 +10,15 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 0 — Semantics must stop moving (everything else builds on this)
 
-- [ ] **A0-1 (#530 + #1485 + #1483) (L) Spec freeze + compatibility contract.** 0.57.2 itself carries
+- [x] **A0-1 (#530 + #1485 + #1483) (L) Spec freeze + compatibility contract.**
+  DECLARED 2026-08-20 (4997c7535, after the owner-sequenced ADR-0012 D2/D3
+  legs): docs/STABILITY.md — frozen surface (LLM-facing = stable), ALS
+  conformance clause ("the implementation is wrong"), breaking-change policy
+  (major + @dialect bump + migration note); proofs/stability-closure.toml —
+  the six-criterion stability bar with Ns fixed before the numbers
+  (#1485 CLOSED), reported on every push. Residual burn-downs stay with
+  their carriers: #530 (prose contradictions to zero), #1483 (the
+  bidirectional surface sweep + experimental marker). 0.57.2 itself carries
   DECIDED 2026-08-20 (owner): freeze is GO, sequenced AFTER the ADR-0012
   error-surface end state lands — #1193 (D2: `-> T!E` carries the typed error
   in the fallibility marker) then #1194 (D3: fmt normalizes return-position
