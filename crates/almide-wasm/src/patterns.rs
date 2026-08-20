@@ -30,9 +30,6 @@ impl Emitter<'_> {
         if arms.is_empty() {
             return unsup("match:no-arms");
         }
-        if arms.iter().any(|a| a.guard.is_some()) {
-            return unsup("match-guard");
-        }
         let subj_ty = self.lower(subject, None)?;
         let scr = match subj_ty.val_type() {
             ValType::I64 => self.scr_i64_local,
@@ -52,26 +49,47 @@ impl Emitter<'_> {
         tail: bool,
     ) -> Result<(), EmitError> {
         let arm = &arms[0];
-        if pattern_irrefutable(&arm.pattern) {
+        let irrefutable = pattern_irrefutable(&arm.pattern);
+        if irrefutable && arm.guard.is_none() {
             // Selected unconditionally; later arms are dead (checker-
             // verified reachability aside, the oracle picks the first).
             self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
             return self.lower_arm_body(&arm.body, result, tail);
         }
-        self.emit_pattern_test(&arm.pattern, subj_ty, scr)?;
+        // The arm's verdict: pattern test AND guard. Binds run BEFORE the
+        // guard (it references them); locals are function-scoped, so on a
+        // guarded arm the body needs no re-bind, and a failed guard's
+        // binds are harmlessly overwritten by whichever arm matches next.
+        match &arm.guard {
+            None => self.emit_pattern_test(&arm.pattern, subj_ty, scr)?,
+            Some(g) if irrefutable => {
+                self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+                self.lower(g, Some(BOOL))?;
+            }
+            Some(g) => {
+                self.emit_pattern_test(&arm.pattern, subj_ty, scr)?;
+                self.f.instructions().if_(BlockType::Result(ValType::I32));
+                self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+                self.lower(g, Some(BOOL))?;
+                self.f.instructions().else_().i32_const(0).end();
+            }
+        }
         let bt = match result {
             Some(t) => BlockType::Result(t.val_type()),
             None => BlockType::Empty,
         };
         self.f.instructions().if_(bt);
-        self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+        if arm.guard.is_none() {
+            self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+        }
         self.lower_arm_body(&arm.body, result, tail)?;
         self.f.instructions().else_();
         if arms.len() > 1 {
             self.lower_arm_chain(&arms[1..], subj_ty, scr, result, tail)?;
         } else {
-            // The checker promises exhaustiveness — if it's ever wrong,
-            // trap LOUDLY instead of silently misbehaving.
+            // The checker promises exhaustiveness — if it's ever wrong
+            // (or every remaining arm was guarded away), trap LOUDLY
+            // instead of silently misbehaving.
             self.f.instructions().unreachable();
         }
         self.f.instructions().end();
