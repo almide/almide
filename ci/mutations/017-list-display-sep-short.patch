@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index f2a321b85..3915cfe75 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -801,7 +801,7 @@ impl Emitter<'_> {
+                 .if_(BlockType::Empty);
+             i.local_get(self.cursor_local)
+                 .i32_const(sep as i32 + almide_layout::PAYLOAD as i32)
+-                .i32_const(2)
++                .i32_const(1)
+                 .call(F_APPEND_COPY)
+                 .local_set(self.cursor_local);
+             i.end();

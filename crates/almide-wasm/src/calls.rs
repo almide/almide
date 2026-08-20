@@ -713,11 +713,6 @@ impl Emitter<'_> {
                 // String->String: byte-level string building; its tuple
                 // helpers are module fns lowered by THIS emitter.
                 "string_to_upper",
-                // List display for the layout-SHARED element classes only
-                // (8-byte Int/Float slots); Bool/String lists keep the
-                // incumbent's 8-byte slots and stay walled.
-                "list_to_string",
-                "list_to_string_f",
             ];
             // Second tier: signatures that TRIP the coupled-type proxy
             // below but whose bodies are AUDITED raw-write-free — every
@@ -764,6 +759,111 @@ impl Emitter<'_> {
             }
             Some(i)
         })
+    }
+
+    /// `${list}`: append "[e, e]" into the line buffer natively. Enters
+    /// with `[cursor, list]` on the stack (the shared part preamble);
+    /// leaves the cursor local updated.
+    fn emit_list_display(&mut self, el: SliceTy) -> Result<(), EmitError> {
+        let stride = el.slot_size() as i32;
+        let open_b = self.pool.intern("[");
+        let close_b = self.pool.intern("]");
+        let sep = self.pool.intern(", ");
+        let hb = self.hold_i32()?;
+        let end = self.hold_i32()?;
+        let cur = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hb);
+            // The preamble pushed the line cursor; appends below manage
+            // cursor_local themselves.
+            i.drop();
+            // '['
+            i.local_get(self.cursor_local)
+                .i32_const(open_b as i32 + almide_layout::PAYLOAD as i32)
+                .i32_const(1)
+                .call(F_APPEND_COPY)
+                .local_set(self.cursor_local);
+            i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(cur);
+            i.local_get(cur)
+                .local_get(hb)
+                .i32_load(len_memarg())
+                .i32_add()
+                .local_set(end);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+            // separator for every element after the first
+            i.local_get(cur)
+                .local_get(hb)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .i32_ne()
+                .if_(BlockType::Empty);
+            i.local_get(self.cursor_local)
+                .i32_const(sep as i32 + almide_layout::PAYLOAD as i32)
+                .i32_const(2)
+                .call(F_APPEND_COPY)
+                .local_set(self.cursor_local);
+            i.end();
+        }
+        match el {
+            INT => {
+                let mut i = self.f.instructions();
+                i.local_get(self.cursor_local);
+                i.local_get(cur).i64_load(wasm_encoder::MemArg {
+                    offset: 0,
+                    align: 2,
+                    memory_index: 0,
+                });
+                i.call(F_APPEND_I64).local_set(self.cursor_local);
+            }
+            FLOAT => {
+                // Element formatting = the SAME compound form the oracle
+                // uses for `${float}` (integer-valued floats drop ".0").
+                let Some(idx) = self.resolve_qualified("float.to_string_compound") else {
+                    return unsup("interp-part:ListFloat-unlinked");
+                };
+                let info = &self.table.infos[idx];
+                if info.refuse.is_some() || info.ret != Some(STR) {
+                    return unsup("interp-part:ListFloat-impl");
+                }
+                let widx = info.wasm_index;
+                self.calls.insert(idx);
+                let mut i = self.f.instructions();
+                i.local_get(cur).f64_load(wasm_encoder::MemArg {
+                    offset: 0,
+                    align: 2,
+                    memory_index: 0,
+                });
+                i.call(widx).local_set(self.tmp_i32_local);
+                i.local_get(self.cursor_local)
+                    .local_get(self.tmp_i32_local)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(self.tmp_i32_local)
+                    .i32_load(len_memarg())
+                    .call(F_APPEND_COPY)
+                    .local_set(self.cursor_local);
+            }
+            _ => return unsup("interp-part:List-el"),
+        }
+        {
+            let mut i = self.f.instructions();
+            i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
+            i.br(0);
+            i.end();
+            i.end();
+            // ']'
+            i.local_get(self.cursor_local)
+                .i32_const(close_b as i32 + almide_layout::PAYLOAD as i32)
+                .i32_const(1)
+                .call(F_APPEND_COPY)
+                .local_set(self.cursor_local);
+        }
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
     }
 
     /// `println`/`eprintln`: interpolations build in the line buffer;
@@ -884,29 +984,14 @@ impl Emitter<'_> {
                                 SliceTy::Scalar(Scalar::Int) | SliceTy::Scalar(Scalar::Float)
                             ) =>
                         {
-                            let surface = match self.types.el(h) {
-                                SliceTy::Scalar(Scalar::Int) => "list.to_string",
-                                _ => "list.to_string_f",
-                            };
-                            let Some(i) = self.resolve_qualified(surface) else {
-                                return unsup("interp-part:List-unlinked");
-                            };
-                            let info = &self.table.infos[i];
-                            if info.refuse.is_some() || info.ret != Some(STR) {
-                                return unsup("interp-part:List-impl");
-                            }
-                            let idx = info.wasm_index;
-                            self.calls.insert(i);
-                            self.f
-                                .instructions()
-                                .call(idx)
-                                .local_tee(self.tmp_i32_local)
-                                .i32_const(almide_layout::PAYLOAD as i32)
-                                .i32_add()
-                                .local_get(self.tmp_i32_local)
-                                .i32_load(len_memarg())
-                                .call(F_APPEND_COPY)
-                                .local_set(self.cursor_local);
+                            // NATIVE display build: "[e, e]" appended
+                            // straight into the line buffer. The linked
+                            // list_to_string impls read the len header as
+                            // COUNT (the incumbent's convention; ours is
+                            // BYTES) — a read-side layout coupling the
+                            // whitelist audit now checks for.
+                            let el = self.types.el(h);
+                            self.emit_list_display(el)?;
                         }
                         other => return unsup(&format!("interp-part:{other:?}")),
                     }

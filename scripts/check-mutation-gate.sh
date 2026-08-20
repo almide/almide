@@ -21,11 +21,35 @@ if ! git diff --quiet; then
   exit 2
 fi
 
+# Scope (ratified 2026-08-20): ALMIDE_MUTATION_SCOPE=incremental runs only
+# the mutants whose patched files intersect the work in flight (committed
+# ahead of origin/greenfield + staged); CI's mutation-gate job always runs
+# the FULL sweep on every push, so no verification is lost — the landing
+# cycle just stops re-proving untouched mutants locally.
+SCOPE="${ALMIDE_MUTATION_SCOPE:-full}"
+CHANGED=""
+if [ "$SCOPE" = "incremental" ]; then
+  CHANGED=$( (git diff --name-only origin/greenfield...HEAD 2>/dev/null; git diff --name-only --cached) | sort -u)
+  echo "incremental scope; changed files:"
+  echo "$CHANGED" | sed 's/^/  /'
+fi
+
 SUITES=(--test backend_parity --test fuzz_differential --test alias_semantics --test tail_calls)
 fail=0
 
 for patch in ci/mutations/*.patch; do
   name=$(basename "$patch")
+  if [ "$SCOPE" = "incremental" ]; then
+    patch_files=$(grep '^+++ b/' "$patch" | sed 's|+++ b/||' | sort -u)
+    in_scope=0
+    for f in $patch_files; do
+      if echo "$CHANGED" | grep -qx "$f"; then in_scope=1; fi
+    done
+    if [ "$in_scope" = 0 ]; then
+      echo "skip: $name (out of scope; CI full sweep covers it)"
+      continue
+    fi
+  fi
   if ! git apply "$patch" 2>/dev/null; then
     echo "FAIL: $name no longer applies — refresh the mutant, do not retire it"
     fail=1

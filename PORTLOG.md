@@ -1231,3 +1231,28 @@ are excluded from flattening — the init-order slice is real and next);
 mut-param, module globals, Unit ABI) — not an unwrap gap.
 
 **Burn-up: 231 → 234 / 590**, floor 234, surface 109, zero divergence.
+
+---
+
+## Unit 6 — stage 25: the fuzzer's second real catch + gate incrementalization (2026-08-20)
+
+**Fuzz finding (the generator learned `${list}` and caught stage 24's
+wiring the same hour):** the linked list_to_string impls read the len
+header as ELEMENT COUNT — the incumbent wasm's convention; ours is BYTES
+— so `${[1, 1]}` printed garbage elements from past the block's end. A
+READ-side layout coupling: the whitelist audit checked raw WRITES only.
+The corpus never exercised `${list}` (the +3 at stage 24 came from
+float_parse), so the burn-up stayed green — the independent net earned
+its keep. Fix: the display impls are RETRACTED from the whitelist; the
+list shell now builds NATIVELY in the line buffer ('[' + per-element
+F_APPEND_I64 / compound-float + ', ' + ']'), byte-matching the oracle.
+Audit criterion extended: read-side header semantics count as coupling.
+Mutant 017 (separator shortened) — 68 fuzz findings under the mutant.
+
+**Mutation gate incrementalization (ratified ○):** locally the gate runs
+only mutants whose patched files intersect the work in flight
+(`ALMIDE_MUTATION_SCOPE=incremental`); CI's mutation-gate job keeps the
+FULL sweep on every push. Verification total unchanged; landing cycles
+lose the ~15-minute re-proof of untouched mutants.
+
+**Burn-up: 234 → 236 / 590**, floor 236, zero divergence.

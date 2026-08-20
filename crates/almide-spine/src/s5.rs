@@ -122,10 +122,24 @@ fn link_self_host(
             // at emission — the demand is implicit in the IR.
             almide::ir::IrExprKind::StringInterp { parts } => {
                 for p in parts {
-                    if let almide::ir::IrStringPart::Expr { expr } = p
-                        && matches!(expr.ty, almide::types::Ty::Float)
-                    {
-                        out.insert("float.to_string_compound".to_string());
+                    if let almide::ir::IrStringPart::Expr { expr } = p {
+                        use almide::types::{constructor::TypeConstructorId, Ty};
+                        match &expr.ty {
+                            Ty::Float => {
+                                out.insert("float.to_string_compound".to_string());
+                            }
+                            // List parts display through the linked list
+                            // formatters — same implicit-demand rule.
+                            // `${List[Float]}` elements format through
+                            // the same compound form as `${Float}` (the
+                            // list shell builds natively in the emitter).
+                            Ty::Applied(TypeConstructorId::List, args)
+                                if args.len() == 1 && matches!(args[0], Ty::Float) =>
+                            {
+                                out.insert("float.to_string_compound".to_string());
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }

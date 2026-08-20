@@ -438,7 +438,8 @@ impl Gen {
                 if k > 0 {
                     parts.push_str([" ", "|", ""][self.rng.below(3)]);
                 }
-                let ty = [Ty::Int, Ty::Bool, Ty::Str][self.rng.below(3)];
+                let ty = [Ty::Int, Ty::Bool, Ty::Str, Ty::Float, Ty::ListInt]
+                    [self.rng.below(5)];
                 let e = self.expr(ty, depth.saturating_sub(1));
                 parts.push_str(&format!("${{{e}}}"));
             }
