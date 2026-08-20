@@ -181,6 +181,13 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_STR_LEN_CHARS);
                 Ok(Some(INT))
             }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "json" && func.as_str() == "stringify" && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.emit_value_stringify()?;
+                Ok(Some(STR))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);

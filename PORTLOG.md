@@ -1374,3 +1374,22 @@ abstention), not a backend one. The literal synthesis path itself reuses
 `map.from_list`'s upsert, which claimed fixtures do exercise. When the
 MapLiteral fixtures' remaining walls fall, the mutant returns WITH its
 observers.
+
+---
+
+## Unit 6 — stage 31: the native JSON serializer (2026-08-20)
+
+`json.stringify`/`value.stringify` land as PER-PROGRAM emitted helpers
+(`$vjson` + `$vjson_quote`, recursive, assembled right after main with
+their indices promised during lowering): tag switch over the rebuilt
+Value blocks, the incumbent's exact surface — 5-escape quoting (\\ \" \n
+\r \t, no \u escapes), separators without spaces, floats through the
+LINKED float.to_string with any trailing ".0" stripped (the `{}` form:
+2.0→"2", 2.5→"2.5"), unknown tags render "null". Build runs over the
+line buffer under the nested-cursor discipline and captures via
+buf_to_block. Probe end-to-end:
+`{"name":"a\"b\\c","ns":[1,2],"f":2,"g":2.5,"t":true,"z":null}`.
+The stringify mutant waits for its observers (only one fixture claims so
+far — the 022 doctrine), arriving with value.field/keys/merge.
+
+**Burn-up: 265 → 266 / 590**, floor 266, zero divergence.

@@ -115,6 +115,13 @@ fn link_self_host(
             almide::ir::IrExprKind::Call { target, .. }
             | almide::ir::IrExprKind::TailCall { target, .. } => {
                 if let almide::ir::CallTarget::Module { module, func, .. } = target {
+                    // The native JSON serializer formats floats through
+                    // the linked float.to_string.
+                    if (module.as_str() == "json" || module.as_str() == "value")
+                        && func.as_str() == "stringify"
+                    {
+                        out.insert("float.to_string".to_string());
+                    }
                     out.insert(format!("{}.{}", module.as_str(), func.as_str()));
                 }
             }

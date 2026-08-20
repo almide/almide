@@ -509,6 +509,38 @@ type WasmSig = (Vec<ValType>, Option<ValType>);
 /// A lifted lambda's lowered form: wasm sig halves, body, callee set.
 type LoweredLifted = (Vec<ValType>, Option<ValType>, Function, HashSet<usize>);
 
+/// A per-program emitted helper (assembled right after `main`, BEFORE the
+/// table-entry extras — call sites need these indices DURING lowering).
+#[derive(Clone, PartialEq)]
+pub(crate) enum Helper {
+    /// `$vjson(cursor, value) -> cursor` — the JSON serializer core
+    /// (recursive; floats through the LINKED float.to_string minus any
+    /// trailing ".0" — the incumbent's `{}` form).
+    JsonValue { float_to_string: u32, frags: JsonFrags },
+    /// `$vjson_quote(cursor, str) -> cursor` — the 5-escape quoted form.
+    JsonQuote { frags: JsonFrags },
+}
+
+/// Pooled fragment addresses the JSON helpers append from.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct JsonFrags {
+    pub(crate) null_: u32,
+    pub(crate) true_: u32,
+    pub(crate) false_: u32,
+    pub(crate) esc_backslash: u32,
+    pub(crate) esc_quote: u32,
+    pub(crate) esc_n: u32,
+    pub(crate) esc_r: u32,
+    pub(crate) esc_t: u32,
+    pub(crate) quote: u32,
+    pub(crate) comma: u32,
+    pub(crate) colon: u32,
+    pub(crate) lbrack: u32,
+    pub(crate) rbrack: u32,
+    pub(crate) lbrace: u32,
+    pub(crate) rbrace: u32,
+}
+
 #[derive(Default)]
 pub(crate) struct FnWork {
     pub(crate) entries: std::cell::RefCell<Vec<TableEntry>>,
@@ -518,6 +550,11 @@ pub(crate) struct FnWork {
     /// First extra type index (15 fixed + one per table fn).
     pub(crate) itype_base: std::cell::Cell<u32>,
     pub(crate) lifted: std::cell::RefCell<Vec<LiftedLambda>>,
+    /// Emitted helpers; function index = helper_base + position.
+    pub(crate) helpers: std::cell::RefCell<Vec<Helper>>,
+    /// F_FN_BASE + infos.len() + 1 (right after main) — known before
+    /// lowering starts, so call sites take helper indices eagerly.
+    pub(crate) helper_base: std::cell::Cell<u32>,
 }
 
 impl FnWork {
@@ -544,6 +581,17 @@ impl FnWork {
         v.push(key.clone());
         self.itype_ids.borrow_mut().insert(key, i);
         self.itype_base.get() + i
+    }
+
+    /// The function index of a helper, registering it on first use.
+    pub(crate) fn helper(&self, h: Helper) -> u32 {
+        let mut v = self.helpers.borrow_mut();
+        if let Some(pos) = v.iter().position(|x| *x == h) {
+            return self.helper_base.get() + pos as u32;
+        }
+        let pos = v.len() as u32;
+        v.push(h);
+        self.helper_base.get() + pos
     }
 
     pub(crate) fn register_lambda(&self, ll: LiftedLambda) -> u32 {
@@ -722,6 +770,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // call_indirect types, lifted lambdas).
     let work = FnWork::default();
     work.itype_base.set(15 + table.infos.len() as u32);
+    work.helper_base.set(F_FN_BASE + table.infos.len() as u32 + 1);
 
     // Lower every callable function; a body that doesn't lower yet is
     // recorded (not fatal) — fatal only if `main` can reach it.
@@ -818,6 +867,22 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // land inside it. Indices start right after main.
     let extra_base = F_FN_BASE + table.infos.len() as u32 + 1;
     let mut extra_fns: Vec<(u32, Function)> = Vec::new();
+    // Emitted helpers assemble FIRST — their indices were promised during
+    // lowering; the table-entry extras follow.
+    let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
+    for h in &helper_snapshot {
+        let ti = work.itype(vec![ValType::I32, ValType::I32], Some(ValType::I32));
+        let f = match h {
+            Helper::JsonValue { float_to_string, frags } => value::emit_json_value_helper(
+                work.helper_base.get(),
+                &helper_snapshot,
+                *float_to_string,
+                *frags,
+            ),
+            Helper::JsonQuote { frags } => value::emit_json_quote_helper(*frags),
+        };
+        extra_fns.push((ti, f));
+    }
     let mut entry_fn_indices: Vec<u32> = Vec::new();
     for e in work.entries.borrow().clone() {
         match e {

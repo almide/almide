@@ -68,6 +68,7 @@ call:value.bool
 call:value.int
 call:value.object
 call:value.str
+call:value.stringify
 expr:BinOp
 expr:Block
 expr:Call
