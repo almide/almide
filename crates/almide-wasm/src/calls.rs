@@ -713,6 +713,11 @@ impl Emitter<'_> {
                 // String->String: byte-level string building; its tuple
                 // helpers are module fns lowered by THIS emitter.
                 "string_to_upper",
+                // List display for the layout-SHARED element classes only
+                // (8-byte Int/Float slots); Bool/String lists keep the
+                // incumbent's 8-byte slots and stay walled.
+                "list_to_string",
+                "list_to_string_f",
             ];
             // Second tier: signatures that TRIP the coupled-type proxy
             // below but whose bodies are AUDITED raw-write-free — every
@@ -721,7 +726,8 @@ impl Emitter<'_> {
             // read-only load on a layout-shared block (string payload).
             // The proxy guards hand-written block internals; it misfires
             // on constructor-built sums.
-            const VERIFIED_SUM_BUILDERS: &[&str] = &["string_to_int", "int_from_hex"];
+            const VERIFIED_SUM_BUILDERS: &[&str] =
+                &["string_to_int", "int_from_hex", "float_parse"];
             if !VERIFIED.contains(&impl_fn) && !VERIFIED_SUM_BUILDERS.contains(&impl_fn) {
                 return None;
             }
@@ -858,6 +864,36 @@ impl Emitter<'_> {
                             let info = &self.table.infos[i];
                             if info.refuse.is_some() || info.ret != Some(STR) {
                                 return unsup("interp-part:Float-impl");
+                            }
+                            let idx = info.wasm_index;
+                            self.calls.insert(i);
+                            self.f
+                                .instructions()
+                                .call(idx)
+                                .local_tee(self.tmp_i32_local)
+                                .i32_const(almide_layout::PAYLOAD as i32)
+                                .i32_add()
+                                .local_get(self.tmp_i32_local)
+                                .i32_load(len_memarg())
+                                .call(F_APPEND_COPY)
+                                .local_set(self.cursor_local);
+                        }
+                        SliceTy::List(h)
+                            if matches!(
+                                self.types.el(h),
+                                SliceTy::Scalar(Scalar::Int) | SliceTy::Scalar(Scalar::Float)
+                            ) =>
+                        {
+                            let surface = match self.types.el(h) {
+                                SliceTy::Scalar(Scalar::Int) => "list.to_string",
+                                _ => "list.to_string_f",
+                            };
+                            let Some(i) = self.resolve_qualified(surface) else {
+                                return unsup("interp-part:List-unlinked");
+                            };
+                            let info = &self.table.infos[i];
+                            if info.refuse.is_some() || info.ret != Some(STR) {
+                                return unsup("interp-part:List-impl");
                             }
                             let idx = info.wasm_index;
                             self.calls.insert(i);

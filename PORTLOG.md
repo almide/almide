@@ -1211,3 +1211,23 @@ entry was ever registered (221 fixtures briefly red). Mutant 016 (the +1
 bias dropped).
 
 **Burn-up: 221 → 231 / 590**, floor 231, surface 108, zero divergence.
+
+---
+
+## Unit 6 — stage 24: container interpolation + float.parse (2026-08-20)
+
+`${list}` parts route through the SAME linked display impls the oracle
+uses — `list.to_string` (List[Int]) / `list.to_string_f` (List[Float],
+whose ".0"-dropping element form the impl's own header documents) — for
+the layout-SHARED element classes only; Bool/String lists keep the
+incumbent's 8-byte slots and stay walled. Mutant 017 (display surfaces
+swapped). float_parse joins the sum-builder tier (raw stores target a
+scratch buffer's PAYLOAD — offset 12 is layout-shared; sums built via
+ok()/err()).
+
+Wall-owner probe: `var:unmapped` ×5 = MODULE GLOBALS (module top_lets
+are excluded from flattening — the init-order slice is real and next);
+`expr:Unwrap` ×6 is a first-refusal label over deeper walls (fs, Matrix,
+mut-param, module globals, Unit ABI) — not an unwrap gap.
+
+**Burn-up: 231 → 234 / 590**, floor 234, surface 109, zero divergence.

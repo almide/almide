@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 21a03eef8..0c18f411f 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -885,8 +885,8 @@ impl Emitter<'_> {
+                             ) =>
+                         {
+                             let surface = match self.types.el(h) {
+-                                SliceTy::Scalar(Scalar::Int) => "list.to_string",
+-                                _ => "list.to_string_f",
++                                SliceTy::Scalar(Scalar::Int) => "list.to_string_f",
++                                _ => "list.to_string",
+                             };
+                             let Some(i) = self.resolve_qualified(surface) else {
+                                 return unsup("interp-part:List-unlinked");
