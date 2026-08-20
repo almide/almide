@@ -1167,3 +1167,20 @@ designed. Standing rule reaffirmed: no tree edits while a landing task
 runs; drafts go to the scratchpad.
 
 **Burn-up: 216 → 221 / 590**, floor 221, zero divergence.
+
+---
+
+## Stage 22 addendum: the refusal-shaped mutant escape (2026-08-20)
+
+Original mutant 015 (by-name field lookup → positional zip) SURVIVED even
+after the fuzzer gained shuffled anonymous-record literals — not because
+the nets lack teeth but because the mutation degrades into a TYPE MISMATCH
+inside `lower`, i.e. an HONEST REFUSAL: affected programs drop out of the
+compared class instead of diverging, and 13 extra refusals breach neither
+the parity floor nor the compared-count floor. **Refusal-shaped mutants
+are invisible to correctness nets by construction** — the mutant class
+worth keeping is the one that yields WRONG VALUES. Replaced with 015
+layout-reversal (anon field offsets reversed): baseline green, 13 fuzz
+findings under the mutant. Fuzzer additions stay: anonymous-record binds
+print both members immediately, so any placement error is observable in
+every program that binds one.

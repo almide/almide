@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/types_table.rs b/crates/almide-wasm/src/types_table.rs
+index 2450ed415..3ccbc77ff 100644
+--- a/crates/almide-wasm/src/types_table.rs
++++ b/crates/almide-wasm/src/types_table.rs
+@@ -91,7 +91,8 @@ impl TypeTable {
+             return Some(i);
+         }
+         let widths: Vec<u32> = infos.iter().map(|(_, t)| t.slot_size()).collect();
+-        let (offsets, size) = almide_layout::pack_fields(&widths);
++        let (mut offsets, size) = almide_layout::pack_fields(&widths);
++        offsets.reverse();
+         let def_fields = infos
+             .iter()
+             .cloned()

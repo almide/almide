@@ -60,6 +60,10 @@ enum Ty {
     ListInt,
     /// The fixed preamble record `Pt { px: Int, py: Int }`.
     Rec,
+    /// An ANONYMOUS record `{ ax: Int, ay: String }` — field order in the
+    /// literal is shuffled half the time (mutant 015's survival exposed
+    /// that nothing exercised by-name field placement).
+    AnonRec,
     /// The fixed preamble variant `Tr = | Lf(Int) | Nd(Int, Int) | Mt`.
     Vart,
     /// `Map[Int, String]` — exercises entry layout with mixed slot widths.
@@ -80,6 +84,7 @@ impl Ty {
             Ty::OptInt => "Int?",
             Ty::ListInt => "List[Int]",
             Ty::Rec => "Pt",
+            Ty::AnonRec => "{ ax: Int, ay: String }",
             Ty::Vart => "Tr",
             Ty::MapIS => "Map[Int, String]",
             Ty::Float => "Float",
@@ -143,7 +148,7 @@ impl Gen {
             return self.leaf(ty);
         }
         match ty {
-            Ty::Int => match self.rng.below(7) {
+            Ty::Int => match self.rng.below(8) {
                 0 | 1 => self.leaf(Ty::Int),
                 2 => {
                     let op = ["+", "-", "*"][self.rng.below(3)];
@@ -179,7 +184,14 @@ impl Gen {
                     self.vars.pop();
                     format!("list.fold({src}, {init}, ({acc}, {x}) => {body})")
                 }
-                5 => match self.var_of(Ty::Rec) {
+                5 => match self.var_of(Ty::AnonRec) {
+                    Some(v) => format!("{v}.ax"),
+                    None => match self.var_of(Ty::Rec) {
+                        Some(v) => format!("{v}.{}", ["px", "py"][self.rng.below(2)]),
+                        None => self.leaf(Ty::Int),
+                    },
+                },
+                6 => match self.var_of(Ty::Rec) {
                     Some(v) => format!("{v}.{}", ["px", "py"][self.rng.below(2)]),
                     None => match self.var_of(Ty::MapIS) {
                         Some(m) => format!("map.len({m})"),
@@ -251,6 +263,15 @@ impl Gen {
                 }
                 _ => self.leaf(Ty::ListInt),
             },
+            Ty::AnonRec => {
+                let ax = self.expr(Ty::Int, depth.saturating_sub(1));
+                let ay = self.expr(Ty::Str, depth.saturating_sub(1));
+                if self.rng.chance(50) {
+                    format!("{{ ay: {ay}, ax: {ax} }}")
+                } else {
+                    format!("{{ ax: {ax}, ay: {ay} }}")
+                }
+            }
             Ty::Rec => match self.rng.below(3) {
                 0 | 1 => format!(
                     "Pt {{ px: {}, py: {} }}",
@@ -342,6 +363,7 @@ impl Gen {
             }
             Ty::ListInt => "[1, 2]".to_string(),
             Ty::Rec => "Pt { px: 1, py: 2 }".to_string(),
+            Ty::AnonRec => "{ ax: 7, ay: \"z\" }".to_string(),
             Ty::Vart => ["Lf(3)", "Nd(4, 5)", "Mt"][i % 3].to_string(),
             Ty::MapIS => "map.new()".to_string(),
             Ty::SetInt => "set.new()".to_string(),
@@ -379,12 +401,19 @@ impl Gen {
             Ty::MapIS,
             Ty::SetInt,
             Ty::Float,
-        ][self.rng.below(10)];
+            Ty::AnonRec,
+        ][self.rng.below(11)];
         let name = self.fresh();
         let mutable = self.rng.chance(40);
         let kw = if mutable { "var" } else { "let" };
         let value = self.expr(ty, depth);
         self.line(&format!("{kw} {name}: {} = {value}", ty.name()));
+        if ty == Ty::AnonRec {
+            // Read BOTH members immediately: any by-name-placement error
+            // (mutant 015's class) is observable in every program that
+            // binds an anonymous record, whatever the literal's order.
+            self.line(&format!("println(\"${{{name}.ax}}|${{{name}.ay}}\")"));
+        }
         self.vars.push(Var { name, ty, mutable });
     }
 
