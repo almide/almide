@@ -42,6 +42,10 @@ for patch in ci/mutations/*.patch; do
   if [ "$SCOPE" = "incremental" ]; then
     patch_files=$(grep '^+++ b/' "$patch" | sed 's|+++ b/||' | sort -u)
     in_scope=0
+    # A refreshed/added patch is ALWAYS in scope, even when its target
+    # file is not in the diff (the stage-39 red: patches refreshed after
+    # a split landed unverified because only ci/mutations/ changed).
+    if echo "$CHANGED" | grep -qx "ci/mutations/$name"; then in_scope=1; fi
     for f in $patch_files; do
       if echo "$CHANGED" | grep -qx "$f"; then in_scope=1; fi
     done

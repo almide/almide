@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
-index e7282d896..8b4493fb9 100644
---- a/crates/almide-wasm/src/emitter.rs
-+++ b/crates/almide-wasm/src/emitter.rs
-@@ -364,9 +364,7 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 4c1adcfae..ad13398cc 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -330,9 +330,7 @@ impl Emitter<'_> {
                          .i64_const(stride)
                          .i64_mul()
                          .i64_add()

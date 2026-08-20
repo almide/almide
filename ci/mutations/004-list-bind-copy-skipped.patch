@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
-index 04af1bc9a..b06a9bd2b 100644
---- a/crates/almide-wasm/src/emitter.rs
-+++ b/crates/almide-wasm/src/emitter.rs
-@@ -154,15 +154,7 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 4c1adcfae..263e22a64 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -84,15 +84,7 @@ impl Emitter<'_> {
                  // can never be observed through aliases. Bytes joined
                  // when the snapshot fixture showed `let snap = arena`
                  // observing later set_at writes.

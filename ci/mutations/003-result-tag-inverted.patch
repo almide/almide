@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
-index a9da4fb30..d993d22a2 100644
---- a/crates/almide-wasm/src/emitter.rs
-+++ b/crates/almide-wasm/src/emitter.rs
-@@ -584,7 +584,7 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
+index f98fdbd6e..bf14825b1 100644
+--- a/crates/almide-wasm/src/data.rs
++++ b/crates/almide-wasm/src/data.rs
+@@ -65,7 +65,7 @@ impl Emitter<'_> {
                      .i32_const(16)
                      .call(F_ALLOC)
                      .local_tee(hold)

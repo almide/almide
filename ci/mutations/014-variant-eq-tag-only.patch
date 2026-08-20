@@ -1,15 +1,17 @@
-diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
-index fa4bd4055..28ef11de7 100644
---- a/crates/almide-wasm/src/emitter.rs
-+++ b/crates/almide-wasm/src/emitter.rs
-@@ -832,8 +832,8 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/equality.rs b/crates/almide-wasm/src/equality.rs
+index d26000187..d218ff162 100644
+--- a/crates/almide-wasm/src/equality.rs
++++ b/crates/almide-wasm/src/equality.rs
+@@ -231,8 +231,10 @@ impl Emitter<'_> {
                          self.f.instructions().if_(BlockType::Result(ValType::I32));
                          self.f.instructions().i32_const(0);
                          self.f.instructions().else_();
 -                        let payload: Vec<_> =
 -                            cases.iter().filter(|(_, fs)| !fs.is_empty()).collect();
-+                        let payload: Vec<(u32, Vec<(SliceTy, u32)>)> = Vec::new();
-+                        let _ = cases;
++                        let payload: Vec<_> = cases
++                            .iter()
++                            .filter(|(_, fs)| !fs.is_empty() && false)
++                            .collect(); // [MUTANT: payload compare dropped]
                          // if tag==A { fields-A } else if tag==B { fields-B }
                          // … else { 1 } (a unit case: tag equality settled it).
                          for (tag, fields) in &payload {

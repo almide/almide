@@ -1,13 +1,13 @@
-diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
-index 85ece370e..dbb039bad 100644
---- a/crates/almide-wasm/src/calls.rs
-+++ b/crates/almide-wasm/src/calls.rs
-@@ -1028,7 +1028,7 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/display.rs b/crates/almide-wasm/src/display.rs
+index ba17e4b4f..2f901cda1 100644
+--- a/crates/almide-wasm/src/display.rs
++++ b/crates/almide-wasm/src/display.rs
+@@ -183,7 +183,7 @@ impl Emitter<'_> {
                          .i32_ne()
                          .if_(BlockType::Empty);
                  }
 -                self.append_lit(", ");
-+                self.append_lit(",");
++                self.append_lit(","); // [MUTANT: separator shortened]
                  self.f.instructions().end();
                  self.f.instructions().local_get(cur);
                  self.load_ty_slot_at(el);
