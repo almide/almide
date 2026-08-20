@@ -1,0 +1,44 @@
+// @contract: C-300
+// The #1527 top fuzz wall family, graduated: a map LITERAL with `Option[<scalar>]`
+// values — and the `(String, Option[<scalar>])` pairs list it desugars through —
+// lowers on the v1 leg instead of walling. The pair element rides the widened
+// StrStr class (both-slot rc_dec; a Flat-class ctor block owns no further heap,
+// so that free is exact), and the map ops ride the hval twins (handle-level
+// set/get_or; `eq`/`get` stay honest walls — bit-compare vs f64 `==`, and the
+// nested-Option `get` wrapper has no verified drop class yet).
+// The value shapes cover the fuzz specimens: a bound var, an inline ctor, `none`,
+// and an if-result — each held by both an inline literal and a bound one.
+fn main() -> Unit = {
+  let v: Int? = some(41)
+  let w: Int? = none
+  // pairs lists: inline ctor elements and var elements
+  let pairs = [("a", some(1)), ("b", none)]
+  println(int.to_string(list.len(pairs)))
+  let vpairs = [("c", v), ("d", w)]
+  println(int.to_string(list.len(vpairs)))
+  // map literal with ctor / var / if-result values
+  let m = [
+    "k0": v,
+    "k1": some(2),
+    "k2": none,
+    "k3": (if true then some(3) else none)
+  ]
+  println(int.to_string(map.len(m)))
+  println(int.to_string(map.get_or(m, "k0", some(-1)) ?? -9))
+  println(int.to_string(map.get_or(m, "k1", some(-1)) ?? -9))
+  println(int.to_string(map.get_or(m, "k2", some(-1)) ?? -9))
+  println(int.to_string(map.get_or(m, "missing", some(-7)) ?? -9))
+  println(if map.contains(m, "k2") then "has-k2" else "no-k2")
+  // set: replace and append on the hval twins
+  let m2 = map.set(m, "k1", some(22))
+  let m3 = map.set(m2, "k4", none)
+  println(int.to_string(map.len(m3)))
+  println(int.to_string(map.get_or(m3, "k1", some(-1)) ?? -9))
+  println(int.to_string(map.get_or(m3, "k4", some(5)) ?? -9))
+  // an inline literal fed straight to an op (the fuzz call-arg position)
+  println(int.to_string(map.get_or(["q": some(8)], "q", none) ?? -9))
+  // Float payloads keep the same routes
+  let mf = ["x": some(1.5), "y": none]
+  println("${map.get_or(mf, "x", none) ?? -0.5}")
+  println("${map.get_or(mf, "y", none) ?? -0.5}")
+}

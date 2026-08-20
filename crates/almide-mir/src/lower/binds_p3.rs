@@ -311,6 +311,13 @@ impl LowerCtx {
             || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && !is_heap_ty(&a[0]))
             || self.variant_layouts.is_flat_variant_ty(ty)
+            // A `Flat`-class ctor block (`Option[<scalar>]` — scalar payload under
+            // len-as-tag) owns no further heap, so one `rc_dec` IS its full free —
+            // the exact property this predicate certifies (#1527, the map-literal
+            // `["k0": some(1)]` pairs family). `lenlist_elem_class` stays the single
+            // authority on the Flat/LenLoop split, so `Option[String]`/`Result[_,
+            // String]` (owned interior slots) remain excluded here by construction.
+            || crate::lower::lenlist_elem_class(ty) == Some(crate::lower::CtorElemClass::Flat)
             || (self.record_or_anon_drop_type_name(ty).is_none()
                 && self
                     .aggregate_field_tys(ty)

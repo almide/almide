@@ -60,12 +60,21 @@ impl LowerCtx {
                 && (matches!(tys[1], Ty::String)
                     || matches!(&tys[1],
                         Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
-                            if b.len() == 1 && !is_heap_ty(&b[0]))))
+                            if b.len() == 1 && !is_heap_ty(&b[0]))
+                    || crate::lower::lenlist_elem_class(&tys[1])
+                        == Some(crate::lower::CtorElemClass::Flat)))
         {
             // Widened to (String, <flat block>): DropListStrStr's per-tuple BOTH-slot
             // rc_dec is a full free for a String OR List[scalar] second slot — the hval
             // map literal's `("xs", [1, 2, 3])` pairs (the OWNED-builder route the PCC
             // ownership gate accepts, unlike the raw-handle view widening it rejected).
+            // Widened again (#1527, the top fuzz map-literal shape `["k0": some(1)]`): a
+            // `Flat`-class ctor second slot — `Option[<scalar>]`, whose block owns NO
+            // further heap (scalar payload under len-as-tag) — frees exactly under the
+            // same both-slot rc_dec. `LenLoop`-class ctors (`Option[String]`,
+            // `Result[_, String]`) own interior slots a flat rc_dec would LEAK; they
+            // stay excluded by keeping `lenlist_elem_class` the single authority on
+            // that split.
             return Some(ListElemDrop::StrStr);
         }
         if matches!(elem_ty, Ty::Tuple(tys)

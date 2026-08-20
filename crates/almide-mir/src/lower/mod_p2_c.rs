@@ -477,15 +477,20 @@ pub fn is_map_fn_ty(ty: &Ty) -> bool {
 pub fn is_map_hval_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     // A FLAT heap value: a List[scalar] row OR an all-scalar tuple (`map.map(mi,
-    // (v) => (v, v*v))` — C-039). Either way `$__drop_map_hval`'s rc_dec of all
-    // 2n slots is the exact free (both value classes are single flat blocks).
+    // (v) => (v, v*v))` — C-039), OR a Flat-class ctor block (`Option[<scalar>]`
+    // — #1527's map-literal family; `lenlist_elem_class` owns the Flat/LenLoop
+    // split, so `Option[String]`/`Result` values stay excluded). Either way
+    // `$__drop_map_hval`'s rc_dec of all 2n slots is the exact free (every
+    // admitted value class is a single flat block).
     matches!(ty,
         Ty::Applied(TypeConstructorId::Map, a)
             if a.len() == 2 && matches!(a[0], Ty::String)
                 && (matches!(&a[1],
                         Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0]))
                     || matches!(&a[1],
-                        Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))))
+                        Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))
+                    || crate::lower::lenlist_elem_class(&a[1])
+                        == Some(crate::lower::CtorElemClass::Flat)))
 }
 
 /// `Map[String, Map[String, String]]` — the msv family (String keys, MAP values;

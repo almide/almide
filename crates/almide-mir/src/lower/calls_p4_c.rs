@@ -659,6 +659,25 @@ impl LowerCtx {
             self.value_drops.entry(dst).or_default().named_route = Some("map_mlo".to_string());
             return;
         }
+        if crate::lower::is_map_hval_ty(ty) {
+            // `Map[String, <flat heap value>]` arg temp — `$__drop_map_hval` sweeps ALL
+            // 2n slots. The flat fallback's len-slot sweep reads len@4 = n (the ENTRY
+            // count) over a block holding 2n slots, so it freed only the KEY half and
+            // leaked every VALUE block. The site that hit it: `__hvf_at`'s recursion
+            // passes `map_set_hval(...)` as a nested call ARGUMENT, so every
+            // INTERMEDIATE map of a `["k0": v0, "k1": v1, …]` literal dropped here —
+            // (n−1) leaked value blocks per literal, output-invisible; found by the
+            // #1530 heap-cap harness on its first live run (the msv arm above is the
+            // same fix for the nested-map family; hval was simply missing).
+            self.value_drops.entry(dst).or_default().named_route = Some("map_hval".to_string());
+            return;
+        }
+        if crate::lower::is_map_ivh_ty(ty) {
+            // `Map[Int, String]` arg temp — `$__drop_map_ivh` (the bind-site route,
+            // mirrored): same 2n-slot layout, same flat-fallback key-half hole.
+            self.value_drops.entry(dst).or_default().named_route = Some("map_ivh".to_string());
+            return;
+        }
         if let Some(rname) = match ty {
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                 if a.len() == 1 =>

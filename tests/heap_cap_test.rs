@@ -178,6 +178,45 @@ fn a_dropped_rc_dec_meets_the_cap_as_deterministic_oom() {
     );
 }
 
+/// The C-300 leak-regression pin: multi-entry map literals whose intermediate
+/// maps drop as call-argument temps (`__hvf_at`'s recursion). Before the fix,
+/// the flat len-slot sweep freed only the KEY half of each intermediate's
+/// 2n-slot block — (n−1) value blocks leaked per literal, output-invisible;
+/// this harness caught it on its first live run. Under the ceiling, a
+/// regression is a deterministic OOM, not a green run.
+const MAP_LITERAL_CHURN: &str = r#"effect fn main() -> Unit = {
+  var i = 0
+  var acc = 0
+  while i < 15000 {
+    let v: Option[Int] = (if i % 3 == 0 then none else some(i))
+    let m = ["k0": v, "k1": some(i + 1), "k2": none]
+    acc = acc + map.len(m) + (map.get_or(m, "k1", some(0)) ?? 0)
+    let hv = ["a": [i], "b": [i + 1], "c": [i + 2]]
+    acc = acc + map.len(hv)
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}
+"#;
+const MAP_LITERAL_CHURN_EXPECTED: &str = "112597500";
+
+#[test]
+fn map_literal_intermediates_do_not_leak_under_the_cap() {
+    if !wasmtime_available() {
+        eprintln!("skipping: wasmtime not on PATH");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let capped = render_with_cap(MAP_LITERAL_CHURN, PROBE_CAP);
+    let (code, out, err) = run_wat(dir.path(), "map-churn.wat", &capped);
+    assert_eq!(
+        code, 0,
+        "map-literal churn must run flat under the {PROBE_CAP}-byte ceiling \
+         (a red here is the C-300 intermediate-map leak back): {err}"
+    );
+    assert_eq!(out, MAP_LITERAL_CHURN_EXPECTED, "map-literal churn output");
+}
+
 #[test]
 fn native_cap_enforcement_is_live() {
     let dir = tempfile::tempdir().expect("tempdir");
