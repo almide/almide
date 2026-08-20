@@ -13,11 +13,16 @@
 # A file lands in exclusions only when the oracle DIED without producing
 # parseable stdout semantics (e.g. resolve failure exits before printing).
 # Empty stdout is legitimate (no diagnostics) and hashes as the empty string.
+#
+# TWO ROOTS: see scripts/gen-ast-manifest.sh — the oracle runs with cwd = the
+# fixture's root (this tree or the almide/als mount) so the relative path it
+# embeds in diagnostics is the corpus path the parity test uses.
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.." || exit 2
 
 ORACLE="${ORACLE:?set ORACLE to the almide binary built from the port SHA}"
+case "$ORACLE" in /*) ;; *) ORACLE="$PWD/$ORACLE" ;; esac
 "$ORACLE" --version >/dev/null || exit 2
 
 OUT_DIR="crates/almide-spine/tests/golden"
@@ -26,32 +31,43 @@ MANIFEST="$OUT_DIR/spec-check-manifest.txt"
 EXCLUDED="$OUT_DIR/spec-check-exclusions.txt"
 : > "$MANIFEST"; : > "$EXCLUDED"
 
+ROOTS=". als"
+for r in $ROOTS; do
+  [ -d "$r/spec" ] || { echo "::error::$r/spec missing (judge submodule: git submodule update --init)"; exit 2; }
+done
+root_of() { if [ -e "$1" ]; then printf '.'; else printf 'als'; fi; }
+check_json() { (cd "$1" && "$ORACLE" check "$2" --json); }
+
 hash_out() { # normalized: empty stays empty; else exactly one trailing \n
   if [ -n "$1" ]; then printf '%s\n' "$1" | shasum -a 256 | cut -d' ' -f1
   else printf '' | shasum -a 256 | cut -d' ' -f1; fi
 }
 
 n_ok=0; n_skip=0
-while IFS= read -r f; do
-  out="$("$ORACLE" check "$f" --json 2>/tmp/chk-err.$$)"; rc=$?
-  # Resolve/module failures exit via stderr with no JSON stdout — those
-  # stdouts are not check results; exclude with the reason. rc=1 WITH stdout
-  # is a normal "has errors" result and stays in the manifest.
-  if [ "$rc" -ne 0 ] && [ -z "$out" ]; then
-    reason="$(head -1 /tmp/chk-err.$$ | tr '\t' ' ' | cut -c1-160)"
-    printf '%s\t%s\n' "$f" "${reason:-exit $rc, empty stdout}" >> "$EXCLUDED"
-    n_skip=$((n_skip + 1))
-  else
-    printf '%s\t%s\t%s\n' "$(hash_out "$out")" "$rc" "$f" >> "$MANIFEST"
-    n_ok=$((n_ok + 1))
-  fi
-done <<< "$(find spec -name '*.almd' | sort)"
+for r in $ROOTS; do
+  while IFS= read -r f; do
+    out="$(check_json "$r" "$f" 2>/tmp/chk-err.$$)"; rc=$?
+    # Resolve/module failures exit via stderr with no JSON stdout — those
+    # stdouts are not check results; exclude with the reason. rc=1 WITH stdout
+    # is a normal "has errors" result and stays in the manifest.
+    if [ "$rc" -ne 0 ] && [ -z "$out" ]; then
+      reason="$(head -1 /tmp/chk-err.$$ | tr '\t' ' ' | cut -c1-160)"
+      printf '%s\t%s\n' "$f" "${reason:-exit $rc, empty stdout}" >> "$EXCLUDED"
+      n_skip=$((n_skip + 1))
+    else
+      printf '%s\t%s\t%s\n' "$(hash_out "$out")" "$rc" "$f" >> "$MANIFEST"
+      n_ok=$((n_ok + 1))
+    fi
+  done <<< "$(cd "$r" && find spec -name '*.almd' | sort)"
+done
 rm -f /tmp/chk-err.$$
+sort -t$'\t' -k3 -o "$MANIFEST" "$MANIFEST"
+sort -o "$EXCLUDED" "$EXCLUDED"
 
 # Determinism spot-check on the first 25 manifest rows.
 ndet=0
 while IFS=$'\t' read -r want _rc f; do
-  got="$(hash_out "$("$ORACLE" check "$f" --json 2>/dev/null)")"
+  got="$(hash_out "$(check_json "$(root_of "$f")" "$f" 2>/dev/null)")"
   [ "$got" = "$want" ] || { echo "::error::nondeterministic check output for $f"; ndet=$((ndet + 1)); }
 done <<< "$(head -25 "$MANIFEST")"
 [ "$ndet" -eq 0 ] || exit 1

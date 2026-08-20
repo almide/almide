@@ -1,1 +1,4 @@
 spec/wasm_cross/guard_else_exit_code.almd	oracle exit 3
+spec/wasm_cross/map_literal_ctor_values.almd	register: no referee at the port SHA (als pin 2026-08-20): the a877d2138 wasm leg WALLS at build (exit 1, empty stdout — a refusal, not a run) and its interpreter is #1226-unsupported; the greenfield backend already emits and runs it, so judging against the wall row would punish being ahead of the oracle
+spec/wasm_cross/map_upsert_str.almd	register: no referee at the port SHA (als pin 2026-08-20): same as map_literal_ctor_values — wasm leg walls at build, interpreter #1226-unsupported
+spec/wasm_cross/record_default_field_omitted.almd	register: contract postdates the port SHA (als pin 2026-08-20): the a877d2138 interpreter aborts (internal: no field `tag` on record) where its wasm leg prints — neither leg referees; re-enters when the record-default fix is ported

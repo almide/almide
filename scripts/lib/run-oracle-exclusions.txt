@@ -1,0 +1,14 @@
+# RUN-ORACLE EXCLUSION REGISTER — fixtures the a877d2138 oracle cannot referee.
+#
+# The run-parity manifest's reference is the port-SHA oracle's wasm leg. When a
+# fixture's CONTRACT postdates the port SHA, the oracle's own legs can disagree
+# on it (the fixture was written WITH the fix): neither leg is the reference,
+# so judging the verbatim-ported interpreter against one of them would be a
+# coin toss dressed as a gate. Such a fixture is held OUT of the manifest with
+# its reason here, and RE-ENTERS when the fix is ported — shrink-only.
+# scripts/gen-run-manifest.sh merges these rows into spec-run-exclusions.txt.
+#
+# path<TAB>reason
+spec/wasm_cross/map_literal_ctor_values.almd	no referee at the port SHA (als pin 2026-08-20): the a877d2138 wasm leg WALLS at build (exit 1, empty stdout — a refusal, not a run) and its interpreter is #1226-unsupported; the greenfield backend already emits and runs it, so judging against the wall row would punish being ahead of the oracle
+spec/wasm_cross/map_upsert_str.almd	no referee at the port SHA (als pin 2026-08-20): same as map_literal_ctor_values — wasm leg walls at build, interpreter #1226-unsupported
+spec/wasm_cross/record_default_field_omitted.almd	contract postdates the port SHA (als pin 2026-08-20): the a877d2138 interpreter aborts (internal: no field `tag` on record) where its wasm leg prints — neither leg referees; re-enters when the record-default fix is ported

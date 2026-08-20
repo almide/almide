@@ -1,1 +1,0 @@
-fn info() -> String = "http module"

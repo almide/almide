@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
@@ -35,17 +36,6 @@ fn load_tsv_by_path(path: &Path, path_col_second: bool) -> BTreeMap<String, Stri
     out
 }
 
-fn walk_almd(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let p = entry.unwrap().path();
-        if p.is_dir() {
-            walk_almd(&p, out);
-        } else if p.extension().is_some_and(|e| e == "almd") {
-            out.push(p);
-        }
-    }
-}
-
 #[test]
 fn spec_corpus_ast_matches_oracle_hashes() {
     let root = workspace_root();
@@ -54,14 +44,13 @@ fn spec_corpus_ast_matches_oracle_hashes() {
     let exclusions = load_tsv_by_path(&golden.join("spec-ast-exclusions.txt"), false);
 
     // Coverage: every corpus file is gated or excluded-with-reason, never both.
-    let mut files = Vec::new();
-    walk_almd(&root.join("spec"), &mut files);
-    files.sort();
+    // Both roots of the corpus partition: this tree (spec/churn, spec/pass_isolated)
+    // and the almide/als mount (everything the judge owns) — one walker.
+    let files = almide_corpus::walk_spec(&root);
     assert!(!files.is_empty());
-    for f in &files {
-        let rel = f.strip_prefix(&root).unwrap().to_string_lossy().to_string();
-        let in_m = manifest.contains_key(&rel);
-        let in_e = exclusions.contains_key(&rel);
+    for (rel, _) in &files {
+        let in_m = manifest.contains_key(rel);
+        let in_e = exclusions.contains_key(rel);
         assert!(in_m ^ in_e, "{rel}: must be in exactly one of manifest/exclusions (manifest={in_m}, excluded={in_e})");
     }
     assert_eq!(files.len(), manifest.len() + exclusions.len(), "stale manifest entries for files no longer in spec/");
@@ -71,7 +60,7 @@ fn spec_corpus_ast_matches_oracle_hashes() {
     // RELATIVE path the oracle saw, so any path embedded in the AST agrees.
     let mut mismatches = Vec::new();
     for (rel, want) in &manifest {
-        let input = std::fs::read_to_string(root.join(rel)).unwrap();
+        let input = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).unwrap();
         let tokens = almide_syntax::lexer::Lexer::tokenize(&input);
         let mut parser = almide_syntax::parser::Parser::new(tokens).with_file(rel);
         let prog = parser

@@ -1409,3 +1409,61 @@ count unmoved (+0): the remaining json chains block deeper (Codec derive
 bodies, value.merge, fs) — mechanisms first, the claims follow.
 
 **Burn-up: 266 / 590 held**, zero divergence.
+
+---
+
+## Unit 0 — re-based onto the almide/als mount (2026-08-20)
+
+The judge left the tree. `almide/als` (https://github.com/almide/als) was
+extracted from `almide@53e2a2ab7` (develop) with `git filter-repo` — 1,321
+commits of history over the judge-owned paths — and is mounted here as the
+submodule `als/`, pinned by commit (R6, ARCHITECTURE.md §6).
+
+- **Deleted from this tree (now read from the mount):** `spec/lang`,
+  `spec/stdlib`, `spec/integration`, `spec/programs`, `spec/wasm_cross`,
+  `spec/wasm_cross_pkg`, `spec/wasm_fail`, `docs/contracts/`, `docs/specs/als/`,
+  `scripts/check-contracts.sh`, `scripts/lib/contract-classes.txt`.
+  **Kept (implementation-resident):** `spec/churn`, `spec/pass_isolated`.
+- **Single indirection:** `crates/almide-corpus` (greenfield-authored, strict
+  tier) resolves a corpus-relative path to this tree first, then `als/`, and
+  walks both roots as a partition (a path in both panics). The parity tests
+  keep handing the parser/checker/interpreter the corpus-relative name, so
+  every oracle hash is unchanged.
+- **Generators** (`gen-ast-manifest.sh`, `gen-check-manifest.sh`,
+  `gen-run-manifest.sh`) run the a877d2138 oracle with cwd = the fixture's
+  root. Regenerated: ast 1,095 → **1,099** manifest rows (+4, 3 exclusions
+  unchanged), check 1,095 → **1,099** (+4, 3 exclusions unchanged), run
+  590 → **591** (+1: `effect_tco_err_rewrap`; exclusions 1 → 4). Every
+  pre-existing row is byte-identical — the diff is exactly the four fixtures
+  the judge gained between a877d2138 and 53e2a2ab7.
+- **What the four do at the port SHA (run parity/burn-up):** three of them
+  have NO referee in the a877d2138 oracle and sit in the new shrink-only
+  register `scripts/lib/run-oracle-exclusions.txt` (merged into the
+  exclusions by the generator, re-entering as the port catches up):
+  `map_literal_ctor_values` and `map_upsert_str` — the oracle's wasm leg
+  WALLS at build (exit 1, empty stdout: a refusal, not a run; its interpreter
+  is #1226-unsupported), and the greenfield backend ALREADY emits and runs
+  `map_literal_ctor_values`, so judging against the wall row would punish
+  being ahead of the oracle; `record_default_field_omitted` — the a877d2138
+  interpreter aborts (`internal: no field \`tag\` on record`) where its wasm
+  leg prints. The fourth, `effect_tco_err_rewrap`, IS refereed (oracle runs
+  it, exit 0) and the verbatim interpreter spins to fuel exhaustion on it —
+  the contract pins a TCO on the err-rewrap path the a877d2138 interpreter
+  does not perform: fuel ceiling 1 → **2**, the pin advance's one ceiling
+  raise. Rule (same as the deviation register): a pin advance may raise a
+  ceiling by exactly what it brings, each named here; otherwise ceilings only
+  lower.
+- **Port gate** now runs `als/scripts/check-contracts.sh --impl-root "$PWD"`
+  (the judge's gate in two-repo mode: judge evidence required inside the
+  mount, implementation evidence required here). Verdict: 42 forward-reference
+  findings, all registered, 0 unexplained — GREEN.
+- **Deviation register:** 50 → **51**. The pin advance brought exactly one new
+  forward reference — C-300 cites `tests/heap_cap_test.rs` (unit 7). The
+  shrink-only rule gains its one sanctioned exception (gate header): a pin
+  advance may raise the ceiling by precisely the references it brings, each
+  named here. Outside a pin advance the ceiling still only lowers.
+- **Oracle and judge are two pins.** The port-SHA oracle stays a877d2138 (the
+  code being ported); the judge pin is als@main at the time of this entry.
+  Advancing the judge is a reviewed commit of its own.
+- **Incumbent `develop` untouched** — it keeps its copies until its own cutover
+  is decided (user decision 2026-08-20: Stage B for greenfield only).

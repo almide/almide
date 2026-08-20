@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true   # the judge: almide/als, pinned
       - uses: Swatinem/rust-cache@v2
       # Evidence machinery (unit 0): incumbent contract gate under the
       # deviation register — only enumerated forward references pass.
@@ -26,14 +28,14 @@ jobs:
       # state, frozen — they are built and tested, not clippy-gated. A ported
       # module rebuilt as new structure moves into the strict tier with it.
       - name: clippy (zero warnings, greenfield-authored tier)
-        run: cargo clippy -p almide-spine -p almide-diag -p almide-base -p almide-layout -p almide-wasm --all-targets --locked -- -D warnings
+        run: cargo clippy -p almide-spine -p almide-diag -p almide-base -p almide-layout -p almide-wasm -p almide-corpus --all-targets --locked -- -D warnings
       - name: MSRV honesty
         run: |
           rustup toolchain install 1.89 --profile minimal
           cargo +1.89 check --workspace --locked
 
   # Flight-gap A-2: structural coverage of the wasm backend's emitter under
-  # its full net (590-fixture parity + 200-seed differential fuzz + first
+  # its full net (591-fixture parity + 200-seed differential fuzz + first
   # light + alias referee), held by a grow-only floor. Honest scope note in
   # scripts/check-wasm-coverage.sh: this instruments the emitter's Rust;
   # the EMITTED wasm helpers' witnesses are the corpus + fuzzer + mutation
@@ -42,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true   # the judge: almide/als, pinned
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: emitter coverage floor
@@ -56,6 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true   # the judge: almide/als, pinned
       - uses: Swatinem/rust-cache@v2
       - name: wasm nets in release shape
         run: cargo test --release -p almide-wasm --locked
@@ -67,6 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true   # the judge: almide/als, pinned
       - uses: Swatinem/rust-cache@v2
       - name: mutants must be caught
         run: bash scripts/check-mutation-gate.sh

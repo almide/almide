@@ -2,8 +2,11 @@
 # PORT GATE for the contract ledger during the greenfield port (ARCHITECTURE.md §4/§5).
 # ==============================================================================
 #
-# Runs the UNMODIFIED incumbent gate (scripts/check-contracts.sh, ported verbatim
-# from almide@a877d2138) and holds it to aviation-style deviation discipline:
+# Runs the JUDGE's gate — almide/als `scripts/check-contracts.sh`, from the
+# submodule mount `als/` with this tree as the implementation root (two-repo
+# mode: judge-resident evidence is required inside the mount, implementation
+# evidence is required HERE) — and holds it to aviation-style deviation
+# discipline:
 #
 #   - Every ::error:: it emits must be a FORWARD REFERENCE: a missing evidence /
 #     cited path that is enumerated, one per line, in the deviation register
@@ -27,8 +30,13 @@ cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 REGISTER="scripts/lib/port-deviations.txt"
 [ -f "$REGISTER" ] || { echo "::error::$REGISTER not found"; exit 2; }
 
-# Ratchet ceiling: LOWER only, never raise. Set at unit #0 landing (96 paths).
-MAX_DEVIATIONS=50
+# Ratchet ceiling: LOWER only, never raise — with ONE sanctioned exception:
+# the commit that ADVANCES the als pin may raise it by exactly the forward
+# references the new contracts bring, each named in PORTLOG.md. Set at unit #0
+# landing (96 paths, judge at almide@a877d2138); 50 at the als mount; 51 after
+# the first pin (als@d503b64 = judge at almide@53e2a2ab7: C-300 cites
+# tests/heap_cap_test.rs, unit 7).
+MAX_DEVIATIONS=51
 n_reg="$(grep -cvE '^[[:space:]]*(#|$)' "$REGISTER")"
 fail=0
 err() { echo "::error::$1"; fail=1; }
@@ -43,8 +51,9 @@ while IFS=$'\t' read -r path unit; do
   [ -e "$path" ] && err "stale deviation: '$path' exists now — remove it from $REGISTER (shrink ratchet)"
 done < "$REGISTER"
 
-# ── run the incumbent gate verbatim ─────────────────────────────────────────
-out="$(bash scripts/check-contracts.sh 2>&1)"
+# ── run the judge's gate from its mount, this tree as implementation root ──
+[ -f als/scripts/check-contracts.sh ] || { echo "::error::als/scripts/check-contracts.sh missing (judge submodule: git submodule update --init)"; exit 2; }
+out="$(bash als/scripts/check-contracts.sh --impl-root "$PWD" 2>&1)"
 rc=$?
 
 fired=0

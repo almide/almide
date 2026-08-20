@@ -48,7 +48,7 @@ fn corpus_burn_up() {
         let want_exit: i32 = it.next().expect("test harness invariant").parse().expect("test harness invariant");
         let rel = it.next().expect("test harness invariant");
         total += 1;
-        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
+        let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("test harness invariant");
         let ir = match almide_spine::s5::lower_to_ir(rel, &text) {
             Ok(ir) => ir,
             Err(_) => {

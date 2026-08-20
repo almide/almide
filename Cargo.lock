@@ -55,6 +55,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-corpus"
+version = "0.0.1"
+
+[[package]]
 name = "almide-diag"
 version = "0.0.1"
 dependencies = [
@@ -135,6 +139,7 @@ name = "almide-spine"
 version = "0.0.1"
 dependencies = [
  "almide",
+ "almide-corpus",
  "almide-driver",
  "almide-syntax",
  "almide-types",
@@ -148,6 +153,7 @@ name = "almide-syntax"
 version = "0.12.2"
 dependencies = [
  "almide-base",
+ "almide-corpus",
  "serde",
  "serde_json",
  "sha2",
@@ -168,6 +174,7 @@ version = "0.0.1"
 dependencies = [
  "almide",
  "almide-base",
+ "almide-corpus",
  "almide-ir",
  "almide-layout",
  "almide-spine",

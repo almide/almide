@@ -1,8 +1,0 @@
-type State = | Active | Done
-
-fn start() -> State = Active
-
-fn show(s: State) -> String = match s {
-  Active => "a-active",
-  Done => "a-done",
-}

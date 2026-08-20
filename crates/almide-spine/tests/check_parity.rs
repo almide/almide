@@ -10,21 +10,10 @@
 
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
-}
-
-fn walk_almd(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).expect("test harness invariant") {
-        let p = entry.expect("test harness invariant").path();
-        if p.is_dir() {
-            walk_almd(&p, out);
-        } else if p.extension().is_some_and(|e| e == "almd") {
-            out.push(p);
-        }
-    }
 }
 
 fn sha(s: &str) -> String {
@@ -53,13 +42,11 @@ fn spec_corpus_check_matches_oracle_hashes() {
         exclusions.insert(p.to_string(), r.to_string());
     }
 
-    let mut files = Vec::new();
-    walk_almd(&root.join("spec"), &mut files);
-    files.sort();
-    for f in &files {
-        let rel = f.strip_prefix(&root).expect("test harness invariant").to_string_lossy().to_string();
-        let in_m = manifest.contains_key(&rel);
-        let in_e = exclusions.contains_key(&rel);
+    // Both roots of the corpus partition (see almide-corpus): one walker.
+    let files = almide_corpus::walk_spec(&root);
+    for (rel, _) in &files {
+        let in_m = manifest.contains_key(rel);
+        let in_e = exclusions.contains_key(rel);
         assert!(in_m ^ in_e, "{rel}: must be in exactly one of manifest/exclusions");
     }
     assert_eq!(files.len(), manifest.len() + exclusions.len(), "stale golden entries");
@@ -69,7 +56,7 @@ fn spec_corpus_check_matches_oracle_hashes() {
     let mut mismatches = Vec::new();
     let mut compared = 0usize;
     for (rel, want) in &manifest {
-        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
+        let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("test harness invariant");
         // Purity contract: resolve must not read the FS inside a query.
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
@@ -125,7 +112,7 @@ fn stage2_variant_matches_oracle_hashes() {
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
     for (rel, want) in &manifest {
-        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
+        let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("test harness invariant");
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
         match parser.parse() {
@@ -160,7 +147,7 @@ fn stage2_v3_template_matches_oracle_hashes() {
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
     for (rel, want) in &manifest {
-        let text = std::fs::read_to_string(root.join(rel)).expect("test harness invariant");
+        let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("test harness invariant");
         let tokens = almide::lexer::Lexer::tokenize(&text);
         let mut parser = almide::parser::Parser::new(tokens).with_file(rel);
         match parser.parse() {

@@ -116,7 +116,7 @@ fn exercised_surface_matches_golden() {
     let mut surface: BTreeSet<String> = BTreeSet::new();
     for line in manifest.lines() {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
-        let text = std::fs::read_to_string(root.join(rel)).expect("fixture readable");
+        let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
         if almide_wasm::emit_program(&ir).is_ok() {
             measure(&ir, &mut surface);

@@ -8,17 +8,23 @@
 #   ORACLE=/path/to/almide bash scripts/gen-run-manifest.sh
 #
 # Requires wasmtime (memory: /opt/homebrew/bin off the sandbox PATH).
+# wasm_cross and wasm_fail are judge-owned: they live under the almide/als
+# mount `als/`, and the oracle runs there so the corpus-relative path is the
+# one the run-parity test hands the interpreter.
 set -uo pipefail
 export LC_ALL=C
 export PATH="/opt/homebrew/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 2
 
 ORACLE="${ORACLE:?set ORACLE to the almide binary built from the port SHA}"
-OUT_DIR="crates/almide-spine/tests/golden"
+case "$ORACLE" in /*) ;; *) ORACLE="$PWD/$ORACLE" ;; esac
+OUT_DIR="$PWD/crates/almide-spine/tests/golden"
 mkdir -p "$OUT_DIR"
 MANIFEST="$OUT_DIR/spec-run-manifest.txt"
 EXCLUDED="$OUT_DIR/spec-run-exclusions.txt"
 : > "$MANIFEST"; : > "$EXCLUDED"
+[ -d als/spec/wasm_cross ] || { echo "::error::als/spec/wasm_cross missing (judge submodule: git submodule update --init)"; exit 2; }
+cd als || exit 2
 
 run_one() {
   f="$1"
@@ -36,8 +42,17 @@ export -f run_one; export ORACLE
 find spec/wasm_cross spec/wasm_fail -name '*.almd' | sort \
   | xargs -P 8 -I{} bash -c 'run_one "$@"' _ {} > /tmp/run-manifest-raw.$$
 
-grep -v $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ | sort -t$'\t' -k3 > "$MANIFEST"
-grep $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ | cut -f1,3 | sort > "$EXCLUDED" || true
+# The hand-maintained register of fixtures the oracle cannot referee (see its
+# header): dropped from the manifest, carried into the exclusions with reason.
+REGISTER="$OLDPWD/scripts/lib/run-oracle-exclusions.txt"
+reg_file="/tmp/run-oracle-reg.$$"
+grep -vE '^[[:space:]]*(#|$)' "$REGISTER" | cut -f1 > "$reg_file"
+{ grep -v $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ \
+    | awk -F'\t' -v rf="$reg_file" 'BEGIN{while ((getline l < rf) > 0) drop[l]=1} !($3 in drop)' \
+    | sort -t$'\t' -k3; } > "$MANIFEST"
+rm -f "$reg_file"
+{ grep $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ | cut -f1,3 || true
+  grep -vE '^[[:space:]]*(#|$)' "$REGISTER" | sed 's/\t/\tregister: /'; } | sort > "$EXCLUDED"
 rm -f /tmp/run-manifest-raw.$$ /tmp/run-err.$$.* 2>/dev/null
 
 echo "manifest: $(wc -l < "$MANIFEST" | tr -d ' ') files, exclusions: $(wc -l < "$EXCLUDED" | tr -d ' ')"

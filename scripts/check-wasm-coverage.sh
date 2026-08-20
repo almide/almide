@@ -2,7 +2,7 @@
 # Structural coverage of the wasm backend's EMITTER (flight-gap A-2).
 #
 # Measures line/region coverage of crates/almide-wasm/src/ under its full
-# test net (590-fixture parity, 200-seed differential fuzz, first light,
+# test net (591-fixture parity, 200-seed differential fuzz, first light,
 # alias referee). HONEST SCOPE: this instruments the emitter's Rust — the
 # EMITTED wasm runtime helpers execute inside wasmtime and are outside
 # llvm-cov's reach; their witnesses are the corpus, the fuzzer, and the

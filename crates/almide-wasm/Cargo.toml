@@ -14,6 +14,7 @@ almide-layout = { path = "../almide-layout" }
 wasm-encoder = "0.256"
 
 [dev-dependencies]
+almide-corpus = { path = "../almide-corpus" }
 anyhow = "1"
 almide-spine = { path = "../almide-spine" }
 almide = { path = "../almide" }

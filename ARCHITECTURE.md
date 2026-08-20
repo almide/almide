@@ -71,6 +71,18 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
   A/B against released almide v0.57.2 — identical stdout/stderr/exit over the
   relevant `spec/` slice. A port is "done" when the released binary can no
   longer be distinguished from it on its slice.
+- **The judge is external.** What the compiler is judged against — the ALS
+  normative text, the contract ledger, the conformance corpus (`spec/lang`,
+  `spec/stdlib`, `spec/integration`, `spec/programs`, `spec/wasm_cross*`,
+  `spec/wasm_fail`, `tests/diagnostics`), the element/epoch ledgers and the
+  traceability gates — lives in [almide/als](https://github.com/almide/als),
+  mounted as the submodule `als/` and pinned by commit (R6). Fixtures tied to
+  THIS compiler's internals (`spec/churn`, `spec/pass_isolated`) stay here;
+  the two are a partition, and `crates/almide-corpus` is the single place that
+  knows it. A behaviour change lands in als first (its own PR, its own gate),
+  then this tree advances the pin — two repositories, two reviews, in that
+  order. The port-SHA oracle (a877d2138) and the judge pin are two different
+  pins on purpose: the judge moves independently of the code being ported.
 - Adaptation at the boundary is allowed (query wrapping, error-type lift);
   rewriting the unit's internals during port is not. Rewrite = separate, later.
 
@@ -78,7 +90,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 
 | # | unit | gate |
 |---|---|---|
-| 0 | `spec/` corpus + contracts.toml schema + checker scripts | ledger checker green on ported set — **LANDED 2026-08-19**, see PORTLOG.md |
+| 0 | `spec/` corpus + contracts.toml schema + checker scripts | ledger checker green on ported set — **LANDED 2026-08-19**; **re-based onto the almide/als mount 2026-08-20** (copies deleted, judge pinned), see PORTLOG.md |
 | 1 | `almide-diag` | unit tests + JSON snapshot parity — **LANDED 2026-08-19**, see PORTLOG.md |
 | 2 | `almide-syntax` | corpus parses; AST JSON parity vs `--emit-ast` oracle at the port SHA — **LANDED 2026-08-19**, 1,095/1,095 byte-identical, see PORTLOG.md |
 | 3 | `almide-spec` (interpreter) + `almide-ir` | corpus output parity vs the port-SHA oracle — **LANDED 2026-08-19**: 451/451 comparable contract fixtures identical (stdout+exit), 138+1 doctrine-consistent skips ceilinged shrink-only, see PORTLOG.md |
@@ -100,6 +112,7 @@ TOML string templates, WAT-text emission, WASI p1 shims, whole-program
 | R3 | Module-boundary ABI = dictionary passing; monomorphization is an intra-CU optimization only (separate compilation preserved). The dictionary is the **semantic contract, not a performance ceiling**: shape-based stenciling (Go 1.18 precedent) and opt-in cross-module specialization (Swift `@inlinable` precedent) remain legal optimizations under the contract — the ABI caps invalidation granularity, never peak performance. Runtime (JIT-time) specialization is the one stronger scheme and is foreclosed by the R1b cert profile (AOT-only), knowingly. | adopt | **RATIFIED 2026-08-19** |
 | R4 | `T ! E` from day one; tail ok-lift owned by fallibility, not by notation (ADR-0002/0012 as founding law). Refining an error type must be a signature-only diff — this is an edit-locality theorem obligation, not just a style goal. Two-layer doctrine (erased default, variant `E` in closed domains, visible `map_err` demotion, E035/E036) ports as-is. | adopt | **RATIFIED 2026-08-19** |
 | R5 | WASI 0.3 component from day one; no Preview-1 compatibility layer. Component-model async (`stream`/`future`) is a host-boundary capability only — the language surface stays deterministic `fan`, inviolable. | adopt | **RATIFIED 2026-08-19** |
+| R6 | The judge is a separate repository: [almide/als](https://github.com/almide/als) holds normative text + contract ledger + conformance corpus + gates + runner, mounted as the `als/` submodule and pinned by commit. Requirements-first change order (als PR, then pin bump) is the process evidence DO-178C-class work needs; both implementations (this tree and the incumbent) are judged by the same pinned artifact. The incumbent's `develop` keeps its copies until its own, separately decided cutover. | adopt | **RATIFIED 2026-08-20** (greenfield only) |
 
 Each ratified R gets its status flipped here in the same commit as any code it
 gates. A rejected R gets its alternative written in, not deleted.

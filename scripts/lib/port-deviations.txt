@@ -32,6 +32,7 @@ tests/expr_stmt_diag_test.rs	7
 tests/float_to_fixed_cross_target_test.rs	7
 tests/fs_if_exists_family_gate_test.rs	7
 tests/fs_streaming_family_gate_test.rs	7
+tests/heap_cap_test.rs	7
 tests/ident_diag_test.rs	7
 tests/if_then_diag_test.rs	7
 tests/kernel_conformance_test.rs	7

@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
-LEDGER="docs/contracts/contracts.toml"
+LEDGER="als/docs/contracts/contracts.toml"   # the judge is mounted at als/ (ARCHITECTURE.md §4)
 README="README.md"
 START="<!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->"
 END="<!-- claims:generated:end -->"
@@ -143,11 +143,11 @@ stage_block() {
   unguarded=$(grep -c 'class = "UNGUARDED"' proofs/scalar-read-audit.toml || true)
   watfns=$(grep -c '^\[\[fn\]\]' proofs/wat-prelude-audit.toml)
   libms=$(grep -c '^\[\[site\]\]' proofs/libm-determinism-audit.toml)
-  corpus=$(ls spec/wasm_cross/*.almd | wc -l | tr -d ' ')
+  corpus=$(ls als/spec/wasm_cross/*.almd | wc -l | tr -d ' ')
   abstains=$(grep -vc '^#\|^$' crates/almide-interp/interp-abstain-ledger.txt)
   voting=$((corpus - abstains))
-  contracts=$(grep -c '^\[\[contract\]\]' docs/contracts/contracts.toml)
-  keyed=$(grep -c '^spec ' docs/contracts/contracts.toml)
+  contracts=$(grep -c '^\[\[contract\]\]' als/docs/contracts/contracts.toml)
+  keyed=$(grep -c '^spec ' als/docs/contracts/contracts.toml)
   seals=$(ls proofs/releases/v*.toml 2>/dev/null | wc -l | tr -d ' ')
   gates=$(grep -c '^\[\[gate\]\]' proofs/gate-verification.toml)
   unverified=$(grep -c 'class = "UNVERIFIED"' proofs/gate-verification.toml || true)
@@ -163,8 +163,8 @@ stage_block() {
   printf '> the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).\n'
   printf '>\n'
   local els unwritten_els
-  els=$(grep -c '^\[\[element\]\]' proofs/als-element-coverage.toml)
-  unwritten_els=$(grep -c 'section = "UNWRITTEN"' proofs/als-element-coverage.toml || true)
+  els=$(grep -c '^\[\[element\]\]' als/proofs/als-element-coverage.toml)
+  unwritten_els=$(grep -c 'section = "UNWRITTEN"' als/proofs/als-element-coverage.toml || true)
   printf '> **Stage 3 (semantics freeze): %s/%s contracts spec-keyed; syntax-element coverage\n' "$keyed" "$contracts"
   printf '> %s/%s sectioned (%s UNWRITTEN, shrink-only — the freeze precondition is 0).**\n' "$((els - unwritten_els))" "$els" "$unwritten_els"
   printf '>\n'

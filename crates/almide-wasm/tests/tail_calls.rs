@@ -51,7 +51,7 @@ fn deep_tail_recursion_is_constant_stack() {
         .canonicalize()
         .expect("root");
     let rel = "spec/wasm_cross/ref_gleam_tail_deep.almd";
-    let text = std::fs::read_to_string(root.join(rel)).expect("fixture");
+    let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture");
     let ir = almide_spine::s5::lower_to_ir(rel, &text).expect("lowers");
     let bytes = almide_wasm::emit_program(&ir).expect("emits");
     let wasm_out = run_small_stack(&bytes).expect("must run in a tiny stack (return_call)");
