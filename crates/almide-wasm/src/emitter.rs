@@ -523,6 +523,53 @@ impl Emitter<'_> {
                 self.f.instructions().i64_const(*value);
                 INT
             }
+            // `["k": v, …]` — a map literal. Desugars to the SAME
+            // insertion-ordered upsert `map.from_list` runs (last write
+            // wins on duplicate keys, the interp's insert-per-entry
+            // semantics) by synthesizing the pairs list.
+            IrExprKind::MapLiteral { entries } => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Map(kh, vh) = ty else {
+                    return unsup(&format!("ty-mismatch:map-literal-vs-{ty:?}"));
+                };
+                let (kt, vt) = (self.types.el(kh), self.types.el(vh));
+                let _ = (kt, vt);
+                let (k_ty, v_ty) = match &e.ty {
+                    Ty::Applied(TypeConstructorId::Map, a)
+                        if a.len() == 2 =>
+                    {
+                        (a[0].clone(), a[1].clone())
+                    }
+                    other => return unsup(&format!("map-literal-ty:{}", ty_name(other))),
+                };
+                let pair_ty = Ty::Tuple(vec![k_ty, v_ty]);
+                let list_ty = Ty::Applied(
+                    TypeConstructorId::List,
+                    vec![pair_ty.clone()],
+                );
+                let pairs = IrExpr {
+                    kind: IrExprKind::List {
+                        elements: entries
+                            .iter()
+                            .map(|(k, v)| IrExpr {
+                                kind: IrExprKind::Tuple {
+                                    elements: vec![k.clone(), v.clone()],
+                                },
+                                ty: pair_ty.clone(),
+                                span: e.span,
+                                def_id: None,
+                            })
+                            .collect(),
+                    },
+                    ty: list_ty,
+                    span: e.span,
+                    def_id: None,
+                };
+                match self.lower_map_call("from_list", &[pairs], Some(ty))? {
+                    Some(t) => t,
+                    None => return unsup("map-literal-unit"),
+                }
+            }
             // Unit as a VALUE (an effect ok payload, a Unit bind).
             IrExprKind::Unit => {
                 self.f.instructions().i32_const(0);

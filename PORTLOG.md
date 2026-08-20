@@ -1340,3 +1340,20 @@ wall collapsed with it. Mutant 021 (constructor tags shifted).
 **Burn-up: 256 → 263 / 590**, floor 263, surface 117, zero divergence.
 Next in the arc: value.object + MapLiteral (×13), then json.stringify
 (×8, port the serializer), then json.parse (×12, port the parser).
+
+---
+
+## Unit 6 — stage 30: map literals + value.object (2026-08-20)
+
+`["k": v, …]` lowers by SYNTHESIS: the emitter builds the pairs-list IR
+and delegates to the same insertion-ordered upsert `map.from_list` runs
+— duplicate keys keep the interp's last-write-wins for free. Objects are
+tag-6 Values whose payload is the (String, Value) pairs list itself:
+insertion order IS the block, the interp's ordered-object model.
+
+One divergence caught and fixed before landing: as_string's err line is
+"expected Str" (the impl's exact text), not "expected String" — the gate
+flagged the newly-claimed C-108 fixture on the first run. Mutant 022
+(literal entries reversed — insertion order flips).
+
+**Burn-up: 263 → 265 / 590**, floor 265, surface 118, zero divergence.

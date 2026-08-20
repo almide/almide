@@ -66,6 +66,7 @@ call:value.as_array
 call:value.as_string
 call:value.bool
 call:value.int
+call:value.object
 call:value.str
 expr:BinOp
 expr:Block

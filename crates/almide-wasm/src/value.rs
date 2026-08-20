@@ -19,6 +19,7 @@ pub(crate) const VT_INT: i32 = 2;
 pub(crate) const VT_FLOAT: i32 = 3;
 pub(crate) const VT_STR: i32 = 4;
 pub(crate) const VT_ARRAY: i32 = 5;
+pub(crate) const VT_OBJECT: i32 = 6;
 
 impl Emitter<'_> {
     /// `value.*` module calls. Returns Ok(None) for unhandled names so the
@@ -54,6 +55,29 @@ impl Emitter<'_> {
                 self.emit_value_box(VT_STR, Some(STR))?;
                 Some(SliceTy::Value)
             }
+            // Object: tag 6, payload = the (String, Value) pairs list —
+            // insertion order IS the block, exactly the interp's ordered
+            // object model.
+            ("object", [pairs]) => {
+                let got = self.lower(pairs, None)?;
+                let SliceTy::List(h) = got else {
+                    return Err(EmitError::Unsupported(format!("value.object-of:{got:?}")));
+                };
+                let ok = match self.types.el(h) {
+                    SliceTy::Tuple(ti) => {
+                        let def = self.types.tuple_def(ti);
+                        def.fields.len() == 2
+                            && def.fields[0].0 == STR
+                            && def.fields[1].0 == SliceTy::Value
+                    }
+                    _ => false,
+                };
+                if !ok {
+                    return Err(EmitError::Unsupported("value.object-el".into()));
+                }
+                self.emit_value_box(VT_OBJECT, Some(STR))?;
+                Some(SliceTy::Value)
+            }
             ("array", [xs]) => {
                 let got = self.lower(xs, None)?;
                 let SliceTy::List(h) = got else {
@@ -77,7 +101,7 @@ impl Emitter<'_> {
             }
             ("as_string", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
-                self.emit_value_unbox(VT_STR, STR, "expected String")?;
+                self.emit_value_unbox(VT_STR, STR, "expected Str")?;
                 Some(SliceTy::Result(self.types.intern(STR), self.types.intern(STR)))
             }
             ("as_array", [v]) => {
