@@ -1564,3 +1564,24 @@ after ANY amendment, no exceptions. V-5 permanence: the reduced case
 goes to almide/als as a PR (the two-repo rule), pin bump to follow.
 
 Fuzz 146→167 compared, zero findings; parity 285/591 unchanged.
+
+---
+
+## Unit 6 — stage 38: the matrix floor opens (2026-08-20)
+
+Ty::Matrix lands as a FLAT block — payload `[rows:i32][cols:i32][f64
+row-major]`, no row-pointer array (the native Vec-of-rows shape is an
+implementation detail; the 2026-08-10 fuzz night's OOM-by-row-headers is
+exactly why the dims rule bounds the ROW count alone). Stage-1 ops:
+zeros / ones / shape / rows / cols with `almide_rt_matrix_dims`
+transcribed verbatim — negative dims clamp to 0 (C-034/C-161), then
+`r > 2^28 || r*c > 2^28` aborts in the T6 form ("Error: matrix
+dimensions too large" + exit 1) before any allocation. The select-order
+clamp bug (negative KEPT the dimension) was caught by the guard fixtures
+on the first parity run. Mutant 027 (the row-alone bound dropped — the
+exact class the fuzz night found). The greenfield interp abstains on
+matrix arithmetic, so the manifest rows are the arc's only oracle —
+noted for the heavy ops ahead (bit-exact f32 accumulation, quant
+schedules; a dedicated-session arc).
+
+**Burn-up: 285 → 287 / 591**, floor 287, surface 135, zero divergence.

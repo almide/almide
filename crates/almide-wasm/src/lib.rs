@@ -75,6 +75,7 @@ mod emitter;
 mod patterns;
 mod prim;
 mod runtime;
+mod matrix;
 mod types_table;
 mod value;
 
@@ -254,6 +255,9 @@ enum SliceTy {
     /// block in THIS backend's layout (ratified rebuild; the incumbent's
     /// len-as-tag convention stays behind). See value.rs.
     Value,
+    /// A matrix — a FLAT block `[rows:i32][cols:i32][f64 data…]` (see
+    /// matrix.rs; no row-pointer array).
+    Matrix,
 }
 
 const STR: SliceTy = SliceTy::Scalar(Scalar::Str);
@@ -274,7 +278,8 @@ impl SliceTy {
             | SliceTy::Named(_)
             | SliceTy::Fn(_)
             | SliceTy::Unit
-            | SliceTy::Value => ValType::I32,
+            | SliceTy::Value
+            | SliceTy::Matrix => ValType::I32,
         }
     }
 
@@ -340,6 +345,7 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         }
         Ty::Record { fields } => types.anon_record(fields).map(SliceTy::Named),
         Ty::Unit => Some(SliceTy::Unit),
+        Ty::Matrix => Some(SliceTy::Matrix),
         Ty::Fn { params, ret, is_effect } => {
             let mut ps = Vec::new();
             for p in params {

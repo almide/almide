@@ -52,6 +52,10 @@ call:map.get_or
 call:map.len
 call:map.new
 call:map.set
+call:matrix.ones
+call:matrix.rows
+call:matrix.shape
+call:matrix.zeros
 call:option.to_result__Int_LoadError
 call:option.unwrap_or
 call:println

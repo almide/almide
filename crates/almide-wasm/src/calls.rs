@@ -227,6 +227,12 @@ impl Emitter<'_> {
                     other => unsup(&format!("unwrap-or-of:{other:?}")),
                 }
             }
+            CallTarget::Module { module, func, .. } if module.as_str() == "matrix" => {
+                if let Some(out) = self.lower_matrix_call(func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:matrix.{func}"))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);
