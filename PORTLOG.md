@@ -1067,3 +1067,24 @@ Reference survey landed: ../almide-references/RESEARCH-wasm-backends.md
 (W-1..W-9, zig/roc/grain SHA-pinned) — Fn-value slice design ratified there
 (W-1 +1-biased table of address-taken fns + W-2 closure blocks; corpus HOFs
 stay inlined). Roc/zig have NO return_call — C-292 keeps us ahead.
+
+---
+
+## Unit 6 — stage 19: structural list equality (2026-08-20)
+
+`==` on lists generalizes past byte-equality: Int/Bool payloads stay
+byte-compared ($str_eq — the bytes ARE the values), while address-carrying
+elements (Str, Float via f64_eq NaN/-0.0 semantics, nested lists) compare
+ELEMENT-WISE through a recursive `emit_val_eq` — same length, then every
+element equal, b's element addressed as `cur - a + b` (five holds per
+nesting level; the pool bound turns absurd nesting into an honest refusal).
+Mutant 012 (element mismatch never flips the verdict).
+
+**Burn-up: 175 → 180 / 590**, floor 180, zero divergence.
+
+Effect-convention probe (for the Unwrap ×6 wall): effect fns keep their RAW
+ret_ty (`Int`) + `is_effect=true`; the `!` marker node carries a
+Result-typed operand and the raw result type itself. The wasm effect
+convention (does an effect fn RETURN a Result block, or trap-propagate?) is
+ours to define against the interp's Flow::Return(Err) semantics — next
+design decision before the Unwrap slice.

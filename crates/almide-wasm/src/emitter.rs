@@ -680,7 +680,19 @@ impl Emitter<'_> {
         }
         let lt = self.lower(left, None)?;
         self.lower(right, Some(lt))?;
-        match lt {
+        self.emit_val_eq(lt)?;
+        if matches!(op, Neq) {
+            self.f.instructions().i32_eqz();
+        }
+        Ok(BOOL)
+    }
+
+    /// Structural equality: `[a, b]` on the stack -> i32 verdict.
+    /// Byte-equality only where payload bytes ARE the values (strings,
+    /// bytes, Int/Bool lists); address-carrying elements compare
+    /// ELEMENT-WISE (byte-compare would be an identity test).
+    pub(crate) fn emit_val_eq(&mut self, ty: SliceTy) -> Result<(), EmitError> {
+        match ty {
             INT => {
                 self.f.instructions().i64_eq();
             }
@@ -690,11 +702,7 @@ impl Emitter<'_> {
             BOOL => {
                 self.f.instructions().i32_eq();
             }
-            // Block byte-equality: strings, and lists whose PAYLOAD bytes
-            // ARE the values (Int/Bool elements). Any element that is an
-            // address (Str, lists, sums, records) makes byte-compare an
-            // identity test, not equality: refused.
-            STR => {
+            STR | SliceTy::Scalar(Scalar::Bytes) => {
                 self.f.instructions().call(F_STR_EQ);
             }
             SliceTy::List(h)
@@ -705,12 +713,65 @@ impl Emitter<'_> {
             {
                 self.f.instructions().call(F_STR_EQ);
             }
+            SliceTy::List(h) => self.emit_list_eq(h)?,
             other => return unsup(&format!("binop:eq-{other:?}")),
         }
-        if matches!(op, Neq) {
-            self.f.instructions().i32_eqz();
+        Ok(())
+    }
+
+    /// Element-wise list equality (recursive): same len, then every
+    /// element equal under `emit_val_eq`. Five holds per nesting level;
+    /// the pool bound turns absurd nesting into an honest refusal.
+    fn emit_list_eq(&mut self, h: ETy) -> Result<(), EmitError> {
+        let el = self.types.el(h);
+        let stride = el.slot_size() as i32;
+        let hb = self.hold_i32()?;
+        let ha = self.hold_i32()?;
+        let verdict = self.hold_i32()?;
+        let end = self.hold_i32()?;
+        let cur = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hb).local_set(ha);
+            i.local_get(ha).i32_load(len_memarg());
+            i.local_get(hb).i32_load(len_memarg());
+            i.i32_ne().if_(BlockType::Result(ValType::I32));
+            i.i32_const(0);
+            i.else_();
+            i.i32_const(1).local_set(verdict);
+            // cur walks a's payload; b's element is at (cur - a + b).
+            i.local_get(ha).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(cur);
+            i.local_get(cur).local_get(ha).i32_load(len_memarg()).i32_add().local_set(end);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+            i.local_get(cur);
         }
-        Ok(BOOL)
+        self.load_ty_slot_at(el);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(cur).local_get(ha).i32_sub().local_get(hb).i32_add();
+        }
+        self.load_ty_slot_at(el);
+        self.emit_val_eq(el)?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_eqz().if_(BlockType::Empty);
+            i.i32_const(0).local_set(verdict);
+            i.br(2);
+            i.end();
+            i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
+            i.br(0);
+            i.end();
+            i.end();
+            i.local_get(verdict);
+            i.end();
+        }
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
     }
 
     /// Sum-shaped values: constructors and unwraps — split from

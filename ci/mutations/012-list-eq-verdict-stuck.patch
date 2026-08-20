@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
+index f3c32b862..557bb429a 100644
+--- a/crates/almide-wasm/src/emitter.rs
++++ b/crates/almide-wasm/src/emitter.rs
+@@ -756,7 +756,7 @@ impl Emitter<'_> {
+         {
+             let mut i = self.f.instructions();
+             i.i32_eqz().if_(BlockType::Empty);
+-            i.i32_const(0).local_set(verdict);
++            i.i32_const(1).local_set(verdict);
+             i.br(2);
+             i.end();
+             i.local_get(cur).i32_const(stride).i32_add().local_set(cur);

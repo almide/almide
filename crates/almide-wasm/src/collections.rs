@@ -395,7 +395,7 @@ impl Emitter<'_> {
     }
 
     /// Load a slot whose ABSOLUTE address is already on the stack.
-    fn load_ty_slot_at(&mut self, t: SliceTy) {
+    pub(crate) fn load_ty_slot_at(&mut self, t: SliceTy) {
         let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_load(m),
