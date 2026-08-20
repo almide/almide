@@ -640,6 +640,51 @@ impl LowerCtx {
     /// never `rc_dec`'d. Returns `None` (defer) for an unresolvable type, an omitted heap
     /// field (a defaulted heap slot would be a garbage handle the drop frees — unsound), or
     /// a field value not lowerable to an owned handle / scalar.
+    /// A record FIELD's Option/Result CTOR the direct field materializer
+    /// declines (`dp: some([some("a"), none])` — the #1064 codec_field_matrix
+    /// Deep shape): ANF the WHOLE ctor into a tracked synth temp via the full
+    /// `lower_bind` machinery — which registers the temp's TYPED recursive
+    /// drop route — then hand the field the temp as a VAR, so the proven Var
+    /// arm Dups a co-owned ref in. This is byte-for-byte the `let v =
+    /// some(...)` + var-field spelling that already lowers leak-free: the
+    /// record's per-field dec releases its co-ref, and the temp's scope-end
+    /// TYPED drop does the recursion at last ref. (An earlier draft rebuilt
+    /// the ctor inline over an ANF'd payload — the wrapper then belonged to
+    /// the record ALONE, whose generated `$__drop_<R>` flat-decs a
+    /// `List[<recursive heap>]`-normalized field, and the #1530 cap harness
+    /// measured the interior leaking at 152 B/iteration. Ownership shape is
+    /// the fix, not a wider drop arm.) A ctor whose bind DEFERS (Opaque)
+    /// declines — the record then WALLS, never wraps an empty block.
+    fn record_field_ctor_fallback(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        if !matches!(
+            expr.kind,
+            IrExprKind::OptionSome { .. }
+                | IrExprKind::OptionNone
+                | IrExprKind::ResultOk { .. }
+                | IrExprKind::ResultErr { .. }
+        ) {
+            return None;
+        }
+        let tmp = self.fresh_synth_var();
+        if self.lower_bind(tmp, &expr.ty, expr).is_err() {
+            return None;
+        }
+        if self
+            .value_of
+            .get(&tmp)
+            .is_some_and(|v| self.deferred_opaque_binds.contains(v))
+        {
+            return None;
+        }
+        let synth = IrExpr {
+            kind: IrExprKind::Var { id: tmp },
+            ty: expr.ty.clone(),
+            span: expr.span.clone(),
+            def_id: None,
+        };
+        self.lower_owned_heap_field(&synth)
+    }
+
     pub(crate) fn try_lower_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
         let IrExprKind::Record { fields, .. } = &value.kind else {
             return None;
@@ -756,7 +801,20 @@ impl LowerCtx {
             let idx = names.iter().position(|n| n == name)?;
             let is_heap = is_heap_ty(&expr.ty);
             if is_heap {
-                let Some(obj) = self.lower_owned_heap_field(expr) else {
+                // A record FIELD additionally takes the FULL Option/Result
+                // ctor set — heap payloads included (`dp: some([some("a"),
+                // none])`, the #1064 codec_field_matrix Deep shape): the
+                // enclosing record's generated `$__drop_<R>` frees every
+                // field by its DECLARED type, so the ctor builder's block is
+                // freed exactly like the `let v = some(...)` + var-field
+                // spelling that already lowers. Deliberately NOT widened in
+                // `lower_owned_heap_field` itself: its other consumers (pair
+                // and list ELEMENT slots) free by flat per-slot rc_dec,
+                // where a heap-payload wrapper would leak its interior.
+                let Some(obj) = self
+                    .lower_owned_heap_field(expr)
+                    .or_else(|| self.record_field_ctor_fallback(expr))
+                else {
                     crate::trace::trace("ALMIDE_DBG_ELEM", || {
                         format!(
                             "[rec-construct] heap field {} ({}) declined",
