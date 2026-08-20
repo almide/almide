@@ -530,17 +530,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         } else {
             None
         };
-        match lower_fn(
-            &params,
-            table.infos[i].ret,
-            &f.body,
-            &[],
-            cur_module,
-            effect_raw,
-            false,
-            &ctx,
-            &mut pool,
-        ) {
+        let plan = FnPlan { ret: table.infos[i].ret, effect_raw, in_main: false };
+        match lower_fn(&params, plan, &f.body, &[], cur_module, &ctx, &mut pool) {
             Ok(ok) => lowered.push(Ok(ok)),
             Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
         }
@@ -549,8 +540,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
     let ctx = Ctx { table: &table, types: &types };
+    let main_plan = FnPlan { ret: None, effect_raw: None, in_main: true };
     let (main_fn, main_calls) =
-        lower_fn(&[], None, &main.body, &ir.top_lets, None, None, true, &ctx, &mut pool)?;
+        lower_fn(&[], main_plan, &main.body, &ir.top_lets, None, &ctx, &mut pool)?;
 
     // Reachability: refuse the program iff a call chain from `main` lands
     // on a function whose body did not lower (its stub would trap).
@@ -727,19 +719,27 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 /// Lower one function body (used for `main` and every program function):
 /// params become the leading locals, collected Binds follow, then the
 /// scratch locals (interp cursor, tmp i32, match/unwrap subjects).
+/// How one function's body meets its wasm signature.
+#[derive(Clone, Copy)]
+struct FnPlan {
+    ret: Option<SliceTy>,
+    /// Some(raw) = effect fn: the body yields RAW `raw`, then wraps
+    /// `ok(..)` into the declared Result-block return.
+    effect_raw: Option<SliceTy>,
+    /// `main`: a propagated `!` error aborts with the native frame.
+    in_main: bool,
+}
+
 fn lower_fn(
     params: &[(VarId, SliceTy)],
-    ret: Option<SliceTy>,
+    plan: FnPlan,
     body: &IrExpr,
     top_lets: &[IrTopLet],
     cur_module: Option<&str>,
-    // Some(raw) = effect fn: the body yields RAW `raw`, then wraps `ok(..)`
-    // into the declared Result-block return.
-    effect_raw: Option<SliceTy>,
-    in_main: bool,
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
+    let FnPlan { ret, effect_raw, in_main } = plan;
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
     let mut seen: HashSet<VarId> = HashSet::new();
     for (i, (var, ty)) in params.iter().enumerate() {
