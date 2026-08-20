@@ -11,12 +11,14 @@
 # native-fallback ceiling beyond the exit codes — see its header for why a
 # plain green is not enough.
 #
-# Ring roster (public repos; Aid-On/teastia is private and joins when a
-# read token is provisioned — its 15-file suite already runs green locally
-# against develop):
+# Ring roster — DELIBERATELY OSS-only (decision 2026-08-20): Almide is an
+# open-source project and its CI must never depend on a private company's
+# repository, so Aid-On/teastia stays OUT of this ring permanently. The
+# boundary runs the other way: teastia validates Almide from ITS side, in
+# its own CI, against pinned releases. Ring members are almide-org repos:
 #   dfa       regex → DFA compiler; leftmost-longest scan proven on wasm
 #   parsegen  parser generator, depends on dfa as a git package
-#   svg       SVG builder, the package teastia consumes
+#   svg       SVG builder (the same package teastia consumes downstream)
 name: Acceptance Ring
 
 on:
