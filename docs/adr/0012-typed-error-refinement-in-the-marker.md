@@ -319,3 +319,26 @@ Inko が撤回した「単一名義型の強制」とは違い、Almide の精�
 - 内部 — ADR-0002/0003/0004/0006/0008/0009/0010、#1103、C-211、
   `crates/almide-syntax/src/parser/declarations.rs`(lift 分岐)、
   `crates/almide-frontend/src/canonicalize/resolve.rs`(`!` 脱糖)
+
+## Amendment (2026-08-20): D3 は collapse-only に縮小
+
+D3 の「正規化は意味保存」という前提は、#1194 の実装ロールアウトで **3 系統の反証**
+を得た(いずれも実プログラム/実 fixture で再現、フォーマッタ発の挙動変化):
+
+1. **named-callback ルーティング** — ADR-0006 D1 は HOF の first-err ルーティングを
+   呼び先宣言の**マーカー綴り**に鍵づける(`fallible_marker_fns` は bare `Ident` を
+   テキスト照合)。`fn f() -> Result[Int, String]` を `-> Int!` に綴り替えると
+   `list.map(xs, f)` が `List[Result[..]]` から first-err の `Result[List[..], E]` に
+   変わる。`"${list.map(ss, f)}"` 型では両綴りともコンパイルが通り**出力だけが変わる**。
+2. **fn 型 slot の受理** — 明示 `(Int) -> Result[Int, String]` slot はマーカー宣言の
+   callback もマーカー lambda も受理しない(3 error)が、`(Int) -> Int!` slot は受理する。
+   slot の綴り替えは checker の受理集合を変える。
+3. **v1 lowering の壁パリティ** — fan 文脈の effect fn (`fan_any_early_winner` の
+   `ok11` 系)は明示 Result では v1 に render されるが、マーカー綴りでは
+   heap-result-match の壁に落ちる。緑 fixture が綴り替えで赤になる。
+
+したがって D3 の fmt 正準化は当面 **`T!String` → `T!` の collapse のみ**
+(マーカー内の綴り統一 — 意味軸が一切動かない)。`Result[T, E]` → `T!E` の
+綴り替えは、マーカー/明示の**挙動等価がコンパイラ全域で成立してから**
+(上記 1〜3 の統一が前提条件)。凍結(A0-1)に対する正準規則は
+「両綴りとも合法、fmt は collapse のみ行う」で確定とする。

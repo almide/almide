@@ -407,3 +407,52 @@ mod module_header_tests {
         assert!(out.trim_end().ends_with("// trailing"), "trailing comment moved:\n{out}");
     }
 }
+
+#[cfg(test)]
+mod marker_collapse {
+    use almide_lang::lexer::Lexer;
+    use almide_lang::parser::Parser;
+    use crate::fmt::format_program;
+
+    fn fmt_src(src: &str) -> String {
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse succeeds");
+        assert!(parser.errors.is_empty(), "parse errors: {:?}",
+            parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>());
+        format_program(&program)
+    }
+
+    /// ADR-0012 D3 as amended (#1194): the ONLY return-position normalization
+    /// is the marker-internal collapse `T!String` → `T!`. `Result[T, E]`
+    /// spellings stay verbatim — the marker and the explicit spelling are not
+    /// behaviorally equivalent (ADR-0006 callback routing, slot acceptance,
+    /// v1 wall parity; see the ADR's 2026-08-20 amendment), so a formatter
+    /// respelling across that line would change program behavior.
+    #[test]
+    fn marker_string_collapses_and_nothing_else_moves() {
+        let out = fmt_src(concat!(
+            "fn a(x: Int) -> Int!String = ok(x)\n\n",
+            "fn b(x: Int) -> Int!Err9 = err(Err9.X(\"no\"))\n\n",
+            "fn c(x: Int) -> Result[Int, String] = ok(x)\n\n",
+            "fn d(op: (Int) -> Int!String, x: Int) -> Int!String = op(x)\n",
+        ));
+        assert!(out.contains("fn a(x: Int) -> Int! ="), "collapse missing:\n{out}");
+        assert!(out.contains("fn b(x: Int) -> Int!Err9 ="), "typed E must survive:\n{out}");
+        assert!(
+            out.contains("fn c(x: Int) -> Result[Int, String] ="),
+            "explicit Result must stay verbatim (the amendment's whole point):\n{out}"
+        );
+        assert!(
+            out.contains("op: (Int) -> Int!") && out.contains(") -> Int! ="),
+            "slot + decl collapse:\n{out}"
+        );
+    }
+
+    #[test]
+    fn marker_collapse_is_idempotent() {
+        let once = fmt_src("fn a(x: Int) -> Int!String = ok(x)\n");
+        let twice = fmt_src(&once);
+        assert_eq!(once, twice);
+    }
+}

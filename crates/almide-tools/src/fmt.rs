@@ -580,6 +580,13 @@ pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> 
     // the spelling is forgiven — arity or argument drift still diverges.
     normalize_option_sugar(&mut before);
     normalize_option_sugar(&mut after);
+    // ADR-0012 D3 (#1194): `Result[T, E]`, `T!E`, and (for E = String) `T!`
+    // are the SAME type by definition — return position canonicalizes to the
+    // marker, so the rename and the elided String must count as conserving.
+    // Both sides are normalized identically; arity or argument drift beyond
+    // the defined String elision still diverges.
+    normalize_marker_sugar(&mut before);
+    normalize_marker_sugar(&mut after);
     if before != after {
         return Err(format!(
             "AST changed by formatting at {}",
@@ -620,6 +627,45 @@ fn normalize_option_sugar(v: &mut serde_json::Value) {
         serde_json::Value::Array(items) => {
             for child in items.iter_mut() {
                 normalize_option_sugar(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Drop a marker's trailing `String` (`T!String` ≡ `T!` — one marker, two
+/// spellings) so the AST comparison treats the collapse as conserving
+/// (#1194, the marker mirror of [`normalize_option_sugar`]). Deliberately
+/// NOT extended to `Result[T, E]` ↔ marker: the two spellings are not
+/// behaviorally equivalent (see `fmt_return_type`), so a formatter bug that
+/// crossed that line must DIVERGE here, not be forgiven.
+fn normalize_marker_sugar(v: &mut serde_json::Value) {
+    // TypeExpr is internally tagged (`#[serde(tag = "kind", rename_all =
+    // "snake_case")]`): a String atom is `{"kind": "simple", "name": "String"}`.
+    fn is_string_simple(v: &serde_json::Value) -> bool {
+        v.get("kind").and_then(|k| k.as_str()) == Some("simple")
+            && v.get("name").and_then(|n| n.as_str()) == Some("String")
+    }
+    match v {
+        serde_json::Value::Object(map) => {
+            let marker_string_tail = map.get("name").and_then(|n| n.as_str()) == Some("!")
+                && map
+                    .get("args")
+                    .and_then(|a| a.as_array())
+                    .map(|a| a.len() == 2 && is_string_simple(&a[1]))
+                    .unwrap_or(false);
+            if marker_string_tail {
+                if let Some(args) = map.get_mut("args").and_then(|a| a.as_array_mut()) {
+                    args.pop();
+                }
+            }
+            for (_, child) in map.iter_mut() {
+                normalize_marker_sugar(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items.iter_mut() {
+                normalize_marker_sugar(child);
             }
         }
         _ => {}
@@ -841,7 +887,7 @@ fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
         }
         if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
     });
-    out.push_str(") -> "); fmt_type(out, return_type, depth);
+    out.push_str(") -> "); fmt_return_type(out, return_type, depth);
     if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
 }
 
@@ -962,6 +1008,50 @@ fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], depth: usize) {
     }
 }
 
+/// ADR-0012 D3 (#1194): RETURN POSITION normalizes to the fallibility marker
+/// — `-> Result[T, E]` prints as `-> T!E`, `-> Result[T, String]` and a
+/// written `-> T!String` both collapse to `-> T!`. Everywhere else `Result`
+/// prints as written (`!` is an attribute of the arrow, not of the value), so
+/// only the two return printers call this: the fn-decl printer and the
+/// fn-TYPE arm's ret. Protocol-method returns deliberately do NOT (their
+/// parse site takes no `!` suffix, so the marker spelling would not re-parse
+/// there).
+///
+/// Gated to shapes the marker grammar can respell (idempotence is this
+/// crate's hard rule, so anything outside the gates stays the explicit
+/// Result):
+/// - T must re-parse with a trailing `!` binding to the WHOLE type
+///   ([`marker_ok_respellable`] — a bare fn-type T would rebind the `!` to
+///   its own return);
+/// - E must re-parse under #1193's `parse_marker_error_type` — a NAMED atom
+///   with optional args — AND print back as that shape
+///   ([`marker_err_respellable`] — an `Option[X]` E would PRINT as `X?`,
+///   which the marker's E slot refuses).
+/// ADR-0012 D3 as AMENDED (#1194): return position normalizes ONLY within
+/// the marker itself — a written `T!String` collapses to the canonical `T!`.
+/// The originally-specified `Result[T, E] → T!E` respelling is NOT performed:
+/// three falsifications showed the two spellings are not behaviorally
+/// equivalent today (ADR-0006 keys HOF first-err routing on the callee
+/// DECL's marker spelling; an explicit-Result fn-type slot does not admit
+/// marker callbacks; a fan-context effect fn walled on v1 under the marker
+/// where the explicit spelling rendered). Until marker/explicit equivalence
+/// is established compiler-wide, a formatter respelling across that line is
+/// a behavior change — the collapse below stays strictly marker-to-marker.
+fn fmt_return_type(out: &mut String, ty: &TypeExpr, depth: usize) {
+    if let TypeExpr::Generic { name, args } = ty {
+        if name.as_str() == "!" && args.len() == 2 && type_is_string_simple(&args[1]) {
+            fmt_type(out, &args[0], depth);
+            out.push('!');
+            return;
+        }
+    }
+    fmt_type(out, ty, depth)
+}
+
+fn type_is_string_simple(ty: &TypeExpr) -> bool {
+    matches!(ty, TypeExpr::Simple { name } if name.as_str() == "String")
+}
+
 fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
     match ty {
         TypeExpr::Simple { name } => out.push_str(name),
@@ -1006,7 +1096,7 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
             if *is_effect { out.push_str("effect "); }
             out.push('(');
             comma_sep(out, params, |out, p| fmt_type(out, p, depth));
-            out.push_str(") -> "); fmt_type(out, ret, depth);
+            out.push_str(") -> "); fmt_return_type(out, ret, depth);
         }
         TypeExpr::Tuple { elements } => {
             out.push('('); comma_sep(out, elements, |out, e| fmt_type(out, e, depth)); out.push(')');
