@@ -11,6 +11,13 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 ## Tier 0 — Semantics must stop moving (everything else builds on this)
 
 - [ ] **A0-1 (#530 + #1485 + #1483) (L) Spec freeze + compatibility contract.** 0.57.2 itself carries
+  DECIDED 2026-08-20 (owner): freeze is GO, sequenced AFTER the ADR-0012
+  error-surface end state lands — #1193 (D2: `-> T!E` carries the typed error
+  in the fallibility marker) then #1194 (D3: fmt normalizes return-position
+  Result to `T!E`/`T!`) — because the fmt canonical form changes the surface
+  the freeze would pin. Order: #1193 -> #1194 -> ALS freeze declaration +
+  breaking-change policy (change = explicit major) + the #530/#1485/#1483
+  closure drafts.
   two behavior changes; a patch-level semantic move disqualifies the language
   for this market. Exit: an ALS freeze document, a breaking-change policy
   (deprecation cycle, never silent), and a 1.0 criteria checklist the release
