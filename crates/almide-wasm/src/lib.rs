@@ -86,6 +86,7 @@ pub(crate) use work::*;
 mod display;
 mod matrix;
 mod ranges;
+mod sums;
 mod types_table;
 mod value;
 

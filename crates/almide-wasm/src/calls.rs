@@ -456,6 +456,19 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
                 self.lower_bytes_call(func.as_str(), args)
             }
+            // string.join(xs, sep) is list.join with the module spelled
+            // the other way — same F_LIST_JOIN, same List[String] demand.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "join" && args.len() == 2 =>
+            {
+                match self.lower(&args[0], None)? {
+                    SliceTy::List(h) if self.types.el(h) == STR => {}
+                    other => return unsup(&format!("string-join-of:{other:?}")),
+                }
+                self.lower(&args[1], Some(STR))?;
+                self.f.instructions().call(F_LIST_JOIN);
+                Ok(Some(STR))
+            }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string" && func.as_str() == "split" && args.len() == 2 =>
             {
@@ -528,6 +541,15 @@ impl Emitter<'_> {
                 self.lower_prim_call(func.as_str(), args)
             }
             CallTarget::Module { module, func, .. } => {
+                // The option/result intrinsic combinator matrix first —
+                // its source-level siblings (flatten, to_list, zip on the
+                // result side, …) fall through to the linked path below.
+                if matches!(module.as_str(), "option" | "result")
+                    && let Some(out) =
+                        self.lower_sum_combinator(module.as_str(), func.as_str(), args)?
+                {
+                    return Ok(out);
+                }
                 // Linked module functions live in the table under their
                 // qualified name. A stdlib SURFACE call additionally
                 // resolves through the self-host registry to its loaded

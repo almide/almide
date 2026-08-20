@@ -1676,3 +1676,24 @@ checking is now part of the drill.
 
 **Burn-up: 289 → 299 / 591**, floor 299, surface 141, zero divergence,
 workspace suite 0 failures.
+
+---
+
+## Unit 6 — stage 42: the option/result combinator matrix (2026-08-21)
+
+The API-family doctrine applied to sums: every INTRINSIC cell of the
+option/result surface lands in one module (sums.rs) — result
+is_ok/is_err/map/map_err/flat_map/unwrap_or_else/to_option/to_err_option,
+option is_some/is_none/map/flat_map/flatten/unwrap_or_else/or_else/
+filter/zip/to_list — while the source-level cells (flatten, to_list, zip
+on the result side, …) keep compiling from their stdlib match bodies
+through the linked path (probed working before writing a line).
+Callbacks are the literal-lambda hof_lambda idiom; pass-through sides
+REUSE the subject block (sums are never mutated in place). Result types
+come from the lambda BODY's IR type, not the ret hint, so nested
+combinator chains type without context. string.join is list.join spelled
+the other way (same F_LIST_JOIN). 13/15 cells probe-matched the interp;
+flatten/zip (interp abstains) A/B'd against native 0.58 byte-for-byte.
+result.partition stays an honest wall for now.
+
+**Burn-up: 299 → 308 / 591**, floor 308, zero divergence.
