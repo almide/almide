@@ -216,7 +216,16 @@ impl Gen {
                 1 | 2 => format!("some({})", self.expr(Ty::Int, depth - 1)),
                 _ => self.leaf(Ty::OptInt),
             },
-            Ty::ListInt => match self.rng.below(5) {
+            Ty::ListInt => match self.rng.below(6) {
+                5 => {
+                    // Slice — start is OFTEN 0 (the everyday form): mutant
+                    // 010's survival exposed that no exercised program
+                    // sliced from zero.
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    let a = self.rng.below(2);
+                    let b = a + self.rng.below(4);
+                    format!("list.slice({src}, {a}, {b})")
+                }
                 0 => {
                     let n = self.rng.below(4);
                     let items: Vec<String> = (0..n).map(|_| self.expr(Ty::Int, depth - 1)).collect();
