@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 24f0dc228..a598f1f16 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -408,7 +408,7 @@ impl Emitter<'_> {
+                     .i64_div_s();
+                 ins.i64_lt_s().select().local_set(eh);
+                 // empty when a < 0 (usize-wrap semantics) or a >= e
+-                ins.local_get(ah).i64_const(0).i64_lt_s();
++                ins.local_get(ah).i64_const(0).i64_le_s();
+                 ins.local_get(ah).local_get(eh).i64_ge_s();
+                 ins.i32_or().if_(BlockType::Result(ValType::I32));
+                 ins.i32_const(0).call(F_ALLOC);

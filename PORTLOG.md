@@ -1025,3 +1025,20 @@ removed) are the slice's teeth.
 
 **Burn-up: 150 → 167 / 590**, floor 167, surface 97 → 103 constructs, zero
 divergence.
+
+---
+
+## Unit 6 — stage 17: match guards + slice-syntax delegation (2026-08-20)
+
+Guards: an arm's verdict is `pattern-test AND (binds; guard)` — binds run
+before the guard (it references them) and locals are function-scoped, so a
+guarded arm's body needs no re-bind and a failed guard's binds are
+harmlessly overwritten. Irrefutable-with-guard keeps the chain (no
+unconditional short-circuit). Mutant 009 (guard fail-open).
+
+Slice syntax: `xs[a..b]` desugars to `almide_rt_list_slice` — delegated to
+the one `list.slice` lowering, as native rt shares one impl. Mutant 010
+(slice start boundary). The RuntimeCall histogram's real remainder is the
+fan budget/timeout machinery (×14), now visible under its own name.
+
+**Burn-up: 167 → 171 / 590**, floor 171, zero divergence.

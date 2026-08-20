@@ -351,6 +351,18 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(idx);
                 ty
             }
+            IrExprKind::RuntimeCall { symbol, args } => {
+                // The slice SYNTAX `xs[a..b]` desugars to this runtime
+                // symbol — one impl with `list.slice` (as in native rt).
+                if symbol.as_str() == "almide_rt_list_slice" && args.len() == 3 {
+                    match self.lower_list_call("slice", args)? {
+                        Some(t) => t,
+                        None => return unsup("rt:list-slice-unit"),
+                    }
+                } else {
+                    return unsup(&format!("rt:{}", symbol.as_str()));
+                }
+            }
             IrExprKind::Call { target, args, .. } => {
                 let hint = slice_ty_of(&e.ty, self.types);
                 match self.lower_call_at(target, args, tail, hint)? {
