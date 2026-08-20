@@ -71,6 +71,15 @@ impl Emitter<'_> {
                 {
                     let mut i = self.f.instructions();
                     i.end();
+                    // rows == 0 forces cols to 0: native's `from_iter`
+                    // derives cols from the FIRST ROW, so a rowless
+                    // matrix has no cols — `cols(zeros(0, 9))` is 0.
+                    i.i64_const(0)
+                        .local_get(hc)
+                        .local_get(hr)
+                        .i64_eqz()
+                        .select()
+                        .local_set(hc);
                     // alloc 8 + r*c*8
                     i.local_get(hr)
                         .local_get(hc)
@@ -155,8 +164,348 @@ impl Emitter<'_> {
                     .i64_extend_i32_u();
                 Some(INT)
             }
+            ("get", [m, r, c]) => {
+                self.lower(m, Some(SliceTy::Matrix))?;
+                let hm = self.hold_i32()?;
+                self.f.instructions().local_set(hm);
+                self.lower(r, Some(INT))?;
+                let hr = self.hold_i64()?;
+                self.f.instructions().local_set(hr);
+                self.lower(c, Some(INT))?;
+                let hc = self.hold_i64()?;
+                self.f.instructions().local_set(hc);
+                // The index-domain rule (C-282): an accessor with no
+                // identity value ABORTS out of range, in the same unified
+                // form as `xs[i]`. Compared as i64 BEFORE any cast, so a
+                // negative can never wrap past the test.
+                let msg = self.pool.intern("matrix index out of bounds");
+                for (idx, ext_off) in [(hr, 0), (hc, 4)] {
+                    {
+                        let mut i = self.f.instructions();
+                        i.local_get(idx).i64_const(0).i64_lt_s();
+                        i.local_get(idx);
+                        i.local_get(hm).i32_load(slot_memarg(ext_off)).i64_extend_i32_u();
+                        i.i64_ge_s();
+                        i.i32_or();
+                        i.if_(BlockType::Empty);
+                        i.i32_const(msg as i32);
+                    }
+                    self.emit_error_frame_abort();
+                    self.f.instructions().end();
+                }
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(hm);
+                    i.local_get(hr);
+                    i.local_get(hm).i32_load(slot_memarg(4)).i64_extend_i32_u();
+                    i.i64_mul().local_get(hc).i64_add().i32_wrap_i64();
+                    i.i32_const(3).i32_shl().i32_add();
+                    i.f64_load(slot_memarg(8));
+                }
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                Some(FLOAT)
+            }
+            ("from_lists", [rows]) => {
+                let fh = self.types.intern(FLOAT);
+                let inner = self.types.intern(SliceTy::List(fh));
+                self.lower(rows, Some(SliceTy::List(inner)))?;
+                let hl = self.hold_i32()?;
+                let hr = self.hold_i32()?;
+                let hc = self.hold_i32()?;
+                let hb = self.hold_i32()?;
+                let hi = self.hold_i32()?;
+                let hsrc = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                let hdst = self.hold_i32()?;
+                let hj = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_tee(hl);
+                // r = list count; c = the FIRST row's width if any (native
+                // from_iter), else 0.
+                i.i32_load(len_memarg()).i32_const(2).i32_shr_u().local_set(hr);
+                i.i32_const(0).local_set(hc);
+                i.local_get(hr).if_(BlockType::Empty);
+                i.local_get(hl)
+                    .i32_load(slot_memarg(0))
+                    .i32_load(len_memarg())
+                    .i32_const(3)
+                    .i32_shr_u()
+                    .local_set(hc);
+                i.end();
+                // alloc 8 + r*c*8 (i64 math: the ragged-degenerate product
+                // can exceed i32 even though well-formed inputs cannot)
+                i.local_get(hr)
+                    .i64_extend_i32_u()
+                    .local_get(hc)
+                    .i64_extend_i32_u()
+                    .i64_mul()
+                    .i64_const(8)
+                    .i64_mul()
+                    .i64_const(8)
+                    .i64_add()
+                    .i32_wrap_i64()
+                    .call(F_ALLOC)
+                    .local_set(hb);
+                i.local_get(hb).local_get(hr).i32_store(slot_memarg(0));
+                i.local_get(hb).local_get(hc).i32_store(slot_memarg(4));
+                // Per row, copy min(width, c) elements; a SHORT row's tail
+                // stays zero from the fresh pages. (Native flattens ragged
+                // rows into misaligned data — self-inconsistent and pinned
+                // by no fixture; zero-fill/truncate is the deterministic
+                // reading of "cols comes from the first row".)
+                i.local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32 + 8)
+                    .i32_add()
+                    .local_set(hdst);
+                i.i32_const(0).local_set(hi);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hi).local_get(hr).i32_ge_u().br_if(1);
+                i.local_get(hl)
+                    .local_get(hi)
+                    .i32_const(2)
+                    .i32_shl()
+                    .i32_add()
+                    .i32_load(slot_memarg(0))
+                    .local_set(hsrc);
+                i.local_get(hsrc).i32_load(len_memarg()).i32_const(3).i32_shr_u().local_set(hn);
+                i.local_get(hn)
+                    .local_get(hc)
+                    .local_get(hn)
+                    .local_get(hc)
+                    .i32_lt_u()
+                    .select()
+                    .local_set(hn);
+                i.i32_const(0).local_set(hj);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hj).local_get(hn).i32_ge_u().br_if(1);
+                i.local_get(hdst).local_get(hj).i32_const(3).i32_shl().i32_add();
+                i.local_get(hsrc).local_get(hj).i32_const(3).i32_shl().i32_add();
+                i.f64_load(slot_memarg(0));
+                i.f64_store(raw8());
+                i.local_get(hj).i32_const(1).i32_add().local_set(hj);
+                i.br(0);
+                i.end();
+                i.end();
+                i.local_get(hdst).local_get(hc).i32_const(3).i32_shl().i32_add().local_set(hdst);
+                i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+                i.br(0);
+                i.end();
+                i.end();
+                i.local_get(hb);
+                let _ = i;
+                for _ in 0..9 {
+                    self.release_i32();
+                }
+                Some(SliceTy::Matrix)
+            }
+            ("to_lists", [m]) => {
+                self.lower(m, Some(SliceTy::Matrix))?;
+                let hm = self.hold_i32()?;
+                let hr = self.hold_i32()?;
+                let hc8 = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let hi = self.hold_i32()?;
+                let hrow = self.hold_i32()?;
+                let hsrc = self.hold_i32()?;
+                let hj = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_tee(hm);
+                i.i32_load(slot_memarg(0)).local_set(hr);
+                i.local_get(hm).i32_load(slot_memarg(4)).i32_const(3).i32_shl().local_set(hc8);
+                i.local_get(hr).i32_const(2).i32_shl().call(F_ALLOC).local_set(ho);
+                i.local_get(hm)
+                    .i32_const(almide_layout::PAYLOAD as i32 + 8)
+                    .i32_add()
+                    .local_set(hsrc);
+                i.i32_const(0).local_set(hi);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hi).local_get(hr).i32_ge_u().br_if(1);
+                // every row is a FRESH List[Float] block (native to_vec
+                // copies; sharing would let a later matrix op alias in)
+                i.local_get(hc8).call(F_ALLOC).local_set(hrow);
+                i.i32_const(0).local_set(hj);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hj).local_get(hc8).i32_ge_u().br_if(1);
+                i.local_get(hrow).local_get(hj).i32_add();
+                i.local_get(hsrc).local_get(hj).i32_add();
+                i.f64_load(raw8());
+                i.f64_store(slot_memarg(0));
+                i.local_get(hj).i32_const(8).i32_add().local_set(hj);
+                i.br(0);
+                i.end();
+                i.end();
+                i.local_get(ho)
+                    .local_get(hi)
+                    .i32_const(2)
+                    .i32_shl()
+                    .i32_add()
+                    .local_get(hrow)
+                    .i32_store(slot_memarg(0));
+                i.local_get(hsrc).local_get(hc8).i32_add().local_set(hsrc);
+                i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+                i.br(0);
+                i.end();
+                i.end();
+                i.local_get(ho);
+                let _ = i;
+                for _ in 0..8 {
+                    self.release_i32();
+                }
+                let fh = self.types.intern(FLOAT);
+                let inner = self.types.intern(SliceTy::List(fh));
+                Some(SliceTy::List(inner))
+            }
+            ("transpose", [m]) => {
+                self.lower(m, Some(SliceTy::Matrix))?;
+                let hm = self.hold_i32()?;
+                let hr = self.hold_i32()?;
+                let hc = self.hold_i32()?;
+                let hb = self.hold_i32()?;
+                let hi = self.hold_i32()?;
+                let hj = self.hold_i32()?;
+                let hsrc = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_tee(hm);
+                i.i32_load(slot_memarg(0)).local_set(hr);
+                i.local_get(hm).i32_load(slot_memarg(4)).local_set(hc);
+                // either dim 0 → the (0, 0) matrix (native mk(0, 0));
+                // zeroing BOTH makes the header write and the loops uniform
+                i.local_get(hr).i32_eqz().local_get(hc).i32_eqz().i32_or();
+                i.if_(BlockType::Empty);
+                i.i32_const(0).local_set(hr);
+                i.i32_const(0).local_set(hc);
+                i.end();
+                // r*c is constructor-ceiling-bounded, so i32 math holds
+                i.local_get(hr)
+                    .local_get(hc)
+                    .i32_mul()
+                    .i32_const(3)
+                    .i32_shl()
+                    .i32_const(8)
+                    .i32_add()
+                    .call(F_ALLOC)
+                    .local_set(hb);
+                i.local_get(hb).local_get(hc).i32_store(slot_memarg(0));
+                i.local_get(hb).local_get(hr).i32_store(slot_memarg(4));
+                // src walks the input row-major once; out[j*r + i] =
+                // in[i*c + j]. A pure permutation — bit-exact against the
+                // kernel by construction, no arithmetic to reassociate.
+                i.local_get(hm)
+                    .i32_const(almide_layout::PAYLOAD as i32 + 8)
+                    .i32_add()
+                    .local_set(hsrc);
+                i.i32_const(0).local_set(hi);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hi).local_get(hr).i32_ge_u().br_if(1);
+                i.i32_const(0).local_set(hj);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hj).local_get(hc).i32_ge_u().br_if(1);
+                i.local_get(hb);
+                i.local_get(hj)
+                    .local_get(hr)
+                    .i32_mul()
+                    .local_get(hi)
+                    .i32_add()
+                    .i32_const(3)
+                    .i32_shl()
+                    .i32_add();
+                i.local_get(hsrc).f64_load(raw8());
+                i.f64_store(slot_memarg(8));
+                i.local_get(hsrc).i32_const(8).i32_add().local_set(hsrc);
+                i.local_get(hj).i32_const(1).i32_add().local_set(hj);
+                i.br(0);
+                i.end();
+                i.end();
+                i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+                i.br(0);
+                i.end();
+                i.end();
+                i.local_get(hb);
+                let _ = i;
+                for _ in 0..7 {
+                    self.release_i32();
+                }
+                Some(SliceTy::Matrix)
+            }
+            ("row_dot" | "dot_row", [m, r, v]) => {
+                self.lower(m, Some(SliceTy::Matrix))?;
+                let hm = self.hold_i32()?;
+                self.f.instructions().local_set(hm);
+                self.lower(r, Some(INT))?;
+                let hr = self.hold_i64()?;
+                self.f.instructions().local_set(hr);
+                let fh = self.types.intern(FLOAT);
+                self.lower(v, Some(SliceTy::List(fh)))?;
+                let hv = self.hold_i32()?;
+                let hs = self.hold_f64()?;
+                let hsrc = self.hold_i32()?;
+                let hvp = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                let hk = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hv);
+                // A REDUCTION over a row: its empty-sum identity is 0.0,
+                // so an out-of-range (or negative) row ANSWERS it — never
+                // aborts (C-282, the accessor/reduction split).
+                i.f64_const(0.0.into()).local_set(hs);
+                i.local_get(hr).i64_const(0).i64_ge_s();
+                i.local_get(hr);
+                i.local_get(hm).i32_load(slot_memarg(0)).i64_extend_i32_u();
+                i.i64_lt_s();
+                i.i32_and();
+                i.if_(BlockType::Empty);
+                // n = min(cols, vec count)
+                i.local_get(hm).i32_load(slot_memarg(4)).local_set(hn);
+                i.local_get(hv).i32_load(len_memarg()).i32_const(3).i32_shr_u().local_set(hk);
+                i.local_get(hn)
+                    .local_get(hk)
+                    .local_get(hn)
+                    .local_get(hk)
+                    .i32_lt_u()
+                    .select()
+                    .local_set(hn);
+                i.local_get(hm).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
+                i.local_get(hr).i32_wrap_i64();
+                i.local_get(hm).i32_load(slot_memarg(4)).i32_mul().i32_const(3).i32_shl();
+                i.i32_add().local_set(hsrc);
+                i.local_get(hv).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hvp);
+                i.i32_const(0).local_set(hk);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
+                // s += row[k] * vec[k]: mul-then-add, k ascending —
+                // exactly the native scalar loop (no fma, no reassociation)
+                i.local_get(hs);
+                i.local_get(hsrc).local_get(hk).i32_const(3).i32_shl().i32_add();
+                i.f64_load(raw8());
+                i.local_get(hvp).local_get(hk).i32_const(3).i32_shl().i32_add();
+                i.f64_load(raw8());
+                i.f64_mul().f64_add().local_set(hs);
+                i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+                i.br(0);
+                i.end();
+                i.end();
+                i.end();
+                i.local_get(hs);
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_f64();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Some(FLOAT)
+            }
             _ => return Ok(None),
         };
         Ok(Some(out))
     }
+}
+
+/// Raw absolute-address f64 access (block bases are 4-aligned, hint 2).
+fn raw8() -> wasm_encoder::MemArg {
+    wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }
 }

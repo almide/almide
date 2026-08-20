@@ -52,7 +52,11 @@ call:map.get_or
 call:map.len
 call:map.new
 call:map.set
+call:matrix.dot_row
+call:matrix.from_lists
+call:matrix.get
 call:matrix.ones
+call:matrix.row_dot
 call:matrix.rows
 call:matrix.shape
 call:matrix.zeros

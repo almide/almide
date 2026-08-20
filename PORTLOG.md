@@ -1603,3 +1603,33 @@ family split; the fuzz generator's expr dispatcher split per type.
 alias + tail + surface all green, clippy 0). Two surgery lessons for the
 tooling: brace-tracking must strip STRING LITERALS before counting, and
 `rindex("}")` splices must land inside the right impl block.
+
+---
+
+## Unit 6 — stage 40: mutation-fleet repair + matrix stage 2 (2026-08-21)
+
+**CI red from stage 39, and the mechanism that ends the class.** The
+eleven-module split stranded 8 mutant patches (003/004/010/012/014/016/
+017/020 — their context lines moved to data/stmts/list/equality/work/
+display); CI's full sweep caught it, the local landing did not, because
+the amend cycle skipped the gate entirely — the same lesson as fuzz
+catch #3, re-learned on a different net. Three fixes, one of them
+structural: (1) all 8 patches refreshed against the split layout, same
+semantics; (2) the incremental scope now treats a CHANGED PATCH FILE as
+in scope even when its target file is not in the diff; (3) a pre-push
+hook (shared hooks dir, greenfield-refs-only) runs the incremental gate
+on every push — a checklist can be skipped, a hook cannot.
+
+**Matrix stage 2** — the index domain + list bridge, semantics verbatim
+from runtime/rs: `get` aborts out-of-range in the unified T6 form,
+i64-compared before any cast (C-282, both halves); `row_dot`/`dot_row`
+answer the empty-sum identity 0.0 out of range (the accessor/reduction
+split), sequential mul-then-add, bit-exact; `from_lists` takes cols from
+the FIRST row (native from_iter), short rows zero-fill; `to_lists` emits
+fresh row blocks; `transpose` is a pure permutation, either-dim-zero →
+the (0,0) matrix. Constructors now normalize rows==0 → cols=0 — the
+stage-1 header kept the clamped cols and `cols(zeros(0, 9))` would have
+answered 9 against native's 0 (latent: no claimed fixture reached it).
+New mutant 028 pins `get`'s col bound through the wasm_fail row.
+
+**Burn-up: 287 → 289 / 591**, floor 289, surface 139, zero divergence.
