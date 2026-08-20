@@ -31,6 +31,7 @@ call:float.parse
 call:float.to_fixed
 call:float.to_string
 call:int.from_hex
+call:int.max
 call:int.parse
 call:int.to_float
 call:int.to_string

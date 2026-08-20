@@ -449,6 +449,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
     let work = FnWork::default();
+    // Calls made from display-helper bodies (BFS roots).
+    let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
     work.itype_base.set(15 + table.infos.len() as u32);
     work.helper_base.set(F_FN_BASE + table.infos.len() as u32 + 1);
 
@@ -486,7 +488,17 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
             env_captures: None,
         };
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
-            Ok(ok) => lowered.push(Ok(ok)),
+            Ok(ok) => {
+                // Any display helpers this fn registered build NOW — a
+                // failing body refuses THIS fn, not the program.
+                match display::build_display_helpers(&table, &types, &work, &mut pool) {
+                    Ok(calls) => {
+                        display_helper_calls.extend(calls);
+                        lowered.push(Ok(ok));
+                    }
+                    Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+                }
+            }
             Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
         }
     }
@@ -503,6 +515,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     };
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, &main.body, &init_lets, &ctx, &mut pool)?;
+    display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
     // Lift lambdas to extra functions (they may register further lambdas
     // or table entries — iterate to the fixed point).
@@ -524,6 +537,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
                 env_captures: Some(ll.captures.clone()),
             };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
+            display_helper_calls
+                .extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
             // Uniform convention: env i32 leads every table signature.
             let mut ps: Vec<ValType> = vec![ValType::I32];
             ps.extend(ll.params.iter().map(|(_, t)| t.val_type()));
@@ -534,6 +549,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // Reachability: refuse the program iff a call chain from `main` lands
     // on a function whose body did not lower (its stub would trap).
     let mut queue: Vec<usize> = main_calls.iter().copied().collect();
+    queue.extend(display_helper_calls.iter().copied());
     for (_, _, _, calls) in &lifted_fns {
         queue.extend(calls.iter().copied());
     }
@@ -729,6 +745,18 @@ fn resolve_extras(
             Helper::ValueField => value::emit_value_field_helper(),
             Helper::ValueKeys => value::emit_value_keys_helper(),
             Helper::StringSplit => value::emit_string_split_helper(),
+            Helper::DisplayNamed { ti } => {
+                match work.display_bodies.borrow_mut().remove(ti) {
+                    Some(work::DisplayBuild::Built(f)) => f,
+                    // Failed (all callers refused) — keep the promised
+                    // index aligned with a loud stub.
+                    _ => {
+                        let mut f = Function::new([]);
+                        f.instructions().unreachable().end();
+                        f
+                    }
+                }
+            }
         };
         extra_fns.push((ti, f));
     }

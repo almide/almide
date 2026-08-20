@@ -364,6 +364,34 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_INT_TO_STRING);
                 Ok(Some(STR))
             }
+            // Two-value i64 min/max — one select each.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "int"
+                    && matches!(func.as_str(), "max" | "min")
+                    && args.len() == 2 =>
+            {
+                let is_max = func.as_str() == "max";
+                self.lower(&args[0], Some(INT))?;
+                let ha = self.hold_i64()?;
+                self.f.instructions().local_set(ha);
+                self.lower(&args[1], Some(INT))?;
+                let hb = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hb);
+                // select(v1, v2, cond) = cond ? v1 : v2
+                i.local_get(ha).local_get(hb);
+                i.local_get(ha).local_get(hb);
+                if is_max {
+                    i.i64_gt_s();
+                } else {
+                    i.i64_lt_s();
+                }
+                i.select();
+                let _ = i;
+                self.release_i64();
+                self.release_i64();
+                Ok(Some(INT))
+            }
             // i64 → f64 is one wasm op; f64.convert_i64_s IS Rust's
             // `as f64` (IEEE round-to-nearest-even), bit-exact.
             CallTarget::Module { module, func, .. }

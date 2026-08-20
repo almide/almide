@@ -31,20 +31,19 @@ impl Emitter<'_> {
         got: SliceTy,
         nested: bool,
     ) -> Result<(), EmitError> {
-        self.emit_display_at(got, nested, 0)
+        self.emit_display_at(got, nested, &mut Vec::new())
     }
 
     fn emit_display_at(
         &mut self,
         got: SliceTy,
         nested: bool,
-        depth: u32,
+        path: &mut Vec<u32>,
     ) -> Result<(), EmitError> {
-        // Emit-time recursion follows the TYPE shape; recursive data
-        // types need a runtime-recursive helper — capped honestly.
-        if depth > 8 {
-            return unsup("display-depth");
-        }
+        // Emit-time recursion follows the TYPE SHAPE: a non-recursive
+        // shape is a finite DAG and inlines fully; a CYCLE (recursive
+        // Named type) is cut at the Named arm below with a call to the
+        // runtime-recursive per-type helper.
         match got {
             INT => {
                 self.f.instructions().local_set(self.scr_i64_local);
@@ -126,7 +125,7 @@ impl Emitter<'_> {
                 self.append_lit("some(");
                 self.f.instructions().local_get(ho);
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_display_at(et, true, depth + 1)?;
+                self.emit_display_at(et, true, path)?;
                 self.append_lit(")");
                 self.f.instructions().end();
                 self.release_i32();
@@ -144,13 +143,13 @@ impl Emitter<'_> {
                 self.append_lit("ok(");
                 self.f.instructions().local_get(hr);
                 self.load_ty_slot(ot, almide_layout::SUM_FIELD);
-                self.emit_display_at(ot, true, depth + 1)?;
+                self.emit_display_at(ot, true, path)?;
                 self.append_lit(")");
                 self.f.instructions().else_();
                 self.append_lit("err(");
                 self.f.instructions().local_get(hr);
                 self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                self.emit_display_at(et, true, depth + 1)?;
+                self.emit_display_at(et, true, path)?;
                 self.append_lit(")");
                 self.f.instructions().end();
                 self.release_i32();
@@ -187,7 +186,7 @@ impl Emitter<'_> {
                 self.f.instructions().end();
                 self.f.instructions().local_get(cur);
                 self.load_ty_slot_at(el);
-                self.emit_display_at(el, true, depth + 1)?;
+                self.emit_display_at(el, true, path)?;
                 {
                     let mut i = self.f.instructions();
                     i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
@@ -211,13 +210,33 @@ impl Emitter<'_> {
                     }
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fty, off);
-                    self.emit_display_at(fty, true, depth + 1)?;
+                    self.emit_display_at(fty, true, path)?;
                 }
                 self.append_lit(")");
                 self.release_i32();
             }
             SliceTy::Named(ti) => {
-                self.emit_display_named(ti, depth)?;
+                if path.contains(&ti) {
+                    // Recursive type: cut the cycle with the runtime
+                    // helper `(block, cursor) -> cursor`. A body that
+                    // failed to build refuses THIS caller too.
+                    if matches!(
+                        self.work.display_bodies.borrow().get(&ti),
+                        Some(crate::work::DisplayBuild::Failed)
+                    ) {
+                        return unsup("display-helper-failed");
+                    }
+                    let idx = self.work.helper(Helper::DisplayNamed { ti });
+                    self.f
+                        .instructions()
+                        .local_get(self.cursor_local)
+                        .call(idx)
+                        .local_set(self.cursor_local);
+                } else {
+                    path.push(ti);
+                    self.emit_display_named(ti, path)?;
+                    path.pop();
+                }
             }
             other => return unsup(&format!("interp-part:{other:?}")),
         }
@@ -226,7 +245,7 @@ impl Emitter<'_> {
 
     /// Records: `Nm { f: v, g: w }`; variants: `Case(v)` / bare unit
     /// names / record-shaped cases in the record form.
-    fn emit_display_named(&mut self, ti: u32, depth: u32) -> Result<(), EmitError> {
+    pub(crate) fn emit_display_named(&mut self, ti: u32, path: &mut Vec<u32>) -> Result<(), EmitError> {
         let name = self.types.name_of(ti);
         match self.types.def(ti) {
             NamedDef::Record(def) => {
@@ -248,12 +267,12 @@ impl Emitter<'_> {
                     self.append_lit(&format!("{}: ", fi.name));
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fi.ty, fi.offset);
-                    self.emit_display_at(fi.ty, true, depth + 1)?;
+                    self.emit_display_at(fi.ty, true, path)?;
                 }
                 self.append_lit(" }");
                 self.release_i32();
             }
-            NamedDef::Variant(ref v) => self.display_variant(v, depth)?,
+            NamedDef::Variant(ref v) => self.display_variant(v, path)?,
             NamedDef::Excluded => return unsup("interp-part:excluded"),
         }
         Ok(())
@@ -261,7 +280,7 @@ impl Emitter<'_> {
 
 
     /// Variant display (split from emit_display_named for the complexity budget).
-    fn display_variant(&mut self, v: &crate::types_table::VariantDef, depth: u32) -> Result<(), EmitError> {
+    fn display_variant(&mut self, v: &crate::types_table::VariantDef, path: &mut Vec<u32>) -> Result<(), EmitError> {
 
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
@@ -286,7 +305,7 @@ impl Emitter<'_> {
                             }
                             self.f.instructions().local_get(hb);
                             self.load_ty_slot(f.ty, f.offset);
-                            self.emit_display_at(f.ty, true, depth + 1)?;
+                            self.emit_display_at(f.ty, true, path)?;
                         }
                         self.append_lit(")");
                     }
@@ -300,4 +319,108 @@ impl Emitter<'_> {
                 self.release_i32();
         Ok(())
     }
+}
+
+/// The display-helper build phase: bodies for every registered
+/// `DisplayNamed` (fixed point — a body may register more). Called after
+/// each successful `lower_fn`; a failing body refuses THAT fn, keeping
+/// per-fn refusal granularity, and is marked Failed so later callers
+/// refuse themselves (assembly stubs the promised index).
+pub(crate) fn build_display_helpers(
+    table: &FnTable,
+    types: &TypeTable,
+    work: &FnWork,
+    pool: &mut Pool,
+) -> Result<std::collections::HashSet<usize>, EmitError> {
+    let mut all_calls = std::collections::HashSet::new();
+    loop {
+        let todo: Vec<u32> = {
+            let hs = work.helpers.borrow();
+            let bodies = work.display_bodies.borrow();
+            hs.iter()
+                .filter_map(|h| match h {
+                    Helper::DisplayNamed { ti } if !bodies.contains_key(ti) => Some(*ti),
+                    _ => None,
+                })
+                .collect()
+        };
+        if todo.is_empty() {
+            return Ok(all_calls);
+        }
+        for ti in todo {
+            match build_one_display_helper(table, types, work, pool, ti) {
+                Ok((f, calls)) => {
+                    all_calls.extend(calls.iter().copied());
+                    work.display_bodies
+                        .borrow_mut()
+                        .insert(ti, crate::work::DisplayBuild::Built(f));
+                }
+                Err(e) => {
+                    work.display_bodies.borrow_mut().insert(ti, crate::work::DisplayBuild::Failed);
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
+/// One `(block, cursor) -> cursor` display body, Emitter-built with the
+/// standard scratch/hold local layout after the two raw params.
+fn build_one_display_helper(
+    table: &FnTable,
+    types: &TypeTable,
+    work: &FnWork,
+    pool: &mut Pool,
+    ti: u32,
+) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
+    use crate::emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
+    use wasm_encoder::ValType;
+    let local_decls = [
+        (3, ValType::I32),
+        (1, ValType::I64),
+        (1, ValType::F64),
+        (HOLD_I32_POOL, ValType::I32),
+        (HOLD_I64_POOL, ValType::I64),
+        (HOLD_F64_POOL, ValType::F64),
+    ];
+    let mut f = wasm_encoder::Function::new(local_decls);
+    let mut calls = std::collections::HashSet::new();
+    let empty_locals = std::collections::HashMap::new();
+    let empty_globals = std::collections::HashMap::new();
+    let empty_ranges = std::collections::HashMap::new();
+    {
+        let mut em = Emitter {
+            pool,
+            locals: &empty_locals,
+            table,
+            types,
+            calls: &mut calls,
+            fn_ret: None,
+            cursor_local: 2,
+            tmp_i32_local: 3,
+            scr_i32_local: 4,
+            scr_i64_local: 5,
+            in_main: false,
+            work,
+            globals: &empty_globals,
+            deferred_ranges: &empty_ranges,
+            in_tail: false,
+            cur_module: None,
+            hold_i32_base: 7,
+            hold_i32_depth: 0,
+            hold_i64_base: 7 + HOLD_I32_POOL,
+            hold_i64_depth: 0,
+            hold_f64_base: 7 + HOLD_I32_POOL + HOLD_I64_POOL,
+            hold_f64_depth: 0,
+            scr_f64_local: 6,
+            f: &mut f,
+        };
+        em.f.instructions().local_get(1).local_set(2);
+        em.f.instructions().local_get(0);
+        let mut path = vec![ti];
+        em.emit_display_named(ti, &mut path)?;
+        em.f.instructions().local_get(2);
+    }
+    f.instructions().end();
+    Ok((f, calls))
 }

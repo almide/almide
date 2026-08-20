@@ -31,6 +31,11 @@ pub(crate) enum Helper {
     /// kept, count = separators + 1. Empty separator traps (Rust's
     /// empty-pattern oddity is out of contract).
     StringSplit,
+    /// `$display_<ti>(block, cursor) -> cursor` — the runtime-recursive
+    /// display of a RECURSIVE Named type (emit-time inlining follows the
+    /// type shape and cycles are cut here; the body is Emitter-built in
+    /// the display-helper phase and stored in `display_bodies`).
+    DisplayNamed { ti: u32 },
 }
 
 /// Pooled fragment addresses the JSON helpers append from.
@@ -67,6 +72,19 @@ pub(crate) struct FnWork {
     /// F_FN_BASE + infos.len() + 1 (right after main) — known before
     /// lowering starts, so call sites take helper indices eagerly.
     pub(crate) helper_base: std::cell::Cell<u32>,
+    /// DisplayNamed helper bodies, built in the display-helper phase
+    /// right after the fn that first registered them (per-fn refusal
+    /// granularity survives: a failing body refuses THAT fn, later
+    /// callers see Failed and refuse themselves, and assembly stubs the
+    /// promised index with `unreachable`).
+    pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
+}
+
+pub(crate) enum DisplayBuild {
+    /// The calls set already merged into the BFS roots at build time —
+    /// kept out of the variant so the body is the only payload.
+    Built(wasm_encoder::Function),
+    Failed,
 }
 
 impl FnWork {

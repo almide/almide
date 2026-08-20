@@ -1791,3 +1791,24 @@ from 032, re-learned the same day, now twice underlined.
 
 **Burn-up: 340 → 353 / 591**, floor 353, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 47: runtime-recursive display (2026-08-21)
+
+The display engine's depth counter is GONE, replaced by what it was
+standing in for: emit-time inlining now follows the type shape with a
+PATH of Named types, and a CYCLE — a genuinely recursive type — is cut
+with a call to a per-type `(block, cursor) -> cursor` helper, built by
+the same Emitter machinery in a fixed-point phase after each fn lowers
+(a body may register more helpers; mutual recursion just works — each
+body starts its path at its own type and calls the sibling's promised
+index). Non-recursive shapes inline at ANY depth (finite DAG). A body
+that fails to build refuses the REGISTERING fn — per-fn granularity
+survives — is marked Failed so later callers refuse themselves, and
+assembly stubs the promised index loud. Self-recursive lists, trees,
+and mutually recursive enums probe-match the interp exactly. int.max /
+int.min came along (one select each).
+
+**Burn-up: 353 → 355 / 591**, floor 355, zero divergence, workspace 0
+failures.
