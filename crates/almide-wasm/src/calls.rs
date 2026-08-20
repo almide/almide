@@ -475,6 +475,12 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:matrix.{func}"))
             }
+            CallTarget::Module { module, func, .. } if module.as_str() == "fan" => {
+                if let Some(out) = self.lower_fan_call(func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:fan.{func}"))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);

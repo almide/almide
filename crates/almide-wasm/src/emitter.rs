@@ -375,6 +375,7 @@ impl Emitter<'_> {
             IrExprKind::Lambda { params, body, .. } => {
                 self.lower_lambda_value(e, params, body, want)?
             }
+            IrExprKind::Fan { exprs } => self.lower_fan_block(exprs)?,
             IrExprKind::RuntimeCall { symbol, args } => {
                 // The slice SYNTAX `xs[a..b]` desugars to this runtime
                 // symbol — one impl with `list.slice` (as in native rt).

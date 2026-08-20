@@ -313,8 +313,13 @@ impl Emitter<'_> {
                             self.load_ty_slot(fty, off);
                             self.f.instructions().local_set(idx);
                         }
+                        // Any other pattern form composes through the
+                        // nested-bind machinery (Ok/Err/Some sub-patterns
+                        // inside tuple positions — the fan.settle shape).
                         other => {
-                            return unsup(&format!("pattern:tuple-{}", pattern_name(other)))
+                            self.f.instructions().local_get(scr);
+                            self.load_ty_slot(fty, off);
+                            self.bind_nested(other, fty)?;
                         }
                     }
                 }

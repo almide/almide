@@ -815,7 +815,7 @@ impl Emitter<'_> {
     }
 
     /// Shared loop header: xs → holds (base, count, idx); returns them.
-    fn hof_loop_open(
+    pub(crate) fn hof_loop_open(
         &mut self,
         xs: &IrExpr,
     ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
@@ -839,7 +839,7 @@ impl Emitter<'_> {
     }
 
     /// Loop-body prologue: guard + load current element into `param`.
-    fn hof_elem_into(&mut self, elem: SliceTy, bh: u32, ch: u32, ih: u32, param: u32) {
+    pub(crate) fn hof_elem_into(&mut self, elem: SliceTy, bh: u32, ch: u32, ih: u32, param: u32) {
         self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
         self.f
             .instructions()
@@ -852,7 +852,7 @@ impl Emitter<'_> {
         self.f.instructions().local_set(param);
     }
 
-    fn hof_step(&mut self, ih: u32) {
+    pub(crate) fn hof_step(&mut self, ih: u32) {
         self.f.instructions().local_get(ih).i32_const(1).i32_add().local_set(ih).br(0).end().end();
     }
 

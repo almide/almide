@@ -1843,3 +1843,23 @@ committed goldens byte-identical before the real parity run said 371.
 
 **Burn-up: 355 → 371 / 591**, floor 371, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 49: the fan combinators are sequential (2026-08-21)
+
+fan.map / fan.any / fan.settle / `fan { }` land as what the
+deterministic model says they ARE: sequential traversals in LIST ORDER
+(fan.race was an E027 tombstone precisely because the model has no
+race). Semantics verbatim from the self-hosted stdlib bodies and the
+interp: map collects oks and the FIRST err IS the result; any takes the
+first Ok (an element's err skips it; all-fail and empty are the
+ledger-constant Err; the block form statically unrolls its literal
+thunk list, and a PURE arm Ok-adapts and wins on the spot); the
+`fan { }` block runs EVERY arm, then aborts with the FIRST err's bare
+message (the interp's run-all-then-abort order), one arm bare / many a
+tuple. Tuple patterns now compose through the nested machinery, so
+`(ok(a), err(e))` destructures — the fan.settle shape.
+
+**Burn-up: 371 → 383 / 591**, floor 383, zero divergence, workspace 0
+failures.
