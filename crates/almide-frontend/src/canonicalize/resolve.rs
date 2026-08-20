@@ -142,12 +142,19 @@ pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym
         },
         ast::TypeExpr::Generic { name, args } => {
             // ADR-0002 Phase 1 (#1103): the pseudo-generic `!` is the
-            // pure-fallible return marker — `-> T!` ≡ `-> Result[T, String]`
-            // (E is String by decision D2; custom E keeps the explicit
-            // Result[T, E] spelling).
+            // pure-fallible return marker — `-> T!` ≡ `-> Result[T, String]`.
             if name.as_str() == "!" && args.len() == 1 {
                 let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
                 return Ty::result(inner, Ty::String);
+            }
+            // ADR-0012 D2 (#1193): the 2-arg marker carries a TYPED error —
+            // `T!E` ≡ `Result[T, E]`. The 1-arg default above is untouched,
+            // so `T!` keeps meaning `T!String` and every existing program is
+            // unaffected.
+            if name.as_str() == "!" && args.len() == 2 {
+                let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
+                let err = resolve_type_expr_in(&args[1], known_types, cur_mod);
+                return Ty::result(inner, err);
             }
             // ADR-0010: the pseudo-generic `?` is the Option marker —
             // `T?` ≡ `Option[T]` in EVERY type position (unlike `!`, which

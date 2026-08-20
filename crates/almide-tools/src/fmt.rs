@@ -971,6 +971,14 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
             fmt_type(out, &args[0], depth);
             out.push('!');
         }
+        // ADR-0012 D2 (#1193): the 2-arg marker prints back as `T!E` (never
+        // `![T, E]`) — the fmt roundtrip for `-> Config!ConfigError`. E is a
+        // named atom by the grammar, so it renders bare.
+        TypeExpr::Generic { name, args } if name.as_str() == "!" && args.len() == 2 => {
+            fmt_type(out, &args[0], depth);
+            out.push('!');
+            fmt_type(out, &args[1], depth);
+        }
         // ADR-0010 D3: `T?` is the canonical Option spelling — the pseudo-
         // generic `?` prints back as written, and a written `Option[T]`
         // NORMALIZES to the same shorthand. The inner takes parens whenever
