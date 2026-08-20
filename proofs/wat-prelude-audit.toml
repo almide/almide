@@ -123,16 +123,16 @@ via = "fuel_timeout_ends.almd"
 
 [[fn]]
 name = "alloc"
-site = "crates/almide-mir/src/render_wasm_p3.rs:193"
-digest = "63591a64eb5c"
+site = "crates/almide-mir/src/render_wasm_p3.rs:209"
+digest = "ccfa17bab359"
 class = "PROVEN"
 via = "alias_combinator_rc.almd"
 proof = "proofs/FreeList.v + proofs/FreeListRc.v"
 
 [[fn]]
 name = "alloc8"
-site = "crates/almide-mir/src/render_wasm_p3.rs:258"
-digest = "04b05ec82dda"
+site = "crates/almide-mir/src/render_wasm_p3.rs:274"
+digest = "ff27e65570c6"
 class = "PROVEN"
 via = "fan_settle_tuple.almd"
 proof = "proofs/FreeList.v"
