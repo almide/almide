@@ -327,9 +327,9 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
     if r.val_heap && r.key_is_string {
         return Some(if matches!(
             r.func,
-            "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "get_or"
-                | "keys" | "values" | "len" | "is_empty" | "contains" | "all" | "any"
-                | "count" | "fold" | "entries"
+            "new" | "set" | "remove" | "merge" | "update" | "upsert" | "filter" | "get"
+                | "get_or" | "keys" | "values" | "len" | "is_empty" | "contains" | "all"
+                | "any" | "count" | "fold" | "entries"
         ) {
             MapName::Suffix("_str")
         } else {

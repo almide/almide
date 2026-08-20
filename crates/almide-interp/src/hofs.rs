@@ -158,8 +158,44 @@ impl<'a> Interpreter<'a> {
             "filter" => self.hof_map_filter(evaled),
             "find" => self.hof_map_find(evaled),
             "update" => self.hof_map_update(evaled),
+            "upsert" => self.hof_map_upsert(evaled),
             _ => Flow::Unsupported(format!("HOF map.{}", f)),
         }
+    }
+
+    /// `map.upsert(m, key, init, (v) -> V)` — a PRESENT key's value rewritten
+    /// via `f` in place (position kept), an ABSENT key appended as `(key,
+    /// init)` — v0's `almide_rt_map_upsert` intrinsic behavior, and the
+    /// `map_upsert_str` self-host (contains → update, else set).
+    fn hof_map_upsert(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.upsert receiver not a Map".into()),
+        };
+        let Some(key) = args.get(1).cloned() else {
+            return Flow::Abort("internal: map.upsert missing key".into());
+        };
+        let Some(init) = args.get(2).cloned() else {
+            return Flow::Abort("internal: map.upsert missing init".into());
+        };
+        let clo = match Self::recv_closure(args, 3) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = (*entries).clone();
+        let mut found = false;
+        for pair in out.iter_mut() {
+            if pair.0 == key {
+                let nv = val!(self.apply_closure(&clo, vec![pair.1.clone()]));
+                pair.1 = nv;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            out.push((key, init));
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
     /// `map.update(m, key, (v) -> V)` — the value at `key` rewritten in

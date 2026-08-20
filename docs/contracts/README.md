@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-300 contracts
+301 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -328,4 +328,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 12 |
 | C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 1 |
+| C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |
 

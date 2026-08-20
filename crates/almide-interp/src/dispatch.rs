@@ -2044,6 +2044,7 @@ pub(crate) fn is_hof(module: &str, func: &str) -> bool {
             | ("map", "count")
             | ("map", "find")
             | ("map", "update")
+            | ("map", "upsert")
             | ("set", "filter")
             | ("set", "map")
             | ("set", "fold")

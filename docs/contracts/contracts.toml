@@ -3848,3 +3848,14 @@ evidence  = [
   { path = "spec/wasm_cross/map_literal_ctor_values.almd", class = "fixture" },
   { path = "tests/heap_cap_test.rs", name = "map_literal_intermediates_do_not_leak_under_the_cap", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-301"
+spec      = "ALS-T2"
+title     = "map.upsert on the all-String map crosses targets"
+statement = "map.upsert(m, key, init, f) over Map[String, String] answers identically on native, wasm, and the interp: a PRESENT key's value is rewritten via f with its POSITION kept; an ABSENT key appends (key, init) at the end; f is never invoked on the insert path. One observable rule, three implementations — native's almide_rt_map_upsert intrinsic, the wasm self-host map_upsert_str (contains -> update's position-keeping rebuild, else set's append; the walk count is not the contract), and the interp's hof_map_upsert. Closes the #1527 registry-gap wall map.upsert_str_wall (6x/shard in the frequency table)."
+since     = "0.59.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/map_upsert_str.almd", class = "fixture" },
+]
