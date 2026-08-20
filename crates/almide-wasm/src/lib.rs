@@ -85,6 +85,7 @@ pub(crate) mod work;
 pub(crate) use work::*;
 mod display;
 mod matrix;
+mod fuel;
 mod ranges;
 mod sums;
 mod types_table;
@@ -162,8 +163,20 @@ const G_LINE_CURSOR: u32 = 2;
 /// Immutable i32 global: one past the line buffer (= heap start); the
 /// append helpers trap LOUDLY on overflow instead of corrupting the heap.
 const G_LINE_END: u32 = 3;
+/// Deterministic meter (ALS-DT2, mirrors the interp's det_* cells):
+/// remaining fuel units (i64, starts at i64::MAX — outside a region the
+/// wrapping decrements never cut).
+const G_DET_FUEL: u32 = 4;
+/// The active region's entry units (i64).
+const G_DET_ENTRY: u32 = 5;
+/// Last region's exhausted verdict (i64 0/1).
+const G_DET_VERDICT: u32 = 6;
+/// Last region's consumed units (i64).
+const G_DET_SPEND: u32 = 7;
+/// Region nesting depth (i32) — the cut condition needs depth > 0.
+const G_DET_DEPTH: u32 = 8;
 /// Fixed runtime globals above; top-let globals start here.
-const G_FIXED_COUNT: u32 = 4;
+const G_FIXED_COUNT: u32 = 9;
 
 // ── slice value model ───────────────────────────────────────────────────
 
@@ -418,6 +431,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // top-level lets is excluded whole (its init order is a later slice).
     let program_fns = collect_program_fns(ir);
     let types = TypeTable::build(ir);
+    // Deterministic-meter plan (ALS-DT2): who charges, whose entry is exempt.
+    let meter = fuel::meter_plan(ir, registry_impl_names());
 
     let mut table =
         FnTable { by_name: HashMap::new(), impl_index: HashMap::new(), infos: Vec::new() };
@@ -486,6 +501,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
             effect_raw,
             in_main: false,
             env_captures: None,
+            metered: meter.user.contains(f.name.as_str()),
+            charge_entry: meter.user.contains(f.name.as_str())
+                && !meter.exempt.contains(f.name.as_str()),
         };
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
             Ok(ok) => {
@@ -512,6 +530,10 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         effect_raw: None,
         in_main: true,
         env_captures: None,
+        // main is user code (its loop heads charge) but is never CALLED,
+        // so no entry charge — the 1002-unit ledger counts the callee's.
+        metered: true,
+        charge_entry: false,
     };
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, &main.body, &init_lets, &ctx, &mut pool)?;
@@ -535,6 +557,9 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
                 effect_raw: ll.effect_raw,
                 in_main: false,
                 env_captures: Some(ll.captures.clone()),
+                // Closure hops always charge (TailCallee::Clo mirror).
+                metered: true,
+                charge_entry: true,
             };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
             display_helper_calls

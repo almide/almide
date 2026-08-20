@@ -404,6 +404,7 @@ fn build_one_display_helper(
             work,
             globals: &empty_globals,
             deferred_ranges: &empty_ranges,
+            metered: false,
             in_tail: false,
             cur_module: None,
             hold_i32_base: 7,

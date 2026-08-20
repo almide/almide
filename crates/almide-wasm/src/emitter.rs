@@ -37,6 +37,9 @@ pub(crate) struct Emitter<'a> {
     /// Deferred head-only range binds (C-238): VarId → (start local,
     /// end local, inclusive). No block exists for these vars.
     pub(crate) deferred_ranges: &'a HashMap<VarId, (u32, u32, bool)>,
+    /// USER code: loop heads / entries / dyn ops charge the deterministic
+    /// meter (ALS-DT2). Pool bodies and synthesized helpers never charge.
+    pub(crate) metered: bool,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -171,6 +174,50 @@ impl Emitter<'_> {
             .i32_const(1)
             .call(F_EXIT_IMPORT)
             .unreachable();
+    }
+
+    /// One deterministic charge of `n` units + the cut check (ALS-DT2).
+    /// The cut mirrors the interp's `Flow::Return(Int(0))`: the CURRENT
+    /// fn returns a zero-shaped value; callers continue to their own next
+    /// charge site — charge sites are identical across legs, so the
+    /// observable cut point is identical by construction.
+    pub(crate) fn emit_det_charge_const(&mut self, n: i64) {
+        if !self.metered {
+            return;
+        }
+        let mut i = self.f.instructions();
+        i.global_get(G_DET_FUEL).i64_const(n).i64_sub().global_set(G_DET_FUEL);
+        let _ = i;
+        self.emit_det_cut_check();
+    }
+
+    /// depth > 0 && fuel < 0 → return the zero of this fn's return type.
+    pub(crate) fn emit_det_cut_check(&mut self) {
+        if !self.metered {
+            return;
+        }
+        let mut i = self.f.instructions();
+        i.global_get(G_DET_DEPTH);
+        i.if_(BlockType::Empty);
+        i.global_get(G_DET_FUEL).i64_const(0).i64_lt_s();
+        i.if_(BlockType::Empty);
+        match self.fn_ret {
+            None => {}
+            Some(t) => match t.val_type() {
+                ValType::I64 => {
+                    i.i64_const(0);
+                }
+                ValType::F64 => {
+                    i.f64_const(0.0.into());
+                }
+                _ => {
+                    i.i32_const(0);
+                }
+            },
+        }
+        i.return_();
+        i.end();
+        i.end();
     }
 
     /// A hold from the pool matching the slice type's wasm value type.
@@ -336,6 +383,8 @@ impl Emitter<'_> {
                         Some(t) => t,
                         None => return unsup("rt:list-slice-unit"),
                     }
+                } else if let Some(t) = self.lower_budget_prim(symbol.as_str(), args)? {
+                    t
                 } else {
                     return unsup(&format!("rt:{}", symbol.as_str()));
                 }
@@ -760,6 +809,20 @@ impl Emitter<'_> {
                 self.lower(left, Some(STR))?;
                 self.lower(right, Some(STR))?;
                 self.f.instructions().call(F_CONCAT);
+                if self.metered {
+                    // T3-5 dynamic charge: 1 + result_byte_len/16, keyed
+                    // on the same result both backends key on.
+                    let t = self.tmp_i32_local;
+                    let mut i = self.f.instructions();
+                    i.local_set(t);
+                    i.global_get(G_DET_FUEL);
+                    i.i64_const(1);
+                    i.local_get(t).i32_load(len_memarg()).i32_const(4).i32_shr_u().i64_extend_i32_u();
+                    i.i64_add().i64_sub().global_set(G_DET_FUEL);
+                    let _ = i;
+                    self.emit_det_cut_check();
+                    self.f.instructions().local_get(t);
+                }
                 Ok(STR)
             }
             // List ++ List: byte-concat of the element arrays IS element

@@ -45,7 +45,12 @@ fn append_line(
 
 pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
-    let engine = wasmtime::Engine::default();
+    // Epoch deadline: a fixture (or a MUTANT under the gate) that
+    // diverges must FAIL the run, never hang the suite. 30s of real time
+    // is orders beyond any fixture; the deadline maps to a plain trap.
+    let mut cfg = wasmtime::Config::new();
+    cfg.epoch_interruption(true);
+    let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
     let out = Arc::new(Mutex::new(String::new()));
     let err = Arc::new(Mutex::new(String::new()));
@@ -79,6 +84,12 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
         Err(wasmtime::Error::msg("almide.exit"))
     }
     linker.func_wrap("almide", "exit", exit_host)?;
+    store.set_epoch_deadline(1);
+    let eng = engine.clone();
+    let ticker = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        eng.increment_epoch();
+    });
     let instance = linker.instantiate(&mut store, &module)?;
     let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
     let call = main.call(&mut store, ());
@@ -96,6 +107,7 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
             anyhow::bail!("almide.exit recorded a code but the run returned normally")
         }
     };
+    drop(ticker);
     Ok(RunResult {
         stdout: out.lock().expect("test harness invariant").clone(),
         stderr: err.lock().expect("test harness invariant").clone(),

@@ -146,6 +146,17 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         GlobalType { val_type: ValType::I32, mutable: false, shared: false },
         &ConstExpr::i32_const(heap_start as i32),
     );
+    // Deterministic meter (G_DET_FUEL/ENTRY/VERDICT/SPEND/DEPTH).
+    for init in [i64::MAX, 0, 0, 0] {
+        globals.global(
+            GlobalType { val_type: ValType::I64, mutable: true, shared: false },
+            &ConstExpr::i64_const(init),
+        );
+    }
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(0),
+    );
 
     // The funcref table always exists (a call_indirect in ANY body needs
     // it, entries or not); slot 0 stays uninitialized — null funcref =

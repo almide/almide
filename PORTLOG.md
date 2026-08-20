@@ -1812,3 +1812,34 @@ int.min came along (one select each).
 
 **Burn-up: 353 → 355 / 591**, floor 355, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 48: the deterministic meter (ALS-DT2/DT3) (2026-08-21)
+
+The fan/fuel wall — the burn's largest — falls in one landing, because
+the design work was READING, not inventing: the frontend already
+desugars time algebra to plain saturating Int IR and brackets regions
+with exactly three prims, and the interp's det_* cells ARE the spec.
+The wasm leg mirrors them cell for cell: five G_DET_* globals; enter
+divides by CM-1 (3ns/unit), min-caps EIP-150 style and RETURNS the
+saved fuel (the IR threads it to exit); exit computes verdict/spend and
+deducts the region's consumption from the restored outer fuel. Charges:
+one unit per loop-head CHECK (n iterations = n+1) on all four loop
+shapes, one per non-exempt user-fn entry (the exempt analysis mirrors
+det_entry_exempt: loop-free AND not self-reaching through user-fn
+edges, SIMPLE-name keyed — deliberately bug-compatible), one per
+closure hop, and the T3-5 dynamic concat charge (1 + len/16). Pool
+bodies and synthesized helpers never charge. The CUT mirrors
+Flow::Return(Int(0)): the current fn returns a zero-shaped value at a
+charge site and callers CONTINUE to their own next charge site —
+charge sites are identical across legs, so the cut point is identical
+by construction, boundary-exact (3006ns ok / 3005ns exhaust pins).
+
+A probe detour worth recording: fourteen "MISMATCH" verdicts were my
+probe hashing without the normalization's re-appended newline; the
+a877 oracle was rebuilt and the manifest regenerated to prove the
+committed goldens byte-identical before the real parity run said 371.
+
+**Burn-up: 355 → 371 / 591**, floor 371, zero divergence, workspace 0
+failures.

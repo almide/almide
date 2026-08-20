@@ -74,6 +74,10 @@ pub(crate) struct FnPlan {
     /// Some(raw) = effect fn: the body yields RAW `raw`, then wraps
     /// `ok(..)` into the declared Result-block return.
     pub(crate) effect_raw: Option<SliceTy>,
+    /// USER code — its loop heads / dyn ops charge the deterministic meter.
+    pub(crate) metered: bool,
+    /// Charge one unit at entry (non-exempt user fn, or any closure hop).
+    pub(crate) charge_entry: bool,
     /// `main`: a propagated `!` error aborts with the native frame.
     pub(crate) in_main: bool,
     /// Lifted lambda: raw wasm param 0 is the closure ENV block; the
@@ -89,7 +93,7 @@ pub(crate) fn lower_fn(
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
-    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module } = plan;
+    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module, metered, charge_entry } = plan;
     let cur_module = cur_module.as_deref();
     let env_shift: u32 = u32::from(env_captures.is_some());
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
@@ -187,6 +191,7 @@ pub(crate) fn lower_fn(
             work: ctx.work,
             globals: ctx.globals,
             deferred_ranges: &deferred_ranges,
+            metered,
             f: &mut f,
         };
         if let Some(caps) = &env_captures {
@@ -213,6 +218,9 @@ pub(crate) fn lower_fn(
                 em.f.instructions().call(F_BLOCK_COPY);
             }
             em.f.instructions().global_set(gidx);
+        }
+        if charge_entry {
+            em.emit_det_charge_const(1);
         }
         match (ret, effect_raw) {
             (None, _) => em.lower_stmt_expr(body)?,

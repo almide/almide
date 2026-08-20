@@ -155,6 +155,7 @@ expr:Range
 expr:Record
 expr:ResultErr
 expr:ResultOk
+expr:RuntimeCall
 expr:SpreadRecord
 expr:StringInterp
 expr:Try

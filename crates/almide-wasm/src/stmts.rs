@@ -45,6 +45,9 @@ impl Emitter<'_> {
             // as their own honest reasons until that lands.
             IrExprKind::While { cond, body } => {
                 self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                // Deterministic meter: one loop-head charge per condition
+                // CHECK (n iterations = n+1 checks), ALS-DT2.
+                self.emit_det_charge_const(1);
                 self.lower(cond, Some(BOOL))?;
                 self.f.instructions().i32_eqz().br_if(1);
                 for s in body {
@@ -240,6 +243,7 @@ impl Emitter<'_> {
                     let stop = self.hold_i64()?;
                     self.f.instructions().local_set(stop);
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                    self.emit_det_charge_const(1);
                     self.f.instructions().local_get(var_idx).local_get(stop);
                     if *inclusive {
                         self.f.instructions().i64_gt_s();
@@ -273,6 +277,7 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                        self.emit_det_charge_const(1);
                         self.f.instructions().local_get(var_idx).local_get(el);
                         if inclusive {
                             self.f.instructions().i64_gt_s();
@@ -317,6 +322,7 @@ impl Emitter<'_> {
                     .i32_const(0)
                     .local_set(cur);
                 self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.emit_det_charge_const(1);
                 self.f.instructions().local_get(cur).local_get(count).i32_ge_u().br_if(1);
                 self.f
                     .instructions()
