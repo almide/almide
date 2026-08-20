@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 85ece370e..bf7e47e52 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -1088,7 +1088,7 @@ impl Emitter<'_> {
+                 }
+                 for (k, fi) in fields.iter().enumerate() {
+                     if k > 0 {
+-                        self.append_lit(", ");
++                        self.append_lit(",");
+                     }
+                     self.append_lit(&format!("{}: ", fi.name));
+                     self.f.instructions().local_get(hb);

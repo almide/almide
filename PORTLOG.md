@@ -1525,3 +1525,22 @@ drops; the ×14 expr:Try histogram entry was THIS, not a marker gap),
 025 (unwrap_or's null test inverted).
 
 **Burn-up: 272 → 278 / 591**, floor 278, surface 131, zero divergence.
+
+---
+
+## Unit 6 — stage 37: the display engine (2026-08-20)
+
+`${part}` grows from five scalar arms into ONE recursive display engine
+over the type shape (emit-time recursion, depth-capped — runtime-
+recursive data displays are a queued helper): the oracle's exact forms
+for records (`Nm { f: v }`), variants (`Case(v)` / bare unit names),
+tuples, Options (`some(v)`/`none`), Results (`ok(v)`/`err(v)`), lists
+(`[a, b]`), with Rust-Debug string quoting in NESTED positions sharing
+the JSON 5-escape walker. Three oracle rulings landed mid-slice:
+anonymous records print as `{ f: v }` with NO name-space, an INFERRED
+structural record that matches a DECLARED record IS that type (name and
+declared field order — r5's contract), and truly-anonymous records
+display their fields in NAME order. Mutant 026 (record separator
+shortened).
+
+**Burn-up: 278 → 285 / 591**, floor 285, zero divergence.

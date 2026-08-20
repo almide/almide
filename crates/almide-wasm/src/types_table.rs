@@ -78,6 +78,8 @@ pub(crate) struct TypeTable {
     /// wraps; a pure Result-typed slot's body yields the Result itself.
     fn_sigs: RefCell<Vec<FnSig>>,
     fn_sig_ids: RefCell<HashMap<FnSig, u32>>,
+    /// Display name per def index ("" = anonymous record shape).
+    names: RefCell<Vec<String>>,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -91,6 +93,11 @@ impl TypeTable {
     /// A definition by index (cloned — defs are small).
     pub(crate) fn def(&self, i: u32) -> NamedDef {
         self.defs.borrow()[i as usize].clone()
+    }
+
+    /// The display name of a def ("" = anonymous record shape).
+    pub(crate) fn name_of(&self, i: u32) -> String {
+        self.names.borrow()[i as usize].clone()
     }
 
     /// Intern a function-value signature.
@@ -119,6 +126,30 @@ impl TypeTable {
         if let Some(&i) = self.anon_ids.borrow().get(&infos) {
             return Some(i);
         }
+        // An INFERRED structural record that matches a DECLARED record
+        // type (same field names+types, any order) IS that type — the
+        // oracle unifies them (r5_wasm_inferred_record_repr: declared
+        // name and declared field order in the repr).
+        {
+            let mut want: Vec<(String, SliceTy)> = infos.clone();
+            want.sort_by(|a, b| a.0.cmp(&b.0));
+            let defs = self.defs.borrow();
+            for (i, d) in defs.iter().enumerate() {
+                if let NamedDef::Record(r) = d {
+                    if self.names.borrow()[i].is_empty() {
+                        continue;
+                    }
+                    if r.fields.len() == want.len() {
+                        let mut have: Vec<(String, SliceTy)> =
+                            r.fields.iter().map(|f| (f.name.clone(), f.ty)).collect();
+                        have.sort_by(|a, b| a.0.cmp(&b.0));
+                        if have == want {
+                            return Some(i as u32);
+                        }
+                    }
+                }
+            }
+        }
         let widths: Vec<u32> = infos.iter().map(|(_, t)| t.slot_size()).collect();
         let (offsets, size) = almide_layout::pack_fields(&widths);
         let def_fields = infos
@@ -131,6 +162,7 @@ impl TypeTable {
             let mut defs = self.defs.borrow_mut();
             let i = defs.len() as u32;
             defs.push(NamedDef::Record(RecordDef { fields: def_fields, size }));
+            self.names.borrow_mut().push(String::new());
             i
         };
         self.anon_ids.borrow_mut().insert(infos, i);
@@ -160,6 +192,7 @@ impl TypeTable {
             let mut defs = self.defs.borrow_mut();
             let i = defs.len() as u32;
             defs.push(NamedDef::Excluded);
+            self.names.borrow_mut().push(name.to_string());
             i
         };
         self.instances.borrow_mut().insert(key, i);
@@ -340,6 +373,7 @@ impl TypeTable {
             anon_ids: RefCell::new(HashMap::new()),
             fn_sigs: RefCell::new(Vec::new()),
             fn_sig_ids: RefCell::new(HashMap::new()),
+            names: RefCell::new(Vec::new()),
         };
         // Phase 1: every CONCRETE declaration gets an index (Excluded
         // placeholder); generic declarations are kept whole for on-demand
@@ -359,6 +393,7 @@ impl TypeTable {
             }
             let idx = table.defs.borrow().len() as u32;
             table.defs.borrow_mut().push(NamedDef::Excluded);
+            table.names.borrow_mut().push(decl.name.as_str().to_string());
             table.by_name.insert(decl.name.as_str().to_string(), idx);
         }
         // Phase 2: build definitions in place.

@@ -564,19 +564,9 @@ impl Emitter<'_> {
         Ok(Some(out))
     }
 
-    /// `[value]` -> `[String]`: run the JSON serializer helpers over the
-    /// line buffer and capture the region as a real block.
-    pub(crate) fn emit_value_stringify(&mut self) -> Result<(), EmitError> {
-        let Some(fi) = self.resolve_qualified("float.to_string") else {
-            return Err(EmitError::Unsupported("stringify:float-unlinked".into()));
-        };
-        let info = &self.table.infos[fi];
-        if info.refuse.is_some() || info.ret != Some(STR) {
-            return Err(EmitError::Unsupported("stringify:float-impl".into()));
-        }
-        let float_idx = info.wasm_index;
-        self.calls.insert(fi);
-        let frags = JsonFrags {
+    /// The pooled JSON/display fragment set.
+    pub(crate) fn json_frags(&mut self) -> JsonFrags {
+        JsonFrags {
             null_: self.pool.intern("null"),
             true_: self.pool.intern("true"),
             false_: self.pool.intern("false"),
@@ -592,7 +582,22 @@ impl Emitter<'_> {
             rbrack: self.pool.intern("]"),
             lbrace: self.pool.intern("{"),
             rbrace: self.pool.intern("}"),
+        }
+    }
+
+    /// `[value]` -> `[String]`: run the JSON serializer helpers over the
+    /// line buffer and capture the region as a real block.
+    pub(crate) fn emit_value_stringify(&mut self) -> Result<(), EmitError> {
+        let Some(fi) = self.resolve_qualified("float.to_string") else {
+            return Err(EmitError::Unsupported("stringify:float-unlinked".into()));
         };
+        let info = &self.table.infos[fi];
+        if info.refuse.is_some() || info.ret != Some(STR) {
+            return Err(EmitError::Unsupported("stringify:float-impl".into()));
+        }
+        let float_idx = info.wasm_index;
+        self.calls.insert(fi);
+        let frags = self.json_frags();
         let _ = self.work.helper(Helper::JsonQuote { frags });
         let vj = self.work.helper(Helper::JsonValue { float_to_string: float_idx, frags });
         let hv = self.hold_i32()?;
