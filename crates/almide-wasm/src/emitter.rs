@@ -297,6 +297,84 @@ impl Emitter<'_> {
                 }
                 Ok(())
             }
+            // `xs[i] = v` — copy-on-write: semantically identical to the
+            // interp's Rc::make_mut COW (C-033), alias-safe by
+            // construction whatever escapes. The unconditional copy is a
+            // correctness-first cost; ownership-guarded in-place stores
+            // are a perf-war slice.
+            IrStmtKind::IndexAssign { target, index, value } => {
+                let (is_local, declared) = match self.locals.get(target) {
+                    Some(&(_, d)) => (true, d),
+                    None => match self.globals.get(target) {
+                        Some(&(_, d)) => (false, d),
+                        None => return unsup("index-assign:unmapped"),
+                    },
+                };
+                let SliceTy::List(h) = declared else {
+                    return unsup(&format!("index-assign-ty:{declared:?}"));
+                };
+                let el = self.types.el(h);
+                let stride = el.slot_size() as i64;
+                // Interp order: index, then value, then the bounds check.
+                self.lower(index, Some(INT))?;
+                let hi = self.hold_i64()?;
+                self.f.instructions().local_set(hi);
+                self.lower(value, Some(el))?;
+                let hv = self.hold_val(el)?;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hv);
+                let get_target = |f: &mut wasm_encoder::Function, locals: &HashMap<VarId, (u32, SliceTy)>, globals: &HashMap<VarId, (u32, SliceTy)>| {
+                    if is_local {
+                        f.instructions().local_get(locals[target].0);
+                    } else {
+                        f.instructions().global_get(globals[target].0);
+                    }
+                };
+                // OOB → the exact native frame + exit 1.
+                let msg = self.pool.intern("index out of bounds");
+                get_target(self.f, self.locals, self.globals);
+                {
+                    let mut i = self.f.instructions();
+                    i.i32_load(len_memarg())
+                        .i64_extend_i32_u()
+                        .i64_const(stride)
+                        .i64_div_s();
+                    i.local_get(hi).i64_le_s();
+                    i.local_get(hi).i64_const(0).i64_lt_s();
+                    i.i32_or().if_(BlockType::Empty);
+                    i.i32_const(msg as i32);
+                }
+                self.emit_error_frame_abort();
+                self.f.instructions().end();
+                // COW: the binding gets a fresh block, then the store.
+                get_target(self.f, self.locals, self.globals);
+                self.f.instructions().call(F_BLOCK_COPY).local_set(hb);
+                if is_local {
+                    let idx = self.locals[target].0;
+                    self.f.instructions().local_get(hb).local_set(idx);
+                } else {
+                    let g = self.globals[target].0;
+                    self.f.instructions().local_get(hb).global_set(g);
+                }
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(hb)
+                        .i64_extend_i32_u()
+                        .local_get(hi)
+                        .i64_const(stride)
+                        .i64_mul()
+                        .i64_add()
+                        .i32_wrap_i64()
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add();
+                    i.local_get(hv);
+                }
+                self.store_ty_slot_raw(el);
+                self.release_i32();
+                self.release_val(el);
+                self.release_i64();
+                Ok(())
+            }
             IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),
             // let (a, b) = e — evaluate once, load each bound position.
             IrStmtKind::BindDestructure { pattern, value } => {
@@ -444,6 +522,11 @@ impl Emitter<'_> {
             IrExprKind::LitInt { value } => {
                 self.f.instructions().i64_const(*value);
                 INT
+            }
+            // Unit as a VALUE (an effect ok payload, a Unit bind).
+            IrExprKind::Unit => {
+                self.f.instructions().i32_const(0);
+                SliceTy::Unit
             }
             IrExprKind::LitFloat { value } => {
                 self.f.instructions().f64_const((*value).into());
@@ -599,6 +682,12 @@ impl Emitter<'_> {
                 let hint = slice_ty_of(&e.ty, self.types);
                 match self.lower_call_at(target, args, tail, hint)? {
                     Some(ty) => ty,
+                    // A void call in value position under a Unit want:
+                    // materialize the unit value.
+                    None if want == Some(SliceTy::Unit) => {
+                        self.f.instructions().i32_const(0);
+                        SliceTy::Unit
+                    }
                     None => return unsup("call-unit-in-value"),
                 }
             }
@@ -919,6 +1008,11 @@ impl Emitter<'_> {
             }
             STR | SliceTy::Scalar(Scalar::Bytes) => {
                 self.f.instructions().call(F_STR_EQ);
+            }
+            SliceTy::Unit => {
+                self.f.instructions().drop();
+                self.f.instructions().drop();
+                self.f.instructions().i32_const(1);
             }
             SliceTy::List(h)
                 if matches!(

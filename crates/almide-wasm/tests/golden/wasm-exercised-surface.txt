@@ -106,5 +106,6 @@ stmt:Bind
 stmt:BindDestructure
 stmt:Comment
 stmt:Expr
+stmt:IndexAssign
 unop:NegInt
 unop:Not

@@ -1295,3 +1295,23 @@ block address like any other capture. Mutant 019 (capture snapshot
 skipped).
 
 **Burn-up: 240 → 249 / 590**, floor 249, zero divergence.
+
+---
+
+## Unit 6 — stage 28: Unit as a value + copy-on-write IndexAssign (2026-08-20)
+
+`SliceTy::Unit` (one i32 zero) covers where Unit must FLOW — binds,
+params, and the effect ok payload — while pure Unit-returning fns keep
+the void convention. The declared-Unit effect ABI (C-135's four shapes)
+claims: a Unit-effect body is statement-shaped and the `ok(())` payload
+materializes after it runs.
+
+`xs[i] = v` lands as COPY-ON-WRITE — semantically identical to the
+interp's `Rc::make_mut` COW (C-033), alias-safe by construction whatever
+escapes; evaluation order (index, value, bounds) and the OOB abort frame
+("Error: index out of bounds" + exit 1) match the interp verbatim. The
+unconditional copy is a correctness-first cost; ownership-guarded
+in-place stores are a perf-war slice. Mutant 020 (store misses the
+payload offset — header corruption every fixture catches).
+
+**Burn-up: 249 → 256 / 590**, floor 256, surface 111, zero divergence.

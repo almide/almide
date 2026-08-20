@@ -245,6 +245,10 @@ enum SliceTy {
     /// the null/trap slot, W-1). The signature lives in the TypeTable's
     /// fn-sig arena. Only value-referenced functions enter the table.
     Fn(u32),
+    /// `Unit` as a VALUE (a bind, a param, an effect ok payload): one
+    /// i32 zero. Pure fns returning Unit keep the void convention (ret
+    /// None) — this variant only appears where Unit must FLOW.
+    Unit,
 }
 
 const STR: SliceTy = SliceTy::Scalar(Scalar::Str);
@@ -263,7 +267,8 @@ impl SliceTy {
             | SliceTy::Set(_)
             | SliceTy::Tuple(_)
             | SliceTy::Named(_)
-            | SliceTy::Fn(_) => ValType::I32,
+            | SliceTy::Fn(_)
+            | SliceTy::Unit => ValType::I32,
         }
     }
 
@@ -328,6 +333,7 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
             Some(SliceTy::Tuple(types.tuple(elems)))
         }
         Ty::Record { fields } => types.anon_record(fields).map(SliceTy::Named),
+        Ty::Unit => Some(SliceTy::Unit),
         Ty::Fn { params, ret, is_effect } => {
             let mut ps = Vec::new();
             for p in params {
@@ -567,7 +573,9 @@ fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<SliceTy>, Opti
         params.push(sty);
     }
     let ret = match &f.ret_ty {
-        Ty::Unit if f.is_effect => return Err("effect-unit-ret".into()),
+        Ty::Unit if f.is_effect => {
+            Some(SliceTy::Result(types.intern(SliceTy::Unit), types.intern(STR)))
+        }
         Ty::Unit => None,
         other => match slice_ty_of(other, types) {
             // Effect convention: the wasm value of an effect fn is ALWAYS
@@ -719,6 +727,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
+                Some(SliceTy::Unit) => Some(SliceTy::Unit),
                 // A declared-Result effect fn is SINGLE-layer (probe:
                 // `wrap_sum(p)!` strips once to Int): the body yields the
                 // Result value itself via ok()/err() — no wrap. Declared-
@@ -1180,7 +1189,14 @@ fn lower_fn(
                 // No tail marker: a raw-typed tail call cannot
                 // `return_call` into a Result-returning frame. (The
                 // `f()!`-in-tail peephole is a later slice.)
-                em.lower(body, Some(raw))?;
+                if raw == SliceTy::Unit {
+                    // A Unit-effect body is statement-shaped; the ok
+                    // payload materializes after it runs.
+                    em.lower_stmt_expr(body)?;
+                    em.f.instructions().i32_const(0);
+                } else {
+                    em.lower(body, Some(raw))?;
+                }
                 em.wrap_ok(raw, want)?;
             }
         }

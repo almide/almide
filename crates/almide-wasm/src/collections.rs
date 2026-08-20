@@ -404,7 +404,7 @@ impl Emitter<'_> {
         };
     }
 
-    fn store_ty_slot_raw(&mut self, t: SliceTy) {
+    pub(crate) fn store_ty_slot_raw(&mut self, t: SliceTy) {
         // addr and value already on the stack, offset 0 (absolute addr).
         let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
         match t.val_type() {
