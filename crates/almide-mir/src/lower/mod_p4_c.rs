@@ -112,6 +112,38 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         // seed 500705518628 index 738, #1154 — a wall-escape, silent wrong
         // output). EITHER side heap-Ok routes to the UNLINKED `_x` — a
         // deterministic render wall, never a wrong-typed link.
+        // The MIXED-tag instantiation the #1527 frontier row pins:
+        // `zip(Result[Float, String], Result[String, String])`. The `_fs`
+        // twin reads side a len-as-tag (f64 bits @12) and side b cap-as-tag
+        // (@16, handle @12) — each side by its OWN rule, which is exactly
+        // what the shared scalar shim cannot do. Checked BEFORE the generic
+        // heap-Ok wall arm below.
+        "zip" if matches!(
+            (arg_tys.first(), arg_tys.get(1)),
+            (
+                Some(Ty::Applied(TC::Result, a)),
+                Some(Ty::Applied(TC::Result, b)),
+            ) if a.len() == 2 && b.len() == 2
+                && matches!(a[0], Ty::Float) && matches!(a[1], Ty::String)
+                && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)
+        ) =>
+        {
+            Some("result.zip_fs".to_string())
+        }
+        // Its consuming half: `unwrap_or_else` over the zip_fs result type,
+        // Result[(Float, String), String] — the `_fs` twin shares the pair
+        // out on Ok and feeds the deep-copied message to the fallback on
+        // Err. Also BEFORE the generic heap-Ok arm (a tuple Ok is heap).
+        "unwrap_or_else" if matches!(
+            arg_tys.first(),
+            Some(Ty::Applied(TC::Result, a)) if a.len() == 2
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[0], Ty::Float) && matches!(ts[1], Ty::String))
+                && matches!(a[1], Ty::String)
+        ) =>
+        {
+            Some("result.unwrap_or_else_fs".to_string())
+        }
         "zip" if arg_tys.iter().take(2).any(|t| matches!(t, Ty::Applied(TC::Result, a)
                 if a.len() == 2 && is_heap_ty(&a[0]))) =>
         {

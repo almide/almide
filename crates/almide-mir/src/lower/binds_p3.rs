@@ -302,7 +302,7 @@ impl LowerCtx {
     /// byte/length interpretation) free EXACTLY — a NESTED-heap type (`List[String]`, a
     /// RECURSIVE-drop record, `Value`) would leak under a blind single `rc_dec`, the same
     /// class of bug this session's `_str`-dispatch fix caught elsewhere.
-    fn is_flat_heap_tuple_slot(&self, ty: &Ty) -> bool {
+    pub(crate) fn is_flat_heap_tuple_slot(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         if !is_heap_ty(ty) {
             return true; // a scalar needs no free at all — vacuously "flat"

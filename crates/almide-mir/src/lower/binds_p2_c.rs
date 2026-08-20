@@ -216,6 +216,15 @@ impl LowerCtx {
         // rewrite, no logic change). A `List[String]` result (string.split / a List[String]
         // combinator) is a nested-ownership list — its scope-end drop must recursively free
         // elements.
+        if crate::lower::is_res_fs_ty(ty) {
+            // `Result[(Float, String), String]` (result.zip_fs) — the tag-aware
+            // `$__drop_res_fs` (Ok → pair-String then pair; Err → message). A
+            // one-level wrapper sweep freed the pair block-only and leaked its
+            // String per call (#1530 cap harness).
+            self.value_drops.entry(dst).or_default().named_route = Some("res_fs".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
         if crate::lower::is_res_intlist_strlist_ty(ty) {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
@@ -296,6 +305,24 @@ impl LowerCtx {
                 if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]));
         if map_str_scalar || is_heap_elem_list_ty(ty) {
             self.value_drops.entry(dst).or_default().flat_elems = true;
+        }
+        // A TUPLE result with ONE-LEVEL-EXACT heap slots (`result.unwrap_or_else`
+        // over the zip_fs pair — (Float, String)): seed the record mask so the
+        // scope-end drop SWEEPS the owned heap slots. Without it the pair's
+        // last-ref free was a plain block dec and the interior String leaked
+        // one block per call (the #1530 cap harness + the WAT rc tracer pinned
+        // it to exactly this dec). Slots outside the one-level-exact set stay
+        // unmasked — a one-level dec would leak THEIR interior, so those
+        // results keep the (honest) status quo instead of a wrong sweep.
+        if let Ty::Tuple(tys) = ty {
+            let heap_slots: Vec<usize> =
+                (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+            if !heap_slots.is_empty()
+                && heap_slots.iter().all(|&i| self.is_flat_heap_tuple_slot(&tys[i]))
+            {
+                self.record_masks.insert(dst, heap_slots);
+                self.materialized_aggregates.insert(dst);
+            }
         }
     }
 

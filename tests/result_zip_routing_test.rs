@@ -60,25 +60,27 @@ fn write_fixture(name: &str, src: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn mixed_zip_walls_on_wasm_and_runs_on_native() {
+fn mixed_zip_runs_identically_on_both_targets() {
+    // GRADUATED (#1527 frontier row, the result.zip_fs twin): this shape used
+    // to be the honest `result.zip_x` wall — the `_fs` twin now reads side a
+    // len-as-tag and side b cap-as-tag, and the tag-aware `$__drop_res_fs`
+    // route frees the pair's interior exactly (the #1530 cap harness holds
+    // the churn flat). The old wall pin flips to a support pin: both targets
+    // must print the SAME ok tuple — and the fallback value must NEVER
+    // appear (the original #1154 mis-link printed exactly that).
     if !tool_available() {
         eprintln!("skipping: almide binary unavailable");
         return;
     }
     let p = write_fixture("mixed_zip.almd", MIXED_ZIP);
 
-    // Native: the properly-typed mono instance runs — the ok tuple, not the
-    // fallback.
     let native = Command::new(almide_bin()).arg("run").arg(&p).output().unwrap();
-    let stdout = String::from_utf8_lossy(&native.stdout);
+    let native_out = String::from_utf8_lossy(&native.stdout).to_string();
     assert!(
-        stdout.contains("r = (1, \"abc\")"),
-        "native must take the ok path:\n{stdout}"
+        native_out.contains("r = (1, \"abc\")"),
+        "native must take the ok path:\n{native_out}"
     );
 
-    // Wasm: an honest wall — NEVER the shim's wrong value. (The wall fires at
-    // RENDER time, before wasmtime, so this half needs no wasmtime either —
-    // but a missing-wasmtime error would still confuse the assertions.)
     if !wasmtime_available() {
         eprintln!("skipping wasm half: wasmtime unavailable");
         return;
@@ -86,20 +88,14 @@ fn mixed_zip_walls_on_wasm_and_runs_on_native() {
     let wasm = Command::new(almide_bin())
         .arg("run").arg(&p).arg("--target").arg("wasm")
         .output().unwrap();
-    let out = format!(
-        "{}{}",
-        String::from_utf8_lossy(&wasm.stdout),
-        String::from_utf8_lossy(&wasm.stderr)
-    );
-    // The wall boilerplate itself says "silent fallback", so key on the
-    // fallback tuple's VALUE, which only the mis-linked shim could print.
+    let wasm_out = String::from_utf8_lossy(&wasm.stdout).to_string();
     assert!(
-        !out.contains("-42.5"),
-        "wasm must not silently take the err path on ok inputs:\n{out}"
+        !wasm_out.contains("-42.5"),
+        "wasm must not silently take the err path on ok inputs:\n{wasm_out}"
     );
-    assert!(
-        out.contains("not yet supported") || out.contains("wall"),
-        "wasm must wall the mixed zip instantiation honestly:\n{out}"
+    assert_eq!(
+        native_out, wasm_out,
+        "the graduated mixed zip must be byte-identical across targets"
     );
 }
 

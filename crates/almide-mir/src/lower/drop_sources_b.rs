@@ -627,6 +627,38 @@ pub fn is_res_list_map_si_ty(ty: &Ty) -> bool {
         && matches!(a[1], Ty::String))
 }
 
+/// The ALMIDE SOURCE of `$__drop_res_fs` — the TAG-AWARE release of a
+/// `Result[(Float, String), String]` (the result.zip_fs return, the #1527
+/// frontier row): tag@16 = Err(1) → the @12 payload is a flat String (the dec
+/// below is exact); tag = Ok(0) → the @12 payload is the (Float, String) pair,
+/// whose String slot @20 frees at the PAIR's last ref before the pair block
+/// itself. Without this route the caller-side wrapper sweep freed the pair
+/// block-only and the interior String leaked one block per call (#1530 cap
+/// harness + the WAT rc tracer). Trusted prim-only, like every `$__drop_*`.
+pub const RES_FS_DROP_SRC: &str = "\
+fn __drop_res_fs(r: List[Int]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    let inner = prim.load32(h + 12)
+    if prim.load32(h + 16) >= 1 then ()
+    else if prim.load32(inner + 0) == 1 then prim.rc_dec(prim.load64(inner + 20))
+    else ()
+    prim.rc_dec(inner)
+  } else ()
+  prim.rc_dec(h)
+}
+";
+
+/// Is `ty` exactly `Result[(Float, String), String]` (the result.zip_fs return —
+/// the tag-aware `$__drop_res_fs` class)?
+pub fn is_res_fs_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ty, Ty::Applied(TC::Result, a) if a.len() == 2
+        && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+            && matches!(ts[0], Ty::Float) && matches!(ts[1], Ty::String))
+        && matches!(a[1], Ty::String))
+}
+
 /// Is `ty` exactly `Result[List[Int], List[String]]` (the result.collect return —
 /// the tag-aware `$__drop_res_ilsl` class)?
 pub fn is_res_intlist_strlist_ty(ty: &Ty) -> bool {

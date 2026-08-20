@@ -96,6 +96,10 @@ fn build_ir_with_drops(
     // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
     // TAG-AWARE `$__drop_res_ilsl` (Err → recursive string free; Ok → flat).
     let res_ilsl_drop = gated(usage.res_intlist_strlist, crate::lower::RES_ILSL_DROP_SRC);
+    // `Result[(Float, String), String]` (result.zip_fs) routes its drop to the
+    // TAG-AWARE `$__drop_res_fs` (Ok → the pair's String slot then the pair;
+    // Err → the flat message).
+    let res_fs_drop = gated(usage.res_fs, crate::lower::RES_FS_DROP_SRC);
     // `Result[Map[String, <scalar>], String]` / its chunked List-of-maps sibling
     // (the fs.fold_lines msi twins) route their drops to the TAG-AWARE
     // `$__drop_res_msi` / `$__drop_res_lmsi` (Ok → the skv key sweep; Err → the
@@ -110,7 +114,7 @@ fn build_ir_with_drops(
     // dangling in the WAT.
     let opt_str_int_drop = gated(usage.opt_str_scalar, crate::lower::OPT_STR_INT_DROP_SRC);
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(
@@ -126,6 +130,7 @@ fn build_ir_with_drops(
         crate::lower::generate_krec_sources(&ir, &all_type_decls),
         closure_drop,
         res_ilsl_drop,
+        res_fs_drop,
         res_msi_drop,
         res_lmsi_drop,
         lenlist_drop,
