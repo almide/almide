@@ -1,0 +1,10 @@
+fn main() -> Unit = {
+  var a = 462
+  var b = 1071
+  while b != 0 {
+    let t = a % b
+    a = b
+    b = t
+  }
+  println(int.to_string(a))
+}

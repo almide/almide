@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let xs = [3, 9, 1, 7, 5]
+  var m = 0
+  for x in xs { m = if x > m then x else m }
+  println(int.to_string(m))
+}

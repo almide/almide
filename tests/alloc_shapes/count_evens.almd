@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var n = 0
+  for i in 0...200 { n = n + (if i % 2 == 0 then 1 else 0) }
+  println(int.to_string(n))
+}

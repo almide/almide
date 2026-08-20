@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  var s = 0
+  for i in 0...20 {
+    for j in 0...20 { s = s + i * j }
+  }
+  println(int.to_string(s))
+}
