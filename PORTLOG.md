@@ -1150,3 +1150,20 @@ line was doubled on the wasm leg, invisible because no gate compares
 stderr yet. Now printed verbatim (trailing newline stripped at the call).
 
 **Burn-up: 195 → 216 / 590**, floor 216, surface 107, zero divergence.
+
+---
+
+## Unit 6 — stage 22: anonymous records as synthetic Named defs (2026-08-20)
+
+`Ty::Record` shapes intern by (name, type) field list into synthetic Named
+record defs — construction, member access, equality, and RecordPatterns
+all reuse the Named machinery with zero new runtime code. Mutant 015
+(field lookup degraded to positional zip).
+
+Process note: the stage-21 landing's mutation gate ABORTED with "tree
+dirty after gate" because this slice was drafted onto the tree WHILE the
+gate ran — the gate's clean-tree invariant blocked the push exactly as
+designed. Standing rule reaffirmed: no tree edits while a landing task
+runs; drafts go to the scratchpad.
+
+**Burn-up: 216 → 221 / 590**, floor 221, zero divergence.

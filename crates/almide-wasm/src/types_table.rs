@@ -68,12 +68,44 @@ pub(crate) struct TypeTable {
     /// equality is shape equality. Layout from `pack_fields`.
     tuples: RefCell<Vec<TupleDef>>,
     tuple_ids: RefCell<HashMap<Vec<SliceTy>, u32>>,
+    /// ANONYMOUS record shapes (`Ty::Record`), interned by their
+    /// (name, type) field list into synthetic Named defs — construction,
+    /// member access, equality and patterns all reuse the Named machinery.
+    anon_ids: RefCell<HashMap<Vec<(String, SliceTy)>, u32>>,
 }
 
 impl TypeTable {
     /// A definition by index (cloned — defs are small).
     pub(crate) fn def(&self, i: u32) -> NamedDef {
         self.defs.borrow()[i as usize].clone()
+    }
+
+    /// An anonymous record shape as a synthetic Named def, built on
+    /// demand and interned by shape (same shape = same index).
+    pub(crate) fn anon_record(&self, fields: &[(Sym, Ty)]) -> Option<u32> {
+        let mut infos = Vec::new();
+        for (n, t) in fields {
+            infos.push((n.as_str().to_string(), slice_ty_of(t, self)?));
+        }
+        if let Some(&i) = self.anon_ids.borrow().get(&infos) {
+            return Some(i);
+        }
+        let widths: Vec<u32> = infos.iter().map(|(_, t)| t.slot_size()).collect();
+        let (offsets, size) = almide_layout::pack_fields(&widths);
+        let def_fields = infos
+            .iter()
+            .cloned()
+            .zip(offsets)
+            .map(|((name, ty), offset)| FieldInfo { name, ty, offset })
+            .collect();
+        let i = {
+            let mut defs = self.defs.borrow_mut();
+            let i = defs.len() as u32;
+            defs.push(NamedDef::Record(RecordDef { fields: def_fields, size }));
+            i
+        };
+        self.anon_ids.borrow_mut().insert(infos, i);
+        Some(i)
     }
 
     /// Monomorph instance of a generic declaration, built on demand.
@@ -276,6 +308,7 @@ impl TypeTable {
             interned: RefCell::new(HashMap::new()),
             tuples: RefCell::new(Vec::new()),
             tuple_ids: RefCell::new(HashMap::new()),
+            anon_ids: RefCell::new(HashMap::new()),
         };
         // Phase 1: every CONCRETE declaration gets an index (Excluded
         // placeholder); generic declarations are kept whole for on-demand

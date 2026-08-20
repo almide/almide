@@ -1245,6 +1245,38 @@ impl Emitter<'_> {
                 fty
             }
             // Record literal: alloc + store each field at its packed offset.
+            // Anonymous record literal: the shape interns as a synthetic
+            // Named record — construction below is shared.
+            IrExprKind::Record { name: None, fields } => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Named(ti) = ty else {
+                    return unsup(&format!("ty-mismatch:anon-record-vs-{ty:?}"));
+                };
+                let NamedDef::Record(def) = &self.types.def(ti) else {
+                    return unsup("anon-record-non-record-ty");
+                };
+                if def.fields.len() != fields.len() {
+                    return unsup("anon-record-defaults");
+                }
+                let mut slots = Vec::new();
+                for (fname, _) in fields {
+                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
+                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                        None => return unsup("anon-record-unknown-field"),
+                    }
+                }
+                let size = def.size;
+                let hold = self.hold_i32()?;
+                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
+                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    self.f.instructions().local_get(hold);
+                    self.lower(fexpr, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                ty
+            }
             IrExprKind::Record { name, fields } if name.is_some() => {
                 let ty = want.map_or_else(|| self.infer(e), Ok)?;
                 let SliceTy::Named(ti) = ty else {
@@ -1317,7 +1349,6 @@ impl Emitter<'_> {
                 self.release_i32();
                 ty
             }
-            IrExprKind::Record { name: None, .. } => return unsup("record-anon"),
             // {...base, f: v}: copy then overwrite — functional update.
             IrExprKind::SpreadRecord { base, fields } => {
                 let ty = self.lower(base, None)?;

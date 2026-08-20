@@ -320,6 +320,7 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
             }
             Some(SliceTy::Tuple(types.tuple(elems)))
         }
+        Ty::Record { fields } => types.anon_record(fields).map(SliceTy::Named),
         Ty::Named(name, args) if args.is_empty() => {
             types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i))
         }
