@@ -9,15 +9,28 @@ use crate::*;
 
 /// `$*_block(base: i32)`: derive (payload, len) from the layout and call
 /// the given host import — the ONLY place a block is unpacked for printing.
-/// C-221: a PURE fn filling an EFFECT slot — forward the params, then
-/// wrap the raw result in an `ok(..)` Result block.
-pub(crate) fn emit_ok_adapter(target_fn: u32, params: &[SliceTy], raw: SliceTy) -> Function {
+/// The (env, params...) forwarding shim for a plain fn's table slot —
+/// and, with `wrap`, the C-221 ok-wrap adapter (a PURE fn filling an
+/// EFFECT slot). Param 0 is the closure env block, ignored here.
+pub(crate) fn emit_env_shim(
+    target_fn: u32,
+    params: &[SliceTy],
+    ret: Option<SliceTy>,
+    wrap: bool,
+) -> Function {
     let n = params.len() as u32;
-    let (rawv, blk) = (n, n + 1);
-    let mut f = Function::new([(1, raw.val_type()), (1, ValType::I32)]);
+    let (rawv, blk) = (n + 1, n + 2);
+    let raw_vt = ret.map_or(ValType::I32, SliceTy::val_type);
+    let mut f = Function::new([(1, raw_vt), (1, ValType::I32)]);
     let mut i = f.instructions();
     for k in 0..n {
-        i.local_get(k);
+        i.local_get(k + 1);
+    }
+    if !wrap {
+        // Plain forward — tail form keeps constant stack.
+        i.return_call(target_fn);
+        i.end();
+        return f;
     }
     i.call(target_fn);
     i.local_set(rawv);
@@ -28,7 +41,7 @@ pub(crate) fn emit_ok_adapter(target_fn: u32, params: &[SliceTy], raw: SliceTy) 
         .i32_store(slot_memarg(almide_layout::SUM_TAG));
     i.local_get(blk).local_get(rawv);
     let m = slot_memarg(almide_layout::SUM_FIELD);
-    match raw.val_type() {
+    match raw_vt {
         ValType::I64 => i.i64_store(m),
         ValType::F64 => i.f64_store(m),
         _ => i.i32_store(m),

@@ -36,16 +36,18 @@ impl Emitter<'_> {
                 if args.len() != def.params.len() {
                     return unsup("computed-arity");
                 }
+                // Closure convention: env block is arg 0; the callee's
+                // table slot is the block's first payload field.
                 let h = self.hold_i32()?;
                 self.f.instructions().local_set(h);
+                self.f.instructions().local_get(h);
                 for (a, p) in args.iter().zip(def.params.iter()) {
                     self.lower(a, Some(*p))?;
                 }
-                self.f.instructions().local_get(h);
-                let ti = self.work.itype(
-                    def.params.iter().map(|t| t.val_type()).collect(),
-                    def.ret.map(SliceTy::val_type),
-                );
+                self.f.instructions().local_get(h).i32_load(slot_memarg(0));
+                let mut ps: Vec<ValType> = vec![ValType::I32];
+                ps.extend(def.params.iter().map(|t| t.val_type()));
+                let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
                 // Encoder argument order is (table, type).
                 if tail && def.ret.is_some() && def.ret == self.fn_ret {
                     self.f.instructions().return_call_indirect(0, ti);

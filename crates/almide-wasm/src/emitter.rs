@@ -98,33 +98,34 @@ impl Emitter<'_> {
         self.hold_f64_depth -= 1;
     }
 
-    /// Does the lambda body reference any OUTER local (a capture)? VarIds
-    /// are unique within a function context, so any Var resolving through
-    /// the enclosing locals map that is not a lambda param is a capture.
-    pub(crate) fn lambda_captures(
+    /// The lambda body's captured OUTER locals (VarIds are unique within
+    /// a function context, so any Var resolving through the enclosing
+    /// locals map that is not a lambda param is a capture).
+    pub(crate) fn captured_vars(
         &self,
         params: &std::collections::HashSet<VarId>,
         body: &IrExpr,
-    ) -> bool {
+    ) -> Vec<(VarId, SliceTy)> {
         struct Scan<'x> {
             locals: &'x HashMap<VarId, (u32, SliceTy)>,
             params: &'x std::collections::HashSet<VarId>,
-            captured: bool,
+            out: Vec<(VarId, SliceTy)>,
         }
         impl almide_ir::visit::IrVisitor for Scan<'_> {
             fn visit_expr(&mut self, e: &IrExpr) {
                 if let IrExprKind::Var { id } = &e.kind
-                    && self.locals.contains_key(id)
                     && !self.params.contains(id)
+                    && let Some(&(_, ty)) = self.locals.get(id)
+                    && !self.out.iter().any(|(v, _)| v == id)
                 {
-                    self.captured = true;
+                    self.out.push((*id, ty));
                 }
                 almide_ir::visit::walk_expr(self, e);
             }
         }
-        let mut sc = Scan { locals: self.locals, params, captured: false };
+        let mut sc = Scan { locals: self.locals, params, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut sc, body);
-        sc.captured
+        sc.out
     }
 
     /// `[raw value]` -> `[ok(..) Result block]` (the effect-fn return wrap).
@@ -507,11 +508,15 @@ impl Emitter<'_> {
                     }
                 };
                 let slot = self.work.slot(entry);
-                self.f.instructions().i32_const(slot as i32);
+                // Fn value = closure BLOCK [slot@0]; capture-free blocks
+                // are pool statics (dedup by content, zero runtime alloc).
+                let block = self.pool.intern_block(&(slot).to_le_bytes());
+                self.f.instructions().i32_const(block as i32);
                 ty
             }
-            // A non-capturing lambda as a VALUE: lifted into an extra
-            // function + table slot. Captures are a later mechanism.
+            // A lambda as a VALUE: lifted into an extra function; its
+            // closure block carries the table slot + captured locals
+            // (by-value snapshot, the interp's closure semantics).
             IrExprKind::Lambda { params, body, .. } => {
                 let ty = want.map_or_else(|| self.infer(e), Ok)?;
                 let SliceTy::Fn(sig) = ty else {
@@ -523,9 +528,8 @@ impl Emitter<'_> {
                 }
                 let param_ids: std::collections::HashSet<VarId> =
                     params.iter().map(|(v, _)| *v).collect();
-                if self.lambda_captures(&param_ids, body) {
-                    return unsup("fn-value-capture");
-                }
+                let mut captured = self.captured_vars(&param_ids, body);
+                captured.sort_by_key(|v| v.0);
                 let ps: Vec<(VarId, SliceTy)> = params
                     .iter()
                     .map(|(v, _)| *v)
@@ -539,14 +543,44 @@ impl Emitter<'_> {
                 } else {
                     None
                 };
+                // Closure block layout: [slot:i32][captures packed...].
+                let widths: Vec<u32> = std::iter::once(4)
+                    .chain(captured.iter().map(|(_, t)| t.slot_size()))
+                    .collect();
+                let (offsets, size) = almide_layout::pack_fields(&widths);
+                let captures: Vec<(VarId, SliceTy, u32)> = captured
+                    .iter()
+                    .zip(offsets.iter().skip(1))
+                    .map(|(&(v, t), &off)| (v, t, off))
+                    .collect();
                 let j = self.work.register_lambda(LiftedLambda {
                     params: ps,
                     ret: def.ret,
                     effect_raw,
                     body: (**body).clone(),
+                    captures: captures.clone(),
                 });
                 let slot = self.work.slot(TableEntry::Lambda(j));
-                self.f.instructions().i32_const(slot as i32);
+                if captures.is_empty() {
+                    let block = self.pool.intern_block(&(slot).to_le_bytes());
+                    self.f.instructions().i32_const(block as i32);
+                } else {
+                    let hb = self.hold_i32()?;
+                    self.f
+                        .instructions()
+                        .i32_const(size as i32)
+                        .call(F_ALLOC)
+                        .local_tee(hb)
+                        .i32_const(slot as i32)
+                        .i32_store(slot_memarg(0));
+                    for (v, t, off) in &captures {
+                        let (idx, _) = self.locals[v];
+                        self.f.instructions().local_get(hb).local_get(idx);
+                        self.store_ty_slot(*t, *off);
+                    }
+                    self.f.instructions().local_get(hb);
+                    self.release_i32();
+                }
                 ty
             }
             IrExprKind::RuntimeCall { symbol, args } => {

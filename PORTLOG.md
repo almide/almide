@@ -1274,3 +1274,24 @@ Mutant 018 (dependency order degraded to declaration order — exactly the
 #632 regression the fixture pins).
 
 **Burn-up: 236 → 240 / 590**, floor 240, surface 110, zero divergence.
+
+---
+
+## Unit 6 — stage 27: CLOSURES — the uniform env convention (2026-08-20)
+
+Fn values graduate from bare table slots to closure BLOCKS
+`[slot:i32][captures packed…]` under ONE convention: every table-entered
+function is `(env, params…) -> ret` with env as arg 0 (W-2, grain's
+doctrine). Capture-free blocks are POOL STATICS (dedup by content, zero
+runtime alloc); capturing lambdas alloc + snapshot their captured locals
+BY VALUE (the interp's closure semantics); the lifted fn's prelude loads
+captures from env into fresh locals, so the body lowers unchanged. Plain
+named fns get a forwarding shim (return_call — constant stack); the
+C-221 ok-wrap adapter merges into the same shim form. Computed calls
+push env first and fetch the callee slot from the block's first field.
+`fn-value-capture` is RETIRED as a wall: compose-style closures
+(capturing OTHER fn values) work — a captured fn value is just an i32
+block address like any other capture. Mutant 019 (capture snapshot
+skipped).
+
+**Burn-up: 240 → 249 / 590**, floor 249, zero divergence.

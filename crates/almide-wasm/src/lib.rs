@@ -396,6 +396,25 @@ impl Pool {
         self.data.extend_from_slice(bytes);
         base
     }
+
+    /// A static BLOCK with the given payload bytes (dedup by content) —
+    /// capture-free closure blocks live in the pool, zero runtime alloc.
+    fn intern_block(&mut self, payload: &[u8]) -> u32 {
+        let key = format!("\u{0}blk:{payload:?}");
+        if let Some(&base) = self.interned.get(&key) {
+            return base;
+        }
+        let base = self.data.len() as u32;
+        let len = payload.len() as u32;
+        let mut header = vec![0u8; almide_layout::PAYLOAD as usize];
+        header[almide_layout::RC.offset as usize..][..4].copy_from_slice(&1u32.to_le_bytes());
+        header[almide_layout::LEN.offset as usize..][..4].copy_from_slice(&len.to_le_bytes());
+        header[almide_layout::CAP.offset as usize..][..4].copy_from_slice(&len.to_le_bytes());
+        self.data.extend_from_slice(&header);
+        self.data.extend_from_slice(payload);
+        self.interned.insert(key, base);
+        base
+    }
 }
 
 fn len_memarg() -> MemArg {
@@ -447,7 +466,9 @@ pub(crate) struct Ctx<'a> {
 /// extra functions (lowered by the fixed-point loop in `emit_program`).
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub(crate) enum TableEntry {
-    /// A program function referenced as a value.
+    /// A program function referenced as a value — its table slot holds a
+    /// SHIM `(env, params...) -> ret` forwarding to the plain fn (the
+    /// uniform closure convention: env is arg 0 everywhere, W-2).
     Fn(usize),
     /// An ok-wrapping adapter: a PURE fn filling an EFFECT slot (C-221).
     Adapter { target: usize, raw: SliceTy },
@@ -461,6 +482,10 @@ pub(crate) struct LiftedLambda {
     pub(crate) ret: Option<SliceTy>,
     pub(crate) effect_raw: Option<SliceTy>,
     pub(crate) body: IrExpr,
+    /// Captured outer locals: (var, type, closure-block payload offset).
+    /// The lifted fn's prelude loads each from the env param (raw param
+    /// slot 0) into a fresh local — by-value snapshot semantics.
+    pub(crate) captures: Vec<(VarId, SliceTy, u32)>,
 }
 
 /// A call_indirect signature at the wasm value-type level.
@@ -705,7 +730,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         } else {
             None
         };
-        let plan = FnPlan { ret: table.infos[i].ret, effect_raw, in_main: false };
+        let plan =
+            FnPlan { ret: table.infos[i].ret, effect_raw, in_main: false, env_captures: None };
         match lower_fn(&params, plan, &f.body, &[], cur_module, &ctx, &mut pool) {
             Ok(ok) => lowered.push(Ok(ok)),
             Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
@@ -715,7 +741,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
     let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map };
-    let main_plan = FnPlan { ret: None, effect_raw: None, in_main: true };
+    let main_plan = FnPlan { ret: None, effect_raw: None, in_main: true, env_captures: None };
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, &main.body, &init_lets, None, &ctx, &mut pool)?;
 
@@ -731,14 +757,17 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
             break;
         }
         for ll in pending {
-            let plan = FnPlan { ret: ll.ret, effect_raw: ll.effect_raw, in_main: false };
+            let plan = FnPlan {
+                ret: ll.ret,
+                effect_raw: ll.effect_raw,
+                in_main: false,
+                env_captures: Some(ll.captures.clone()),
+            };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], None, &ctx, &mut pool)?;
-            lifted_fns.push((
-                ll.params.iter().map(|(_, t)| t.val_type()).collect(),
-                ll.ret.map(SliceTy::val_type),
-                f,
-                calls,
-            ));
+            // Uniform convention: env i32 leads every table signature.
+            let mut ps: Vec<ValType> = vec![ValType::I32];
+            ps.extend(ll.params.iter().map(|(_, t)| t.val_type()));
+            lifted_fns.push((ps, ll.ret.map(SliceTy::val_type), f, calls));
         }
     }
 
@@ -773,15 +802,31 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let mut entry_fn_indices: Vec<u32> = Vec::new();
     for e in work.entries.borrow().clone() {
         match e {
-            TableEntry::Fn(i) => entry_fn_indices.push(F_FN_BASE + i as u32),
+            TableEntry::Fn(i) => {
+                // Uniform closure convention: env leads — a plain fn's
+                // table slot holds a forwarding shim.
+                let info = &table.infos[i];
+                let mut ps: Vec<ValType> = vec![ValType::I32];
+                ps.extend(info.params.iter().map(|t| t.val_type()));
+                let ti = work.itype(ps, info.ret.map(SliceTy::val_type));
+                let idx = extra_base + extra_fns.len() as u32;
+                extra_fns.push((
+                    ti,
+                    emit_env_shim(F_FN_BASE + i as u32, &info.params, info.ret, false),
+                ));
+                entry_fn_indices.push(idx);
+            }
             TableEntry::Adapter { target, raw } => {
                 let info = &table.infos[target];
-                let ti = work.itype(
-                    info.params.iter().map(|t| t.val_type()).collect(),
-                    Some(ValType::I32),
-                );
+                let mut ps: Vec<ValType> = vec![ValType::I32];
+                ps.extend(info.params.iter().map(|t| t.val_type()));
+                let ti = work.itype(ps, Some(ValType::I32));
                 let idx = extra_base + extra_fns.len() as u32;
-                extra_fns.push((ti, emit_ok_adapter(F_FN_BASE + target as u32, &info.params, raw)));
+                let _ = raw;
+                extra_fns.push((
+                    ti,
+                    emit_env_shim(F_FN_BASE + target as u32, &info.params, info.ret, true),
+                ));
                 entry_fn_indices.push(idx);
             }
             TableEntry::Lambda(j) => {
@@ -1001,7 +1046,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 /// params become the leading locals, collected Binds follow, then the
 /// scratch locals (interp cursor, tmp i32, match/unwrap subjects).
 /// How one function's body meets its wasm signature.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct FnPlan {
     ret: Option<SliceTy>,
     /// Some(raw) = effect fn: the body yields RAW `raw`, then wraps
@@ -1009,6 +1054,9 @@ struct FnPlan {
     effect_raw: Option<SliceTy>,
     /// `main`: a propagated `!` error aborts with the native frame.
     in_main: bool,
+    /// Lifted lambda: raw wasm param 0 is the closure ENV block; the
+    /// prelude loads each capture into a fresh local (value snapshot).
+    env_captures: Option<Vec<(VarId, SliceTy, u32)>>,
 }
 
 fn lower_fn(
@@ -1020,15 +1068,23 @@ fn lower_fn(
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
-    let FnPlan { ret, effect_raw, in_main } = plan;
+    let FnPlan { ret, effect_raw, in_main, env_captures } = plan;
+    let env_shift: u32 = u32::from(env_captures.is_some());
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
     let mut seen: HashSet<VarId> = HashSet::new();
     for (i, (var, ty)) in params.iter().enumerate() {
-        locals.insert(*var, (i as u32, *ty));
+        locals.insert(*var, (i as u32 + env_shift, *ty));
         seen.insert(*var);
     }
 
     let mut binds: Vec<(VarId, SliceTy)> = Vec::new();
+    if let Some(caps) = &env_captures {
+        for (var, ty, _) in caps {
+            if seen.insert(*var) {
+                binds.push((*var, *ty));
+            }
+        }
+    }
     for tl in top_lets {
         if slice_ty_of(&tl.ty, ctx.types).is_none() {
             return unsup(&format!("bind-ty:{}", ty_name(&tl.ty)));
@@ -1042,10 +1098,10 @@ fn lower_fn(
 
     let mut local_decls: Vec<(u32, ValType)> = Vec::new();
     for (i, (var, ty)) in binds.iter().enumerate() {
-        locals.insert(*var, ((params.len() + i) as u32, *ty));
+        locals.insert(*var, (env_shift + (params.len() + i) as u32, *ty));
         local_decls.push((1, ty.val_type()));
     }
-    let base = (params.len() + binds.len()) as u32;
+    let base = env_shift + (params.len() + binds.len()) as u32;
     let (cursor_local, tmp_i32_local, scr_i32_local, scr_i64_local, scr_f64_local) =
         (base, base + 1, base + 2, base + 3, base + 4);
     local_decls.push((3, ValType::I32)); // cursor, tmp, scr_i32
@@ -1090,6 +1146,15 @@ fn lower_fn(
             globals: ctx.globals,
             f: &mut f,
         };
+        if let Some(caps) = &env_captures {
+            // env (raw param 0) → capture locals, by-value snapshot.
+            for (var, ty, off) in caps {
+                let (idx, _) = em.locals[var];
+                em.f.instructions().local_get(0);
+                em.load_ty_slot(*ty, *off);
+                em.f.instructions().local_set(idx);
+            }
+        }
         for tl in top_lets {
             let Some(&(gidx, declared)) = ctx.globals.get(&tl.var) else {
                 return unsup(&format!("bind-ty:{}", ty_name(&tl.ty)));
