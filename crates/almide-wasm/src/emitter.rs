@@ -89,6 +89,23 @@ impl Emitter<'_> {
         self.hold_f64_depth -= 1;
     }
 
+    /// A hold from the pool matching the slice type's wasm value type.
+    pub(crate) fn hold_val(&mut self, ty: SliceTy) -> Result<u32, EmitError> {
+        match ty.val_type() {
+            ValType::I64 => self.hold_i64(),
+            ValType::F64 => self.hold_f64(),
+            _ => self.hold_i32(),
+        }
+    }
+
+    pub(crate) fn release_val(&mut self, ty: SliceTy) {
+        match ty.val_type() {
+            ValType::I64 => self.release_i64(),
+            ValType::F64 => self.release_f64(),
+            _ => self.release_i32(),
+        }
+    }
+
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
         match &e.kind {

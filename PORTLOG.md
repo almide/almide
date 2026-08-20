@@ -1042,3 +1042,28 @@ the one `list.slice` lowering, as native rt shares one impl. Mutant 010
 fan budget/timeout machinery (×14), now visible under its own name.
 
 **Burn-up: 167 → 171 / 590**, floor 171, zero divergence.
+
+---
+
+## Unit 6 — stage 18: nested patterns + a net-tooth lesson (2026-08-20)
+
+**Mutant 010 SURVIVED on first landing attempt** — `a<0 → a<=0` in the slice
+empty-check went uncaught because NO exercised program sliced from zero (the
+everyday form: existing fixtures use starts 2/10, the claimed rt-slice rows
+nonzero starts). The gate blocked the push, exactly as designed. Tooth added:
+the fuzz generator now produces `list.slice(xs, 0|1, k)` — mutant 010 is
+caught by 4 seeds. Standing gap noted: landing NEW spec fixtures requires the
+oracle-pinned run-manifest regen procedure (also the V-5 permanence path) —
+not yet exercised in greenfield.
+
+Nested patterns: `some(ok(3))`, `Nd(Lf, x)`, ctor-in-ctor — every inner
+pattern now recurses through a typed hold (`test_nested`/`bind_nested`), so
+the outer subject's scratch survives later fields. The Literal-only special
+cases collapsed into the general form. Mutant 011 (nested test forced true).
+
+**Burn-up: 171 → 175 / 590**, floor 175, zero divergence.
+
+Reference survey landed: ../almide-references/RESEARCH-wasm-backends.md
+(W-1..W-9, zig/roc/grain SHA-pinned) — Fn-value slice design ratified there
+(W-1 +1-biased table of address-taken fns + W-2 closure blocks; corpus HOFs
+stay inlined). Roc/zig have NO return_call — C-292 keeps us ahead.

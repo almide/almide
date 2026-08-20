@@ -134,19 +134,14 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(scr).i32_const(0).i32_ne();
                     return Ok(());
                 }
-                // some(<literal>): non-null AND slot == literal (scalar slots only).
-                let IrPattern::Literal { expr } = inner.as_ref() else {
-                    return unsup(&format!("pattern:some-{}", pattern_name(inner)));
-                };
+                // some(<refutable>): non-null AND the payload matches —
+                // the inner pattern recurses through a typed hold, so
+                // some(ok(3)), some(Nd(x)), … all compose.
                 let et = self.types.el(h);
-                let SliceTy::Scalar(sc) = et else {
-                    return unsup("pattern:some-lit-nonscalar");
-                };
                 self.f.instructions().local_get(scr).if_(BlockType::Result(ValType::I32));
                 self.f.instructions().local_get(scr);
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.lower(expr, Some(et))?;
-                self.emit_scalar_eq(sc);
+                self.test_nested(inner, et)?;
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
             }
@@ -184,19 +179,12 @@ impl Emitter<'_> {
                 if pattern_irrefutable(inner) {
                     return Ok(());
                 }
-                let IrPattern::Literal { expr } = inner.as_ref() else {
-                    return unsup(&format!("pattern:sum-{}", pattern_name(inner)));
-                };
                 let et = self.types.el(o);
-                let SliceTy::Scalar(sc) = et else {
-                    return unsup("pattern:sum-lit-nonscalar");
-                };
-                // tag matches AND field == literal.
+                // tag matches AND the payload matches (recursive).
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
                 self.f.instructions().local_get(scr);
                 self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                self.lower(expr, Some(et))?;
-                self.emit_scalar_eq(sc);
+                self.test_nested(inner, et)?;
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
             }
@@ -231,7 +219,8 @@ impl Emitter<'_> {
                 if args.len() != fields.len() {
                     return unsup("pattern:ctor-arity");
                 }
-                // tag test, then AND in each refutable field literal.
+                // tag test, then AND in each refutable field pattern
+                // (recursive — nested constructors compose).
                 self.f
                     .instructions()
                     .local_get(scr)
@@ -242,17 +231,10 @@ impl Emitter<'_> {
                     if pattern_irrefutable(ap) {
                         continue;
                     }
-                    let IrPattern::Literal { expr } = ap else {
-                        return unsup(&format!("pattern:ctor-{}", pattern_name(ap)));
-                    };
-                    let SliceTy::Scalar(fs) = fty else {
-                        return unsup("pattern:ctor-lit-nonscalar");
-                    };
                     self.f.instructions().if_(BlockType::Result(ValType::I32));
                     self.f.instructions().local_get(scr);
                     self.load_ty_slot(fty, off);
-                    self.lower(expr, Some(fty))?;
-                    self.emit_scalar_eq(fs);
+                    self.test_nested(ap, fty)?;
                     self.f.instructions().else_().i32_const(0).end();
                 }
                 Ok(())
@@ -384,8 +366,10 @@ impl Emitter<'_> {
                             self.load_ty_slot(fty, off);
                             self.f.instructions().local_set(idx);
                         }
-                        other => {
-                            return unsup(&format!("pattern:ctor-{}", pattern_name(other)))
+                        nested => {
+                            self.f.instructions().local_get(scr);
+                            self.load_ty_slot(fty, off);
+                            self.bind_nested(nested, fty)?;
                         }
                     }
                 }
@@ -414,8 +398,33 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(idx);
                 Ok(())
             }
-            other => unsup(&format!("pattern:inner-{}", pattern_name(other))),
+            nested => {
+                let et = self.types.el(h);
+                self.f.instructions().local_get(scr);
+                self.load_ty_slot(et, field);
+                self.bind_nested(nested, et)
+            }
         }
+    }
+
+    /// Test a NESTED pattern against the field value on the stack: park
+    /// it in a typed hold (the outer subject's scratch must survive for
+    /// later fields) and recurse — any pattern form composes.
+    pub(crate) fn test_nested(&mut self, ap: &IrPattern, fty: SliceTy) -> Result<(), EmitError> {
+        let h = self.hold_val(fty)?;
+        self.f.instructions().local_set(h);
+        self.emit_pattern_test(ap, fty, h)?;
+        self.release_val(fty);
+        Ok(())
+    }
+
+    /// Bind a NESTED pattern's variables from the field value on the stack.
+    pub(crate) fn bind_nested(&mut self, ap: &IrPattern, fty: SliceTy) -> Result<(), EmitError> {
+        let h = self.hold_val(fty)?;
+        self.f.instructions().local_set(h);
+        self.emit_pattern_binds(ap, fty, h)?;
+        self.release_val(fty);
+        Ok(())
     }
 
     /// Scalar equality: i64/i32 compare, byte-equality for strings.
