@@ -136,8 +136,10 @@ const F_F16_TO_F64: u32 = 24;
 const F_CP_OFF: u32 = 25;
 const F_STR_SLICE: u32 = 26;
 const F_STR_REPEAT: u32 = 27;
+const F_STR_CMP: u32 = 28;
+const F_STR_REPLACE: u32 = 29;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 28;
+const F_FN_BASE: u32 = 30;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),

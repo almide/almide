@@ -1697,3 +1697,28 @@ flatten/zip (interp abstains) A/B'd against native 0.58 byte-for-byte.
 result.partition stays an honest wall for now.
 
 **Burn-up: 299 → 308 / 591**, floor 308, zero divergence.
+
+---
+
+## Unit 6 — stage 43: string.replace, sort, chunk/windows, with_capacity (2026-08-21)
+
+Two new fixed helpers (types reused, so only F_FN_BASE moved 28→30):
+$str_replace carries Rust str::replace/replace_first byte-for-byte —
+the C-100 empty-pattern rule (`to` at every CHAR boundary, a leading
+`to`, multibyte chars whole; replace_first("") = to ++ s) plus the
+count-pass/fill-pass general form. $str_cmp is byte-lexicographic with
+length tiebreak (String: Ord), feeding list.sort — an insertion sort
+over a FRESH copy (stable; for scalars any correct sort is
+value-identical to native `v.sort()`); Float order is IEEE totalOrder
+via the bits ^ ((bits >>s 63) >>u 1) key compared signed, so
+`-0.0 < 0.0` and the NaN positions hold. chunk keeps the
+ceiling-division-without-the-overflow-trick form and the v0
+negative-n one-chunk reading; windows: n > len (negatives included) →
+empty; both die "…size must be positive" on 0. with_capacity is the
+empty list (capacity is a hint — native clamps it; ret_hint now flows
+into lower_list_call). The select-operand footgun struck TWICE in
+chunk (probe caught garbage reads immediately) — mutant 031 pins the
+exact inversion permanently.
+
+**Burn-up: 308 → 319 / 591**, floor 319, zero divergence, workspace 0
+failures.

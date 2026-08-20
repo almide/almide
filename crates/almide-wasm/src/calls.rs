@@ -456,6 +456,24 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
                 self.lower_bytes_call(func.as_str(), args)
             }
+            // Rust str::replace / replace_first byte-for-byte via the
+            // shared helper (the `first` flag selects the form). The
+            // empty-pattern char-boundary rule (C-100) lives in the helper.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string"
+                    && matches!(func.as_str(), "replace" | "replace_first")
+                    && args.len() == 3 =>
+            {
+                let first = func.as_str() == "replace_first";
+                for a in args {
+                    self.lower(a, Some(STR))?;
+                }
+                self.f
+                    .instructions()
+                    .i32_const(i32::from(first))
+                    .call(F_STR_REPLACE);
+                Ok(Some(STR))
+            }
             // string.join(xs, sep) is list.join with the module spelled
             // the other way — same F_LIST_JOIN, same List[String] demand.
             CallTarget::Module { module, func, .. }
@@ -529,7 +547,7 @@ impl Emitter<'_> {
                 Ok(Some(STR))
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
-                self.lower_list_call(func.as_str(), args)
+                self.lower_list_call(func.as_str(), args, ret_hint)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "map" => {
                 self.lower_map_call(func.as_str(), args, ret_hint)

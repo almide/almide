@@ -110,6 +110,8 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     functions.function(13); // F_CP_OFF
     functions.function(14); // F_STR_SLICE
     functions.function(13); // F_STR_REPEAT
+    functions.function(5); // F_STR_CMP
+    functions.function(11); // F_STR_REPLACE
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -206,6 +208,8 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_cp_off());
     code.function(&emit_str_slice());
     code.function(&emit_str_repeat());
+    code.function(&emit_str_cmp());
+    code.function(&emit_str_replace());
     for l in lowered {
         match l {
             Ok((f, _)) => {

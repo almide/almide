@@ -13,7 +13,9 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
+        ret_hint: Option<SliceTy>,
     ) -> Result<Option<SliceTy>, EmitError> {
+        let _ = &ret_hint;
         match (func, args) {
             ("len", [xs]) => {
                 let elem = match self.lower(xs, None)? {
@@ -341,6 +343,236 @@ impl Emitter<'_> {
                     Hx::I32(_) => self.release_i32(),
                 }
                 Ok(Some(SliceTy::List(self.types.intern(elem))))
+            }
+            // Capacity is a HINT (native clamps it and the backing
+            // buffer is unobservable) — the value is the empty list.
+            ("with_capacity", [n]) => {
+                let Some(SliceTy::List(h)) = ret_hint else {
+                    return unsup("list-with-capacity-no-hint");
+                };
+                self.lower(n, Some(INT))?;
+                self.f.instructions().drop().i32_const(0).call(F_ALLOC);
+                Ok(Some(SliceTy::List(h)))
+            }
+            // Insertion sort over a FRESH copy — stable, and for scalar
+            // elements any correct sort is value-identical to native's
+            // `v.sort()`. Float order is IEEE totalOrder (f64::total_cmp):
+            // key = bits ^ ((bits >>s 63) >>u 1), compared signed.
+            ("sort", [xs]) => {
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
+                    other => return unsup(&format!("list-sort-of:{other:?}")),
+                };
+                let elem = self.types.el(h);
+                if !matches!(elem, INT | FLOAT | STR) {
+                    return unsup(&format!("list-sort-elem:{elem:?}"));
+                }
+                let stride = elem.slot_size() as i32;
+                self.f.instructions().call(F_BLOCK_COPY);
+                let hb = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                let hi = self.hold_i32()?;
+                let hj = self.hold_i32()?;
+                let ht = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hb);
+                i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().local_set(hn);
+                i.i32_const(1).local_set(hi);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hi).local_get(hn).i32_ge_u().br_if(1);
+                i.local_get(hi).local_set(hj);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hj).i32_eqz().br_if(1);
+                // a = elem[j-1], b = elem[j]; break unless a > b
+                let addr = |i: &mut wasm_encoder::InstructionSink<'_>, idx: u32, back: i32| {
+                    i.local_get(hb)
+                        .local_get(idx)
+                        .i32_const(back)
+                        .i32_sub()
+                        .i32_const(stride)
+                        .i32_mul()
+                        .i32_add();
+                };
+                match elem {
+                    INT | FLOAT => {
+                        let key = |i: &mut wasm_encoder::InstructionSink<'_>| {
+                            if elem == FLOAT {
+                                // totalOrder key transform on the raw bits
+                                let t = ht;
+                                i.local_set(t);
+                                i.local_get(t);
+                                i.local_get(t).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
+                                i.i64_xor();
+                            }
+                        };
+                        addr(&mut i, hj, 1);
+                        i.i64_load(slot_memarg(0));
+                        key(&mut i);
+                        let hk = ht; // ht reused as raw scratch inside key only
+                        let _ = hk;
+                        addr(&mut i, hj, 0);
+                        i.i64_load(slot_memarg(0));
+                        key(&mut i);
+                        i.i64_le_s().br_if(1);
+                    }
+                    _ => {
+                        addr(&mut i, hj, 1);
+                        i.i32_load(slot_memarg(0));
+                        addr(&mut i, hj, 0);
+                        i.i32_load(slot_memarg(0));
+                        i.call(F_STR_CMP).i32_const(0).i32_le_s().br_if(1);
+                    }
+                }
+                // swap elem[j-1] <-> elem[j]
+                if stride == 8 {
+                    addr(&mut i, hj, 0);
+                    i.i64_load(slot_memarg(0)).local_set(ht);
+                    addr(&mut i, hj, 0);
+                    addr(&mut i, hj, 1);
+                    i.i64_load(slot_memarg(0)).i64_store(slot_memarg(0));
+                    addr(&mut i, hj, 1);
+                    i.local_get(ht).i64_store(slot_memarg(0));
+                } else {
+                    addr(&mut i, hj, 0);
+                    i.i32_load(slot_memarg(0)).i64_extend_i32_u().local_set(ht);
+                    addr(&mut i, hj, 0);
+                    addr(&mut i, hj, 1);
+                    i.i32_load(slot_memarg(0)).i32_store(slot_memarg(0));
+                    addr(&mut i, hj, 1);
+                    i.local_get(ht).i32_wrap_i64().i32_store(slot_memarg(0));
+                }
+                i.local_get(hj).i32_const(1).i32_sub().local_set(hj);
+                i.br(0).end().end();
+                i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+                i.br(0).end().end();
+                i.local_get(hb);
+                let _ = i;
+                self.release_i64();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(SliceTy::List(h)))
+            }
+            // chunk: ceiling division WITHOUT the `total + n - 1` trick
+            // (that sum overflows for huge n — fuzz seed 510721188963);
+            // n == 0 dies in the T6 form, a NEGATIVE n is one chunk
+            // holding everything (v0's `n as usize` reinterpretation).
+            // windows: n > len (negatives included) is the empty list.
+            ("chunk" | "windows", [xs, n_arg]) => {
+                let windows = func == "windows";
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
+                    other => return unsup(&format!("list-{func}-of:{other:?}")),
+                };
+                let elem = self.types.el(h);
+                let stride = elem.slot_size() as i32;
+                let hxs = self.hold_i32()?;
+                self.f.instructions().local_set(hxs);
+                self.lower(n_arg, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let msg = self.pool.intern(if windows {
+                    "window size must be positive"
+                } else {
+                    "chunk size must be positive"
+                });
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hn);
+                    i.local_get(hn).i64_eqz();
+                    i.if_(BlockType::Empty);
+                    i.i32_const(msg as i32);
+                }
+                self.emit_error_frame_abort();
+                let htot = self.hold_i64()?;
+                let hnum = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let hk = self.hold_i32()?;
+                let hrow = self.hold_i32()?;
+                let hcs = self.hold_i64()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.end();
+                    i.local_get(hxs)
+                        .i32_load(len_memarg())
+                        .i32_const(stride)
+                        .i32_div_u()
+                        .i64_extend_i32_u()
+                        .local_set(htot);
+                    if windows {
+                        // n < 0 or n > total → zero windows
+                        i.local_get(hn).i64_const(0).i64_lt_s();
+                        i.local_get(hn).local_get(htot).i64_gt_s();
+                        i.i32_or().if_(BlockType::Result(ValType::I32));
+                        i.i32_const(0);
+                        i.else_();
+                        i.local_get(htot).local_get(hn).i64_sub().i64_const(1).i64_add().i32_wrap_i64();
+                        i.end();
+                        i.local_set(hnum);
+                    } else {
+                        // negative n → everything in one chunk
+                        i.local_get(hn).i64_const(0).i64_lt_s().if_(BlockType::Empty);
+                        // select(v1, v2, cond) = cond ? v1 : v2
+                        i.local_get(htot)
+                            .i64_const(1)
+                            .local_get(htot)
+                            .i64_const(0)
+                            .i64_gt_s()
+                            .select()
+                            .local_set(hn);
+                        i.end();
+                        i.local_get(htot).local_get(hn).i64_div_s();
+                        i.local_get(htot).local_get(hn).i64_rem_s().i64_const(0).i64_ne().i64_extend_i32_u();
+                        i.i64_add().i32_wrap_i64().local_set(hnum);
+                    }
+                    i.local_get(hnum).i32_const(2).i32_shl().call(F_ALLOC).local_set(ho);
+                    i.i32_const(0).local_set(hk);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(hk).local_get(hnum).i32_ge_u().br_if(1);
+                    // row size: windows → n; chunk → min(n, total - k*n)
+                    if windows {
+                        i.local_get(hn).local_set(hcs);
+                    } else {
+                        // cs = n > remaining ? remaining : n
+                        i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                        i.local_get(hn);
+                        i.local_get(hn);
+                        i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                        i.i64_gt_s().select().local_set(hcs);
+                    }
+                    i.local_get(hcs).i32_wrap_i64().i32_const(stride).i32_mul().call(F_ALLOC).local_set(hrow);
+                    // copy from source: start = windows ? k : k*n (elements)
+                    i.local_get(hrow).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                    i.local_get(hxs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                    if windows {
+                        i.local_get(hk).i32_const(stride).i32_mul().i32_add();
+                    } else {
+                        i.local_get(hk)
+                            .i64_extend_i32_u()
+                            .local_get(hn)
+                            .i64_mul()
+                            .i32_wrap_i64()
+                            .i32_const(stride)
+                            .i32_mul()
+                            .i32_add();
+                    }
+                    i.local_get(hcs).i32_wrap_i64().i32_const(stride).i32_mul();
+                    i.memory_copy(0, 0);
+                    i.local_get(ho).local_get(hk).i32_const(2).i32_shl().i32_add();
+                    i.local_get(hrow).i32_store(slot_memarg(0));
+                    i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+                    i.br(0).end().end();
+                    i.local_get(ho);
+                }
+                self.release_i64();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(SliceTy::List(self.types.intern(SliceTy::List(h)))))
             }
             _ => unsup(&format!("call:list.{func}")),
         }

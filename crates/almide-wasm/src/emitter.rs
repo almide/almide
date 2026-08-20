@@ -304,7 +304,7 @@ impl Emitter<'_> {
                 // The slice SYNTAX `xs[a..b]` desugars to this runtime
                 // symbol — one impl with `list.slice` (as in native rt).
                 if symbol.as_str() == "almide_rt_list_slice" && args.len() == 3 {
-                    match self.lower_list_call("slice", args)? {
+                    match self.lower_list_call("slice", args, None)? {
                         Some(t) => t,
                         None => return unsup("rt:list-slice-unit"),
                     }
