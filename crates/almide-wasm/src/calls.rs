@@ -672,8 +672,19 @@ impl Emitter<'_> {
                 "math_log",
                 "math_log2",
                 "math_log10",
+                // String->String, raw stores build STRING blocks only —
+                // the string layout is digest-shared with the incumbent.
+                "string_trim",
             ];
-            if !VERIFIED.contains(&impl_fn) {
+            // Second tier: signatures that TRIP the coupled-type proxy
+            // below but whose bodies are AUDITED raw-write-free — every
+            // sum is built via language-level ok()/err() (lowered by THIS
+            // emitter with THIS layout) and every prim access is a
+            // read-only load on a layout-shared block (string payload).
+            // The proxy guards hand-written block internals; it misfires
+            // on constructor-built sums.
+            const VERIFIED_SUM_BUILDERS: &[&str] = &["string_to_int", "int_from_hex"];
+            if !VERIFIED.contains(&impl_fn) && !VERIFIED_SUM_BUILDERS.contains(&impl_fn) {
                 return None;
             }
             let i = self.table.impl_index.get(impl_fn).copied()?;
@@ -702,7 +713,9 @@ impl Emitter<'_> {
                     _ => false,
                 }
             };
-            if info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled) {
+            if !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
+                && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
+            {
                 return None;
             }
             Some(i)
