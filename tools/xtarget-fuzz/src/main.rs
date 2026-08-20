@@ -67,7 +67,7 @@ fn print_usage() {
     eprintln!(
         "xtarget-fuzz — Almide generative fuzzer\n\n\
          USAGE:\n\
-         \x20 xtarget-fuzz run    [--seed N] [--minutes M | --count N] [--jobs J] [--timeout S] [--family F]\n\
+         \x20 xtarget-fuzz run    [--seed N] [--minutes M | --count N] [--jobs J] [--timeout S] [--family F] [--dump-walls DIR]\n\
          \x20 xtarget-fuzz replay --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
@@ -177,6 +177,17 @@ fn cmd_run(args: &[String]) {
         .map(PathBuf::from)
         .unwrap_or_else(|| repo.join("tools/xtarget-fuzz/findings"));
 
+    // Wall-specimen dump (#1527): walls are aggregated as reasons, which is
+    // the right ledger for a verdict but useless for BURN-DOWN — graduating a
+    // wall family needs the walled programs themselves (to shrink into the
+    // voting fixture the shrink-only rule demands). `--dump-walls DIR` writes
+    // each walled program's source as `wall-<index>-<reason-slug>.almd`;
+    // everything stays reproducible from (seed, index) regardless.
+    let dump_walls: Option<PathBuf> = flag_value(args, "--dump-walls").map(PathBuf::from);
+    if let Some(d) = &dump_walls {
+        std::fs::create_dir_all(d).expect("create --dump-walls dir");
+    }
+
     let family = resolve_family(args);
 
     eprintln!("xtarget-fuzz campaign");
@@ -234,6 +245,7 @@ fn cmd_run(args: &[String]) {
             seed,
             deadline,
             max_count,
+            dump_walls: dump_walls.clone(),
         };
         handles.push(std::thread::spawn(move || {
             worker_loop(engine, sink, tc, work_dir, next_index, stop, stats, cfg);
@@ -266,11 +278,13 @@ fn cmd_run(args: &[String]) {
 }
 
 /// Per-worker campaign configuration (the parts that do not move).
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct WorkerCfg {
     seed: u64,
     deadline: Option<Instant>,
     max_count: Option<u64>,
+    /// `--dump-walls`: where walled programs' sources land, if anywhere.
+    dump_walls: Option<PathBuf>,
 }
 
 /// One worker: pull program indices, generate, run the ladder, minimize
@@ -358,6 +372,17 @@ fn worker_loop(
             }
             Outcome::Walled { reason } => {
                 stats.walled.fetch_add(1, Ordering::Relaxed);
+                if let Some(dir) = &cfg.dump_walls {
+                    let slug: String = reason
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                        .take(64)
+                        .collect();
+                    let _ = std::fs::write(
+                        dir.join(format!("wall-{index:05}-{slug}.almd")),
+                        &gen.source,
+                    );
+                }
                 let mut reasons = stats.wall_reasons.lock().unwrap();
                 let key = if reason.len() > 160 {
                     format!("{}…", &reason[..reason.char_indices().take_while(|(i, _)| *i < 160).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0)])
