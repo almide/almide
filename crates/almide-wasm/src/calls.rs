@@ -456,6 +456,24 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
                 self.lower_bytes_call(func.as_str(), args)
             }
+            // mut append (native s.push_str): var write-back of concat.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "push" && args.len() == 2 =>
+            {
+                let IrExprKind::Var { id } = &args[0].kind else {
+                    return unsup("string-push-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                if var_ty != STR {
+                    return unsup(&format!("string-push-of:{var_ty:?}"));
+                }
+                self.f.instructions().local_get(var_idx);
+                self.lower(&args[1], Some(STR))?;
+                self.f.instructions().call(F_CONCAT).local_set(var_idx);
+                Ok(None)
+            }
             // First n CHARS (native `s.chars().take(n as usize)`): a
             // NEGATIVE n reinterprets huge and takes the WHOLE string —
             // deliberately not the C-054 clamp; cp_off clamps past-end.

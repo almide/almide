@@ -108,6 +108,64 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(idx);
                 Ok(())
             }
+            // `p.field = v` on a record var: copy-on-write write-back —
+            // fresh block, one slot replaced, rebound. In-place mutation
+            // stays unobservable (the alias_cow fixtures pin exactly
+            // this: an alias captured before the assign keeps the old
+            // value).
+            IrStmtKind::FieldAssign { target, field, value } => {
+                let (slot, declared) = match self.locals.get(target) {
+                    Some(&(idx, d)) => (Ok(idx), d),
+                    None => match self.globals.get(target) {
+                        Some(&(gidx, d)) => (Err(gidx), d),
+                        None => return unsup("field-assign:unmapped"),
+                    },
+                };
+                let SliceTy::Named(ti) = declared else {
+                    return unsup(&format!("field-assign-of:{declared:?}"));
+                };
+                let (fty, off) = {
+                    let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
+                        return unsup("field-assign-nonrecord");
+                    };
+                    let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
+                        return unsup(&format!("field-assign-unknown:{field}"));
+                    };
+                    (fi.ty, fi.offset)
+                };
+                let hb = self.hold_i32()?;
+                match slot {
+                    Ok(idx) => self.f.instructions().local_get(idx),
+                    Err(gidx) => self.f.instructions().global_get(gidx),
+                };
+                self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
+                self.lower(value, Some(fty))?;
+                self.store_ty_slot(fty, off);
+                self.f.instructions().local_get(hb);
+                match slot {
+                    Ok(idx) => self.f.instructions().local_set(idx),
+                    Err(gidx) => self.f.instructions().global_set(gidx),
+                };
+                self.release_i32();
+                Ok(())
+            }
+            // `m[k] = v` on a map var — the same write-back the
+            // `map.insert` mut form runs (functional `set`, rebind).
+            IrStmtKind::MapInsert { target, key, value } => {
+                let Some(&(var_idx, _)) = self.locals.get(target) else {
+                    return unsup("map-insert:unmapped");
+                };
+                let var_expr = IrExpr {
+                    kind: IrExprKind::Var { id: *target },
+                    ty: Ty::Unit,
+                    span: None,
+                    def_id: None,
+                };
+                let args = [var_expr, key.clone(), value.clone()];
+                self.lower_map_call("set", &args, None)?;
+                self.f.instructions().local_set(var_idx);
+                Ok(())
+            }
             IrStmtKind::Assign { var, value } => {
                 let (local, declared) = match self.locals.get(var) {
                     Some(&(idx, d)) => (Some(idx), d),

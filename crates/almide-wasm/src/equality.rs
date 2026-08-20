@@ -102,6 +102,37 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
             }
+            SliceTy::Result(o, er) => {
+                // Tags must agree; the ACTIVE side's payload compares
+                // (recursive) — ok vs ok through el(o), err vs err
+                // through el(er).
+                let (ot, et) = (self.types.el(o), self.types.el(er));
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                self.f.instructions().local_set(hb).local_set(ha);
+                let tag = slot_memarg(almide_layout::SUM_TAG);
+                self.f.instructions().local_get(ha).i32_load(tag);
+                self.f.instructions().local_get(hb).i32_load(tag);
+                self.f.instructions().i32_ne().if_(BlockType::Result(ValType::I32));
+                self.f.instructions().i32_const(0);
+                self.f.instructions().else_();
+                self.f.instructions().local_get(ha).i32_load(tag).i32_eqz();
+                self.f.instructions().if_(BlockType::Result(ValType::I32));
+                self.f.instructions().local_get(ha);
+                self.load_ty_slot(ot, almide_layout::SUM_FIELD);
+                self.f.instructions().local_get(hb);
+                self.load_ty_slot(ot, almide_layout::SUM_FIELD);
+                self.emit_val_eq(ot)?;
+                self.f.instructions().else_();
+                self.f.instructions().local_get(ha);
+                self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                self.f.instructions().local_get(hb);
+                self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                self.emit_val_eq(et)?;
+                self.f.instructions().end().end();
+                self.release_i32();
+                self.release_i32();
+            }
             SliceTy::Named(ti) => self.emit_named_eq(ti)?,
             SliceTy::Tuple(id) => {
                 // Field-wise AND, each field recursing through emit_val_eq.

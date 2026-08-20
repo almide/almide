@@ -242,6 +242,77 @@ impl Emitter<'_> {
                 self.release_i32();
                 Ok(Some(SliceTy::List(h)))
             }
+            // mut form (native xs.clear()): rebind to the empty list.
+            ("clear", [xs]) => {
+                let IrExprKind::Var { id } = &xs.kind else {
+                    return unsup("list-clear-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                let SliceTy::List(_) = var_ty else {
+                    return unsup(&format!("list-clear-of:{var_ty:?}"));
+                };
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(var_idx);
+                Ok(None)
+            }
+            ("is_empty", [xs]) => {
+                match self.lower(xs, None)? {
+                    SliceTy::List(_) => {}
+                    other => return unsup(&format!("list-is-empty-of:{other:?}")),
+                }
+                self.f.instructions().i32_load(len_memarg()).i32_eqz();
+                Ok(Some(BOOL))
+            }
+            // mut form (native xs.pop()): var write-back of the copy
+            // minus its last element; yields some(last) / none.
+            ("pop", [xs]) => {
+                let IrExprKind::Var { id } = &xs.kind else {
+                    return unsup("list-pop-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                let SliceTy::List(h) = var_ty else {
+                    return unsup(&format!("list-pop-of:{var_ty:?}"));
+                };
+                let elem = self.types.el(h);
+                let stride = elem.slot_size() as i32;
+                let hb = self.hold_i32()?;
+                let hlen = self.hold_i32()?;
+                let hres = self.hold_i32()?;
+                let hnew = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(var_idx).local_set(hb);
+                    i.local_get(hb).i32_load(len_memarg()).local_set(hlen);
+                    i.local_get(hlen).i32_eqz().if_(BlockType::Empty);
+                    i.i32_const(0).local_set(hres);
+                    i.else_();
+                    // some(last)
+                    i.i32_const(stride).call(F_ALLOC).local_set(hres);
+                    i.local_get(hres);
+                    i.local_get(hb).local_get(hlen).i32_add().i32_const(stride).i32_sub();
+                }
+                self.load_ty_slot(elem, 0);
+                self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
+                {
+                    let mut i = self.f.instructions();
+                    // shrunken copy, write-back
+                    i.local_get(hlen).i32_const(stride).i32_sub().call(F_ALLOC).local_set(hnew);
+                    i.local_get(hnew).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                    i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                    i.local_get(hlen).i32_const(stride).i32_sub();
+                    i.memory_copy(0, 0);
+                    i.local_get(hnew).local_set(var_idx);
+                    i.end();
+                    i.local_get(hres);
+                }
+                for _ in 0..4 {
+                    self.release_i32();
+                }
+                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+            }
             ("map", [xs, cb]) => self.lower_list_map(xs, cb),
             ("find", [xs, cb]) => {
                 let (params, body) = self.hof_lambda(cb, 1)?;

@@ -569,6 +569,15 @@ impl Emitter<'_> {
                 self.release_i32();
                 hty
             }
+            // m[k]: exactly map.get — a miss is `none`, never an abort
+            // (the interp's map_lookup contract).
+            IrExprKind::MapAccess { object, key } => {
+                let args = [(**object).clone(), (**key).clone()];
+                match self.lower_map_call("get", &args, want)? {
+                    Some(t) => t,
+                    None => return unsup("map-access-void"),
+                }
+            }
             // xs[i]: bounds-checked element load. Out of bounds aborts on
             // the oracle — the trap lands in the abort-parity bucket.
             IrExprKind::IndexAccess { object, index } => {

@@ -259,6 +259,71 @@ impl Emitter<'_> {
                 Ok(None)
             }
             // fold over entries in insertion order: (acc, k, v) => acc'.
+            // Insertion-ordered (K, V) pairs — memory order IS the
+            // map's insertion order, so a straight walk is exact.
+            ("entries", [m]) => {
+                let (kh, vh) = match self.lower(m, None)? {
+                    SliceTy::Map(kh, vh) => (kh, vh),
+                    other => return unsup(&format!("map-entries-of:{other:?}")),
+                };
+                let (k, v) = (self.types.el(kh), self.types.el(vh));
+                let (offs, esize) = almide_layout::pack_fields(&[k.slot_size(), v.slot_size()]);
+                let pair_ti = self.types.tuple(vec![k, v]);
+                let pdef = self.types.tuple_def(pair_ti);
+                let (pk, pv, psize) = (pdef.fields[0].1, pdef.fields[1].1, pdef.size);
+                let hm = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let hi = self.hold_i32()?;
+                let hp = self.hold_i32()?;
+                self.f.instructions().local_set(hm);
+                self.f
+                    .instructions()
+                    .local_get(hm)
+                    .i32_load(len_memarg())
+                    .i32_const(esize as i32)
+                    .i32_div_u()
+                    .local_set(hn);
+                self.f
+                    .instructions()
+                    .local_get(hn)
+                    .i32_const(2)
+                    .i32_shl()
+                    .call(F_ALLOC)
+                    .local_set(ho);
+                self.f.instructions().i32_const(0).local_set(hi);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.f.instructions().local_get(hi).local_get(hn).i32_ge_u().br_if(1);
+                self.f.instructions().i32_const(psize as i32).call(F_ALLOC).local_set(hp);
+                for (src_off, dst_off, t) in [(offs[0], pk, k), (offs[1], pv, v)] {
+                    self.f.instructions().local_get(hp);
+                    self.f
+                        .instructions()
+                        .local_get(hm)
+                        .local_get(hi)
+                        .i32_const(esize as i32)
+                        .i32_mul()
+                        .i32_add();
+                    self.load_ty_slot(t, src_off);
+                    self.store_ty_slot(t, dst_off);
+                }
+                self.f
+                    .instructions()
+                    .local_get(ho)
+                    .local_get(hi)
+                    .i32_const(2)
+                    .i32_shl()
+                    .i32_add()
+                    .local_get(hp)
+                    .i32_store(slot_memarg(0));
+                self.f.instructions().local_get(hi).i32_const(1).i32_add().local_set(hi);
+                self.f.instructions().br(0).end().end();
+                self.f.instructions().local_get(ho);
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+                Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti)))))
+            }
             ("fold", [m, init, cb]) => {
                 let (params, body) = self.hof_lambda(cb, 3)?;
                 let (acc_p, k_p, v_p) = (params[0], params[1], params[2]);

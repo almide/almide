@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 68936007b..7f1719bed 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -138,7 +138,7 @@ impl Emitter<'_> {
+                     Ok(idx) => self.f.instructions().local_get(idx),
+                     Err(gidx) => self.f.instructions().global_get(gidx),
+                 };
+-                self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
++                self.f.instructions().local_tee(hb); // [MUTANT: copy dropped]
+                 self.lower(value, Some(fty))?;
+                 self.store_ty_slot(fty, off);
+                 self.f.instructions().local_get(hb);

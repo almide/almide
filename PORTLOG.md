@@ -1768,3 +1768,26 @@ All eight probes matched the interp byte-for-byte, stderr included.
 
 **Burn-up: 330 → 340 / 591**, floor 340, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 46: mutation write-backs, Result equality, map pairs (2026-08-21)
+
+The place-mutation statement family lands as COPY-ON-WRITE write-backs
+(the doctrine that keeps in-place mutation unobservable): FieldAssign
+copies the record block, replaces one slot, rebinds; MapInsert
+(`m[k] = v`) reuses the functional `set` the `map.insert` mut form
+already runs; list.pop yields some(last)/none and rebinds the shrunken
+copy; list.clear rebinds empty. `m[k]` in EXPRESSION position is
+exactly map.get (a miss is `none`, the interp's map_lookup contract).
+Result `==` joins emit_val_eq: tags agree, then the ACTIVE side's
+payload compares recursively. map.entries walks the insertion-ordered
+entry region into fresh pair blocks. list.is_empty is len == 0;
+string.push is the concat write-back — the last link in alias_cow's
+chain, which then also proved mutant 033 (FieldAssign's copy dropped)
+is observable: the first 033 generation SURVIVED because no claimed
+fixture aliased a record across the assign — the observer-first rule
+from 032, re-learned the same day, now twice underlined.
+
+**Burn-up: 340 → 353 / 591**, floor 353, zero divergence, workspace 0
+failures.

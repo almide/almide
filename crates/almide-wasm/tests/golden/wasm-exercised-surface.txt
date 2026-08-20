@@ -37,6 +37,7 @@ call:int.to_string
 call:json.parse
 call:json.stringify
 call:list.chunk
+call:list.clear
 call:list.enumerate
 call:list.filter
 call:list.find
@@ -44,11 +45,13 @@ call:list.first
 call:list.fold
 call:list.get
 call:list.get_or
+call:list.is_empty
 call:list.join
 call:list.len
 call:list.map
 call:list.max
 call:list.min
+call:list.pop
 call:list.push
 call:list.repeat
 call:list.slice
@@ -57,6 +60,7 @@ call:list.sort_by
 call:list.windows
 call:list.with_capacity
 call:map.contains
+call:map.entries
 call:map.fold
 call:map.from_list
 call:map.get
@@ -103,6 +107,7 @@ call:set.len
 call:set.new
 call:string.join
 call:string.len
+call:string.push
 call:string.repeat
 call:string.replace
 call:string.slice
@@ -139,6 +144,7 @@ expr:LitBool
 expr:LitFloat
 expr:LitInt
 expr:LitStr
+expr:MapAccess
 expr:MapLiteral
 expr:Match
 expr:Member
@@ -174,6 +180,8 @@ stmt:Bind
 stmt:BindDestructure
 stmt:Comment
 stmt:Expr
+stmt:FieldAssign
 stmt:IndexAssign
+stmt:MapInsert
 unop:NegInt
 unop:Not
