@@ -50,20 +50,17 @@ fn pack(status: i64, len: usize) -> i64 {
     (status << 32) | (len as i64 & 0xFFFF_FFFF)
 }
 
-fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+/// The WRITE-side ops — split from fs_dispatch for the complexity
+/// budget. Bodies verbatim from the native runtime (io_err = Display).
+fn fs_dispatch_w(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use std::path::Path;
-    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     let unit = |r: Result<(), String>| match r {
         Ok(()) => (pack(0, 0), Vec::new()),
         Err(m) => err_s(m),
     };
     match op {
-        1 => match std::fs::read_to_string(a) {
-            Ok(t) => ok_text(t),
-            Err(e) => err_s(io_err(e)),
-        },
-        2 => unit(std::fs::write(a, b).map_err(io_err)),
+        2 | 15 => unit(std::fs::write(a, b).map_err(io_err)),
         // write_bytes: b is the guest List[Int] payload — i64 LE slots,
         // low byte each (native `x as u8`).
         3 => {
@@ -73,9 +70,6 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
                 .collect();
             unit(std::fs::write(a, &data).map_err(io_err))
         }
-        4 => (pack(0, usize::from(Path::new(a).exists())), Vec::new()),
-        5 => (pack(0, usize::from(Path::new(a).is_dir())), Vec::new()),
-        6 => (pack(0, usize::from(Path::new(a).is_file())), Vec::new()),
         7 => unit(std::fs::create_dir_all(a).map_err(io_err)),
         8 => {
             let p = Path::new(a);
@@ -93,6 +87,24 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
                 std::fs::remove_file(a).map_err(io_err)
             })
         }
+        _ => unit(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(a)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, b))
+                .map_err(io_err),
+        ),
+    }
+}
+
+/// The structured READ ops (temp dir / list_dir / read_lines /
+/// if-exists / read_bytes) — split for the complexity budget.
+fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
+    use std::path::Path;
+    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    match op {
         10 => {
             let dir = std::env::temp_dir();
             let name = format!(
@@ -142,19 +154,31 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
                 (pack(2, 0), Vec::new())
             }
         }
-        14 => match std::fs::read(a) {
+        _ => match std::fs::read(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(e)),
         },
-        15 => unit(std::fs::write(a, b).map_err(io_err)),
-        16 => unit(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(a)
-                .and_then(|mut f| std::io::Write::write_all(&mut f, b))
-                .map_err(io_err),
-        ),
+    }
+}
+
+fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    use std::path::Path;
+    if matches!(op, 2 | 3 | 7 | 8 | 9 | 15 | 16) {
+        return fs_dispatch_w(op, a, b);
+    }
+    if matches!(op, 10 | 11 | 12 | 13 | 14) {
+        return fs_dispatch_r2(op, a);
+    }
+    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    match op {
+        1 => match std::fs::read_to_string(a) {
+            Ok(t) => ok_text(t),
+            Err(e) => err_s(io_err(e)),
+        },
+        4 => (pack(0, usize::from(Path::new(a).exists())), Vec::new()),
+        5 => (pack(0, usize::from(Path::new(a).is_dir())), Vec::new()),
+        6 => (pack(0, usize::from(Path::new(a).is_file())), Vec::new()),
         _ => err_s(format!("unknown fs op {op}")),
     }
 }

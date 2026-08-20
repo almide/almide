@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use almide_ir::{BinOp, IrExpr, IrExprKind, UnOp, VarId};
+use almide_ir::{IrExpr, IrExprKind, UnOp, VarId};
 use wasm_encoder::{BlockType, Function, ValType};
 
 use crate::*;
@@ -176,49 +176,7 @@ impl Emitter<'_> {
             .unreachable();
     }
 
-    /// One deterministic charge of `n` units + the cut check (ALS-DT2).
-    /// The cut mirrors the interp's `Flow::Return(Int(0))`: the CURRENT
-    /// fn returns a zero-shaped value; callers continue to their own next
-    /// charge site — charge sites are identical across legs, so the
-    /// observable cut point is identical by construction.
-    pub(crate) fn emit_det_charge_const(&mut self, n: i64) {
-        if !self.metered {
-            return;
-        }
-        let mut i = self.f.instructions();
-        i.global_get(G_DET_FUEL).i64_const(n).i64_sub().global_set(G_DET_FUEL);
-        let _ = i;
-        self.emit_det_cut_check();
-    }
 
-    /// depth > 0 && fuel < 0 → return the zero of this fn's return type.
-    pub(crate) fn emit_det_cut_check(&mut self) {
-        if !self.metered {
-            return;
-        }
-        let mut i = self.f.instructions();
-        i.global_get(G_DET_DEPTH);
-        i.if_(BlockType::Empty);
-        i.global_get(G_DET_FUEL).i64_const(0).i64_lt_s();
-        i.if_(BlockType::Empty);
-        match self.fn_ret {
-            None => {}
-            Some(t) => match t.val_type() {
-                ValType::I64 => {
-                    i.i64_const(0);
-                }
-                ValType::F64 => {
-                    i.f64_const(0.0.into());
-                }
-                _ => {
-                    i.i32_const(0);
-                }
-            },
-        }
-        i.return_();
-        i.end();
-        i.end();
-    }
 
     /// A hold from the pool matching the slice type's wasm value type.
     pub(crate) fn hold_val(&mut self, ty: SliceTy) -> Result<u32, EmitError> {
@@ -507,93 +465,8 @@ impl Emitter<'_> {
                     | IrExprKind::Tuple { .. }
                     | IrExprKind::TupleIndex { .. }
             ) => self.lower_record(e, want)?,
-            // Range in VALUE position materializes the real List[Int]
-            // (the front end types it Applied(List, [Int])). Span follows
-            // native list_range: end.saturating_sub(start).max(0) — the
-            // saturation is real i64-overflow detection, so (i64::MIN, 3)
-            // is the C-197 die, not an empty list. Past the wasm leg's own
-            // structural bound the same "Error: out of memory" + exit 1
-            // fires BEFORE the allocator (success between the two legs'
-            // bounds is the contracted divergence, runtime/rs list.rs).
             IrExprKind::Range { start, end, inclusive } => {
-                let hty = SliceTy::List(self.types.intern(INT));
-                if let Some(w) = want
-                    && w != hty
-                {
-                    return unsup(&format!("ty-mismatch:range-vs-{w:?}"));
-                }
-                self.lower(start, Some(INT))?;
-                let hs = self.hold_i64()?;
-                self.f.instructions().local_set(hs);
-                self.lower(end, Some(INT))?;
-                let he = self.hold_i64()?;
-                let hd = self.hold_i64()?;
-                let hb = self.hold_i32()?;
-                let hc = self.hold_i32()?;
-                let msg = self.pool.intern("out of memory");
-                // Block bytes must fit a positive i32: span*8 + header.
-                const RANGE_CAP: i64 = ((i32::MAX - 16) / 8) as i64;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(he);
-                    if *inclusive {
-                        i.local_get(he).i64_const(1).i64_add().local_set(he);
-                    }
-                    // d = he - hs (wrapping); true span positive iff
-                    // he > hs; positive overflow iff sign(he)!=sign(hs)
-                    // and sign(d)!=sign(he) — then any past-cap value
-                    // stands in for the saturated span.
-                    i.local_get(he).local_get(hs).i64_sub().local_set(hd);
-                    i.i64_const(RANGE_CAP + 1);
-                    i.local_get(hd);
-                    i.local_get(he).local_get(hs).i64_xor();
-                    i.local_get(he).local_get(hd).i64_xor();
-                    i.i64_and().i64_const(0).i64_lt_s();
-                    i.select();
-                    i.i64_const(0);
-                    i.local_get(he).local_get(hs).i64_gt_s();
-                    i.select();
-                    i.local_set(hd);
-                    i.local_get(hd).i64_const(RANGE_CAP).i64_gt_s();
-                    i.if_(BlockType::Empty);
-                    i.i32_const(msg as i32);
-                }
-                self.emit_error_frame_abort();
-                {
-                    let mut i = self.f.instructions();
-                    i.end();
-                    i.local_get(hd)
-                        .i64_const(8)
-                        .i64_mul()
-                        .i32_wrap_i64()
-                        .call(F_ALLOC)
-                        .local_set(hb);
-                    // fill ascending: payload[k] = start + k
-                    i.local_get(hb)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .local_set(hc);
-                    i.block(BlockType::Empty).loop_(BlockType::Empty);
-                    i.local_get(hd).i64_const(0).i64_le_s().br_if(1);
-                    i.local_get(hc).local_get(hs).i64_store(MemArg {
-                        offset: 0,
-                        align: 2,
-                        memory_index: 0,
-                    });
-                    i.local_get(hs).i64_const(1).i64_add().local_set(hs);
-                    i.local_get(hc).i32_const(8).i32_add().local_set(hc);
-                    i.local_get(hd).i64_const(1).i64_sub().local_set(hd);
-                    i.br(0);
-                    i.end();
-                    i.end();
-                    i.local_get(hb);
-                }
-                self.release_i32();
-                self.release_i32();
-                self.release_i64();
-                self.release_i64();
-                self.release_i64();
-                hty
+                self.lower_range_value(start, end, *inclusive, want)?
             }
             // List literal: alloc, then store each element through a hold
             // local (kept live across element lowering — the pool makes
@@ -693,153 +566,6 @@ impl Emitter<'_> {
         }
     }
 
-    pub(crate) fn lower_binop(
-        &mut self,
-        op: BinOp,
-        left: &IrExpr,
-        right: &IrExpr,
-    ) -> Result<SliceTy, EmitError> {
-        use BinOp::*;
-        match op {
-            AddFloat | SubFloat | MulFloat | DivFloat => {
-                self.lower(left, Some(FLOAT))?;
-                self.lower(right, Some(FLOAT))?;
-                let mut i = self.f.instructions();
-                match op {
-                    AddFloat => i.f64_add(),
-                    SubFloat => i.f64_sub(),
-                    MulFloat => i.f64_mul(),
-                    DivFloat => i.f64_div(),
-                    _ => unreachable!(),
-                };
-                Ok(FLOAT)
-            }
-            AddInt | SubInt | MulInt => {
-                self.lower(left, Some(INT))?;
-                self.lower(right, Some(INT))?;
-                let mut i = self.f.instructions();
-                match op {
-                    AddInt => i.i64_add(),
-                    SubInt => i.i64_sub(),
-                    _ => i.i64_mul(),
-                };
-                Ok(INT)
-            }
-            // C-002: wasm's own div/rem semantics DIFFER from the native
-            // abort contract — `i64.rem_s` defines `MIN % -1 = 0` (no
-            // trap: the silent-divergence case the abort-parity gate
-            // caught on activation day), and a raw trap carries no stderr.
-            // Guard BOTH operands and abort with the exact native frame
-            // ("Error: division by zero" / "Error: integer overflow" +
-            // exit 1) before the op, so the op itself can never trap.
-            DivInt | ModInt => {
-                self.lower(left, Some(INT))?;
-                self.lower(right, Some(INT))?;
-                let div0 = self.pool.intern("Error: division by zero");
-                let ovf = self.pool.intern("Error: integer overflow");
-                let r = self.hold_i64()?;
-                let l = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(r).local_set(l);
-                i.local_get(r).i64_eqz().if_(BlockType::Empty);
-                i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                i.local_get(l).i64_const(i64::MIN).i64_eq();
-                i.local_get(r).i64_const(-1).i64_eq();
-                i.i32_and().if_(BlockType::Empty);
-                i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                i.local_get(l).local_get(r);
-                match op {
-                    DivInt => i.i64_div_s(),
-                    _ => i.i64_rem_s(),
-                };
-                self.release_i64();
-                self.release_i64();
-                Ok(INT)
-            }
-            // Wrapping square-multiply, verbatim from the oracle's
-            // int_pow (#895): a negative exponent has no integer result
-            // and aborts on every target; products wrap like `*` does.
-            PowInt => {
-                self.lower(left, Some(INT))?;
-                self.lower(right, Some(INT))?;
-                let neg = self.pool.intern("Error: negative exponent");
-                let e = self.hold_i64()?;
-                let b = self.hold_i64()?;
-                let acc = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(e).local_set(b);
-                i.local_get(e).i64_const(0).i64_lt_s().if_(BlockType::Empty);
-                i.i32_const(neg as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                i.i64_const(1).local_set(acc);
-                i.block(BlockType::Empty).loop_(BlockType::Empty);
-                i.local_get(e).i64_eqz().br_if(1);
-                i.local_get(e).i64_const(1).i64_and().i64_const(0).i64_ne().if_(BlockType::Empty);
-                i.local_get(acc).local_get(b).i64_mul().local_set(acc);
-                i.end();
-                i.local_get(e).i64_const(1).i64_shr_u().local_set(e);
-                i.local_get(e).i64_eqz().i32_eqz().if_(BlockType::Empty);
-                i.local_get(b).local_get(b).i64_mul().local_set(b);
-                i.end();
-                i.br(0).end().end();
-                i.local_get(acc);
-                let _ = i;
-                self.release_i64();
-                self.release_i64();
-                self.release_i64();
-                Ok(INT)
-            }
-            Lt | Gt | Lte | Gte | Eq | Neq => self.lower_cmp(op, left, right),
-            // SHORT-CIRCUIT: the right operand must not evaluate (and
-            // possibly trap) when the left already decides — an `if`
-            // yielding i32, never a strict bitop.
-            And => {
-                self.lower(left, Some(BOOL))?;
-                self.f.instructions().if_(BlockType::Result(ValType::I32));
-                self.lower(right, Some(BOOL))?;
-                self.f.instructions().else_().i32_const(0).end();
-                Ok(BOOL)
-            }
-            Or => {
-                self.lower(left, Some(BOOL))?;
-                self.f.instructions().if_(BlockType::Result(ValType::I32)).i32_const(1).else_();
-                self.lower(right, Some(BOOL))?;
-                self.f.instructions().end();
-                Ok(BOOL)
-            }
-            ConcatStr => {
-                self.lower(left, Some(STR))?;
-                self.lower(right, Some(STR))?;
-                self.f.instructions().call(F_CONCAT);
-                if self.metered {
-                    // T3-5 dynamic charge: 1 + result_byte_len/16, keyed
-                    // on the same result both backends key on.
-                    let t = self.tmp_i32_local;
-                    let mut i = self.f.instructions();
-                    i.local_set(t);
-                    i.global_get(G_DET_FUEL);
-                    i.i64_const(1);
-                    i.local_get(t).i32_load(len_memarg()).i32_const(4).i32_shr_u().i64_extend_i32_u();
-                    i.i64_add().i64_sub().global_set(G_DET_FUEL);
-                    let _ = i;
-                    self.emit_det_cut_check();
-                    self.f.instructions().local_get(t);
-                }
-                Ok(STR)
-            }
-            // List ++ List: byte-concat of the element arrays IS element
-            // concat (same stride both sides).
-            ConcatList => {
-                let lt = self.lower(left, None)?;
-                let SliceTy::List(_) = lt else {
-                    return unsup(&format!("concat-list-of:{lt:?}"));
-                };
-                self.lower(right, Some(lt))?;
-                self.f.instructions().call(F_CONCAT);
-                Ok(lt)
-            }
-            other => unsup(&format!("binop:{other:?}")),
-        }
-    }
 
 
 

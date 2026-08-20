@@ -49,51 +49,7 @@ impl Emitter<'_> {
                 }
                 Some(BOOL)
             }
-            ("result", "map" | "map_err", [r, f]) => {
-                let on_ok = func == "map";
-                let SliceTy::Result(o, er) = self.lower(r, None)? else {
-                    return unsup(&format!("result-{func}-of-nonresult"));
-                };
-                let (params, body) = self.hof_lambda(f, 1)?;
-                let Some(b) = slice_ty_of(&body.ty, self.types) else {
-                    return unsup(&format!("result-{func}-ret:{}", ty_name(&body.ty)));
-                };
-                let side = self.types.el(if on_ok { o } else { er });
-                let hs = self.hold_i32()?;
-                let hb = self.hold_i32()?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(hs);
-                    i.local_get(hs).i32_load(slot_memarg(almide_layout::SUM_TAG));
-                    if on_ok {
-                        i.i32_const(0).i32_ne();
-                    } else {
-                        i.i32_eqz();
-                    }
-                    i.if_(BlockType::Result(ValType::I32));
-                    // pass-through side: the block is reused as-is
-                    i.local_get(hs);
-                    i.else_();
-                }
-                self.f.instructions().local_get(hs);
-                self.load_ty_slot(side, almide_layout::SUM_FIELD);
-                self.f.instructions().local_set(params[0]);
-                self.f
-                    .instructions()
-                    .i32_const(16)
-                    .call(F_ALLOC)
-                    .local_tee(hb)
-                    .i32_const(if on_ok { 0 } else { 1 })
-                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                self.f.instructions().local_get(hb);
-                self.lower(body, Some(b))?;
-                self.store_ty_slot(b, almide_layout::SUM_FIELD);
-                self.f.instructions().local_get(hb).end();
-                self.release_i32();
-                self.release_i32();
-                let bi = self.types.intern(b);
-                Some(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) })
-            }
+            ("result", "map" | "map_err", [r, f]) => self.lower_result_map(func, r, f)?,
             ("result", "flat_map", [r, f]) => {
                 let SliceTy::Result(o, _) = self.lower(r, None)? else {
                     return unsup("result-flat_map-of-nonresult");
@@ -398,5 +354,59 @@ impl Emitter<'_> {
             _ => return Ok(None),
         };
         Ok(Some(out))
+    }
+
+    fn lower_result_map(
+        &mut self,
+        func: &str,
+        r: &IrExpr,
+        f: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        Ok({
+
+                let on_ok = func == "map";
+                let SliceTy::Result(o, er) = self.lower(r, None)? else {
+                    return unsup(&format!("result-{func}-of-nonresult"));
+                };
+                let (params, body) = self.hof_lambda(f, 1)?;
+                let Some(b) = slice_ty_of(&body.ty, self.types) else {
+                    return unsup(&format!("result-{func}-ret:{}", ty_name(&body.ty)));
+                };
+                let side = self.types.el(if on_ok { o } else { er });
+                let hs = self.hold_i32()?;
+                let hb = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hs);
+                    i.local_get(hs).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                    if on_ok {
+                        i.i32_const(0).i32_ne();
+                    } else {
+                        i.i32_eqz();
+                    }
+                    i.if_(BlockType::Result(ValType::I32));
+                    // pass-through side: the block is reused as-is
+                    i.local_get(hs);
+                    i.else_();
+                }
+                self.f.instructions().local_get(hs);
+                self.load_ty_slot(side, almide_layout::SUM_FIELD);
+                self.f.instructions().local_set(params[0]);
+                self.f
+                    .instructions()
+                    .i32_const(16)
+                    .call(F_ALLOC)
+                    .local_tee(hb)
+                    .i32_const(if on_ok { 0 } else { 1 })
+                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                self.f.instructions().local_get(hb);
+                self.lower(body, Some(b))?;
+                self.store_ty_slot(b, almide_layout::SUM_FIELD);
+                self.f.instructions().local_get(hb).end();
+                self.release_i32();
+                self.release_i32();
+                let bi = self.types.intern(b);
+                Some(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) })
+        })
     }
 }

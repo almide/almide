@@ -1890,3 +1890,27 @@ groundwork; tail_calls' mini-harness stubs the new imports.
 
 **Burn-up: 383 → 388 / 591**, floor 388, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 51: aviation discipline restored AND mechanized (2026-08-21)
+
+The user's check-in caught the same slippage class as stage 39: ten
+stages of burn had pushed four files past the 800-line discipline and
+codopsy to B(84), with lower_list_call at cc 79. Restoration by the
+same playbook — list.rs → list_order.rs + list_mut.rs (dispatcher
+falls through family-wise), emitter.rs → binop.rs + the Range value
+arm joining ranges.rs, runtime.rs → runtime_str.rs, resolve_extras
+home to assembly.rs, the harness fs_dispatch split read/write, the
+fuzz generator's grown arms to an included file — all behavior-proven
+by the full nets at every step (B84 → 86 → 88 → 89 → A 90, 34 files
+all under 800, clippy 0).
+
+The difference from stage 39: the failure is now MECHANIZED away.
+scripts/check-file-discipline.sh (the 800-line cap — the measured
+primary driver of both slippages) runs inside the pre-push hook, so
+file growth can no longer reach a push unmeasured. Surgery lessons
+banked: multi-line fn signatures need seen-open depth counting; a
+`{ pat }` in a match GUARD balances on its own line (count from the
+`=>`); include! files in tests/ must live in a subdirectory or cargo
+compiles them as their own test target.

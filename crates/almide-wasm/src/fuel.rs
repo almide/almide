@@ -165,3 +165,49 @@ impl Emitter<'_> {
         }
     }
 }
+
+impl Emitter<'_> {
+    /// One deterministic charge of `n` units + the cut check (ALS-DT2).
+    /// The cut mirrors the interp's `Flow::Return(Int(0))`: the CURRENT
+    /// fn returns a zero-shaped value; callers continue to their own next
+    /// charge site — charge sites are identical across legs, so the
+    /// observable cut point is identical by construction.
+    pub(crate) fn emit_det_charge_const(&mut self, n: i64) {
+        if !self.metered {
+            return;
+        }
+        let mut i = self.f.instructions();
+        i.global_get(G_DET_FUEL).i64_const(n).i64_sub().global_set(G_DET_FUEL);
+        let _ = i;
+        self.emit_det_cut_check();
+    }
+
+    /// depth > 0 && fuel < 0 → return the zero of this fn's return type.
+    pub(crate) fn emit_det_cut_check(&mut self) {
+        if !self.metered {
+            return;
+        }
+        let mut i = self.f.instructions();
+        i.global_get(G_DET_DEPTH);
+        i.if_(BlockType::Empty);
+        i.global_get(G_DET_FUEL).i64_const(0).i64_lt_s();
+        i.if_(BlockType::Empty);
+        match self.fn_ret {
+            None => {}
+            Some(t) => match t.val_type() {
+                ValType::I64 => {
+                    i.i64_const(0);
+                }
+                ValType::F64 => {
+                    i.f64_const(0.0.into());
+                }
+                _ => {
+                    i.i32_const(0);
+                }
+            },
+        }
+        i.return_();
+        i.end();
+        i.end();
+    }
+}

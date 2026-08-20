@@ -74,103 +74,8 @@ impl Emitter<'_> {
                 self.release_i32();
                 hty
             }
-            // `!` — three enclosing shapes (the interp's eval_try_unwrap):
-            //   effect fn  -> PROPAGATE (return the err block as-is; err
-            //                 blocks of any Result(_, E) share one layout),
-            //   main       -> ABORT with the native frame
-            //                 ("Error: {msg}" + exit 1),
-            //   pure fn    -> same abort (the checker forbids propagating
-            //                 `!` outside effect fns; a pure-Option/Result
-            //                 fn's `!` is #1410-propagating — refused).
-            // `?` (Try) and `!` (Unwrap) are ONE marker in the oracle:
-            // eval.rs dispatches Try | Unwrap to the same eval_try_unwrap.
             IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
-                // C-216: a marker node TYPED Option is the effect-RESULT-
-                // layer strip on a declared-Option effect call — identity.
-                let node_ty = slice_ty_of(&e.ty, self.types);
-                // Propagation returns the operand's err block INTO the
-                // enclosing frame — sound only when the err slot types
-                // agree (they share one layout then).
-                let fn_err = match self.fn_ret {
-                    Some(SliceTy::Result(_, fe)) => Some(self.types.el(fe)),
-                    _ => None,
-                };
-                let in_effect = fn_err.is_some();
-                if !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_))) {
-                    return unsup("unwrap-propagating");
-                }
-                match self.lower(expr, None)? {
-                    got @ SliceTy::Option(_)
-                        if node_ty == Some(got) =>
-                    {
-                        // Identity: pass the Option through untouched.
-                        got
-                    }
-                    SliceTy::Option(h) => {
-                        let et = self.types.el(h);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_eqz()
-                            .if_(BlockType::Empty);
-                        if in_effect {
-                            if fn_err != Some(STR) {
-                                return unsup("unwrap-none-err-ty");
-                            }
-                            // err("none") — #556: `!` on none propagates
-                            // an Err whose message is "none".
-                            let none_msg = self.pool.intern("none");
-                            self.f
-                                .instructions()
-                                .i32_const(16)
-                                .call(F_ALLOC)
-                                .local_tee(self.tmp_i32_local)
-                                .i32_const(1)
-                                .i32_store(slot_memarg(almide_layout::SUM_TAG))
-                                .local_get(self.tmp_i32_local)
-                                .i32_const(none_msg as i32)
-                                .i32_store(slot_memarg(almide_layout::SUM_FIELD))
-                                .local_get(self.tmp_i32_local)
-                                .return_();
-                        } else if self.in_main {
-                            let none_msg = self.pool.intern("none");
-                            self.f.instructions().i32_const(none_msg as i32);
-                            self.emit_error_frame_abort();
-                        } else {
-                            self.f.instructions().unreachable();
-                        }
-                        self.f.instructions().end().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                        et
-                    }
-                    SliceTy::Result(o, er) => {
-                        let et = self.types.el(o);
-                        let ert = self.types.el(er);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(0)
-                            .i32_ne()
-                            .if_(BlockType::Empty);
-                        if in_effect {
-                            if fn_err != Some(ert) {
-                                return unsup("unwrap-err-ty-mismatch");
-                            }
-                            self.f.instructions().local_get(self.scr_i32_local).return_();
-                        } else if self.in_main && ert == STR {
-                            self.f.instructions().local_get(self.scr_i32_local);
-                            self.load_ty_slot(ert, almide_layout::SUM_FIELD);
-                            self.emit_error_frame_abort();
-                        } else {
-                            self.f.instructions().unreachable();
-                        }
-                        self.f.instructions().end().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                        et
-                    }
-                    other => return unsup(&format!("unwrap-of:{other:?}")),
-                }
+                self.lower_try_unwrap(e, expr)?
             }
             // `??` — fallback on none/Err. The fallback branch may clobber
             // the scratch, but the branch that reads the scratch is the
@@ -360,6 +265,150 @@ impl Emitter<'_> {
             }
             // {...base, f: v}: copy then overwrite — functional update.
             IrExprKind::SpreadRecord { base, fields } => {
+                self.lower_spread_record(e, base, fields, want)?
+            }
+            // r.field: offset load from the record block.
+            IrExprKind::Member { object, field } => {
+                let ty = self.lower(object, None)?;
+                let SliceTy::Named(ti) = ty else {
+                    return unsup(&format!("member-of:{ty:?}"));
+                };
+                let NamedDef::Record(def) = &self.types.def(ti) else {
+                    return unsup("member-of-variant");
+                };
+                let Some(fi) = def.fields.iter().find(|fi| fi.name == field.as_str()) else {
+                    return unsup("record-unknown-field");
+                };
+                let (fty, off) = (fi.ty, fi.offset);
+                self.load_ty_slot(fty, off);
+                fty
+            }
+            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
+        };
+        Ok(got)
+    }
+}
+
+impl Emitter<'_> {
+            // `!` — three enclosing shapes (the interp's eval_try_unwrap):
+            //   effect fn  -> PROPAGATE (return the err block as-is; err
+            //                 blocks of any Result(_, E) share one layout),
+            //   main       -> ABORT with the native frame
+            //                 ("Error: {msg}" + exit 1),
+            //   pure fn    -> same abort (the checker forbids propagating
+            //                 `!` outside effect fns; a pure-Option/Result
+            //                 fn's `!` is #1410-propagating — refused).
+            // `?` (Try) and `!` (Unwrap) are ONE marker in the oracle:
+            // eval.rs dispatches Try | Unwrap to the same eval_try_unwrap.
+    pub(crate) fn lower_try_unwrap(
+        &mut self,
+        e: &IrExpr,
+        expr: &IrExpr,
+    ) -> Result<SliceTy, EmitError> {
+        Ok({
+
+                // C-216: a marker node TYPED Option is the effect-RESULT-
+                // layer strip on a declared-Option effect call — identity.
+                let node_ty = slice_ty_of(&e.ty, self.types);
+                // Propagation returns the operand's err block INTO the
+                // enclosing frame — sound only when the err slot types
+                // agree (they share one layout then).
+                let fn_err = match self.fn_ret {
+                    Some(SliceTy::Result(_, fe)) => Some(self.types.el(fe)),
+                    _ => None,
+                };
+                let in_effect = fn_err.is_some();
+                if !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_))) {
+                    return unsup("unwrap-propagating");
+                }
+                match self.lower(expr, None)? {
+                    got @ SliceTy::Option(_)
+                        if node_ty == Some(got) =>
+                    {
+                        // Identity: pass the Option through untouched.
+                        got
+                    }
+                    SliceTy::Option(h) => {
+                        let et = self.types.el(h);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_eqz()
+                            .if_(BlockType::Empty);
+                        if in_effect {
+                            if fn_err != Some(STR) {
+                                return unsup("unwrap-none-err-ty");
+                            }
+                            // err("none") — #556: `!` on none propagates
+                            // an Err whose message is "none".
+                            let none_msg = self.pool.intern("none");
+                            self.f
+                                .instructions()
+                                .i32_const(16)
+                                .call(F_ALLOC)
+                                .local_tee(self.tmp_i32_local)
+                                .i32_const(1)
+                                .i32_store(slot_memarg(almide_layout::SUM_TAG))
+                                .local_get(self.tmp_i32_local)
+                                .i32_const(none_msg as i32)
+                                .i32_store(slot_memarg(almide_layout::SUM_FIELD))
+                                .local_get(self.tmp_i32_local)
+                                .return_();
+                        } else if self.in_main {
+                            let none_msg = self.pool.intern("none");
+                            self.f.instructions().i32_const(none_msg as i32);
+                            self.emit_error_frame_abort();
+                        } else {
+                            self.f.instructions().unreachable();
+                        }
+                        self.f.instructions().end().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                        et
+                    }
+                    SliceTy::Result(o, er) => {
+                        let et = self.types.el(o);
+                        let ert = self.types.el(er);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                            .i32_const(0)
+                            .i32_ne()
+                            .if_(BlockType::Empty);
+                        if in_effect {
+                            if fn_err != Some(ert) {
+                                return unsup("unwrap-err-ty-mismatch");
+                            }
+                            self.f.instructions().local_get(self.scr_i32_local).return_();
+                        } else if self.in_main && ert == STR {
+                            self.f.instructions().local_get(self.scr_i32_local);
+                            self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+                            self.emit_error_frame_abort();
+                        } else {
+                            self.f.instructions().unreachable();
+                        }
+                        self.f.instructions().end().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                        et
+                    }
+                    other => return unsup(&format!("unwrap-of:{other:?}")),
+                }
+        })
+    }
+}
+
+impl Emitter<'_> {
+    /// `{ ...base, f: v }` — spread-record build (split from
+    /// lower_record for the complexity budget).
+    pub(crate) fn lower_spread_record(
+        &mut self,
+        _e: &IrExpr,
+        base: &IrExpr,
+        fields: &[(almide_base::intern::Sym, IrExpr)],
+        _want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+        Ok({
+
                 let ty = self.lower(base, None)?;
                 let SliceTy::Named(ti) = ty else {
                     return unsup(&format!("spread-of:{ty:?}"));
@@ -384,25 +433,6 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(hold);
                 self.release_i32();
                 ty
-            }
-            // r.field: offset load from the record block.
-            IrExprKind::Member { object, field } => {
-                let ty = self.lower(object, None)?;
-                let SliceTy::Named(ti) = ty else {
-                    return unsup(&format!("member-of:{ty:?}"));
-                };
-                let NamedDef::Record(def) = &self.types.def(ti) else {
-                    return unsup("member-of-variant");
-                };
-                let Some(fi) = def.fields.iter().find(|fi| fi.name == field.as_str()) else {
-                    return unsup("record-unknown-field");
-                };
-                let (fty, off) = (fi.ty, fi.offset);
-                self.load_ty_slot(fty, off);
-                fty
-            }
-            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
-        };
-        Ok(got)
+        })
     }
 }

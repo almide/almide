@@ -71,6 +71,7 @@ mod emitter;
 mod patterns;
 mod prim;
 mod runtime;
+mod runtime_str;
 mod data;
 mod assembly;
 pub(crate) use assembly::*;
@@ -80,11 +81,15 @@ pub(crate) use func::*;
 pub(crate) mod ty;
 pub(crate) use ty::*;
 mod list;
+mod list_mut;
+mod list_order;
 mod stmts;
+mod string_ext;
 pub(crate) mod work;
 pub(crate) use work::*;
 mod display;
 mod matrix;
+mod binop;
 mod fan;
 mod fs;
 mod fuel;
@@ -96,6 +101,7 @@ mod value;
 use collect::collect_binds;
 use emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
 use runtime::*;
+use runtime_str::*;
 use types_table::TypeTable;
 
 // ── fixed memory map ────────────────────────────────────────────────────
@@ -752,88 +758,3 @@ fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>)> {
     program_fns
 }
 
-/// Emitted helpers + table-entry extras (shims, adapters, lifted
-/// lambdas) — split from emit_program for the complexity budget.
-fn resolve_extras(
-    table: &FnTable,
-    work: &FnWork,
-    lifted_fns: &[LoweredLifted],
-) -> (Vec<(u32, Function)>, Vec<u32>) {
-    let extra_base = F_FN_BASE + table.infos.len() as u32 + 1;
-    let mut extra_fns: Vec<(u32, Function)> = Vec::new();
-    // Emitted helpers assemble FIRST — their indices were promised during
-    // lowering; the table-entry extras follow.
-    let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
-    for h in &helper_snapshot {
-        let params = match h {
-            Helper::ValueKeys => vec![ValType::I32],
-            _ => vec![ValType::I32, ValType::I32],
-        };
-        let ti = work.itype(params, Some(ValType::I32));
-        let f = match h {
-            Helper::JsonValue { float_to_string, frags } => value::emit_json_value_helper(
-                work.helper_base.get(),
-                &helper_snapshot,
-                *float_to_string,
-                *frags,
-            ),
-            Helper::JsonQuote { frags } => value::emit_json_quote_helper(*frags),
-            Helper::ValueField => value::emit_value_field_helper(),
-            Helper::ValueKeys => value::emit_value_keys_helper(),
-            Helper::StringSplit => value::emit_string_split_helper(),
-            Helper::DisplayNamed { ti } => {
-                match work.display_bodies.borrow_mut().remove(ti) {
-                    Some(work::DisplayBuild::Built(f)) => f,
-                    // Failed (all callers refused) — keep the promised
-                    // index aligned with a loud stub.
-                    _ => {
-                        let mut f = Function::new([]);
-                        f.instructions().unreachable().end();
-                        f
-                    }
-                }
-            }
-        };
-        extra_fns.push((ti, f));
-    }
-    let mut entry_fn_indices: Vec<u32> = Vec::new();
-    for e in work.entries.borrow().clone() {
-        match e {
-            TableEntry::Fn(i) => {
-                // Uniform closure convention: env leads — a plain fn's
-                // table slot holds a forwarding shim.
-                let info = &table.infos[i];
-                let mut ps: Vec<ValType> = vec![ValType::I32];
-                ps.extend(info.params.iter().map(|t| t.val_type()));
-                let ti = work.itype(ps, info.ret.map(SliceTy::val_type));
-                let idx = extra_base + extra_fns.len() as u32;
-                extra_fns.push((
-                    ti,
-                    emit_env_shim(F_FN_BASE + i as u32, &info.params, info.ret, false),
-                ));
-                entry_fn_indices.push(idx);
-            }
-            TableEntry::Adapter { target, raw } => {
-                let info = &table.infos[target];
-                let mut ps: Vec<ValType> = vec![ValType::I32];
-                ps.extend(info.params.iter().map(|t| t.val_type()));
-                let ti = work.itype(ps, Some(ValType::I32));
-                let idx = extra_base + extra_fns.len() as u32;
-                let _ = raw;
-                extra_fns.push((
-                    ti,
-                    emit_env_shim(F_FN_BASE + target as u32, &info.params, info.ret, true),
-                ));
-                entry_fn_indices.push(idx);
-            }
-            TableEntry::Lambda(j) => {
-                let (ps, r, f, _) = &lifted_fns[j as usize];
-                let ti = work.itype(ps.clone(), *r);
-                let idx = extra_base + extra_fns.len() as u32;
-                extra_fns.push((ti, f.clone()));
-                entry_fn_indices.push(idx);
-            }
-        }
-    }
-    (extra_fns, entry_fn_indices)
-}
