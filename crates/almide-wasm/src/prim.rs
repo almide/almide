@@ -100,6 +100,59 @@ impl Emitter<'_> {
                 };
                 Ok(Some(INT))
             }
+            ("i2f" | "f2i" | "fbits" | "ffrombits" | "fadd" | "fsub" | "fmul"
+            | "fdiv" | "fceil" | "ffloor" | "fneg" | "fabs" | "feq" | "fne" | "flt"
+            | "fle" | "fgt" | "fge", _) => self.lower_prim_float(func, args),
+            // die(msg_handle): the guarded-abort floor — surface the line
+            // on stderr, then trap (abort parity is its own gate class).
+            ("die", [msg]) => {
+                // The die convention carries its own trailing "\n" in the
+                // message block, and the host print appends one — print
+                // ptr/len directly with the trailing newline stripped so
+                // stderr is the interp's line VERBATIM, not doubled.
+                self.lower(msg, Some(INT))?;
+                let b = self.tmp_i32_local;
+                let mut i = self.f.instructions();
+                i.i32_wrap_i64().local_set(b);
+                i.local_get(b).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(b).i32_load(len_memarg());
+                // len -= (len > 0 && payload[len-1] == '\n')
+                i.local_get(b).i32_load(len_memarg());
+                i.if_(BlockType::Result(ValType::I32));
+                i.local_get(b)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(b)
+                    .i32_load(len_memarg())
+                    .i32_add()
+                    .i32_const(1)
+                    .i32_sub()
+                    .i32_load8_u(raw(()))
+                    .i32_const(10)
+                    .i32_eq();
+                i.else_().i32_const(0).end();
+                i.i32_sub();
+                i.call(F_EPRINTLN_IMPORT).unreachable();
+                Ok(None)
+            }
+            // Bump world: refcounts are inert — evaluate for effect order,
+            // drop the value.
+            ("rc_inc", [x]) | ("rc_dec", [x]) => {
+                self.lower(x, None)?;
+                self.f.instructions().drop();
+                Ok(None)
+            }
+            _ => unsup(&format!("call:prim.{func}")),
+        }
+    }
+
+    /// The float half of the prim floor — split for the complexity budget.
+    fn lower_prim_float(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
             ("i2f", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().f64_convert_i64_s();
@@ -167,45 +220,6 @@ impl Emitter<'_> {
                     _ => i.f64_ge(),
                 };
                 Ok(Some(BOOL))
-            }
-            // die(msg_handle): the guarded-abort floor — surface the line
-            // on stderr, then trap (abort parity is its own gate class).
-            ("die", [msg]) => {
-                // The die convention carries its own trailing "\n" in the
-                // message block, and the host print appends one — print
-                // ptr/len directly with the trailing newline stripped so
-                // stderr is the interp's line VERBATIM, not doubled.
-                self.lower(msg, Some(INT))?;
-                let b = self.tmp_i32_local;
-                let mut i = self.f.instructions();
-                i.i32_wrap_i64().local_set(b);
-                i.local_get(b).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(b).i32_load(len_memarg());
-                // len -= (len > 0 && payload[len-1] == '\n')
-                i.local_get(b).i32_load(len_memarg());
-                i.if_(BlockType::Result(ValType::I32));
-                i.local_get(b)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(b)
-                    .i32_load(len_memarg())
-                    .i32_add()
-                    .i32_const(1)
-                    .i32_sub()
-                    .i32_load8_u(raw(()))
-                    .i32_const(10)
-                    .i32_eq();
-                i.else_().i32_const(0).end();
-                i.i32_sub();
-                i.call(F_EPRINTLN_IMPORT).unreachable();
-                Ok(None)
-            }
-            // Bump world: refcounts are inert — evaluate for effect order,
-            // drop the value.
-            ("rc_inc", [x]) | ("rc_dec", [x]) => {
-                self.lower(x, None)?;
-                self.f.instructions().drop();
-                Ok(None)
             }
             _ => unsup(&format!("call:prim.{func}")),
         }

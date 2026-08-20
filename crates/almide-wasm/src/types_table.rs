@@ -7,7 +7,8 @@ use almide_ir::{IrProgram, IrTypeDecl, IrTypeDeclKind, IrVariantKind};
 use almide_base::intern::Sym;
 use almide_types::types::Ty;
 
-use crate::{slice_ty_of, ETy, SliceTy};
+use crate::ty::slice_ty_of;
+use crate::{ETy, SliceTy};
 
 // ── user-type table ─────────────────────────────────────────────────────
 

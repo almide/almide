@@ -363,37 +363,7 @@ impl Emitter<'_> {
                 Ok(())
             }
             IrPattern::Constructor { name, args } => {
-                let SliceTy::Named(ti) = subj_ty else {
-                    return unsup("pattern:ctor-on-non-named");
-                };
-                let fields: Vec<(SliceTy, u32)> = {
-                    let NamedDef::Variant(v) = &self.types.def(ti) else {
-                        return unsup("pattern:ctor-of-record");
-                    };
-                    let Some(c) = v.cases.iter().find(|c| c.name == name.as_str()) else {
-                        return unsup(&format!("pattern:ctor-unknown:{name}"));
-                    };
-                    c.fields.iter().map(|f| (f.ty, f.offset)).collect()
-                };
-                for (ap, (fty, off)) in args.iter().zip(fields) {
-                    match ap {
-                        IrPattern::Wildcard | IrPattern::Literal { .. } => {}
-                        IrPattern::Bind { var, .. } => {
-                            let Some(&(idx, _)) = self.locals.get(var) else {
-                                return unsup("bind:unmapped");
-                            };
-                            self.f.instructions().local_get(scr);
-                            self.load_ty_slot(fty, off);
-                            self.f.instructions().local_set(idx);
-                        }
-                        nested => {
-                            self.f.instructions().local_get(scr);
-                            self.load_ty_slot(fty, off);
-                            self.bind_nested(nested, fty)?;
-                        }
-                    }
-                }
-                Ok(())
+                self.bind_ctor_fields(name, args, subj_ty, scr)
             }
             other => unsup(&format!("pattern:{}", pattern_name(other))),
         }
@@ -457,4 +427,46 @@ impl Emitter<'_> {
         };
     }
 
+
+    /// Constructor-pattern binds (split from emit_pattern_binds for the complexity budget).
+    fn bind_ctor_fields(
+        &mut self,
+        name: &str,
+        args: &[IrPattern],
+        subj_ty: SliceTy,
+        scr: u32,
+    ) -> Result<(), EmitError> {
+
+                let SliceTy::Named(ti) = subj_ty else {
+                    return unsup("pattern:ctor-on-non-named");
+                };
+                let fields: Vec<(SliceTy, u32)> = {
+                    let NamedDef::Variant(v) = &self.types.def(ti) else {
+                        return unsup("pattern:ctor-of-record");
+                    };
+                    let Some(c) = v.cases.iter().find(|c| c.name == name) else {
+                        return unsup(&format!("pattern:ctor-unknown:{name}"));
+                    };
+                    c.fields.iter().map(|f| (f.ty, f.offset)).collect()
+                };
+                for (ap, (fty, off)) in args.iter().zip(fields) {
+                    match ap {
+                        IrPattern::Wildcard | IrPattern::Literal { .. } => {}
+                        IrPattern::Bind { var, .. } => {
+                            let Some(&(idx, _)) = self.locals.get(var) else {
+                                return unsup("bind:unmapped");
+                            };
+                            self.f.instructions().local_get(scr);
+                            self.load_ty_slot(fty, off);
+                            self.f.instructions().local_set(idx);
+                        }
+                        nested => {
+                            self.f.instructions().local_get(scr);
+                            self.load_ty_slot(fty, off);
+                            self.bind_nested(nested, fty)?;
+                        }
+                    }
+                }
+                Ok(())
+    }
 }

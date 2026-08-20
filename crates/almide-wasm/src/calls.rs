@@ -145,629 +145,19 @@ impl Emitter<'_> {
                 Ok(ret)
             }
             // Stdlib special forms the runtime helpers cover directly.
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "process" && func.as_str() == "exit" =>
-            {
-                // The abort floor (C-153 family): surface the code to the
-                // host import, then trap. The host records the code BEFORE
-                // the unwind, so exit-code parity is exact; the trailing
-                // `unreachable` keeps the stack polymorphic (nothing after
-                // `process.exit` executes on any target).
-                match args.first() {
-                    Some(a) => {
-                        self.lower(a, Some(INT))?;
-                        self.f.instructions().i32_wrap_i64();
-                    }
-                    None => {
-                        self.f.instructions().i32_const(1);
-                    }
-                }
-                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
-                Ok(None)
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "int" && func.as_str() == "to_string" && args.len() == 1 =>
-            {
-                self.lower(&args[0], Some(INT))?;
-                self.f.instructions().call(F_INT_TO_STRING);
-                Ok(Some(STR))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "string"
-                    && matches!(func.as_str(), "len" | "length")
-                    && args.len() == 1 =>
-            {
-                self.lower(&args[0], Some(STR))?;
-                self.f.instructions().call(F_STR_LEN_CHARS);
-                Ok(Some(INT))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "json" && func.as_str() == "stringify" && args.len() == 1 =>
-            {
-                self.lower(&args[0], Some(SliceTy::Value))?;
-                self.emit_value_stringify()?;
-                Ok(Some(STR))
-            }
-            // option.unwrap_or(o, d) IS `o ?? d`; result.unwrap_or too.
-            CallTarget::Module { module, func, .. }
-                if (module.as_str() == "option" || module.as_str() == "result")
-                    && func.as_str() == "unwrap_or"
-                    && args.len() == 2 =>
-            {
-                let got = self.lower(&args[0], None)?;
-                match got {
-                    SliceTy::Option(h) => {
-                        let et = self.types.el(h);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_eqz()
-                            .if_(BlockType::Result(et.val_type()));
-                        self.lower(&args[1], Some(et))?;
-                        self.f.instructions().else_().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                        self.f.instructions().end();
-                        Ok(Some(et))
-                    }
-                    SliceTy::Result(o, _) => {
-                        let et = self.types.el(o);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(0)
-                            .i32_ne()
-                            .if_(BlockType::Result(et.val_type()));
-                        self.lower(&args[1], Some(et))?;
-                        self.f.instructions().else_().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                        self.f.instructions().end();
-                        Ok(Some(et))
-                    }
-                    other => unsup(&format!("unwrap-or-of:{other:?}")),
-                }
-            }
-            CallTarget::Module { module, func, .. } if module.as_str() == "matrix" => {
-                if let Some(out) = self.lower_matrix_call(func.as_str(), args)? {
-                    return Ok(out);
-                }
-                unsup(&format!("call:matrix.{func}"))
-            }
-            CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
-                if let Some(out) = self.lower_value_call(func.as_str(), args)? {
-                    return Ok(out);
-                }
-                unsup(&format!("call:value.{func}"))
-            }
-            CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
-                self.lower_bytes_call(func.as_str(), args)
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "string" && func.as_str() == "split" && args.len() == 2 =>
-            {
-                self.lower(&args[0], Some(STR))?;
-                let h = self.hold_i32()?;
-                self.f.instructions().local_set(h);
-                self.lower(&args[1], Some(STR))?;
-                let hs = self.hold_i32()?;
-                self.f.instructions().local_set(hs);
-                let sp = self.work.helper(Helper::StringSplit);
-                self.f.instructions().local_get(h).local_get(hs).call(sp);
-                self.release_i32();
-                self.release_i32();
-                Ok(Some(SliceTy::List(self.types.intern(STR))))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "string" && func.as_str() == "to_bytes" && args.len() == 1 =>
-            {
-                self.lower(&args[0], Some(STR))?;
-                self.f.instructions().call(F_BLOCK_COPY);
-                Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "string"
-                    && func.as_str() == "slice"
-                    && (args.len() == 2 || args.len() == 3) =>
-            {
-                self.lower(&args[0], Some(STR))?;
-                self.lower(&args[1], Some(INT))?;
-                if let Some(e) = args.get(2) {
-                    self.lower(e, Some(INT))?;
-                } else {
-                    // the surface's `end` default: i64::MAX ("to the end")
-                    self.f.instructions().i64_const(i64::MAX);
-                }
-                self.f.instructions().call(F_STR_SLICE);
-                Ok(Some(STR))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "string" && func.as_str() == "repeat" && args.len() == 2 =>
-            {
-                self.lower(&args[0], Some(STR))?;
-                self.lower(&args[1], Some(INT))?;
-                self.f.instructions().call(F_STR_REPEAT);
-                Ok(Some(STR))
-            }
-            CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
-                self.lower_list_call(func.as_str(), args)
-            }
-            CallTarget::Module { module, func, .. } if module.as_str() == "map" => {
-                self.lower_map_call(func.as_str(), args, ret_hint)
-            }
-            CallTarget::Module { module, func, .. } if module.as_str() == "set" => {
-                self.lower_set_call(func.as_str(), args, ret_hint)
-            }
-            CallTarget::Module { module, func, .. } if module.as_str() == "prim" => {
-                self.lower_prim_call(func.as_str(), args)
-            }
-            CallTarget::Module { module, func, .. } => {
-                // Linked module functions live in the table under their
-                // qualified name. A stdlib SURFACE call additionally
-                // resolves through the self-host registry to its loaded
-                // implementation (same registry the interp's bridge uses —
-                // one IR, two sound resolutions). Anything else is an
-                // honest wall.
-                let key = format!("{}.{}", module.as_str(), func.as_str());
-                let Some(i) = self.resolve_qualified(&key) else {
-                    return unsup(&format!("call:{key}"));
-                };
-                let info = &self.table.infos[i];
-                if let Some(r) = &info.refuse {
-                    return unsup(&format!("call-fn:{key}:{r}"));
-                }
-                if args.len() != info.params.len() {
-                    return unsup(&format!("call-arity:{key}"));
-                }
-                let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
-                for (a, want) in args.iter().zip(params) {
-                    self.lower(a, Some(want))?;
-                }
-                self.calls.insert(i);
-                if tail && ret.is_some() && ret == self.fn_ret {
-                    self.f.instructions().return_call(index);
-                } else {
-                    self.f.instructions().call(index);
-                }
-                Ok(ret)
-            }
+            CallTarget::Module { .. } => self.lower_module_call(target, args, tail, ret_hint),
             _ => unsup("call:computed-or-method"),
         }
     }
 
-    /// `list.*` special forms over the runtime helpers.
-    pub(crate) fn lower_list_call(
-        &mut self,
-        func: &str,
-        args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
-        match (func, args) {
-            ("len", [xs]) => {
-                let elem = match self.lower(xs, None)? {
-                    SliceTy::List(h) => self.types.el(h),
-                    other => return unsup(&format!("list-len-of:{other:?}")),
-                };
-                self.f
-                    .instructions()
-                    .i32_load(len_memarg())
-                    .i32_const(elem.slot_size() as i32)
-                    .i32_div_u()
-                    .i64_extend_i32_u();
-                Ok(Some(INT))
-            }
-            ("get", [xs, idx]) => {
-                let h = match self.lower(xs, None)? {
-                    SliceTy::List(h) => h,
-                    other => return unsup(&format!("list-get-of:{other:?}")),
-                };
-                self.lower(idx, Some(INT))?;
-                let helper = match self.types.el(h).slot_size() {
-                    8 => F_LIST_GET_8,
-                    _ => F_LIST_GET_4,
-                };
-                self.f.instructions().call(helper);
-                Ok(Some(SliceTy::Option(h)))
-            }
-            ("get_or", [xs, idx, default]) => self.lower_list_get_or(xs, idx, default),
-            // first = get(xs, 0) — the same Option-returning helper.
-            ("first", [xs]) => {
-                let elem = match self.lower(xs, None)? {
-                    SliceTy::List(h) => self.types.el(h),
-                    other => return unsup(&format!("list-first-of:{other:?}")),
-                };
-                self.f.instructions().i64_const(0);
-                let helper = match elem.slot_size() {
-                    8 => F_LIST_GET_8,
-                    _ => F_LIST_GET_4,
-                };
-                self.f.instructions().call(helper);
-                Ok(Some(SliceTy::Option(self.types.intern(elem))))
-            }
-            // `list.push` MUTATES through its `mut` param on the oracle
-            // (the growth fixture pushes as bare statements). Lowered as a
-            // write-back: var = $push(var, v). Requires a plain var arg.
-            ("push", [xs, v]) => {
-                let IrExprKind::Var { id } = &xs.kind else {
-                    return unsup("list-push-nonvar");
-                };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
-                    return unsup("var:unmapped");
-                };
-                let SliceTy::List(h) = var_ty else {
-                    return unsup(&format!("list-push-of:{var_ty:?}"));
-                };
-                let elem = self.types.el(h);
-                self.f.instructions().local_get(var_idx);
-                self.lower(v, Some(elem))?;
-                // The 8-byte helper's value param is i64; an f64 element
-                // crosses the call boundary as its BIT PATTERN (memory is
-                // bytes — the consumer reloads the slot as f64).
-                if elem.val_type() == wasm_encoder::ValType::F64 {
-                    self.f.instructions().i64_reinterpret_f64();
-                }
-                let helper = match elem.slot_size() {
-                    8 => F_LIST_PUSH_8,
-                    _ => F_LIST_PUSH_4,
-                };
-                self.f.instructions().call(helper).local_set(var_idx);
-                Ok(None)
-            }
-            ("join", [xs, sep]) => {
-                match self.lower(xs, None)? {
-                    SliceTy::List(h) if self.types.el(h) == STR => {}
-                    other => return unsup(&format!("list-join-of:{other:?}")),
-                }
-                self.lower(sep, Some(STR))?;
-                self.f.instructions().call(F_LIST_JOIN);
-                Ok(Some(STR))
-            }
-            ("enumerate", [xs]) => {
-                let elem = match self.lower(xs, None)? {
-                    SliceTy::List(h) => self.types.el(h),
-                    other => return unsup(&format!("list-enumerate-of:{other:?}")),
-                };
-                let pair_ti = self.types.tuple(vec![INT, elem]);
-                let pdef = self.types.tuple_def(pair_ti);
-                let (ioff, eoff, psize) =
-                    (pdef.fields[0].1, pdef.fields[1].1, pdef.size);
-                let stride = elem.slot_size();
-                let bh = self.hold_i32()?;
-                let ch = self.hold_i32()?;
-                let ih = self.hold_i32()?;
-                let rh = self.hold_i32()?;
-                let ph = self.hold_i32()?;
-                self.f.instructions().local_tee(bh);
-                self.f
-                    .instructions()
-                    .i32_load(len_memarg())
-                    .i32_const(stride as i32)
-                    .i32_div_u()
-                    .local_set(ch)
-                    .i32_const(0)
-                    .local_set(ih);
-                // result list of pair addresses
-                self.f
-                    .instructions()
-                    .local_get(ch)
-                    .i32_const(4)
-                    .i32_mul()
-                    .call(F_ALLOC)
-                    .local_set(rh);
-                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-                self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
-                // pair block
-                self.f.instructions().i32_const(psize as i32).call(F_ALLOC).local_set(ph);
-                self.f
-                    .instructions()
-                    .local_get(ph)
-                    .local_get(ih)
-                    .i64_extend_i32_u();
-                self.store_ty_slot(INT, ioff);
-                self.f.instructions().local_get(ph);
-                self.f
-                    .instructions()
-                    .local_get(bh)
-                    .local_get(ih)
-                    .i32_const(stride as i32)
-                    .i32_mul()
-                    .i32_add();
-                self.load_ty_slot(elem, 0);
-                self.store_ty_slot(elem, eoff);
-                // store pair addr into result
-                self.f
-                    .instructions()
-                    .local_get(rh)
-                    .local_get(ih)
-                    .i32_const(4)
-                    .i32_mul()
-                    .i32_add()
-                    .local_get(ph);
-                self.store_ty_slot(SliceTy::Tuple(pair_ti), 0);
-                self.f
-                    .instructions()
-                    .local_get(ih)
-                    .i32_const(1)
-                    .i32_add()
-                    .local_set(ih)
-                    .br(0)
-                    .end()
-                    .end();
-                self.f.instructions().local_get(rh);
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti)))))
-            }
-            ("slice", [xs, a, b]) => {
-                let (h, elem) = match self.lower(xs, None)? {
-                    SliceTy::List(h) => (h, self.types.el(h)),
-                    other => return unsup(&format!("list-slice-of:{other:?}")),
-                };
-                let stride = elem.slot_size() as i64;
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                self.lower(a, Some(INT))?;
-                let ah = self.hold_i64()?;
-                self.f.instructions().local_set(ah);
-                self.lower(b, Some(INT))?;
-                let eh = self.hold_i64()?;
-                // e = min(b, count); s = a; s < 0 or s >= e → []
-                let mut ins = self.f.instructions();
-                ins.local_tee(eh);
-                ins.local_get(bh)
-                    .i32_load(len_memarg())
-                    .i64_extend_i32_u()
-                    .i64_const(stride)
-                    .i64_div_s();
-                ins.local_get(eh);
-                ins.local_get(bh)
-                    .i32_load(len_memarg())
-                    .i64_extend_i32_u()
-                    .i64_const(stride)
-                    .i64_div_s();
-                ins.i64_lt_s().select().local_set(eh);
-                // empty when a < 0 (usize-wrap semantics) or a >= e
-                ins.local_get(ah).i64_const(0).i64_lt_s();
-                ins.local_get(ah).local_get(eh).i64_ge_s();
-                ins.i32_or().if_(BlockType::Result(ValType::I32));
-                ins.i32_const(0).call(F_ALLOC);
-                ins.else_();
-                // alloc (e-a)*stride; copy from base + a*stride
-                ins.local_get(eh)
-                    .local_get(ah)
-                    .i64_sub()
-                    .i64_const(stride)
-                    .i64_mul()
-                    .i32_wrap_i64()
-                    .call(F_ALLOC)
-                    .local_tee(self.tmp_i32_local)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add();
-                ins.local_get(bh)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(ah)
-                    .i64_const(stride)
-                    .i64_mul()
-                    .i32_wrap_i64()
-                    .i32_add();
-                ins.local_get(eh)
-                    .local_get(ah)
-                    .i64_sub()
-                    .i64_const(stride)
-                    .i64_mul()
-                    .i32_wrap_i64();
-                ins.memory_copy(0, 0);
-                ins.local_get(self.tmp_i32_local);
-                ins.end();
-                self.release_i64();
-                self.release_i64();
-                self.release_i32();
-                Ok(Some(SliceTy::List(h)))
-            }
-            ("map", [xs, cb]) => self.lower_list_map(xs, cb),
-            ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
-            ("fold", [xs, init, cb]) => self.lower_list_fold(xs, init, cb),
-            _ => unsup(&format!("call:list.{func}")),
-        }
-    }
 
-    /// A literal-lambda HOF callback: (param locals, body). Fn-typed
-    /// VALUES are a later mechanism — the direct-lambda form is the
-    /// dominant idiom (153:31 in the corpus) and inlines with zero
-    /// closure machinery: captures are just enclosing locals in scope.
-    pub(crate) fn hof_lambda<'e>(
-        &mut self,
-        cb: &'e IrExpr,
-        arity: usize,
-    ) -> Result<(Vec<u32>, &'e IrExpr), EmitError> {
-        let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
-            return unsup("list-hof-nonlambda");
-        };
-        if params.len() != arity {
-            return unsup("list-hof-arity");
-        }
-        let mut idxs = Vec::new();
-        for (var, _) in params {
-            let Some(&(idx, _)) = self.locals.get(var) else {
-                return unsup("bind:unmapped");
-            };
-            idxs.push(idx);
-        }
-        Ok((idxs, body))
-    }
 
-    /// Shared loop header: xs → holds (base, count, idx); returns them.
-    fn hof_loop_open(
-        &mut self,
-        xs: &IrExpr,
-    ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
-        let elem = match self.lower(xs, None)? {
-            SliceTy::List(h) => self.types.el(h),
-            other => return unsup(&format!("list-hof-of:{other:?}")),
-        };
-        let bh = self.hold_i32()?;
-        let ch = self.hold_i32()?;
-        let ih = self.hold_i32()?;
-        self.f.instructions().local_tee(bh);
-        self.f
-            .instructions()
-            .i32_load(len_memarg())
-            .i32_const(elem.slot_size() as i32)
-            .i32_div_u()
-            .local_set(ch)
-            .i32_const(0)
-            .local_set(ih);
-        Ok((elem, bh, ch, ih))
-    }
 
-    /// Loop-body prologue: guard + load current element into `param`.
-    fn hof_elem_into(&mut self, elem: SliceTy, bh: u32, ch: u32, ih: u32, param: u32) {
-        self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
-        self.f
-            .instructions()
-            .local_get(bh)
-            .local_get(ih)
-            .i32_const(elem.slot_size() as i32)
-            .i32_mul()
-            .i32_add();
-        self.load_ty_slot(elem, 0);
-        self.f.instructions().local_set(param);
-    }
 
-    fn hof_step(&mut self, ih: u32) {
-        self.f.instructions().local_get(ih).i32_const(1).i32_add().local_set(ih).br(0).end().end();
-    }
 
-    fn lower_list_map(
-        &mut self,
-        xs: &IrExpr,
-        cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        let (params, body) = self.hof_lambda(cb, 1)?;
-        let Some(u) = slice_ty_of(&body.ty, self.types) else {
-            return unsup(&format!("list-map-ret:{}", ty_name(&body.ty)));
-        };
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-        // result = alloc(count * stride_u), same element count as source
-        let rh = self.hold_i32()?;
-        self.f
-            .instructions()
-            .local_get(ch)
-            .i32_const(u.slot_size() as i32)
-            .i32_mul()
-            .call(F_ALLOC)
-            .local_set(rh);
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        // dest addr, then value, then store
-        self.f
-            .instructions()
-            .local_get(rh)
-            .local_get(ih)
-            .i32_const(u.slot_size() as i32)
-            .i32_mul()
-            .i32_add();
-        self.lower(body, Some(u))?;
-        self.store_ty_slot(u, 0);
-        self.hof_step(ih);
-        self.f.instructions().local_get(rh);
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(u))))
-    }
 
-    fn lower_list_filter(
-        &mut self,
-        xs: &IrExpr,
-        cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        let (params, body) = self.hof_lambda(cb, 1)?;
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-        let rh = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(rh); // []
-        let push = match elem.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
-        self.f.instructions().if_(BlockType::Empty);
-        self.f
-            .instructions()
-            .local_get(rh)
-            .local_get(params[0])
-            .call(push)
-            .local_set(rh);
-        self.f.instructions().end();
-        self.hof_step(ih);
-        self.f.instructions().local_get(rh);
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(elem))))
-    }
 
-    fn lower_list_fold(
-        &mut self,
-        xs: &IrExpr,
-        init: &IrExpr,
-        cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        let (params, body) = self.hof_lambda(cb, 2)?;
-        let (acc_p, x_p) = (params[0], params[1]);
-        let Some(b) = slice_ty_of(&init.ty, self.types) else {
-            return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
-        };
-        self.lower(init, Some(b))?;
-        self.f.instructions().local_set(acc_p);
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        self.hof_elem_into(elem, bh, ch, ih, x_p);
-        self.lower(body, Some(b))?;
-        self.f.instructions().local_set(acc_p);
-        self.hof_step(ih);
-        self.f.instructions().local_get(acc_p);
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        Ok(Some(b))
-    }
 
-    /// `list.get_or(xs, i, d)`: (xs.get(i)) ?? d, inlined via the get
-    /// helper — extracted for complexity budget.
-    pub(crate) fn lower_list_get_or(
-        &mut self,
-        xs: &IrExpr,
-        idx: &IrExpr,
-        default: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        let elem = match self.lower(xs, None)? {
-            SliceTy::List(h) => self.types.el(h),
-            other => return unsup(&format!("list-get-of:{other:?}")),
-        };
-        self.lower(idx, Some(INT))?;
-        let helper = match elem.slot_size() {
-            8 => F_LIST_GET_8,
-            _ => F_LIST_GET_4,
-        };
-        self.f
-            .instructions()
-            .call(helper)
-            .local_tee(self.scr_i32_local)
-            .i32_eqz()
-            .if_(BlockType::Result(elem.val_type()));
-        self.lower(default, Some(elem))?;
-        self.f.instructions().else_().local_get(self.scr_i32_local);
-        self.load_ty_slot(elem, almide_layout::OPTION_FIELD);
-        self.f.instructions().end();
-        Ok(Some(elem))
-    }
 
     /// Resolve a qualified stdlib call ("float.to_string") to a table
     /// index: linked module fns first, then the self-host registry's
@@ -861,290 +251,9 @@ impl Emitter<'_> {
         })
     }
 
-    /// Append a static fragment to the line buffer.
-    fn append_lit(&mut self, text: &str) {
-        let base = self.pool.intern(text);
-        self.f
-            .instructions()
-            .local_get(self.cursor_local)
-            .i32_const((base + almide_layout::PAYLOAD) as i32)
-            .i32_const(text.len() as i32)
-            .call(F_APPEND_COPY)
-            .local_set(self.cursor_local);
-    }
 
-    /// One `${part}` (or a nested position inside one): the value is on
-    /// the stack; append its ORACLE display form to the line buffer and
-    /// update the cursor local. `nested` = the Rust-Debug nesting rule
-    /// (strings quote+escape inside containers, bare at the top).
-    pub(crate) fn emit_display_value(
-        &mut self,
-        got: SliceTy,
-        nested: bool,
-    ) -> Result<(), EmitError> {
-        self.emit_display_at(got, nested, 0)
-    }
 
-    fn emit_display_at(
-        &mut self,
-        got: SliceTy,
-        nested: bool,
-        depth: u32,
-    ) -> Result<(), EmitError> {
-        // Emit-time recursion follows the TYPE shape; recursive data
-        // types need a runtime-recursive helper — capped honestly.
-        if depth > 8 {
-            return unsup("display-depth");
-        }
-        match got {
-            INT => {
-                self.f.instructions().local_set(self.scr_i64_local);
-                self.f
-                    .instructions()
-                    .local_get(self.cursor_local)
-                    .local_get(self.scr_i64_local)
-                    .call(F_APPEND_I64)
-                    .local_set(self.cursor_local);
-            }
-            BOOL => {
-                self.f.instructions().local_set(self.tmp_i32_local);
-                self.f
-                    .instructions()
-                    .local_get(self.cursor_local)
-                    .local_get(self.tmp_i32_local)
-                    .call(F_APPEND_BOOL)
-                    .local_set(self.cursor_local);
-            }
-            FLOAT => {
-                // The SAME linked Dragon4 compound form the oracle uses.
-                let Some(i) = self.resolve_qualified("float.to_string_compound") else {
-                    return unsup("interp-part:Float-unlinked");
-                };
-                let info = &self.table.infos[i];
-                if info.refuse.is_some() || info.ret != Some(STR) {
-                    return unsup("interp-part:Float-impl");
-                }
-                let idx = info.wasm_index;
-                self.calls.insert(i);
-                self.f
-                    .instructions()
-                    .call(idx)
-                    .local_set(self.tmp_i32_local);
-                self.f
-                    .instructions()
-                    .local_get(self.cursor_local)
-                    .local_get(self.tmp_i32_local)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(self.tmp_i32_local)
-                    .i32_load(len_memarg())
-                    .call(F_APPEND_COPY)
-                    .local_set(self.cursor_local);
-            }
-            STR => {
-                if nested {
-                    // Rust-Debug quoting shares the 5-escape walker.
-                    let frags = self.json_frags();
-                    let q = self.work.helper(Helper::JsonQuote { frags });
-                    self.f.instructions().local_set(self.tmp_i32_local);
-                    self.f
-                        .instructions()
-                        .local_get(self.cursor_local)
-                        .local_get(self.tmp_i32_local)
-                        .call(q)
-                        .local_set(self.cursor_local);
-                } else {
-                    self.f.instructions().local_set(self.tmp_i32_local);
-                    self.f
-                        .instructions()
-                        .local_get(self.cursor_local)
-                        .local_get(self.tmp_i32_local)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .local_get(self.tmp_i32_local)
-                        .i32_load(len_memarg())
-                        .call(F_APPEND_COPY)
-                        .local_set(self.cursor_local);
-                }
-            }
-            SliceTy::Option(h) => {
-                let et = self.types.el(h);
-                let ho = self.hold_i32()?;
-                self.f.instructions().local_set(ho);
-                self.f.instructions().local_get(ho).i32_eqz().if_(BlockType::Empty);
-                self.append_lit("none");
-                self.f.instructions().else_();
-                self.append_lit("some(");
-                self.f.instructions().local_get(ho);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_display_at(et, true, depth + 1)?;
-                self.append_lit(")");
-                self.f.instructions().end();
-                self.release_i32();
-            }
-            SliceTy::Result(o, e) => {
-                let (ot, et) = (self.types.el(o), self.types.el(e));
-                let hr = self.hold_i32()?;
-                self.f.instructions().local_set(hr);
-                self.f
-                    .instructions()
-                    .local_get(hr)
-                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                    .i32_eqz()
-                    .if_(BlockType::Empty);
-                self.append_lit("ok(");
-                self.f.instructions().local_get(hr);
-                self.load_ty_slot(ot, almide_layout::SUM_FIELD);
-                self.emit_display_at(ot, true, depth + 1)?;
-                self.append_lit(")");
-                self.f.instructions().else_();
-                self.append_lit("err(");
-                self.f.instructions().local_get(hr);
-                self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                self.emit_display_at(et, true, depth + 1)?;
-                self.append_lit(")");
-                self.f.instructions().end();
-                self.release_i32();
-            }
-            SliceTy::List(h) => {
-                let el = self.types.el(h);
-                let stride = el.slot_size() as i32;
-                let hb = self.hold_i32()?;
-                let end = self.hold_i32()?;
-                let cur = self.hold_i32()?;
-                self.f.instructions().local_set(hb);
-                self.append_lit("[");
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(hb)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .local_set(cur);
-                    i.local_get(cur)
-                        .local_get(hb)
-                        .i32_load(len_memarg())
-                        .i32_add()
-                        .local_set(end);
-                    i.block(BlockType::Empty).loop_(BlockType::Empty);
-                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
-                    i.local_get(cur)
-                        .local_get(hb)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .i32_ne()
-                        .if_(BlockType::Empty);
-                }
-                self.append_lit(", ");
-                self.f.instructions().end();
-                self.f.instructions().local_get(cur);
-                self.load_ty_slot_at(el);
-                self.emit_display_at(el, true, depth + 1)?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
-                    i.br(0);
-                    i.end();
-                    i.end();
-                }
-                self.append_lit("]");
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-            }
-            SliceTy::Tuple(id) => {
-                let fields = self.types.tuple_def(id).fields;
-                let hb = self.hold_i32()?;
-                self.f.instructions().local_set(hb);
-                self.append_lit("(");
-                for (k, (fty, off)) in fields.into_iter().enumerate() {
-                    if k > 0 {
-                        self.append_lit(", ");
-                    }
-                    self.f.instructions().local_get(hb);
-                    self.load_ty_slot(fty, off);
-                    self.emit_display_at(fty, true, depth + 1)?;
-                }
-                self.append_lit(")");
-                self.release_i32();
-            }
-            SliceTy::Named(ti) => {
-                self.emit_display_named(ti, depth)?;
-            }
-            other => return unsup(&format!("interp-part:{other:?}")),
-        }
-        Ok(())
-    }
 
-    /// Records: `Nm { f: v, g: w }`; variants: `Case(v)` / bare unit
-    /// names / record-shaped cases in the record form.
-    fn emit_display_named(&mut self, ti: u32, depth: u32) -> Result<(), EmitError> {
-        let name = self.types.name_of(ti);
-        match self.types.def(ti) {
-            NamedDef::Record(def) => {
-                let hb = self.hold_i32()?;
-                self.f.instructions().local_set(hb);
-                let mut fields: Vec<_> = def.fields.clone();
-                if name.is_empty() {
-                    // Anonymous record shape: "{ f: v }", fields in NAME
-                    // order (the oracle's structural display).
-                    self.append_lit("{ ");
-                    fields.sort_by(|a, b| a.name.cmp(&b.name));
-                } else {
-                    self.append_lit(&format!("{name} {{ "));
-                }
-                for (k, fi) in fields.iter().enumerate() {
-                    if k > 0 {
-                        self.append_lit(", ");
-                    }
-                    self.append_lit(&format!("{}: ", fi.name));
-                    self.f.instructions().local_get(hb);
-                    self.load_ty_slot(fi.ty, fi.offset);
-                    self.emit_display_at(fi.ty, true, depth + 1)?;
-                }
-                self.append_lit(" }");
-                self.release_i32();
-            }
-            NamedDef::Variant(v) => {
-                let hb = self.hold_i32()?;
-                self.f.instructions().local_set(hb);
-                for (k, c) in v.cases.iter().enumerate() {
-                    let last = k + 1 == v.cases.len();
-                    if !last {
-                        self.f
-                            .instructions()
-                            .local_get(hb)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(c.tag as i32)
-                            .i32_eq()
-                            .if_(BlockType::Empty);
-                    }
-                    if c.fields.is_empty() {
-                        self.append_lit(&c.name);
-                    } else {
-                        self.append_lit(&format!("{}(", c.name));
-                        for (j, f) in c.fields.iter().enumerate() {
-                            if j > 0 {
-                                self.append_lit(", ");
-                            }
-                            self.f.instructions().local_get(hb);
-                            self.load_ty_slot(f.ty, f.offset);
-                            self.emit_display_at(f.ty, true, depth + 1)?;
-                        }
-                        self.append_lit(")");
-                    }
-                    if !last {
-                        self.f.instructions().else_();
-                    }
-                }
-                for _ in 0..v.cases.len().saturating_sub(1) {
-                    self.f.instructions().end();
-                }
-                self.release_i32();
-            }
-            NamedDef::Excluded => return unsup("interp-part:excluded"),
-        }
-        Ok(())
-    }
 
     /// `println`/`eprintln`: interpolations build in the line buffer;
     /// everything else must lower to a String block and goes through the
@@ -1214,6 +323,233 @@ impl Emitter<'_> {
             }
         }
         Ok(start)
+    }
+
+
+    /// Module-surface dispatch — special forms first, then the qualified
+    /// table and the verified self-host whitelist. Split from
+    /// `lower_call_at` for the complexity budget.
+    fn lower_module_call(
+        &mut self,
+        target: &CallTarget,
+        args: &[IrExpr],
+        tail: bool,
+        ret_hint: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match target {
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "process" && func.as_str() == "exit" =>
+            {
+                // The abort floor (C-153 family): surface the code to the
+                // host import, then trap. The host records the code BEFORE
+                // the unwind, so exit-code parity is exact; the trailing
+                // `unreachable` keeps the stack polymorphic (nothing after
+                // `process.exit` executes on any target).
+                match args.first() {
+                    Some(a) => {
+                        self.lower(a, Some(INT))?;
+                        self.f.instructions().i32_wrap_i64();
+                    }
+                    None => {
+                        self.f.instructions().i32_const(1);
+                    }
+                }
+                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
+                Ok(None)
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "int" && func.as_str() == "to_string" && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(INT))?;
+                self.f.instructions().call(F_INT_TO_STRING);
+                Ok(Some(STR))
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string"
+                    && matches!(func.as_str(), "len" | "length")
+                    && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                self.f.instructions().call(F_STR_LEN_CHARS);
+                Ok(Some(INT))
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "json" && func.as_str() == "stringify" && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.emit_value_stringify()?;
+                Ok(Some(STR))
+            }
+            _ => self.lower_module_call_b(target, args, tail, ret_hint),
+        }
+    }
+
+    /// Module dispatch, second third (mechanical split — first-match
+    /// order preserved).
+    fn lower_module_call_b(
+        &mut self,
+        target: &CallTarget,
+        args: &[IrExpr],
+        tail: bool,
+        ret_hint: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match target {
+            CallTarget::Module { module, func, .. }
+                if (module.as_str() == "option" || module.as_str() == "result")
+                    && func.as_str() == "unwrap_or"
+                    && args.len() == 2 =>
+            {
+                let got = self.lower(&args[0], None)?;
+                match got {
+                    SliceTy::Option(h) => {
+                        let et = self.types.el(h);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_eqz()
+                            .if_(BlockType::Result(et.val_type()));
+                        self.lower(&args[1], Some(et))?;
+                        self.f.instructions().else_().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                        self.f.instructions().end();
+                        Ok(Some(et))
+                    }
+                    SliceTy::Result(o, _) => {
+                        let et = self.types.el(o);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                            .i32_const(0)
+                            .i32_ne()
+                            .if_(BlockType::Result(et.val_type()));
+                        self.lower(&args[1], Some(et))?;
+                        self.f.instructions().else_().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                        self.f.instructions().end();
+                        Ok(Some(et))
+                    }
+                    other => unsup(&format!("unwrap-or-of:{other:?}")),
+                }
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "matrix" => {
+                if let Some(out) = self.lower_matrix_call(func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:matrix.{func}"))
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
+                if let Some(out) = self.lower_value_call(func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:value.{func}"))
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
+                self.lower_bytes_call(func.as_str(), args)
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "split" && args.len() == 2 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                let h = self.hold_i32()?;
+                self.f.instructions().local_set(h);
+                self.lower(&args[1], Some(STR))?;
+                let hs = self.hold_i32()?;
+                self.f.instructions().local_set(hs);
+                let sp = self.work.helper(Helper::StringSplit);
+                self.f.instructions().local_get(h).local_get(hs).call(sp);
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(SliceTy::List(self.types.intern(STR))))
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "to_bytes" && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                self.f.instructions().call(F_BLOCK_COPY);
+                Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
+            }
+            _ => self.lower_module_call_c(target, args, tail, ret_hint),
+        }
+    }
+
+    /// Module dispatch, final third + the qualified fallback.
+    fn lower_module_call_c(
+        &mut self,
+        target: &CallTarget,
+        args: &[IrExpr],
+        tail: bool,
+        ret_hint: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match target {
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string"
+                    && func.as_str() == "slice"
+                    && (args.len() == 2 || args.len() == 3) =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                self.lower(&args[1], Some(INT))?;
+                if let Some(e) = args.get(2) {
+                    self.lower(e, Some(INT))?;
+                } else {
+                    // the surface's `end` default: i64::MAX ("to the end")
+                    self.f.instructions().i64_const(i64::MAX);
+                }
+                self.f.instructions().call(F_STR_SLICE);
+                Ok(Some(STR))
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string" && func.as_str() == "repeat" && args.len() == 2 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                self.lower(&args[1], Some(INT))?;
+                self.f.instructions().call(F_STR_REPEAT);
+                Ok(Some(STR))
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
+                self.lower_list_call(func.as_str(), args)
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "map" => {
+                self.lower_map_call(func.as_str(), args, ret_hint)
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "set" => {
+                self.lower_set_call(func.as_str(), args, ret_hint)
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "prim" => {
+                self.lower_prim_call(func.as_str(), args)
+            }
+            CallTarget::Module { module, func, .. } => {
+                // Linked module functions live in the table under their
+                // qualified name. A stdlib SURFACE call additionally
+                // resolves through the self-host registry to its loaded
+                // implementation (same registry the interp's bridge uses —
+                // one IR, two sound resolutions). Anything else is an
+                // honest wall.
+                let key = format!("{}.{}", module.as_str(), func.as_str());
+                let Some(i) = self.resolve_qualified(&key) else {
+                    return unsup(&format!("call:{key}"));
+                };
+                let info = &self.table.infos[i];
+                if let Some(r) = &info.refuse {
+                    return unsup(&format!("call-fn:{key}:{r}"));
+                }
+                if args.len() != info.params.len() {
+                    return unsup(&format!("call-arity:{key}"));
+                }
+                let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
+                for (a, want) in args.iter().zip(params) {
+                    self.lower(a, Some(want))?;
+                }
+                self.calls.insert(i);
+                if tail && ret.is_some() && ret == self.fn_ret {
+                    self.f.instructions().return_call(index);
+                } else {
+                    self.f.instructions().call(index);
+                }
+                Ok(ret)
+            }
+            _ => unreachable!("module dispatch"),
+        }
     }
 
 }

@@ -1,0 +1,244 @@
+//! Structural module assembly (sections, tables, globals, code, data) —
+//! split from emit_program for the complexity budget.
+
+use wasm_encoder::{
+    CodeSection, ConstExpr, DataSection, ElementSection, Elements, EntityType, ExportKind,
+    ExportSection, Function, FunctionSection, GlobalSection, GlobalType, ImportSection,
+    MemorySection, MemoryType, Module, RefType, TableSection, TableType, TypeSection, ValType,
+};
+
+use crate::func::Pool;
+use crate::work::FnWork;
+use crate::*;
+
+pub(crate) struct AssembleIn<'a> {
+    pub(crate) table: &'a FnTable,
+    pub(crate) work: &'a FnWork,
+    pub(crate) pool: &'a Pool,
+    pub(crate) lowered: &'a [Result<(Function, std::collections::HashSet<usize>), String>],
+    pub(crate) main_fn: &'a Function,
+    pub(crate) entry_fn_indices: &'a [u32],
+    pub(crate) extra_fns: &'a [(u32, Function)],
+    pub(crate) global_decls: &'a [(almide_ir::VarId, SliceTy)],
+    pub(crate) main_index: u32,
+    pub(crate) true_base: u32,
+    pub(crate) false_base: u32,
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
+    let AssembleIn {
+        table,
+        work,
+        pool,
+        lowered,
+        main_fn,
+        entry_fn_indices,
+        extra_fns,
+        global_decls,
+        main_index,
+        true_base,
+        false_base,
+    } = a;
+    // ── assemble the module structurally ────────────────────────────────
+    let line_start = (pool.data.len() as u32 + 15) & !15;
+    let heap_start = u64::from(line_start) + LINE_BUF_MIN;
+    let pages = heap_start.div_ceil(65536);
+
+    let mut types = TypeSection::new();
+    types.ty().function([ValType::I32, ValType::I32], []); // 0: print import (ptr, len)
+    types.ty().function([ValType::I32], []); // 1: block-print(base) / exit(code)
+    types.ty().function([ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 2: append_copy
+    types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 3: append_i64
+    types.ty().function([], []); // 4: main
+    types.ty().function([ValType::I32, ValType::I32], [ValType::I32]); // 5: append_bool / concat / str_eq
+    types.ty().function([ValType::I64], [ValType::I32]); // 6: itoa / int_to_string
+    types.ty().function([ValType::I32], [ValType::I32]); // 7: alloc
+    types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 8: list_get/push (8-byte)
+    types.ty().function([ValType::I32], [ValType::I64]); // 9: str_len_chars
+    types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I64], [ValType::I32]); // 10: scan_w64
+    types.ty().function([ValType::I32, ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 11: scan_w32/str
+    types.ty().function([ValType::I32], [ValType::F64]); // 12: f16_to_f64
+    types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 13: cp_off / str_repeat
+    types.ty().function([ValType::I32, ValType::I64, ValType::I64], [ValType::I32]); // 14: str_slice
+    for (i, info) in table.infos.iter().enumerate() {
+        // Refused functions keep a placeholder type — their stub body is
+        // `unreachable` and no call site ever targets them.
+        debug_assert_eq!(T_FN_BASE as usize + i, 15 + i);
+        if info.refuse.is_some() {
+            types.ty().function([], []);
+        } else {
+            let params: Vec<ValType> = info.params.iter().map(|t| t.val_type()).collect();
+            let results: Vec<ValType> = info.ret.iter().map(|t| t.val_type()).collect();
+            types.ty().function(params, results);
+        }
+    }
+    // Function-value types (call_indirect signatures + extra fns),
+    // indices assigned eagerly during lowering from itype_base.
+    for (ps, r) in work.itypes.borrow().iter() {
+        types.ty().function(ps.clone(), r.iter().copied().collect::<Vec<_>>());
+    }
+
+    let mut imports = ImportSection::new();
+    imports.import("almide", "println", EntityType::Function(0));
+    imports.import("almide", "eprintln", EntityType::Function(0));
+    imports.import("almide", "exit", EntityType::Function(1));
+
+    let mut functions = FunctionSection::new();
+    functions.function(1); // F_PRINTLN_BLOCK
+    functions.function(1); // F_EPRINTLN_BLOCK
+    functions.function(2); // F_APPEND_COPY
+    functions.function(6); // F_ITOA
+    functions.function(3); // F_APPEND_I64
+    functions.function(5); // F_APPEND_BOOL
+    functions.function(7); // F_ALLOC
+    functions.function(6); // F_INT_TO_STRING
+    functions.function(5); // F_CONCAT
+    functions.function(5); // F_STR_EQ
+    functions.function(8); // F_LIST_GET_8
+    functions.function(8); // F_LIST_GET_4 (idx is ALWAYS i64 — only the slot width differs)
+    functions.function(8); // F_LIST_PUSH_8
+    functions.function(5); // F_LIST_PUSH_4
+    functions.function(5); // F_LIST_JOIN
+    functions.function(7); // F_BLOCK_COPY
+    functions.function(5); // F_BUF_TO_BLOCK
+    functions.function(9); // F_STR_LEN_CHARS
+    functions.function(10); // F_SCAN_W64
+    functions.function(11); // F_SCAN_W32
+    functions.function(11); // F_SCAN_STR
+    functions.function(12); // F_F16_TO_F64
+    functions.function(13); // F_CP_OFF
+    functions.function(14); // F_STR_SLICE
+    functions.function(13); // F_STR_REPEAT
+    for i in 0..table.infos.len() {
+        functions.function(T_FN_BASE + i as u32);
+    }
+    functions.function(T_MAIN); // main, last
+    for (ti, _) in extra_fns {
+        functions.function(*ti);
+    }
+
+    let mut memories = MemorySection::new();
+    memories.memory(MemoryType {
+        minimum: pages,
+        maximum: None,
+        memory64: false,
+        shared: false,
+        page_size_log2: None,
+    });
+
+    let mut globals = GlobalSection::new();
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: false, shared: false },
+        &ConstExpr::i32_const(line_start as i32),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(heap_start as i32),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(line_start as i32),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: false, shared: false },
+        &ConstExpr::i32_const(heap_start as i32),
+    );
+
+    // The funcref table always exists (a call_indirect in ANY body needs
+    // it, entries or not); slot 0 stays uninitialized — null funcref =
+    // trap — so fn-value slots are +1-biased (W-1).
+    let mut tables = TableSection::new();
+    let mut elements = ElementSection::new();
+    let n = entry_fn_indices.len() as u64 + 1;
+    tables.table(TableType {
+        element_type: RefType::FUNCREF,
+        minimum: n,
+        maximum: Some(n),
+        table64: false,
+        shared: false,
+    });
+    if !entry_fn_indices.is_empty() {
+        elements.active(
+            Some(0),
+            &ConstExpr::i32_const(1),
+            Elements::Functions(entry_fn_indices.to_vec().into()),
+        );
+    }
+
+    for (_, sty) in global_decls {
+        let vt = sty.val_type();
+        let init = match vt {
+            ValType::I64 => ConstExpr::i64_const(0),
+            ValType::F64 => ConstExpr::f64_const(0.0.into()),
+            _ => ConstExpr::i32_const(0),
+        };
+        globals.global(GlobalType { val_type: vt, mutable: true, shared: false }, &init);
+    }
+
+    let mut exports = ExportSection::new();
+    exports.export("memory", ExportKind::Memory, 0);
+    exports.export("main", ExportKind::Func, main_index);
+
+    let mut code = CodeSection::new();
+    code.function(&emit_block_print(F_PRINTLN_IMPORT));
+    code.function(&emit_block_print(F_EPRINTLN_IMPORT));
+    code.function(&emit_append_copy());
+    code.function(&emit_itoa());
+    code.function(&emit_append_i64());
+    code.function(&emit_append_bool(true_base, false_base));
+    code.function(&emit_alloc());
+    code.function(&emit_int_to_string());
+    code.function(&emit_concat());
+    code.function(&emit_str_eq());
+    code.function(&emit_list_get(Scalar::Int));
+    code.function(&emit_list_get(Scalar::Str));
+    code.function(&emit_list_push(Scalar::Int));
+    code.function(&emit_list_push(Scalar::Str));
+    code.function(&emit_list_join());
+    code.function(&emit_block_copy());
+    code.function(&emit_buf_to_block());
+    code.function(&emit_str_len_chars());
+    code.function(&emit_scan_w64());
+    code.function(&emit_scan_w32());
+    code.function(&emit_scan_str());
+    code.function(&emit_f16_to_f64());
+    code.function(&emit_cp_off());
+    code.function(&emit_str_slice());
+    code.function(&emit_str_repeat());
+    for l in lowered {
+        match l {
+            Ok((f, _)) => {
+                code.function(f);
+            }
+            Err(_) => {
+                // Unreachable-from-main stub (the BFS above guarantees it).
+                let mut stub = Function::new([]);
+                stub.instructions().unreachable().end();
+                code.function(&stub);
+            }
+        }
+    }
+    code.function(main_fn);
+    for (_, f) in extra_fns {
+        code.function(f);
+    }
+
+    let mut data = DataSection::new();
+    data.active(0, &ConstExpr::i32_const(0), pool.data.iter().copied());
+
+    let mut module = Module::new();
+    module
+        .section(&types)
+        .section(&imports)
+        .section(&functions)
+        .section(&tables)
+        .section(&memories)
+        .section(&globals)
+        .section(&exports);
+    if !entry_fn_indices.is_empty() {
+        module.section(&elements);
+    }
+    module.section(&code).section(&data);
+    Ok(module.finish())
+}

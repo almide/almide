@@ -1585,3 +1585,21 @@ noted for the heavy ops ahead (bit-exact f32 accumulation, quant
 schedules; a dedicated-session arc).
 
 **Burn-up: 285 → 287 / 591**, floor 287, surface 135, zero divergence.
+
+---
+
+## Unit 6 — stage 39: codopsy A restored (2026-08-20)
+
+The burn let the crate slip to B(79) — three files over 800 lines,
+lower_call_at at cc 72 — caught by the user's standing check-in, not by a
+gate: measurement was manual and skipped during the run. Restoration by
+the stage-5 playbook (mechanical splits, behavior judged by the FULL nets
+after): calls.rs → display.rs/list.rs + a thirds-split module dispatch;
+emitter.rs → data.rs/stmts.rs/equality.rs + FnRef/Lambda/IndexAssign
+extractions; lib.rs → work.rs/ty.rs/func.rs/assembly.rs +
+collect_program_fns/build_globals/resolve_extras phases; prim float
+family split; the fuzz generator's expr dispatcher split per type.
+**B(79) → A(90)**, zero behavior change (full parity 287/591 + fuzz +
+alias + tail + surface all green, clippy 0). Two surgery lessons for the
+tooling: brace-tracking must strip STRING LITERALS before counting, and
+`rindex("}")` splices must land inside the right impl block.

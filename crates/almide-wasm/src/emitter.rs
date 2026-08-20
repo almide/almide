@@ -2,10 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use almide_ir::{BinOp, IrExpr, IrExprKind, IrStmt, IrStmtKind, UnOp, VarId};
+use almide_ir::{BinOp, IrExpr, IrExprKind, UnOp, VarId};
 use wasm_encoder::{BlockType, Function, ValType};
 
-use crate::types_table::NamedDef;
 use crate::*;
 
 // ── body lowering ───────────────────────────────────────────────────────
@@ -188,331 +187,8 @@ impl Emitter<'_> {
         }
     }
 
-    /// Statement position: Unit-typed shapes only (blocks, calls, control).
-    pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
-        match &e.kind {
-            IrExprKind::Block { stmts, expr } => {
-                for s in stmts {
-                    self.lower_stmt(s)?;
-                }
-                if let Some(tail) = expr {
-                    self.lower_stmt_expr(tail)?;
-                }
-                Ok(())
-            }
-            IrExprKind::Call { target, args, .. } => {
-                // Unit-position call: a value-returning callee's result is
-                // dropped (a bare non-Unit call statement is legal IR).
-                if self.lower_call(target, args)?.is_some() {
-                    self.f.instructions().drop();
-                }
-                Ok(())
-            }
-            // Unit-position `if`: both arms are statement bodies.
-            IrExprKind::If { cond, then, else_ } => {
-                self.lower(cond, Some(BOOL))?;
-                self.f.instructions().if_(BlockType::Empty);
-                self.lower_stmt_expr(then)?;
-                self.f.instructions().else_();
-                self.lower_stmt_expr(else_)?;
-                self.f.instructions().end();
-                Ok(())
-            }
-            // `while`: block { loop { !cond → br out; body; br loop } }.
-            // Break/Continue would need label-depth tracking — they surface
-            // as their own honest reasons until that lands.
-            IrExprKind::While { cond, body } => {
-                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-                self.lower(cond, Some(BOOL))?;
-                self.f.instructions().i32_eqz().br_if(1);
-                for s in body {
-                    self.lower_stmt(s)?;
-                }
-                self.f.instructions().br(0).end().end();
-                Ok(())
-            }
-            IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
-            // for x in <list> / for i in a..b — extracted for complexity.
-            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-                self.lower_forin(*var, var_tuple.as_deref(), iterable, body)
-            }
-            IrExprKind::Unit => Ok(()),
-            // Statement-position `f()!` / `f()?`: the marker machinery
-            // runs (propagation/abort), the ok payload is discarded.
-            IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => {
-                self.lower(e, None)?;
-                self.f.instructions().drop();
-                Ok(())
-            }
-            // `{}` in statement position is a no-op value; in value
-            // position the arm below builds the empty map.
-            other => unsup(&format!("expr:{}", expr_kind_name(other))),
-        }
-    }
 
-    pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
-        match &s.kind {
-            IrStmtKind::Bind { var, value, .. } => {
-                let Some(&(idx, declared)) = self.locals.get(var) else {
-                    return unsup("bind:unmapped");
-                };
-                self.lower(value, Some(declared))?;
-                // Container value semantics: every bind owns a fresh
-                // block, so in-place mutation (push growth, bytes.set_*)
-                // can never be observed through aliases. Bytes joined
-                // when the snapshot fixture showed `let snap = arena`
-                // observing later set_at writes.
-                if matches!(
-                    declared,
-                    SliceTy::List(_)
-                        | SliceTy::Map(..)
-                        | SliceTy::Set(_)
-                        | SliceTy::Scalar(Scalar::Bytes)
-                ) {
-                    self.f.instructions().call(F_BLOCK_COPY);
-                }
-                self.f.instructions().local_set(idx);
-                Ok(())
-            }
-            IrStmtKind::Assign { var, value } => {
-                let (local, declared) = match self.locals.get(var) {
-                    Some(&(idx, d)) => (Some(idx), d),
-                    None => match self.globals.get(var) {
-                        Some(&(gidx, d)) => (None, {
-                            let _ = gidx;
-                            d
-                        }),
-                        None => return unsup("assign:unmapped"),
-                    },
-                };
-                self.lower(value, Some(declared))?;
-                if matches!(
-                    declared,
-                    SliceTy::List(_)
-                        | SliceTy::Map(..)
-                        | SliceTy::Set(_)
-                        | SliceTy::Scalar(Scalar::Bytes)
-                ) {
-                    self.f.instructions().call(F_BLOCK_COPY);
-                }
-                match local {
-                    Some(idx) => {
-                        self.f.instructions().local_set(idx);
-                    }
-                    None => {
-                        let gidx = self.globals[var].0;
-                        self.f.instructions().global_set(gidx);
-                    }
-                }
-                Ok(())
-            }
-            // `xs[i] = v` — copy-on-write: semantically identical to the
-            // interp's Rc::make_mut COW (C-033), alias-safe by
-            // construction whatever escapes. The unconditional copy is a
-            // correctness-first cost; ownership-guarded in-place stores
-            // are a perf-war slice.
-            IrStmtKind::IndexAssign { target, index, value } => {
-                let (is_local, declared) = match self.locals.get(target) {
-                    Some(&(_, d)) => (true, d),
-                    None => match self.globals.get(target) {
-                        Some(&(_, d)) => (false, d),
-                        None => return unsup("index-assign:unmapped"),
-                    },
-                };
-                let SliceTy::List(h) = declared else {
-                    return unsup(&format!("index-assign-ty:{declared:?}"));
-                };
-                let el = self.types.el(h);
-                let stride = el.slot_size() as i64;
-                // Interp order: index, then value, then the bounds check.
-                self.lower(index, Some(INT))?;
-                let hi = self.hold_i64()?;
-                self.f.instructions().local_set(hi);
-                self.lower(value, Some(el))?;
-                let hv = self.hold_val(el)?;
-                let hb = self.hold_i32()?;
-                self.f.instructions().local_set(hv);
-                let get_target = |f: &mut wasm_encoder::Function, locals: &HashMap<VarId, (u32, SliceTy)>, globals: &HashMap<VarId, (u32, SliceTy)>| {
-                    if is_local {
-                        f.instructions().local_get(locals[target].0);
-                    } else {
-                        f.instructions().global_get(globals[target].0);
-                    }
-                };
-                // OOB → the exact native frame + exit 1.
-                let msg = self.pool.intern("index out of bounds");
-                get_target(self.f, self.locals, self.globals);
-                {
-                    let mut i = self.f.instructions();
-                    i.i32_load(len_memarg())
-                        .i64_extend_i32_u()
-                        .i64_const(stride)
-                        .i64_div_s();
-                    i.local_get(hi).i64_le_s();
-                    i.local_get(hi).i64_const(0).i64_lt_s();
-                    i.i32_or().if_(BlockType::Empty);
-                    i.i32_const(msg as i32);
-                }
-                self.emit_error_frame_abort();
-                self.f.instructions().end();
-                // COW: the binding gets a fresh block, then the store.
-                get_target(self.f, self.locals, self.globals);
-                self.f.instructions().call(F_BLOCK_COPY).local_set(hb);
-                if is_local {
-                    let idx = self.locals[target].0;
-                    self.f.instructions().local_get(hb).local_set(idx);
-                } else {
-                    let g = self.globals[target].0;
-                    self.f.instructions().local_get(hb).global_set(g);
-                }
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(hb)
-                        .i64_extend_i32_u()
-                        .local_get(hi)
-                        .i64_const(stride)
-                        .i64_mul()
-                        .i64_add()
-                        .i32_wrap_i64()
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add();
-                    i.local_get(hv);
-                }
-                self.store_ty_slot_raw(el);
-                self.release_i32();
-                self.release_val(el);
-                self.release_i64();
-                Ok(())
-            }
-            IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),
-            // let (a, b) = e — evaluate once, load each bound position.
-            IrStmtKind::BindDestructure { pattern, value } => {
-                let ty = self.lower(value, None)?;
-                let scr = self.scr_i32_local;
-                self.f.instructions().local_set(scr);
-                self.emit_pattern_binds(pattern, ty, scr)
-            }
-            IrStmtKind::Comment { .. } => Ok(()),
-            other => unsup(&format!("stmt:{}", stmt_kind_name(other))),
-        }
-    }
 
-    /// A call in any position. Returns the callee's slice return type
-    /// (None = Unit). `println`/`eprintln` are the special forms.
-    /// `for` loops: a Range iterates Int directly; a List walks its
-    /// element array. The loop variable is a pre-collected local.
-    pub(crate) fn lower_forin(
-        &mut self,
-        var: VarId,
-        var_tuple: Option<&[VarId]>,
-        iterable: &IrExpr,
-        body: &[IrStmt],
-    ) -> Result<(), EmitError> {
-        let Some(&(var_idx, var_ty)) = self.locals.get(&var) else {
-            return unsup("bind:unmapped");
-        };
-
-                if let IrExprKind::Range { start, end, inclusive } = &iterable.kind {
-                    // Range: var runs start..end directly, no list at all.
-                    if var_ty != INT {
-                        return unsup("forin-range-nonint");
-                    }
-                    self.lower(start, Some(INT))?;
-                    self.f.instructions().local_set(var_idx);
-                    self.lower(end, Some(INT))?;
-                    let stop = self.hold_i64()?;
-                    self.f.instructions().local_set(stop);
-                    self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-                    self.f.instructions().local_get(var_idx).local_get(stop);
-                    if *inclusive {
-                        self.f.instructions().i64_gt_s();
-                    } else {
-                        self.f.instructions().i64_ge_s();
-                    }
-                    self.f.instructions().br_if(1);
-                    for st in body {
-                        self.lower_stmt(st)?;
-                    }
-                    self.f
-                        .instructions()
-                        .local_get(var_idx)
-                        .i64_const(1)
-                        .i64_add()
-                        .local_set(var_idx)
-                        .br(0)
-                        .end()
-                        .end();
-                    self.release_i64();
-                    return Ok(());
-                }
-                let elem = match self.lower(iterable, None)? {
-                    SliceTy::List(h) => self.types.el(h),
-                    other => return unsup(&format!("forin-iter:{other:?}")),
-                };
-                if var_ty != elem {
-                    return unsup("forin-var-ty");
-                }
-                let stride = elem.slot_size();
-                let base = self.hold_i32()?;
-                let count = self.hold_i32()?;
-                let cur = self.hold_i32()?;
-                self.f.instructions().local_set(base);
-                self.f
-                    .instructions()
-                    .local_get(base)
-                    .i32_load(len_memarg())
-                    .i32_const(stride as i32)
-                    .i32_div_u()
-                    .local_set(count)
-                    .i32_const(0)
-                    .local_set(cur);
-                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-                self.f.instructions().local_get(cur).local_get(count).i32_ge_u().br_if(1);
-                self.f
-                    .instructions()
-                    .local_get(base)
-                    .local_get(cur)
-                    .i32_const(stride as i32)
-                    .i32_mul()
-                    .i32_add();
-                self.load_ty_slot(elem, 0);
-                self.f.instructions().local_set(var_idx);
-                // for (a, b) in pairs — the loop var holds the tuple base;
-                // load each position into its destructured local.
-                if let Some(tvars) = var_tuple {
-                    let SliceTy::Tuple(ti) = elem else {
-                        return unsup("forin-tuple-nontuple");
-                    };
-                    let def = self.types.tuple_def(ti);
-                    if def.fields.len() != tvars.len() {
-                        return unsup("forin-tuple-arity");
-                    }
-                    for (tv, (fty, off)) in tvars.iter().zip(def.fields) {
-                        let Some(&(tidx, _)) = self.locals.get(tv) else {
-                            return unsup("bind:unmapped");
-                        };
-                        self.f.instructions().local_get(var_idx);
-                        self.load_ty_slot(fty, off);
-                        self.f.instructions().local_set(tidx);
-                    }
-                }
-                for st in body {
-                    self.lower_stmt(st)?;
-                }
-                self.f
-                    .instructions()
-                    .local_get(cur)
-                    .i32_const(1)
-                    .i32_add()
-                    .local_set(cur)
-                    .br(0)
-                    .end()
-                    .end();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                Ok(())
-                }
 
     /// Lower `e` in TAIL position (the value becomes the function's
     /// return): direct calls become `return_call`.
@@ -617,119 +293,9 @@ impl Emitter<'_> {
                     return unsup("var:unmapped");
                 }
             }
-            // A named fn as a VALUE: a (+1-biased) funcref-table slot.
-            // A PURE fn filling an EFFECT slot gets an ok-wrap adapter
-            // (C-221 carrier semantics).
-            IrExprKind::FnRef { name } => {
-                let ty = want.map_or_else(|| self.infer(e), Ok)?;
-                let SliceTy::Fn(sig) = ty else {
-                    return unsup(&format!("fnref-vs-{ty:?}"));
-                };
-                let def = self.types.fn_sig_def(sig);
-                let resolved = self
-                    .cur_module
-                    .and_then(|m| self.table.by_name.get(&format!("{m}.{}", name.as_str())))
-                    .or_else(|| self.table.by_name.get(name.as_str()))
-                    .copied();
-                let Some(idx) = resolved else {
-                    return unsup(&format!("fnref:{name}"));
-                };
-                let info = &self.table.infos[idx];
-                if info.refuse.is_some() {
-                    return unsup("fnref-refused-target");
-                }
-                if info.params != def.params {
-                    return unsup("fnref-param-mismatch");
-                }
-                let entry = if info.ret == def.ret {
-                    TableEntry::Fn(idx)
-                } else {
-                    match (info.ret, def.ret) {
-                        (Some(raw), Some(SliceTy::Result(o, er)))
-                            if def.effect
-                                && self.types.el(o) == raw
-                                && self.types.el(er) == STR =>
-                        {
-                            TableEntry::Adapter { target: idx, raw }
-                        }
-                        _ => return unsup("fnref-ret-mismatch"),
-                    }
-                };
-                let slot = self.work.slot(entry);
-                // Fn value = closure BLOCK [slot@0]; capture-free blocks
-                // are pool statics (dedup by content, zero runtime alloc).
-                let block = self.pool.intern_block(&(slot).to_le_bytes());
-                self.f.instructions().i32_const(block as i32);
-                ty
-            }
-            // A lambda as a VALUE: lifted into an extra function; its
-            // closure block carries the table slot + captured locals
-            // (by-value snapshot, the interp's closure semantics).
+            IrExprKind::FnRef { name } => self.lower_fn_ref(e, name, want)?,
             IrExprKind::Lambda { params, body, .. } => {
-                let ty = want.map_or_else(|| self.infer(e), Ok)?;
-                let SliceTy::Fn(sig) = ty else {
-                    return unsup(&format!("lambda-vs-{ty:?}"));
-                };
-                let def = self.types.fn_sig_def(sig);
-                if params.len() != def.params.len() {
-                    return unsup("lambda-arity");
-                }
-                let param_ids: std::collections::HashSet<VarId> =
-                    params.iter().map(|(v, _)| *v).collect();
-                let mut captured = self.captured_vars(&param_ids, body);
-                captured.sort_by_key(|v| v.0);
-                let ps: Vec<(VarId, SliceTy)> = params
-                    .iter()
-                    .map(|(v, _)| *v)
-                    .zip(def.params.iter().copied())
-                    .collect();
-                let effect_raw = if def.effect {
-                    match def.ret {
-                        Some(SliceTy::Result(o, _)) => Some(self.types.el(o)),
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-                // Closure block layout: [slot:i32][captures packed...].
-                let widths: Vec<u32> = std::iter::once(4)
-                    .chain(captured.iter().map(|(_, t)| t.slot_size()))
-                    .collect();
-                let (offsets, size) = almide_layout::pack_fields(&widths);
-                let captures: Vec<(VarId, SliceTy, u32)> = captured
-                    .iter()
-                    .zip(offsets.iter().skip(1))
-                    .map(|(&(v, t), &off)| (v, t, off))
-                    .collect();
-                let j = self.work.register_lambda(LiftedLambda {
-                    params: ps,
-                    ret: def.ret,
-                    effect_raw,
-                    body: (**body).clone(),
-                    captures: captures.clone(),
-                });
-                let slot = self.work.slot(TableEntry::Lambda(j));
-                if captures.is_empty() {
-                    let block = self.pool.intern_block(&(slot).to_le_bytes());
-                    self.f.instructions().i32_const(block as i32);
-                } else {
-                    let hb = self.hold_i32()?;
-                    self.f
-                        .instructions()
-                        .i32_const(size as i32)
-                        .call(F_ALLOC)
-                        .local_tee(hb)
-                        .i32_const(slot as i32)
-                        .i32_store(slot_memarg(0));
-                    for (v, t, off) in &captures {
-                        let (idx, _) = self.locals[v];
-                        self.f.instructions().local_get(hb).local_get(idx);
-                        self.store_ty_slot(*t, *off);
-                    }
-                    self.f.instructions().local_get(hb);
-                    self.release_i32();
-                }
-                ty
+                self.lower_lambda_value(e, params, body, want)?
             }
             IrExprKind::RuntimeCall { symbol, args } => {
                 // The slice SYNTAX `xs[a..b]` desugars to this runtime
@@ -1028,472 +594,9 @@ impl Emitter<'_> {
         }
     }
 
-    /// Comparison operators — Int ordering, and equality over ints,
-    /// bools, and byte-equal blocks (strings, List[Int/Bool]).
-    /// List[String] holds addresses — identity is NOT equality: refused.
-    pub(crate) fn lower_cmp(
-        &mut self,
-        op: BinOp,
-        left: &IrExpr,
-        right: &IrExpr,
-    ) -> Result<SliceTy, EmitError> {
-        use BinOp::*;
-        if matches!(op, Lt | Gt | Lte | Gte) {
-            let lt = self.lower(left, None)?;
-            self.lower(right, Some(lt))?;
-            let mut i = self.f.instructions();
-            match (lt, op) {
-                (INT, Lt) => i.i64_lt_s(),
-                (INT, Gt) => i.i64_gt_s(),
-                (INT, Lte) => i.i64_le_s(),
-                (INT, Gte) => i.i64_ge_s(),
-                (FLOAT, Lt) => i.f64_lt(),
-                (FLOAT, Gt) => i.f64_gt(),
-                (FLOAT, Lte) => i.f64_le(),
-                (FLOAT, Gte) => i.f64_ge(),
-                (other, _) => return unsup(&format!("binop:cmp-{other:?}")),
-            };
-            return Ok(BOOL);
-        }
-        let lt = self.lower(left, None)?;
-        self.lower(right, Some(lt))?;
-        self.emit_val_eq(lt)?;
-        if matches!(op, Neq) {
-            self.f.instructions().i32_eqz();
-        }
-        Ok(BOOL)
-    }
 
-    /// Structural equality: `[a, b]` on the stack -> i32 verdict.
-    /// Byte-equality only where payload bytes ARE the values (strings,
-    /// bytes, Int/Bool lists); address-carrying elements compare
-    /// ELEMENT-WISE (byte-compare would be an identity test).
-    pub(crate) fn emit_val_eq(&mut self, ty: SliceTy) -> Result<(), EmitError> {
-        match ty {
-            INT => {
-                self.f.instructions().i64_eq();
-            }
-            FLOAT => {
-                self.f.instructions().f64_eq();
-            }
-            BOOL => {
-                self.f.instructions().i32_eq();
-            }
-            STR | SliceTy::Scalar(Scalar::Bytes) => {
-                self.f.instructions().call(F_STR_EQ);
-            }
-            SliceTy::Unit => {
-                self.f.instructions().drop();
-                self.f.instructions().drop();
-                self.f.instructions().i32_const(1);
-            }
-            SliceTy::List(h)
-                if matches!(
-                    self.types.el(h),
-                    SliceTy::Scalar(Scalar::Int) | SliceTy::Scalar(Scalar::Bool)
-                ) =>
-            {
-                self.f.instructions().call(F_STR_EQ);
-            }
-            SliceTy::List(h) => self.emit_list_eq(h)?,
-            SliceTy::Option(h) => {
-                // Null-ness must agree; both-null is equal; both-some
-                // compares the payload (recursive).
-                let et = self.types.el(h);
-                let hb = self.hold_i32()?;
-                let ha = self.hold_i32()?;
-                self.f.instructions().local_set(hb).local_set(ha);
-                self.f.instructions().local_get(ha).i32_eqz();
-                self.f.instructions().local_get(hb).i32_eqz();
-                self.f.instructions().i32_ne().if_(BlockType::Result(ValType::I32));
-                self.f.instructions().i32_const(0);
-                self.f.instructions().else_();
-                self.f.instructions().local_get(ha).i32_eqz();
-                self.f.instructions().if_(BlockType::Result(ValType::I32));
-                self.f.instructions().i32_const(1);
-                self.f.instructions().else_();
-                self.f.instructions().local_get(ha);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.f.instructions().local_get(hb);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_val_eq(et)?;
-                self.f.instructions().end().end();
-                self.release_i32();
-                self.release_i32();
-            }
-            SliceTy::Named(ti) => {
-                enum Shape {
-                    Record(Vec<(SliceTy, u32)>),
-                    UnitVariant,
-                    Variant(Vec<(u32, Vec<(SliceTy, u32)>)>),
-                }
-                let shape = match &self.types.def(ti) {
-                    NamedDef::Record(r) => {
-                        Shape::Record(r.fields.iter().map(|f| (f.ty, f.offset)).collect())
-                    }
-                    NamedDef::Variant(v) => {
-                        if v.cases.iter().all(|c| c.fields.is_empty()) {
-                            Shape::UnitVariant
-                        } else {
-                            Shape::Variant(
-                                v.cases
-                                    .iter()
-                                    .map(|c| {
-                                        (c.tag, c.fields.iter().map(|f| (f.ty, f.offset)).collect())
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    }
-                    NamedDef::Excluded => return unsup("binop:eq-excluded"),
-                };
-                match shape {
-                    Shape::UnitVariant => {
-                        // Unit-case variants: the tag IS the value.
-                        let m = slot_memarg(almide_layout::SUM_TAG);
-                        let hb = self.hold_i32()?;
-                        self.f.instructions().local_set(hb);
-                        self.f.instructions().i32_load(m);
-                        self.f.instructions().local_get(hb).i32_load(m).i32_eq();
-                        self.release_i32();
-                    }
-                    Shape::Variant(cases) => {
-                        // tags equal AND (dispatch by tag → field-wise).
-                        let hb = self.hold_i32()?;
-                        let ha = self.hold_i32()?;
-                        let m = slot_memarg(almide_layout::SUM_TAG);
-                        self.f.instructions().local_set(hb).local_set(ha);
-                        self.f.instructions().local_get(ha).i32_load(m);
-                        self.f.instructions().local_get(hb).i32_load(m).i32_ne();
-                        self.f.instructions().if_(BlockType::Result(ValType::I32));
-                        self.f.instructions().i32_const(0);
-                        self.f.instructions().else_();
-                        let payload: Vec<_> =
-                            cases.iter().filter(|(_, fs)| !fs.is_empty()).collect();
-                        // if tag==A { fields-A } else if tag==B { fields-B }
-                        // … else { 1 } (a unit case: tag equality settled it).
-                        for (tag, fields) in &payload {
-                            self.f.instructions().local_get(ha).i32_load(m);
-                            self.f.instructions().i32_const(*tag as i32).i32_eq();
-                            self.f.instructions().if_(BlockType::Result(ValType::I32));
-                            self.f.instructions().i32_const(1);
-                            for (fty, off) in fields.iter() {
-                                self.f.instructions().if_(BlockType::Result(ValType::I32));
-                                self.f.instructions().local_get(ha);
-                                self.load_ty_slot(*fty, *off);
-                                self.f.instructions().local_get(hb);
-                                self.load_ty_slot(*fty, *off);
-                                self.emit_val_eq(*fty)?;
-                                self.f.instructions().else_().i32_const(0).end();
-                            }
-                            self.f.instructions().else_();
-                        }
-                        self.f.instructions().i32_const(1);
-                        for _ in &payload {
-                            self.f.instructions().end();
-                        }
-                        self.f.instructions().end(); // the tags-differ if
-                        self.release_i32();
-                        self.release_i32();
-                    }
-                    Shape::Record(fields) => {
-                        let hb = self.hold_i32()?;
-                        let ha = self.hold_i32()?;
-                        self.f.instructions().local_set(hb).local_set(ha);
-                        self.f.instructions().i32_const(1);
-                        for (fty, off) in fields {
-                            self.f.instructions().if_(BlockType::Result(ValType::I32));
-                            self.f.instructions().local_get(ha);
-                            self.load_ty_slot(fty, off);
-                            self.f.instructions().local_get(hb);
-                            self.load_ty_slot(fty, off);
-                            self.emit_val_eq(fty)?;
-                            self.f.instructions().else_().i32_const(0).end();
-                        }
-                        self.release_i32();
-                        self.release_i32();
-                    }
-                }
-            }
-            SliceTy::Tuple(id) => {
-                // Field-wise AND, each field recursing through emit_val_eq.
-                let fields = self.types.tuple_def(id).fields;
-                let hb = self.hold_i32()?;
-                let ha = self.hold_i32()?;
-                self.f.instructions().local_set(hb).local_set(ha);
-                self.f.instructions().i32_const(1);
-                for (fty, off) in fields {
-                    self.f.instructions().if_(BlockType::Result(ValType::I32));
-                    self.f.instructions().local_get(ha);
-                    self.load_ty_slot(fty, off);
-                    self.f.instructions().local_get(hb);
-                    self.load_ty_slot(fty, off);
-                    self.emit_val_eq(fty)?;
-                    self.f.instructions().else_().i32_const(0).end();
-                }
-                self.release_i32();
-                self.release_i32();
-            }
-            other => return unsup(&format!("binop:eq-{other:?}")),
-        }
-        Ok(())
-    }
 
-    /// Element-wise list equality (recursive): same len, then every
-    /// element equal under `emit_val_eq`. Five holds per nesting level;
-    /// the pool bound turns absurd nesting into an honest refusal.
-    fn emit_list_eq(&mut self, h: ETy) -> Result<(), EmitError> {
-        let el = self.types.el(h);
-        let stride = el.slot_size() as i32;
-        let hb = self.hold_i32()?;
-        let ha = self.hold_i32()?;
-        let verdict = self.hold_i32()?;
-        let end = self.hold_i32()?;
-        let cur = self.hold_i32()?;
-        {
-            let mut i = self.f.instructions();
-            i.local_set(hb).local_set(ha);
-            i.local_get(ha).i32_load(len_memarg());
-            i.local_get(hb).i32_load(len_memarg());
-            i.i32_ne().if_(BlockType::Result(ValType::I32));
-            i.i32_const(0);
-            i.else_();
-            i.i32_const(1).local_set(verdict);
-            // cur walks a's payload; b's element is at (cur - a + b).
-            i.local_get(ha).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(cur);
-            i.local_get(cur).local_get(ha).i32_load(len_memarg()).i32_add().local_set(end);
-            i.block(BlockType::Empty).loop_(BlockType::Empty);
-            i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
-            i.local_get(cur);
-        }
-        self.load_ty_slot_at(el);
-        {
-            let mut i = self.f.instructions();
-            i.local_get(cur).local_get(ha).i32_sub().local_get(hb).i32_add();
-        }
-        self.load_ty_slot_at(el);
-        self.emit_val_eq(el)?;
-        {
-            let mut i = self.f.instructions();
-            i.i32_eqz().if_(BlockType::Empty);
-            i.i32_const(0).local_set(verdict);
-            i.br(2);
-            i.end();
-            i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
-            i.br(0);
-            i.end();
-            i.end();
-            i.local_get(verdict);
-            i.end();
-        }
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        Ok(())
-    }
 
-    /// Sum-shaped values: constructors and unwraps — split from
-    /// `lower_data` for complexity budget. The `want` check happens in
-    /// `lower`'s shared tail.
-    pub(crate) fn lower_sum(
-        &mut self,
-        e: &IrExpr,
-        want: Option<SliceTy>,
-    ) -> Result<SliceTy, EmitError> {
-        let got = match &e.kind {
-            // Sum constructors — `none`/`ok`/`err` REQUIRE the hint.
-            IrExprKind::OptionNone => match want.map_or_else(|| self.infer(e), Ok)? {
-                SliceTy::Option(s) => {
-                    self.f.instructions().i32_const(almide_layout::NULL_ADDR as i32);
-                    SliceTy::Option(s)
-                }
-                other => return unsup(&format!("ty-mismatch:none-vs-{other:?}")),
-            },
-            IrExprKind::OptionSome { expr } => {
-                let (hty, s) = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::Option(h) => (SliceTy::Option(h), self.types.el(h)),
-                    other => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
-                };
-                // The base lives in a HOLD local (stack-disciplined),
-                // never the shared tmp: the inner expression can contain
-                // its own `some(...)`/`ok(...)` as a SUBEXPRESSION even
-                // when the types forbid nested sums — the differential
-                // fuzzer falsified the old shared-tmp argument on day one
-                // (seed 79: the outer `some` returned the inner block).
-                let hold = self.hold_i32()?;
-                self.f
-                    .instructions()
-                    .i32_const(s.slot_size() as i32)
-                    .call(F_ALLOC)
-                    .local_tee(hold);
-                self.lower(expr, Some(s))?;
-                self.store_ty_slot(s, almide_layout::OPTION_FIELD);
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                hty
-            }
-            IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
-                let is_ok = matches!(&e.kind, IrExprKind::ResultOk { .. });
-                let (hty, o, er) = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::Result(o, er) => (SliceTy::Result(o, er), o, er),
-                    other => return unsup(&format!("ty-mismatch:result-vs-{other:?}")),
-                };
-                let side = self.types.el(if is_ok { o } else { er });
-                // Hold-local, not shared tmp — same seed-79 lesson as
-                // OptionSome above.
-                let hold = self.hold_i32()?;
-                self.f
-                    .instructions()
-                    .i32_const(16)
-                    .call(F_ALLOC)
-                    .local_tee(hold)
-                    .i32_const(i32::from(!is_ok))
-                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                self.f.instructions().local_get(hold);
-                self.lower(expr, Some(side))?;
-                self.store_ty_slot(side, almide_layout::SUM_FIELD);
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                hty
-            }
-            // `!` — three enclosing shapes (the interp's eval_try_unwrap):
-            //   effect fn  -> PROPAGATE (return the err block as-is; err
-            //                 blocks of any Result(_, E) share one layout),
-            //   main       -> ABORT with the native frame
-            //                 ("Error: {msg}" + exit 1),
-            //   pure fn    -> same abort (the checker forbids propagating
-            //                 `!` outside effect fns; a pure-Option/Result
-            //                 fn's `!` is #1410-propagating — refused).
-            // `?` (Try) and `!` (Unwrap) are ONE marker in the oracle:
-            // eval.rs dispatches Try | Unwrap to the same eval_try_unwrap.
-            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
-                // C-216: a marker node TYPED Option is the effect-RESULT-
-                // layer strip on a declared-Option effect call — identity.
-                let node_ty = slice_ty_of(&e.ty, self.types);
-                // Propagation returns the operand's err block INTO the
-                // enclosing frame — sound only when the err slot types
-                // agree (they share one layout then).
-                let fn_err = match self.fn_ret {
-                    Some(SliceTy::Result(_, fe)) => Some(self.types.el(fe)),
-                    _ => None,
-                };
-                let in_effect = fn_err.is_some();
-                if !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_))) {
-                    return unsup("unwrap-propagating");
-                }
-                match self.lower(expr, None)? {
-                    got @ SliceTy::Option(_)
-                        if node_ty == Some(got) =>
-                    {
-                        // Identity: pass the Option through untouched.
-                        got
-                    }
-                    SliceTy::Option(h) => {
-                        let et = self.types.el(h);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_eqz()
-                            .if_(BlockType::Empty);
-                        if in_effect {
-                            if fn_err != Some(STR) {
-                                return unsup("unwrap-none-err-ty");
-                            }
-                            // err("none") — #556: `!` on none propagates
-                            // an Err whose message is "none".
-                            let none_msg = self.pool.intern("none");
-                            self.f
-                                .instructions()
-                                .i32_const(16)
-                                .call(F_ALLOC)
-                                .local_tee(self.tmp_i32_local)
-                                .i32_const(1)
-                                .i32_store(slot_memarg(almide_layout::SUM_TAG))
-                                .local_get(self.tmp_i32_local)
-                                .i32_const(none_msg as i32)
-                                .i32_store(slot_memarg(almide_layout::SUM_FIELD))
-                                .local_get(self.tmp_i32_local)
-                                .return_();
-                        } else if self.in_main {
-                            let none_msg = self.pool.intern("none");
-                            self.f.instructions().i32_const(none_msg as i32);
-                            self.emit_error_frame_abort();
-                        } else {
-                            self.f.instructions().unreachable();
-                        }
-                        self.f.instructions().end().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                        et
-                    }
-                    SliceTy::Result(o, er) => {
-                        let et = self.types.el(o);
-                        let ert = self.types.el(er);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(0)
-                            .i32_ne()
-                            .if_(BlockType::Empty);
-                        if in_effect {
-                            if fn_err != Some(ert) {
-                                return unsup("unwrap-err-ty-mismatch");
-                            }
-                            self.f.instructions().local_get(self.scr_i32_local).return_();
-                        } else if self.in_main && ert == STR {
-                            self.f.instructions().local_get(self.scr_i32_local);
-                            self.load_ty_slot(ert, almide_layout::SUM_FIELD);
-                            self.emit_error_frame_abort();
-                        } else {
-                            self.f.instructions().unreachable();
-                        }
-                        self.f.instructions().end().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                        et
-                    }
-                    other => return unsup(&format!("unwrap-of:{other:?}")),
-                }
-            }
-            // `??` — fallback on none/Err. The fallback branch may clobber
-            // the scratch, but the branch that reads the scratch is the
-            // exclusive other path.
-            IrExprKind::UnwrapOr { expr, fallback } => match self.lower(expr, None)? {
-                SliceTy::Option(h) => {
-                    let et = self.types.el(h);
-                    self.f
-                        .instructions()
-                        .local_tee(self.scr_i32_local)
-                        .i32_eqz()
-                        .if_(BlockType::Result(et.val_type()));
-                    self.lower(fallback, Some(et))?;
-                    self.f.instructions().else_().local_get(self.scr_i32_local);
-                    self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                    self.f.instructions().end();
-                    et
-                }
-                SliceTy::Result(o, _) => {
-                    let et = self.types.el(o);
-                    self.f
-                        .instructions()
-                        .local_tee(self.scr_i32_local)
-                        .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                        .i32_const(0)
-                        .i32_ne()
-                        .if_(BlockType::Result(et.val_type()));
-                    self.lower(fallback, Some(et))?;
-                    self.f.instructions().else_().local_get(self.scr_i32_local);
-                    self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                    self.f.instructions().end();
-                    et
-                }
-                other => return unsup(&format!("unwrap-or-of:{other:?}")),
-            },
-            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
-        };
-        Ok(got)
-    }
 }
 
 impl Emitter<'_> {
@@ -1540,200 +643,6 @@ impl Emitter<'_> {
 }
 
 impl Emitter<'_> {
-    /// Record-shaped values: literals, spreads, member reads — split from
-    /// `lower_data` for complexity budget.
-    pub(crate) fn lower_record(
-        &mut self,
-        e: &IrExpr,
-        want: Option<SliceTy>,
-    ) -> Result<SliceTy, EmitError> {
-        let got = match &e.kind {
-            // Tuple literal: positional record.
-            IrExprKind::Tuple { elements } => {
-                let ty = want.map_or_else(|| self.infer(e), Ok)?;
-                let SliceTy::Tuple(ti) = ty else {
-                    return unsup(&format!("ty-mismatch:tuple-vs-{ty:?}"));
-                };
-                let def = self.types.tuple_def(ti);
-                if def.fields.len() != elements.len() {
-                    return unsup("tuple-arity");
-                }
-                let hold = self.hold_i32()?;
-                self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hold);
-                for (el, (fty, off)) in elements.iter().zip(def.fields) {
-                    self.f.instructions().local_get(hold);
-                    self.lower(el, Some(fty))?;
-                    self.store_ty_slot(fty, off);
-                }
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                ty
-            }
-            // t.0 / t.1 — positional field read.
-            IrExprKind::TupleIndex { object, index } => {
-                let ty = self.lower(object, None)?;
-                let SliceTy::Tuple(ti) = ty else {
-                    return unsup(&format!("tuple-index-of:{ty:?}"));
-                };
-                let def = self.types.tuple_def(ti);
-                let Some(&(fty, off)) = def.fields.get(*index) else {
-                    return unsup("tuple-index-oob");
-                };
-                self.load_ty_slot(fty, off);
-                fty
-            }
-            // Record literal: alloc + store each field at its packed offset.
-            // Anonymous record literal: the shape interns as a synthetic
-            // Named record — construction below is shared.
-            IrExprKind::Record { name: None, fields } => {
-                let ty = want.map_or_else(|| self.infer(e), Ok)?;
-                let SliceTy::Named(ti) = ty else {
-                    return unsup(&format!("ty-mismatch:anon-record-vs-{ty:?}"));
-                };
-                let NamedDef::Record(def) = &self.types.def(ti) else {
-                    return unsup("anon-record-non-record-ty");
-                };
-                if def.fields.len() != fields.len() {
-                    return unsup("anon-record-defaults");
-                }
-                let mut slots = Vec::new();
-                for (fname, _) in fields {
-                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                        Some(fi) => slots.push((fi.ty, fi.offset)),
-                        None => return unsup("anon-record-unknown-field"),
-                    }
-                }
-                let size = def.size;
-                let hold = self.hold_i32()?;
-                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
-                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
-                    self.f.instructions().local_get(hold);
-                    self.lower(fexpr, Some(fty))?;
-                    self.store_ty_slot(fty, off);
-                }
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                ty
-            }
-            IrExprKind::Record { name, fields } if name.is_some() => {
-                let ty = want.map_or_else(|| self.infer(e), Ok)?;
-                let SliceTy::Named(ti) = ty else {
-                    return unsup(&format!("ty-mismatch:record-vs-{ty:?}"));
-                };
-                // A record LITERAL with a variant type is a record-shaped
-                // CASE construction (`Scroll { dy: 3 }`).
-                if let NamedDef::Variant(v) = &self.types.def(ti) {
-                    let Some(cname) = name else {
-                        return unsup("record-case-unnamed");
-                    };
-                    let Some(c) = v.cases.iter().find(|c| c.name == cname.as_str()) else {
-                        return unsup("record-case-unknown");
-                    };
-                    if c.fields.len() != fields.len() {
-                        return unsup("record-case-defaults");
-                    }
-                    let mut slots = Vec::new();
-                    for (fname, _) in fields {
-                        match c.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                            Some(fi) => slots.push((fi.ty, fi.offset)),
-                            None => return unsup("record-case-unknown-field"),
-                        }
-                    }
-                    let (size, tag) = (c.size, c.tag);
-                    let hold = self.hold_i32()?;
-                    self.f
-                        .instructions()
-                        .i32_const(size as i32)
-                        .call(F_ALLOC)
-                        .local_tee(hold)
-                        .i32_const(tag as i32)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
-                        self.f.instructions().local_get(hold);
-                        self.lower(fexpr, Some(fty))?;
-                        self.store_ty_slot(fty, off);
-                    }
-                    self.f.instructions().local_get(hold);
-                    self.release_i32();
-                    return Ok(ty);
-                }
-                let NamedDef::Record(def) = &self.types.def(ti) else {
-                    return unsup("record-of-variant-ty");
-                };
-                // Defaulted fields: until we verify the checker fills
-                // omissions into the literal, a literal that supplies
-                // fewer fields than the layout is REFUSED — a missing
-                // store would leave header-garbage in the slot.
-                if fields.len() != def.fields.len() {
-                    return unsup("record-defaults");
-                }
-                let size = def.size;
-                // (name → (offset, ty)) resolved up front to end the borrow.
-                let mut slots = Vec::new();
-                for (fname, _) in fields {
-                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                        Some(fi) => slots.push((fi.ty, fi.offset)),
-                        None => return unsup("record-unknown-field"),
-                    }
-                }
-                let hold = self.hold_i32()?;
-                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
-                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
-                    self.f.instructions().local_get(hold);
-                    self.lower(fexpr, Some(fty))?;
-                    self.store_ty_slot(fty, off);
-                }
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                ty
-            }
-            // {...base, f: v}: copy then overwrite — functional update.
-            IrExprKind::SpreadRecord { base, fields } => {
-                let ty = self.lower(base, None)?;
-                let SliceTy::Named(ti) = ty else {
-                    return unsup(&format!("spread-of:{ty:?}"));
-                };
-                let NamedDef::Record(def) = &self.types.def(ti) else {
-                    return unsup("spread-of-variant");
-                };
-                let mut slots = Vec::new();
-                for (fname, _) in fields {
-                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                        Some(fi) => slots.push((fi.ty, fi.offset)),
-                        None => return unsup("record-unknown-field"),
-                    }
-                }
-                let hold = self.hold_i32()?;
-                self.f.instructions().call(F_BLOCK_COPY).local_set(hold);
-                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
-                    self.f.instructions().local_get(hold);
-                    self.lower(fexpr, Some(fty))?;
-                    self.store_ty_slot(fty, off);
-                }
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                ty
-            }
-            // r.field: offset load from the record block.
-            IrExprKind::Member { object, field } => {
-                let ty = self.lower(object, None)?;
-                let SliceTy::Named(ti) = ty else {
-                    return unsup(&format!("member-of:{ty:?}"));
-                };
-                let NamedDef::Record(def) = &self.types.def(ti) else {
-                    return unsup("member-of-variant");
-                };
-                let Some(fi) = def.fields.iter().find(|fi| fi.name == field.as_str()) else {
-                    return unsup("record-unknown-field");
-                };
-                let (fty, off) = (fi.ty, fi.offset);
-                self.load_ty_slot(fty, off);
-                fty
-            }
-            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
-        };
-        Ok(got)
-    }
 }
 
 /// Kinds `lower_sum` owns (constructors and unwraps).
@@ -1747,4 +656,131 @@ fn is_sum_shape(k: &IrExprKind) -> bool {
             | IrExprKind::Unwrap { .. }
             | IrExprKind::UnwrapOr { .. }
     )
+}
+
+impl Emitter<'_> {
+    /// A named fn as a VALUE (split from lower for the complexity budget).
+    fn lower_fn_ref(
+        &mut self,
+        e: &IrExpr,
+        name: &almide_base::intern::Sym,
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Fn(sig) = ty else {
+                    return unsup(&format!("fnref-vs-{ty:?}"));
+                };
+                let def = self.types.fn_sig_def(sig);
+                let resolved = self
+                    .cur_module
+                    .and_then(|m| self.table.by_name.get(&format!("{m}.{}", name.as_str())))
+                    .or_else(|| self.table.by_name.get(name.as_str()))
+                    .copied();
+                let Some(idx) = resolved else {
+                    return unsup(&format!("fnref:{name}"));
+                };
+                let info = &self.table.infos[idx];
+                if info.refuse.is_some() {
+                    return unsup("fnref-refused-target");
+                }
+                if info.params != def.params {
+                    return unsup("fnref-param-mismatch");
+                }
+                let entry = if info.ret == def.ret {
+                    TableEntry::Fn(idx)
+                } else {
+                    match (info.ret, def.ret) {
+                        (Some(raw), Some(SliceTy::Result(o, er)))
+                            if def.effect
+                                && self.types.el(o) == raw
+                                && self.types.el(er) == STR =>
+                        {
+                            TableEntry::Adapter { target: idx, raw }
+                        }
+                        _ => return unsup("fnref-ret-mismatch"),
+                    }
+                };
+                let slot = self.work.slot(entry);
+                // Fn value = closure BLOCK [slot@0]; capture-free blocks
+                // are pool statics (dedup by content, zero runtime alloc).
+                let block = self.pool.intern_block(&(slot).to_le_bytes());
+                self.f.instructions().i32_const(block as i32);
+                Ok(ty)
+    }
+
+    /// A lambda as a VALUE (split from lower for the complexity budget).
+    fn lower_lambda_value(
+        &mut self,
+        e: &IrExpr,
+        params: &[(VarId, almide_types::types::Ty)],
+        body: &IrExpr,
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Fn(sig) = ty else {
+                    return unsup(&format!("lambda-vs-{ty:?}"));
+                };
+                let def = self.types.fn_sig_def(sig);
+                if params.len() != def.params.len() {
+                    return unsup("lambda-arity");
+                }
+                let param_ids: std::collections::HashSet<VarId> =
+                    params.iter().map(|(v, _)| *v).collect();
+                let mut captured = self.captured_vars(&param_ids, body);
+                captured.sort_by_key(|v| v.0);
+                let ps: Vec<(VarId, SliceTy)> = params
+                    .iter()
+                    .map(|(v, _)| *v)
+                    .zip(def.params.iter().copied())
+                    .collect();
+                let effect_raw = if def.effect {
+                    match def.ret {
+                        Some(SliceTy::Result(o, _)) => Some(self.types.el(o)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                // Closure block layout: [slot:i32][captures packed...].
+                let widths: Vec<u32> = std::iter::once(4)
+                    .chain(captured.iter().map(|(_, t)| t.slot_size()))
+                    .collect();
+                let (offsets, size) = almide_layout::pack_fields(&widths);
+                let captures: Vec<(VarId, SliceTy, u32)> = captured
+                    .iter()
+                    .zip(offsets.iter().skip(1))
+                    .map(|(&(v, t), &off)| (v, t, off))
+                    .collect();
+                let j = self.work.register_lambda(LiftedLambda {
+                    params: ps,
+                    ret: def.ret,
+                    effect_raw,
+                    body: body.clone(),
+                    captures: captures.clone(),
+                });
+                let slot = self.work.slot(TableEntry::Lambda(j));
+                if captures.is_empty() {
+                    let block = self.pool.intern_block(&(slot).to_le_bytes());
+                    self.f.instructions().i32_const(block as i32);
+                } else {
+                    let hb = self.hold_i32()?;
+                    self.f
+                        .instructions()
+                        .i32_const(size as i32)
+                        .call(F_ALLOC)
+                        .local_tee(hb)
+                        .i32_const(slot as i32)
+                        .i32_store(slot_memarg(0));
+                    for (v, t, off) in &captures {
+                        let (idx, _) = self.locals[v];
+                        self.f.instructions().local_get(hb).local_get(idx);
+                        self.store_ty_slot(*t, *off);
+                    }
+                    self.f.instructions().local_get(hb);
+                    self.release_i32();
+                }
+        Ok(ty)
+    }
 }

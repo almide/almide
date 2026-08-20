@@ -148,7 +148,22 @@ impl Gen {
             return self.leaf(ty);
         }
         match ty {
-            Ty::Int => match self.rng.below(8) {
+            Ty::Int => self.expr_int(depth),
+            Ty::Bool => self.expr_bool(depth),
+            Ty::Str => self.expr_str(depth),
+            Ty::OptInt => self.expr_opt(depth),
+            Ty::ListInt => self.expr_list(depth),
+            Ty::AnonRec => self.expr_anon(depth),
+            Ty::Rec => self.expr_rec(depth),
+            Ty::Vart => self.expr_vart(depth),
+            Ty::MapIS => self.expr_map(depth),
+            Ty::Float => self.expr_float(depth),
+            Ty::SetInt => self.expr_set(depth),
+        }
+    }
+
+    fn expr_int(&mut self, depth: usize) -> String {
+        match self.rng.below(8) {
                 0 | 1 => self.leaf(Ty::Int),
                 2 => {
                     let op = ["+", "-", "*"][self.rng.below(3)];
@@ -202,8 +217,11 @@ impl Gen {
                     },
                 },
                 _ => format!("({} ?? {})", self.expr(Ty::OptInt, depth - 1), self.expr(Ty::Int, depth - 1)),
-            },
-            Ty::Bool => match self.rng.below(5) {
+        }
+    }
+
+    fn expr_bool(&mut self, depth: usize) -> String {
+            match self.rng.below(5) {
                 0 => self.leaf(Ty::Bool),
                 1 | 2 => {
                     let op = ["==", "!=", "<", ">", "<=", ">="][self.rng.below(6)];
@@ -214,21 +232,30 @@ impl Gen {
                     format!("({} {} {})", self.expr(Ty::Bool, depth - 1), op, self.expr(Ty::Bool, depth - 1))
                 }
                 _ => format!("(not {})", self.expr(Ty::Bool, depth - 1)),
-            },
-            Ty::Str => match (self.rng.below(6), self.var_of(Ty::MapIS)) {
+            }
+    }
+
+    fn expr_str(&mut self, depth: usize) -> String {
+            match (self.rng.below(6), self.var_of(Ty::MapIS)) {
                 (0, Some(m)) => format!(
                     "map.get_or({m}, {}, {})",
                     self.expr(Ty::Int, depth.saturating_sub(1)),
                     self.leaf(Ty::Str)
                 ),
                 _ => self.str_expr_core(depth),
-            },
-            Ty::OptInt => match self.rng.below(4) {
+            }
+    }
+
+    fn expr_opt(&mut self, depth: usize) -> String {
+            match self.rng.below(4) {
                 0 => "none".to_string(),
                 1 | 2 => format!("some({})", self.expr(Ty::Int, depth - 1)),
                 _ => self.leaf(Ty::OptInt),
-            },
-            Ty::ListInt => match self.rng.below(6) {
+            }
+    }
+
+    fn expr_list(&mut self, depth: usize) -> String {
+            match self.rng.below(6) {
                 5 => {
                     // Slice — start is OFTEN 0 (the everyday form): mutant
                     // 010's survival exposed that no exercised program
@@ -262,8 +289,11 @@ impl Gen {
                     format!("list.filter({src}, ({p}) => {cond})")
                 }
                 _ => self.leaf(Ty::ListInt),
-            },
-            Ty::AnonRec => {
+            }
+    }
+
+    fn expr_anon(&mut self, depth: usize) -> String {
+            {
                 let ax = self.expr(Ty::Int, depth.saturating_sub(1));
                 let ay = self.expr(Ty::Str, depth.saturating_sub(1));
                 if self.rng.chance(50) {
@@ -272,7 +302,10 @@ impl Gen {
                     format!("{{ ax: {ax}, ay: {ay} }}")
                 }
             }
-            Ty::Rec => match self.rng.below(3) {
+    }
+
+    fn expr_rec(&mut self, depth: usize) -> String {
+            match self.rng.below(3) {
                 0 | 1 => format!(
                     "Pt {{ px: {}, py: {} }}",
                     self.expr(Ty::Int, depth - 1),
@@ -287,8 +320,11 @@ impl Gen {
                         self.expr(Ty::Int, depth - 1)
                     ),
                 },
-            },
-            Ty::Vart => match self.rng.below(4) {
+            }
+    }
+
+    fn expr_vart(&mut self, depth: usize) -> String {
+            match self.rng.below(4) {
                 0 => format!("Lf({})", self.expr(Ty::Int, depth - 1)),
                 1 => format!(
                     "Nd({}, {})",
@@ -297,8 +333,11 @@ impl Gen {
                 ),
                 2 => "Mt".to_string(),
                 _ => self.leaf(Ty::Vart),
-            },
-            Ty::Float => match self.rng.below(5) {
+            }
+    }
+
+    fn expr_float(&mut self, depth: usize) -> String {
+            match self.rng.below(5) {
                 0 | 1 => self.leaf(Ty::Float),
                 2 | 3 => {
                     let op = ["+", "-", "*"][self.rng.below(3)];
@@ -310,23 +349,28 @@ impl Gen {
                     )
                 }
                 _ => self.leaf(Ty::Float),
-            },
-            Ty::MapIS => match (self.rng.below(3), self.var_of(Ty::MapIS)) {
+            }
+    }
+
+    fn expr_map(&mut self, depth: usize) -> String {
+            match (self.rng.below(3), self.var_of(Ty::MapIS)) {
                 (0, Some(v)) | (1, Some(v)) => format!(
                     "map.set({v}, {}, {})",
                     self.expr(Ty::Int, depth - 1),
                     self.expr(Ty::Str, depth.saturating_sub(1))
                 ),
                 _ => "map.new()".to_string(),
-            },
-            Ty::SetInt => match (self.rng.below(3), self.var_of(Ty::SetInt)) {
+            }
+    }
+
+    fn expr_set(&mut self, depth: usize) -> String {
+            match (self.rng.below(3), self.var_of(Ty::SetInt)) {
                 (0, Some(v)) | (1, Some(v)) => {
                     format!("set.insert({v}, {})", self.expr(Ty::Int, depth - 1))
                 }
                 (2, _) => format!("set.from_list({})", self.expr(Ty::ListInt, depth - 1)),
                 _ => "set.new()".to_string(),
-            },
-        }
+            }
     }
 
     fn str_expr_core(&mut self, depth: usize) -> String {

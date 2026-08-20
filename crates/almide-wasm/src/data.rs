@@ -1,0 +1,408 @@
+//! Sum- and record-shaped VALUE lowering (constructors, unwrap markers,
+//! record literals, spreads) — split from emitter.rs for the complexity
+//! budget; `lower`'s shared want-check tail still judges every result.
+
+use almide_ir::{IrExpr, IrExprKind};
+use wasm_encoder::BlockType;
+
+use crate::emitter::Emitter;
+use crate::types_table::NamedDef;
+use crate::*;
+
+impl Emitter<'_> {
+    /// Sum-shaped values: constructors and unwraps — split from
+    /// `lower_data` for complexity budget. The `want` check happens in
+    /// `lower`'s shared tail.
+    pub(crate) fn lower_sum(
+        &mut self,
+        e: &IrExpr,
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+        let got = match &e.kind {
+            // Sum constructors — `none`/`ok`/`err` REQUIRE the hint.
+            IrExprKind::OptionNone => match want.map_or_else(|| self.infer(e), Ok)? {
+                SliceTy::Option(s) => {
+                    self.f.instructions().i32_const(almide_layout::NULL_ADDR as i32);
+                    SliceTy::Option(s)
+                }
+                other => return unsup(&format!("ty-mismatch:none-vs-{other:?}")),
+            },
+            IrExprKind::OptionSome { expr } => {
+                let (hty, s) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::Option(h) => (SliceTy::Option(h), self.types.el(h)),
+                    other => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
+                };
+                // The base lives in a HOLD local (stack-disciplined),
+                // never the shared tmp: the inner expression can contain
+                // its own `some(...)`/`ok(...)` as a SUBEXPRESSION even
+                // when the types forbid nested sums — the differential
+                // fuzzer falsified the old shared-tmp argument on day one
+                // (seed 79: the outer `some` returned the inner block).
+                let hold = self.hold_i32()?;
+                self.f
+                    .instructions()
+                    .i32_const(s.slot_size() as i32)
+                    .call(F_ALLOC)
+                    .local_tee(hold);
+                self.lower(expr, Some(s))?;
+                self.store_ty_slot(s, almide_layout::OPTION_FIELD);
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                hty
+            }
+            IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
+                let is_ok = matches!(&e.kind, IrExprKind::ResultOk { .. });
+                let (hty, o, er) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::Result(o, er) => (SliceTy::Result(o, er), o, er),
+                    other => return unsup(&format!("ty-mismatch:result-vs-{other:?}")),
+                };
+                let side = self.types.el(if is_ok { o } else { er });
+                // Hold-local, not shared tmp — same seed-79 lesson as
+                // OptionSome above.
+                let hold = self.hold_i32()?;
+                self.f
+                    .instructions()
+                    .i32_const(16)
+                    .call(F_ALLOC)
+                    .local_tee(hold)
+                    .i32_const(i32::from(!is_ok))
+                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                self.f.instructions().local_get(hold);
+                self.lower(expr, Some(side))?;
+                self.store_ty_slot(side, almide_layout::SUM_FIELD);
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                hty
+            }
+            // `!` — three enclosing shapes (the interp's eval_try_unwrap):
+            //   effect fn  -> PROPAGATE (return the err block as-is; err
+            //                 blocks of any Result(_, E) share one layout),
+            //   main       -> ABORT with the native frame
+            //                 ("Error: {msg}" + exit 1),
+            //   pure fn    -> same abort (the checker forbids propagating
+            //                 `!` outside effect fns; a pure-Option/Result
+            //                 fn's `!` is #1410-propagating — refused).
+            // `?` (Try) and `!` (Unwrap) are ONE marker in the oracle:
+            // eval.rs dispatches Try | Unwrap to the same eval_try_unwrap.
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
+                // C-216: a marker node TYPED Option is the effect-RESULT-
+                // layer strip on a declared-Option effect call — identity.
+                let node_ty = slice_ty_of(&e.ty, self.types);
+                // Propagation returns the operand's err block INTO the
+                // enclosing frame — sound only when the err slot types
+                // agree (they share one layout then).
+                let fn_err = match self.fn_ret {
+                    Some(SliceTy::Result(_, fe)) => Some(self.types.el(fe)),
+                    _ => None,
+                };
+                let in_effect = fn_err.is_some();
+                if !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_))) {
+                    return unsup("unwrap-propagating");
+                }
+                match self.lower(expr, None)? {
+                    got @ SliceTy::Option(_)
+                        if node_ty == Some(got) =>
+                    {
+                        // Identity: pass the Option through untouched.
+                        got
+                    }
+                    SliceTy::Option(h) => {
+                        let et = self.types.el(h);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_eqz()
+                            .if_(BlockType::Empty);
+                        if in_effect {
+                            if fn_err != Some(STR) {
+                                return unsup("unwrap-none-err-ty");
+                            }
+                            // err("none") — #556: `!` on none propagates
+                            // an Err whose message is "none".
+                            let none_msg = self.pool.intern("none");
+                            self.f
+                                .instructions()
+                                .i32_const(16)
+                                .call(F_ALLOC)
+                                .local_tee(self.tmp_i32_local)
+                                .i32_const(1)
+                                .i32_store(slot_memarg(almide_layout::SUM_TAG))
+                                .local_get(self.tmp_i32_local)
+                                .i32_const(none_msg as i32)
+                                .i32_store(slot_memarg(almide_layout::SUM_FIELD))
+                                .local_get(self.tmp_i32_local)
+                                .return_();
+                        } else if self.in_main {
+                            let none_msg = self.pool.intern("none");
+                            self.f.instructions().i32_const(none_msg as i32);
+                            self.emit_error_frame_abort();
+                        } else {
+                            self.f.instructions().unreachable();
+                        }
+                        self.f.instructions().end().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                        et
+                    }
+                    SliceTy::Result(o, er) => {
+                        let et = self.types.el(o);
+                        let ert = self.types.el(er);
+                        self.f
+                            .instructions()
+                            .local_tee(self.scr_i32_local)
+                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                            .i32_const(0)
+                            .i32_ne()
+                            .if_(BlockType::Empty);
+                        if in_effect {
+                            if fn_err != Some(ert) {
+                                return unsup("unwrap-err-ty-mismatch");
+                            }
+                            self.f.instructions().local_get(self.scr_i32_local).return_();
+                        } else if self.in_main && ert == STR {
+                            self.f.instructions().local_get(self.scr_i32_local);
+                            self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+                            self.emit_error_frame_abort();
+                        } else {
+                            self.f.instructions().unreachable();
+                        }
+                        self.f.instructions().end().local_get(self.scr_i32_local);
+                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                        et
+                    }
+                    other => return unsup(&format!("unwrap-of:{other:?}")),
+                }
+            }
+            // `??` — fallback on none/Err. The fallback branch may clobber
+            // the scratch, but the branch that reads the scratch is the
+            // exclusive other path.
+            IrExprKind::UnwrapOr { expr, fallback } => match self.lower(expr, None)? {
+                SliceTy::Option(h) => {
+                    let et = self.types.el(h);
+                    self.f
+                        .instructions()
+                        .local_tee(self.scr_i32_local)
+                        .i32_eqz()
+                        .if_(BlockType::Result(et.val_type()));
+                    self.lower(fallback, Some(et))?;
+                    self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                    self.f.instructions().end();
+                    et
+                }
+                SliceTy::Result(o, _) => {
+                    let et = self.types.el(o);
+                    self.f
+                        .instructions()
+                        .local_tee(self.scr_i32_local)
+                        .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                        .i32_const(0)
+                        .i32_ne()
+                        .if_(BlockType::Result(et.val_type()));
+                    self.lower(fallback, Some(et))?;
+                    self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                    self.f.instructions().end();
+                    et
+                }
+                other => return unsup(&format!("unwrap-or-of:{other:?}")),
+            },
+            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
+        };
+        Ok(got)
+    }
+
+    /// Record-shaped values: literals, spreads, member reads — split from
+    /// `lower_data` for complexity budget.
+    pub(crate) fn lower_record(
+        &mut self,
+        e: &IrExpr,
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+        let got = match &e.kind {
+            // Tuple literal: positional record.
+            IrExprKind::Tuple { elements } => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Tuple(ti) = ty else {
+                    return unsup(&format!("ty-mismatch:tuple-vs-{ty:?}"));
+                };
+                let def = self.types.tuple_def(ti);
+                if def.fields.len() != elements.len() {
+                    return unsup("tuple-arity");
+                }
+                let hold = self.hold_i32()?;
+                self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hold);
+                for (el, (fty, off)) in elements.iter().zip(def.fields) {
+                    self.f.instructions().local_get(hold);
+                    self.lower(el, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                ty
+            }
+            // t.0 / t.1 — positional field read.
+            IrExprKind::TupleIndex { object, index } => {
+                let ty = self.lower(object, None)?;
+                let SliceTy::Tuple(ti) = ty else {
+                    return unsup(&format!("tuple-index-of:{ty:?}"));
+                };
+                let def = self.types.tuple_def(ti);
+                let Some(&(fty, off)) = def.fields.get(*index) else {
+                    return unsup("tuple-index-oob");
+                };
+                self.load_ty_slot(fty, off);
+                fty
+            }
+            // Record literal: alloc + store each field at its packed offset.
+            // Anonymous record literal: the shape interns as a synthetic
+            // Named record — construction below is shared.
+            IrExprKind::Record { name: None, fields } => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Named(ti) = ty else {
+                    return unsup(&format!("ty-mismatch:anon-record-vs-{ty:?}"));
+                };
+                let NamedDef::Record(def) = &self.types.def(ti) else {
+                    return unsup("anon-record-non-record-ty");
+                };
+                if def.fields.len() != fields.len() {
+                    return unsup("anon-record-defaults");
+                }
+                let mut slots = Vec::new();
+                for (fname, _) in fields {
+                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
+                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                        None => return unsup("anon-record-unknown-field"),
+                    }
+                }
+                let size = def.size;
+                let hold = self.hold_i32()?;
+                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
+                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    self.f.instructions().local_get(hold);
+                    self.lower(fexpr, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                ty
+            }
+            IrExprKind::Record { name, fields } if name.is_some() => {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Named(ti) = ty else {
+                    return unsup(&format!("ty-mismatch:record-vs-{ty:?}"));
+                };
+                // A record LITERAL with a variant type is a record-shaped
+                // CASE construction (`Scroll { dy: 3 }`).
+                if let NamedDef::Variant(v) = &self.types.def(ti) {
+                    let Some(cname) = name else {
+                        return unsup("record-case-unnamed");
+                    };
+                    let Some(c) = v.cases.iter().find(|c| c.name == cname.as_str()) else {
+                        return unsup("record-case-unknown");
+                    };
+                    if c.fields.len() != fields.len() {
+                        return unsup("record-case-defaults");
+                    }
+                    let mut slots = Vec::new();
+                    for (fname, _) in fields {
+                        match c.fields.iter().find(|fi| fi.name == fname.as_str()) {
+                            Some(fi) => slots.push((fi.ty, fi.offset)),
+                            None => return unsup("record-case-unknown-field"),
+                        }
+                    }
+                    let (size, tag) = (c.size, c.tag);
+                    let hold = self.hold_i32()?;
+                    self.f
+                        .instructions()
+                        .i32_const(size as i32)
+                        .call(F_ALLOC)
+                        .local_tee(hold)
+                        .i32_const(tag as i32)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                        self.f.instructions().local_get(hold);
+                        self.lower(fexpr, Some(fty))?;
+                        self.store_ty_slot(fty, off);
+                    }
+                    self.f.instructions().local_get(hold);
+                    self.release_i32();
+                    return Ok(ty);
+                }
+                let NamedDef::Record(def) = &self.types.def(ti) else {
+                    return unsup("record-of-variant-ty");
+                };
+                // Defaulted fields: until we verify the checker fills
+                // omissions into the literal, a literal that supplies
+                // fewer fields than the layout is REFUSED — a missing
+                // store would leave header-garbage in the slot.
+                if fields.len() != def.fields.len() {
+                    return unsup("record-defaults");
+                }
+                let size = def.size;
+                // (name → (offset, ty)) resolved up front to end the borrow.
+                let mut slots = Vec::new();
+                for (fname, _) in fields {
+                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
+                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                        None => return unsup("record-unknown-field"),
+                    }
+                }
+                let hold = self.hold_i32()?;
+                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
+                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    self.f.instructions().local_get(hold);
+                    self.lower(fexpr, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                ty
+            }
+            // {...base, f: v}: copy then overwrite — functional update.
+            IrExprKind::SpreadRecord { base, fields } => {
+                let ty = self.lower(base, None)?;
+                let SliceTy::Named(ti) = ty else {
+                    return unsup(&format!("spread-of:{ty:?}"));
+                };
+                let NamedDef::Record(def) = &self.types.def(ti) else {
+                    return unsup("spread-of-variant");
+                };
+                let mut slots = Vec::new();
+                for (fname, _) in fields {
+                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
+                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                        None => return unsup("record-unknown-field"),
+                    }
+                }
+                let hold = self.hold_i32()?;
+                self.f.instructions().call(F_BLOCK_COPY).local_set(hold);
+                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    self.f.instructions().local_get(hold);
+                    self.lower(fexpr, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                ty
+            }
+            // r.field: offset load from the record block.
+            IrExprKind::Member { object, field } => {
+                let ty = self.lower(object, None)?;
+                let SliceTy::Named(ti) = ty else {
+                    return unsup(&format!("member-of:{ty:?}"));
+                };
+                let NamedDef::Record(def) = &self.types.def(ti) else {
+                    return unsup("member-of-variant");
+                };
+                let Some(fi) = def.fields.iter().find(|fi| fi.name == field.as_str()) else {
+                    return unsup("record-unknown-field");
+                };
+                let (fty, off) = (fi.ty, fi.offset);
+                self.load_ty_slot(fty, off);
+                fty
+            }
+            other => return unsup(&format!("expr:{}", expr_kind_name(other))),
+        };
+        Ok(got)
+    }
+}
