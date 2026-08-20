@@ -148,6 +148,26 @@ impl Emitter<'_> {
             (IrPattern::Constructor { name, args }, SliceTy::Named(ti)) => {
                 self.test_ctor_pattern(name, args, ti, scr)
             }
+            // Tuple pattern with refutable positions: AND together each
+            // refutable field's test (nested via typed holds).
+            (IrPattern::Tuple { elements }, SliceTy::Tuple(id)) => {
+                let fields = self.types.tuple_def(id).fields;
+                if elements.len() != fields.len() {
+                    return unsup("pattern:tuple-arity");
+                }
+                self.f.instructions().i32_const(1);
+                for (ep, (fty, off)) in elements.iter().zip(fields) {
+                    if pattern_irrefutable(ep) {
+                        continue;
+                    }
+                    self.f.instructions().if_(BlockType::Result(ValType::I32));
+                    self.f.instructions().local_get(scr);
+                    self.load_ty_slot(fty, off);
+                    self.test_nested(ep, fty)?;
+                    self.f.instructions().else_().i32_const(0).end();
+                }
+                Ok(())
+            }
             (IrPattern::RecordPattern { name, .. }, SliceTy::Named(ti)) => {
                 // Record-shaped case: the TEST is the tag; the named field
                 // binds happen in emit_pattern_binds. A plain record
