@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/display.rs b/crates/almide-wasm/src/display.rs
+index 6ddc5b047..45aa70a41 100644
+--- a/crates/almide-wasm/src/display.rs
++++ b/crates/almide-wasm/src/display.rs
+@@ -231,7 +231,7 @@ impl Emitter<'_> {
+                         .instructions()
+                         .local_get(self.cursor_local)
+                         .call(idx)
+-                        .local_set(self.cursor_local);
++                        .drop(); // [MUTANT: cursor writeback dropped]
+                 } else {
+                     path.push(ti);
+                     self.emit_display_named(ti, path)?;
