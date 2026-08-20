@@ -1,0 +1,150 @@
+# Acceptance ring (#1533, attack-list A2-2): REAL downstream projects built
+# and tested against the compiler at this commit, on every develop/main push
+# and PR. The E0004 and #1501 classes were found by real code, #1526 by a
+# real downstream running real input — this ring exists because generated
+# corpora keep missing what production shapes hit.
+#
+# Each leg checks a project out at a PINNED commit, so downstream churn can
+# never turn compiler CI red on its own (the same doctrine as the downstreams
+# pinning ALMIDE_VERSION in their CI: bump on purpose, with review). The leg
+# driver (scripts/ci-acceptance-ring.sh) asserts a test-file floor and a
+# native-fallback ceiling beyond the exit codes — see its header for why a
+# plain green is not enough.
+#
+# Ring roster (public repos; Aid-On/teastia is private and joins when a
+# read token is provisioned — its 15-file suite already runs green locally
+# against develop):
+#   dfa       regex → DFA compiler; leftmost-longest scan proven on wasm
+#   parsegen  parser generator, depends on dfa as a git package
+#   svg       SVG builder, the package teastia consumes
+name: Acceptance Ring
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.89.0"
+  CARGO_INCREMENTAL: "0"
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  build-cli:
+    if: github.server_url == 'https://github.com'
+    name: Build the compiler under test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ring-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ring-cargo-${{ env.RUST_TOOLCHAIN }}-
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: almide-ring-cli
+          path: target/release/almide
+          retention-days: 1
+
+  ring:
+    name: Ring (${{ matrix.project }})
+    needs: build-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ref pins are deliberate (see header). min_tests is the project's
+          # current test-file count; fallback allowance is 0 everywhere until
+          # a project earns a documented exception.
+          - project: dfa
+            repo: almide/dfa
+            ref: f5c4784558a0c1ab18e7ae8f79627bfbdb82921c
+            min_tests: 3
+          - project: parsegen
+            repo: almide/parsegen
+            ref: 03506fde781f829fa0b095c1d8843152d30a9b9b
+            min_tests: 3
+          - project: svg
+            repo: almide/svg
+            ref: 63e8e3b899a6ae07efca61dc5cac4039afc8930f
+            min_tests: 2
+    steps:
+      # The compiler repo, for the leg driver script only.
+      - uses: actions/checkout@v7
+        with:
+          path: compiler
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          path: project
+
+      # `almide build` compiles through Rust, so downstream builds need a
+      # toolchain even though the compiler itself arrives prebuilt.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.almide
+          key: ring-${{ matrix.project }}-${{ env.RUST_TOOLCHAIN }}-${{ matrix.ref }}
+          restore-keys: ring-${{ matrix.project }}-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+      - name: Install wasmtime
+        # `almide test` executes its wasm leg on the wasmtime CLI; without it
+        # every file would fall back to native and the fallback ceiling in the
+        # leg driver would fail the run (deliberately — a ring that quietly
+        # tests only native is the #983 skip-as-pass shape again).
+        run: |
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: almide-ring-cli
+          path: bin
+      - name: Put the compiler under test on PATH
+        run: |
+          chmod +x bin/almide
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      - name: Ring leg
+        run: |
+          almide --version
+          bash compiler/scripts/ci-acceptance-ring.sh project ${{ matrix.min_tests }} 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
