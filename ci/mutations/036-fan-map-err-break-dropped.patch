@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/fan.rs b/crates/almide-wasm/src/fan.rs
+index 8bb80efe9..8633b8b2d 100644
+--- a/crates/almide-wasm/src/fan.rs
++++ b/crates/almide-wasm/src/fan.rs
+@@ -54,7 +54,7 @@ impl Emitter<'_> {
+                         i.i32_const(0).local_set(hr);
+                     } else {
+                         // err → hr IS the whole result, break.
+-                        i.i32_const(0).i32_ne().br_if(1);
++                        i.i32_const(0).i32_ne().drop(); // [MUTANT: map err-break dropped]
+                     }
+                 }
+                 if !first_ok_wins {
