@@ -875,6 +875,11 @@ jobs:
       - name: Workflow files parse strictly (a schedule-only workflow that cannot parse fails silently, #1234)
         run: bash scripts/check-workflows.sh
 
+      - name: Stability closure standing (#1485 — informational, never blocks)
+        run: bash scripts/check-stability-closure.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: rt-oracle registry (RETIRED with v0, #782 — prints the tombstone; v1 is gated by spec/wasm_cross + the interp oracle)
         # The step name previously claimed "every compile_* registered +
         # verified tests exist" while the script short-circuits on the deleted

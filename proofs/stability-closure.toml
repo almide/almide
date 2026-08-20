@@ -1,0 +1,58 @@
+# The stability closure criterion (#1485) — the definition of the sentence
+# "the defect curve has bent", written down BEFORE the numbers arrive so it
+# cannot be adjusted to fit them (the #924 precedent: fix the bar first).
+#
+# STABILITY IS CLAIMED when every criterion below holds SIMULTANEOUSLY for
+# one 30-consecutive-day window. This is not a promise to stop changing
+# Almide and not a 1.0 declaration — it is the measurable end of the
+# discovery curve's active phase.
+#
+# CHANGING ANY N BELOW requires editing this file with a written reason in
+# the same commit (rule 3 of #1485's definition of done). The reporting gate
+# is scripts/check-stability-closure.sh — informational on every push,
+# blocking nothing.
+
+[window]
+days = 30
+rationale = "One calendar month of every instrument quiet at once. Shorter windows are weather; longer ones delay the claim past the point instruments could support it."
+
+[[criterion]]
+id = "fuzz-nights"
+statement = "14 consecutive full-budget fuzz nights with zero correctness findings, ending inside the window"
+n = 14
+source = "#924 (fixed 2026-07; reused verbatim per #1485)"
+instrument = "scripts/fuzz-green-streak.sh (reads the nightly verdicts; milestone tracking beyond 14 continues toward the 90-day A2-1 meter, which is NOT this criterion)"
+
+[[criterion]]
+id = "conformance-weeks"
+statement = "4 consecutive weeks of the conformance corpus with zero new divergences, with the generator's exclusion list EMPTY"
+n = 4
+source = "#1485 proposed criterion 2; the empty-exclusion clause means this cannot be claimed while the #1431 shape is excluded"
+instrument = "conformance-mutations.yml weekly verdicts + the conformancegen exclusion list"
+
+[[criterion]]
+id = "wasm-frontier"
+statement = "COMPILER_FRONTIER rows in proofs/wasm-fallback-baseline.txt at zero, held through the window"
+n = 0
+measured_at_declaration = 5
+source = "#1485 criterion 3 (4 rows at filing; 5 at this file's creation — the count is re-measured by the gate, not trusted from here)"
+instrument = "grep -c ':: COMPILER_FRONTIER ::' proofs/wasm-fallback-baseline.txt"
+
+[[criterion]]
+id = "wall-corpus"
+statement = "the wall corpus (#1481) shrink-only and stable through the window: corpus-wall TOTAL holds, walled-real ratchet stays 0, spec fallback baseline does not grow"
+source = "#1485 criterion 4"
+instrument = "proofs/corpus-wall.sh + the walled-real ratchet + proofs/wasm-fallback-baseline.txt row count"
+
+[[criterion]]
+id = "blockers"
+statement = "zero OPEN issues labeled I-divergence, I-miscompile, or I-unsound, held through the window"
+n = 0
+source = "#1485 criterion 5 (#1482's severity taxonomy is the instrument's vocabulary)"
+instrument = "gh issue list --label <severity> --state open"
+
+[[criterion]]
+id = "dialect-still"
+statement = "no @dialect epoch bump during the window — the language surface held still"
+source = "#1485 criterion 6"
+instrument = "proofs/dialect-epochs.toml (the epoch at window start equals the epoch at window end)"
