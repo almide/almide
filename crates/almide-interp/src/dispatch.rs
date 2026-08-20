@@ -225,13 +225,9 @@ impl<'a> Interpreter<'a> {
         }
         let root = self.root_scope();
         let is_pool = self.pool_fns.contains(&func.name);
-        if is_pool {
-            self.pool_depth += 1;
-        }
+        // Depth is owned by `run_callable`'s per-hop bump — see
+        // `call_pool_tier`.
         let (flow, frame) = self.call_function_keeping_frame(func, evaled, &root);
-        if is_pool {
-            self.pool_depth -= 1;
-        }
         // Copy-out only on a normal return — an abort/abstain never
         // half-writes state the backends would not have written either.
         if !matches!(flow, Flow::Value(_)) {
@@ -855,15 +851,11 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         root: &Scope,
     ) -> Flow {
-        let is_pool = self.pool_fns.contains(&func.name);
-        if is_pool {
-            self.pool_depth += 1;
-        }
-        let flow = self.call_function(func, args, root);
-        if is_pool {
-            self.pool_depth -= 1;
-        }
-        flow
+        // Depth is owned by `run_callable`'s per-hop bump (a tail TRANSFER
+        // into a pool fn must carry the tier with it — a second bump here
+        // would leave the spine-exit sync reading a stale depth and skipping
+        // the read-back, the codec `list.len on non-list` leak).
+        self.call_function(func, args, root)
     }
 
     /// The return sync, gated to the pool-tier EXIT boundary. `named` marks
@@ -886,9 +878,20 @@ impl<'a> Interpreter<'a> {
     /// block CANNOT faithfully spell the declared type abstains — passing the
     /// raw address onward would hand the fixture an Int where its type says
     /// container, and whatever that Int does next is a wrong vote.
-    fn sync_block_return(&self, func_def: &'a almide_ir::IrFunction, flow: Flow) -> Flow {
+    pub(crate) fn sync_block_return(&self, func_def: &'a almide_ir::IrFunction, flow: Flow) -> Flow {
         let Flow::Value(v) = &flow else { return flow };
         match self.sync_value(v, &func_def.ret_ty) {
+            Ok(Some(rebuilt)) => Flow::Value(rebuilt),
+            Ok(None) => flow,
+            Err(why) => Flow::Unsupported(why),
+        }
+    }
+
+    /// [`Self::sync_block_return`] driven by a bare `Ty` — the closure-boundary
+    /// entry (`apply_closure` has a `ret_ty`, not an `IrFunction`).
+    pub(crate) fn sync_flow_typed(&self, flow: Flow, ty: &Ty) -> Flow {
+        let Flow::Value(v) = &flow else { return flow };
+        match self.sync_value(v, ty) {
             Ok(Some(rebuilt)) => Flow::Value(rebuilt),
             Ok(None) => flow,
             Err(why) => Flow::Unsupported(why),
@@ -974,8 +977,23 @@ impl<'a> Interpreter<'a> {
                         ty_short(ty)
                     ));
                 }
-                // An opaque return type (`Value`, a bare type variable, Int):
-                // the address IS the value in the i64-uniform tier.
+                if matches!(ty, Ty::Named(n, args) if args.is_empty() && n.as_str() == "Value") {
+                    // The dynamic `Value` leaves the pool tier as a CARRIER:
+                    // the block address (so `prim.handle` re-enters the SAME
+                    // block) plus the structural snapshot display and `==`
+                    // read. A bare Int here used to leak to native ops as an
+                    // integer (value_repr printed the address, value_eq
+                    // pointer-compared to false).
+                    return match self.dyn_value_of(addr) {
+                        Some(d) => Ok(Some(d)),
+                        None => Err(format!(
+                            "return sync: a Value-typed block at {addr} cannot \
+                             be walked (unknown tag or unreadable child)"
+                        )),
+                    };
+                }
+                // An opaque return type (a bare type variable, Int): the
+                // address IS the value in the i64-uniform tier.
                 Ok(None)
             }
             _ => Ok(None),
@@ -997,6 +1015,70 @@ impl<'a> Interpreter<'a> {
             }
         }
         Ok(any.then_some(rebuilt))
+    }
+
+    /// The structural snapshot of a dynamic-`Value` block — value_core's tag
+    /// walk (0 null, 1 bool, 2 int, 3 float, 4 str payload = child String
+    /// handle, 5 array of n Value handles with n at @8, 6 object of n
+    /// (String, Value) pairs with the SLOT count 2n at @8). `None` (an
+    /// abstain upstream) for a non-block address, an unknown tag, an
+    /// unreadable child, or a depth past the cap — never a guess.
+    fn dyn_node_of(&self, addr: u32, depth: u32) -> Option<crate::value::DynNode> {
+        use crate::value::DynNode;
+        if depth > 512 || self.heap.kind(addr)? != crate::heap::BlockKind::Slots {
+            return None;
+        }
+        let tag = self.heap.block_len(addr)?;
+        Some(match tag {
+            0 => DynNode::Null,
+            1 => DynNode::Bool(self.heap.slot(addr, 0)? != 0),
+            2 => DynNode::Int(self.heap.slot(addr, 0)?),
+            3 => DynNode::Float(f64::from_bits(self.heap.slot(addr, 0)? as u64)),
+            4 => {
+                let child = u32::try_from(self.heap.slot(addr, 0)?).ok()?;
+                let (bytes, kind) = self.heap.block_bytes(child)?;
+                if kind != crate::heap::BlockKind::Str {
+                    return None;
+                }
+                DynNode::Str(String::from_utf8(bytes).ok()?)
+            }
+            5 => {
+                let n = self.heap.cap_field(addr)?;
+                let mut xs = Vec::with_capacity(n as usize);
+                for i in 0..n {
+                    let child = u32::try_from(self.heap.slot(addr, i)?).ok()?;
+                    xs.push(self.dyn_node_of(child, depth + 1)?);
+                }
+                DynNode::Arr(xs)
+            }
+            6 => {
+                let pairs = self.heap.cap_field(addr)? / 2;
+                let mut out = Vec::with_capacity(pairs as usize);
+                for i in 0..pairs {
+                    let kaddr = u32::try_from(self.heap.slot(addr, 2 * i)?).ok()?;
+                    let (kb, kk) = self.heap.block_bytes(kaddr)?;
+                    if kk != crate::heap::BlockKind::Str {
+                        return None;
+                    }
+                    let vaddr = u32::try_from(self.heap.slot(addr, 2 * i + 1)?).ok()?;
+                    out.push((
+                        String::from_utf8(kb).ok()?,
+                        self.dyn_node_of(vaddr, depth + 1)?,
+                    ));
+                }
+                DynNode::Obj(out)
+            }
+            _ => return None,
+        })
+    }
+
+    /// A dynamic-`Value` carrier for a block address, or `None` when the
+    /// block cannot honestly be walked.
+    fn dyn_value_of(&self, addr: u32) -> Option<Value> {
+        Some(Value::Dyn {
+            addr: addr as i64,
+            node: Rc::new(self.dyn_node_of(addr, 0)?),
+        })
     }
 
     /// A block address as the `Value` the declared type `ty` spells — `None`
@@ -1075,6 +1157,9 @@ impl<'a> Interpreter<'a> {
             | Ty::Tuple(_)
             | Ty::Applied(C::List | C::Set | C::Map | C::Option | C::Result, _) => {
                 self.rebuild_addr(u32::try_from(s).ok()?, elem)
+            }
+            Ty::Named(n, args) if args.is_empty() && n.as_str() == "Value" => {
+                self.dyn_value_of(u32::try_from(s).ok()?)
             }
             _ => Some(Value::Int(s)),
         }
@@ -1268,15 +1353,23 @@ impl<'a> Interpreter<'a> {
                 self.heap.keep(rc);
                 Ok(a as i64)
             }
-            // NOT here: tuple materialization. Physically a tuple is one more
-            // slot block (value_object reads `(String, Value)` pairs as
-            // `load64(tup+12)` / `load64(tup+20)`), and an arm for it was
-            // measured: it unlocks the codec/value DECODE chains, whose
-            // results then flow into fixture-level `==` and repr — and the
-            // interp's native eq/repr on a bare address votes WRONG (value_eq
-            // printed F for T, value_repr printed the address). Those need a
-            // typed dynamic-Value carrier first (slice 2 increment 3); until
-            // then a tuple element abstains before the wrong vote can form.
+            // A tuple is one more slot block: one slot per element, `len` =
+            // the element count (value_object reads `(String, Value)` pairs
+            // as `load64(tup+12)` / `load64(tup+20)`). Unlocked by the
+            // `Value::Dyn` carrier (increment 4): the decode chains this
+            // opens now hand fixture-level `==` and repr typed carriers,
+            // not bare addresses.
+            (Value::Tuple(rc), Some(Ty::Tuple(ts))) if ts.len() == rc.len() => {
+                let rc = Rc::clone(rc);
+                let slots: Result<Vec<i64>, String> = rc
+                    .iter()
+                    .zip(ts)
+                    .map(|(e, t)| self.heap_slot_hinted(e, t))
+                    .collect();
+                let a = self.heap.bind_slots(rc_key(&rc), &slots?, rc.len() as u32);
+                self.heap.keep(rc);
+                Ok(a as i64)
+            }
             _ => self.heap_materialize(v),
         }
     }
@@ -1311,11 +1404,41 @@ impl<'a> Interpreter<'a> {
             || matches!(ty, Ty::Named(n, args) if args.is_empty() && n.as_str() == "Value");
         match e {
             Value::Int(i) if int_decl || opaque_decl => Ok(*i),
+            Value::Dyn { addr, .. } if opaque_decl => Ok(*addr),
+            // An ADDRESS from the i64-uniform tier flowing back under a HEAP
+            // declaration (a `load_handle`/`load64` borrow riding through
+            // fixture-tier plumbing): accept iff it is a live block whose
+            // KIND can spell the declared type — identity, no copy, aliasing
+            // kept. A dead address or a kind mismatch stays the abstain.
+            Value::Int(i) if heap_slot_is_child(ty) => {
+                use crate::heap::BlockKind as K;
+                let kind = u32::try_from(*i).ok().and_then(|a| self.heap.kind(a));
+                let spellable = match (kind, ty) {
+                    (Some(K::Str), Ty::String) => true,
+                    (Some(K::Bytes), Ty::Bytes) => true,
+                    (Some(K::Slots), Ty::Applied(..) | Ty::Tuple(_)) => true,
+                    (Some(K::Slots), Ty::Named(n, args))
+                        if args.is_empty() && n.as_str() == "Value" =>
+                    {
+                        true
+                    }
+                    _ => false,
+                };
+                if spellable {
+                    Ok(*i)
+                } else {
+                    Err(format!(
+                        "prim.handle of a container holding a non-block Int \
+                         under the declared element type {}",
+                        ty_short(ty)
+                    ))
+                }
+            }
             Value::Float(_) if matches!(ty, Ty::Float | Ty::Float64) || opaque_decl => {
                 heap_scalar_slot(e, "container")
             }
             Value::Bool(b) if matches!(ty, Ty::Bool) || opaque_decl => Ok(*b as i64),
-            Value::Str(_) | Value::List(_) | Value::Set(_) | Value::Map(_)
+            Value::Str(_) | Value::List(_) | Value::Set(_) | Value::Map(_) | Value::Tuple(_)
                 if heap_slot_is_child(ty) && !opaque_decl =>
             {
                 self.heap_materialize_hinted(e, Some(ty))
@@ -1338,6 +1461,8 @@ impl<'a> Interpreter<'a> {
             // result — identity is the faithful model. It is identity for a
             // genuine scalar Int too, exactly as it is there.
             Value::Int(i) => Ok(*i),
+            // The dynamic-Value carrier re-enters as ITS OWN block.
+            Value::Dyn { addr, .. } => Ok(*addr),
             Value::Str(rc) => {
                 let a = self.heap.bind(rc_key(rc), rc.as_bytes(), BlockKind::Str);
                 self.heap.keep(Rc::clone(rc));
@@ -1683,9 +1808,10 @@ impl<'a> Interpreter<'a> {
                 // Top-level fn closes only over top-level lets, modeled by the
                 // root scope.
                 captured: self.root_scope(),
-                // No lambda node here; the fn's own ABI already decides its
-                // shape, so this path is left exactly as it was.
-                ret_ty: None,
+                // The fn's DECLARED return type rides along so the closure
+                // boundary can run the same #1226 read-back a direct call
+                // gets (value.as_array as an FnRef leaked raw addresses).
+                ret_ty: Some(func.ret_ty.clone()),
             };
             return Flow::val(Value::Closure(Rc::new(clo)));
         }

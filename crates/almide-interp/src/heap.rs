@@ -186,6 +186,13 @@ impl Heap {
         self.bound.entry(key).or_insert(addr);
     }
 
+    /// The `cap` field of the block at `addr` — for a dynamic-`Value` block
+    /// this is where value_core keeps the ELEMENT count (tag 5) / SLOT count
+    /// (tag 6), with the tag itself in the `len` field.
+    pub(crate) fn cap_field(&self, addr: u32) -> Option<u32> {
+        self.kinds.contains_key(&addr).then(|| self.get_u32(addr + CAP_OFF)).flatten()
+    }
+
     /// The `len` field of the block at `addr`. What it MEANS (bytes, elements,
     /// entries, or a tag) is the caller's to decide from the declared type.
     pub(crate) fn block_len(&self, addr: u32) -> Option<u32> {

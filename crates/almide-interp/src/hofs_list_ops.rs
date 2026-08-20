@@ -34,6 +34,20 @@ impl<'a> Interpreter<'a> {
                  before dispatch, so its binding cannot be written back)"
             )));
         }
+        // ADDRESS-UNIFORM receivers stay in the pool tier (#1226): a live
+        // block address reaching a native container op means a POOL body is
+        // mid-flight (its values are addresses by design) — the native impls
+        // expect real containers and would abort. Falling through hands the
+        // call to the self-host body, which reads the SAME arena through the
+        // prim floor (`list_len` = handle + load32). First-arg only: every
+        // container op's receiver is its first argument, and a genuinely
+        // scalar first arg under a container module name never collides
+        // (fall-through is the pre-existing behavior for unknown ops anyway).
+        if let Some(Value::Int(i)) = args.first() {
+            if u32::try_from(*i).ok().and_then(|a| self.heap.kind(a)).is_some() {
+                return None;
+            }
+        }
         // Per-module dispatch below — grouping by `module` first (rather than
         // one flat `(module, func)` match) is behavior-preserving because every
         // arm was already keyed by a unique `(module, func)` literal pair, so

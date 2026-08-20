@@ -77,6 +77,75 @@ pub enum Value {
     Closure(Rc<Closure>),
     /// A lazy integer range; materialized to a `List` by iteration / list ops.
     Range { start: i64, end: i64, inclusive: bool },
+    /// A DYNAMIC `Value` (the almide `Value` data model, #1226 slice 2
+    /// increment 4): `addr` is its arena block (so `prim.handle` answers the
+    /// SAME block — aliasing and rc semantics preserved when it re-enters the
+    /// pool tier), and `node` is the structural snapshot taken at the pool
+    /// EXIT boundary, which display and `==` read (both backends' `Value` is
+    /// functional — blocks are built fresh, not mutated in place — so the
+    /// snapshot cannot go stale on the shapes the corpus pins; a shape that
+    /// mutates a shared block would dissent in the 3-way gate, not silently
+    /// pass).
+    Dyn { addr: i64, node: Rc<DynNode> },
+}
+
+/// The structural snapshot of a dynamic `Value` block: value_core's tag
+/// universe (0 null, 1 bool, 2 int, 3 float, 4 str, 5 array, 6 object).
+/// `PartialEq` derives value_core's `value.eq` exactly — scalars by value
+/// (Float via f64 `==`: NaN != NaN, -0.0 == 0.0), strings by content, arrays
+/// element-wise, objects pairwise IN ORDER.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DynNode {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Arr(Vec<DynNode>),
+    Obj(Vec<(String, DynNode)>),
+}
+
+impl DynNode {
+    /// `value_stringify` byte-for-byte (stdlib/value_core.almd): scalars
+    /// rendered directly, Float via Rust's raw `{}` (the native oracle),
+    /// strings JSON-quoted with the exact escape set/order (`\` first, then
+    /// quote, newline, CR, tab), arrays/objects comma-joined, no spaces.
+    pub fn to_json(&self) -> String {
+        fn quote(s: &str) -> String {
+            let mut out = String::with_capacity(s.len() + 2);
+            out.push('"');
+            for c in s.chars() {
+                match c {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    other => out.push(other),
+                }
+            }
+            out.push('"');
+            out
+        }
+        match self {
+            DynNode::Null => "null".to_string(),
+            DynNode::Bool(b) => b.to_string(),
+            DynNode::Int(n) => n.to_string(),
+            DynNode::Float(f) => format!("{}", f),
+            DynNode::Str(s) => quote(s),
+            DynNode::Arr(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.to_json()).collect();
+                format!("[{}]", parts.join(","))
+            }
+            DynNode::Obj(pairs) => {
+                let parts: Vec<String> = pairs
+                    .iter()
+                    .map(|(k, v)| format!("{}:{}", quote(k), v.to_json()))
+                    .collect();
+                format!("{{{}}}", parts.join(","))
+            }
+        }
+    }
 }
 
 impl Value {
@@ -163,6 +232,7 @@ impl Value {
             Value::Result(_) => "Result",
             Value::Closure(_) => "Closure",
             Value::Range { .. } => "Range",
+            Value::Dyn { .. } => "Value",
         }
     }
 }
@@ -196,6 +266,12 @@ fn value_eq_a(a: &Value, b: &Value) -> Option<bool> {
         (Unit, Unit) => true,
         (Bool(a), Bool(b)) => a == b,
         (Int(a), Int(b)) => a == b,
+        // Dynamic Values compare STRUCTURALLY via their snapshots — the
+        // value_core `value.eq` rules ride on DynNode's derived PartialEq
+        // (scalars by value, float f64 `==`, strings by content, arrays
+        // element-wise, objects pairwise in order). Never by address: two
+        // separately-built equal Values are equal (C-099).
+        (Dyn { node: a, .. }, Dyn { node: b, .. }) => a == b,
         // f64 PartialEq: NaN != NaN, matching Rust `==` semantics that
         // codegen lowers `almide_eq!` to.
         (Float(a), Float(b)) => a == b,
@@ -341,6 +417,9 @@ impl Value {
             Value::Float(f) => format!("{}", f),
             Value::Bool(b) => b.to_string(),
             Value::Unit => "()".to_string(),
+            // A dynamic Value reprs as its JSON text, bare and nested alike
+            // (the C-215-family contract value_repr pins).
+            Value::Dyn { node, .. } => node.to_json(),
             // Compound / container values use the repr form even at top level.
             _ => self.almide_repr(),
         }
@@ -373,6 +452,9 @@ impl Value {
             // A string inside a container is double-quoted + escaped with the
             // exact set `\\ \" \n \r \t`.
             Value::Str(s) => repr_str(s),
+            // A dynamic Value stays its raw JSON text inside containers and
+            // record fields too (`params: {"x":1}` — never re-quoted).
+            Value::Dyn { node, .. } => node.to_json(),
             _ => return None,
         })
     }

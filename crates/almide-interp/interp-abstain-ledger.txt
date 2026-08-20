@@ -11,23 +11,7 @@
 # (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).
 
 alias_combinator_rc  out-of-interp-scope capability: prim.handle of a Option (outside the slice-2 heap family)
-bytes_f16_offset_overflow  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
 bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr
-codec_decode_error_surface  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_decode_errors  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_deep_nesting  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_doc_array  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_empty_and_bool  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_extra_keys  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_float_int  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_int_float_boundaries  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_list_list_field  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_nested_records  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_none_omission  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_option_numeric  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_string_escapes  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_variant_roundtrip  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-codec_whitespace_tolerance  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
 count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
 fan_effect_mapper_capability  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
@@ -40,15 +24,7 @@ fs_read_lines  out-of-interp-scope capability: prim.handle of a Result (outside 
 fs_read_text_utf8  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
 fs_write_errno  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
 io_write_ordering  out-of-interp-scope capability: prim.fd_write
-json_gltf_walk  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-json_number_unicode  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-json_path_edges  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-json_string_span  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-json_stringify_pretty  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-json_value  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
-list_set_value  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-list_update_heap  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
 matrix_dims_guard  out-of-interp-scope capability: prim.store64 with a non-address
 matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
 module_var_alias_cow  out-of-interp-scope capability: prim.store64 with a non-address
@@ -57,10 +33,3 @@ range_bind_huge  interp fuel/recursion budget exhausted
 range_materialize_oom  out-of-interp-scope capability: range materialization beyond the interp cap (both backends take the C-197 resource path)
 set_index_order  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
 string_from_bytes  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
-unwrap_or_unwrap_fallback  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-value_deep_eq  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-value_eq  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-value_merge  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-value_object_leak_loop  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-value_object_ops_share  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
-value_repr  out-of-interp-scope capability: prim.handle of a container holding a Tuple element under the declared element type (String, Named) (no faithful slot repr)
