@@ -42,10 +42,12 @@ fallback_rows=$(grep -cE '^spec/' proofs/wasm-fallback-baseline.txt 2>/dev/null 
 echo "  wall-corpus        SEE-GATES (corpus-wall + walled-real ratchet gate red on regression; baseline rows: ${fallback_rows})"
 
 # 5. blockers (target 0): needs gh; honest UNMEASURED without it.
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+GH="gh"
+command -v timeout >/dev/null 2>&1 && GH="timeout 20 gh"
+if command -v gh >/dev/null 2>&1 && $GH auth status >/dev/null 2>&1; then
   total=0
   for lbl in I-divergence I-miscompile I-unsound; do
-    n=$(gh issue list --label "$lbl" --state open --json number -q 'length' 2>/dev/null || echo "")
+    n=$($GH issue list --label "$lbl" --state open --json number -q 'length' 2>/dev/null || echo "")
     [ -z "$n" ] && { total="?"; break; }
     total=$((total + n))
   done
