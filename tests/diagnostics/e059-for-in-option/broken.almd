@@ -1,0 +1,8 @@
+// An Option-of-List head: the loop cannot see through the carrier — unwrap
+// with `?? []` so the none case iterates zero times.
+fn main() -> Unit = {
+  let xs: List[Int]? = some([1, 2])
+  for x in xs {
+    println(int.to_string(x))
+  }
+}
