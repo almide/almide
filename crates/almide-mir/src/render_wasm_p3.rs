@@ -53,6 +53,21 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     } else {
         String::new()
     };
+    // HEAP-CAP knob (#1530): a harness-set ceiling on the bump frontier,
+    // checked in $alloc and $alloc8 right after their frontier-wrap guards.
+    // Free-list reuse never moves $bump, so what the ceiling measures is the
+    // PEAK ARENA FOOTPRINT — a dropped rc_dec starves the free-list, churn
+    // then bumps a fresh block every round, and the leak meets this line as
+    // the same DEFINED abort as real exhaustion ("Error: out of memory",
+    // exit 1) at a deterministic iteration instead of an invisible slow
+    // bloat. With the knob off (the default 0) the snippet is empty and the
+    // prelude is byte-identical to a build without #1530.
+    let heap_cap_check = match crate::heap_cap::heap_cap() {
+        0 => String::new(),
+        cap => format!(
+            "    ;; heap-cap knob (#1530): frontier ceiling, baked by the harness\n    (if (i32.gt_u (global.get $bump) (i32.const {cap}))\n      (then (call $oom)))\n"
+        ),
+    };
     format!(
         r#"(module
   (import "wasi_snapshot_preview1" "fd_write"
@@ -228,7 +243,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     ;; push probe faulted at exactly the memory boundary). Unsigned wrap test.
     (if (i32.lt_u (global.get $bump) (local.get $p))
       (then (call $oom)))
-    ;; GROW the linear memory if the new frontier passed the last allocated page. The wasm memory
+{heap_cap_check}    ;; GROW the linear memory if the new frontier passed the last allocated page. The wasm memory
     ;; starts at 1 page (64 KiB) with no max; a program that allocates more (a deep recursive
     ;; List-accumulator, a large file read) MUST grow it or the next store traps OOB. `memory.size`
     ;; returns the current page count; grow by exactly enough whole pages to cover `$bump`. This
@@ -263,7 +278,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     ;; Same frontier-overflow guard as $alloc (Wave 4 L5 layer 2).
     (if (i32.lt_u (global.get $bump) (local.get $p))
       (then (call $oom)))
-    ;; Grow the linear memory past the last page if this (possibly large — a 4 KiB readdir buffer, a
+{heap_cap_check}    ;; Grow the linear memory past the last page if this (possibly large — a 4 KiB readdir buffer, a
     ;; file-content buffer) scratch alloc crossed it. Same page-count-only grow as `$alloc`, and the
     ;; same C-197 discipline: a refused grow is the defined `$oom` abort, never an OOB store.
     (if (i32.gt_u (global.get $bump) (i32.mul (memory.size) (i32.const 65536)))

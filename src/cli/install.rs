@@ -117,6 +117,7 @@ pub fn cmd_install(
         verified: false,         // v0 codegen for install
         native_verified: false,  // v0 codegen for install
         wasm_opt: false,
+        heap_cap: None,
     });
 
     let _ = std::env::set_current_dir(&prev_cwd);

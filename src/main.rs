@@ -135,6 +135,16 @@ enum Commands {
         /// flag the module ships verbatim. No-op on the native target.
         #[arg(long = "wasm-opt")]
         wasm_opt: bool,
+        /// Bake a hard heap ceiling (bytes) into the built artifact (#1530).
+        /// Exceeding it is the DEFINED "Error: out of memory" abort (exit 1)
+        /// on both targets: the wasm bump frontier checks the cap in $alloc,
+        /// and the native binary counts live bytes in a wrapping global
+        /// allocator. A leak-harness knob — a leak becomes a deterministic
+        /// OOM at the boundary instead of an invisible slow bloat. Absent or
+        /// 0 = no ceiling, and the output is byte-identical to a build
+        /// without the flag.
+        #[arg(long = "heap-cap")]
+        heap_cap: Option<u32>,
     },
     /// Run tests
     Test {
@@ -808,7 +818,7 @@ fn dispatch(cli: Cli) {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
             dispatch_run(file, no_check, release, target, no_verified, time_report, program_args),
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, heap_cap } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -825,6 +835,7 @@ fn dispatch(cli: Cli) {
                 verified: !no_verified,
                 native_verified: !no_verified,
                 wasm_opt,
+                heap_cap,
             });
         }
         Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),

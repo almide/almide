@@ -20,6 +20,7 @@ pub struct BuildArgs<'a> {
     pub verified: bool,
     pub native_verified: bool,
     pub wasm_opt: bool,
+    pub heap_cap: Option<u32>,
 }
 
 /// The npm/JavaScript target was removed with the TS backend; reject it with
@@ -146,14 +147,19 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, heap_cap,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
+    let heap_cap = heap_cap.filter(|n| *n > 0);
 
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
+        // The knob rides a render-scoped guard, not a params thread-through:
+        // the whole CLI runs on the one `almide-main` worker thread, so the
+        // thread-local is exactly as scoped as this call.
+        let _cap = heap_cap.map(almide_mir::heap_cap::HeapCapGuard::set);
         cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt);
         return;
     }
@@ -166,6 +172,10 @@ pub fn cmd_build(args: BuildArgs) {
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
+        let rs_code = match heap_cap {
+            Some(n) => inject_heap_cap(&rs_code, n),
+            None => rs_code,
+        };
         cmd_build_wasi_rustc(&rs_code, &output);
         return;
     }
@@ -179,6 +189,25 @@ pub fn cmd_build(args: BuildArgs) {
         super::render_v1_native_or_fallback(file, rs_code)
     } else {
         rs_code
+    };
+
+    // --heap-cap (#1530): wrap the binary's allocator AFTER the v1/v0 source
+    // decision so both native paths carry the same ceiling.
+    let rs_code = match heap_cap {
+        Some(n) => {
+            // The rlib fast path SLIMS the generated source down to its main
+            // body and splices a prebuilt runtime in — the injected allocator
+            // block would be stripped with the prelude it sits in, and the
+            // "capped" binary would silently carry no cap (exactly the
+            // skip-as-pass shape this knob exists to kill). A cap build is a
+            // harness build: take the self-contained cargo path.
+            // SAFETY: the whole CLI runs sequentially on the one `almide-main`
+            // worker thread and no other thread is alive to read the
+            // environment concurrently.
+            unsafe { std::env::set_var("ALMIDE_NO_RTLIB", "1") };
+            inject_heap_cap(&rs_code, n)
+        }
+        None => rs_code,
     };
 
     // Load native deps from almide.toml (search in input file's directory, then
@@ -196,6 +225,72 @@ pub fn cmd_build(args: BuildArgs) {
     }
 
     cmd_build_native(&rs_code, &output, use_release, &native_deps, source_root.as_deref());
+}
+
+/// `--heap-cap` (#1530): wrap the generated program's allocator in a counting
+/// `GlobalAlloc` with a hard live-bytes ceiling. Exceeding it is the DEFINED
+/// abort — "Error: out of memory" on stderr, exit 1 — the exact shape the wasm
+/// leg's `$oom` prints when its bump frontier passes the same knob, so a leak
+/// harness can drive both targets to one deterministic boundary. The block is
+/// inserted AFTER the leading inner attributes (`#![...]` must stay first in a
+/// crate root); item order is otherwise free in Rust.
+fn inject_heap_cap(rs_code: &str, cap: u32) -> String {
+    let runtime = format!(
+        r#"// --heap-cap runtime (#1530): hard ceiling on live heap bytes.
+const __ALMIDE_HEAP_CAP: usize = {cap};
+static __ALMIDE_HEAP_LIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static __ALMIDE_HEAP_TRIPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+struct __AlmideCapAlloc;
+impl __AlmideCapAlloc {{
+    fn charge(&self, n: usize) {{
+        use std::sync::atomic::Ordering::Relaxed;
+        let live = __ALMIDE_HEAP_LIVE.fetch_add(n, Relaxed) + n;
+        // TRIPPED gates the abort to fire once; allocations made by the exit
+        // path itself pass through instead of re-entering the abort.
+        if live > __ALMIDE_HEAP_CAP && !__ALMIDE_HEAP_TRIPPED.swap(true, Relaxed) {{
+            use std::io::Write;
+            let _ = std::io::stderr().write_all(b"Error: out of memory\n");
+            std::process::exit(1);
+        }}
+    }}
+}}
+unsafe impl std::alloc::GlobalAlloc for __AlmideCapAlloc {{
+    unsafe fn alloc(&self, l: std::alloc::Layout) -> *mut u8 {{
+        self.charge(l.size());
+        std::alloc::System.alloc(l)
+    }}
+    unsafe fn alloc_zeroed(&self, l: std::alloc::Layout) -> *mut u8 {{
+        self.charge(l.size());
+        std::alloc::System.alloc_zeroed(l)
+    }}
+    unsafe fn dealloc(&self, p: *mut u8, l: std::alloc::Layout) {{
+        __ALMIDE_HEAP_LIVE.fetch_sub(l.size(), std::sync::atomic::Ordering::Relaxed);
+        std::alloc::System.dealloc(p, l)
+    }}
+    unsafe fn realloc(&self, p: *mut u8, l: std::alloc::Layout, new: usize) -> *mut u8 {{
+        if new > l.size() {{
+            self.charge(new - l.size());
+        }} else {{
+            __ALMIDE_HEAP_LIVE.fetch_sub(l.size() - new, std::sync::atomic::Ordering::Relaxed);
+        }}
+        std::alloc::System.realloc(p, l, new)
+    }}
+}}
+#[global_allocator]
+static __ALMIDE_CAP_ALLOC: __AlmideCapAlloc = __AlmideCapAlloc;
+"#
+    );
+    // Inner attributes must precede all items: split after the leading run of
+    // `#![...]` / blank lines, then place the runtime between the two halves.
+    let mut split = 0;
+    for line in rs_code.split_inclusive('\n') {
+        if line.trim().is_empty() || line.trim_start().starts_with("#![") {
+            split += line.len();
+        } else {
+            break;
+        }
+    }
+    format!("{}{}{}", &rs_code[..split], runtime, &rs_code[split..])
 }
 
 /// Build for WASI target using bare rustc (no external crate deps).
