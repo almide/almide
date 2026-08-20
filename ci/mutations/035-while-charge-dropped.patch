@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 5372aec50..b42b01466 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -47,7 +47,7 @@ impl Emitter<'_> {
+                 self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                 // Deterministic meter: one loop-head charge per condition
+                 // CHECK (n iterations = n+1 checks), ALS-DT2.
+-                self.emit_det_charge_const(1);
++                // [MUTANT: while loop-head charge dropped]
+                 self.lower(cond, Some(BOOL))?;
+                 self.f.instructions().i32_eqz().br_if(1);
+                 for s in body {
