@@ -55,6 +55,21 @@ every build.
 The per-class regression pins for all five are in
 [`proofs/TRUSTED_BASE.md`](../../proofs/TRUSTED_BASE.md#the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins).
 
+The row stayed live after that gate shipped. #1537 (2026-08, reported from a
+real downstream project) was another instance: `desugar_guard`'s nested rewrite
+left a Result-typed arm under a Unit-typed statement-`if`, and the branch
+lowering's deferred-value fallthrough silently dropped the early return — the
+guard's `err` never propagated, and the function returned `ok` with the
+guard-skipped state. The MIR was again valid: RC-balanced, name-total,
+certified. Def-before-use cannot see it because nothing was unresolved; a
+well-formed wrong value flowed. The repair is one more named invariant of the
+same post-pass shape (a strict-mode wall on Result/Option-typed tails inside
+unit-typed arms, `crates/almide-mir/src/lower/control.rs`), and full support
+for the shape is tracked under the #1527 wall burn-down. The honest reading of
+this row: it produces a new accepted-but-wrong instance every few months, each
+retired by one more invariant — so the map keeps it **trusted**, and what
+would move it is a quiet quarter, not a gate count.
+
 ## The edit-locality kernel seam (Stage 3)
 
 The λ_almd kernel (`crates/almide-edit-belt`, the third 0-sorry Lean belt)
