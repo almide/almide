@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
+index fa4bd4055..28ef11de7 100644
+--- a/crates/almide-wasm/src/emitter.rs
++++ b/crates/almide-wasm/src/emitter.rs
+@@ -832,8 +832,8 @@ impl Emitter<'_> {
+                         self.f.instructions().if_(BlockType::Result(ValType::I32));
+                         self.f.instructions().i32_const(0);
+                         self.f.instructions().else_();
+-                        let payload: Vec<_> =
+-                            cases.iter().filter(|(_, fs)| !fs.is_empty()).collect();
++                        let payload: Vec<(u32, Vec<(SliceTy, u32)>)> = Vec::new();
++                        let _ = cases;
+                         // if tag==A { fields-A } else if tag==B { fields-B }
+                         // … else { 1 } (a unit case: tag equality settled it).
+                         for (tag, fields) in &payload {

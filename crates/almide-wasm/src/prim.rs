@@ -5,7 +5,7 @@
 //! align-hint 0 — the ops do arbitrary byte arithmetic by design.
 
 use almide_ir::IrExpr;
-use wasm_encoder::MemArg;
+use wasm_encoder::{BlockType, MemArg, ValType};
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -171,8 +171,33 @@ impl Emitter<'_> {
             // die(msg_handle): the guarded-abort floor — surface the line
             // on stderr, then trap (abort parity is its own gate class).
             ("die", [msg]) => {
+                // The die convention carries its own trailing "\n" in the
+                // message block, and the host print appends one — print
+                // ptr/len directly with the trailing newline stripped so
+                // stderr is the interp's line VERBATIM, not doubled.
                 self.lower(msg, Some(INT))?;
-                self.f.instructions().i32_wrap_i64().call(F_EPRINTLN_BLOCK).unreachable();
+                let b = self.tmp_i32_local;
+                let mut i = self.f.instructions();
+                i.i32_wrap_i64().local_set(b);
+                i.local_get(b).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(b).i32_load(len_memarg());
+                // len -= (len > 0 && payload[len-1] == '\n')
+                i.local_get(b).i32_load(len_memarg());
+                i.if_(BlockType::Result(ValType::I32));
+                i.local_get(b)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(b)
+                    .i32_load(len_memarg())
+                    .i32_add()
+                    .i32_const(1)
+                    .i32_sub()
+                    .i32_load8_u(raw(()))
+                    .i32_const(10)
+                    .i32_eq();
+                i.else_().i32_const(0).end();
+                i.i32_sub();
+                i.call(F_EPRINTLN_IMPORT).unreachable();
                 Ok(None)
             }
             // Bump world: refcounts are inert — evaluate for effect order,

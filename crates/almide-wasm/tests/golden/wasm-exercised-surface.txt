@@ -55,6 +55,8 @@ call:set.len
 call:string.len
 call:string.repeat
 call:string.slice
+call:string.to_upper
+call:string.trim
 call:user-fn
 expr:BinOp
 expr:Block

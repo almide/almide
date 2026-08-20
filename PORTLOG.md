@@ -1120,3 +1120,33 @@ emit_val_eq) complete the composite-comparison matrix for tuples.
 
 **Burn-up: 180 → 195 / 590** (effect +1+7 via parse/trim, tuples +3+4),
 floor 195, surface 105, zero divergence. Mutant 013 (ok-wrap tag).
+
+---
+
+## Unit 6 — stage 21: the equality matrix + declared-sum effect ABI (2026-08-20)
+
+Probe-settled ABI corner (the `ty-mismatch:result-vs-Scalar(Int)` class):
+a declared-Result effect fn is SINGLE-layer — its body yields the Result
+value itself (`ok(h(p)! + …)`), no wrap; declared-Option and raw-T effect
+fns wrap (call sites are checker-annotated `Result[T?, E]` / `Result[T, E]`).
+The four cells of effect_option_explicit_bang (never-err/can-err ×
+scalar/heap payload) and unwrap_in_callarg all claim.
+
+Equality matrix completed for the current type surface: Option (null-ness
+agreement + recursive payload), records (field-wise), unit variants (tag),
+payload variants (tag + per-case field dispatch — an if/else chain per
+case, unit cases settled by the tag). The wasmparser wall caught BOTH
+authoring bugs in the variant chain (then/else inversion, missing outer
+end) before any instantiation — four fixtures briefly divergent, zero
+landed. Mutant 014 (variant equality degraded to tag-only).
+
+Whitelist: + list_repeat (8-byte Int slots, the shared list class; carries
+its own C-169 ceiling die), + string_to_upper (byte-level string builder;
+its tuple helpers lower through THIS emitter).
+
+**die stderr fix (invisible-divergence class):** the die convention carries
+its own trailing `\n` and the host print appended another — every die
+line was doubled on the wasm leg, invisible because no gate compares
+stderr yet. Now printed verbatim (trailing newline stripped at the call).
+
+**Burn-up: 195 → 216 / 590**, floor 216, surface 107, zero divergence.

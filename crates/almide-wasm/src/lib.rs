@@ -523,8 +523,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
-                // A declared `T!E` body still yields the RAW ok type.
-                Some(SliceTy::Result(o, _)) => Some(types.el(o)),
+                // A declared-Result effect fn is SINGLE-layer (probe:
+                // `wrap_sum(p)!` strips once to Int): the body yields the
+                // Result value itself via ok()/err() — no wrap. Declared-
+                // Option and raw-T bodies yield the raw value and wrap
+                // (call sites are annotated Result[T?, E] / Result[T, E]).
+                Some(SliceTy::Result(..)) => None,
                 other => other,
             }
         } else {

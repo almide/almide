@@ -760,6 +760,125 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_STR_EQ);
             }
             SliceTy::List(h) => self.emit_list_eq(h)?,
+            SliceTy::Option(h) => {
+                // Null-ness must agree; both-null is equal; both-some
+                // compares the payload (recursive).
+                let et = self.types.el(h);
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                self.f.instructions().local_set(hb).local_set(ha);
+                self.f.instructions().local_get(ha).i32_eqz();
+                self.f.instructions().local_get(hb).i32_eqz();
+                self.f.instructions().i32_ne().if_(BlockType::Result(ValType::I32));
+                self.f.instructions().i32_const(0);
+                self.f.instructions().else_();
+                self.f.instructions().local_get(ha).i32_eqz();
+                self.f.instructions().if_(BlockType::Result(ValType::I32));
+                self.f.instructions().i32_const(1);
+                self.f.instructions().else_();
+                self.f.instructions().local_get(ha);
+                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.f.instructions().local_get(hb);
+                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.emit_val_eq(et)?;
+                self.f.instructions().end().end();
+                self.release_i32();
+                self.release_i32();
+            }
+            SliceTy::Named(ti) => {
+                enum Shape {
+                    Record(Vec<(SliceTy, u32)>),
+                    UnitVariant,
+                    Variant(Vec<(u32, Vec<(SliceTy, u32)>)>),
+                }
+                let shape = match &self.types.def(ti) {
+                    NamedDef::Record(r) => {
+                        Shape::Record(r.fields.iter().map(|f| (f.ty, f.offset)).collect())
+                    }
+                    NamedDef::Variant(v) => {
+                        if v.cases.iter().all(|c| c.fields.is_empty()) {
+                            Shape::UnitVariant
+                        } else {
+                            Shape::Variant(
+                                v.cases
+                                    .iter()
+                                    .map(|c| {
+                                        (c.tag, c.fields.iter().map(|f| (f.ty, f.offset)).collect())
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    }
+                    NamedDef::Excluded => return unsup("binop:eq-excluded"),
+                };
+                match shape {
+                    Shape::UnitVariant => {
+                        // Unit-case variants: the tag IS the value.
+                        let m = slot_memarg(almide_layout::SUM_TAG);
+                        let hb = self.hold_i32()?;
+                        self.f.instructions().local_set(hb);
+                        self.f.instructions().i32_load(m);
+                        self.f.instructions().local_get(hb).i32_load(m).i32_eq();
+                        self.release_i32();
+                    }
+                    Shape::Variant(cases) => {
+                        // tags equal AND (dispatch by tag → field-wise).
+                        let hb = self.hold_i32()?;
+                        let ha = self.hold_i32()?;
+                        let m = slot_memarg(almide_layout::SUM_TAG);
+                        self.f.instructions().local_set(hb).local_set(ha);
+                        self.f.instructions().local_get(ha).i32_load(m);
+                        self.f.instructions().local_get(hb).i32_load(m).i32_ne();
+                        self.f.instructions().if_(BlockType::Result(ValType::I32));
+                        self.f.instructions().i32_const(0);
+                        self.f.instructions().else_();
+                        let payload: Vec<_> =
+                            cases.iter().filter(|(_, fs)| !fs.is_empty()).collect();
+                        // if tag==A { fields-A } else if tag==B { fields-B }
+                        // … else { 1 } (a unit case: tag equality settled it).
+                        for (tag, fields) in &payload {
+                            self.f.instructions().local_get(ha).i32_load(m);
+                            self.f.instructions().i32_const(*tag as i32).i32_eq();
+                            self.f.instructions().if_(BlockType::Result(ValType::I32));
+                            self.f.instructions().i32_const(1);
+                            for (fty, off) in fields.iter() {
+                                self.f.instructions().if_(BlockType::Result(ValType::I32));
+                                self.f.instructions().local_get(ha);
+                                self.load_ty_slot(*fty, *off);
+                                self.f.instructions().local_get(hb);
+                                self.load_ty_slot(*fty, *off);
+                                self.emit_val_eq(*fty)?;
+                                self.f.instructions().else_().i32_const(0).end();
+                            }
+                            self.f.instructions().else_();
+                        }
+                        self.f.instructions().i32_const(1);
+                        for _ in &payload {
+                            self.f.instructions().end();
+                        }
+                        self.f.instructions().end(); // the tags-differ if
+                        self.release_i32();
+                        self.release_i32();
+                    }
+                    Shape::Record(fields) => {
+                        let hb = self.hold_i32()?;
+                        let ha = self.hold_i32()?;
+                        self.f.instructions().local_set(hb).local_set(ha);
+                        self.f.instructions().i32_const(1);
+                        for (fty, off) in fields {
+                            self.f.instructions().if_(BlockType::Result(ValType::I32));
+                            self.f.instructions().local_get(ha);
+                            self.load_ty_slot(fty, off);
+                            self.f.instructions().local_get(hb);
+                            self.load_ty_slot(fty, off);
+                            self.emit_val_eq(fty)?;
+                            self.f.instructions().else_().i32_const(0).end();
+                        }
+                        self.release_i32();
+                        self.release_i32();
+                    }
+                }
+            }
             SliceTy::Tuple(id) => {
                 // Field-wise AND, each field recursing through emit_val_eq.
                 let fields = self.types.tuple_def(id).fields;

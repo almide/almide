@@ -675,6 +675,13 @@ impl Emitter<'_> {
                 // String->String, raw stores build STRING blocks only —
                 // the string layout is digest-shared with the incumbent.
                 "string_trim",
+                // (Int, Int) -> List[Int]: raw stores build 8-byte Int
+                // slots — the one list class both layouts share. Carries
+                // its own C-169 ceiling die.
+                "list_repeat",
+                // String->String: byte-level string building; its tuple
+                // helpers are module fns lowered by THIS emitter.
+                "string_to_upper",
             ];
             // Second tier: signatures that TRIP the coupled-type proxy
             // below but whose bodies are AUDITED raw-write-free — every
