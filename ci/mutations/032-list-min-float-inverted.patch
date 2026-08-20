@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/list.rs b/crates/almide-wasm/src/list.rs
-index 9d65910e0..ca22da8e0 100644
---- a/crates/almide-wasm/src/list.rs
-+++ b/crates/almide-wasm/src/list.rs
-@@ -311,7 +311,7 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
+index 47ecc8167..5be692536 100644
+--- a/crates/almide-wasm/src/list_order.rs
++++ b/crates/almide-wasm/src/list_order.rs
+@@ -210,7 +210,7 @@ impl Emitter<'_> {
                              i.i64_xor();
                          }
                          if is_min {

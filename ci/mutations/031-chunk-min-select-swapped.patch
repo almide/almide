@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/list.rs b/crates/almide-wasm/src/list.rs
-index cb0d6b206..6a5a25c77 100644
---- a/crates/almide-wasm/src/list.rs
-+++ b/crates/almide-wasm/src/list.rs
-@@ -534,9 +534,9 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
+index 47ecc8167..eabd46c9e 100644
+--- a/crates/almide-wasm/src/list_order.rs
++++ b/crates/almide-wasm/src/list_order.rs
+@@ -358,9 +358,9 @@ impl Emitter<'_> {
                          i.local_get(hn).local_set(hcs);
                      } else {
                          // cs = n > remaining ? remaining : n
