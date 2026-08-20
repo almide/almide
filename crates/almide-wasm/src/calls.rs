@@ -181,6 +181,12 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_STR_LEN_CHARS);
                 Ok(Some(INT))
             }
+            CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
+                if let Some(out) = self.lower_value_call(func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:value.{func}"))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
                 self.lower_bytes_call(func.as_str(), args)
             }

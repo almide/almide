@@ -76,6 +76,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod types_table;
+mod value;
 
 use collect::collect_binds;
 use emitter::{Emitter, HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
@@ -249,6 +250,10 @@ enum SliceTy {
     /// i32 zero. Pure fns returning Unit keep the void convention (ret
     /// None) — this variant only appears where Unit must FLOW.
     Unit,
+    /// The dynamic `Value` (Codec/json data model) — a 16-byte tagged
+    /// block in THIS backend's layout (ratified rebuild; the incumbent's
+    /// len-as-tag convention stays behind). See value.rs.
+    Value,
 }
 
 const STR: SliceTy = SliceTy::Scalar(Scalar::Str);
@@ -268,7 +273,8 @@ impl SliceTy {
             | SliceTy::Tuple(_)
             | SliceTy::Named(_)
             | SliceTy::Fn(_)
-            | SliceTy::Unit => ValType::I32,
+            | SliceTy::Unit
+            | SliceTy::Value => ValType::I32,
         }
     }
 
@@ -363,7 +369,11 @@ fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
             })))
         }
         Ty::Named(name, args) if args.is_empty() => {
-            types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i))
+            // A user declaration wins; the builtin dynamic Value is the
+            // fallback for the undeclared opaque name.
+            types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i)).or_else(|| {
+                (name.as_str() == "Value").then_some(SliceTy::Value)
+            })
         }
         Ty::Named(name, args) => types.instance(name.as_str(), args).map(SliceTy::Named),
         _ => None,

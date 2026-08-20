@@ -1315,3 +1315,28 @@ in-place stores are a perf-war slice. Mutant 020 (store misses the
 payload offset — header corruption every fixture catches).
 
 **Burn-up: 249 → 256 / 590**, floor 256, surface 111, zero divergence.
+
+---
+
+## Unit 6 — stage 29: the dynamic Value model, REBUILT (2026-08-20)
+
+Ratified ○ (2026-08-20): the Value/json/Codec arc REBUILDS on this
+backend's layout instead of adopting the incumbent's len-as-tag
+convention (which bit twice today — list_to_string's len-as-count, and
+the whole class the layout doctrine exists to kill). A Value is a
+16-byte tagged block at the SAME offsets Result uses (tag@SUM_TAG,
+payload@SUM_FIELD); tags 0=Null 1=Bool 2=Int 3=Float 4=Str 5=Array
+6=Object; Str/Array payloads are OUR block addresses (4-byte-slot
+lists). The registry's value/json impls stay unlinked by design — their
+algorithms (json parse/stringify) get PORTED onto this representation in
+the arc's later stages, not their layout.
+
+Stage 1 (src/value.rs): scalar constructors (null/int/bool/float/str)
++ array + the as_* accessor family with the incumbent's exact err lines
+("expected Int" …) and the #658 Int→Float widening. The `Value` name
+resolves as a builtin fallback AFTER user declarations. The bind-ty:Named
+wall collapsed with it. Mutant 021 (constructor tags shifted).
+
+**Burn-up: 256 → 263 / 590**, floor 263, surface 117, zero divergence.
+Next in the arc: value.object + MapLiteral (×13), then json.stringify
+(×8, port the serializer), then json.parse (×12, port the parser).

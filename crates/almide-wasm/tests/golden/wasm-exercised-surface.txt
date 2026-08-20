@@ -61,6 +61,12 @@ call:string.slice
 call:string.to_upper
 call:string.trim
 call:user-fn
+call:value.array
+call:value.as_array
+call:value.as_string
+call:value.bool
+call:value.int
+call:value.str
 expr:BinOp
 expr:Block
 expr:Call
