@@ -37,6 +37,13 @@ fn run_small_stack(bytes: &[u8]) -> anyhow::Result<String> {
         Err(wasmtime::Error::msg(format!("almide.exit({code}) in a tail-call fixture")))
     }
     linker.func_wrap("almide", "exit", exit_host)?;
+    // fs is never reached by this fixture — inert stubs satisfy the imports.
+    linker.func_wrap(
+        "almide",
+        "fs_call",
+        |_: wasmtime::Caller<'_, ()>, _: i32, _: i32, _: i32, _: i32, _: i32| -> i64 { 0 },
+    )?;
+    linker.func_wrap("almide", "host_read", |_: wasmtime::Caller<'_, ()>, _: i32| {})?;
     let instance = linker.instantiate(&mut store, &module)?;
     let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
     main.call(&mut store, ())?;

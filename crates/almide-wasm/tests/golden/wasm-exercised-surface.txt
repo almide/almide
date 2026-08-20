@@ -32,6 +32,14 @@ call:fan.map
 call:float.parse
 call:float.to_fixed
 call:float.to_string
+call:fs.create_temp_dir
+call:fs.exists
+call:fs.mkdir_p
+call:fs.read_lines
+call:fs.read_text
+call:fs.read_text_if_exists
+call:fs.remove_all
+call:fs.write
 call:int.from_hex
 call:int.max
 call:int.parse

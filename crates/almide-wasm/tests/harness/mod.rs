@@ -22,6 +22,141 @@ struct Host {
     out: Arc<Mutex<String>>,
     err: Arc<Mutex<String>>,
     exit: Arc<Mutex<Option<i32>>>,
+    /// The fs result parking buffer (host_read copies it to the guest).
+    fs_buf: Arc<Mutex<Vec<u8>>>,
+}
+
+/// io_err = Display — VERBATIM the native runtime's formatting, so error
+/// strings ("No such file or directory (os error 2)") match by
+/// construction.
+fn io_err(e: impl std::fmt::Display) -> String {
+    format!("{e}")
+}
+
+/// Length-prefixed string frames (u32 LE + bytes) — the list-of-strings
+/// result encoding the guest decoder walks.
+fn frames(names: &[String]) -> Vec<u8> {
+    let mut b = Vec::new();
+    for n in names {
+        b.extend_from_slice(&(n.len() as u32).to_le_bytes());
+        b.extend_from_slice(n.as_bytes());
+    }
+    b
+}
+
+/// status<<32 | len: 0 = ok, 1 = err (buffer holds the message), 2 =
+/// ok-none (the *_if_exists shapes). `flag` rides len for bool ops.
+fn pack(status: i64, len: usize) -> i64 {
+    (status << 32) | (len as i64 & 0xFFFF_FFFF)
+}
+
+fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    use std::path::Path;
+    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    let unit = |r: Result<(), String>| match r {
+        Ok(()) => (pack(0, 0), Vec::new()),
+        Err(m) => err_s(m),
+    };
+    match op {
+        1 => match std::fs::read_to_string(a) {
+            Ok(t) => ok_text(t),
+            Err(e) => err_s(io_err(e)),
+        },
+        2 => unit(std::fs::write(a, b).map_err(io_err)),
+        // write_bytes: b is the guest List[Int] payload — i64 LE slots,
+        // low byte each (native `x as u8`).
+        3 => {
+            let data: Vec<u8> = b
+                .chunks_exact(8)
+                .map(|c| i64::from_le_bytes(c.try_into().expect("chunk")) as u8)
+                .collect();
+            unit(std::fs::write(a, &data).map_err(io_err))
+        }
+        4 => (pack(0, usize::from(Path::new(a).exists())), Vec::new()),
+        5 => (pack(0, usize::from(Path::new(a).is_dir())), Vec::new()),
+        6 => (pack(0, usize::from(Path::new(a).is_file())), Vec::new()),
+        7 => unit(std::fs::create_dir_all(a).map_err(io_err)),
+        8 => {
+            let p = Path::new(a);
+            unit(if p.is_dir() {
+                std::fs::remove_dir(a).map_err(io_err)
+            } else {
+                std::fs::remove_file(a).map_err(io_err)
+            })
+        }
+        9 => {
+            let p = Path::new(a);
+            unit(if p.is_dir() {
+                std::fs::remove_dir_all(a).map_err(io_err)
+            } else {
+                std::fs::remove_file(a).map_err(io_err)
+            })
+        }
+        10 => {
+            let dir = std::env::temp_dir();
+            let name = format!(
+                "{}{}",
+                a,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            let path = dir.join(&name);
+            match std::fs::create_dir_all(&path).map_err(io_err) {
+                Ok(()) => ok_text(path.to_string_lossy().replace('\\', "/")),
+                Err(m) => err_s(m),
+            }
+        }
+        11 => match std::fs::read_dir(a) {
+            Ok(entries) => {
+                let mut names = Vec::new();
+                for entry in entries {
+                    match entry {
+                        Ok(e) => names.push(e.file_name().to_string_lossy().to_string()),
+                        Err(e) => return err_s(io_err(e)),
+                    }
+                }
+                names.sort();
+                let buf = frames(&names);
+                (pack(0, buf.len()), buf)
+            }
+            Err(e) => err_s(io_err(e)),
+        },
+        12 => match std::fs::read_to_string(a) {
+            Ok(t) => {
+                let lines: Vec<String> = t.lines().map(str::to_string).collect();
+                let buf = frames(&lines);
+                (pack(0, buf.len()), buf)
+            }
+            Err(e) => err_s(io_err(e)),
+        },
+        13 => {
+            if Path::new(a).exists() {
+                match std::fs::read_to_string(a) {
+                    Ok(t) => ok_text(t),
+                    Err(e) => err_s(io_err(e)),
+                }
+            } else {
+                (pack(2, 0), Vec::new())
+            }
+        }
+        14 => match std::fs::read(a) {
+            Ok(bytes) => (pack(0, bytes.len()), bytes),
+            Err(e) => err_s(io_err(e)),
+        },
+        15 => unit(std::fs::write(a, b).map_err(io_err)),
+        16 => unit(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(a)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, b))
+                .map_err(io_err),
+        ),
+        _ => err_s(format!("unknown fs op {op}")),
+    }
 }
 
 fn append_line(
@@ -55,9 +190,10 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
     let out = Arc::new(Mutex::new(String::new()));
     let err = Arc::new(Mutex::new(String::new()));
     let exit = Arc::new(Mutex::new(None));
+    let fs_buf = Arc::new(Mutex::new(Vec::new()));
     let mut store = wasmtime::Store::new(
         &engine,
-        Host { out: out.clone(), err: err.clone(), exit: exit.clone() },
+        Host { out: out.clone(), err: err.clone(), exit: exit.clone(), fs_buf: fs_buf.clone() },
     );
     let mut linker = wasmtime::Linker::new(&engine);
     linker.func_wrap(
@@ -84,6 +220,43 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
         Err(wasmtime::Error::msg("almide.exit"))
     }
     linker.func_wrap("almide", "exit", exit_host)?;
+    linker.func_wrap(
+        "almide",
+        "fs_call",
+        |mut caller: wasmtime::Caller<'_, Host>,
+         op: i32,
+         a_ptr: i32,
+         a_len: i32,
+         b_ptr: i32,
+         b_len: i32|
+         -> wasmtime::Result<i64> {
+            let mem = caller
+                .get_export("memory")
+                .and_then(|e| e.into_memory())
+                .expect("exported memory");
+            let mut a = vec![0u8; a_len as u32 as usize];
+            mem.read(&caller, a_ptr as u32 as usize, &mut a)?;
+            let mut b = vec![0u8; b_len as u32 as usize];
+            mem.read(&caller, b_ptr as u32 as usize, &mut b)?;
+            let a = String::from_utf8_lossy(&a).to_string();
+            let (ret, buf) = fs_dispatch(op, &a, &b);
+            *caller.data().fs_buf.lock().expect("fs buf") = buf;
+            Ok(ret)
+        },
+    )?;
+    linker.func_wrap(
+        "almide",
+        "host_read",
+        |mut caller: wasmtime::Caller<'_, Host>, dst: i32| -> wasmtime::Result<()> {
+            let mem = caller
+                .get_export("memory")
+                .and_then(|e| e.into_memory())
+                .expect("exported memory");
+            let buf = caller.data().fs_buf.lock().expect("fs buf").clone();
+            mem.write(&mut caller, dst as u32 as usize, &buf)?;
+            Ok(())
+        },
+    )?;
     store.set_epoch_deadline(1);
     let eng = engine.clone();
     let ticker = std::thread::spawn(move || {

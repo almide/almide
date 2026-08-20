@@ -256,6 +256,44 @@ impl Emitter<'_> {
                 self.f.instructions().i32_const(0).call(F_ALLOC).local_set(var_idx);
                 Ok(None)
             }
+            // First n elements (native `take(n as usize)`): a NEGATIVE
+            // n reinterprets huge and takes the WHOLE list.
+            ("take", [xs, n]) => {
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
+                    other => return unsup(&format!("list-take-of:{other:?}")),
+                };
+                let stride = self.types.el(h).slot_size() as i32;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let hc = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                // bytes = n < 0 ? len : min(n*stride, len)
+                i.local_get(hb).i32_load(len_memarg());
+                i.local_get(hn).i64_const(stride as i64).i64_mul();
+                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.local_get(hn).i64_const(stride as i64).i64_mul();
+                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.i64_gt_s().select().i32_wrap_i64();
+                i.local_get(hn).i64_const(0).i64_lt_s();
+                i.select().local_set(hc);
+                i.local_get(hc).call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hc);
+                i.memory_copy(0, 0);
+                i.local_get(ho);
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(SliceTy::List(h)))
+            }
             ("is_empty", [xs]) => {
                 match self.lower(xs, None)? {
                     SliceTy::List(_) => {}

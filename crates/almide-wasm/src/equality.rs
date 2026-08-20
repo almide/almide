@@ -32,6 +32,12 @@ impl Emitter<'_> {
                 (FLOAT, Gt) => i.f64_gt(),
                 (FLOAT, Lte) => i.f64_le(),
                 (FLOAT, Gte) => i.f64_ge(),
+                // String order = byte-lexicographic with length tiebreak
+                // (String: Ord) via the shared $str_cmp.
+                (STR, Lt) => i.call(F_STR_CMP).i32_const(0).i32_lt_s(),
+                (STR, Gt) => i.call(F_STR_CMP).i32_const(0).i32_gt_s(),
+                (STR, Lte) => i.call(F_STR_CMP).i32_const(0).i32_le_s(),
+                (STR, Gte) => i.call(F_STR_CMP).i32_const(0).i32_ge_s(),
                 (other, _) => return unsup(&format!("binop:cmp-{other:?}")),
             };
             return Ok(BOOL);

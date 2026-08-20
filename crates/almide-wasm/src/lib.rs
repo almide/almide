@@ -86,6 +86,7 @@ pub(crate) use work::*;
 mod display;
 mod matrix;
 mod fan;
+mod fs;
 mod fuel;
 mod ranges;
 mod sums;
@@ -113,35 +114,44 @@ const LINE_BUF_MIN: u64 = 65536;
 const F_PRINTLN_IMPORT: u32 = 0;
 const F_EPRINTLN_IMPORT: u32 = 1;
 const F_EXIT_IMPORT: u32 = 2;
-const F_PRINTLN_BLOCK: u32 = 3;
-const F_EPRINTLN_BLOCK: u32 = 4;
-const F_APPEND_COPY: u32 = 5;
-const F_ITOA: u32 = 6;
-const F_APPEND_I64: u32 = 7;
-const F_APPEND_BOOL: u32 = 8;
-const F_ALLOC: u32 = 9;
-const F_INT_TO_STRING: u32 = 10;
-const F_CONCAT: u32 = 11;
-const F_STR_EQ: u32 = 12;
-const F_LIST_GET_8: u32 = 13;
-const F_LIST_GET_4: u32 = 14;
-const F_LIST_PUSH_8: u32 = 15;
-const F_LIST_PUSH_4: u32 = 16;
-const F_LIST_JOIN: u32 = 17;
-const F_BLOCK_COPY: u32 = 18;
-const F_BUF_TO_BLOCK: u32 = 19;
-const F_STR_LEN_CHARS: u32 = 20;
-const F_SCAN_W64: u32 = 21;
-const F_SCAN_W32: u32 = 22;
-const F_SCAN_STR: u32 = 23;
-const F_F16_TO_F64: u32 = 24;
-const F_CP_OFF: u32 = 25;
-const F_STR_SLICE: u32 = 26;
-const F_STR_REPEAT: u32 = 27;
-const F_STR_CMP: u32 = 28;
-const F_STR_REPLACE: u32 = 29;
+/// `almide.fs_call(op, a_ptr, a_len, b_ptr, b_len) -> i64` — the fs host
+/// boundary: the HARNESS runs the same std::fs code the native runtime
+/// runs (io_err = Display, so error strings match verbatim) and parks
+/// result bytes in its buffer; negative return = err, else the payload
+/// meaning is per-op (len / flag / scalar).
+const F_FS_CALL: u32 = 3;
+/// `almide.host_read(dst_ptr)` — copy the parked result buffer into
+/// guest memory (the guest allocated `len` bytes first).
+const F_HOST_READ: u32 = 4;
+const F_PRINTLN_BLOCK: u32 = 5;
+const F_EPRINTLN_BLOCK: u32 = 6;
+const F_APPEND_COPY: u32 = 7;
+const F_ITOA: u32 = 8;
+const F_APPEND_I64: u32 = 9;
+const F_APPEND_BOOL: u32 = 10;
+const F_ALLOC: u32 = 11;
+const F_INT_TO_STRING: u32 = 12;
+const F_CONCAT: u32 = 13;
+const F_STR_EQ: u32 = 14;
+const F_LIST_GET_8: u32 = 15;
+const F_LIST_GET_4: u32 = 16;
+const F_LIST_PUSH_8: u32 = 17;
+const F_LIST_PUSH_4: u32 = 18;
+const F_LIST_JOIN: u32 = 19;
+const F_BLOCK_COPY: u32 = 20;
+const F_BUF_TO_BLOCK: u32 = 21;
+const F_STR_LEN_CHARS: u32 = 22;
+const F_SCAN_W64: u32 = 23;
+const F_SCAN_W32: u32 = 24;
+const F_SCAN_STR: u32 = 25;
+const F_F16_TO_F64: u32 = 26;
+const F_CP_OFF: u32 = 27;
+const F_STR_SLICE: u32 = 28;
+const F_STR_REPEAT: u32 = 29;
+const F_STR_CMP: u32 = 30;
+const F_STR_REPLACE: u32 = 31;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 30;
+const F_FN_BASE: u32 = 32;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
@@ -151,7 +161,7 @@ const T_MAIN: u32 = 4;
 /// 10: (i32,i32,i32,i64)→i32 scan_w64; 11: (i32,i32,i32,i32)→i32 scan_w32/str;
 /// 12: (i32)→f64 f16_to_f64; 13: (i32,i64)→i32 cp_off/str_repeat;
 /// 14: (i32,i64,i64)→i32 str_slice.
-const T_FN_BASE: u32 = 15;
+const T_FN_BASE: u32 = 17;
 // Global 0 is the immutable line-buffer start (= align16(pool end)); it
 // is emitted for inspectability but no instruction references it since
 // the build cursor (global 2) took over.
@@ -467,7 +477,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let work = FnWork::default();
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
-    work.itype_base.set(15 + table.infos.len() as u32);
+    work.itype_base.set(T_FN_BASE + table.infos.len() as u32);
     work.helper_base.set(F_FN_BASE + table.infos.len() as u32 + 1);
 
     // Lower every callable function; a body that doesn't lower yet is

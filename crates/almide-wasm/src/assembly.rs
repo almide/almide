@@ -61,10 +61,14 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     types.ty().function([ValType::I32], [ValType::F64]); // 12: f16_to_f64
     types.ty().function([ValType::I32, ValType::I64], [ValType::I32]); // 13: cp_off / str_repeat
     types.ty().function([ValType::I32, ValType::I64, ValType::I64], [ValType::I32]); // 14: str_slice
+    types
+        .ty()
+        .function([ValType::I32; 5], [ValType::I64]); // 15: fs_call
+    types.ty().function([ValType::I32], []); // 16: host_read
     for (i, info) in table.infos.iter().enumerate() {
         // Refused functions keep a placeholder type — their stub body is
         // `unreachable` and no call site ever targets them.
-        debug_assert_eq!(T_FN_BASE as usize + i, 15 + i);
+        debug_assert_eq!(T_FN_BASE as usize + i, 17 + i);
         if info.refuse.is_some() {
             types.ty().function([], []);
         } else {
@@ -83,6 +87,8 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     imports.import("almide", "println", EntityType::Function(0));
     imports.import("almide", "eprintln", EntityType::Function(0));
     imports.import("almide", "exit", EntityType::Function(1));
+    imports.import("almide", "fs_call", EntityType::Function(15));
+    imports.import("almide", "host_read", EntityType::Function(16));
 
     let mut functions = FunctionSection::new();
     functions.function(1); // F_PRINTLN_BLOCK

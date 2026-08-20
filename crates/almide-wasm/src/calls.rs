@@ -481,6 +481,12 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:fan.{func}"))
             }
+            CallTarget::Module { module, func, .. } if module.as_str() == "fs" => {
+                if let Some(out) = self.lower_fs_call(func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:fs.{func}"))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);

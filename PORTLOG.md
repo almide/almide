@@ -1863,3 +1863,30 @@ tuple. Tuple patterns now compose through the nested machinery, so
 
 **Burn-up: 371 → 383 / 591**, floor 383, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 50: the fs host boundary (2026-08-21)
+
+fs crosses ONE generic import — `almide.fs_call(op, a, b) -> i64`
+(status in the high half, len/flag in the low) plus `almide.host_read`
+pulling parked result bytes — and the HOST (the harness) runs the SAME
+std::fs code the native runtime runs, io_err = Display included, so
+error strings ("No such file or directory (os error 2)") match
+verbatim by construction. Twelve ops land: read_text / write /
+write_bytes (the List[Int] payload crosses raw; the host takes the low
+byte per native `x as u8`) / write_bytes_raw / exists / is_dir /
+is_file / mkdir_p / remove / remove_all / create_temp_dir (host-side
+verbatim, temp paths never printed by the corpus) / list_dir (sorted) /
+read_lines / read_text_if_exists (status 2 = ok-none) / read_bytes /
+append. List-of-strings results travel as u32-LE length-prefixed
+frames; fold_lines / for_each_line run GUEST-side over the frames —
+observably identical to native's streaming. One probe catch: the frame
+walker peeked hold indices by depth arithmetic and a caller's extra
+hold shifted them — indices are now passed explicitly (the probe showed
+garbage lengths immediately). fan_settle_tuple completes its chain.
+list.take and String `<`/`>` comparisons (via $str_cmp) land as
+groundwork; tail_calls' mini-harness stubs the new imports.
+
+**Burn-up: 383 → 388 / 591**, floor 388, zero divergence, workspace 0
+failures.
