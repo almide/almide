@@ -1393,3 +1393,19 @@ The stringify mutant waits for its observers (only one fixture claims so
 far — the 022 doctrine), arriving with value.field/keys/merge.
 
 **Burn-up: 265 → 266 / 590**, floor 266, zero divergence.
+
+---
+
+## Unit 6 — stage 32: value.field/keys + the parser links (2026-08-20)
+
+`value.field` (the Codec-derive accessor: tag check → first-match scan →
+the exact err lines, missing-field message built at runtime via concat)
+and `value.keys` land as emitted helpers. `json_parse` joins the
+sum-builder tier on a decisive audit: its raw ops build its OWN string
+buffers (layout-shared) and every Value comes through the public value.*
+surface — which THIS emitter now lowers natively, so the whole 387-line
+recursive-descent parser is layout-consistent by construction. Fixture
+count unmoved (+0): the remaining json chains block deeper (Codec derive
+bodies, value.merge, fs) — mechanisms first, the claims follow.
+
+**Burn-up: 266 / 590 held**, zero divergence.

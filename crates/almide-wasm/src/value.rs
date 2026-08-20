@@ -68,6 +68,63 @@ pub(crate) fn emit_json_quote_helper(frags: JsonFrags) -> Function {
     f
 }
 
+/// `$vfield(v, key) -> i32`: 0 not-object / 1 missing / value address.
+pub(crate) fn emit_value_field_helper() -> Function {
+    let (v, key, p, end, pair) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let m_tag = slot_memarg(almide_layout::SUM_TAG);
+    let m_pay = slot_memarg(almide_layout::SUM_FIELD);
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(v).i32_load(m_tag).i32_const(value_tags::VT_OBJECT).i32_ne();
+    i.if_(BlockType::Empty);
+    i.i32_const(0).return_();
+    i.end();
+    i.local_get(v).i32_load(m_pay).local_set(pair); // pairs list (reuse local)
+    i.local_get(pair).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(pair).i32_load(len_memarg()).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(p).i32_load(raw8()).local_set(pair);
+    i.local_get(pair).i32_load(slot_memarg(0)).local_get(key).call(F_STR_EQ);
+    i.if_(BlockType::Empty);
+    i.local_get(pair).i32_load(slot_memarg(4)).return_();
+    i.end();
+    i.local_get(p).i32_const(4).i32_add().local_set(p);
+    i.br(0);
+    i.end();
+    i.end();
+    i.i32_const(1);
+    i.end();
+    f
+}
+
+/// `$vkeys(v) -> i32`: the keys as a List[String] (fresh block; key
+/// addresses shared — strings are immutable).
+pub(crate) fn emit_value_keys_helper() -> Function {
+    let (v, p, end, dst, cur) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let m_pay = slot_memarg(almide_layout::SUM_FIELD);
+    let mut f = Function::new([(4, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(v).i32_load(m_pay).local_set(v); // pairs list
+    i.local_get(v).i32_load(len_memarg()).call(F_ALLOC).local_set(dst);
+    i.local_get(v).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(v).i32_load(len_memarg()).i32_add().local_set(end);
+    i.local_get(dst).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(cur);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(cur);
+    i.local_get(p).i32_load(raw8()).i32_load(slot_memarg(0));
+    i.i32_store(raw8());
+    i.local_get(p).i32_const(4).i32_add().local_set(p);
+    i.local_get(cur).i32_const(4).i32_add().local_set(cur);
+    i.br(0);
+    i.end();
+    i.end();
+    i.local_get(dst);
+    i.end();
+    f
+}
+
 /// `$vjson(cursor, value) -> cursor` — the recursive serializer.
 pub(crate) fn emit_json_value_helper(
     helper_base: u32,
@@ -206,6 +263,9 @@ pub(crate) fn emit_json_value_helper(
     f
 }
 
+pub(crate) mod value_tags {
+    pub(crate) const VT_OBJECT: i32 = 6;
+}
 pub(crate) const VT_NULL: i32 = 0;
 pub(crate) const VT_BOOL: i32 = 1;
 pub(crate) const VT_INT: i32 = 2;
@@ -309,6 +369,55 @@ impl Emitter<'_> {
                 self.lower(v, Some(SliceTy::Value))?;
                 self.emit_value_as_float()?;
                 Some(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR)))
+            }
+            // The Codec-derive field accessor: tag check, first-match
+            // scan, the incumbent's exact err lines.
+            ("field", [v, key]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                let hv = self.hold_i32()?;
+                self.f.instructions().local_set(hv);
+                self.lower(key, Some(STR))?;
+                let hk = self.hold_i32()?;
+                self.f.instructions().local_set(hk);
+                let vf = self.work.helper(Helper::ValueField);
+                let hr = self.hold_i32()?;
+                self.f.instructions().i32_const(16).call(F_ALLOC).local_set(hr);
+                let m_tag = slot_memarg(almide_layout::SUM_TAG);
+                let m_pay = slot_memarg(almide_layout::SUM_FIELD);
+                let not_obj = self.pool.intern("expected Object");
+                let miss_pre = self.pool.intern("missing field '");
+                let miss_post = self.pool.intern("'");
+                let mut i = self.f.instructions();
+                i.local_get(hv).local_get(hk).call(vf).local_set(hv);
+                i.local_get(hv).i32_eqz().if_(BlockType::Empty);
+                i.local_get(hr).i32_const(1).i32_store(m_tag);
+                i.local_get(hr).i32_const(not_obj as i32).i32_store(m_pay);
+                i.else_();
+                i.local_get(hv).i32_const(1).i32_eq().if_(BlockType::Empty);
+                i.local_get(hr).i32_const(1).i32_store(m_tag);
+                i.local_get(hr);
+                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT);
+                i.i32_const(miss_post as i32).call(F_CONCAT);
+                i.i32_store(m_pay);
+                i.else_();
+                i.local_get(hr).i32_const(0).i32_store(m_tag);
+                i.local_get(hr).local_get(hv).i32_store(m_pay);
+                i.end();
+                i.end();
+                i.local_get(hr);
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Some(SliceTy::Result(
+                    self.types.intern(SliceTy::Value),
+                    self.types.intern(STR),
+                ))
+            }
+            ("keys", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                let vk = self.work.helper(Helper::ValueKeys);
+                self.f.instructions().call(vk);
+                Some(SliceTy::List(self.types.intern(STR)))
             }
             ("stringify", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;

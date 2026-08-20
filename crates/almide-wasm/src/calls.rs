@@ -736,8 +736,16 @@ impl Emitter<'_> {
             // read-only load on a layout-shared block (string payload).
             // The proxy guards hand-written block internals; it misfires
             // on constructor-built sums.
-            const VERIFIED_SUM_BUILDERS: &[&str] =
-                &["string_to_int", "int_from_hex", "float_parse"];
+            const VERIFIED_SUM_BUILDERS: &[&str] = &[
+                "string_to_int",
+                "int_from_hex",
+                "float_parse",
+                // The JSON parser: raw ops build its OWN string buffers
+                // (layout-shared); every Value comes through the public
+                // value.* surface, which THIS emitter lowers natively —
+                // the whole body is layout-consistent by construction.
+                "json_parse",
+            ];
             if !VERIFIED.contains(&impl_fn) && !VERIFIED_SUM_BUILDERS.contains(&impl_fn) {
                 return None;
             }

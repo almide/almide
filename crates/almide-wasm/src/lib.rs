@@ -519,6 +519,13 @@ pub(crate) enum Helper {
     JsonValue { float_to_string: u32, frags: JsonFrags },
     /// `$vjson_quote(cursor, str) -> cursor` — the 5-escape quoted form.
     JsonQuote { frags: JsonFrags },
+    /// `$vfield(value, key) -> i32`: 0 = not an Object, 1 = missing key,
+    /// else the found Value's address (real addresses never collide with
+    /// the sentinels — the heap starts past the null guard).
+    ValueField,
+    /// `$vkeys(value) -> i32`: the object's keys as a List[String]
+    /// (addresses shared — strings are immutable).
+    ValueKeys,
 }
 
 /// Pooled fragment addresses the JSON helpers append from.
@@ -880,6 +887,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
                 *frags,
             ),
             Helper::JsonQuote { frags } => value::emit_json_quote_helper(*frags),
+            Helper::ValueField => value::emit_value_field_helper(),
+            Helper::ValueKeys => value::emit_value_keys_helper(),
         };
         extra_fns.push((ti, f));
     }
