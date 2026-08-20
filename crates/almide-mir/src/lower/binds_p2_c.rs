@@ -306,24 +306,6 @@ impl LowerCtx {
         if map_str_scalar || is_heap_elem_list_ty(ty) {
             self.value_drops.entry(dst).or_default().flat_elems = true;
         }
-        // A TUPLE result with ONE-LEVEL-EXACT heap slots (`result.unwrap_or_else`
-        // over the zip_fs pair — (Float, String)): seed the record mask so the
-        // scope-end drop SWEEPS the owned heap slots. Without it the pair's
-        // last-ref free was a plain block dec and the interior String leaked
-        // one block per call (the #1530 cap harness + the WAT rc tracer pinned
-        // it to exactly this dec). Slots outside the one-level-exact set stay
-        // unmasked — a one-level dec would leak THEIR interior, so those
-        // results keep the (honest) status quo instead of a wrong sweep.
-        if let Ty::Tuple(tys) = ty {
-            let heap_slots: Vec<usize> =
-                (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
-            if !heap_slots.is_empty()
-                && heap_slots.iter().all(|&i| self.is_flat_heap_tuple_slot(&tys[i]))
-            {
-                self.record_masks.insert(dst, heap_slots);
-                self.materialized_aggregates.insert(dst);
-            }
-        }
     }
 
     /// The named `$__drop_*` route a NESTED-container self-host result needs,

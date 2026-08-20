@@ -709,25 +709,6 @@ impl LowerCtx {
         }
         if crate::lower::is_heap_elem_list_ty(ty) {
             self.value_drops.entry(dst).or_default().flat_elems = true;
-            return;
-        }
-        // A TUPLE arg-temp with ONE-LEVEL-EXACT heap slots — the module-call
-        // twin of `seed_call_result_tuple_mask` (a destructure's subject comes
-        // through THIS arg machinery): mask the owned heap slots so the
-        // scope-end drop sweeps them. The zip_fs consumer's (Float, String)
-        // pair freed its last ref through a plain block dec here and leaked
-        // the interior String one block per call (#1530 cap harness + the WAT
-        // rc tracer). Non-exact slots stay unmasked (a one-level dec would
-        // leak THEIR interior).
-        if let Ty::Tuple(tys) = ty {
-            let heap_slots: Vec<usize> =
-                (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
-            if !heap_slots.is_empty()
-                && heap_slots.iter().all(|&i| self.is_flat_heap_tuple_slot(&tys[i]))
-            {
-                self.record_masks.insert(dst, heap_slots);
-                self.materialized_aggregates.insert(dst);
-            }
         }
     }
 
