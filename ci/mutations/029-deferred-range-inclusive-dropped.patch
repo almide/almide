@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 1df8f8bcd..25ff1b97c 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -217,7 +217,7 @@ impl Emitter<'_> {
+                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                         self.f.instructions().local_get(var_idx).local_get(el);
+                         if inclusive {
+-                            self.f.instructions().i64_gt_s();
++                            self.f.instructions().i64_ge_s(); // [MUTANT: inclusive off-by-one]
+                         } else {
+                             self.f.instructions().i64_ge_s();
+                         }
