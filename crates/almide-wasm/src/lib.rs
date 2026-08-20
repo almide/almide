@@ -85,6 +85,7 @@ pub(crate) mod work;
 pub(crate) use work::*;
 mod display;
 mod matrix;
+mod ranges;
 mod types_table;
 mod value;
 

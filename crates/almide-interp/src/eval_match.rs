@@ -388,9 +388,23 @@ impl<'a> Interpreter<'a> {
                 }
                 Flow::val(Value::str(out))
             }
-            (BinOp::ConcatList, Value::List(a), Value::List(b)) => {
-                let mut v = (*a).clone();
-                v.extend((*b).clone());
+            (BinOp::ConcatList, a, b)
+                if matches!(a, Value::List(_) | Value::Range { .. })
+                    && matches!(b, Value::List(_) | Value::Range { .. }) =>
+            {
+                // A BOUND range concats as the list it denotes (fuzz seeds
+                // 47/83/89: `[1, 2] + r` aborted here while native and the
+                // wasm leg both answered the materialized list). Over-cap
+                // spans abstain like index/len do — both backends take the
+                // C-197 resource abort there, so a lazy answer would be a
+                // wrong third vote.
+                let (Some(mut v), Some(tail)) = (a.as_iter_items(), b.as_iter_items()) else {
+                    return Flow::Unsupported(
+                        "range concat beyond the interp materialization cap                          (both backends take the C-197 resource path)"
+                            .into(),
+                    );
+                };
+                v.extend(tail);
                 Flow::val(Value::list(v))
             }
             (op, a, b) => {

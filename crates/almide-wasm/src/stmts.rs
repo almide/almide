@@ -75,6 +75,18 @@ impl Emitter<'_> {
     pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
         match &s.kind {
             IrStmtKind::Bind { var, value, .. } => {
+                // Deferred head-only range (C-238): evaluate the bounds
+                // ONCE, in source order, into the pair locals — no block.
+                if let Some(&(sl, el, _)) = self.deferred_ranges.get(var) {
+                    let IrExprKind::Range { start, end, .. } = &value.kind else {
+                        return unsup("bind:deferred-non-range");
+                    };
+                    self.lower(start, Some(INT))?;
+                    self.f.instructions().local_set(sl);
+                    self.lower(end, Some(INT))?;
+                    self.f.instructions().local_set(el);
+                    return Ok(());
+                }
                 let Some(&(idx, declared)) = self.locals.get(var) else {
                     return unsup("bind:unmapped");
                 };
@@ -191,6 +203,39 @@ impl Emitter<'_> {
                         .end();
                     self.release_i64();
                     return Ok(());
+                }
+                // A deferred range var: the same counting loop, bounds
+                // from the bind-time pair locals.
+                if let IrExprKind::Var { id } = &iterable.kind
+                    && let Some(&(sl, el, inclusive)) = self.deferred_ranges.get(id)
+                {
+                    {
+                        if var_ty != INT {
+                            return unsup("forin-range-nonint");
+                        }
+                        self.f.instructions().local_get(sl).local_set(var_idx);
+                        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                        self.f.instructions().local_get(var_idx).local_get(el);
+                        if inclusive {
+                            self.f.instructions().i64_gt_s();
+                        } else {
+                            self.f.instructions().i64_ge_s();
+                        }
+                        self.f.instructions().br_if(1);
+                        for st in body {
+                            self.lower_stmt(st)?;
+                        }
+                        self.f
+                            .instructions()
+                            .local_get(var_idx)
+                            .i64_const(1)
+                            .i64_add()
+                            .local_set(var_idx)
+                            .br(0)
+                            .end()
+                            .end();
+                        return Ok(());
+                    }
                 }
                 let elem = match self.lower(iterable, None)? {
                     SliceTy::List(h) => self.types.el(h),

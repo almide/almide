@@ -31,6 +31,7 @@ call:float.to_fixed
 call:float.to_string
 call:int.from_hex
 call:int.parse
+call:int.to_float
 call:int.to_string
 call:json.parse
 call:json.stringify
@@ -44,11 +45,14 @@ call:list.join
 call:list.len
 call:list.map
 call:list.push
+call:list.repeat
 call:list.slice
 call:map.contains
 call:map.fold
 call:map.from_list
+call:map.get
 call:map.get_or
+call:map.insert
 call:map.len
 call:map.new
 call:map.set
@@ -69,6 +73,7 @@ call:set.contains
 call:set.from_list
 call:set.insert
 call:set.len
+call:set.new
 call:string.len
 call:string.repeat
 call:string.slice

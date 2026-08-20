@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Grow-only floor: raise as slices land, never lower.
-const SUPPORTED_FLOOR: usize = 289;
+const SUPPORTED_FLOOR: usize = 299;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")

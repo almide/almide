@@ -364,6 +364,15 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_INT_TO_STRING);
                 Ok(Some(STR))
             }
+            // i64 → f64 is one wasm op; f64.convert_i64_s IS Rust's
+            // `as f64` (IEEE round-to-nearest-even), bit-exact.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "int" && func.as_str() == "to_float" && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(INT))?;
+                self.f.instructions().f64_convert_i64_s();
+                Ok(Some(FLOAT))
+            }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string"
                     && matches!(func.as_str(), "len" | "length")

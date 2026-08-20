@@ -118,6 +118,12 @@ pub(crate) fn lower_fn(
     }
     collect_binds(body, &mut binds, &mut seen, ctx.types)?;
 
+    // Bound-range deferral (C-238): head-only range binds leave the
+    // locals table entirely — they live as (start, end) i64 pairs after
+    // the hold pools, and every for-in over them counts.
+    let deferred = crate::ranges::deferred_ranges_of(body);
+    binds.retain(|(v, _)| !deferred.contains_key(v));
+
     let mut local_decls: Vec<(u32, ValType)> = Vec::new();
     for (i, (var, ty)) in binds.iter().enumerate() {
         locals.insert(*var, (env_shift + (params.len() + i) as u32, *ty));
@@ -139,6 +145,20 @@ pub(crate) fn lower_fn(
     local_decls.push((HOLD_I32_POOL, ValType::I32));
     local_decls.push((HOLD_I64_POOL, ValType::I64));
     local_decls.push((HOLD_F64_POOL, ValType::F64));
+    // Deferred-range (start, end) i64 pairs after the pools.
+    let mut deferred_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
+    {
+        let mut next = hold_f64_base + HOLD_F64_POOL;
+        let mut vars: Vec<_> = deferred.iter().collect();
+        vars.sort_by_key(|(v, _)| **v);
+        for (v, inc) in vars {
+            deferred_ranges.insert(*v, (next, next + 1, *inc));
+            next += 2;
+        }
+        if !deferred_ranges.is_empty() {
+            local_decls.push((2 * deferred_ranges.len() as u32, ValType::I64));
+        }
+    }
 
     let mut f = Function::new(local_decls);
     let mut calls: HashSet<usize> = HashSet::new();
@@ -166,6 +186,7 @@ pub(crate) fn lower_fn(
             in_main,
             work: ctx.work,
             globals: ctx.globals,
+            deferred_ranges: &deferred_ranges,
             f: &mut f,
         };
         if let Some(caps) = &env_captures {

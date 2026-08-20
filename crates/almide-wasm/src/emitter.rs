@@ -34,6 +34,9 @@ pub(crate) struct Emitter<'a> {
     /// Top-let globals (VarId → wasm global index + type): the fallback
     /// when a Var/Assign misses the locals map.
     pub(crate) globals: &'a HashMap<VarId, (u32, SliceTy)>,
+    /// Deferred head-only range binds (C-238): VarId → (start local,
+    /// end local, inclusive). No block exists for these vars.
+    pub(crate) deferred_ranges: &'a HashMap<VarId, (u32, u32, bool)>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -403,6 +406,94 @@ impl Emitter<'_> {
                     | IrExprKind::Tuple { .. }
                     | IrExprKind::TupleIndex { .. }
             ) => self.lower_record(e, want)?,
+            // Range in VALUE position materializes the real List[Int]
+            // (the front end types it Applied(List, [Int])). Span follows
+            // native list_range: end.saturating_sub(start).max(0) — the
+            // saturation is real i64-overflow detection, so (i64::MIN, 3)
+            // is the C-197 die, not an empty list. Past the wasm leg's own
+            // structural bound the same "Error: out of memory" + exit 1
+            // fires BEFORE the allocator (success between the two legs'
+            // bounds is the contracted divergence, runtime/rs list.rs).
+            IrExprKind::Range { start, end, inclusive } => {
+                let hty = SliceTy::List(self.types.intern(INT));
+                if let Some(w) = want
+                    && w != hty
+                {
+                    return unsup(&format!("ty-mismatch:range-vs-{w:?}"));
+                }
+                self.lower(start, Some(INT))?;
+                let hs = self.hold_i64()?;
+                self.f.instructions().local_set(hs);
+                self.lower(end, Some(INT))?;
+                let he = self.hold_i64()?;
+                let hd = self.hold_i64()?;
+                let hb = self.hold_i32()?;
+                let hc = self.hold_i32()?;
+                let msg = self.pool.intern("out of memory");
+                // Block bytes must fit a positive i32: span*8 + header.
+                const RANGE_CAP: i64 = ((i32::MAX - 16) / 8) as i64;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(he);
+                    if *inclusive {
+                        i.local_get(he).i64_const(1).i64_add().local_set(he);
+                    }
+                    // d = he - hs (wrapping); true span positive iff
+                    // he > hs; positive overflow iff sign(he)!=sign(hs)
+                    // and sign(d)!=sign(he) — then any past-cap value
+                    // stands in for the saturated span.
+                    i.local_get(he).local_get(hs).i64_sub().local_set(hd);
+                    i.i64_const(RANGE_CAP + 1);
+                    i.local_get(hd);
+                    i.local_get(he).local_get(hs).i64_xor();
+                    i.local_get(he).local_get(hd).i64_xor();
+                    i.i64_and().i64_const(0).i64_lt_s();
+                    i.select();
+                    i.i64_const(0);
+                    i.local_get(he).local_get(hs).i64_gt_s();
+                    i.select();
+                    i.local_set(hd);
+                    i.local_get(hd).i64_const(RANGE_CAP).i64_gt_s();
+                    i.if_(BlockType::Empty);
+                    i.i32_const(msg as i32);
+                }
+                self.emit_error_frame_abort();
+                {
+                    let mut i = self.f.instructions();
+                    i.end();
+                    i.local_get(hd)
+                        .i64_const(8)
+                        .i64_mul()
+                        .i32_wrap_i64()
+                        .call(F_ALLOC)
+                        .local_set(hb);
+                    // fill ascending: payload[k] = start + k
+                    i.local_get(hb)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_set(hc);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(hd).i64_const(0).i64_le_s().br_if(1);
+                    i.local_get(hc).local_get(hs).i64_store(MemArg {
+                        offset: 0,
+                        align: 2,
+                        memory_index: 0,
+                    });
+                    i.local_get(hs).i64_const(1).i64_add().local_set(hs);
+                    i.local_get(hc).i32_const(8).i32_add().local_set(hc);
+                    i.local_get(hd).i64_const(1).i64_sub().local_set(hd);
+                    i.br(0);
+                    i.end();
+                    i.end();
+                    i.local_get(hb);
+                }
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i64();
+                self.release_i64();
+                hty
+            }
             // List literal: alloc, then store each element through a hold
             // local (kept live across element lowering — the pool makes
             // nesting safe by construction).

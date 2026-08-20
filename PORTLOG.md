@@ -1633,3 +1633,46 @@ answered 9 against native's 0 (latent: no claimed fixture reached it).
 New mutant 028 pins `get`'s col bound through the wasm_fail row.
 
 **Burn-up: 287 → 289 / 591**, floor 289, surface 139, zero divergence.
+
+---
+
+## Unit 6 — stage 41: bound ranges + repeat's copy wall + fuzz catch #4 (2026-08-21)
+
+**Bound ranges (C-238), the design that deletes the analysis debt.** The
+front end types `let a = 0..<4` as `List[Int]` with the Range expr as
+initializer, so value-position Range now MATERIALIZES the real block —
+span by native list_range's `saturating_sub().max(0)` (the saturation is
+genuine i64-overflow detection: `(i64::MIN)..<3` is the C-197 die, not an
+empty list), with "Error: out of memory" + exit 1 past the wasm leg's own
+structural bound (success between the two legs' bounds is the contracted
+divergence). Head-only binds never materialize: ranges.rs scans the fn
+body (exhaustive-match visitor — a miss disqualifies toward the SAFE
+side, materialization) and every for-in over a deferred var counts
+between two i64 locals — the 4294967295-iteration cell passes by
+construction.
+
+**Fuzz catch #4 — the new range-bind arm bit the INTERP.** Three seeds
+(47/83/89) found `[1, 2] + r` aborting "internal: list concat" in the
+reference evaluator while native 0.58.0 and this backend both answer the
+materialized list. ConcatList now takes List|Range operands through
+as_iter_items (over-cap abstains like index/len — C-197 territory).
+The A/B against the released binary settled who was wrong (the memory
+rule exists for exactly this).
+
+**list.repeat's copy wall.** Routing repeat to the VERIFIED linked impl
+failed the C-169 boundary cell: the impl BINDS its buffer, the bind
+deep-copy doubles the footprint, and 2×2^31 bytes cannot exist in
+wasm32 — a raw trap where the contract requires success. Root-caused by
+probe (harness now surfaces swallowed traps under ALMIDE_DBG_TRAP; its
+host reads also zero-extend ptr/len — i32 sign-extension broke reads
+past 2 GiB). repeat is now a native one-allocation fill, semantics
+verbatim from list_make.almd (die > 2^28 slots, negative clamps empty).
+int.to_float is f64.convert_i64_s (IS Rust's `as f64`).
+
+**Verification honesty note**: the interim "297 green" I reported to
+myself was a grep that filtered the burn-up line and DROPPED the test
+verdict — the run was already red on the boundary cell. Full-line
+checking is now part of the drill.
+
+**Burn-up: 289 → 299 / 591**, floor 299, surface 141, zero divergence,
+workspace suite 0 failures.

@@ -418,7 +418,7 @@ impl Gen {
     }
 
     fn stmt(&mut self, depth: usize) {
-        match self.rng.below(14) {
+        match self.rng.below(15) {
             0..=2 => self.stmt_bind(depth),
             3 | 4 => self.stmt_println(depth),
             5 => self.stmt_assign(depth),
@@ -429,8 +429,34 @@ impl Gen {
             10 => self.stmt_tuple_destructure(depth),
             11 => self.stmt_enumerate_loop(depth),
             12 => self.stmt_map_from_list(depth),
+            13 => self.stmt_range_bind(),
             _ => self.stmt_push(depth),
         }
+    }
+
+    /// A BOUND range (C-238): sometimes head-only (the counting-path
+    /// deferral), sometimes measured right here — and the var is also
+    /// registered as a plain ListInt, so later statements may index or
+    /// iterate it, exercising the analysis' disqualifying shapes against
+    /// the interp's materializing answer.
+    fn stmt_range_bind(&mut self) {
+        let name = self.fresh();
+        let lo = self.rng.below(5) as i64 - 1;
+        let hi = lo + self.rng.below(6) as i64 - 1;
+        let op = if self.rng.below(2) == 0 { "..<" } else { "..." };
+        self.line(&format!("let {name} = {lo}{op}{hi}"));
+        for _ in 0..=self.rng.below(2) {
+            let iv = self.fresh();
+            self.line(&format!("for {iv} in {name} {{"));
+            self.indent += 1;
+            self.line(&format!("println(\"${{{iv}}}\")"));
+            self.indent -= 1;
+            self.line("}");
+        }
+        if self.rng.below(2) == 0 {
+            self.line(&format!("println(int.to_string(list.len({name})))"));
+        }
+        self.vars.push(Var { name, ty: Ty::ListInt, mutable: false });
     }
 
     fn stmt_bind(&mut self, depth: usize) {

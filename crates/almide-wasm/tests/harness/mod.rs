@@ -34,8 +34,10 @@ fn append_line(
         .get_export("memory")
         .and_then(|e| e.into_memory())
         .expect("exported memory");
-    let mut buf = vec![0u8; len as usize];
-    mem.read(&caller, ptr as usize, &mut buf).expect("in-bounds read");
+    let mut buf = vec![0u8; len as u32 as usize];
+    if let Err(e) = mem.read(&caller, ptr as u32 as usize, &mut buf) {
+        panic!("in-bounds read: {e:?} ptr={ptr} len={len} memsize={}", mem.data_size(&caller));
+    }
     let mut o = sink(caller.data()).lock().expect("test harness invariant");
     o.push_str(&String::from_utf8_lossy(&buf));
     o.push('\n');
@@ -84,7 +86,12 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
     let exit_code = match (&call, recorded) {
         (Ok(()), None) => 0,
         (Err(_), Some(code)) => code,
-        (Err(_), None) => 1, // genuine trap = runtime abort
+        (Err(e), None) => {
+            if std::env::var("ALMIDE_DBG_TRAP").is_ok() {
+                eprintln!("TRAP: {e:?}");
+            }
+            1 // genuine trap = runtime abort
+        }
         (Ok(()), Some(_)) => {
             anyhow::bail!("almide.exit recorded a code but the run returned normally")
         }
