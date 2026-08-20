@@ -32,6 +32,9 @@ pub(crate) struct Emitter<'a> {
     /// Function-value work: funcref-table entries, call_indirect types,
     /// lifted lambdas (W-1/W-2).
     pub(crate) work: &'a FnWork,
+    /// Top-let globals (VarId → wasm global index + type): the fallback
+    /// when a Var/Assign misses the locals map.
+    pub(crate) globals: &'a HashMap<VarId, (u32, SliceTy)>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -262,8 +265,15 @@ impl Emitter<'_> {
                 Ok(())
             }
             IrStmtKind::Assign { var, value } => {
-                let Some(&(idx, declared)) = self.locals.get(var) else {
-                    return unsup("assign:unmapped");
+                let (local, declared) = match self.locals.get(var) {
+                    Some(&(idx, d)) => (Some(idx), d),
+                    None => match self.globals.get(var) {
+                        Some(&(gidx, d)) => (None, {
+                            let _ = gidx;
+                            d
+                        }),
+                        None => return unsup("assign:unmapped"),
+                    },
                 };
                 self.lower(value, Some(declared))?;
                 if matches!(
@@ -275,7 +285,15 @@ impl Emitter<'_> {
                 ) {
                     self.f.instructions().call(F_BLOCK_COPY);
                 }
-                self.f.instructions().local_set(idx);
+                match local {
+                    Some(idx) => {
+                        self.f.instructions().local_set(idx);
+                    }
+                    None => {
+                        let gidx = self.globals[var].0;
+                        self.f.instructions().global_set(gidx);
+                    }
+                }
                 Ok(())
             }
             IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),
@@ -440,11 +458,15 @@ impl Emitter<'_> {
                 STR
             }
             IrExprKind::Var { id } => {
-                let Some(&(idx, ty)) = self.locals.get(id) else {
+                if let Some(&(idx, ty)) = self.locals.get(id) {
+                    self.f.instructions().local_get(idx);
+                    ty
+                } else if let Some(&(gidx, ty)) = self.globals.get(id) {
+                    self.f.instructions().global_get(gidx);
+                    ty
+                } else {
                     return unsup("var:unmapped");
-                };
-                self.f.instructions().local_get(idx);
-                ty
+                }
             }
             // A named fn as a VALUE: a (+1-biased) funcref-table slot.
             // A PURE fn filling an EFFECT slot gets an ok-wrap adapter

@@ -1256,3 +1256,21 @@ FULL sweep on every push. Verification total unchanged; landing cycles
 lose the ~15-minute re-proof of untouched mutants.
 
 **Burn-up: 234 → 236 / 590**, floor 236, zero divergence.
+
+---
+
+## Unit 6 — stage 26: top-lets are wasm GLOBALS (2026-08-20)
+
+Top-lets (root + module) leave main's locals and become zero-initialized
+mutable wasm globals, set by main's prelude in DEPENDENCY order — the
+SAME `dependency_init_order` the interp uses (C-077: `BANNER` declared
+first but reading `APP_NAME` through a fn must see it initialized), so
+the order matches by construction. Functions read globals across
+function boundaries — the class main-local top-lets could never serve
+(the whole `var:unmapped` wall). Modules WITH top_lets are no longer
+excluded from flattening. Var/Assign fall back to the globals map;
+container semantics unchanged (binds from globals deep-copy as always).
+Mutant 018 (dependency order degraded to declaration order — exactly the
+#632 regression the fixture pins).
+
+**Burn-up: 236 → 240 / 590**, floor 240, surface 110, zero divergence.

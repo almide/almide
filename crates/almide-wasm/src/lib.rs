@@ -147,6 +147,8 @@ const G_LINE_CURSOR: u32 = 2;
 /// Immutable i32 global: one past the line buffer (= heap start); the
 /// append helpers trap LOUDLY on overflow instead of corrupting the heap.
 const G_LINE_END: u32 = 3;
+/// Fixed runtime globals above; top-let globals start here.
+const G_FIXED_COUNT: u32 = 4;
 
 // ── slice value model ───────────────────────────────────────────────────
 
@@ -433,6 +435,10 @@ pub(crate) struct Ctx<'a> {
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
     pub(crate) work: &'a FnWork,
+    /// Top-let vars (root + module) as WASM GLOBALS: VarId → (global
+    /// index, slice type). Functions read them across function
+    /// boundaries — the class main-local top-lets could never serve.
+    pub(crate) globals: &'a HashMap<VarId, (u32, SliceTy)>,
 }
 
 /// Function-VALUE work discovered during lowering: funcref-table entries
@@ -573,9 +579,6 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         .map(|f| (f, None))
         .collect();
     for m in &ir.modules {
-        if !m.top_lets.is_empty() {
-            continue;
-        }
         for f in &m.functions {
             // A Hole body is a bodyless SURFACE decl (`= _`) — a bridge
             // boundary, not an implementation. Registering it would
@@ -616,6 +619,62 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let true_base = pool.intern("true");
     let false_base = pool.intern("false");
 
+    // Top-lets (root + module) become wasm globals — zero-initialized,
+    // then set by main's prelude in DEPENDENCY order (C-077: the same
+    // `dependency_init_order` the interp uses, so the order matches by
+    // construction).
+    let mut global_map: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
+    let mut global_decls: Vec<(VarId, SliceTy)> = Vec::new();
+    {
+        let mut next = G_FIXED_COUNT;
+        let mut add = |tl: &IrTopLet,
+                       map: &mut HashMap<VarId, (u32, SliceTy)>,
+                       decls: &mut Vec<(VarId, SliceTy)>| {
+            if let Some(sty) = slice_ty_of(&tl.ty, &types) {
+                map.insert(tl.var, (next, sty));
+                decls.push((tl.var, sty));
+                next += 1;
+            }
+            // An unsliceable top-let stays out of the pool; reading it
+            // refuses at the var site with its own honest reason.
+        };
+        for tl in &ir.top_lets {
+            add(tl, &mut global_map, &mut global_decls);
+        }
+        for m in &ir.modules {
+            for tl in &m.top_lets {
+                add(tl, &mut global_map, &mut global_decls);
+            }
+        }
+    }
+    let init_order: Vec<VarId> = {
+        use almide_ir::top_let_storage::{
+            build_global_tables, dependency_init_order, top_let_inputs,
+        };
+        let mut inputs = Vec::new();
+        for tl in &ir.top_lets {
+            inputs.push(top_let_inputs(tl));
+        }
+        for m in &ir.modules {
+            for tl in &m.top_lets {
+                inputs.push(top_let_inputs(tl));
+            }
+        }
+        let (_info, alias, _off) = build_global_tables(&inputs, &ir.var_table);
+        dependency_init_order(ir, &alias)
+    };
+    let mut init_by_var: HashMap<VarId, &IrTopLet> = HashMap::new();
+    for tl in &ir.top_lets {
+        init_by_var.insert(tl.var, tl);
+    }
+    for m in &ir.modules {
+        for tl in &m.top_lets {
+            init_by_var.insert(tl.var, tl);
+        }
+    }
+    let init_lets: Vec<IrTopLet> =
+        init_order.iter().filter_map(|v| init_by_var.get(v).map(|tl| (*tl).clone())).collect();
+
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
     let work = FnWork::default();
@@ -631,7 +690,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         }
         let params: Vec<(VarId, SliceTy)> =
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-        let ctx = Ctx { table: &table, types: &types, work: &work };
+        let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map };
         let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
@@ -655,10 +714,10 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
-    let ctx = Ctx { table: &table, types: &types, work: &work };
+    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map };
     let main_plan = FnPlan { ret: None, effect_raw: None, in_main: true };
     let (main_fn, main_calls) =
-        lower_fn(&[], main_plan, &main.body, &ir.top_lets, None, &ctx, &mut pool)?;
+        lower_fn(&[], main_plan, &main.body, &init_lets, None, &ctx, &mut pool)?;
 
     // Lift lambdas to extra functions (they may register further lambdas
     // or table entries — iterate to the fixed point).
@@ -861,6 +920,16 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         );
     }
 
+    for (_, sty) in &global_decls {
+        let vt = sty.val_type();
+        let init = match vt {
+            ValType::I64 => ConstExpr::i64_const(0),
+            ValType::F64 => ConstExpr::f64_const(0.0.into()),
+            _ => ConstExpr::i32_const(0),
+        };
+        globals.global(GlobalType { val_type: vt, mutable: true, shared: false }, &init);
+    }
+
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
     exports.export("main", ExportKind::Func, main_index);
@@ -961,12 +1030,12 @@ fn lower_fn(
 
     let mut binds: Vec<(VarId, SliceTy)> = Vec::new();
     for tl in top_lets {
-        let Some(sty) = slice_ty_of(&tl.ty, ctx.types) else {
+        if slice_ty_of(&tl.ty, ctx.types).is_none() {
             return unsup(&format!("bind-ty:{}", ty_name(&tl.ty)));
         };
-        if seen.insert(tl.var) {
-            binds.push((tl.var, sty));
-        }
+        // The top-let var itself is a GLOBAL; only its initializer's
+        // inner binds need main locals.
+        seen.insert(tl.var);
         collect_binds(&tl.value, &mut binds, &mut seen, ctx.types)?;
     }
     collect_binds(body, &mut binds, &mut seen, ctx.types)?;
@@ -1018,10 +1087,13 @@ fn lower_fn(
             cur_module,
             in_main,
             work: ctx.work,
+            globals: ctx.globals,
             f: &mut f,
         };
         for tl in top_lets {
-            let (idx, declared) = em.locals[&tl.var];
+            let Some(&(gidx, declared)) = ctx.globals.get(&tl.var) else {
+                return unsup(&format!("bind-ty:{}", ty_name(&tl.ty)));
+            };
             em.lower(&tl.value, Some(declared))?;
             if matches!(
                 declared,
@@ -1032,7 +1104,7 @@ fn lower_fn(
             ) {
                 em.f.instructions().call(F_BLOCK_COPY);
             }
-            em.f.instructions().local_set(idx);
+            em.f.instructions().global_set(gidx);
         }
         match (ret, effect_raw) {
             (None, _) => em.lower_stmt_expr(body)?,

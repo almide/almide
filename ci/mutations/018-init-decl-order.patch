@@ -1,0 +1,19 @@
+diff --git a/crates/almide-wasm/src/lib.rs b/crates/almide-wasm/src/lib.rs
+index cd70046b3..f820c338e 100644
+--- a/crates/almide-wasm/src/lib.rs
++++ b/crates/almide-wasm/src/lib.rs
+@@ -660,8 +660,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
+                 inputs.push(top_let_inputs(tl));
+             }
+         }
+-        let (_info, alias, _off) = build_global_tables(&inputs, &ir.var_table);
+-        dependency_init_order(ir, &alias)
++        let (_info, _alias, _off) = build_global_tables(&inputs, &ir.var_table);
++        let mut decl: Vec<VarId> = ir.top_lets.iter().map(|t| t.var).collect();
++        for m in &ir.modules {
++            decl.extend(m.top_lets.iter().map(|t| t.var));
++        }
++        decl
+     };
+     let mut init_by_var: HashMap<VarId, &IrTopLet> = HashMap::new();
+     for tl in &ir.top_lets {
