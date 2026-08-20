@@ -1088,3 +1088,35 @@ Result-typed operand and the raw result type itself. The wasm effect
 convention (does an effect fn RETURN a Result block, or trap-propagate?) is
 ours to define against the interp's Flow::Return(Err) semantics — next
 design decision before the Unwrap slice.
+
+---
+
+## Unit 6 — stage 20: the effect convention (2026-08-20)
+
+Effect fns stop being a wholesale refusal. The wasm convention: an effect
+fn's value is ALWAYS one Result block — the interp's raw-value-or-
+Flow::Return(Err) pair becomes tag dispatch on one static type. Bodies
+yield the RAW ok value and wrap `ok(..)` at the tail; `!` now has the
+interp's three enclosing shapes: effect fn → PROPAGATE (return the err
+block as-is — err blocks of any Result(_,E) share one layout; slot-type
+guards refuse mismatched E), main → ABORT with the exact native frame
+("Error: {msg}" + exit 1, via the abort-parity machinery), pure fn → same
+frame (stderr contract now emitted, was a bare trap). C-216 identity
+(marker typed Option = effect-layer strip) honored. Known debt: effect
+bodies drop the tail marker (`f()!`-in-tail return_call peephole queued),
+and `-> Unit` effect helpers wait on a Unit repr.
+
+Whitelist growth with a SECOND tier: `string_to_int`/`int_from_hex` trip
+the coupled-type proxy (Result in signature) but their bodies are audited
+raw-write-free — sums built via language-level ok()/err(), lowered by THIS
+emitter with THIS layout; the proxy guards hand-written block internals
+and misfires on constructor-built sums. `string_trim` (String→String, raw
+stores build string blocks only — digest-shared layout) joins tier 1.
+`string_split` stays refused: it hand-builds List[String] with 8-byte
+incumbent slots — the REAL coupling class.
+
+Tuple patterns (refutable positions) + tuple equality (field-wise through
+emit_val_eq) complete the composite-comparison matrix for tuples.
+
+**Burn-up: 180 → 195 / 590** (effect +1+7 via parse/trim, tuples +3+4),
+floor 195, surface 105, zero divergence. Mutant 013 (ok-wrap tag).

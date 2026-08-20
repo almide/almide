@@ -26,6 +26,8 @@ call:bytes.set_at
 call:eprintln
 call:float.to_fixed
 call:float.to_string
+call:int.from_hex
+call:int.parse
 call:int.to_string
 call:list.enumerate
 call:list.filter

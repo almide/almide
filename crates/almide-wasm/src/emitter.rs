@@ -26,6 +26,9 @@ pub(crate) struct Emitter<'a> {
     /// before any nested match/unwrap in a SELECTED arm's body runs.
     pub(crate) scr_i32_local: u32,
     pub(crate) scr_i64_local: u32,
+    /// Lowering `main`: a propagated `!` error ABORTS (the interp's
+    /// main-level Flow::Return(Err) contract — "Error: {msg}" + exit 1).
+    pub(crate) in_main: bool,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -87,6 +90,49 @@ impl Emitter<'_> {
 
     pub(crate) fn release_f64(&mut self) {
         self.hold_f64_depth -= 1;
+    }
+
+    /// `[raw value]` -> `[ok(..) Result block]` (the effect-fn return wrap).
+    pub(crate) fn wrap_ok(&mut self, raw: SliceTy, ret: SliceTy) -> Result<(), EmitError> {
+        let SliceTy::Result(o, _) = ret else {
+            return unsup("effect-wrap-non-result");
+        };
+        let side = self.types.el(o);
+        if side != raw {
+            return unsup("effect-wrap-ty-mismatch");
+        }
+        let hv = self.hold_val(raw)?;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hv);
+        self.f
+            .instructions()
+            .i32_const(16)
+            .call(F_ALLOC)
+            .local_tee(hb)
+            .i32_const(0)
+            .i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.f.instructions().local_get(hb).local_get(hv);
+        self.store_ty_slot(raw, almide_layout::SUM_FIELD);
+        self.f.instructions().local_get(hb);
+        self.release_i32();
+        self.release_val(raw);
+        Ok(())
+    }
+
+    /// The main-level / pure-fn abort frame for a failed `!`: the exact
+    /// native contract — `Error: {msg}` on stderr, exit 1. The message
+    /// block address is on the stack.
+    pub(crate) fn emit_error_frame_abort(&mut self) {
+        let prefix = self.pool.intern("Error: ");
+        let hm = self.tmp_i32_local;
+        self.f.instructions().local_set(hm);
+        self.f.instructions().i32_const(prefix as i32).local_get(hm).call(F_CONCAT);
+        self.f
+            .instructions()
+            .call(F_EPRINTLN_BLOCK)
+            .i32_const(1)
+            .call(F_EXIT_IMPORT)
+            .unreachable();
     }
 
     /// A hold from the pool matching the slice type's wasm value type.
@@ -714,6 +760,25 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_STR_EQ);
             }
             SliceTy::List(h) => self.emit_list_eq(h)?,
+            SliceTy::Tuple(id) => {
+                // Field-wise AND, each field recursing through emit_val_eq.
+                let fields = self.types.tuple_def(id).fields;
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                self.f.instructions().local_set(hb).local_set(ha);
+                self.f.instructions().i32_const(1);
+                for (fty, off) in fields {
+                    self.f.instructions().if_(BlockType::Result(ValType::I32));
+                    self.f.instructions().local_get(ha);
+                    self.load_ty_slot(fty, off);
+                    self.f.instructions().local_get(hb);
+                    self.load_ty_slot(fty, off);
+                    self.emit_val_eq(fty)?;
+                    self.f.instructions().else_().i32_const(0).end();
+                }
+                self.release_i32();
+                self.release_i32();
+            }
             other => return unsup(&format!("binop:eq-{other:?}")),
         }
         Ok(())
@@ -838,38 +903,96 @@ impl Emitter<'_> {
                 self.release_i32();
                 hty
             }
-            // `!` — ABORT form only. In a pure fn returning Option/Result
-            // the oracle PROPAGATES instead (#1410 family): refuse those.
+            // `!` — three enclosing shapes (the interp's eval_try_unwrap):
+            //   effect fn  -> PROPAGATE (return the err block as-is; err
+            //                 blocks of any Result(_, E) share one layout),
+            //   main       -> ABORT with the native frame
+            //                 ("Error: {msg}" + exit 1),
+            //   pure fn    -> same abort (the checker forbids propagating
+            //                 `!` outside effect fns; a pure-Option/Result
+            //                 fn's `!` is #1410-propagating — refused).
             IrExprKind::Unwrap { expr } => {
-                if matches!(self.fn_ret, Some(SliceTy::Option(_) | SliceTy::Result(..))) {
+                // C-216: a marker node TYPED Option is the effect-RESULT-
+                // layer strip on a declared-Option effect call — identity.
+                let node_ty = slice_ty_of(&e.ty, self.types);
+                // Propagation returns the operand's err block INTO the
+                // enclosing frame — sound only when the err slot types
+                // agree (they share one layout then).
+                let fn_err = match self.fn_ret {
+                    Some(SliceTy::Result(_, fe)) => Some(self.types.el(fe)),
+                    _ => None,
+                };
+                let in_effect = fn_err.is_some();
+                if !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_))) {
                     return unsup("unwrap-propagating");
                 }
                 match self.lower(expr, None)? {
+                    got @ SliceTy::Option(_)
+                        if node_ty == Some(got) =>
+                    {
+                        // Identity: pass the Option through untouched.
+                        got
+                    }
                     SliceTy::Option(h) => {
                         let et = self.types.el(h);
                         self.f
                             .instructions()
                             .local_tee(self.scr_i32_local)
                             .i32_eqz()
-                            .if_(BlockType::Empty)
-                            .unreachable()
-                            .end()
-                            .local_get(self.scr_i32_local);
+                            .if_(BlockType::Empty);
+                        if in_effect {
+                            if fn_err != Some(STR) {
+                                return unsup("unwrap-none-err-ty");
+                            }
+                            // err("none") — #556: `!` on none propagates
+                            // an Err whose message is "none".
+                            let none_msg = self.pool.intern("none");
+                            self.f
+                                .instructions()
+                                .i32_const(16)
+                                .call(F_ALLOC)
+                                .local_tee(self.tmp_i32_local)
+                                .i32_const(1)
+                                .i32_store(slot_memarg(almide_layout::SUM_TAG))
+                                .local_get(self.tmp_i32_local)
+                                .i32_const(none_msg as i32)
+                                .i32_store(slot_memarg(almide_layout::SUM_FIELD))
+                                .local_get(self.tmp_i32_local)
+                                .return_();
+                        } else if self.in_main {
+                            let none_msg = self.pool.intern("none");
+                            self.f.instructions().i32_const(none_msg as i32);
+                            self.emit_error_frame_abort();
+                        } else {
+                            self.f.instructions().unreachable();
+                        }
+                        self.f.instructions().end().local_get(self.scr_i32_local);
                         self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                         et
                     }
-                    SliceTy::Result(o, _) => {
+                    SliceTy::Result(o, er) => {
                         let et = self.types.el(o);
+                        let ert = self.types.el(er);
                         self.f
                             .instructions()
                             .local_tee(self.scr_i32_local)
                             .i32_load(slot_memarg(almide_layout::SUM_TAG))
                             .i32_const(0)
                             .i32_ne()
-                            .if_(BlockType::Empty)
-                            .unreachable()
-                            .end()
-                            .local_get(self.scr_i32_local);
+                            .if_(BlockType::Empty);
+                        if in_effect {
+                            if fn_err != Some(ert) {
+                                return unsup("unwrap-err-ty-mismatch");
+                            }
+                            self.f.instructions().local_get(self.scr_i32_local).return_();
+                        } else if self.in_main && ert == STR {
+                            self.f.instructions().local_get(self.scr_i32_local);
+                            self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+                            self.emit_error_frame_abort();
+                        } else {
+                            self.f.instructions().unreachable();
+                        }
+                        self.f.instructions().end().local_get(self.scr_i32_local);
                         self.load_ty_slot(et, almide_layout::SUM_FIELD);
                         et
                     }

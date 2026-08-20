@@ -415,9 +415,6 @@ fn registry_impl_names() -> &'static std::collections::HashSet<&'static str> {
 }
 
 fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<SliceTy>, Option<SliceTy>), String> {
-    if f.is_effect {
-        return Err("effect".into());
-    }
     if f.generics.is_some() {
         return Err("generic".into());
     }
@@ -432,8 +429,18 @@ fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<SliceTy>, Opti
         params.push(sty);
     }
     let ret = match &f.ret_ty {
+        Ty::Unit if f.is_effect => return Err("effect-unit-ret".into()),
         Ty::Unit => None,
         other => match slice_ty_of(other, types) {
+            // Effect convention: the wasm value of an effect fn is ALWAYS
+            // one Result block — the interp's raw-value-or-Flow::Return(Err)
+            // pair becomes tag dispatch on one static type. A declared
+            // `T!E` return is already Result-shaped; a raw `T` wraps as
+            // `Result(T, String)` (the default error carrier).
+            Some(sty @ SliceTy::Result(..)) => Some(sty),
+            Some(sty) if f.is_effect => {
+                Some(SliceTy::Result(types.intern(sty), types.intern(STR)))
+            }
             Some(sty) => Some(sty),
             None => return Err(format!("ret-ty:{}", ty_name(other))),
         },
@@ -514,7 +521,26 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
         let ctx = Ctx { table: &table, types: &types };
         let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
-        match lower_fn(&params, table.infos[i].ret, &f.body, &[], cur_module, &ctx, &mut pool) {
+        let effect_raw = if f.is_effect {
+            match slice_ty_of(&f.ret_ty, &types) {
+                // A declared `T!E` body still yields the RAW ok type.
+                Some(SliceTy::Result(o, _)) => Some(types.el(o)),
+                other => other,
+            }
+        } else {
+            None
+        };
+        match lower_fn(
+            &params,
+            table.infos[i].ret,
+            &f.body,
+            &[],
+            cur_module,
+            effect_raw,
+            false,
+            &ctx,
+            &mut pool,
+        ) {
             Ok(ok) => lowered.push(Ok(ok)),
             Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
         }
@@ -524,7 +550,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // fatal — main is always reachable.
     let ctx = Ctx { table: &table, types: &types };
     let (main_fn, main_calls) =
-        lower_fn(&[], None, &main.body, &ir.top_lets, None, &ctx, &mut pool)?;
+        lower_fn(&[], None, &main.body, &ir.top_lets, None, None, true, &ctx, &mut pool)?;
 
     // Reachability: refuse the program iff a call chain from `main` lands
     // on a function whose body did not lower (its stub would trap).
@@ -707,6 +733,10 @@ fn lower_fn(
     body: &IrExpr,
     top_lets: &[IrTopLet],
     cur_module: Option<&str>,
+    // Some(raw) = effect fn: the body yields RAW `raw`, then wraps `ok(..)`
+    // into the declared Result-block return.
+    effect_raw: Option<SliceTy>,
+    in_main: bool,
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
@@ -774,6 +804,7 @@ fn lower_fn(
             scr_f64_local,
             in_tail: false,
             cur_module,
+            in_main,
             f: &mut f,
         };
         for tl in top_lets {
@@ -790,10 +821,17 @@ fn lower_fn(
             }
             em.f.instructions().local_set(idx);
         }
-        match ret {
-            None => em.lower_stmt_expr(body)?,
-            Some(want) => {
+        match (ret, effect_raw) {
+            (None, _) => em.lower_stmt_expr(body)?,
+            (Some(want), None) => {
                 em.lower_tail(body, Some(want))?;
+            }
+            (Some(want), Some(raw)) => {
+                // No tail marker: a raw-typed tail call cannot
+                // `return_call` into a Result-returning frame. (The
+                // `f()!`-in-tail peephole is a later slice.)
+                em.lower(body, Some(raw))?;
+                em.wrap_ok(raw, want)?;
             }
         }
     }
