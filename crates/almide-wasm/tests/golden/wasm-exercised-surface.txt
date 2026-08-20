@@ -105,11 +105,15 @@ call:string.trim
 call:user-fn
 call:value.array
 call:value.as_array
+call:value.as_bool
+call:value.as_float
 call:value.as_int
 call:value.as_string
 call:value.bool
 call:value.field
+call:value.float
 call:value.int
+call:value.keys
 call:value.null
 call:value.object
 call:value.str
@@ -138,6 +142,7 @@ expr:ResultErr
 expr:ResultOk
 expr:SpreadRecord
 expr:StringInterp
+expr:Try
 expr:Tuple
 expr:TupleIndex
 expr:UnOp

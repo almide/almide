@@ -220,16 +220,19 @@ pub(crate) fn lower_fn(
                 em.lower_tail(body, Some(want))?;
             }
             (Some(want), Some(raw)) => {
-                // No tail marker: a raw-typed tail call cannot
-                // `return_call` into a Result-returning frame. (The
-                // `f()!`-in-tail peephole is a later slice.)
+                // Tail marker ON: a RAW-typed tail call still cannot
+                // `return_call` into this Result-returning frame (the
+                // Named arm's ret == fn_ret guard keeps it a plain call),
+                // but `f(…)!` in tail position with a MATCHING Result
+                // type sees through Try/Unwrap and return_calls — the
+                // effect-TCO contract (#557 / C-069, O(1) stack).
                 if raw == SliceTy::Unit {
                     // A Unit-effect body is statement-shaped; the ok
                     // payload materializes after it runs.
                     em.lower_stmt_expr(body)?;
                     em.f.instructions().i32_const(0);
                 } else {
-                    em.lower(body, Some(raw))?;
+                    em.lower_tail(body, Some(raw))?;
                 }
                 em.wrap_ok(raw, want)?;
             }

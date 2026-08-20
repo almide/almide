@@ -193,6 +193,34 @@ impl Emitter<'_> {
 
 
 
+    /// The WASM-level Result type of a Named callee (the IR `ty` on the
+    /// call is the RAW ok type — the effect ABI is a backend layer), or
+    /// None when the operand is not a resolvable Named call. Feeds the
+    /// Try/Unwrap tail see-through guard.
+    fn effect_tail_callee_ret(&self, e: &IrExpr) -> Option<SliceTy> {
+        let IrExprKind::Call {
+            target: almide_ir::CallTarget::Named { name }, ..
+        } = &e.kind
+        else {
+            return None;
+        };
+        let name = name.as_str();
+        // Mirror lower_call_at's dispatch order: a ctor wins the name.
+        if self.types.ctors.contains_key(name) {
+            return None;
+        }
+        let i = self
+            .cur_module
+            .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
+            .or_else(|| self.table.by_name.get(name))
+            .copied()?;
+        let info = &self.table.infos[i];
+        if info.refuse.is_some() {
+            return None;
+        }
+        info.ret
+    }
+
     /// Lower `e` in TAIL position (the value becomes the function's
     /// return): direct calls become `return_call`.
     pub(crate) fn lower_tail(
@@ -310,6 +338,29 @@ impl Emitter<'_> {
                     }
                 } else {
                     return unsup(&format!("rt:{}", symbol.as_str()));
+                }
+            }
+            // TCO sees THROUGH `Try{Call self}` / `Unwrap{Call self}`
+            // (#557 / C-069): when the callee's Result type IS this
+            // effect fn's Result, propagate-err-or-rewrap-ok is the
+            // identity, so the call happens in TRUE tail position
+            // (return_call, O(1) stack). Restricted to Named calls —
+            // the one arm guaranteed to honor `tail` when ret == fn_ret,
+            // so the un-taken wrap path after us is provably dead.
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr }
+                if tail
+                    && matches!(self.fn_ret, Some(SliceTy::Result(..)))
+                    && self.effect_tail_callee_ret(expr) == self.fn_ret =>
+            {
+                self.in_tail = true;
+                self.lower(expr, self.fn_ret)?;
+                // The Named arm return_calls (ret == fn_ret by the guard),
+                // so control NEVER returns here — the stack is polymorphic
+                // and the dead wrap path after us only needs to type-check.
+                // Report the surrounding expectation, not the Result.
+                match want.or_else(|| slice_ty_of(&e.ty, self.types)) {
+                    Some(t) => t,
+                    None => return unsup("try-tail-untyped"),
                 }
             }
             IrExprKind::Call { target, args, .. } => {
@@ -744,6 +795,10 @@ fn is_sum_shape(k: &IrExprKind) -> bool {
             | IrExprKind::OptionSome { .. }
             | IrExprKind::ResultOk { .. }
             | IrExprKind::ResultErr { .. }
+            // `?` and `!` are ONE oracle marker (eval_try_unwrap) and
+            // lower_sum handles Try | Unwrap in one arm — the routing
+            // predicate omitting Try was the entire ×15 "expr:Try" wall.
+            | IrExprKind::Try { .. }
             | IrExprKind::Unwrap { .. }
             | IrExprKind::UnwrapOr { .. }
     )

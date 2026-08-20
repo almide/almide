@@ -1722,3 +1722,30 @@ exact inversion permanently.
 
 **Burn-up: 308 → 319 / 591**, floor 319, zero divergence, workspace 0
 failures.
+
+---
+
+## Unit 6 — stage 44: the Try routing hole + effect TCO see-through (2026-08-21)
+
+The ×15 "expr:Try" wall was ONE MISSING LINE: lower_sum has handled
+`Try | Unwrap` in a single arm since the effect-ABI stage, but the
+routing predicate `is_sum_shape` listed only Unwrap — every `?` fell to
+the generic refusal. Routing it exposed a real divergence the burn-up
+caught at once: effect_tco (C-069) traps at depth ~1e5 because
+`Try{Call self}` in tail position evaluated the call on O(n) stack.
+
+The fix is the see-through the old comment had parked ("the
+`f()!`-in-tail peephole is a later slice"): the effect body now lowers
+WITH the tail marker — a RAW-typed tail call stays a plain call (the
+Named arm's ret == fn_ret guard), while `f(…)!` whose callee's WASM
+Result type equals the frame's return_calls directly:
+propagate-err-or-rewrap-ok on an identical Result is the identity, so
+O(1) stack (1e6/2e6-deep fixtures pass, value-exact). The callee's
+Result type comes from the TABLE, not the IR node (the IR `ty` is the
+raw ok type — the effect ABI is a backend layer; the first guard
+compared against it and never fired). No mutant this stage: the
+behavior pin is effect_tco's own stack-depth cell, which is exactly
+what caught the miss.
+
+**Burn-up: 319 → 330 / 591**, floor 330, zero divergence, workspace 0
+failures.
