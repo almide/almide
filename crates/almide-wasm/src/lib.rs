@@ -81,6 +81,7 @@ pub(crate) use func::*;
 pub(crate) mod ty;
 pub(crate) use ty::*;
 mod list;
+mod list_fuse;
 mod list_mut;
 mod list_order;
 mod stmts;

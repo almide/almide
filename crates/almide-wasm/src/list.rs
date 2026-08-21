@@ -253,7 +253,12 @@ impl Emitter<'_> {
             // insertion sort as list.sort moves keys and values in
             // lockstep.
             ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
-            ("fold", [xs, init, cb]) => self.lower_list_fold(xs, init, cb),
+            ("fold", [xs, init, cb]) => {
+                if let Some(out) = self.lower_list_fold_fused(xs, init, cb)? {
+                    return Ok(out);
+                }
+                self.lower_list_fold(xs, init, cb)
+            }
             _ => unsup(&format!("call:list.{func}")),
         }
     }

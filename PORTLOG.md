@@ -2057,3 +2057,29 @@ silent-bail lesson banked: Function::encode writes a code-entry LENGTH
 PREFIX — the first wiring parsed it as a locals count and returned
 None quietly; the probe that counts per-body self-return_calls is what
 caught it.
+
+---
+
+## Unit 6 — stage 58: pipeline fusion (2026-08-21)
+
+The last named perf front falls: `src |> map* |> filter* |> fold` fuses
+into ONE pass with zero intermediate lists — the pipeline kernel drops
+19 → 3ms work, PAST the hand-fused zig loop (~9ms) it was 2.9x behind
+this morning. Soundness is the whole design: the unfused oracle runs
+all maps, then all filters, then the fold, so fusion is legal only when
+every callback is OBSERVATION-FREE — the scan is conservative (any
+Named or Computed call refuses: user fns are opaque and println IS a
+Named call; fs/io/http/process/env/random/fan module calls refuse;
+RuntimeCall/Fan/nested-Lambda refuse), and any refusal falls back to
+the generic staged lowering. Deterministic fuel is symmetric by the
+pool rule (HOF internals never charge on either leg; callback charges
+are order-free sums). One validator catch banked: a wasm block cannot
+receive operands from outside — the element load moved inside the
+skip-block the moment the first parity run said "expected i32 but
+nothing on stack".
+
+Scorecard after stages 52-58: arithmetic AT the WAT ceiling, sort at
+zig parity, strings at incumbent parity, recursion 1.08x of the loop
+ceiling, pipeline AHEAD of hand-fused zig. Remaining known gap: the
+constant-divisor strength reduction (bounded, exactness-critical,
+needs its own fuzz arm).
