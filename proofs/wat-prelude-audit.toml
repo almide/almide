@@ -332,7 +332,7 @@ why = "reached through prim.path_filestat; every fixture that would exercise it 
 [[fn]]
 name = "path_norm"
 site = "crates/almide-mir/src/render_wasm_fs_wat.rs:69"
-digest = "2490608234b1"
+digest = "20cc932739fa"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
@@ -435,7 +435,7 @@ why = "reached through prim.read_n_bytes; every fixture that would exercise it i
 [[fn]]
 name = "read_text_file"
 site = "crates/almide-mir/src/render_wasm_fs_wat.rs:183"
-digest = "6ded9974c5d7"
+digest = "46b4975eb8fd"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 

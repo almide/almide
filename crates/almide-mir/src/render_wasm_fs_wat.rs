@@ -184,7 +184,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $valid i32) (local $vi i32) (local $vb0 i32) (local $vb1 i32) (local $vw i32) (local $vlo i32) (local $vhi i32) (local $vk i32)
     (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
-    (local $nread i32) (local $data i32) (local $str i32) (local $result i32)
+    (local $nread i32) (local $data i32) (local $datb i32) (local $str i32) (local $result i32)
     (local $j i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
     ;; dirfd + path bytes + length via $path_norm (the preopen the path belongs to,
     ;; and its remainder relative to that preopen — #1394).
@@ -192,9 +192,16 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local.set $plen)
     (local.set $pdata)
     (local.set $dirfd)
+    ;; The FIXED out-param scratch (stat/fd_out/iov/nread) comes from the ONE-TIME
+    ;; cached block ($rtf_scratch — the environ-snapshot principle): $alloc8 scratch
+    ;; is immortal by design, so taking it per call leaked ~80 bytes on EVERY fs
+    ;; read (the fold_lines churn bisect's linear ceiling; the trace attributed the
+    ;; 4/64/8/4-byte quartet block-by-block).
+    (if (i32.eqz (global.get $rtf_scratch))
+      (then (global.set $rtf_scratch (call $alloc8 (i32.const 88)))))
     ;; path_open(dirfd, dirflags=0, path_ptr, path_len, oflags=0,
     ;;   rights_base = fd_read(2) | fd_seek(4) = 6, rights_inheriting=0, fdflags=0, fd_out)
-    (local.set $fd_out (call $alloc8 (i32.const 4)))
+    (local.set $fd_out (i32.add (global.get $rtf_scratch) (i32.const 64)))
     (local.set $errno
       (call $path_open (local.get $dirfd) (i32.const 0) (local.get $pdata) (local.get $plen)
                        (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (local.get $fd_out)))
@@ -211,8 +218,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (then
         (local.set $fd (i32.load (local.get $fd_out)))
         ;; fd_filestat_get → file size (i64 @ stat+32; take the low 32 bits). The stat buffer
-        ;; MUST be 8-aligned (the host writes an i64 there) — `$alloc8` guarantees it.
-        (local.set $stat (call $alloc8 (i32.const 64)))
+        ;; MUST be 8-aligned (the host writes an i64 there) — the scratch base is `$alloc8`-
+        ;; aligned and stat sits at offset 0.
+        (local.set $stat (global.get $rtf_scratch))
         (drop (call $fd_filestat_get (local.get $fd) (local.get $stat)))
         ;; filetype@16 == 3 is a DIRECTORY. Classify it from the STAT, not from
         ;; fd_read's errno: the errno a host reports for reading a directory fd is
@@ -223,35 +231,50 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
           (then (local.set $errno (i32.const 31)))
           (else
             (local.set $fsize (i32.load (i32.add (local.get $stat) (i32.const 32))))
-            ;; fd_read into a fresh buffer; iov = [buf_ptr, buf_len].
-            (local.set $data (call $alloc8 (i32.add (local.get $fsize) (i32.const 8))))
-            (local.set $iov (call $alloc8 (i32.const 8)))
+            ;; fd_read into a fresh buffer; iov = [buf_ptr, buf_len]. The buffer is a
+            ;; CANONICAL free-list block (`$list_new` with the byte capacity rounded to
+            ;; whole slots, exactly $rtf_str's rounding — the allocator invariant
+            ;; `block_bytes == LIST_HEADER + cap*ELEM_SIZE` holds by construction), so
+            ;; the `$rc_dec` at the exit frees it back to the free list: the content
+            ;; buffer was the UNBOUNDED half of the per-read leak (filesize bytes per
+            ;; call, immortal under $alloc8).
+            (local.set $datb (call $list_new (i32.const 0)
+              (i32.shr_u (i32.and (i32.add (local.get $fsize) (i32.const 15)) (i32.const -8))
+                         (i32.const 3))))
+            (local.set $data (i32.add (local.get $datb) (i32.const {LIST_HEADER})))
+            (local.set $iov (i32.add (global.get $rtf_scratch) (i32.const 72)))
             (i32.store (local.get $iov) (local.get $data))
             (i32.store (i32.add (local.get $iov) (i32.const 4)) (local.get $fsize))
-            (local.set $nread (call $alloc8 (i32.const 4)))
+            (local.set $nread (i32.add (global.get $rtf_scratch) (i32.const 80)))
             (local.set $errno
               (call $fd_read (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nread)))))
         (drop (call $fd_close (local.get $fd)))))
     ;; On a path_open OR fd_read error build Err(<native std::io Display>) — the WASI errno
     ;; maps to the EXACT text native std::fs emits ($fs_errno_msg), so `err(e)` byte-matches.
-    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+    (if (i32.ne (local.get $errno) (i32.const 0))
       (then
 {rtf_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
-        (call $rtf_result (local.get $msg) (i32.const 1)))
+        (local.set $result (call $rtf_result (local.get $msg) (i32.const 1))))
       (else
         ;; the actual byte count read (may be < the stat size) is the String length.
         (local.set $fsize (i32.load (local.get $nread)))
-{utf8_validate}        (if (result i32) (i32.eqz (local.get $valid))
+{utf8_validate}        (if (i32.eqz (local.get $valid))
           (then
             ;; #1506 — the text floor refuses invalid UTF-8 exactly like native
             ;; std::fs::read_to_string: Err with its InvalidData message. The bytes floor
             ;; ($validate = 0) never takes this arm.
             (local.set $msg (call $rtf_str (i32.const {FS_ERR_UTF8_ADDR}) (i32.const {FS_ERR_UTF8_LEN})))
-            (call $rtf_result (local.get $msg) (i32.const 1)))
+            (local.set $result (call $rtf_result (local.get $msg) (i32.const 1))))
           (else
             ;; build the canonical String + copy the bytes, then wrap it Ok.
             (local.set $str (call $rtf_str (local.get $data) (local.get $fsize)))
-            (call $rtf_result (local.get $str) (i32.const 0)))))))
+            (local.set $result (call $rtf_result (local.get $str) (i32.const 0)))))))
+    ;; Release the content buffer on EVERY exit that allocated it (the ok arm copied
+    ;; into the canonical String; the err arms never read it again). A directory /
+    ;; path_open failure never allocated one ($datb stays 0).
+    (if (i32.ne (local.get $datb) (i32.const 0))
+      (then (call $rc_dec (local.get $datb))))
+    (local.get $result))
 
   ;; helper: copy $len bytes at $src into a fresh canonical String `[rc][len][cap][bytes…]`.
   ;; THE single host-floor String constructor — every WASI exit that turns raw host bytes

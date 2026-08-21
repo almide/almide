@@ -155,6 +155,17 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; `[fd@0][nameptr@4][namelen@8]`, 12 bytes each.
   (global $preopen_tab (mut i32) (i32.const 0))
   (global $preopen_cnt (mut i32) (i32.const 0))
+  ;; The fs read floor's ONE-TIME fixed-size WASI out-param scratch (the
+  ;; environ-snapshot principle a third time): 88 bytes, laid out
+  ;; `[stat@0 (64, 8-aligned — the host writes an i64 at stat+32)]
+  ;; [fd_out@64 (4)][iov@72 (8, 8-aligned)][nread@80 (4)]`, allocated on first
+  ;; use and REUSED by every subsequent read. Before this the floor $alloc8'd
+  ;; all four PER CALL — immortal by $alloc8's design, so every fs read leaked
+  ;; ~80 fixed bytes (plus the file-content buffer, now a canonical free-list
+  ;; block) — the fold_lines churn bisect's linear ceiling. 0 = not yet
+  ;; allocated. Single-threaded guest, no reentrancy inside one read: reuse is
+  ;; race-free.
+  (global $rtf_scratch (mut i32) (i32.const 0))
   ;; __div_trap(msg,len): write the interned abort line to STDERR and proc_exit(1)
   ;; — the render-path twin of v0-wasm's __div_trap (§13 termination convention).
   ;; Uses the fd_write iovec scratch; never returns.
