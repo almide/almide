@@ -163,10 +163,10 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
 
 fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use std::path::Path;
-    if matches!(op, 2 | 3 | 7 | 8 | 9 | 15 | 16) {
+    if matches!(op, 2 | 3 | 7..=9 | 15 | 16) {
         return fs_dispatch_w(op, a, b);
     }
-    if matches!(op, 10 | 11 | 12 | 13 | 14) {
+    if matches!(op, 10..=14) {
         return fs_dispatch_r2(op, a);
     }
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
