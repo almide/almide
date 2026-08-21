@@ -1949,3 +1949,45 @@ allocator; next probe targets), pipeline ~3.5x (HOF body inlining is
 fine; fold/map dominate). The probe is now a tracked test
 (tests/perf_probe.rs, ignored by default) with its kernels in
 tests/perf/ — ratio gating once a second checkpoint exists.
+
+---
+
+## Unit 6 — stage 52b: the cross-language truths (2026-08-21)
+
+The second measurement round answers "are we losing to other
+languages?" with data. Same kernels, hand-written ideal WAT (the
+machine's wasm ceiling) and Zig 0.16 ReleaseFast
+(wasm32-freestanding), ALL under the same wasmtime 47, outputs
+verified identical:
+
+| kernel        | ideal WAT | zig  | greenfield | incumbent≈ |
+|---------------|-----------|------|------------|------------|
+| int_loop 30M  | ~95ms     | ~79  | ~100       | ~95        |
+| list_sort     | —         | ~13  | ~13-15     | ~23        |
+| str_build 3M  | —         | ~26  | ~120       | ~59        |
+| list_pipeline | —         | ~9   | ~26        | ~19        |
+
+Three verdicts. (1) On arithmetic we are AT the WAT ceiling — the
+earlier "1.3-2x behind the incumbent" was baseline-estimation error
+(measure baselines with an empty module, never by subtraction of a
+guess); zig's edge over the ceiling itself localizes the one real
+arithmetic gap: LLVM strength-reduces the CONSTANT modulus to
+multiply-shift where we emit i64.rem_s — a known, bounded
+optimization, not a design flaw. (2) list.sort is at PARITY with
+zig's pdqsort — yesterday it was 26x behind our own incumbent.
+(3) The string/allocation workload is the real front: 2x behind the
+incumbent on identical semantics (implementation debt in the
+itoa/concat/alloc path) and 4.6x behind zig-with-zero-allocations
+(the immutable-string semantics bill — partly mitigable, honestly not
+fully). The pipeline reads 1.4x vs the incumbent baseline-corrected,
+2.9x vs a hand-fused zig loop.
+
+Next probe targets, in order: the itoa/concat path, then constant-
+divisor strength reduction (exactness-critical — lands only with its
+own fuzz arm and oracle sweep).
+
+Process note, banked the hard way: a subshell `cd` plus the harness's
+cwd reset landed one PORTLOG commit on the MAIN checkout (develop,
+the incumbent session's desk) — caught by the foreign-diff rule,
+removed without touching their work. Repo-mutating commands now pin
+their worktree path explicitly.
