@@ -15,6 +15,19 @@ fn bench() {
     let dir = std::env::var("ALMIDE_BENCH_DIR").unwrap_or_else(|_| {
         format!("{}/tests/perf", env!("CARGO_MANIFEST_DIR"))
     });
+    // MEASURED baseline, never a guessed one (the first comparison round
+    // mis-called two verdicts by subtracting an estimate): an empty
+    // program through the same emit+run path.
+    let empty_ir = almide_spine::s5::lower_to_ir("e.almd", "fn main() -> Unit = println(\"\")\n")
+        .expect("front");
+    let empty = almide_wasm::emit_program(&empty_ir).expect("emit");
+    let mut base = u128::MAX;
+    for _ in 0..5 {
+        let t = Instant::now();
+        run_wasm(&empty).expect("run");
+        base = base.min(t.elapsed().as_millis());
+    }
+    println!("BENCH baseline_ms={base}");
     for b in ["int_loop", "float_math", "str_build", "list_sort", "recursion", "list_pipeline"] {
         let src = std::fs::read_to_string(format!("{dir}/{b}.almd")).expect("bench file");
         let t0 = Instant::now();
@@ -33,6 +46,10 @@ fn bench() {
             out = r.stdout.clone();
             assert_eq!(r.exit, 0, "{b} exited nonzero");
         }
-        println!("BENCH {b} emit_ms={emit_ms} run_best_ms={best} out={}", out.trim());
+        println!(
+            "BENCH {b} emit_ms={emit_ms} run_best_ms={best} work_ms={} out={}",
+            best.saturating_sub(base),
+            out.trim()
+        );
     }
 }

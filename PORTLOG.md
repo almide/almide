@@ -1991,3 +1991,26 @@ cwd reset landed one PORTLOG commit on the MAIN checkout (develop,
 the incumbent session's desk) — caught by the foreign-diff rule,
 removed without touching their work. Repo-mutating commands now pin
 their worktree path explicitly.
+
+---
+
+## Unit 6 — stage 53: the verifier verifies itself (2026-08-21)
+
+The user's challenge — "is this how you aim for world-best?" — named
+the real pattern: the PRODUCT has a world-class net, but the OPERATOR
+ran on manual discipline, and every recent incident (two codopsy
+slips caught only by human check-in, a probe that hashed without the
+manifest's normalization, a benchmark verdict skewed by a guessed
+baseline, one commit landed on the wrong desk by a cwd reset) is the
+same class: an unmechanized process step. Doctrine applied to self,
+three mechanizations landed:
+
+1. `aviation-quality` CI job — codopsy A (>= 90) and the 800-line cap
+   are RED conditions on every push, not check-in answers.
+2. A wrong-desk pre-commit guard in the shared hooks: greenfield-only
+   paths staged on any other branch refuse to commit (the cwd-reset
+   class dies at the desk, and it cannot bite the develop session).
+3. The perf probe measures its OWN empty-module baseline and prints
+   work-only numbers — no more guessed subtractions (re-measured:
+   float_math work 32ms vs the 33ms hand-WAT ceiling — at ceiling,
+   now with a measured control).

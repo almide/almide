@@ -66,6 +66,24 @@ jobs:
       - name: wasm nets in release shape
         run: cargo test --release -p almide-wasm --locked
 
+  # Aviation discipline as CI (2026-08-21): codopsy slipped to B twice
+  # during the burn and both times only a HUMAN check-in caught it —
+  # manual measurement is a dead doctrine. A < 90 is red here forever.
+  aviation-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: build codopsy
+        run: git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy && cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
+      - name: score must be A (>= 90)
+        run: |
+          cp .codopsyrc.json crates/almide-wasm/
+          /tmp/codopsy/target/release/codopsy analyze crates/almide-wasm | tee /tmp/codopsy.out
+          grep -E "Quality Score:" /tmp/codopsy.out | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
+      - name: file discipline (800-line cap)
+        run: bash scripts/check-file-discipline.sh
+
   # V-6: verification of the verifier as a STANDING gate. Every pre-authored
   # mutant in ci/mutations/ must be CAUGHT by the release-shape net; a
   # surviving mutant or a no-longer-applying patch is red.
