@@ -2083,3 +2083,16 @@ zig parity, strings at incumbent parity, recursion 1.08x of the loop
 ceiling, pipeline AHEAD of hand-fused zig. Remaining known gap: the
 constant-divisor strength reduction (bounded, exactness-critical,
 needs its own fuzz arm).
+
+---
+
+## Unit 6 — stage 59: the fusion boundary gets its own fuzz arm (2026-08-21)
+
+Mutant 039 was killed by the fuzz alone — no claimed fixture exercises
+a fused filter — which made the generator the load-bearing observer of
+stage 58's soundness. So the boundary now has DEDICATED coverage: a
+generator arm that builds map/filter → fold pipelines whose callbacks
+are sometimes pure (the fusion path) and sometimes PRINTING (the
+refusal path, where the oracle's all-maps-then-all-filters ordering
+must survive verbatim). Both sides compare green against the interp
+across the fixed seed range.

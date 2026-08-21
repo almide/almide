@@ -420,7 +420,7 @@ impl Gen {
     }
 
     fn stmt(&mut self, depth: usize) {
-        match self.rng.below(15) {
+        match self.rng.below(16) {
             0..=2 => self.stmt_bind(depth),
             3 | 4 => self.stmt_println(depth),
             5 => self.stmt_assign(depth),
@@ -432,6 +432,7 @@ impl Gen {
             11 => self.stmt_enumerate_loop(depth),
             12 => self.stmt_map_from_list(depth),
             13 => self.stmt_range_bind(),
+            14 => self.stmt_fuse_pipeline(depth),
             _ => self.stmt_push(depth),
         }
     }

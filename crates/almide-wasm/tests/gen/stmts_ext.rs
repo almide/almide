@@ -82,4 +82,33 @@ impl Gen {
         self.vars.push(Var { name: a, ty: Ty::Int, mutable: false });
         self.vars.push(Var { name: b, ty: Ty::Str, mutable: false });
     }
+
+    /// A map/filter → fold pipeline whose callbacks are sometimes PURE
+    /// (the fusion path) and sometimes PRINTING (the refusal path, where
+    /// the oracle's stage order — all maps, then all filters, then the
+    /// fold — must survive verbatim). Pins stage 58's soundness boundary
+    /// from both sides.
+    fn stmt_fuse_pipeline(&mut self, depth: usize) {
+        let name = self.fresh();
+        let src = self.expr(Ty::ListInt, depth.saturating_sub(1));
+        let x = self.fresh();
+        let map_body = if self.rng.chance(30) {
+            // impure: the map callback prints each element — MUST refuse
+            // fusion and keep all-maps-first ordering.
+            format!("{{\n    println(\"m${{{x}}}\")\n    {x} * 3 + 1\n  }}")
+        } else {
+            format!("{x} * 3 + 1")
+        };
+        let f = self.fresh();
+        let filter_body = if self.rng.chance(20) {
+            format!("{{\n    println(\"f${{{f}}}\")\n    {f} % 2 == 0\n  }}")
+        } else {
+            format!("{f} % 2 == 0")
+        };
+        let (a, v) = (self.fresh(), self.fresh());
+        self.line(&format!(
+            "let {name} = {src} |> list.map(({x}) => {map_body}) |> list.filter(({f}) => {filter_body}) |> list.fold(0, ({a}, {v}) => ({a} + {v}) % 999983)"
+        ));
+        self.vars.push(Var { name, ty: Ty::Int, mutable: false });
+    }
 }
