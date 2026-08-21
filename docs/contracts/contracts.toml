@@ -3861,7 +3861,7 @@ evidence  = [
 ]
 
 [[contract]]
-id        = "C-302"
+id        = "C-319"
 spec      = "ALS-I1"
 title     = "A captured-and-mutated var List is shared storage through a closure"
 statement = "A `var` List that a closure captures AND mutates behaves as ONE shared storage on both targets: a functional rebind inside the closure (`seen = seen + [s]`, the `list.push` desugar) is visible to the enclosing scope, and an enclosing-scope rebind between closure calls is visible to the next call — both directions, byte-identically native == wasm. The admitted element classes are exactly the ones whose cell teardown is already exact under the len-counted OWNED-slots rule (String elements; Flat-ctor elements like Option[Int]); a deeper element (List[List[String]], a record-valued map) keeps the honest lift refusal. The failure mode this pins against is NOT a wall: before the shared-cell admission the capture lowered as an env value-copy and the wasm leg printed a silently wrong value (native 2 / wasm 0). Cell churn is leak-free under the heap cap (flat ceiling across N=2000 vs N=8000)."

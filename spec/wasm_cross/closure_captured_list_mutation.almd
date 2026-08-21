@@ -1,4 +1,4 @@
-// @contract: C-302
+// @contract: C-319
 // A `var` List captured AND mutated through a closure is SHARED storage on the
 // wasm leg (the shared-cell machinery, closures Rung 6): the closure's
 // functional rebind (`seen = seen + [s]`, the `list.push` desugar) writes

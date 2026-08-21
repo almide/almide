@@ -329,5 +329,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 1 |
 | C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |
-| C-302 | A captured-and-mutated var List is shared storage through a closure | 0.59.0 | active | fixture | 1 |
+| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.59.0 | active | fixture | 1 |
 
