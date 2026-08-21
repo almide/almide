@@ -101,18 +101,23 @@ effect fn store_find[T: RowStore](s: T, k: String) -> String = {
   // outside the wasm lowering subset, and this file must stay on the wasm leg.
   let found = s.fetch(k)!
   match found {
-    some(r) => r.id
-    none => "missing"
+    some(r) => r.id,
+    none => "missing",
   }
 }
 
 test "effect protocol method through a generic bound: bind the result" {
-  let s = MemStore { rows: [Row { id: "a" }, Row { id: "b" }] }
+  let s = MemStore { rows: [
+    Row { id: "a" },
+    Row { id: "b" }
+  ] }
   assert_eq(store_label(s), ok("rows=2"))
 }
 
 test "effect protocol method through a generic bound: match the result" {
-  let s = MemStore { rows: [Row { id: "a" }] }
+  let s = MemStore { rows: [
+    Row { id: "a" }
+  ] }
   assert_eq(store_find(s, "a"), ok("a"))
   assert_eq(store_find(s, "zz"), ok("missing"))
 }
