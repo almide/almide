@@ -156,8 +156,12 @@ const F_STR_SLICE: u32 = 28;
 const F_STR_REPEAT: u32 = 29;
 const F_STR_CMP: u32 = 30;
 const F_STR_REPLACE: u32 = 31;
+/// `$copy(dst, src, len)` — the tiny-aware copy: len < 16 walks bytes
+/// (wasmtime's memory.copy is an out-of-line libcall whose fixed cost
+/// dwarfs small moves), else one memory.copy.
+const F_COPY: u32 = 32;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 32;
+const F_FN_BASE: u32 = 33;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
@@ -167,7 +171,7 @@ const T_MAIN: u32 = 4;
 /// 10: (i32,i32,i32,i64)→i32 scan_w64; 11: (i32,i32,i32,i32)→i32 scan_w32/str;
 /// 12: (i32)→f64 f16_to_f64; 13: (i32,i64)→i32 cp_off/str_repeat;
 /// 14: (i32,i64,i64)→i32 str_slice.
-const T_FN_BASE: u32 = 17;
+const T_FN_BASE: u32 = 18;
 // Global 0 is the immutable line-buffer start (= align16(pool end)); it
 // is emitted for inspectability but no instruction references it since
 // the build cursor (global 2) took over.

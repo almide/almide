@@ -68,10 +68,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         .ty()
         .function([ValType::I32; 5], [ValType::I64]); // 15: fs_call
     types.ty().function([ValType::I32], []); // 16: host_read
+    types.ty().function([ValType::I32; 3], []); // 17: copy
     for (i, info) in table.infos.iter().enumerate() {
         // Refused functions keep a placeholder type — their stub body is
         // `unreachable` and no call site ever targets them.
-        debug_assert_eq!(T_FN_BASE as usize + i, 17 + i);
+        debug_assert_eq!(T_FN_BASE as usize + i, 18 + i);
         if info.refuse.is_some() {
             types.ty().function([], []);
         } else {
@@ -121,6 +122,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     functions.function(13); // F_STR_REPEAT
     functions.function(5); // F_STR_CMP
     functions.function(11); // F_STR_REPLACE
+    functions.function(17); // F_COPY
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -230,6 +232,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_str_repeat());
     code.function(&emit_str_cmp());
     code.function(&emit_str_replace());
+    code.function(&emit_copy());
     for l in lowered {
         match l {
             Ok((f, _)) => {

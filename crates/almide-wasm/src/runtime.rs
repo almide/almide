@@ -75,7 +75,7 @@ pub(crate) fn emit_append_copy() -> Function {
     i.local_get(0)
         .local_get(1)
         .local_get(2)
-        .memory_copy(0, 0)
+        .call(F_COPY)
         .local_get(0)
         .local_get(2)
         .i32_add()
@@ -96,7 +96,7 @@ pub(crate) fn emit_buf_to_block() -> Function {
     i.local_get(bbase).i32_const(payload).i32_add();
     i.local_get(start);
     i.local_get(len);
-    i.memory_copy(0, 0);
+    i.call(F_COPY);
     i.local_get(bbase);
     i.end();
     f
@@ -267,7 +267,7 @@ pub(crate) fn emit_str_slice() -> Function {
     i.local_get(r).i32_const(payload).i32_add();
     i.local_get(bbase).i32_const(payload).i32_add().local_get(so).i32_add();
     i.local_get(eo).local_get(so).i32_sub();
-    i.memory_copy(0, 0);
+    i.call(F_COPY);
     i.local_get(r);
     i.end();
     f
@@ -299,7 +299,7 @@ pub(crate) fn emit_str_repeat() -> Function {
     i.local_get(k).i32_wrap_i64().local_get(len).i32_mul().i32_add();
     i.local_get(bbase).i32_const(payload).i32_add();
     i.local_get(len);
-    i.memory_copy(0, 0);
+    i.call(F_COPY);
     i.local_get(k).i64_const(1).i64_add().local_set(k);
     i.br(0).end().end();
     i.local_get(r);
@@ -385,7 +385,7 @@ pub(crate) fn emit_append_i64() -> Function {
     i.local_get(cur);
     i.i32_const(ITOA_END as i32).local_get(len).i32_sub(); // src
     i.local_get(len);
-    i.memory_copy(0, 0);
+    i.call(F_COPY);
     i.local_get(cur).local_get(len).i32_add();
     i.end();
     f
@@ -412,7 +412,11 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
         .i32_const(-4)
         .i32_and()
         .local_set(next);
-    // if next > memory.size * 64Ki: grow just enough; a failed grow traps.
+    // if next > memory.size * 64Ki: grow GEOMETRICALLY — max(needed,
+    // current) pages, i.e. at least doubling. Grow-just-enough produced
+    // thousands of one-page grows on allocation-heavy kernels (~53ms of
+    // the str_build micro-profile, stage 54); memory.size is not
+    // observable from the language, so the policy is behavior-free.
     i.local_get(next).memory_size(0).i32_const(16).i32_shl().i32_gt_u().if_(BlockType::Empty);
     i.local_get(next)
         .memory_size(0)
@@ -422,8 +426,22 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
         .i32_const(65535)
         .i32_add()
         .i32_const(16)
-        .i32_shr_u()
-        .memory_grow(0)
+        .i32_shr_u();
+    {
+        // needed pages on stack; select(needed, current, needed > current)
+        i.memory_size(0);
+        i.local_get(next)
+            .memory_size(0)
+            .i32_const(16)
+            .i32_shl()
+            .i32_sub()
+            .i32_const(65535)
+            .i32_add()
+            .i32_const(16)
+            .i32_shr_u();
+        i.memory_size(0).i32_gt_u().select();
+    }
+    i.memory_grow(0)
         .i32_const(0)
         .i32_lt_s()
         .if_(BlockType::Empty)
@@ -458,7 +476,7 @@ pub(crate) fn emit_int_to_string() -> Function {
     i.local_get(base).i32_const(almide_layout::PAYLOAD as i32).i32_add(); // dst
     i.i32_const(ITOA_END as i32).local_get(len).i32_sub(); // src
     i.local_get(len);
-    i.memory_copy(0, 0);
+    i.call(F_COPY);
     i.local_get(base);
     i.end();
     f
@@ -467,24 +485,43 @@ pub(crate) fn emit_int_to_string() -> Function {
 /// `$concat(a: i32, b: i32) -> i32`: fresh block holding a's bytes then
 /// b's bytes; returns the block BASE.
 pub(crate) fn emit_concat() -> Function {
-    // params: 0=a i32, 1=b i32; locals: 2=la i32, 3=lb i32, 4=base i32
+    // params: 0=a i32, 1=b i32; locals: 2=la i32, 3=lb i32, 4=base i32,
+    // 5=dst i32, 6=src i32, 7=end i32
     let (a, b, la, lb, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let (dst, src, endp) = (5u32, 6u32, 7u32);
     let payload = almide_layout::PAYLOAD as i32;
-    let mut f = Function::new([(3, ValType::I32)]);
+    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let mut f = Function::new([(6, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(a).i32_load(len_memarg()).local_set(la);
     i.local_get(b).i32_load(len_memarg()).local_set(lb);
     i.local_get(la).local_get(lb).i32_add().call(F_ALLOC).local_set(base);
-    // copy a
-    i.local_get(base).i32_const(payload).i32_add();
-    i.local_get(a).i32_const(payload).i32_add();
-    i.local_get(la);
-    i.memory_copy(0, 0);
-    // copy b (dst offset by la)
-    i.local_get(base).i32_const(payload).i32_add().local_get(la).i32_add();
-    i.local_get(b).i32_const(payload).i32_add();
-    i.local_get(lb);
-    i.memory_copy(0, 0);
+    // Tiny copies take a BYTE LOOP: wasmtime lowers memory.copy to an
+    // out-of-line libcall whose fixed cost dwarfs a 2-8 byte move (the
+    // stage-54 micro-profile put ~20ns on each tiny concat).
+    for (which, off_by_la) in [(a, false), (b, true)] {
+        let ln = if which == a { la } else { lb };
+        i.local_get(base).i32_const(payload).i32_add();
+        if off_by_la {
+            i.local_get(la).i32_add();
+        }
+        i.local_set(dst);
+        i.local_get(which).i32_const(payload).i32_add().local_set(src);
+        i.local_get(ln).i32_const(16).i32_lt_u().if_(BlockType::Empty);
+        i.local_get(src).local_get(ln).i32_add().local_set(endp);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(src).local_get(endp).i32_ge_u().br_if(1);
+        i.local_get(dst).local_get(src).i32_load8_u(byte).i32_store8(byte);
+        i.local_get(dst).i32_const(1).i32_add().local_set(dst);
+        i.local_get(src).i32_const(1).i32_add().local_set(src);
+        i.br(0).end().end();
+        i.else_();
+        i.local_get(dst);
+        i.local_get(src);
+        i.local_get(ln);
+        i.memory_copy(0, 0);
+        i.end();
+    }
     i.local_get(base);
     i.end();
     f
@@ -607,7 +644,7 @@ pub(crate) fn emit_list_push(s: Scalar) -> Function {
     i.local_get(base).i32_const(payload).i32_add();
     i.local_get(list).i32_const(payload).i32_add();
     i.local_get(la);
-    i.memory_copy(0, 0);
+    i.call(F_COPY);
     i.local_get(base).local_get(la).i32_add();
     i.local_get(v);
     match s {
@@ -634,7 +671,7 @@ pub(crate) fn emit_block_copy() -> Function {
     i.local_get(base).i32_const(payload).i32_add();
     i.local_get(src).i32_const(payload).i32_add();
     i.local_get(len);
-    i.memory_copy(0, 0);
+    i.call(F_COPY);
     i.local_get(base);
     i.end();
     f
@@ -664,6 +701,29 @@ pub(crate) fn emit_list_join() -> Function {
     i.br(0);
     i.end();
     i.unreachable();
+    i.end();
+    f
+}
+
+/// `$copy(dst, src, len)`: len < 16 walks bytes — wasmtime lowers
+/// memory.copy to an out-of-line libcall whose fixed cost dwarfs a
+/// small move (stage 54: ~20ns per tiny concat) — else one memory.copy.
+pub(crate) fn emit_copy() -> Function {
+    let (dst, src, len, endp) = (0u32, 1u32, 2u32, 3u32);
+    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(len).i32_const(16).i32_lt_u().if_(BlockType::Empty);
+    i.local_get(src).local_get(len).i32_add().local_set(endp);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(src).local_get(endp).i32_ge_u().br_if(1);
+    i.local_get(dst).local_get(src).i32_load8_u(byte).i32_store8(byte);
+    i.local_get(dst).i32_const(1).i32_add().local_set(dst);
+    i.local_get(src).i32_const(1).i32_add().local_set(src);
+    i.br(0).end().end();
+    i.else_();
+    i.local_get(dst).local_get(src).local_get(len).memory_copy(0, 0);
+    i.end();
     i.end();
     f
 }

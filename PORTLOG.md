@@ -2014,3 +2014,27 @@ three mechanizations landed:
    work-only numbers — no more guessed subtractions (re-measured:
    float_math work 32ms vs the 33ms hand-WAT ceiling — at ceiling,
    now with a measured control).
+
+---
+
+## Unit 6 — stage 54: the tiny-copy truth (2026-08-21)
+
+The string-front gap localized by micro-bisection (skeleton / concat /
+itoa / full — each 3M iterations): the missing ~50ms was wasmtime
+lowering `memory.copy` to an out-of-line libcall whose fixed cost
+dwarfs a 2-8 byte move. Concat now branches: len < 16 walks bytes,
+else one memory.copy — str_build work 121ms → ~68ms, from 2x behind
+the incumbent to PARITY (incumbent ≈ 59ms end-to-end, shared-machine
+noise band ±15ms). The same rule lands as one shared `$copy(dst, src,
+len)` helper routing append_copy, buf_to_block, str_slice, str_repeat,
+append_i64, int_to_string, list-push-grow, and block_copy. Geometric
+allocator growth (max(needed, current) pages) came along — measured
+neutral here (wasmtime grows cheaply) but strictly dominant, and
+memory.size is unobservable from the language so the policy is
+behavior-free. Two dead-end hypotheses recorded honestly: grow policy
+(~0ms) and let-binds (free); the libcall was the whole story.
+
+Full nets green, clippy 0, workspace 0 failures. The remaining fronts
+after this: recursion work 129ms (call overhead — the one arithmetic
+kernel still 1.5x off ceiling), and the constant-divisor strength
+reduction (exactness-critical, needs its own fuzz arm).

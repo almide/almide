@@ -1,16 +1,13 @@
 diff --git a/crates/almide-wasm/src/runtime.rs b/crates/almide-wasm/src/runtime.rs
-index c6d5a987f..bd81387fa 100644
+index 975d3a364..a4061da6a 100644
 --- a/crates/almide-wasm/src/runtime.rs
 +++ b/crates/almide-wasm/src/runtime.rs
-@@ -173,9 +173,9 @@ pub(crate) fn emit_concat() -> Function {
-     i.local_get(a).i32_load(len_memarg()).local_set(la);
-     i.local_get(b).i32_load(len_memarg()).local_set(lb);
-     i.local_get(la).local_get(lb).i32_add().call(F_ALLOC).local_set(base);
--    // copy a
-+    // copy a  [MUTANT: copies b]
-     i.local_get(base).i32_const(payload).i32_add();
--    i.local_get(a).i32_const(payload).i32_add();
-+    i.local_get(b).i32_const(payload).i32_add();
-     i.local_get(la);
-     i.memory_copy(0, 0);
-     // copy b (dst offset by la)
+@@ -499,7 +499,7 @@ pub(crate) fn emit_concat() -> Function {
+     // Tiny copies take a BYTE LOOP: wasmtime lowers memory.copy to an
+     // out-of-line libcall whose fixed cost dwarfs a 2-8 byte move (the
+     // stage-54 micro-profile put ~20ns on each tiny concat).
+-    for (which, off_by_la) in [(a, false), (b, true)] {
++    for (which, off_by_la) in [(b, false), (a, true)] { // [MUTANT: b copied first]
+         let ln = if which == a { la } else { lb };
+         i.local_get(base).i32_const(payload).i32_add();
+         if off_by_la {
