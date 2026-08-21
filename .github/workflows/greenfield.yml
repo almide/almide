@@ -79,8 +79,10 @@ jobs:
       - name: score must be A (>= 90)
         run: |
           cp .codopsyrc.json crates/almide-wasm/
-          /tmp/codopsy/target/release/codopsy analyze crates/almide-wasm | tee /tmp/codopsy.out
-          grep -E "Quality Score:" /tmp/codopsy.out | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
+          # codopsy prints the summary on STDERR — capture both streams,
+          # and strip ANSI before judging.
+          /tmp/codopsy/target/release/codopsy analyze crates/almide-wasm 2>&1 | tee /tmp/codopsy.out
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
       - name: file discipline (800-line cap)
         run: bash scripts/check-file-discipline.sh
 
