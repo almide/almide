@@ -16,9 +16,10 @@
 #                       (assert_throws requires catching a panic; wasm traps
 #                       are uncatchable in-process).
 #
-# COMPILER_FRONTIER (4) — the debt, in leverage order:
-spec/lang/closure_capture_map_test.almd :: COMPILER_FRONTIER :: defunc closure frontier — measured: 1 of 23 fns walls, `__almd_test_2` ("closure folds records through a captured map via match"), "computed closure call outside the liftable subset". The captured cell is a Map[String, Record] and the closure body MATCHES on map.get before writing back, so the callee is not statically resolvable at the call site — the two SCALAR-cell tests in the same file already render. Needs the closure-env brick (lift a computed callee whose capture set includes a heap cell), not another typed twin.
-spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: blocked on `for_each_line` over a CAPTURED var, not on the accumulator twins. 2 of the 6 tests (`var seen` + list.push, `var calls` + increment) need a closure whose capture set is mutated inside the callback — the same closure-env brick as closure_capture_map_test. The fold_lines String/Int/List[String] accumulator twins are mechanical (the `_ls` chunked twin landed the same way) but landing all three still leaves those 2 tests walled, so this row does not move until the closure brick does.
+# COMPILER_FRONTIER (3) — the debt, in leverage order:
+spec/lang/closure_capture_map_test.almd :: COMPILER_FRONTIER :: measured (shared-cell brick, C-302): only `__almd_test_2` ("closure folds records through a captured map via match") still walls — the Map[String, Int] cell tests now render. The blocker is BELOW the cell class: `map.new`/`map.get`/`map.insert` on a Map[String, <record>] route to the deliberate `*_hval_wall` stubs even with NO closure in the program (probe-measured), so this row needs the record-valued-map stdlib family (new/get/insert twins + Option[<record>] match consumption) FIRST, then the routed cell class (`map_named_value_drop` already names the drop route) and its env-capture leg. Not a one-brick row.
+spec/lang/codec_default_list_test.almd :: COMPILER_FRONTIER :: Codec decode sits on the heap-result-match subset boundary (#1520 pin); native leg is the authority until that brick
+spec/stdlib/fs_streaming_test.almd :: COMPILER_FRONTIER :: measured (shared-cell brick, C-302): the captured-var half is DONE — `var seen: List[String]` + `list.push` through the callback is an admitted cell now. The wall MOVED: every test opens with `let d = tmp()!` where `tmp()` returns a heap-Ok Result[String, _], and that `!` propagation sits on the same #1520 heap-result-match boundary as codec_default_list_test ("would move out an empty deferred heap value"). This row and that one are now the SAME brick; fs.create_temp_dir's wasm leg and the fold_lines accumulator twins queue behind it.
 #
 # HOST_CAPABILITY (6):
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
@@ -31,4 +32,3 @@ spec/stdlib/zlib_test.almd :: HOST_CAPABILITY :: zlib is a native library bindin
 # HARNESS_LIMITATION (2):
 spec/stdlib/coverage_assert_throws_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
 spec/stdlib/testing_polarity_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
-spec/lang/codec_default_list_test.almd :: COMPILER_FRONTIER :: Codec decode sits on the heap-result-match subset boundary (#1520 pin); native leg is the authority until that brick
