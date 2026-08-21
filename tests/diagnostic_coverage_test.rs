@@ -162,6 +162,29 @@ fn diagnostic_fixture_and_doc_coverage_report() {
     }
 }
 
+/// #1528 tier-1 floor, PROMOTED from "backlog, not a failure" to ENFORCED:
+/// every fixture-covered code carries at least THREE families (distinct
+/// broken/fixed/meta triples), so a code cannot sit at a single token case —
+/// each hint variant needs its own family before the code counts as covered
+/// in depth. The last below-bar codes (E059 at 1, E060 at 2) were brought to
+/// the floor in the same change that added this gate; a new code lands with
+/// its three families or turns this red.
+#[test]
+fn every_covered_code_has_at_least_three_fixture_families() {
+    let fixtures = scan_fixture_codes();
+    let below: Vec<String> = fixtures
+        .iter()
+        .filter(|(_, fams)| fams.len() < 3)
+        .map(|(c, fams)| format!("{c}({})", fams.len()))
+        .collect();
+    assert!(
+        below.is_empty(),
+        "codes below the 3-family tier-1 floor: {} — add families under \
+         tests/diagnostics/ (broken/fixed/meta) until each code has three",
+        below.join(", ")
+    );
+}
+
 /// #1486: every diagnostic doc declares its FIX-IT VERDICT — `mechanical`
 /// (an unattended fixer may apply it), `conditional` (suggested, needs
 /// review), or `not-fixable`. The verdict is the third piece of the

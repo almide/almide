@@ -39,10 +39,8 @@ bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 env.set :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capability not in this brick
 env.sleep_ms :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.sleep_ms needs a declared capability not in this brick
-fs.fold_lines :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: fs.fold_lines_x — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to th
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
 fs.fold_lines_range :: UNPROBEABLE :: no candidate shape builds natively
-fs.for_each_line :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call fs.for_each_line needs a declared capability not in this brick
 http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick
 http.body :: UNPROBEABLE :: parameter type outside the synthesizer
 http.delete :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.delete needs a declared capability not in this brick

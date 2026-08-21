@@ -1,0 +1,74 @@
+// ADR-0012 D2 (#1193): `-> T!E` carries a TYPED error in the fallibility
+// marker — `T!E` ≡ `Result[T, E]` in fn-decl return position and fn-type slot
+// return position. `T!` stays the abbreviation of `T!String`, so every
+// pre-existing spelling keeps its meaning. Propagation is ADR-0003 verbatim:
+// `!` never converts E — an E match propagates structurally, a mismatch stays
+// a check error. The lift parity promise: a `-> T!E` body accepts exactly
+// what a `-> T!` body accepts (value tails ok-lift with the DECLARED E).
+type ConfigError = | Missing(String) | BadValue(String)
+
+// value-tail lift: the T-typed tail wraps in ok(...) carrying E=ConfigError
+fn read_cache(path: String) -> String!ConfigError = {
+  guard path == "ok" else err(Missing(path))
+  "valid-text"
+}
+
+// structural E-match propagation: read_cache's ConfigError rides `!` through
+fn load(path: String) -> String!ConfigError = {
+  let text = read_cache(path)!
+  guard text == "valid-text" else err(BadValue(path))
+  text
+}
+
+// pass-through body: the body IS the Result — no wrapping ceremony
+fn relay(path: String) -> String!ConfigError = read_cache(path)
+
+// explicit-ok body: Phase 1a forms stay untouched under a typed E
+fn always() -> Int!ConfigError = ok(7)
+
+// `?` binds first: `-> B?!E` is Result[Option[B], E]
+fn find(x: Int) -> Int?!ConfigError = {
+  guard x >= 0 else err(BadValue("neg"))
+  if x > 10 then some(x) else none
+}
+
+test "typed-E ok path" {
+  match load("ok") {
+    ok(c) => assert_eq(c, "valid-text"),
+    err(_) => assert_eq("err", "unreachable"),
+  }
+}
+
+test "typed-E err path carries the variant" {
+  match load("nope") {
+    ok(_) => assert_eq("ok", "unreachable"),
+    err(Missing(p)) => assert_eq(p, "nope"),
+    err(BadValue(p)) => assert_eq(p, "unreachable-arm"),
+  }
+}
+
+test "pass-through and explicit-ok bodies" {
+  match relay("ok") {
+    ok(c) => assert_eq(c, "valid-text"),
+    err(_) => assert_eq("err", "unreachable"),
+  }
+  assert_eq(always() ?? -1, 7)
+}
+
+test "option binds before the typed marker" {
+  match find(20) {
+    ok(some(v)) => assert_eq(v, 20),
+    ok(none) => assert_eq("none", "unreachable"),
+    err(_) => assert_eq("err", "unreachable"),
+  }
+  match find(3) {
+    ok(some(_)) => assert_eq("some", "unreachable"),
+    ok(none) => assert_eq(1, 1),
+    err(_) => assert_eq("err", "unreachable"),
+  }
+  match find(0 - 1) {
+    ok(_) => assert_eq("ok", "unreachable"),
+    err(BadValue(m)) => assert_eq(m, "neg"),
+    err(Missing(m)) => assert_eq(m, "unreachable-arm"),
+  }
+}

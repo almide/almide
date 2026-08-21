@@ -233,7 +233,7 @@ impl LowerCtx {
                 match cell_class_of(&ty) {
                     Some(CellClass::Scalar) => heap_caps.push((v, ty)),
                     Some(CellClass::FlatHeap) => nested_heap_caps.push((v, ty)),
-                    Some(CellClass::MapSkv) => cellmap_caps.push((v, ty)),
+                    Some(CellClass::LenOwnedSlots) => cellmap_caps.push((v, ty)),
                     None => {
                         crate::trace::trace("ALMIDE_DBG_ANF", || format!(
                             "[lift] {}: cell capture {v:?} class unadmitted ({ty:?})", self.fn_name));

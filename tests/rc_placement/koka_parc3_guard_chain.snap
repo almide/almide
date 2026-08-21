@@ -1,0 +1,52 @@
+fn $main
+  (call $rc_dec (local.get $v41))
+  (call $__drop_IList (local.get $v39))
+  (call $rc_dec (local.get $v35))
+  (call $rc_dec (local.get $v33))
+  (call $rc_dec (local.get $v31))
+  (call $rc_dec (local.get $v29))
+  (call $__drop_IList (local.get $v18))
+fn $__drop_IList
+  (call $__drop_IList (local.get $v14))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_IList
+  (call $__drop_list_IList_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_IList_loop
+  (call $__drop_IList (local.get $v13))
+fn $__drop_res_IList
+  (call $__drop_IList (local.get $v16))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_str_IList
+  (call $__drop_list_str_IList_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_str_IList_loop
+  (call $rc_dec (i32.wrap_i64 (local.get $v21)))
+  (call $__drop_IList (local.get $v24))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
+fn $__drop_list_int_IList
+  (call $__drop_list_int_IList_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_IList_loop
+  (call $__drop_IList (local.get $v21))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
+fn $__drop_map_IList_go
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
+  (call $__drop_IList (local.get $v20))
+fn $__drop_map_IList
+  (call $__drop_map_IList_go (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__repr_IList
+  (call $rc_dec (local.get $v25))
+  (call $rc_dec (local.get $v24))
+  (call $rc_dec (local.get $v23))
+  (call $rc_dec (local.get $v22))
+  (call $rc_dec (local.get $v21))
+  (call $rc_dec (local.get $v20))
+  (call $rc_dec (local.get $v19))
+  (call $rc_dec (local.get $v15))
+fn $__drop_opt_str_str
+  (call $rc_dec (i32.wrap_i64 (local.get $v22)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v25)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v14)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))

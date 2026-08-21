@@ -71,3 +71,53 @@ test "protocol generic with custom method name" {
   let c = Color { r: 255, g: 0, b: 128 }
   assert_eq(print_label(c), "label:255,0,128")
 }
+
+// ── Effect protocol method reached through a generic bound (#1545) ──
+// The checker must lift an effect protocol method's return to Result[T, String]
+// exactly as it lifts a named effect fn. Without the lift the bare T reached
+// every USE of the value — a let-binding, a match subject — so `check` accepted
+// a shape codegen never emits and rustc rejected the generated code (a `match`
+// subject additionally ICE'd in ConcretizeTypes).
+type Row = { id: String }
+
+protocol RowStore {
+  effect fn fetch(s: Self, k: String) -> Row?
+  effect fn count(s: Self) -> Int
+}
+
+type MemStore: RowStore = { rows: List[Row] }
+
+effect fn MemStore.fetch(s: MemStore, k: String) -> Row? = list.find(s.rows, (r) => r.id == k)
+
+effect fn MemStore.count(s: MemStore) -> Int = list.len(s.rows)
+
+effect fn store_label[T: RowStore](s: T) -> String = {
+  let n = s.count()!
+  "rows=" + int.to_string(n)
+}
+
+effect fn store_find[T: RowStore](s: T, k: String) -> String = {
+  // The subject is bound first: a tail `match` returning a heap value is
+  // outside the wasm lowering subset, and this file must stay on the wasm leg.
+  let found = s.fetch(k)!
+  match found {
+    some(r) => r.id,
+    none => "missing",
+  }
+}
+
+test "effect protocol method through a generic bound: bind the result" {
+  let s = MemStore { rows: [
+    Row { id: "a" },
+    Row { id: "b" }
+  ] }
+  assert_eq(store_label(s), ok("rows=2"))
+}
+
+test "effect protocol method through a generic bound: match the result" {
+  let s = MemStore { rows: [
+    Row { id: "a" }
+  ] }
+  assert_eq(store_find(s, "a"), ok("a"))
+  assert_eq(store_find(s, "zz"), ok("missing"))
+}

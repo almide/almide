@@ -308,6 +308,17 @@ done <<< "$(grep -rhoE '(crates|runtime|stdlib|spec|tests|scripts|proofs)/[A-Za-
 [ "$dead_paths" -eq 0 ] && echo "cited-paths: every source path named in a statement or fixture header resolves to a live directory."
 
 # ── (f) COVERAGE: ids must be contiguous C-001..C-NNN, no gaps ──────────────
+# EXCEPTION — canonical-ledger reservation (#1544, owner-approved 2026-08-21):
+# contract ids are global and the almide/als ledger is CANONICAL; this file is
+# the pre-Stage-B COPY. als assigned C-302..C-318 (ALS-T19..T24 numeric
+# determinism, ALS-B1..B11 bounded profile) whose fixtures/spec chapters do
+# not exist in this repo yet, and the copy's shared-cell contract was renamed
+# C-302 -> C-319 to match the canonical id. The reserved range is NOT mintable
+# here — it is a documented hole that DIES at the Stage B cutover (als
+# BOUNDARY.md: mount als, delete the copies). New ids in the copy must land in
+# als FIRST (two-PR order, als CONTRIBUTING; next free per #1544: C-320).
+RESERVED_CANONICAL_LO=302
+RESERVED_CANONICAL_HI=318
 sorted_ids="$(printf '%s\n' "$ALL_IDS" | sort -u)"
 n_contracts="$(printf '%s\n' "$sorted_ids" | grep -c . || true)"
 maxnum="$(printf '%s\n' "$sorted_ids" | sed -E 's/^C-//' | sort -n | tail -1)"
@@ -315,7 +326,12 @@ maxnum="$((10#${maxnum:-0}))"
 i=1
 while [ "$i" -le "$maxnum" ]; do
   want="$(printf 'C-%03d' "$i")"
-  has "$want" "$sorted_ids" || err "coverage gap: $want is missing (C-001..C-$(printf '%03d' "$maxnum") must be contiguous)"
+  if [ "$i" -ge "$RESERVED_CANONICAL_LO" ] && [ "$i" -le "$RESERVED_CANONICAL_HI" ]; then
+    # A row IN the reserved range is a collision with the canonical ledger.
+    has "$want" "$sorted_ids" && err "$want is reserved to the canonical als ledger (#1544) — the copy must not mint inside C-${RESERVED_CANONICAL_LO}..C-${RESERVED_CANONICAL_HI}"
+  else
+    has "$want" "$sorted_ids" || err "coverage gap: $want is missing (C-001..C-$(printf '%03d' "$maxnum") must be contiguous)"
+  fi
   i=$((i + 1))
 done
 

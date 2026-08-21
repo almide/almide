@@ -876,11 +876,25 @@ impl<'a> Interpreter<'a> {
             if first_frame.is_none() {
                 first_frame = Some(frame.clone());
             }
+            // #1226: a TAIL TRANSFER into a POOL body must carry the
+            // address-uniform tier with it — without this, a pool callee
+            // reached through the trampoline ran at the caller's depth, its
+            // internal module calls were boundary-synced mid-flight (the
+            // set_union eager-snapshot class), and its own return skipped
+            // the read-back entirely (codec decode handed fixture code a raw
+            // block address; `list.len on non-list`).
+            let hop_pool = matches!(&callee, TailCallee::Fn(f) if self.pool_fns.contains(&f.name));
+            if hop_pool {
+                self.pool_depth += 1;
+            }
             let outcome = match (&fn_body, &clo_body) {
                 (Some(b), _) => self.eval_body_spine(b, &frame),
                 (_, Some(c)) => self.eval_body_spine(&c.body, &frame),
                 _ => unreachable!("one body source is always set"),
             };
+            if hop_pool {
+                self.pool_depth -= 1;
+            }
             match outcome {
                 SpineOutcome::Done(flow) => break 'tramp flow,
                 SpineOutcome::Transfer { next, next_args, try_marker } => {
@@ -896,6 +910,28 @@ impl<'a> Interpreter<'a> {
             }
         };
 
+        // #1226 read-back for the FINAL callee when the spine ended inside a
+        // pool fn at the tier boundary (tail transfers bypass the dispatch
+        // tails where the sync normally lives). Idempotent with the outer
+        // dispatch sync: a rebuilt value is no longer a block address.
+        let result = match &callee {
+            TailCallee::Fn(f)
+                if self.pool_depth == 0 && self.pool_fns.contains(&f.name) =>
+            {
+                // A body ending in an early exit hands back `Flow::Return` —
+                // sync the carried value the same way and keep the flow kind
+                // (the fold below is what resolves Return at the boundary).
+                match result {
+                    Flow::Value(_) => self.sync_block_return(f, result),
+                    Flow::Return(v) => match self.sync_block_return(f, Flow::Value(v)) {
+                        Flow::Value(v2) => Flow::Return(v2),
+                        other => other,
+                    },
+                    other => other,
+                }
+            }
+            _ => result,
+        };
         let result = normalize_option_fn_return(&callee, result);
         let result = self.fold_pending_try(result, &pending);
         self.det_in_user.set(det_was_user);
@@ -961,7 +997,19 @@ impl<'a> Interpreter<'a> {
     /// O(1) evaluator depth per chain, matching the backends' `return_call`.
     pub(crate) fn apply_closure(&mut self, clo: &Rc<Closure>, args: Vec<Value>) -> Flow {
         let root = self.root_scope();
-        self.run_callable(TailCallee::Clo(Rc::clone(clo)), args, &root).0
+        let flow = self.run_callable(TailCallee::Clo(Rc::clone(clo)), args, &root).0;
+        // #1226 return sync at the CLOSURE boundary too: an FnRef of a pool
+        // fn (`result.map(r, value.as_array)`) forwards through a closure,
+        // and without the read-back its block address rode into native list
+        // ops as a raw Int (codec decode aborted `list.len on non-list`).
+        // Same depth gate as every other boundary: pool-internal closures
+        // stay address-uniform.
+        if self.pool_depth == 0 {
+            if let Some(ty) = &clo.ret_ty {
+                return self.sync_flow_typed(flow, &ty.clone());
+            }
+        }
+        flow
     }
 }
 

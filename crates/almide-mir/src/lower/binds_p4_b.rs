@@ -281,11 +281,18 @@ impl LowerCtx {
                 self.piece_from_borrowed_param_var(*id)?
             }
             IrExprKind::LitStr { value } => self.piece_from_lit_str(&expr.ty, value)?,
+            // A variant-CTOR name here would emit a dangling `(call $Circle)` —
+            // decline instead, so the ctor chain's own arm (the
+            // `try_lower_*_variant_ctor` twins, which also pick the RIGHT
+            // wrapper drop route for rich payloads) handles it (#1064 row:
+            // `ok(Circle(2.5))` as a call argument shipped the unlinked name).
             IrExprKind::Call {
                 target: CallTarget::Named { name },
                 args,
                 ..
-            } => self.piece_from_named_call(&expr.ty, name, args)?,
+            } if !self.variant_layouts.ctor_to_type.contains_key(name.as_str()) => {
+                self.piece_from_named_call(&expr.ty, name, args)?
+            }
             // `Some(Some(..))` / `Some(None)` / `Some(Ok(..))` / `Some(Err(..))` — a NESTED
             // Option/Result ctor payload. Build the inner Option/Result block recursively
             // (a fresh OWNED handle), then MOVE it into the outer Some's slot — exactly like
@@ -656,11 +663,18 @@ impl LowerCtx {
                 self.piece_from_borrowed_param_var(*id)?
             }
             IrExprKind::LitStr { value } => self.piece_from_lit_str(&expr.ty, value)?,
+            // A variant-CTOR name here would emit a dangling `(call $Circle)` —
+            // decline instead, so the ctor chain's own arm (the
+            // `try_lower_*_variant_ctor` twins, which also pick the RIGHT
+            // wrapper drop route for rich payloads) handles it (#1064 row:
+            // `ok(Circle(2.5))` as a call argument shipped the unlinked name).
             IrExprKind::Call {
                 target: CallTarget::Named { name },
                 args,
                 ..
-            } => self.piece_from_named_call(&expr.ty, name, args)?,
+            } if !self.variant_layouts.ctor_to_type.contains_key(name.as_str()) => {
+                self.piece_from_named_call(&expr.ty, name, args)?
+            }
             // `ok([])` / `ok(["a", …])` — a LIST-literal Ok payload (the
             // tail-duplicated `let xs = if c then load(p)! else []` else-arm,
             // porta resolve_env). The string-list literal builder yields a

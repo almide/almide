@@ -1,0 +1,3 @@
+expects_code = "E059"
+expects_error = "cannot iterate `String`"
+hint_substring = "Iterate a collection"

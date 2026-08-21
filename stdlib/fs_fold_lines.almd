@@ -254,3 +254,153 @@ effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List
     ok(__ffl_range_walk_ls(th, slen, p0, endp, init, f))
   }
 }
+
+// `fs.fold_lines` String-accumulator twin (`_s` — the concat-fold shape
+// `fold_lines(p, "", (acc, line) => acc + line)`): the SAME full-file walk as
+// the msi twin over a String acc. The acc moves through f per line; the final
+// acc is the owned Ok payload (flat drop — one buffer).
+fn __ffl_walk_s(sh: Int, slen: Int, pos: Int, acc: String, f: (String, String) -> String) -> String = if pos >= slen then acc
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  let nacc = f(acc, line)
+  __ffl_walk_s(sh, slen, e + 1, nacc, f)
+}
+
+effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> String) -> Result[String, String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    ok(__ffl_walk_s(th, prim.load32(th + 4), 0, init, f))
+  }
+}
+
+// `fs.fold_lines` Int-accumulator twin (`_i` — the counting shape
+// `fold_lines(p, 0, (acc, line) => acc + string.len(line))`): a scalar acc
+// carries no ownership; the len-as-tag Result[Int, String] payload class.
+fn __ffl_walk_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Int) -> Int = if pos >= slen then acc
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  let nacc = f(acc, line)
+  __ffl_walk_i(sh, slen, e + 1, nacc, f)
+}
+
+effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    ok(__ffl_walk_i(th, prim.load32(th + 4), 0, init, f))
+  }
+}
+
+// `fs.fold_lines` List[String]-accumulator twin (`_ls` — the read_lines
+// equivalence shape `fold_lines(p, [], (acc, line) => acc + [line])`): the
+// full-file version of the range walker's acc class.
+fn __ffl_walk_ls(sh: Int, slen: Int, pos: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] = if pos >= slen then acc
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  let nacc = f(acc, line)
+  __ffl_walk_ls(sh, slen, e + 1, nacc, f)
+}
+
+effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    ok(__ffl_walk_ls(th, prim.load32(th + 4), 0, init, f))
+  }
+}
+
+// `fs.for_each_line` (the visitor of the family — no accumulator): the SAME
+// byte walk, calling f per line for its effects only. The Unit-returning
+// callback rides the same lift machinery the fold twins use; the answer is
+// `ok(())` unless the READ failed (a per-line callback cannot fail here —
+// that form is the fallible carrier below).
+fn __ffl_walk_u(sh: Int, slen: Int, pos: Int, f: (String) -> Unit) -> Int = if pos >= slen then 0
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  f(line)
+  __ffl_walk_u(sh, slen, e + 1, f)
+}
+
+effect fn fs_for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    let _w = __ffl_walk_u(th, prim.load32(th + 4), 0, f)
+    ok(())
+  }
+}
+
+// The ADR-0006 fallible carriers for the Int fold and the visitor (#1144,
+// C-274): the FIRST err ends the walk — the callback is NOT invoked for any
+// later line (the invocation trace is the cross-target observable, same as
+// the msi fallible walker above).
+fn __ffl_walk_eff_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = if pos >= slen then ok(acc)
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  match f(acc, line) {
+    ok(nacc) => __ffl_walk_eff_i(sh, slen, e + 1, nacc, f),
+    err(m) => err(m),
+  }
+}
+
+effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    __ffl_walk_eff_i(th, prim.load32(th + 4), 0, init, f)
+  }
+}
+
+fn __ffl_walk_eff_u(sh: Int, slen: Int, pos: Int, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = if pos >= slen then ok(())
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  match f(line) {
+    ok(_u) => __ffl_walk_eff_u(sh, slen, e + 1, f),
+    err(m) => err(m),
+  }
+}
+
+effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    __ffl_walk_eff_u(th, prim.load32(th + 4), 0, f)
+  }
+}

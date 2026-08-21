@@ -2,6 +2,14 @@
 
 **"Not a language for writing freely, but a language for converging correctly."**
 
+> **Normative status (declared 2026-08-20, #530 / A0-1):** this specification
+> and `docs/specs/` are normative — **where an implementation disagrees with
+> the ALS, the implementation is wrong.** The interpreter is the ALS's
+> executable companion (the 3-way oracle's third judge), held to the spec,
+> never a spec itself. The frozen surface and the breaking-change policy are
+> [docs/STABILITY.md](STABILITY.md); known prose contradictions are #530's
+> open burn-down, each closing with a fixture citing its ALS section.
+
 ---
 
 ## 0. Design Philosophy

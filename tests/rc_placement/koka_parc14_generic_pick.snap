@@ -1,0 +1,32 @@
+fn $main
+  (call $rc_dec (local.get $v29))
+  (call $rc_dec (local.get $v25))
+  (call $rc_dec (local.get $v24))
+  (call $rc_dec (local.get $v23))
+  (call $rc_dec (local.get $v22))
+  (call $rc_dec (local.get $v20))
+  (call $rc_dec (local.get $v19))
+  (call $rc_dec (local.get $v17))
+  (call $rc_dec (local.get $v16))
+  (call $rc_dec (local.get $v13))
+  (call $rc_dec (local.get $v9))
+  (call $rc_dec (local.get $v8))
+  (call $rc_dec (local.get $v7))
+  (call $rc_dec (local.get $v6))
+  (call $rc_dec (local.get $v5))
+  (call $rc_dec (local.get $v4))
+  (call $rc_dec (local.get $v3))
+  (call $rc_dec (local.get $v1))
+fn $__drop_opt_str_str
+  (call $rc_dec (i32.wrap_i64 (local.get $v22)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v25)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v14)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $first_of__String
+  (call $rc_inc (local.get $v0))
+fn $pick__List_Int
+  (call $rc_inc (local.get $v1))
+  (call $rc_inc (local.get $v2))
+fn $pick__String
+  (call $rc_inc (local.get $v1))
+  (call $rc_inc (local.get $v2))

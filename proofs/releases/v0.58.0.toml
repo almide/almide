@@ -1,0 +1,27 @@
+# Release evidence seal — v0.58.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.58.0"
+tag = "v0.58.0"
+tag_commit = "5e53dfb473a4d6021075664b5f4951761cd5986f"
+date = "2026-08-19"
+url = "https://github.com/almide/almide/releases/tag/v0.58.0"
+
+[derived]
+cargo_version = "0.58.0"
+contracts_sha256 = "ecc5efeff52de757e55c7e4fc1efc00298e6e108be7f3b320cd60b57254d9a40"
+contracts_total = "299"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "e2c7698f5c7f7c4da3a3c6b1f637a98fef7e3a6c78104c4550481fac8fa0ff8b"
+abstain_ledger_entries = "75"
+wasm_cross_fixtures = "589"
+rust_toolchain = "1.89.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "manual fuzz dispatch 32228753201 on develop 188cc7b7d (= the tagged tree; the only later commit is the version bump), 8 shards x 8 min (x86_64 + aarch64). Six shards completed their full 480s budget with findings=0; shards 2-3 (x86_64) were SIGTERMed by the runner mid-budget (exit 143 at ~356s/~340s, the documented small-runner reclaim) with findings=0 up to termination — infra loss, not silence about a defect. The verdict job (the run's single failure authority) aggregated the surviving shards and PASSED: zero correctness findings. Context that matters: the SCHEDULED night before the fix (run 32212662252, tree 02ac67d85) recorded 17 findings — all one family, the third oracle (interpreter) leaking f64 bits/Bools as integers through mislabeled scalar-impl declarations, NOT a target-vs-target divergence; disposed same-day by 188cc7b7d (slot-materialization strictness), 7 representative seeds replayed CLEAN, then this findings=0 dispatch. An earlier dispatch (32221910846) with the default 60-minute budget lost all 8 shards to runner reclaim and the verdict correctly failed on no-evidence; superseded by this run. Zero unexplained findings. At the tag: full suite 1190 passed / 0 failed, wasm_runtime_test 79/79, 3-way voting gate zero-dissent across 589 fixtures."
+assets = "6: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256"
+known_problems = "#1525 (native q1_0 huge-dims raw panic) is FIXED this release (dims ceiling + global-k decode, both legs). Carried over unchanged: #1229 quadratic wasm string-accumulator concat; #1520/#1522 Codec decode heap-result-match subset walls honestly on wasm (COMPILER_FRONTIER pin); the declared contracted divergences in proofs/domain-edges.toml (C-197, ratified A 2026-08-17); native SIGKILL under OS overcommit on small-RAM hosts. Newly DISCLOSED (documented in C-069's statement and the effect_tco_err_rewrap fixture): the v1/wasm leg deliberately declines the TCO loop rewrite for effect bodies with an err($var) base and lowers real input-bounded recursion (v0 loops; cross-target claim is build-success + byte-identical answers, not O(1) stack on both), and a USER-defined effect callee in the match subject declines TCO on BOTH legs (consistent O(n)). The interpreter's remaining 79-row abstain ledger is fully classified (voting 514/589, 87.3%)."

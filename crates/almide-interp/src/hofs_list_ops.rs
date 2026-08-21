@@ -34,6 +34,20 @@ impl<'a> Interpreter<'a> {
                  before dispatch, so its binding cannot be written back)"
             )));
         }
+        // ADDRESS-UNIFORM receivers stay in the pool tier (#1226): a live
+        // block address reaching a native container op means a POOL body is
+        // mid-flight (its values are addresses by design) — the native impls
+        // expect real containers and would abort. Falling through hands the
+        // call to the self-host body, which reads the SAME arena through the
+        // prim floor (`list_len` = handle + load32). First-arg only: every
+        // container op's receiver is its first argument, and a genuinely
+        // scalar first arg under a container module name never collides
+        // (fall-through is the pre-existing behavior for unknown ops anyway).
+        if let Some(Value::Int(i)) = args.first() {
+            if u32::try_from(*i).ok().and_then(|a| self.heap.kind(a)).is_some() {
+                return None;
+            }
+        }
         // Per-module dispatch below — grouping by `module` first (rather than
         // one flat `(module, func)` match) is behavior-preserving because every
         // arm was already keyed by a unique `(module, func)` literal pair, so
@@ -81,6 +95,14 @@ impl<'a> Interpreter<'a> {
             // fixture, #1416).
             "with_capacity" => Some(Flow::val(Value::list(Vec::new()))),
             "concat" => Some(self.list_concat(args)),
+            // Structural, element-type-blind — served natively so a heap-element
+            // list never reaches the pool's Int-declared core impl (the
+            // wrong-impl guard walled chunk/windows on List[String], #1226).
+            // Semantics mirror stdlib/list_chunk.almd EXACTLY: chunk(0) /
+            // windows(0) abort in the T6 form; a negative chunk size is one
+            // chunk holding everything; windows past the length are none.
+            "chunk" => Some(self.list_chunk(args)),
+            "windows" | "window" => Some(self.list_windows(args)),
             // The aggregate/ordering ops are a second-tier sub-router — purely
             // to keep this router's own arm count (and cyclomatic weight)
             // under the per-function threshold; `func` still uniquely selects
@@ -89,9 +111,129 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    /// `list.chunk(xs, n)` — stdlib/list_chunk.almd's exact domain rules:
+    /// n == 0 aborts with v0's line, n < 0 is `chunks(huge usize)` = one
+    /// chunk holding everything, and the count is the overflow-proof
+    /// `total/n + (total % n != 0)`.
+    fn list_chunk(&mut self, args: &[Value]) -> Flow {
+        let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
+            return Flow::Abort("internal: list.chunk bad args".into());
+        };
+        if *n == 0 {
+            return Flow::Abort("chunk size must be positive".into());
+        }
+        let total = xs.len() as i64;
+        let n = if *n < 0 { total.max(1) } else { *n };
+        let out: Vec<Value> = xs
+            .chunks(usize::try_from(n).unwrap_or(usize::MAX).max(1))
+            .map(|c| Value::list(c.to_vec()))
+            .collect();
+        Flow::val(Value::list(out))
+    }
+
+    /// `list.windows(xs, n)` — n == 0 aborts, n < 0 or n > len is the empty
+    /// list, else the len-n+1 overlapping sub-slices.
+    fn list_windows(&mut self, args: &[Value]) -> Flow {
+        let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
+            return Flow::Abort("internal: list.windows bad args".into());
+        };
+        if *n == 0 {
+            return Flow::Abort("window size must be positive".into());
+        }
+        let total = xs.len() as i64;
+        if *n < 0 || *n > total {
+            return Flow::val(Value::list(Vec::new()));
+        }
+        let out: Vec<Value> = xs
+            .windows(*n as usize)
+            .map(|w| Value::list(w.to_vec()))
+            .collect();
+        Flow::val(Value::list(out))
+    }
+
+    fn list_dedup(&mut self, args: &[Value]) -> Flow {
+        let Some(Value::List(xs)) = args.first() else {
+            return Flow::Abort("internal: list.dedup bad args".into());
+        };
+        let mut r: Vec<Value> = Vec::new();
+        for x in xs.iter() {
+            if r.last() != Some(x) {
+                r.push(x.clone());
+            }
+        }
+        Flow::val(Value::list(r))
+    }
+
+    fn list_unique(&mut self, args: &[Value]) -> Flow {
+        let Some(Value::List(xs)) = args.first() else {
+            return Flow::Abort("internal: list.unique bad args".into());
+        };
+        let mut r: Vec<Value> = Vec::new();
+        for x in xs.iter() {
+            if !r.contains(x) {
+                r.push(x.clone());
+            }
+        }
+        Flow::val(Value::list(r))
+    }
+
+    fn list_flatten(&mut self, args: &[Value]) -> Flow {
+        let Some(Value::List(xss)) = args.first() else {
+            return Flow::Abort("internal: list.flatten bad args".into());
+        };
+        let mut r: Vec<Value> = Vec::new();
+        for xs in xss.iter() {
+            match xs {
+                Value::List(inner) => r.extend(inner.iter().cloned()),
+                other => {
+                    return Flow::Abort(format!(
+                        "internal: list.flatten over a {} element",
+                        other.type_name()
+                    ))
+                }
+            }
+        }
+        Flow::val(Value::list(r))
+    }
+
+    fn list_intersperse(&mut self, args: &[Value]) -> Flow {
+        let (Some(Value::List(xs)), Some(sep)) = (args.first(), args.get(1)) else {
+            return Flow::Abort("internal: list.intersperse bad args".into());
+        };
+        let mut r: Vec<Value> = Vec::with_capacity(xs.len().saturating_mul(2));
+        for (i, x) in xs.iter().enumerate() {
+            if i > 0 {
+                r.push(sep.clone());
+            }
+            r.push(x.clone());
+        }
+        Flow::val(Value::list(r))
+    }
+
+    fn list_zip(&mut self, args: &[Value]) -> Flow {
+        let (Some(Value::List(xs)), Some(Value::List(ys))) = (args.first(), args.get(1)) else {
+            return Flow::Abort("internal: list.zip bad args".into());
+        };
+        let r: Vec<Value> = xs
+            .iter()
+            .zip(ys.iter())
+            .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
+            .collect();
+        Flow::val(Value::list(r))
+    }
+
     fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
             "sum" => Some(self.list_sum(args)),
+            // Structural, element-type-blind, mirroring the v0 runtime
+            // exactly (runtime/rs/src/list.rs): dedup drops CONSECUTIVE
+            // equals, unique keeps first occurrences, both under the same
+            // `PartialEq` the interp's `==` already models (f64 NaN != NaN).
+            "dedup" => Some(self.list_dedup(args)),
+            "unique" => Some(self.list_unique(args)),
+            "flatten" => Some(self.list_flatten(args)),
+            "intersperse" => Some(self.list_intersperse(args)),
+            "zip" => Some(self.list_zip(args)),
             "product" => Some(self.list_product(args)),
             "min" => Some(self.list_min_max(args, false)),
             "max" => Some(self.list_min_max(args, true)),
@@ -367,7 +509,77 @@ impl<'a> Interpreter<'a> {
             "set" => Some(self.map_set(args)),
             "keys" => Some(self.map_keys(args)),
             "values" => Some(self.map_values(args)),
+            // Served natively so a String-keyed map never reaches the pool's
+            // scalar core impl (the wrong-impl guard walled these on
+            // Map[String, _], #1226). All three are element-type-blind over
+            // the insertion-ordered entry list both backends share.
+            "get_or" => Some(self.map_get_or(args)),
+            "from_list" => Some(self.map_from_list(args)),
+            "entries" | "to_list" => Some(self.map_entries(args)),
+            // v0's AlmideMap semantics exactly: remove keeps order, merge is
+            // a's entries then b's upserted in (FIRST position, LAST value).
+            "remove" => Some(self.map_remove(args)),
+            "merge" => Some(self.map_merge(args)),
             _ => None,
+        }
+    }
+
+    fn map_remove(&mut self, args: &[Value]) -> Flow {
+        match (args.first(), args.get(1)) {
+            (Some(Value::Map(e)), Some(k)) => Flow::val(Value::Map(Rc::new(
+                e.iter().filter(|(ek, _)| ek != k).cloned().collect(),
+            ))),
+            _ => Flow::Abort("internal: map.remove bad args".into()),
+        }
+    }
+
+    fn map_merge(&mut self, args: &[Value]) -> Flow {
+        match (args.first(), args.get(1)) {
+            (Some(Value::Map(a)), Some(Value::Map(b))) => {
+                let mut out = (**a).clone();
+                for (k, v) in b.iter() {
+                    crate::eval::map_insert(&mut out, k.clone(), v.clone());
+                }
+                Flow::val(Value::Map(Rc::new(out)))
+            }
+            _ => Flow::Abort("internal: map.merge bad args".into()),
+        }
+    }
+
+    fn map_get_or(&mut self, args: &[Value]) -> Flow {
+        match (args.first(), args.get(1), args.get(2)) {
+            (Some(Value::Map(e)), Some(k), Some(d)) => Flow::val(
+                e.iter().find(|(ek, _)| ek == k).map(|(_, v)| v.clone()).unwrap_or_else(|| d.clone()),
+            ),
+            _ => Flow::Abort("internal: map.get_or bad args".into()),
+        }
+    }
+
+    /// Insertion order with upsert-in-place — v0's AlmideMap `from_list`
+    /// (FIRST position, LAST value), the same rule `map_insert` implements.
+    fn map_from_list(&mut self, args: &[Value]) -> Flow {
+        let Some(Value::List(pairs)) = args.first() else {
+            return Flow::Abort("internal: map.from_list bad args".into());
+        };
+        let mut out: Vec<(Value, Value)> = Vec::with_capacity(pairs.len());
+        for p in pairs.iter() {
+            let Value::Tuple(kv) = p else {
+                return Flow::Abort("internal: map.from_list on a non-tuple element".into());
+            };
+            let (Some(k), Some(v)) = (kv.first(), kv.get(1)) else {
+                return Flow::Abort("internal: map.from_list on a non-pair tuple".into());
+            };
+            crate::eval::map_insert(&mut out, k.clone(), v.clone());
+        }
+        Flow::val(Value::Map(Rc::new(out)))
+    }
+
+    fn map_entries(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Map(e)) => Flow::val(Value::list(
+                e.iter().map(|(k, v)| Value::tuple(vec![k.clone(), v.clone()])).collect(),
+            )),
+            _ => Flow::Abort("internal: map.entries on non-map".into()),
         }
     }
 
@@ -434,8 +646,64 @@ impl<'a> Interpreter<'a> {
             "contains" | "has" => Some(self.set_contains(args)),
             "insert" | "add" => Some(self.set_insert(args)),
             "to_list" => Some(self.set_to_list(args)),
+            // The C-014 order rules the set_insertion_order fixture pins:
+            // union is a-order then b's new elements; intersection and
+            // difference walk a; symmetric difference is (a-b) then (b-a).
+            "union" => Some(self.set_union(args)),
+            "intersection" => Some(self.set_intersection(args)),
+            "difference" => Some(self.set_difference(args)),
+            "symmetric_difference" => Some(self.set_symmetric_difference(args)),
             _ => None,
         }
+    }
+
+    fn set_pair<'v>(args: &'v [Value], op: &str) -> Result<(&'v Rc<Vec<Value>>, &'v Rc<Vec<Value>>), Flow> {
+        match (args.first(), args.get(1)) {
+            (Some(Value::Set(a)), Some(Value::Set(b))) => Ok((a, b)),
+            _ => Err(Flow::Abort(format!("internal: set.{op} bad args"))),
+        }
+    }
+
+    fn set_union(&mut self, args: &[Value]) -> Flow {
+        let (a, b) = match Self::set_pair(args, "union") {
+            Ok(p) => p,
+            Err(f) => return f,
+        };
+        let mut out = (**a).clone();
+        for x in b.iter() {
+            if !out.contains(x) {
+                out.push(x.clone());
+            }
+        }
+        Flow::val(Value::Set(Rc::new(out)))
+    }
+
+    fn set_intersection(&mut self, args: &[Value]) -> Flow {
+        let (a, b) = match Self::set_pair(args, "intersection") {
+            Ok(p) => p,
+            Err(f) => return f,
+        };
+        let out: Vec<Value> = a.iter().filter(|x| b.contains(x)).cloned().collect();
+        Flow::val(Value::Set(Rc::new(out)))
+    }
+
+    fn set_difference(&mut self, args: &[Value]) -> Flow {
+        let (a, b) = match Self::set_pair(args, "difference") {
+            Ok(p) => p,
+            Err(f) => return f,
+        };
+        let out: Vec<Value> = a.iter().filter(|x| !b.contains(x)).cloned().collect();
+        Flow::val(Value::Set(Rc::new(out)))
+    }
+
+    fn set_symmetric_difference(&mut self, args: &[Value]) -> Flow {
+        let (a, b) = match Self::set_pair(args, "symmetric_difference") {
+            Ok(p) => p,
+            Err(f) => return f,
+        };
+        let mut out: Vec<Value> = a.iter().filter(|x| !b.contains(x)).cloned().collect();
+        out.extend(b.iter().filter(|x| !a.contains(x)).cloned());
+        Flow::val(Value::Set(Rc::new(out)))
     }
 
     fn set_len(&mut self, args: &[Value]) -> Flow {

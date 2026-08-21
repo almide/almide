@@ -1,0 +1,42 @@
+// @contract: C-319
+// A `var` List captured AND mutated through a closure is SHARED storage on the
+// wasm leg (the shared-cell machinery, closures Rung 6): the closure's
+// functional rebind (`seen = seen + [s]`, the `list.push` desugar) writes
+// through the cell, and BOTH directions stay visible — a rebind inside the
+// closure is seen by the enclosing scope, and an enclosing-scope rebind AFTER
+// capture is seen by the next closure call. Before this admission the value
+// lowered as an env value-copy, and the miscompile was a silent wrong value
+// (native 2 / wasm 0), not a wall — which is why the element classes admitted
+// here are exactly the ones whose cell drop is already exact (len-counted
+// OWNED slots: String elements, and Flat-ctor elements like Option[Int]).
+effect fn main() -> Unit = {
+  // (1) closure-side mutation observed outside: List[String] cell
+  var seen: List[String] = []
+  let note = (s: String) => {
+    seen = seen + [s]
+  }
+  note("a")
+  note("b")
+  println(int.to_string(list.len(seen)))
+  println(list.get_or(seen, 1, "-"))
+  // (2) Flat-ctor element class: List[Option[Int]] cell
+  var acc: List[Int?] = []
+  let put = (x: Int) => {
+    acc = acc + [
+      (if x > 0 then some(x) else none)
+    ]
+  }
+  put(3)
+  put(0 - 1)
+  println(int.to_string(list.len(acc)))
+  // (3) BOTH directions: outside rebind between closure calls stays visible
+  var log: List[String] = ["init"]
+  let mark = (s: String) => {
+    log = log + [s]
+  }
+  mark("a")
+  log = log + ["outside"]
+  mark("b")
+  println(int.to_string(list.len(log)))
+  println(list.get_or(log, 0, "-") + list.get_or(log, 2, "-") + list.get_or(log, 3, "-"))
+}

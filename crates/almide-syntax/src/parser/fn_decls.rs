@@ -83,13 +83,18 @@ impl Parser {
         Err(msg)
     }
 
-    /// `-> Ty` or `-> Ty!`.
+    /// `-> Ty`, `-> Ty!`, or `-> Ty!E`.
     ///
     /// ADR-0002 Phase 1 (#1103): `-> T!` marks a pure-fallible return — sugar for
     /// `Result[T, String]`, carried as the pseudo-generic `!` so the formatter can
     /// print the surface spelling back. Legal ONLY in fn-decl return position
     /// (this parse site); the resolver maps it, and everything downstream sees the
     /// plain Result.
+    ///
+    /// ADR-0012 D2 (#1193): the marker may carry a TYPED error — `-> T!E` ≡
+    /// `Result[T, E]`, the 2-arg pseudo-generic. Bare `!` stays 1-arg (the
+    /// `!String` default), so `T!` keeps meaning `T!String` and every existing
+    /// program is unaffected. Same-line only, one token of lookahead.
     fn parse_fn_return_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
@@ -97,6 +102,13 @@ impl Parser {
             return Ok(return_type);
         }
         self.advance();
+        if self.marker_error_follows() {
+            let e = self.parse_marker_error_type()?;
+            return Ok(TypeExpr::Generic {
+                name: crate::intern::sym("!"),
+                args: vec![return_type, e],
+            });
+        }
         Ok(TypeExpr::Generic { name: crate::intern::sym("!"), args: vec![return_type] })
     }
 

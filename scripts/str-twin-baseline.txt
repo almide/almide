@@ -4,4 +4,8 @@
 # 2026-08-18: +1 — list_flat_map_str, the deep-copy twin that fixes the
 # aliased-sublist double-free (#1519, C-297). A justified bump, not drift;
 # the #1460 protocol direction still owns the family's future.
-119
+# 2026-08-20: +1 — map_upsert_str, retiring the map.upsert_str_wall fuzz wall
+# (#1527 burn-down, C-301; 6x/shard). Compositional over the existing twins
+# (contains -> update, else set), so the protocol migration that retires the
+# family retires it with zero extra surface. #1460 still owns the future.
+120

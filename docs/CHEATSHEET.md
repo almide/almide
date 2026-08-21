@@ -122,9 +122,21 @@ A LAMBDA whose body uses `!` becomes a fallible closure `(A) -> Result[T, String
 (first-class; a fallible callback to a core list HOF takes the first-err form;
 fn-type slots spell it `(A) -> B!`). In test blocks a lambda's `!` stays plain
 unwrap. `!` the RETURN MARKER is legal ONLY in return position of a fn
-declaration and in fn-type slots. E is always String —
-a custom error type keeps the explicit `Result[T, MyError]` spelling
-(ADR-0003/0004: branch on structure, not message text).
+declaration and in fn-type slots.
+
+The marker carries a TYPED error too (ADR-0012 D2): `-> T!E` ≡ `Result[T, E]`
+for a NAMED error type E, and `T!` stays the abbreviation of `T!String`. `?`
+binds first: `-> B?!E` is `Result[Option[B], E]`. Propagation is unchanged —
+`!` never converts E (ADR-0003/0004: branch on structure, not message text);
+an E mismatch stays a check error.
+
+```almide check
+type ConfigError = | Missing(String) | BadValue(String)
+fn load(path: String) -> String!ConfigError = {
+  guard path != "" else err(Missing(path))
+  "text"                          // value tail lifts into ok(...) with E=ConfigError
+}
+```
 
 ### Option shorthand `T?` (ADR-0010)
 

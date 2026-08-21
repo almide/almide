@@ -476,8 +476,12 @@ _o_mut: MUT
       |
 _o_generics: generic_params
            |
-_o_bang: BANG
+_o_bang: BANG marker_err?
        |
+// ADR-0012 D2 (#1193): the fallibility marker may carry a TYPED error —
+// `-> T!E` — where E is a (possibly qualified) NAMED atom with optional
+// generic args; no `?`/`!` suffix on E.
+marker_err: qualified_type_name ("[" type_args "]")?
 _o_question: QUESTION
            |
 _o_ty_ann: COLON type_expr

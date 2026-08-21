@@ -92,8 +92,19 @@ pub(crate) fn collect_cell_vars(
                 IrStmtKind::Assign { var, .. } => {
                     self.mutated.insert(*var);
                 }
-                IrStmtKind::IndexAssign { target, .. }
-                | IrStmtKind::FieldAssign { target, .. }
+                // `IndexAssign` is deliberately NOT here: `xs[0] = v` writes an
+                // element SLOT of the shared block through the handle — no
+                // rebind, no realloc — so a plain env value-copy capture is
+                // already correct in both directions (the same physics as the
+                // `bytes.set_at` exclusion above). Forcing a cell regressed the
+                // proven wasm_indexassign_noncopy_element_through_closure shape
+                // to a lift refusal the moment List[String] gained a cell class
+                // (cb7c00ee4's admission widening): the closure body's
+                // index-assign-through-a-cell has no lowering, so the whole
+                // lambda declined. FieldAssign/MapInsert stay: a map write IS
+                // the functional-rebind family (`inplace_mutated_receiver`'s
+                // map arms), and a record var has no cell class to regress.
+                IrStmtKind::FieldAssign { target, .. }
                 | IrStmtKind::MapInsert { target, .. } => {
                     self.mutated.insert(*target);
                 }
@@ -141,12 +152,22 @@ pub(crate) fn collect_cell_vars(
 pub(crate) enum CellClass {
     Scalar,
     FlatHeap,
-    /// `Map[String, <scalar>]` inner (the word-count `bump` closure class): the
-    /// map owns its key Strings, so neither the flat nor the nested env class
-    /// frees it exactly — the cell's scope-end drop is the `DropListListStr`
-    /// walk (cell slot → key-slot sweep → map block → cell block) and its env
-    /// capture takes `$__drop_closure`'s dedicated 4th header class.
-    MapSkv,
+    /// An inner whose block is "len@4-counted OWNED slots, nothing deeper" —
+    /// the STRUCTURAL rule, with (so far) two instances: a `Map[String,
+    /// <scalar>]` (len counts the KEYS; the key slots are owned Strings, the
+    /// value region is scalar — the word-count `bump` closure class) and a
+    /// `List[<one-level-exact element>]` (len counts the elements; every slot
+    /// is an owned handle whose single `rc_dec` is its full free — the
+    /// fs_streaming `var seen` class). Both free through the SAME machinery:
+    /// the cell's scope-end drop is the `DropListListStr` walk (cell slot →
+    /// len-slot sweep → inner block → cell block) and the env capture takes
+    /// `$__drop_closure`'s dedicated 4th header class (`__drop_cellmap`,
+    /// whose sweep is len-generic and reads no interior bytes). NOT admitted:
+    /// any inner whose slots need recursion of their own (a record-valued
+    /// map, `List[List[String]]`) — a len-sweep would leak their interiors,
+    /// so those keep the honest lift refusal until a routed cell class
+    /// exists.
+    LenOwnedSlots,
 }
 
 pub(crate) fn cell_class_of(ty: &Ty) -> Option<CellClass> {
@@ -162,7 +183,24 @@ pub(crate) fn cell_class_of(ty: &Ty) -> Option<CellClass> {
         Ty::Applied(TypeConstructorId::Map, a)
             if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]) =>
         {
-            Some(CellClass::MapSkv)
+            Some(CellClass::LenOwnedSlots)
+        }
+        // A list of ONE-LEVEL-EXACT elements (String, Bytes, List[scalar], a
+        // Flat-class ctor like Option[<scalar>]): every len-counted slot is an
+        // owned handle one `rc_dec` fully frees — the same physical shape as
+        // the skv key region, so the same walk is exact. The predicate is the
+        // registry-free one-level-exact subset (flat records/variants need
+        // registry access this free fn does not have; they stay refused —
+        // honestly — until the class takes `&self`).
+        Ty::Applied(TypeConstructorId::List, a)
+            if a.len() == 1
+                && (matches!(a[0], Ty::String | Ty::Bytes)
+                    || matches!(&a[0], Ty::Applied(TypeConstructorId::List, b)
+                        if b.len() == 1 && !is_heap_ty(&b[0]))
+                    || crate::lower::lenlist_elem_class(&a[0])
+                        == Some(crate::lower::CtorElemClass::Flat)) =>
+        {
+            Some(CellClass::LenOwnedSlots)
         }
         _ => None,
     }
@@ -202,7 +240,7 @@ impl LowerCtx {
                         "cell var {var:?} scalar initializer outside the value subset"
                     ))
                 })?,
-            CellClass::FlatHeap | CellClass::MapSkv => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
                 self.lower_owned_heap_field(value).ok_or_else(|| {
                     LowerError::Unsupported(format!(
                         "cell var {var:?} heap initializer outside the value subset"
@@ -227,7 +265,7 @@ impl LowerCtx {
                     args: vec![addr, inner],
                 });
             }
-            CellClass::FlatHeap | CellClass::MapSkv => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
                 let handle = self.fresh_value();
                 self.ops
                     .push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(handle), args: vec![inner] });
@@ -238,11 +276,12 @@ impl LowerCtx {
                 });
                 self.ops.push(Op::Consume { v: inner });
                 self.live_heap_handles.retain(|x| *x != inner);
-                if class == CellClass::MapSkv {
-                    // The inner map owns its key Strings: the cell's scope-end drop is
-                    // the NESTED DropListListStr walk (cell slot -> key-slot sweep ->
-                    // map block -> cell block); the flat heap_elem_lists sweep would
-                    // dec only the map handle and leak every key.
+                if class == CellClass::LenOwnedSlots {
+                    // The inner owns its len-counted slots (skv keys / one-exact
+                    // list elements): the cell's scope-end drop is the NESTED
+                    // DropListListStr walk (cell slot -> len-slot sweep -> inner
+                    // block -> cell block); the flat heap_elem_lists sweep would
+                    // dec only the inner handle and leak every owned slot.
                     self.value_drops.entry(cell).or_default().list_list_str = true;
                 } else {
                     self.value_drops.entry(cell).or_default().flat_elems = true;
@@ -279,7 +318,7 @@ impl LowerCtx {
                 });
                 Ok(dst)
             }
-            CellClass::FlatHeap | CellClass::MapSkv => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
                 let repr = repr_of(&ty)?;
                 let borrowed = self.fresh_value();
                 self.ops.push(Op::Prim {
@@ -341,7 +380,7 @@ impl LowerCtx {
                 });
                 Ok(())
             }
-            CellClass::FlatHeap | CellClass::MapSkv => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
                 let new = self.lower_owned_heap_field(value).ok_or_else(|| {
                     LowerError::Unsupported(format!(
                         "heap value assigned to cell var {var:?} outside the executable subset"

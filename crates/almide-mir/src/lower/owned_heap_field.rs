@@ -78,6 +78,21 @@ impl LowerCtx {
                 let blk = self.lift_lambda(params, body)?;
                 self.track_owned_field(blk)
             }
+            // An `Option[<scalar>]` CTOR field (`("k0", some(1))` / `("j", none)` — the
+            // map-literal pairs shape, #1527's top fuzz family): materialize the REAL
+            // tagged 0-or-1 block via `try_lower_option_ctor` (the SAME OptSome/OptNone
+            // block a `let o = some(1)` bind builds), tracked so the caller's Consume
+            // moves it into the enclosing slot. Gated to the `Flat` lenlist class: the
+            // block owns no further heap, so every enclosing consumer's one-level
+            // `rc_dec` of this slot is its exact free. A heap-payload `Some` keeps
+            // deferring — its free needs recursion the flat slot drops don't do.
+            IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+                if crate::lower::lenlist_elem_class(&expr.ty)
+                    == Some(crate::lower::CtorElemClass::Flat) =>
+            {
+                let obj = self.try_lower_option_ctor(expr, &expr.ty)?;
+                self.track_owned_field(obj)
+            }
             // A tracked LOCAL heap var, or a MODULE-LEVEL global (`_style: _default` — the
             // ceangal View ctors): `value_or_global` materializes a global's const/record
             // initializer as a fresh owned cached copy (dropped at scope end); the Dup here

@@ -1,0 +1,33 @@
+fn $make_heap_thunk
+  (call $rc_inc (local.get $v0))
+fn $__lambda_make_heap_thunk_0
+  (call $rc_dec (local.get $v5))
+fn $main
+  (call $rc_dec (local.get $v14))
+  (call $rc_dec (local.get $v11))
+  (call $__drop_closure (local.get $v10))
+  (call $rc_dec (local.get $v9))
+  (call $rc_dec (local.get $v8))
+  (call $rc_dec (local.get $v4))
+  (call $__drop_closure (local.get $v0))
+fn $__drop_closure
+  (call $__drop_closure_loop (local.get $v1) (local.get $v16) (local.get $v21) (local.get $v24) (local.get $v11) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_closure_loop
+  (call $__drop_closure (local.get $v20))
+  (call $__drop_list_str (local.get $v28))
+  (call $rc_dec (i32.wrap_i64 (local.get $v37)))
+  (call $__drop_cellmap (local.get $v43))
+fn $__drop_cellmap
+  (call $__drop_list_str (local.get $v8))
+  (call $rc_dec (i32.wrap_i64 (local.get $v0)))
+fn $__drop_list_str
+  (call $__drop_list_str_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_str_loop
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
+fn $__drop_opt_str_str
+  (call $rc_dec (i32.wrap_i64 (local.get $v22)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v25)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v14)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))

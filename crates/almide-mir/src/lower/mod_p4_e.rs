@@ -62,6 +62,10 @@ struct MapRoute<'a> {
     val_is_string: bool,
     /// Whether the value is the flat `List[scalar]` class `map_hval` implements.
     val_is_flat_list: bool,
+    /// Whether the value is a `Flat`-class ctor block (`Option[<scalar>]` —
+    /// `lenlist_elem_class` = Flat): a single flat block the hval one-level
+    /// sweep frees exactly (#1527, the `["k0": some(1)]` map-literal family).
+    val_is_flat_ctor: bool,
     /// Whether the value is a closure (the `mclo` family).
     val_is_fn: bool,
     /// Whether the map's key type is a nullary variant (the `map_ivh` route).
@@ -251,9 +255,19 @@ fn classify_map_route<'a>(
         Some(Ty::Applied(TypeConstructorId::Map, a))
             if a.len() == 2 && matches!(a[1], Ty::Fn { .. })
     );
+    // The Flat-ctor value class (`Option[<scalar>]` — #1527's map-literal family):
+    // `lenlist_elem_class` is the single authority on the Flat/LenLoop split, so
+    // `Option[String]` (owned interior slot) stays out of this route by construction.
+    let val_is_flat_ctor = matches!(
+        subject,
+        Some(Ty::Applied(TypeConstructorId::Map, a))
+            if a.len() == 2
+                && crate::lower::lenlist_elem_class(&a[1])
+                    == Some(crate::lower::CtorElemClass::Flat)
+    );
     Some(MapRoute {
         func, arg_tys, result_ty, key_heap, val_heap,
-        key_is_string, val_is_string, val_is_flat_list, val_is_fn,
+        key_is_string, val_is_string, val_is_flat_list, val_is_fn, val_is_flat_ctor,
         key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
     })
 }
@@ -313,9 +327,9 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
     if r.val_heap && r.key_is_string {
         return Some(if matches!(
             r.func,
-            "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "get_or"
-                | "keys" | "values" | "len" | "is_empty" | "contains" | "all" | "any"
-                | "count" | "fold" | "entries"
+            "new" | "set" | "remove" | "merge" | "update" | "upsert" | "filter" | "get"
+                | "get_or" | "keys" | "values" | "len" | "is_empty" | "contains" | "all"
+                | "any" | "count" | "fold" | "entries"
         ) {
             MapName::Suffix("_str")
         } else {
@@ -336,7 +350,9 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
 /// val_heap)` match is kept so each arm reads exactly as it did in the one body.
 fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
     
-    let MapRoute { func, result_ty, val_is_string, val_is_flat_list, val_is_fn, .. } = r;
+    let MapRoute {
+        func, result_ty, val_is_string, val_is_flat_list, val_is_fn, val_is_flat_ctor, ..
+    } = r;
     match (r.key_heap, r.val_heap) {
     // `Map[String, List[scalar]]` — the implemented subset of the heap-value
     // family (new/set/eq/len/contains/get/get_or; other funcs keep the
@@ -354,6 +370,22 @@ fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
     (true, true)
         if val_is_fn
             && matches!(func, "new" | "set" | "len" | "contains" | "get" | "get_or") =>
+    {
+        Some(MapName::Suffix("_hval"))
+    }
+    // `Map[String, Option[<scalar>]]` — the Flat-ctor value class (#1527's
+    // map-literal family): the hval twins are handle-level (set stores +
+    // rc-shares the value handle; get_or shares it back), and the value block
+    // is FLAT (scalar payload under len-as-tag), so `$__drop_map_hval`'s
+    // one-level sweep frees it exactly. `eq` is EXCLUDED: hval eq compares
+    // value blocks structurally, which for an `Option[Float]` payload is an
+    // i64 bit-compare, not the f64 `==` native implements (-0.0/NaN) — it
+    // keeps the honest wall. `get` is EXCLUDED for now too: its result is a
+    // NESTED `Option[Option[<scalar>]]` wrapper whose drop routing has no
+    // verified class yet — get_or (the fuzz shape) needs no wrapper.
+    (true, true)
+        if val_is_flat_ctor
+            && matches!(func, "new" | "set" | "len" | "contains" | "get_or" | "keys") =>
     {
         Some(MapName::Suffix("_hval"))
     }
@@ -376,8 +408,24 @@ fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
     (true, true) if !val_is_string && func == "from_list" && is_map_str_int_list(result_ty) => {
         Some(MapName::Suffix("_hval"))
     }
+    // `Map[String, Option[<scalar>]]` from_list (keyed on the RESULT — the arg
+    // is the pairs List): the same handle-level pair-walk as the flat-list and
+    // closure arms above; the pairs list itself materializes via the widened
+    // `(String, <Flat ctor>)` StrStr element class.
+    (true, true) if func == "from_list" && is_map_str_flat_ctor(result_ty) => {
+        Some(MapName::Suffix("_hval"))
+    }
     _ => None,
     }
+}
+
+/// `Map[String, Option[<scalar>]]` — the Flat-ctor hval result key for `from_list`
+/// (see the construction route's Flat-ctor arm).
+fn is_map_str_flat_ctor(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+        && matches!(a[0], Ty::String)
+        && crate::lower::lenlist_elem_class(&a[1]) == Some(crate::lower::CtorElemClass::Flat))
 }
 
 /// Extracted verbatim from [`map_variant_heap_key`] (codopsy round-3 sweep, #852):

@@ -1,0 +1,6 @@
+// CONTROL: allocates per iteration on purpose — the gate must NAME this one.
+fn main() -> Unit = {
+  var s = ""
+  for i in 0...20 { s = s + int.to_string(i) }
+  println(int.to_string(string.len(s)))
+}

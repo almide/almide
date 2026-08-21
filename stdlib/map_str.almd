@@ -275,6 +275,13 @@ fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> M
   r
 }
 
+// map.upsert over the all-String map — one observable rule, two proven walks:
+// a PRESENT key updates via f (map_update_str's rebuild), an ABSENT one
+// appends (k, init) (map_set_str's rebuild). v0's intrinsic does the same in
+// one walk; byte-equality of the RESULT is the contract, not the walk count.
+fn map_upsert_str(m: Map[String, String], k: String, init: String, f: (String) -> String) -> Map[String, String] = if map_contains_str(m, k) then map_update_str(m, k, f)
+else map_set_str(m, k, init)
+
 // ── Higher-order Map[String,String] (closures machinery; the predicate f is a TWO-arity closure
 // f : (Key, Value) -> Bool with String args, heap-widened) ── filter keeps matching entries
 // (deep-copied); all/any/count read.

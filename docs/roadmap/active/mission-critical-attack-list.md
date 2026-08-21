@@ -10,7 +10,22 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 0 — Semantics must stop moving (everything else builds on this)
 
-- [ ] **A0-1 (#530 + #1485 + #1483) (L) Spec freeze + compatibility contract.** 0.57.2 itself carries
+- [x] **A0-1 (#530 + #1485 + #1483) (L) Spec freeze + compatibility contract.**
+  DECLARED 2026-08-20 (4997c7535, after the owner-sequenced ADR-0012 D2/D3
+  legs): docs/STABILITY.md — frozen surface (LLM-facing = stable), ALS
+  conformance clause ("the implementation is wrong"), breaking-change policy
+  (major + @dialect bump + migration note); proofs/stability-closure.toml —
+  the six-criterion stability bar with Ns fixed before the numbers
+  (#1485 CLOSED), reported on every push. Residual burn-downs stay with
+  their carriers: #530 (prose contradictions to zero), #1483 (the
+  bidirectional surface sweep + experimental marker). 0.57.2 itself carries
+  DECIDED 2026-08-20 (owner): freeze is GO, sequenced AFTER the ADR-0012
+  error-surface end state lands — #1193 (D2: `-> T!E` carries the typed error
+  in the fallibility marker) then #1194 (D3: fmt normalizes return-position
+  Result to `T!E`/`T!`) — because the fmt canonical form changes the surface
+  the freeze would pin. Order: #1193 -> #1194 -> ALS freeze declaration +
+  breaking-change policy (change = explicit major) + the #530/#1485/#1483
+  closure drafts.
   two behavior changes; a patch-level semantic move disqualifies the language
   for this market. Exit: an ALS freeze document, a breaking-change policy
   (deprecation cycle, never silent), and a 1.0 criteria checklist the release
@@ -18,10 +33,13 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 1 — Close the verification holes (compiler correctness)
 
-- [ ] **A1-1 (#1226) (L) Interp tagged-heap slice (#1226 slice 2).** HEAP_BOUNDARY
+- [x] **A1-1 (#1226) (L) Interp tagged-heap slice (#1226 slice 2).** HEAP_BOUNDARY
   abstains = 115/501 fixtures; every abstain is a place where a shared
   frontend bug passes on a 2-0 vote (the E0004 family was exactly this
   shape). Exit: abstain rate < 5% (voting ≥ 476/501).
+  DONE 2026-08-19 (#1226 closed): abstains 135→27 rows = 4.6% of the corpus,
+  real 3-way votes 566/589 (96.1%), zero dissent held across every increment;
+  the 23 residual abstains are classified in interp-abstain-classes.toml.
 - [ ] **A1-2 (XL, #1527) Wall burn-down, fuzz-frequency order.** The subset walls
   sit on everyday code. Burn down by observed frequency (per 30-min fuzz run):
   List-argument materialization (~98×), unresolvable-`if` with call-bearing
@@ -37,19 +55,28 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   pairs; the coverage gate enumerates E-codes with < 3 fixtures.
   PROGRESS 2026-08-18: **749 pairs** (wave-2's 730 + the #1518/#1521/#1486/
   #1515 families); three new E-codes (E058/E059/E060) landed with families.
-- [ ] **A1-4 (M, #1529) RC-placement snapshots (koka parc model).** Commit the
+- [x] **A1-4 (M, #1529) RC-placement snapshots (koka parc model).** Commit the
   post-RC-insertion drop/dup placement as expected output beside the runtime
   result for an RC-critical corpus (the koka_parc* family is the seed), so a
   benign-today placement move is loud. Exit: snapshot gate in CI over ≥ 20
   shapes.
-- [ ] **A1-5 (M, #1530) Heap-cap leak harness (grain makeGcProgram model).** A hard
+  DONE 2026-08-19 (#1529 closed): 21-shape snapshot gate
+  (tests/rc_placement_snapshot_test.rs), drop-order mutant kill-evidence.
+- [x] **A1-5 (M, #1530) Heap-cap leak harness (grain makeGcProgram model).** A hard
   heap budget knob on both targets; run each RC fixture at N units and N-1 —
   silent leaks become deterministic OOM. Exit: churn corpus runs under the
   cap in CI; one deliberately-leaking control proves the harness bites.
-- [ ] **A1-6 (M, #1531) Allocation-count assertions (roc alloc-count model).** An
+  DONE 2026-08-20 (#1530): `almide build --heap-cap` on both targets (wasm
+  frontier ceiling in $alloc, native live-bytes global allocator, both the
+  defined C-197 abort shape); harness tests/heap_cap_test.rs — churn corpus
+  unperturbed under the cap, rc_dec-removal mutants 4/9 deterministic OOM,
+  native cap=1 enforcement live.
+- [x] **A1-6 (M, #1531) Allocation-count assertions (roc alloc-count model).** An
   allocation counter surface + exact loop-body counts with a control program
   per assertion. Exit: gate over ≥ 10 loop shapes asserting zero per-iteration
   allocation.
+  DONE 2026-08-19 (#1531 closed): static-zero gate over the shipped WAT
+  (tests/alloc_count_gate_test.rs), 10 shapes + 2 allocating controls.
 - [x] **A1-7 (S) Filed diagnostics trio.** #1509 (`not (expr)` guard parse),
   #1510 (`t.0.1` float lexing hint), #1511 (fmt Option-canonicalization E054
   — fmt must be total over legal programs). Exit: all three closed with
@@ -63,11 +90,15 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   this week). Then: nightly runs with rotating seeds, findings auto-filed,
   streak meter. Exit: 90 consecutive green nights with zero new
   correctness findings.
-- [ ] **A2-2 (M, #1533) Real-code acceptance tier.** Compile-and-test the real
+- [x] **A2-2 (M, #1533) Real-code acceptance tier.** Compile-and-test the real
   downstream projects (dfa, parsegen, and the other consumers) in CI as an
   acceptance ring — the E0004 and #1501 classes were both found by real code,
   not generated code. Exit: ≥ 3 real projects green in CI on every develop
   push.
+  DONE 2026-08-20 (#1533 closed): Acceptance Ring workflow — dfa/parsegen/svg
+  at pinned refs against the develop-built compiler on every push/PR, with a
+  test-file floor and a native-fallback ceiling; kill-evidence for both; green
+  from its first run. teastia (private) joins when a read token exists.
 - [x] **A2-3 (S) New-angle cadence.** Each quarter adds one new detection
   angle (this campaign added: reference-suite ports, panic-wash, nested-type
   matrix). The #1508 backlog (or-patterns, string patterns, NaN-bits) feeds

@@ -447,7 +447,16 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                     // all three consumers already handle.
                     convert_option_unwraps_to_result(&mut ir_body);
                     if !ir_body.ty.is_result() {
-                        ir_body = crate::lower::wrap_fallible_value_tail(ir_body);
+                        // The lambda's E comes off its checked Result return
+                        // (ADR-0012 D2: typed-E fallible callbacks lift with
+                        // their own E, not the String default).
+                        let err_ty = match &**ret {
+                            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
+                                a[1].clone()
+                            }
+                            _ => Ty::String,
+                        };
+                        ir_body = crate::lower::wrap_fallible_value_tail(ir_body, &err_ty);
                     }
                 }
             }

@@ -70,15 +70,17 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // #1144: the ADR-0006 fallible carriers the checker rewrites
         // `fs.fold_lines(p, z, (a, l) => g(a, l)!)` / `fs.for_each_line(p, (l)
         // => g(l)!)` into — same read, same capability, only the callback's
-        // answer changed shape. BOTH must be admitted, including
-        // `__fallible_for_each_line`, which has no wasm twin: an unadmitted
-        // effectful call is refused HERE, in lower_function, which walls the
-        // enclosing REAL function and trips the walled-real ratchet
-        // (proofs/walled-real-baseline.txt is permanently 0). Admitting it
-        // keeps lowering TOTAL and moves the honest refusal to the renderer,
-        // where the unlinked twin name lives — the same place the `_x`
-        // accumulator cells of the total family wall.
-        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range" | "__fallible_fold_lines" | "__fallible_for_each_line"))
+        // answer changed shape. BOTH must be admitted (an unadmitted effectful
+        // call is refused HERE, in lower_function, which walls the enclosing
+        // REAL function and trips the walled-real ratchet —
+        // proofs/walled-real-baseline.txt is permanently 0); admission keeps
+        // lowering TOTAL and moves any honest refusal to the renderer, where
+        // an unlinked twin name lives — the same place the `_x` accumulator
+        // cells of the total family wall. `for_each_line` (the total visitor,
+        // fs_for_each_line in fs_fold_lines.almd) completes the family: its
+        // omission left the visitor call DEFERRED, and the `!` desugar then
+        // walled downstream as an unrelated-looking heap-result `match`.
+        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range" | "for_each_line" | "__fallible_fold_lines" | "__fallible_for_each_line"))
 }
 
 /// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up, group 3

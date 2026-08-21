@@ -1,0 +1,26 @@
+fn $main
+  (call $rc_dec (local.get $v20))
+  (call $rc_dec (local.get $v23))
+  (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $v7) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))
+  (call $rc_dec (local.get $v7))
+  (call $rc_dec (local.get $v1))
+  (call $rc_dec (local.get $v0))
+fn $__drop_opt_str_str
+  (call $rc_dec (i32.wrap_i64 (local.get $v22)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v25)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v14)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $branch_lift_synth_0
+  (call $rc_inc (local.get $v28))
+  (call $__drop_opt_str_str (local.get $v12))
+fn $branch_lift_synth_1
+  (call $rc_inc (local.get $v37))
+  (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $v29) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))
+  (call $rc_dec (local.get $v29))
+  (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $v16) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))
+  (call $rc_dec (local.get $v16))
+fn $__get_str_some
+  (call $rc_inc (local.get $v8))
+  (call $rc_dec (local.get $v8))
+fn $string.repeat
+  (call $rc_dec (local.get $v17))

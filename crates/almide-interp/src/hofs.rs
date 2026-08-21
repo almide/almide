@@ -89,8 +89,37 @@ impl<'a> Interpreter<'a> {
             "unique_by" => self.hof_unique_by(evaled),
             "scan" => self.hof_scan(evaled),
             "update" => self.hof_list_update(evaled),
+            "group_by" => self.hof_group_by(evaled),
             _ => self.eval_hof_list_try(f, evaled),
         }
+    }
+
+    /// `list.group_by(xs, (x) -> K)` — a Map of first-occurrence-ordered keys
+    /// to the sub-lists in source order (runtime/rs/src/list.rs's
+    /// insert-or-append walk, verbatim).
+    fn hof_group_by(&mut self, args: &[Value]) -> Flow {
+        let xs = match args.first() {
+            Some(Value::List(e)) => e.clone(),
+            _ => return Flow::Abort("internal: list.group_by receiver not a List".into()),
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out: Vec<(Value, Value)> = Vec::new();
+        for x in xs.iter() {
+            let k = val!(self.apply_closure(&clo, vec![x.clone()]));
+            match out.iter_mut().find(|(ek, _)| *ek == k) {
+                Some((_, Value::List(group))) => {
+                    let mut g = (**group).clone();
+                    g.push(x.clone());
+                    *group = std::rc::Rc::new(g);
+                }
+                Some(_) => unreachable!("group values are lists by construction"),
+                None => out.push((k, Value::list(vec![x.clone()]))),
+            }
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
     /// The `__fallible_*` carriers (ADR-0006): the fallibility-polymorphic form of
@@ -128,8 +157,71 @@ impl<'a> Interpreter<'a> {
             "map" => self.hof_map_map(evaled),
             "filter" => self.hof_map_filter(evaled),
             "find" => self.hof_map_find(evaled),
+            "update" => self.hof_map_update(evaled),
+            "upsert" => self.hof_map_upsert(evaled),
             _ => Flow::Unsupported(format!("HOF map.{}", f)),
         }
+    }
+
+    /// `map.upsert(m, key, init, (v) -> V)` — a PRESENT key's value rewritten
+    /// via `f` in place (position kept), an ABSENT key appended as `(key,
+    /// init)` — v0's `almide_rt_map_upsert` intrinsic behavior, and the
+    /// `map_upsert_str` self-host (contains → update, else set).
+    fn hof_map_upsert(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.upsert receiver not a Map".into()),
+        };
+        let Some(key) = args.get(1).cloned() else {
+            return Flow::Abort("internal: map.upsert missing key".into());
+        };
+        let Some(init) = args.get(2).cloned() else {
+            return Flow::Abort("internal: map.upsert missing init".into());
+        };
+        let clo = match Self::recv_closure(args, 3) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = (*entries).clone();
+        let mut found = false;
+        for pair in out.iter_mut() {
+            if pair.0 == key {
+                let nv = val!(self.apply_closure(&clo, vec![pair.1.clone()]));
+                pair.1 = nv;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            out.push((key, init));
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
+    }
+
+    /// `map.update(m, key, (v) -> V)` — the value at `key` rewritten in
+    /// place (position kept), a missing key returns the map unchanged —
+    /// map_core's `__map_find_soft` + `__map_update_at` behavior.
+    fn hof_map_update(&mut self, args: &[Value]) -> Flow {
+        let entries = match args.first() {
+            Some(Value::Map(e)) => e.clone(),
+            _ => return Flow::Abort("internal: map.update receiver not a Map".into()),
+        };
+        let Some(key) = args.get(1).cloned() else {
+            return Flow::Abort("internal: map.update missing key".into());
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = (*entries).clone();
+        for pair in out.iter_mut() {
+            if pair.0 == key {
+                let nv = val!(self.apply_closure(&clo, vec![pair.1.clone()]));
+                pair.1 = nv;
+                break;
+            }
+        }
+        Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
     /// `map.map(m, (v) -> B)` — VALUES rewritten, keys and entry order kept

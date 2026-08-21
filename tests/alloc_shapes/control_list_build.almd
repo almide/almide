@@ -1,0 +1,6 @@
+// CONTROL: allocates per iteration on purpose — the gate must NAME this one.
+fn main() -> Unit = {
+  var ys: List[Int] = []
+  for i in 0...50 { ys = ys + [i] }
+  println(int.to_string(list.len(ys)))
+}

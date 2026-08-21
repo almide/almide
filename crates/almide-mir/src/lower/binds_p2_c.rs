@@ -216,6 +216,15 @@ impl LowerCtx {
         // rewrite, no logic change). A `List[String]` result (string.split / a List[String]
         // combinator) is a nested-ownership list — its scope-end drop must recursively free
         // elements.
+        if crate::lower::is_res_fs_ty(ty) {
+            // `Result[(Float, String), String]` (result.zip_fs) — the tag-aware
+            // `$__drop_res_fs` (Ok → pair-String then pair; Err → message). A
+            // one-level wrapper sweep freed the pair block-only and leaked its
+            // String per call (#1530 cap harness).
+            self.value_drops.entry(dst).or_default().named_route = Some("res_fs".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
         if crate::lower::is_res_intlist_strlist_ty(ty) {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;

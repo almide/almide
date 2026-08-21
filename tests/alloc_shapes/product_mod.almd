@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var p = 1
+  for i in 1...50 { p = p * i % 1000003 }
+  println(int.to_string(p))
+}

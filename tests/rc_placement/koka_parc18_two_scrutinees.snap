@@ -1,0 +1,68 @@
+fn $show
+  (call $rc_dec (local.get $v15))
+  (call $rc_dec (local.get $v14))
+  (call $rc_dec (local.get $v13))
+fn $merge_head
+  (call $rc_inc (local.get $v19))
+  (call $rc_inc (local.get $v0))
+  (call $rc_inc (local.get $v1))
+fn $main
+  (call $rc_dec (local.get $v70))
+  (call $rc_dec (local.get $v69))
+  (call $__drop_SList (local.get $v68))
+  (call $__drop_SList (local.get $v64))
+  (call $rc_dec (local.get $v60))
+  (call $rc_dec (local.get $v59))
+  (call $__drop_SList (local.get $v58))
+  (call $rc_dec (local.get $v54))
+  (call $rc_dec (local.get $v53))
+  (call $__drop_SList (local.get $v52))
+  (call $rc_dec (local.get $v48))
+  (call $rc_dec (local.get $v47))
+  (call $__drop_SList (local.get $v36))
+  (call $__drop_SList (local.get $v19))
+fn $__drop_SList
+  (call $rc_dec (i32.wrap_i64 (local.get $v14)))
+  (call $__drop_SList (local.get $v17))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_SList
+  (call $__drop_list_SList_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_SList_loop
+  (call $__drop_SList (local.get $v13))
+fn $__drop_res_SList
+  (call $__drop_SList (local.get $v16))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_str_SList
+  (call $__drop_list_str_SList_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_str_SList_loop
+  (call $rc_dec (i32.wrap_i64 (local.get $v21)))
+  (call $__drop_SList (local.get $v24))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
+fn $__drop_list_int_SList
+  (call $__drop_list_int_SList_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_SList_loop
+  (call $__drop_SList (local.get $v21))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
+fn $__drop_map_SList_go
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
+  (call $__drop_SList (local.get $v20))
+fn $__drop_map_SList
+  (call $__drop_map_SList_go (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__repr_SList
+  (call $rc_dec (local.get $v25))
+  (call $rc_dec (local.get $v24))
+  (call $rc_dec (local.get $v23))
+  (call $rc_dec (local.get $v22))
+  (call $rc_dec (local.get $v21))
+  (call $rc_dec (local.get $v20))
+  (call $rc_dec (local.get $v19))
+  (call $rc_dec (local.get $v15))
+fn $__drop_opt_str_str
+  (call $rc_dec (i32.wrap_i64 (local.get $v22)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v25)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v14)))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
