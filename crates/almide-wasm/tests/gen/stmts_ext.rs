@@ -133,4 +133,27 @@ impl Gen {
         let x = xs[self.rng.below(xs.len())];
         self.line(&format!("println(int.to_string({x} / {d}) + \"|\" + int.to_string({x} % {d}))"));
     }
+
+    /// A deterministic-budget region whose loop length and declared
+    /// nanoseconds are RANDOM, so the fixed seed range lands on both
+    /// sides of the exhaustion boundary — the two legs must agree on
+    /// every verdict, EIP-150 nesting included (ALS-DT2).
+    fn stmt_fuel_region(&mut self) {
+        self.needs_effect = true;
+        let name = self.fresh();
+        let (s, i) = (self.fresh(), self.fresh());
+        let k = self.rng.below(9);
+        let ns = self.rng.below(3 * (k + 6));
+        let body = format!(
+            "{{\n  var {s} = 0\n  for {i} in 0..<{k} {{\n    {s} = {s} + {i}\n  }}\n  {s}\n}}"
+        );
+        // (Syntactic nesting is E007 — a region's outlined body is not
+        // an effect fn; the EIP-150 nesting cells stay fixture-pinned.)
+        self.line(&format!(
+            "let {name} = fan.bounded(compute.ns({ns})) {body} ?? -1"
+        ));
+        self.line(&format!("println(\"${{{name}}}\")"));
+        self.vars.push(Var { name, ty: Ty::Int, mutable: false });
+    }
+
 }

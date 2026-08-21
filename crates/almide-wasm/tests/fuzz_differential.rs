@@ -107,6 +107,10 @@ struct Gen {
     next_id: usize,
     out: String,
     indent: usize,
+    /// The fuel/fs arms need `effect fn main` (and fs its import) —
+    /// the header is chosen AFTER generation.
+    needs_effect: bool,
+    needs_fs: bool,
 }
 
 // NB: i64::MIN itself cannot be written as one literal (it is -(MAX+1));
@@ -119,7 +123,7 @@ const FLOAT_POOL: &[&str] = &[
 
 impl Gen {
     fn new(seed: u64) -> Gen {
-        Gen { rng: Rng::new(seed), vars: Vec::new(), next_id: 0, out: String::new(), indent: 1 }
+        Gen { rng: Rng::new(seed), vars: Vec::new(), next_id: 0, out: String::new(), indent: 1, needs_effect: false, needs_fs: false }
     }
 
     fn fresh(&mut self) -> String {
@@ -420,7 +424,7 @@ impl Gen {
     }
 
     fn stmt(&mut self, depth: usize) {
-        match self.rng.below(17) {
+        match self.rng.below(18) {
             0..=2 => self.stmt_bind(depth),
             3 | 4 => self.stmt_println(depth),
             5 => self.stmt_assign(depth),
@@ -434,6 +438,7 @@ impl Gen {
             13 => self.stmt_range_bind(),
             14 => self.stmt_fuse_pipeline(depth),
             15 => self.stmt_div_edges(),
+            16 => self.stmt_fuel_region(),
             _ => self.stmt_push(depth),
         }
     }
@@ -572,17 +577,27 @@ impl Gen {
 
 
     fn program(mut self) -> String {
-        self.out.push_str("type Pt = { px: Int, py: Int }\n");
-        self.out.push_str("type Tr = | Lf(Int) | Nd(Int, Int) | Mt\n");
-        self.out.push_str("fn main() -> Unit = {\n");
         let n = 3 + self.rng.below(6);
         for _ in 0..n {
             self.stmt(2);
         }
         // Always end with an observation so no program is a silent no-op.
         self.stmt_println(2);
-        self.out.push_str("}\n");
-        self.out
+        let body = std::mem::take(&mut self.out);
+        let mut p = String::new();
+        if self.needs_fs {
+            p.push_str("import fs\n");
+        }
+        p.push_str("type Pt = { px: Int, py: Int }\n");
+        p.push_str("type Tr = | Lf(Int) | Nd(Int, Int) | Mt\n");
+        if self.needs_effect {
+            p.push_str("effect fn main() -> Unit = {\n");
+        } else {
+            p.push_str("fn main() -> Unit = {\n");
+        }
+        p.push_str(&body);
+        p.push_str("}\n");
+        p
     }
 }
 
