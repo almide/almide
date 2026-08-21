@@ -95,6 +95,7 @@ mod fs;
 mod fuel;
 mod ranges;
 mod sums;
+mod tco;
 mod types_table;
 mod value;
 
@@ -533,7 +534,20 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
                 match display::build_display_helpers(&table, &types, &work, &mut pool) {
                     Ok(calls) => {
                         display_helper_calls.extend(calls);
-                        lowered.push(Ok(ok));
+                        // Self-tail-recursion → loop (tco.rs): only fns
+                        // whose call set includes THEMSELVES are scanned.
+                        let (body, fcalls) = ok;
+                        let body = if fcalls.contains(&i) {
+                            let info = &table.infos[i];
+                            let pvts: Vec<ValType> =
+                                info.params.iter().map(|t| t.val_type()).collect();
+                            let rvt = info.ret.map(SliceTy::val_type);
+                            tco::loop_convert(&body, &pvts, rvt, info.wasm_index)
+                                .unwrap_or(body)
+                        } else {
+                            body
+                        };
+                        lowered.push(Ok((body, fcalls)));
                     }
                     Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
                 }

@@ -2038,3 +2038,22 @@ Full nets green, clippy 0, workspace 0 failures. The remaining fronts
 after this: recursion work 129ms (call overhead — the one arithmetic
 kernel still 1.5x off ceiling), and the constant-divisor strength
 reduction (exactness-critical, needs its own fuzz arm).
+
+---
+
+## Unit 6 — stage 56: self-tail-recursion becomes a loop (2026-08-21)
+
+The recursion front closes to within 8% of the loop ceiling. tco.rs is
+a contained peephole over the ENCODED body — depth comes from parsing
+truth (wasmparser), not from bookkeeping threaded through twenty
+emitter files: wrap the body in one `loop`, rewrite every
+`return_call $self` into reverse-order `local.set` of the params plus
+`br` to the head. Values, termination, and constant stack are
+unchanged (tail_calls' 1e6-deep cell still passes); the win is
+wasmtime's per-tail-call overhead on hot self-recursion — the 30M-call
+kernel drops 139 → 105ms work against a 97ms pure-loop ceiling
+(1.4x → 1.08x). Mutual recursion keeps genuine return_call. One
+silent-bail lesson banked: Function::encode writes a code-entry LENGTH
+PREFIX — the first wiring parsed it as a locals count and returned
+None quietly; the probe that counts per-body self-return_calls is what
+caught it.
