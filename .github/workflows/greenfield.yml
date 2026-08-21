@@ -63,8 +63,19 @@ jobs:
         with:
           submodules: true   # the judge: almide/als, pinned
       - uses: Swatinem/rust-cache@v2
-      - name: wasm nets in release shape
-        run: cargo test --release -p almide-wasm --locked
+      - name: fetch the host oracle (pinned release binary)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.58.0 -p almide-linux-x86_64.tar.gz -D /tmp/oracle
+          tar -xzf /tmp/oracle/almide-linux-x86_64.tar.gz -C /tmp/oracle
+          find /tmp/oracle -type f -name almide -perm -u+x | head -1 > /tmp/oracle/path
+          test -s /tmp/oracle/path
+      - name: wasm nets in release shape (third oracle armed)
+        run: |
+          export ALMIDE_FUZZ_HOST_ORACLE=$(cat /tmp/oracle/path)
+          "$ALMIDE_FUZZ_HOST_ORACLE" --version
+          cargo test --release -p almide-wasm --locked
 
   # Aviation discipline as CI (2026-08-21): codopsy slipped to B twice
   # during the burn and both times only a HUMAN check-in caught it —

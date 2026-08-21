@@ -156,4 +156,29 @@ impl Gen {
         self.vars.push(Var { name, ty: Ty::Int, mutable: false });
     }
 
+
+    /// An fs ROUND TRIP in a temp dir — HOST-ORACLE MODE ONLY (the
+    /// reference interpreter abstains on host fs; the released native
+    /// binary referees instead). Every printed observable is path-free
+    /// and the content is seed-derived.
+    fn stmt_fs_roundtrip(&mut self) {
+        self.needs_effect = true;
+        self.needs_fs = true;
+        let d = self.fresh();
+        let (a, b) = (self.fresh(), self.fresh());
+        let payload = format!("l{}\\nl{}\\nx{}", self.rng.below(100), self.rng.below(100), self.rng.below(1000));
+        self.line(&format!("let {d} = fs.create_temp_dir(\"gfz\")!"));
+        self.line(&format!("let _w{a} = fs.write({d} + \"/a.txt\", \"{payload}\")!"));
+        self.line(&format!("let {a} = fs.read_text({d} + \"/a.txt\")!"));
+        self.line(&format!("println(\"len=\" + int.to_string(string.len({a})))"));
+        self.line(&format!("let {b} = fs.read_lines({d} + \"/a.txt\")!"));
+        self.line(&format!("println(\"lines=\" + int.to_string(list.len({b})))"));
+        self.line(&format!(
+            "println(\"probe=\" + (if fs.exists({d} + \"/a.txt\") then \"y\" else \"n\") + (if fs.exists({d} + \"/nope\") then \"y\" else \"n\"))"
+        ));
+        self.line(&format!("let _r{b} = fs.remove_all({d})!"));
+        self.line(&format!(
+            "println(\"gone=\" + (if fs.exists({d}) then \"n\" else \"y\"))"
+        ));
+    }
 }

@@ -2119,3 +2119,24 @@ refusal class (the magic path's four i64 holds overflowed the pool of
 the grow-only floor caught it, pool now 8), and "optimization dogma
 loses to the host's silicon — keep the net, measure the candidate,
 keep only the winner."
+
+---
+
+## Unit 6 — stage 62: the third oracle (2026-08-21)
+
+The 2-way-oracle gap — the first item on the cannot-claim list —
+closes structurally: where the reference interpreter abstains (host
+fs, over-cap materializations, matrix), the fuzz now referees against
+the RELEASED native binary (`ALMIDE_FUZZ_HOST_ORACLE`; CI downloads
+the pinned v0.58.0 asset, locally the installed almide). Arm selection
+stays deterministic per (seed, mode) — the env is read, never the
+clock — and the fs round-trip arm returns under that mode with every
+printed observable path-free. First armed run: 122 interp-compared +
+45 HOST-compared, zero abstentions, zero divergences — the fs host
+boundary, the fuel meter, and the abort forms now have fuzz coverage
+with a real referee on both sides of every program.
+
+Org note, owner-adjudicated: 0.59.x stabilizes the incumbent
+architecture; 0.60.x onward IS this compiler — the greenfield burn is
+the successor line, with the als canonical ledger and the Stage B
+cutover aligned to that frame.

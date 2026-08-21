@@ -18,6 +18,8 @@
 //! `ALMIDE_FUZZ_ITERS=5000 ALMIDE_FUZZ_BASE=123456 cargo test ...`.
 
 mod harness;
+#[path = "gen/host_oracle.rs"]
+mod host_oracle;
 use harness::run_wasm;
 
 // ── deterministic RNG (no deps, reproducible everywhere) ────────────────
@@ -424,7 +426,7 @@ impl Gen {
     }
 
     fn stmt(&mut self, depth: usize) {
-        match self.rng.below(18) {
+        match self.rng.below(if host_oracle_mode() { 19 } else { 18 }) {
             0..=2 => self.stmt_bind(depth),
             3 | 4 => self.stmt_println(depth),
             5 => self.stmt_assign(depth),
@@ -439,6 +441,7 @@ impl Gen {
             14 => self.stmt_fuse_pipeline(depth),
             15 => self.stmt_div_edges(),
             16 => self.stmt_fuel_region(),
+            18 => self.stmt_fs_roundtrip(),
             _ => self.stmt_push(depth),
         }
     }
@@ -601,6 +604,12 @@ impl Gen {
     }
 }
 
+/// The host-oracle mode flag (arm selection must be deterministic per
+/// (seed, mode), so the env is read, not the clock).
+fn host_oracle_mode() -> bool {
+    std::env::var("ALMIDE_FUZZ_HOST_ORACLE").is_ok()
+}
+
 /// Probe hook (used by the temporary rejection-sampling probe).
 #[allow(dead_code)]
 pub fn gen_program_for_probe(seed: u64) -> String {
@@ -670,6 +679,7 @@ struct Tally {
     /// VISIBLE class — a growing number here is a growing blind spot
     /// (the interp's #1226 heap-bridge burn-down shrinks it).
     oracle_abstained: usize,
+    host_compared: usize,
     compared: usize,
 }
 
@@ -693,6 +703,25 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
     let interp = almide_spine::s5::run_file(&path, &src)
         .map_err(|e| format!("seed {seed}: interpreter harness error: {e}\n--- src ---\n{src}"))?;
     if interp.exit == -2 || interp.exit == -3 {
+        // The THIRD oracle: where the reference interpreter abstains
+        // (host fs, over-cap materializations, matrix), the RELEASED
+        // native binary referees — set ALMIDE_FUZZ_HOST_ORACLE to its
+        // path (CI downloads the pinned release; locally the installed
+        // almide). Without it the program stays an honest abstention.
+        if let Ok(oracle) = std::env::var("ALMIDE_FUZZ_HOST_ORACLE") {
+            let (native_stdout, native_exit) = host_oracle::native_run(&oracle, seed, &src)?;
+            let run = run_wasm(&bytes).map_err(|e| {
+                format!("seed {seed}: wasm leg failed to run (host-oracle path): {e}\n--- src ---\n{src}")
+            })?;
+            if run.stdout != native_stdout || run.exit != native_exit {
+                return Err(format!(
+                    "seed {seed}: HOST-ORACLE DIVERGENCE\n--- native (exit {native_exit}) ---\n{native_stdout}\n--- wasm (exit {}) ---\n{}\n--- src ---\n{src}",
+                    run.exit, run.stdout
+                ));
+            }
+            tally.host_compared += 1;
+            return Ok(());
+        }
         tally.oracle_abstained += 1;
         return Ok(());
     }
@@ -734,6 +763,7 @@ fn differential_fuzz_fixed_seed_range() {
         emit_refused: 0,
         abort_class: 0,
         oracle_abstained: 0,
+        host_compared: 0,
         compared: 0,
     };
     let mut findings: Vec<String> = Vec::new();
@@ -743,9 +773,10 @@ fn differential_fuzz_fixed_seed_range() {
         }
     }
     println!(
-        "fuzz: {} compared / {} abort-compared / {} ORACLE-ABSTAINED / {} emit-refused / {} checker-rejected (of {iters})",
+        "fuzz: {} compared / {} abort-compared / {} host-compared / {} ORACLE-ABSTAINED / {} emit-refused / {} checker-rejected (of {iters})",
         tally.compared,
         tally.abort_class,
+        tally.host_compared,
         tally.oracle_abstained,
         tally.emit_refused,
         tally.checker_rejected
