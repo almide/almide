@@ -1,5 +1,5 @@
 use almide_ir::*;
-use almide_lang::types::Ty;
+use almide_lang::types::{Ty, TypeConstructorId};
 use super::utils::has_typevar;
 
 pub(super) fn propagate_concrete_types(program: &mut IrProgram) {
@@ -18,6 +18,17 @@ pub(super) fn propagate_concrete_types(program: &mut IrProgram) {
 /// Also recurse into Block tails.
 fn fix_body_match_ty(body: &mut IrExpr, ret_ty: &Ty) {
     if matches!(ret_ty, Ty::Unit | Ty::Unknown) { return; }
+    // An effect fn's body is not Ok-lifted until ResultPropagation, which runs
+    // downstream of mono. A body typed as the Ok payload T while ret_ty is
+    // Result[T, E] is therefore CORRECT, not stale. Overwriting it makes the body
+    // CLAIM to be a Result it never wraps, and ResultPropagation's
+    // "already Result — nothing to repair" gate then skips the lift, emitting a
+    // bare `()` where `Result<(), String>` is expected (#1546).
+    if let Ty::Applied(TypeConstructorId::Result, args) = ret_ty {
+        if args.first().is_some_and(|ok| almide_ir::wasm_types_compatible(&body.ty, ok)) {
+            return;
+        }
+    }
     match &mut body.kind {
         IrExprKind::Match { arms, .. } => {
             if !almide_ir::wasm_types_compatible(&body.ty, ret_ty) {
