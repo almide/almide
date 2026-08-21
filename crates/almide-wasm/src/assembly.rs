@@ -12,6 +12,8 @@ use crate::work::FnWork;
 use crate::*;
 
 pub(crate) struct AssembleIn<'a> {
+    /// Pooled "Error: out of memory" block for the allocator's C-197 die.
+    pub(crate) oom_msg: u32,
     pub(crate) table: &'a FnTable,
     pub(crate) work: &'a FnWork,
     pub(crate) pool: &'a Pool,
@@ -31,6 +33,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         table,
         work,
         pool,
+        oom_msg,
         lowered,
         main_fn,
         entry_fn_indices,
@@ -206,7 +209,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_itoa());
     code.function(&emit_append_i64());
     code.function(&emit_append_bool(true_base, false_base));
-    code.function(&emit_alloc());
+    code.function(&emit_alloc(oom_msg));
     code.function(&emit_int_to_string());
     code.function(&emit_concat());
     code.function(&emit_str_eq());

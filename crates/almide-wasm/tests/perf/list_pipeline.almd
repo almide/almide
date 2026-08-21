@@ -1,0 +1,19 @@
+fn main() -> Unit = {
+  var out: List[Int] = []
+  var i = 0
+  while i < 2000 {
+    list.push(out, i)
+    i = i + 1
+  }
+  var acc = 0
+  var r = 0
+  while r < 2000 {
+    let v = out
+      |> list.map((x) => x * 3 + 1)
+      |> list.filter((x) => x % 2 == 0)
+      |> list.fold(0, (a, x) => (a + x) % 999983)
+    acc = (acc + v) % 999983
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}

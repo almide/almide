@@ -394,7 +394,7 @@ pub(crate) fn emit_append_i64() -> Function {
 /// `$alloc(len: i32) -> i32`: bump-allocate a layout-true block (header
 /// rc=1/len/cap=len + payload), growing memory when needed; returns the
 /// block BASE. Blocks are never freed in this slice.
-pub(crate) fn emit_alloc() -> Function {
+pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
     // params: 0=len i32; locals: 1=base i32, 2=next i32
     let (len, base, next) = (0u32, 1u32, 2u32);
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
@@ -427,6 +427,12 @@ pub(crate) fn emit_alloc() -> Function {
         .i32_const(0)
         .i32_lt_s()
         .if_(BlockType::Empty)
+        // C-197: allocation the machine cannot satisfy is the DEFINED
+        // "Error: out of memory" + exit 1 — never a raw trap (T6).
+        .i32_const(oom_msg as i32)
+        .call(F_EPRINTLN_BLOCK)
+        .i32_const(1)
+        .call(F_EXIT_IMPORT)
         .unreachable()
         .end();
     i.end();

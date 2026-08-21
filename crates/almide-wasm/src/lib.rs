@@ -549,7 +549,7 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         env_captures: None,
         // main is user code (its loop heads charge) but is never CALLED,
         // so no entry charge — the 1002-unit ledger counts the callee's.
-        metered: true,
+        metered: !meter.user.is_empty(),
         charge_entry: false,
     };
     let (main_fn, main_calls) =
@@ -574,9 +574,10 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
                 effect_raw: ll.effect_raw,
                 in_main: false,
                 env_captures: Some(ll.captures.clone()),
-                // Closure hops always charge (TailCallee::Clo mirror).
-                metered: true,
-                charge_entry: true,
+                // Closure hops always charge (TailCallee::Clo mirror) —
+                // unless the whole meter elided (no regions anywhere).
+                metered: !meter.user.is_empty(),
+                charge_entry: !meter.user.is_empty(),
             };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
             display_helper_calls
@@ -617,10 +618,12 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // land inside it. Indices start right after main.
     let (extra_fns, entry_fn_indices) = resolve_extras(&table, &work, &lifted_fns);
 
+    let oom_msg = pool.intern("Error: out of memory");
     assemble_module(AssembleIn {
         table: &table,
         work: &work,
         pool: &pool,
+        oom_msg,
         lowered: &lowered,
         main_fn: &main_fn,
         entry_fn_indices: &entry_fn_indices,

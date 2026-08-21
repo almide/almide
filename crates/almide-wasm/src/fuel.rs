@@ -41,7 +41,42 @@ impl IrVisitor for Scan {
     }
 }
 
+/// True iff the program brackets ANY region (budget/timeout prims in
+/// the IR). Without one, charges are UNOBSERVABLE — verdict/spend are
+/// only read through region desugars — so the whole meter elides,
+/// reclaiming the per-iteration loop-head cost for ordinary programs.
+pub(crate) fn program_has_regions(ir: &IrProgram) -> bool {
+    struct Scan {
+        found: bool,
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::RuntimeCall { symbol, .. } = &e.kind
+                && symbol.as_str().starts_with("almide_rt_prim_budget")
+            {
+                self.found = true;
+            }
+            if !self.found {
+                walk_expr(self, e);
+            }
+        }
+    }
+    let mut s = Scan { found: false };
+    for f in &ir.functions {
+        s.visit_expr(&f.body);
+    }
+    for m in &ir.modules {
+        for f in &m.functions {
+            s.visit_expr(&f.body);
+        }
+    }
+    s.found
+}
+
 pub(crate) fn meter_plan(ir: &IrProgram, registry_names: &HashSet<&str>) -> MeterPlan {
+    if !program_has_regions(ir) {
+        return MeterPlan { user: HashSet::new(), exempt: HashSet::new() };
+    }
     let mut user: HashSet<String> = ir
         .functions
         .iter()

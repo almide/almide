@@ -1,0 +1,9 @@
+fn main() -> Unit = {
+  var i = 0
+  var acc = 0
+  while i < 30000000 {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}

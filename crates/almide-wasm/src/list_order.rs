@@ -54,104 +54,23 @@ impl Emitter<'_> {
                 Ok(Some(Some(SliceTy::List(h))))
             }
             ("min" | "max", [xs]) => self.lower_list_min_max(func, xs).map(Some),
-            // Insertion sort over a FRESH copy — stable, and for scalar
-            // elements any correct sort is value-identical to native's
-            // `v.sort()`. Float order is IEEE totalOrder (f64::total_cmp):
-            // key = bits ^ ((bits >>s 63) >>u 1), compared signed.
+            // Bottom-up MERGE SORT over a fresh copy (O(n log n) — the
+            // first perf measurement showed insertion sort 26x behind the
+            // incumbent on 2k elements). Take-from-left on `<=` (stable);
+            // scalar values make any correct sort value-identical to
+            // native. The result may live in either ping-pong buffer —
+            // both are layout-true blocks with the right len header.
             ("sort", [xs]) => {
                 let h = match self.lower(xs, None)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-sort-of:{other:?}")),
                 };
                 let elem = self.types.el(h);
-                if !matches!(elem, INT | FLOAT | STR) {
+                if !matches!(elem, INT | FLOAT | STR | BOOL) {
                     return unsup(&format!("list-sort-elem:{elem:?}"));
                 }
-                let stride = elem.slot_size() as i32;
                 self.f.instructions().call(F_BLOCK_COPY);
-                let hb = self.hold_i32()?;
-                let hn = self.hold_i32()?;
-                let hi = self.hold_i32()?;
-                let hj = self.hold_i32()?;
-                let ht = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(hb);
-                i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().local_set(hn);
-                i.i32_const(1).local_set(hi);
-                i.block(BlockType::Empty).loop_(BlockType::Empty);
-                i.local_get(hi).local_get(hn).i32_ge_u().br_if(1);
-                i.local_get(hi).local_set(hj);
-                i.block(BlockType::Empty).loop_(BlockType::Empty);
-                i.local_get(hj).i32_eqz().br_if(1);
-                // a = elem[j-1], b = elem[j]; break unless a > b
-                let addr = |i: &mut wasm_encoder::InstructionSink<'_>, idx: u32, back: i32| {
-                    i.local_get(hb)
-                        .local_get(idx)
-                        .i32_const(back)
-                        .i32_sub()
-                        .i32_const(stride)
-                        .i32_mul()
-                        .i32_add();
-                };
-                match elem {
-                    INT | FLOAT => {
-                        let key = |i: &mut wasm_encoder::InstructionSink<'_>| {
-                            if elem == FLOAT {
-                                // totalOrder key transform on the raw bits
-                                let t = ht;
-                                i.local_set(t);
-                                i.local_get(t);
-                                i.local_get(t).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
-                                i.i64_xor();
-                            }
-                        };
-                        addr(&mut i, hj, 1);
-                        i.i64_load(slot_memarg(0));
-                        key(&mut i);
-                        let hk = ht; // ht reused as raw scratch inside key only
-                        let _ = hk;
-                        addr(&mut i, hj, 0);
-                        i.i64_load(slot_memarg(0));
-                        key(&mut i);
-                        i.i64_le_s().br_if(1);
-                    }
-                    _ => {
-                        addr(&mut i, hj, 1);
-                        i.i32_load(slot_memarg(0));
-                        addr(&mut i, hj, 0);
-                        i.i32_load(slot_memarg(0));
-                        i.call(F_STR_CMP).i32_const(0).i32_le_s().br_if(1);
-                    }
-                }
-                // swap elem[j-1] <-> elem[j]
-                if stride == 8 {
-                    addr(&mut i, hj, 0);
-                    i.i64_load(slot_memarg(0)).local_set(ht);
-                    addr(&mut i, hj, 0);
-                    addr(&mut i, hj, 1);
-                    i.i64_load(slot_memarg(0)).i64_store(slot_memarg(0));
-                    addr(&mut i, hj, 1);
-                    i.local_get(ht).i64_store(slot_memarg(0));
-                } else {
-                    addr(&mut i, hj, 0);
-                    i.i32_load(slot_memarg(0)).i64_extend_i32_u().local_set(ht);
-                    addr(&mut i, hj, 0);
-                    addr(&mut i, hj, 1);
-                    i.i32_load(slot_memarg(0)).i32_store(slot_memarg(0));
-                    addr(&mut i, hj, 1);
-                    i.local_get(ht).i32_wrap_i64().i32_store(slot_memarg(0));
-                }
-                i.local_get(hj).i32_const(1).i32_sub().local_set(hj);
-                i.br(0).end().end();
-                i.local_get(hi).i32_const(1).i32_add().local_set(hi);
-                i.br(0).end().end();
-                i.local_get(hb);
-                let _ = i;
-                self.release_i64();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
+                self.emit_merge_sort(elem)?;
                 Ok(Some(Some(SliceTy::List(h))))
             }
             ("chunk" | "windows", [xs, n_arg]) => {
@@ -535,5 +454,161 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         Ok(Some(SliceTy::List(h)))
+    }
+}
+
+impl Emitter<'_> {
+    /// `[block]` -> `[sorted block]`: ping-pong bottom-up merge sort.
+    /// Comparison is take-from-left on `left <= right` in the scalar
+    /// orders (Int/Bool signed-or-flag i64, Float via the totalOrder key
+    /// transform, Str via $str_cmp).
+    fn emit_merge_sort(&mut self, elem: SliceTy) -> Result<(), EmitError> {
+        let stride = elem.slot_size() as i32;
+        let ha = self.hold_i32()?;
+        let hb2 = self.hold_i32()?;
+        let hn = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hlo = self.hold_i32()?;
+        let hmid = self.hold_i32()?;
+        let hhi = self.hold_i32()?;
+        let hi_ = self.hold_i32()?;
+        let hj = self.hold_i32()?;
+        let hk = self.hold_i32()?;
+        let hsrc = self.scr_i32_local;
+        let htmp = self.tmp_i32_local;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(ha);
+            i.local_get(ha).i32_load(len_memarg()).i32_const(stride).i32_div_u().local_set(hn);
+            i.local_get(hn).i32_const(stride).i32_mul().call(F_ALLOC).local_set(hb2);
+            i.i32_const(1).local_set(hw);
+            // while w < n
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hw).local_get(hn).i32_ge_u().br_if(1);
+            i.i32_const(0).local_set(hlo);
+            // for lo in steps of 2w
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hlo).local_get(hn).i32_ge_u().br_if(1);
+            // mid = min(lo + w, n); hi = min(lo + 2w, n)
+            i.local_get(hlo).local_get(hw).i32_add().local_set(hmid);
+            i.local_get(hn)
+                .local_get(hmid)
+                .local_get(hmid)
+                .local_get(hn)
+                .i32_gt_u()
+                .select()
+                .local_set(hmid);
+            i.local_get(hlo).local_get(hw).i32_const(1).i32_shl().i32_add().local_set(hhi);
+            i.local_get(hn)
+                .local_get(hhi)
+                .local_get(hhi)
+                .local_get(hn)
+                .i32_gt_u()
+                .select()
+                .local_set(hhi);
+            i.local_get(hlo).local_set(hi_);
+            i.local_get(hmid).local_set(hj);
+            i.local_get(hlo).local_set(hk);
+            // merge [lo,mid) + [mid,hi) from A into B
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hk).local_get(hhi).i32_ge_u().br_if(1);
+            // take_left = j >= hi || (i < mid && a[i] <= a[j])
+            i.local_get(hj).local_get(hhi).i32_ge_u();
+            i.if_(BlockType::Result(ValType::I32));
+            i.i32_const(1);
+            i.else_();
+            i.local_get(hi_).local_get(hmid).i32_ge_u();
+            i.if_(BlockType::Result(ValType::I32));
+            i.i32_const(0);
+            i.else_();
+        }
+        self.emit_le_flag(elem, ha, hi_, hj)?;
+        {
+            let mut i = self.f.instructions();
+            i.end();
+            i.end();
+            // src = take_left ? i++ : j++
+            i.if_(BlockType::Result(ValType::I32));
+            i.local_get(hi_);
+            i.local_get(hi_).i32_const(1).i32_add().local_set(hi_);
+            i.else_();
+            i.local_get(hj);
+            i.local_get(hj).i32_const(1).i32_add().local_set(hj);
+            i.end();
+            i.local_set(hsrc);
+            // B[k] = A[src]
+            i.local_get(hb2).local_get(hk).i32_const(stride).i32_mul().i32_add();
+            i.local_get(ha).local_get(hsrc).i32_const(stride).i32_mul().i32_add();
+            if stride == 8 {
+                i.i64_load(slot_memarg(0)).i64_store(slot_memarg(0));
+            } else {
+                i.i32_load(slot_memarg(0)).i32_store(slot_memarg(0));
+            }
+            i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+            i.br(0);
+            i.end();
+            i.end();
+            i.local_get(hlo).local_get(hw).i32_const(1).i32_shl().i32_add().local_set(hlo);
+            i.br(0);
+            i.end();
+            i.end();
+            // swap A <-> B; w *= 2
+            i.local_get(ha).local_set(htmp);
+            i.local_get(hb2).local_set(ha);
+            i.local_get(htmp).local_set(hb2);
+            i.local_get(hw).i32_const(1).i32_shl().local_set(hw);
+            i.br(0);
+            i.end();
+            i.end();
+            i.local_get(ha);
+        }
+        for _ in 0..10 {
+            self.release_i32();
+        }
+        Ok(())
+    }
+
+    /// Push `A[i] <= A[j]` as an i32 flag.
+    fn emit_le_flag(&mut self, elem: SliceTy, ha: u32, hi_: u32, hj: u32) -> Result<(), EmitError> {
+        let stride = elem.slot_size() as i32;
+        let mut i = self.f.instructions();
+        let addr = |i: &mut wasm_encoder::InstructionSink<'_>, idx: u32| {
+            i.local_get(ha).local_get(idx).i32_const(stride).i32_mul().i32_add();
+        };
+        match elem {
+            FLOAT => {
+                let t = self.scr_i64_local;
+                for idx in [hi_, hj] {
+                    addr(&mut i, idx);
+                    i.i64_load(slot_memarg(0)).local_set(t);
+                    i.local_get(t);
+                    i.local_get(t).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
+                    i.i64_xor();
+                }
+                i.i64_le_s();
+            }
+            INT => {
+                addr(&mut i, hi_);
+                i.i64_load(slot_memarg(0));
+                addr(&mut i, hj);
+                i.i64_load(slot_memarg(0));
+                i.i64_le_s();
+            }
+            BOOL => {
+                addr(&mut i, hi_);
+                i.i32_load(slot_memarg(0));
+                addr(&mut i, hj);
+                i.i32_load(slot_memarg(0));
+                i.i32_le_u();
+            }
+            _ => {
+                addr(&mut i, hi_);
+                i.i32_load(slot_memarg(0));
+                addr(&mut i, hj);
+                i.i32_load(slot_memarg(0));
+                i.call(F_STR_CMP).i32_const(0).i32_le_s();
+            }
+        }
+        Ok(())
     }
 }

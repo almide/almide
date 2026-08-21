@@ -1914,3 +1914,38 @@ banked: multi-line fn signatures need seen-open depth counting; a
 `{ pat }` in a match GUARD balances on its own line (count from the
 `=>`); include! files in tests/ must live in a subdirectory or cargo
 compiles them as their own test target.
+
+---
+
+## Unit 6 — stage 52: the first performance truths (2026-08-21)
+
+The world-best claim got its first NUMBERS. Six kernels, greenfield
+wasm (emit once, five runs, best) vs the a877 oracle's wasm leg
+(end-to-end minus its ~84ms baseline), all six outputs byte-identical:
+
+| kernel        | before      | oracle≈ | after   |
+|---------------|-------------|---------|---------|
+| int_loop 30M  | 107ms       | ~84ms   | ~106ms  |
+| float_math    | 45ms        | ~24ms   | ~45ms   |
+| str_build 3M  | 130ms       | ~59ms   | ~125ms  |
+| list_sort     | **608ms**   | ~23ms   | **15ms**|
+| recursion     | 126ms       | ~86ms   | ~122ms  |
+| list_pipeline | 30ms        | ~8ms    | ~28ms   |
+
+Three fixes the numbers forced, landed with full-net invariance:
+merge sort replaces insertion sort (26x behind → now AHEAD of the
+oracle on the same kernel); list.filter builds in ONE upper-bound
+allocation with a final len/cap rewrite (the push-per-kept form
+re-copied the block per element); and the deterministic meter ELIDES
+entirely for programs with no region prims — charges are unobservable
+without a region, so ordinary programs stop paying the per-iteration
+loop-head cost. Plus one correctness-grade item off the "cannot claim"
+list: the allocator's failed grow now dies in the C-197 form ("Error:
+out of memory" + exit 1), never a raw trap.
+
+Honest remainder, recorded not hidden: ~1.3-2x on tight arithmetic
+loops and ~2x on string churn against the incumbent (codegen shape +
+allocator; next probe targets), pipeline ~3.5x (HOF body inlining is
+fine; fold/map dominate). The probe is now a tracked test
+(tests/perf_probe.rs, ignored by default) with its kernels in
+tests/perf/ — ratio gating once a second checkpoint exists.

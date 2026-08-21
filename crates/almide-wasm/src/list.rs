@@ -373,12 +373,20 @@ impl Emitter<'_> {
     ) -> Result<Option<SliceTy>, EmitError> {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let stride = elem.slot_size() as i32;
+        // ONE upper-bound allocation, then a kept-counter and a final len
+        // rewrite — the push-per-kept form re-copied the block per element
+        // (quadratic bytes; the perf probe caught it at 3.8x).
         let rh = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(rh); // []
-        let push = match elem.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
+        let hw = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_get(ch)
+            .i32_const(stride)
+            .i32_mul()
+            .call(F_ALLOC)
+            .local_set(rh);
+        self.f.instructions().i32_const(0).local_set(hw);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
         self.lower(body, Some(BOOL))?;
@@ -386,12 +394,31 @@ impl Emitter<'_> {
         self.f
             .instructions()
             .local_get(rh)
-            .local_get(params[0])
-            .call(push)
-            .local_set(rh);
+            .local_get(hw)
+            .i32_const(stride)
+            .i32_mul()
+            .i32_add()
+            .local_get(params[0]);
+        self.store_ty_slot(elem, 0);
+        self.f.instructions().local_get(hw).i32_const(1).i32_add().local_set(hw);
         self.f.instructions().end();
         self.hof_step(ih);
-        self.f.instructions().local_get(rh);
+        // len = cap = kept*stride
+        {
+            let mut i = self.f.instructions();
+            i.local_get(rh).local_get(hw).i32_const(stride).i32_mul().i32_store(len_memarg());
+            i.local_get(rh)
+                .local_get(hw)
+                .i32_const(stride)
+                .i32_mul()
+                .i32_store(MemArg {
+                    offset: u64::from(almide_layout::CAP.offset),
+                    align: 2,
+                    memory_index: 0,
+                });
+            i.local_get(rh);
+        }
+        self.release_i32();
         self.release_i32();
         self.release_i32();
         self.release_i32();
