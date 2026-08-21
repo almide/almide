@@ -2096,3 +2096,26 @@ are sometimes pure (the fusion path) and sometimes PRINTING (the
 refusal path, where the oracle's all-maps-then-all-filters ordering
 must survive verbatim). Both sides compare green against the interp
 across the fixed seed range.
+
+---
+
+## Unit 6 — stage 60: constant divisors — the measurement is the boss (2026-08-21)
+
+The last named perf item lands as what the NUMBERS chose, not what the
+textbook did. The net came first (a fuzz arm hammering literal
+divisors of both signs across the edge lattice, MIN included — green
+before any change). Then the full Hacker's Delight signed-magic
+multiply-shift, with the emitted op sequence mirrored in Rust and an
+exhaustive exactness test (±1000 all divisors, plus 999983 / ±2^40 /
+±MAX, against ~260 edge dividends). It was EXACT — and a measured
+PESSIMIZATION: aarch64 sdiv is fast, cranelift has no mulhi, and the
+32-split sequence cost int_loop +60%. Retired honestly. What survives
+is what measured: literal divisors drop their GUARDS (a nonzero
+non-minus-one constant makes both die-checks provably dead), positive
+powers of two take the 4-op shift form, and /1 and %1 fold. int_loop
+lands at the hand-WAT ceiling. Two lessons banked: the hold-pool
+refusal class (the magic path's four i64 holds overflowed the pool of
+4 inside held expressions — one fixture silently became UNSUPPORTED;
+the grow-only floor caught it, pool now 8), and "optimization dogma
+loses to the host's silicon — keep the net, measure the candidate,
+keep only the winner."

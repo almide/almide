@@ -60,7 +60,7 @@ pub(crate) struct Emitter<'a> {
 
 /// Hold-pool sizes: nesting deeper than this is refused, never corrupted.
 pub(crate) const HOLD_I32_POOL: u32 = 12;
-pub(crate) const HOLD_I64_POOL: u32 = 4;
+pub(crate) const HOLD_I64_POOL: u32 = 8;
 pub(crate) const HOLD_F64_POOL: u32 = 4;
 
 impl Emitter<'_> {

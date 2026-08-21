@@ -111,4 +111,26 @@ impl Gen {
         ));
         self.vars.push(Var { name, ty: Ty::Int, mutable: false });
     }
+
+    /// Constant-divisor division/remainder over the EDGE domain (the
+    /// strength-reduction net, written BEFORE the optimization): known
+    /// literal divisors both signs, dividends spanning 0/±1/±MAX/MIN,
+    /// every result printed so the mul-shift path must agree with
+    /// i64.div_s/rem_s bit-for-bit, truncation toward zero included.
+    fn stmt_div_edges(&mut self) {
+        const DIVS: &[i64] = &[2, 3, 4, 5, 7, 8, 10, 16, 100, 999983, -2, -3, -7, -8, -100];
+        let xs = [
+            "0",
+            "1",
+            "-1",
+            "9223372036854775807",
+            "-9223372036854775807",
+            "(-9223372036854775807 - 1)",
+            "123456789",
+            "-987654321",
+        ];
+        let d = DIVS[self.rng.below(DIVS.len())];
+        let x = xs[self.rng.below(xs.len())];
+        self.line(&format!("println(int.to_string({x} / {d}) + \"|\" + int.to_string({x} % {d}))"));
+    }
 }

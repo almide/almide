@@ -1,7 +1,7 @@
 //! Binary operator lowering — split from emitter.rs for the
 //! complexity budget.
 
-use almide_ir::{BinOp, IrExpr};
+use almide_ir::{BinOp, IrExpr, IrExprKind};
 use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
@@ -48,6 +48,24 @@ impl Emitter<'_> {
             // ("Error: division by zero" / "Error: integer overflow" +
             // exit 1) before the op, so the op itself can never trap.
             DivInt | ModInt => {
+                // LITERAL divisor: strength-reduce (multiply-shift, no
+                // guards — the abortable divisors are excluded here).
+                // c in {0, -1, MIN} keeps the guarded runtime path; /1
+                // is the operand, %1 is zero (operand still evaluated).
+                if let IrExprKind::LitInt { value: c } = &right.kind {
+                    let c = *c;
+                    if !matches!(c, 0 | -1 | i64::MIN) {
+                        self.lower(left, Some(INT))?;
+                        if c == 1 {
+                            if matches!(op, ModInt) {
+                                self.f.instructions().i64_const(0).i64_and();
+                            }
+                            return Ok(INT);
+                        }
+                        self.emit_const_div(c, matches!(op, DivInt))?;
+                        return Ok(INT);
+                    }
+                }
                 self.lower(left, Some(INT))?;
                 self.lower(right, Some(INT))?;
                 let div0 = self.pool.intern("Error: division by zero");
@@ -154,5 +172,51 @@ impl Emitter<'_> {
             }
             other => unsup(&format!("binop:{other:?}")),
         }
+    }
+}
+
+impl Emitter<'_> {
+    /// `x op c` with a LITERAL divisor, |c| >= 2 (c == 1 handled by the
+    /// caller; c in {0, -1, i64::MIN} keeps the guarded runtime path):
+    /// multiply-shift, no division instruction, no guards needed — the
+    /// only abortable divisor values are excluded by construction.
+    pub(crate) fn emit_const_div(&mut self, c: i64, is_div: bool) -> Result<(), EmitError> {
+        let hx = self.hold_i64()?;
+        let scr = self.scr_i64_local;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hx);
+        }
+        if c > 0 && (c as u64).is_power_of_two() {
+            let k = c.trailing_zeros();
+            let mut i = self.f.instructions();
+            i.local_get(hx);
+            i.local_get(hx).i64_const(63).i64_shr_s().i64_const(64 - i64::from(k)).i64_shr_u();
+            i.i64_add().i64_const(i64::from(k)).i64_shr_s();
+            if !is_div {
+                i.local_set(scr);
+                i.local_get(hx);
+                i.local_get(scr).i64_const(i64::from(k)).i64_shl();
+                i.i64_sub();
+            }
+            let _ = i;
+            self.release_i64();
+            return Ok(());
+        }
+        // General literal divisor: the HD magic sequence measured as a
+        // PESSIMIZATION on this class of host (aarch64 sdiv is fast and
+        // cranelift has no mulhi; int_loop +60%) — the bounded win is
+        // dropping the GUARDS, which a nonzero non-minus-one literal
+        // makes provably dead.
+        let mut i = self.f.instructions();
+        i.local_get(hx).i64_const(c);
+        if is_div {
+            i.i64_div_s();
+        } else {
+            i.i64_rem_s();
+        }
+        let _ = i;
+        self.release_i64();
+        Ok(())
     }
 }
