@@ -92,8 +92,19 @@ pub(crate) fn collect_cell_vars(
                 IrStmtKind::Assign { var, .. } => {
                     self.mutated.insert(*var);
                 }
-                IrStmtKind::IndexAssign { target, .. }
-                | IrStmtKind::FieldAssign { target, .. }
+                // `IndexAssign` is deliberately NOT here: `xs[0] = v` writes an
+                // element SLOT of the shared block through the handle — no
+                // rebind, no realloc — so a plain env value-copy capture is
+                // already correct in both directions (the same physics as the
+                // `bytes.set_at` exclusion above). Forcing a cell regressed the
+                // proven wasm_indexassign_noncopy_element_through_closure shape
+                // to a lift refusal the moment List[String] gained a cell class
+                // (cb7c00ee4's admission widening): the closure body's
+                // index-assign-through-a-cell has no lowering, so the whole
+                // lambda declined. FieldAssign/MapInsert stay: a map write IS
+                // the functional-rebind family (`inplace_mutated_receiver`'s
+                // map arms), and a record var has no cell class to regress.
+                IrStmtKind::FieldAssign { target, .. }
                 | IrStmtKind::MapInsert { target, .. } => {
                     self.mutated.insert(*target);
                 }
