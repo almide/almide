@@ -161,6 +161,17 @@ impl Checker {
                         if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == *field) {
                             // Resolve method return type: substitute Self -> T (the TypeVar)
                             let ret = self.substitute_self_in_ty(&method_sig.ret, obj_concrete);
+                            // An effect protocol method reached through a generic bound is
+                            // lifted to Result[T, String] by codegen's ResultPropagation, the
+                            // same as a named effect fn (see `finalize_call_return_ty`, which
+                            // this path never reaches because the callee has no entry in
+                            // `env.functions`). Returning the bare T let every USE of the value
+                            // — a let-binding, a match subject — type-check against a shape
+                            // codegen never emits, so `check` passed and rustc rejected the
+                            // generated code (#1545).
+                            if method_sig.is_effect && !ret.is_result() {
+                                return Some(Ty::result(ret, Ty::String));
+                            }
                             return Some(ret);
                         }
                     }
