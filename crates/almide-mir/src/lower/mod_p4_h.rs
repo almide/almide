@@ -257,6 +257,10 @@ fn list_heap_call_name_special_cases(
                 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
         return Some(if msi_acc {
             "fs.__fallible_fold_lines_msi".to_string()
+        } else if matches!(arg_tys.get(1), Some(Ty::Int)) {
+            // The Int accumulator (fs_streaming's traced_step cell): the `_i`
+            // fallible walker — same first-err trace contract as `_msi`.
+            "fs.__fallible_fold_lines_i".to_string()
         } else {
             "fs.__fallible_fold_lines_x".to_string()
         });
@@ -277,15 +281,20 @@ fn list_heap_call_name_special_cases(
         // range int acc, non-String-element lists, …) stay `_x`-walled until
         // their twins land — never a wrong-typed link.
         let int_acc = matches!(arg_tys.get(init_idx), Some(Ty::Int));
+        // `fold_lines`'s own String accumulator (the concat-fold shape) — the
+        // `_s` twin; chunked/range String accs have no twin and stay `_x`.
+        let s_acc = matches!(arg_tys.get(init_idx), Some(Ty::String));
         return Some(if msi_acc && func != "fold_lines_range" {
             format!("fs.{func}_msi")
-        } else if ls_acc && func != "fold_lines" {
-            // `fold_lines_range` (the original cell) and `fold_lines_chunked`
-            // (#1233) share the `_ls` twin shape; `fold_lines`'s own List[String]
-            // cell has no twin yet and stays `_x`-walled.
+        } else if ls_acc {
+            // All three family members carry an `_ls` twin now: `fold_lines_range`
+            // (the original cell), `fold_lines_chunked` (#1233), and `fold_lines`
+            // itself (the read_lines-equivalence shape, fs_streaming C-220).
             format!("fs.{func}_ls")
-        } else if int_acc && func == "fold_lines_chunked" {
+        } else if int_acc && matches!(func, "fold_lines" | "fold_lines_chunked") {
             format!("fs.{func}_i")
+        } else if s_acc && func == "fold_lines" {
+            format!("fs.{func}_s")
         } else {
             format!("fs.{func}_x")
         });

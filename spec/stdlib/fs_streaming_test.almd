@@ -1,19 +1,16 @@
 // @contract: C-220
 // @contract: C-274
-// wasm:skip — this file's accumulator shapes (String/Int/List[String] fold_lines,
-// for_each_line) have no self-host twins yet — only the Map[String, Int] msi pair
-// and fold_lines_range_ls landed (#1134 endgame) — and tmp() rides
-// fs.create_temp_dir (its own brick). The wasm render walls honestly;
-// remove this skip when the wasm leg lands.
 // Streaming line walkers {fold_lines, for_each_line}: line-by-line over a
 // file with O(longest line) memory, line semantics byte-matching read_lines.
+// Both-target since the streaming family completed: the String/Int/List[String]
+// fold_lines accumulator twins, the for_each_line visitor, and the fallible
+// Int/visitor carriers all live in fs_fold_lines.almd (the msi pair and
+// fold_lines_range_ls were the #1134 endgame's first landings).
 //
 // The C-274 half at the bottom is the ADR-0006 FALLIBLE callback form
-// (#1144). Its cross-target proof is spec/wasm_cross/fs_fallible_stream_callback.almd
-// (the Map[String,Int] fold_lines cell, which HAS a wasm twin); what lives
-// here is the `for_each_line` cell — native-only for the same reason the
-// plain for_each_line above is, and the Int/String fold accumulators, whose
-// twins have not landed either.
+// (#1144). Its FIRST cross-target proof was spec/wasm_cross/
+// fs_fallible_stream_callback.almd (the Map[String,Int] fold_lines cell);
+// the `for_each_line` cell and the Int fold accumulator here now cross too.
 import fs
 import testing
 

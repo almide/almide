@@ -418,8 +418,17 @@ impl LowerCtx {
         // return value the caller `match`es on, so it must flow to the HEAP path below (produce the
         // owned Result block) — voiding it would emit a void `$fs.write` while the call site does
         // `(local.set $r (call $fs.write …))`, a type mismatch (invalid wasm). The voiding stays in
-        // force for the SYNTHETIC `Result[Unit, _]` of a declared-`Unit` effect fn (flag false).
-        if is_unit_result_ty(&tail.ty) && !self.decl_ret_is_result {
+        // force for the SYNTHETIC `Result[Unit, _]` of a declared-`Unit` effect fn (flag false)
+        // — WHEN that fn is never-err. A CAN-ERR declared-Unit effect fn (an `AUTO_WRAP_ABI_FNS`
+        // member, so `ret_is_result_abi` is set) is the same def/callsite split from the OTHER
+        // side: every call site consults the name-keyed ABI registries and `local.set`s the
+        // promised `Result[Unit, String]` handle (`testing.assert_err(w(p))` — the fs_streaming
+        // C-274 visitor shape), so voiding the DEF both swallowed the err (the rc_dec'd call
+        // result was never inspected) and failed wasm validation ("expected i32 but nothing on
+        // stack" — the hrmH pin: `effect fn w(p) -> Unit = fs.write(p, "x")!`). Such a fn keeps
+        // the heap path and returns the real carrier its classification promises; `main` never
+        // enters AUTO_WRAP (name-filtered at populate), so the exit-code void convention holds.
+        if is_unit_result_ty(&tail.ty) && !self.decl_ret_is_result && !self.ret_is_result_abi {
             if let Some(r) = self.lower_voided_effect_tail(tail) {
                 return r;
             }

@@ -599,6 +599,30 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
         if opt_ret || !has_propagation_site(&body) {
             wrap_return_positions_in_ok(&mut body, &func.ret_ty, &result_ty);
         }
+        // A SINGLE-EXPRESSION body `X!` (or auto-`?` `X?`) whose callee already
+        // answers the carrier: the root retype above and the TAIL are the same
+        // node, so the Unwrap itself got stamped `Result[T, String]` — a
+        // nonsensical "unwrap yielding the un-unwrapped type" that every
+        // downstream gate then declines (`wrap_return_positions_in_ok`: ty !=
+        // decl_ty; the unit-tail arm: ty != Unit) and the lowering treats as a
+        // bare effect STATEMENT — call, rc_dec the Result, return void. That is
+        // BOTH a swallowed err and the def/callsite ABI split (callers
+        // `local.set` the promised handle over a void callee = invalid wasm;
+        // pin: `effect fn w(p) -> Unit = fs.write(p, "x")!` consumed
+        // first-class by testing.assert_err). ADR-0006 Phase 1a names the
+        // semantics: a tail `X!` in a fallible fn is PASS-THROUGH — err and ok
+        // alike are X's own value, so the root IS the call. Guarded on the
+        // inner answering the EXACT carrier; a typed-E mismatch keeps its
+        // honest wall.
+        if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } = &body.kind {
+            if std::env::var("ALMIDE_TMPDBG").is_ok() {
+                eprintln!("[tmpdbg] passthrough-check fn={} inner_ty={:?} result_ty={:?} eq={}",
+                    func.name.as_str(), inner.ty, result_ty, inner.ty == result_ty);
+            }
+            if inner.ty == result_ty {
+                body = (**inner).clone();
+            }
+        }
         Some(body)
     } else {
         None

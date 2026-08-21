@@ -60,13 +60,12 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     ("spec/integration/modules/deep_phantom_test.almd", SkipReason::CompileErrorFixture),
     // `assert_throws` catches a panic; a wasm trap cannot be caught.
     ("spec/stdlib/coverage_assert_throws_test.almd", SkipReason::NoUnwinding),
-    // C-220: the streaming line walkers' callbacks cross the runtime boundary
-    // (fold_lines_chunked adds real threads inside the runtime) — the surface
-    // is native-only by the contract's own statement, C-215-style; the wasm
-    // arrival is #1134's defunctionalization frontier. The files carried the
-    // `// wasm:skip` marker from the landing; these entries are the ledger
-    // half that landing missed (#1146).
-    ("spec/stdlib/fs_streaming_test.almd", SkipReason::NativeOnlyApi),
+    // (fs_streaming_test's C-220 row retired: the streaming family completed —
+    // the String/Int/List[String] fold accumulator twins, the for_each_line
+    // visitor, and the ADR-0006 fallible carriers — and the declared-Unit
+    // can-err Result ABI landed, so the file runs the wasm leg for real. The
+    // old "native-only" claim was about fold_lines_chunked's THREADS, which
+    // are a wall-clock property, never an observable; the observables cross.)
 ];
 
 fn repo_root() -> PathBuf {
