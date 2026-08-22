@@ -596,6 +596,16 @@ impl LowerCtx {
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
+        if crate::lower::is_res_lenlist_str_ty(ty) {
+            // Heap-Ok `Result[List[<one-level-exact>], String]` (fs.read_lines /
+            // fold_lines_ls) — the TAG-AWARE `$__drop_res_lsl` (Ok -> slot sweep
+            // then list then wrapper; Err -> message). The one-level wrapper
+            // sweep freed the list BLOCK-ONLY and stranded every element (the
+            // read_lines-in-a-lifted-effect-fn churn leak).
+            self.value_drops.entry(dst).or_default().named_route = Some("res_lsl".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
         if crate::lower::is_res_intlist_strlist_ty(ty) {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;

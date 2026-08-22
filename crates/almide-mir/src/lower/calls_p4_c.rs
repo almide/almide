@@ -615,6 +615,12 @@ impl LowerCtx {
             self.value_drops.entry(dst).or_default().named_route = Some("res_fs".to_string());
             return;
         }
+        if crate::lower::is_res_lenlist_str_ty(ty) {
+            // Heap-Ok `Result[List[<one-level-exact>], String]` arg temp — the same
+            // tag-aware `$__drop_res_lsl` route the bind sites seed.
+            self.value_drops.entry(dst).or_default().named_route = Some("res_lsl".to_string());
+            return;
+        }
         if crate::lower::is_result_listval_ty(ty) {
             self.value_drops.entry(dst).or_default().value_result_list = true;
             return;

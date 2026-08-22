@@ -437,8 +437,12 @@
         // An `Option[(String, <scalar>)]` — `$__drop_opt_str_int` (see pipeline.rs's
         // mirror; type-driven gate, #840).
         let opt_str_int_drop = if usage.opt_str_scalar { crate::lower::OPT_STR_INT_DROP_SRC } else { "" };
+        // A heap-Ok `Result[List[<one-level-exact>], String]` — `$__drop_res_lsl`
+        // (pipeline_tail's mirror). The codec `__decode_list_string` helper's return
+        // is an instance, so the derived-codec decode tests reach it.
+        let res_lsl_drop = if usage.res_lenlist_str { crate::lower::RES_LSL_DROP_SRC } else { "" };
         let drops = format!(
-            "{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
             crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(ir), &crate::lower::collect_interp_repr_containers(ir)),
@@ -447,6 +451,7 @@
             list_str_drop,
             list_closure_drop,
             opt_str_int_drop,
+            res_lsl_drop,
         );
         drops
     }
