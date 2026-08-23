@@ -19,8 +19,12 @@ let MESSAGE = "hello"
 
 let MESSAGE_2 = MESSAGE
 
-// a COMPUTED top-let init (MESSAGE_2 + "?") is a pinned wall —
-// walls/toplet_computed_string_init.almd — so the concat happens in main.
+// gleam #6086's aliased-concat CONSTANT, as written: a computed top-let init
+// over another const top-let folds to one literal (#1552's per-region const
+// fold) — this row graduated from the wall corpus
+// (walls/toplet_computed_string_init.almd) when the fold landed.
+let MESSAGE_3 = MESSAGE_2 + "?"
+
 fn eq(x: Bool) -> String = if x then "1" else "0"
 
 fn main() -> Unit = {
@@ -43,6 +47,8 @@ fn main() -> Unit = {
   // (concat of an ALIASED global — `MESSAGE_2 + "!"` — walls as a BinOp
   // heap bind; concat of the DIRECT global carries #6086's point below)
   list.push(aliased, eq(MESSAGE + "!" == "hello!"))
+  // the computed CONSTANT itself (#6086's const_concat row, post-#1552)
+  list.push(aliased, eq(MESSAGE_3 == "hello?"))
   println(list.join(aliased, ""))
   let subject = "hello!"
   println(match subject {
