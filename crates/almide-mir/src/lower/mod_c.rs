@@ -706,11 +706,21 @@ fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) 
             any
         }
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => false,
-        // A CALL in return position already yields the CARRIER — an effect fn's
-        // own ABI wraps its exits, so wrapping the call site again would build
-        // `ok(ok(..))`. The callee's ABI is the single decider for a call's
-        // shape; this retype only speaks for the values THIS body produces.
-        IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => false,
+        // A call to a NAMED/computed/method callee in return position may
+        // already yield the CARRIER — a lifted effect sibling's ABI wraps its
+        // exits (wrapping the site again would build `ok(ok(..))`), and the
+        // tail SELF-call's unwrapped spine is what lets `effect_tco`
+        // loop-convert — so those stay with the existing machinery. A MODULE
+        // (stdlib) callee is different: it is a plain VALUE producer with no
+        // wrapping ABI of its own, so declining it left the raw value as the
+        // fn's return — `map.len(m)` in the tail of an auto-wrapped fn
+        // returned a raw i64 where every call site `local.set`s the promised
+        // i32 carrier: invalid wasm at validate ("expected i32, found i64").
+        // A Module call answering the DECLARED type falls through to the value
+        // wrap below; a Result-typed Module call (fs.read_text) fails the
+        // `ty == decl_ty` test there and stays untouched.
+        IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Computed { .. } | CallTarget::Method { .. }, .. }
+        | IrExprKind::TailCall { .. } => false,
         _ => {
             // A VALUE in return position. Wrap it when it produces the declared
             // type; anything else (a Never-typed die, an already-Result
