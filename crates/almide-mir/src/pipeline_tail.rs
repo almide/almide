@@ -180,6 +180,15 @@ fn build_ir_with_drops(
     // never reads `ir.functions`, so moving it ahead of the synthesis is a pure
     // reordering for every other file.
     disambiguate_module_global_regions(&mut ir);
+    // Fold `let B = "x " + A + " y"` module-level String constants whose leaves
+    // are literals and other SAME-REGION const String top-lets into ONE LitStr
+    // (#1552): a computed String constant is an ordinary shape, and unfolded it
+    // fell out of the renderer's CONST-initializer subset — walling same-module
+    // and degrading to `unbound var` across a module boundary (the bridge
+    // copies the folded init, so both spellings materialize as `Init::Str`
+    // now). Fold-by-substitution only — a leaf that is neither a literal nor a
+    // foldable const reference leaves the init untouched (walls as before).
+    fold_const_str_toplets(&mut ir);
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;
     }
