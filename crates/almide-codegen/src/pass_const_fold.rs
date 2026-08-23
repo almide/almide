@@ -137,7 +137,18 @@ fn narrow_to_width(v: i64, ty: &almide_lang::types::Ty) -> i64 {
     }
 }
 
-fn is_zero_f(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 0.0) }
+// The ±0 split matters (#1542): `x + 0.0 -> x` is NOT a valid IEEE 754
+// identity — under round-to-nearest `-0.0 + 0.0 = +0.0`, so folding it made
+// native print -0.0 where wasm (which never folds) printed 0.0: a
+// cross-target divergence. The float identities are SIGN-precise:
+// `x + (-0.0) -> x` and `x - (+0.0) -> x` (LLVM folds exactly these two).
+// `== 0.0` compares true for BOTH zeros, so the Add/Sub arms key on the sign.
+fn is_pos_zero_f(e: &IrExpr) -> bool {
+    matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 0.0 && !value.is_sign_negative())
+}
+fn is_neg_zero_f(e: &IrExpr) -> bool {
+    matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 0.0 && value.is_sign_negative())
+}
 fn is_one_f(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 1.0) }
 fn is_zero_i(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitInt { value } if *value == 0) }
 fn is_one_i(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitInt { value } if *value == 1) }
@@ -155,13 +166,16 @@ fn try_fold_identity(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprK
 /// split of the same decomposition).
 fn try_fold_identity_add_sub(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
     match op {
-        // x + 0 / 0 + x → x
-        BinOp::AddFloat if is_zero_f(right) => Some(left.kind.clone()),
-        BinOp::AddFloat if is_zero_f(left) => Some(right.kind.clone()),
+        // FLOAT: only the sign-precise identities (#1542, see is_pos/neg_zero_f):
+        // x + (-0.0) / (-0.0) + x → x; x - (+0.0) → x. `x + 0.0` and `0.0 + x`
+        // must EVALUATE (they normalize -0.0 to +0.0); `x - (-0.0)` likewise.
+        BinOp::AddFloat if is_neg_zero_f(right) => Some(left.kind.clone()),
+        BinOp::AddFloat if is_neg_zero_f(left) => Some(right.kind.clone()),
+        // INT: x + 0 / 0 + x → x (exact, no signed zero).
         BinOp::AddInt if is_zero_i(right) => Some(left.kind.clone()),
         BinOp::AddInt if is_zero_i(left) => Some(right.kind.clone()),
         // x - 0 → x  (not 0 - x; that's negation, leave alone)
-        BinOp::SubFloat if is_zero_f(right) => Some(left.kind.clone()),
+        BinOp::SubFloat if is_pos_zero_f(right) => Some(left.kind.clone()),
         BinOp::SubInt if is_zero_i(right) => Some(left.kind.clone()),
         _ => None,
     }
