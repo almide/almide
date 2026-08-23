@@ -307,6 +307,14 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
     // it exits the function with an error.
     let raw_body = if matches!(&arm.body.kind, IrExprKind::ResultErr { .. }) && !match_ty.is_result() {
         format!("return {}", render_expr(ctx, &arm.body))
+    } else if matches!(&arm.body.kind, IrExprKind::Continue) {
+        // Arm position takes the bare keyword: the `continue_stmt` template is
+        // the STATEMENT spelling (`continue;`), whose `;` inside an arm is a
+        // parse error (`_ => continue;,` — the guard-let-in-a-loop else,
+        // #1543's sibling shape).
+        "continue".to_string()
+    } else if matches!(&arm.body.kind, IrExprKind::Break) {
+        "break".to_string()
     } else {
         super::expressions::render_expr_owned(ctx, &arm.body)
     };

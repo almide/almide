@@ -336,8 +336,47 @@ fn alias_float_variant_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
 /// function's own `param.borrow`, never reads `sigs` back within the same
 /// iteration (that read happens via the `SIGS_SNAPSHOT` thread-local frozen
 /// by the caller before this runs) — a safe write-only accumulator.
+
+/// The KEYWORD-only borrow rule for a MONOMORPHIZED instance (#1551): the
+/// full body inference stays skipped for `name__Suffix` fns (the historical
+/// contract below), but the explicit `mut` convention is authoritative and
+/// must survive specialization — the generic `fn f[C: Counter](mut c: C)`
+/// declared it, the instance's param clones `is_mut`, and dropping it emitted
+/// a by-value `c: Tally` while the specialized body (cloned from call sites
+/// inferred against the CONCRETE method sigs) still passes `&mut c` — rustc
+/// E0596, check green. Only the keyword rule runs: no body heuristics, so no
+/// other monomorphized sig can shift.
+fn seed_monomorphized_mut_params(
+    func: &mut IrFunction,
+    sigs: &mut HashMap<String, Vec<ParamBorrow>>,
+    sig_key: String,
+) {
+    let borrows: Vec<ParamBorrow> = func
+        .params
+        .iter()
+        .map(|p| {
+            if p.is_mut && is_borrow_eligible(&p.ty) {
+                ParamBorrow::RefMut
+            } else {
+                p.borrow
+            }
+        })
+        .collect();
+    if borrows.iter().any(|b| matches!(b, ParamBorrow::RefMut)) {
+        sigs.insert(sig_key, borrows.clone());
+        for (param, borrow) in func.params.iter_mut().zip(borrows) {
+            param.borrow = borrow;
+        }
+    }
+}
+
 fn infer_program_fn_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
     for func in &mut program.functions {
+        if is_monomorphized(&func.name) && !func.is_test && !is_derive_fn(func) {
+            let key = func.name.to_string();
+            seed_monomorphized_mut_params(func, sigs, key);
+            continue;
+        }
         if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
         let borrows = tco_owned_params(func, infer_function_borrows(func));
         // Always record the signature (including all-Own) so that the
@@ -359,6 +398,11 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
         let mod_name = module.name.to_string();
         MOD_SCOPE.with(|m| *m.borrow_mut() = Some(mod_name.clone()));
         for func in &mut module.functions {
+            if is_monomorphized(&func.name) && !func.is_test && !is_derive_fn(func) {
+                let key = format!("{}::{}", mod_name, func.name);
+                seed_monomorphized_mut_params(func, sigs, key);
+                continue;
+            }
             if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
             let borrows = tco_owned_params(func, infer_function_borrows(func));
             sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
@@ -379,6 +423,24 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
                     func.name.as_str().replace('.', "_"),
                 );
                 sigs.insert(mangled, borrows.clone());
+                // A CROSS-module convention-method call site carries the
+                // DOTTED key (`m.Box.twice` — the #1087 "emit the key that
+                // exists" spelling), while this loop recorded only
+                // `m::Box.twice` and the mangled symbol. The miss left the
+                // receiver un-borrowed against a by-ref def — the borrow mode
+                // did not travel with the exported signature (#1549, the
+                // #1088 class). Mirror under the dotted spelling too.
+                sigs.insert(format!("{}.{}", mod_name, func.name), borrows.clone());
+                // …and under the BARE convention name (`Box.twice`): the
+                // frontend's convention_emit_key resolves a derived/defined
+                // method to the bare `P.encode`-style key (#1087), so that is
+                // what a cross-module call site actually carries. `or_insert`
+                // (never overwrite): a same-named method in the root program
+                // or another module keeps its own signature — the same
+                // last-resort rule MODULE_METHOD_FNS applies to its tail key.
+                if func.name.as_str().contains('.') {
+                    sigs.entry(func.name.to_string()).or_insert_with(|| borrows.clone());
+                }
             }
             for (param, borrow) in func.params.iter_mut().zip(borrows) {
                 param.borrow = borrow;

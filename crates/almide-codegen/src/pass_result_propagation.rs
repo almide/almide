@@ -425,6 +425,14 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
 /// Check if an expression is divergent (never produces a value).
 /// Used to decide whether guard-else bodies need Ok() wrapping.
 fn is_divergent(expr: &IrExpr) -> bool {
+    // A `Never`-typed else (`process.exit(n)`, a die) never yields a value to
+    // wrap — Ok-wrapping it stamped `Ok::<(), String>(exit(n))` against
+    // whatever the enclosing return channel really is (E0308 for every
+    // non-Unit effect fn, #1541). The spec lists Never as an accepted guard
+    // else; divergence is a TYPE fact here, not a syntax one.
+    if matches!(expr.ty, Ty::Never) {
+        return true;
+    }
     match &expr.kind {
         IrExprKind::Break | IrExprKind::Continue => true,
         // err(...)! — error propagation, always diverges

@@ -724,7 +724,7 @@ fn lower_loop_body_stmts(ctx: &mut LowerCtx, body: &[ast::Stmt]) -> Vec<IrStmt> 
     // `lower_block_body` owns the guard rewrite; a Unit-typed, tail-less block
     // over the REST is exactly the shape it expects, and its result is a single
     // expression statement here.
-    let rest = lower_block_body(ctx, &body[i..], None, &Ty::Unit, None);
+    let rest = lower_block_body_in(ctx, &body[i..], None, &Ty::Unit, None, true);
     out.push(IrStmt { kind: IrStmtKind::Expr { expr: rest }, span: None });
     out
 }
@@ -735,6 +735,27 @@ fn lower_block_body(
     tail: Option<&ast::Expr>,
     ty: &Ty,
     span: Option<ast::Span>,
+) -> IrExpr {
+    lower_block_body_in(ctx, stmts, tail, ty, span, false)
+}
+
+/// [`lower_block_body`] with the LOOP-position fact (#1543). In a BLOCK, the
+/// guard-let match sits in tail position, so the wildcard arm's else value IS
+/// the fn's return. In a LOOP body the match is a Unit STATEMENT — a plain
+/// value there is a type error (`match` arms `()` vs `Option<_>`, rustc
+/// E0308 → "codegen produced invalid Rust"), and semantically the else must
+/// EXIT THE FN. The IR's one fn-exit spelling from statement position is the
+/// `Guard` statement, so a fn-exiting else in a loop is wrapped as
+/// `{ guard false else <else>; () }` — every backend already renders a Guard's
+/// return channel correctly (ok-wrapping included). A `break`/`continue` else
+/// stays a bare arm (loop control is valid in arm position).
+fn lower_block_body_in(
+    ctx: &mut LowerCtx,
+    stmts: &[ast::Stmt],
+    tail: Option<&ast::Expr>,
+    ty: &Ty,
+    span: Option<ast::Span>,
+    in_loop: bool,
 ) -> IrExpr {
     if let Some(i) = stmts.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) {
         let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
@@ -764,14 +785,52 @@ fn lower_block_body(
         // Some/Ok arm: bind name, then the rest of the block (recurse for nested guards).
         ctx.push_scope();
         let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
-        let rest = lower_block_body(ctx, &stmts[i + 1..], tail, ty, span);
+        let rest = lower_block_body_in(ctx, &stmts[i + 1..], tail, ty, span, in_loop);
         ctx.pop_scope();
         let arm1 = IrMatchArm { pattern: pat1, guard: None, body: rest };
         // Wildcard arm: the else branch (must diverge).
         ctx.push_scope();
         let pat2 = lower_pattern(ctx, &ast::Pattern::Wildcard, &subject_ty);
-        let alt = lower_expr(ctx, else_);
+        let mut alt = lower_expr(ctx, else_);
         ctx.pop_scope();
+        let alt_is_loop_control = |e: &IrExpr| -> bool {
+            matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue)
+                || matches!(&e.kind, IrExprKind::Block { stmts, expr: None }
+                    if stmts.len() == 1
+                        && matches!(&stmts[0].kind, IrStmtKind::Expr { expr }
+                            if matches!(&expr.kind, IrExprKind::Break | IrExprKind::Continue)))
+        };
+        if in_loop && alt_is_loop_control(&alt) {
+            // Normalize a block-wrapped `{ continue }` / `{ break }` else to the
+            // BARE loop-control expression: a statement-only Block in match-arm
+            // position renders as `continue;` (invalid Rust in an arm without
+            // braces). The bare node renders as the arm value `continue`.
+            if let IrExprKind::Block { stmts, expr: None } = &alt.kind {
+                if let Some(IrStmtKind::Expr { expr }) = stmts.first().map(|s| &s.kind) {
+                    alt = expr.clone();
+                }
+            }
+        }
+        if in_loop && !alt_is_loop_control(&alt) {
+            // See the doc comment: a fn-exiting else in a loop rides the Guard
+            // statement's return channel; the arm's own value becomes Unit so
+            // the statement-position match types.
+            let guard_stmt = IrStmt {
+                kind: IrStmtKind::Guard {
+                    cond: ctx.mk(IrExprKind::LitBool { value: false }, Ty::Bool, None),
+                    else_: alt,
+                },
+                span: None,
+            };
+            alt = ctx.mk(
+                IrExprKind::Block {
+                    stmts: vec![guard_stmt],
+                    expr: Some(Box::new(ctx.mk(IrExprKind::Unit, Ty::Unit, None))),
+                },
+                Ty::Unit,
+                None,
+            );
+        }
         let arm2 = IrMatchArm { pattern: pat2, guard: None, body: alt };
         let match_expr =
             ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: vec![arm1, arm2] }, ty.clone(), span);

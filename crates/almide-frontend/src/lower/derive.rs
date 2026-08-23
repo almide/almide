@@ -51,9 +51,23 @@ fn derive_one(
     fn_names: &std::collections::HashSet<&str>,
 ) -> Vec<IrFunction> {
     match conv {
-        "Repr" => fields
-            .map(|f| vec![auto_derive_repr(&mut ctx.var_table, &td.name, type_ty, f)])
-            .unwrap_or_default(),
+        "Repr" => {
+            if let Some(f) = fields {
+                vec![auto_derive_repr(&mut ctx.var_table, &td.name, type_ty, f)]
+            } else if matches!(&td.kind, IrTypeDeclKind::Variant { .. }) {
+                // A VARIANT deriving Repr gets a real `Type.repr` fn too — the
+                // record arm always did, and the asymmetry meant `.repr()` on a
+                // derived variant resolved (find_convention_fn promises the
+                // derive) but linked NOTHING: codegen flattened `Color.repr` to
+                // a `Color_repr` free fn that was never generated (#1539 —
+                // check green, rustc E0425). The body is the value interpolated
+                // (`"${_v}"`), so all three legs print through the SAME C-008
+                // repr machinery interpolation already uses.
+                vec![auto_derive_variant_repr(&mut ctx.var_table, &td.name, type_ty)]
+            } else {
+                Vec::new()
+            }
+        }
         "Eq" => derive_eq(ctx, td, type_ty, fields),
         "Codec" => derive_codec(ctx, td, type_ty, fields, fn_names),
         _ => Vec::new(),
@@ -148,6 +162,28 @@ fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[
     }
     parts.push(IrStringPart::Lit { value: " }".to_string() });
 
+    IrFunction {
+        name: sym(&format!("{}.repr", type_name)),
+        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],
+        ret_ty: Ty::String,
+        body: IrExpr { kind: IrExprKind::StringInterp { parts }, ty: Ty::String, span: None, def_id: None },
+        is_effect: false, is_test: false,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
+        doc: None, blank_lines_before: 0,
+        def_id: None,
+        mutated_params: vec![], module_origin: None,
+    }
+}
+
+/// Auto-derive Repr for variant types: `fn Color.repr(_v: Color) -> String = "${_v}"` —
+/// the interpolation spelling, so the derived method and `"${value}"` print
+/// byte-identically on every leg (the C-008/C-009 machinery is the one
+/// implementation).
+fn auto_derive_variant_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> IrFunction {
+    let var = vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
+    let parts = vec![IrStringPart::Expr {
+        expr: IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None, def_id: None },
+    }];
     IrFunction {
         name: sym(&format!("{}.repr", type_name)),
         params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],

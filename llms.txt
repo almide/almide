@@ -252,6 +252,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E058 | Unhashable Map key: Float, Map, or a record/variant carrying one anywhere in its fields (a FUNCTION in the key is E016) | Key on String/Int/Bool (or a record/variant of those); carry the unhashable value on the VALUE side |
 | E059 | `for` over a non-iterable head (`for x in 5`) — the loop head must be a List or a Map | Iterate a List, a range (`for i in 0...n`), or a Map (`for (k, v) in m`) |
 | E060 | (warning) Import hygiene: a module imported and never used, or imported twice under two names | Remove the unused/duplicate import; `import _name` suppresses a deliberate one |
+| E061 | Top-level `let` bound to a lambda — the closure has no home in a module constant and the binding is not callable | Declare it as a function: `fn name(…) = …`; a `let`-bound lambda inside a fn/test body is fine |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 

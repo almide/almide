@@ -444,6 +444,24 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
             ),
         };
     }
+    // A WHOLE-parameter assignment to a `mut` param: the binding is `&mut T`,
+    // so the store needs the deref (`*p = …`) — the bare `p = …` tried to
+    // repoint the reference itself (rustc E0308, and rustc's own help names
+    // the `*`; #1550). Field assigns (`p.n = …`) auto-deref and never came
+    // here. EXCEPT the TCO parameter rotation: `pass_tco` binds
+    // `let __tco_tmp_p = p` (the REFERENCE) and re-seats it with `p =
+    // __tco_tmp_p` — deref'ing that store assigns `&mut T` into `T`
+    // (the mut_param_call_chain cross-target red this arm's first
+    // spelling shipped). The rotation carries the same reference, so
+    // the legacy bare form is the correct one there.
+    if ctx.ref_mut_params.contains(var) {
+        let is_tco_rotation = matches!(&value.kind, IrExprKind::Var { id }
+            if ctx.var_name(*id).starts_with("__tco_tmp_"));
+        if !is_tco_rotation {
+            return format!("*{} = {};", target_s, value_s);
+        }
+        return format!("{} = {};", target_s, value_s);
+    }
     match ctx.ann.get_var_storage(var) {
         VarStorage::RcCow => format!("{} = RcCow::new({});", target_s, value_s),
         _ => ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
@@ -494,6 +512,13 @@ fn render_stmt_guard(ctx: &RenderContext, stmt: &IrStmt) -> String {
         .unwrap_or_else(|| format!("!cond"));
     if action == "break" || action == "continue" {
         format!("if {} {{ {} }}", neg, action)
+    } else if matches!(else_.ty, Ty::Never) {
+        // A `Never`-typed else (`process.exit(n)`, a die) yields no value —
+        // `return exit(n)` would type the fn's return channel from the runtime
+        // call's `()` (E0308 in every non-Unit fn, #1541). Run the diverging
+        // call as a STATEMENT; `unreachable!()` gives the block the `!` type
+        // the spec assigns the else, valid against ANY return.
+        format!("if {} {{ {}; unreachable!() }}", neg, else_str)
     } else {
         format!("if {} {{ return {} }}", neg, else_str)
     }

@@ -1,0 +1,3 @@
+expects_code = "E061"
+expects_error = "cannot be bound to a function value"
+hint_substring = "declare it as a function instead"
