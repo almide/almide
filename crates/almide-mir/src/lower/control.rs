@@ -202,10 +202,14 @@ impl LowerCtx {
         // bodies is then observationally a no-op). An arm containing a CALL can
         // print / write / recurse — running the untaken arm is a silent
         // miscompile (both println arms of an untracked Result match ran,
-        // 2026-07-03). WALL it: an unlowered shape must be a clean Unsupported,
-        // never wrong output.
-        fn arm_has_call(e: &IrExpr) -> bool {
-            use almide_ir::visit::{walk_expr, IrVisitor};
+        // 2026-07-03). An arm containing an ASSIGNMENT is an effect the same
+        // way: linearizing `some(_) => { hits = hits + 1 }, none => { hits =
+        // hits - 1 }` runs BOTH stores every time (net zero — the #1547
+        // shape-2/3 churn probe read hits=0 where native read 100000, caught
+        // before shipping). WALL both: an unlowered shape must be a clean
+        // Unsupported, never wrong output.
+        fn arm_has_call_or_assign(e: &IrExpr) -> bool {
+            use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
             struct C(bool);
             impl IrVisitor for C {
                 fn visit_expr(&mut self, e: &IrExpr) {
@@ -219,16 +223,28 @@ impl LowerCtx {
                     }
                     walk_expr(self, e);
                 }
+                fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+                    if matches!(
+                        s.kind,
+                        IrStmtKind::Assign { .. }
+                            | IrStmtKind::IndexAssign { .. }
+                            | IrStmtKind::FieldAssign { .. }
+                            | IrStmtKind::MapInsert { .. }
+                    ) {
+                        self.0 = true;
+                    }
+                    walk_stmt(self, s);
+                }
             }
             let mut c = C(false);
             c.visit_expr(e);
             c.0
         }
-        if arms.iter().any(|a| arm_has_call(&a.body)) {
+        if arms.iter().any(|a| arm_has_call_or_assign(&a.body)) {
             return Err(LowerError::Unsupported(
-                "match over an UNTRACKED subject with a call-bearing arm cannot take \
-                 the both-arms linearization (it would run the untaken arm's effects) \
-                 not in this brick".into(),
+                "match over an UNTRACKED subject with a call- or assignment-bearing arm \
+                 cannot take the both-arms linearization (it would run the untaken \
+                 arm's effects) not in this brick".into(),
             ));
         }
         for arm in arms {
@@ -378,6 +394,17 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Named { .. }, .. } => true,
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } =>
                 crate::purity::is_pure(module.as_str(), func.as_str()),
+            // A COMPUTED (closure) call subject (`match p.load(id) { … }` — the #1547
+            // port/adapter consumption, reached un-pre-bound inside a loop): by the
+            // time seeding runs, the subject VALUE exists only if the heap computed
+            // call EXECUTED (`try_heap_opaque_computed_arg` — a real `CallIndirect`
+            // through a resolved closure block; the unresolvable case is a hard wall,
+            // never a deferred block). The lifted lambda body builds its Option/Result
+            // by the SAME v1 calling convention a Named callee does (a body that
+            // cannot walls the lift), so the type-keyed read-shape/drop seeds below
+            // apply verbatim. Without this the loop-position match fell to the
+            // both-arms linearization gate.
+            IrExprKind::Call { target: CallTarget::Computed { .. }, .. } => true,
             _ => false,
         };
         if !result_call_subject {

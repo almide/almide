@@ -214,6 +214,7 @@ impl LowerCtx {
                     && (!is_heap_ty(&a[0]) || matches!(a[0], Ty::String)))
         };
         let mut closure_caps: Vec<(VarId, Ty)> = Vec::new();
+        let mut rich_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut heap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut nested_heap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut cellmap_caps: Vec<(VarId, Ty)> = Vec::new();
@@ -254,6 +255,19 @@ impl LowerCtx {
                 nested_heap_caps.push((v, ty));
                 continue;
             }
+            // #1547 shapes 2/3 — the port/adapter capture: a `List[<rich variant>]` /
+            // `List[<recursive-drop record>]` (the repository `db` a returned record's
+            // closure field closes over) rides the RICH env class. Its slot holds a
+            // `[tag@12][list-handle@20]` wrapper block; the uniform `$__drop_closure`
+            // walk hands it to the generated `__drop_env_rich`, whose tag arm recurses
+            // via the element type's own `$__drop_list_<V>` / `$__drop_caplist_<R>` —
+            // a flat or `__drop_list_str` free would leak every element's tree.
+            // Structural admission (the same per-name mirrors the drop generators use);
+            // the tag is `rich_env_tag(<element type name>)` — no registry to sync.
+            if self.rich_capture_elem_name(&ty).is_some() {
+                rich_caps.push((v, ty));
+                continue;
+            }
             // `!is_heap_ty` IS this bucket's promise — the crate's canonical name for
             // "one raw i64 slot, no refcount", which is exactly what the scalar region
             // of the env stores and what `ListGetScalar` reads back. This used to
@@ -275,25 +289,54 @@ impl LowerCtx {
             return None;
         }
         let n_closure = closure_caps.len();
+        let n_rich = rich_caps.len();
         let n_heap = heap_caps.len();
         let n_nested_heap = nested_heap_caps.len();
         let n_cellmap = cellmap_caps.len();
         // ENV LAYOUT ORDER must match `$__drop_closure`'s class walk EXACTLY:
-        // [closures][NESTED][FLAT][cell-map][scalars]. The chain previously placed
-        // FLAT before NESTED while the walker frees NESTED before FLAT — a LATENT
-        // mis-free whenever one closure captured BOTH classes at once (the nested
-        // walk over a flat block reads raw i64 slots as handles; the flat dec of a
-        // nested block leaks its elements). No corpus shape co-captured both until
-        // the cell classes made it reachable (`var count` + `var acc` mutated
+        // [closures][RICH][NESTED][FLAT][cell-map][scalars]. The chain previously
+        // placed FLAT before NESTED while the walker frees NESTED before FLAT — a
+        // LATENT mis-free whenever one closure captured BOTH classes at once (the
+        // nested walk over a flat block reads raw i64 slots as handles; the flat dec
+        // of a nested block leaks its elements). No corpus shape co-captured both
+        // until the cell classes made it reachable (`var count` + `var acc` mutated
         // through one stored closure).
         let captures: Vec<(VarId, Ty)> = closure_caps
             .into_iter()
+            .chain(rich_caps)
             .chain(nested_heap_caps)
             .chain(heap_caps)
             .chain(cellmap_caps)
             .chain(scalar_caps)
             .collect();
-        Some(CaptureLayout { captures, n_closure, n_heap, n_nested_heap, n_cellmap })
+        Some(CaptureLayout { captures, n_closure, n_rich, n_heap, n_nested_heap, n_cellmap })
+    }
+
+    /// The RICH-capture admission mirror (#1547 shapes 2/3): `Some(<element type
+    /// name>)` iff `ty` is a `List[<non-generic named elem>]` whose element the drop
+    /// generators give a per-element recursive free — a RICH variant (`$__drop_list_
+    /// <V>`, unconditional) or a recursive-drop record (`$__drop_<R>` unconditional;
+    /// the capture side's `$__drop_caplist_<R>` loop rides it). The name feeds
+    /// [`crate::lower::rich_env_tag`] — the SAME function `generate_closure_env_rich_
+    /// sources` derives its dispatcher arm tags with, so admission ⊆ generation holds
+    /// per name with no registry to keep in sync. Everything else declines (an
+    /// honest wall, exactly as before).
+    fn rich_capture_elem_name(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::List, a) = ty else { return None };
+        if a.len() != 1 {
+            return None;
+        }
+        let elem = &a[0];
+        if !matches!(elem, Ty::Named(_, args) if args.is_empty()) {
+            return None;
+        }
+        if let Some(vn) = self.variant_layouts.is_rich_variant_ty(elem, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        }) {
+            return Some(vn);
+        }
+        self.record_drop_type_name(elem)
     }
 
     /// Phase 3 of [`Self::lift_lambda`]: resolve every capture to a lowered local value
@@ -437,6 +480,30 @@ impl LowerCtx {
                 if i < layout.n_closure {
                     sub.closure_values.insert(val);
                 }
+                // A RICH capture (#1547 shapes 2/3): `val` is the `[tag@12][list@20]`
+                // WRAPPER — the body wants the LIST. One more deref binds it, borrowed
+                // exactly like every other env-owned capture, and the read-shape seed
+                // mirrors `bind_params` so `list.len(db)` / `list.find(db, …)` inside
+                // the lifted body execute over the real block.
+                if layout.is_rich(i) {
+                    let iwh = sub.fresh_value();
+                    sub.ops
+                        .push(Op::Prim { kind: PrimKind::Handle, dst: Some(iwh), args: vec![val] });
+                    let o20 = sub.fresh_value();
+                    sub.ops.push(Op::ConstInt { dst: o20, value: 20 });
+                    let laddr = sub.fresh_value();
+                    sub.ops.push(Op::IntBinOp { dst: laddr, op: IntOp::Add, a: iwh, b: o20 });
+                    let lv = sub.fresh_value();
+                    sub.ops.push(Op::Prim {
+                        kind: PrimKind::LoadHandle,
+                        dst: Some(lv),
+                        args: vec![laddr],
+                    });
+                    sub.param_values.insert(lv);
+                    sub.seed_variant_param(lv, ty);
+                    sub.value_of.insert(*v, lv);
+                    continue;
+                }
                 // A SHARED-CELL capture: the loaded handle IS the cell block — map the
                 // var into the sub-context's `cell_of` (NOT `value_of`), so body reads
                 // load the slot fresh and body assigns store through it. The inner
@@ -518,6 +585,54 @@ impl LowerCtx {
             self.closure_values.insert(blk);
             return blk;
         }
+        // RICH captures (#1547 shapes 2/3): wrap each captured list in a fresh
+        // 2-slot `[tag@12][list-handle@20]` block FIRST — the env slot then holds
+        // the wrapper, and `$__drop_closure`'s rich arm hands it to the generated
+        // `__drop_env_rich` (tag → the element type's recursive list free). The
+        // wrapper co-owns the list (`Dup` + move-in, the original var's scope-end
+        // drop untouched) and is itself MOVED into the env below (no Dup — it
+        // exists solely for this block).
+        let mut cap_vals = cap_vals;
+        let mut rich_wrappers: std::collections::HashSet<ValueId> = std::collections::HashSet::new();
+        for i in 0..layout.captures.len() {
+            if !layout.is_rich(i) {
+                continue;
+            }
+            let tag_val = self
+                .rich_capture_elem_name(&layout.captures[i].1)
+                .map(|n| crate::lower::rich_env_tag(&n))
+                .expect("rich class admitted only via rich_capture_elem_name");
+            let two = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: two, value: 2 });
+            let w = self.fresh_value();
+            self.ops.push(Op::Alloc {
+                dst: w,
+                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                init: Init::DynList { len: two },
+            });
+            let wh = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(wh), args: vec![w] });
+            let tv = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: tv, value: tag_val });
+            let o12 = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: o12, value: 12 });
+            let s0 = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: s0, op: IntOp::Add, a: wh, b: o12 });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s0, tv] });
+            let owned = self.fresh_value();
+            self.ops.push(Op::Dup { dst: owned, src: cap_vals[i] });
+            let lh = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(lh), args: vec![owned] });
+            let o20 = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: o20, value: 20 });
+            let s1 = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: s1, op: IntOp::Add, a: wh, b: o20 });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s1, lh] });
+            self.ops.push(Op::Consume { v: owned });
+            self.live_heap_handles.retain(|x| *x != owned);
+            cap_vals[i] = w;
+            rich_wrappers.insert(w);
+        }
         let len_c = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len_c, value: (2 + cap_vals.len()) as i64 });
         let blk = self.fresh_value();
@@ -534,7 +649,8 @@ impl LowerCtx {
             value: (layout.n_heap as i64)
                 | ((layout.n_nested_heap as i64) << 16)
                 | ((layout.n_closure as i64) << 32)
-                | ((layout.n_cellmap as i64) << 48),
+                | ((layout.n_cellmap as i64) << 48)
+                | ((layout.n_rich as i64) << 56),
         });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
@@ -550,8 +666,16 @@ impl LowerCtx {
             // The fnidx/header/scalar slots store the raw value.
             let cap_index = i as i64 - 2; // captures start at slot 2
             if cap_index >= 0 && (cap_index as usize) < layout.handle_slots() {
-                let owned = self.fresh_value();
-                self.ops.push(Op::Dup { dst: owned, src: v });
+                // A RICH wrapper is MOVED in (built above solely for this env slot —
+                // a Dup would strand one reference); every other handle capture keeps
+                // the Dup co-own.
+                let owned = if rich_wrappers.contains(&v) {
+                    v
+                } else {
+                    let owned = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: owned, src: v });
+                    owned
+                };
                 let handle = self.fresh_value();
                 self.ops
                     .push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![owned] });
@@ -587,18 +711,24 @@ impl LowerCtx {
 struct CaptureLayout {
     captures: Vec<(VarId, Ty)>,
     n_closure: usize,
+    n_rich: usize,
     n_heap: usize,
     n_nested_heap: usize,
     n_cellmap: usize,
 }
 
 impl CaptureLayout {
-    /// Slots `2..2 + handle_slots()` hold HANDLES (closure, nested-heap, flat-heap and
-    /// cell-map captures); everything after them is a raw scalar slot. The prologue's
-    /// `LoadHandle`-vs-`ListGetScalar` split, the header's zero test and the block
-    /// store's co-own test all key on this same boundary.
+    /// Slots `2..2 + handle_slots()` hold HANDLES (closure, rich-wrapper, nested-heap,
+    /// flat-heap and cell-map captures); everything after them is a raw scalar slot.
+    /// The prologue's `LoadHandle`-vs-`ListGetScalar` split, the header's zero test and
+    /// the block store's co-own test all key on this same boundary.
     fn handle_slots(&self) -> usize {
-        self.n_closure + self.n_heap + self.n_nested_heap + self.n_cellmap
+        self.n_closure + self.n_rich + self.n_heap + self.n_nested_heap + self.n_cellmap
+    }
+
+    /// Is capture index `i` in the RICH class ([closures][RICH][…] order)?
+    fn is_rich(&self, i: usize) -> bool {
+        i >= self.n_closure && i < self.n_closure + self.n_rich
     }
 }
 

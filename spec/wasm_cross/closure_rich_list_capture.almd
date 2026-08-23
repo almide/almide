@@ -1,0 +1,80 @@
+// @contract: C-106
+// #1547 shapes 2/3 — the port/adapter record: closures capturing a
+// List[<recursive record>] / List[<rich variant>] (the RICH closure-env class:
+// a [tag][handle] wrapper slot freed via the generated $__drop_env_rich
+// dispatcher), returned inside a record of function fields, and consumed
+// through a match over the closure-field call — including in LOOP position
+// (the computed-call subject seeding; untracked it either walled or, with
+// assignment-only arms, linearized BOTH arms' stores). The churn loop is the
+// leak canary: every iteration builds a port, dispatches, and drops the
+// closures (wrapper + captured-list co-own must free exactly); the originals
+// stay intact after.
+type St = | Draft(String) | Done(String)
+
+type Item = { id: String }
+
+type Port = { load: (String) -> Item?, check: (String) -> Result[St, String] }
+
+fn mk(db: List[Item], sdb: List[St]) -> Port = { load: (id) => list.find(db, (o) => o.id == id), check: (id) => match list.find(sdb, (s) => match s {
+  Draft(i) => i == id,
+  Done(i) => i == id,
+}) {
+  some(s) => ok(s),
+  none => err("not found: ${id}"),
+} }
+
+fn show(s: St) -> String = match s {
+  Draft(i) => "draft:" + i,
+  Done(i) => "done:" + i,
+}
+
+fn main() -> Unit = {
+  let db = [
+    { id: "a" },
+    { id: "b" }
+  ]
+  let sdb = [Draft("x"), Done("y")]
+  let p = mk(db, sdb)
+  // single-shot consumption, both fields, hit and miss
+  match p.load("b") {
+    some(o) => println("found:" + o.id),
+    none => println("missing"),
+  }
+  match p.load("zz") {
+    some(o) => println("found:" + o.id),
+    none => println("missing"),
+  }
+  match p.check("y") {
+    ok(s) => println(show(s)),
+    err(e) => println(e),
+  }
+  match p.check("zz") {
+    ok(s) => println(show(s)),
+    err(e) => println(e),
+  }
+  // loop consumption with assignment-bearing arms (the computed-call subject
+  // seed; the both-arms linearization would net hits to 0)
+  var i = 0
+  var hits = 0
+  while i < 2000 {
+    let q = mk(db, sdb)
+    match q.load("b") {
+      some(o) => {
+        hits = hits + 1
+      },
+      none => {
+        hits = hits - 1
+      },
+    }
+    match q.check("zz") {
+      ok(s) => {
+        hits = hits + 10
+      },
+      err(e) => {
+        hits = hits + 2
+      },
+    }
+    i = i + 1
+  }
+  println("hits=${hits} db=${list.len(db)} sdb=${list.len(sdb)}")
+}

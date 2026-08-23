@@ -421,6 +421,13 @@
         // First-class function values need the uniform `$__drop_closure` (same
         // injection as the production pipeline).
         let closure_drop = if usage.closures { crate::lower::CLOSURE_DROP_SRC } else { "" };
+        // `$__drop_closure`'s RICH arm needs `__drop_env_rich` in scope whenever
+        // CLOSURE_DROP_SRC is injected — pipeline_tail's mirror (#1547 shapes 2/3).
+        let env_rich_drop = if usage.closures {
+            crate::lower::generate_closure_env_rich_sources(&ir.type_decls)
+        } else {
+            String::new()
+        };
         let lenlist_drop = if usage.lenlist_elem_lists { crate::lower::LENLIST_DROP_SRC } else { "" };
         // `__drop_list_str` (a `List[String]` record/variant ctor field, OR a closure's
         // nested-heap capture) — SHARED between the record and variant drop generators
@@ -442,7 +449,7 @@
         // is an instance, so the derived-codec decode tests reach it.
         let res_lsl_drop = if usage.res_lenlist_str { crate::lower::RES_LSL_DROP_SRC } else { "" };
         let drops = format!(
-            "{}{}{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
             // `Result[(V1, V2), String]` wrapper drops (#1547 shape 1) —
@@ -450,6 +457,7 @@
             crate::lower::generate_variant_pair_result_sources(ir, &ir.type_decls),
             crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(ir), &crate::lower::collect_interp_repr_containers(ir)),
             closure_drop,
+            env_rich_drop,
             lenlist_drop,
             list_str_drop,
             list_closure_drop,

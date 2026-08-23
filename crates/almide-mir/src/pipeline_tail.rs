@@ -59,6 +59,15 @@ fn build_ir_with_drops(
     // First-class function values need the UNIFORM closure-block release
     // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
     let closure_drop = gated(uses_closures, crate::lower::CLOSURE_DROP_SRC);
+    // `$__drop_closure`'s RICH walk arm (#1547 shapes 2/3 — a `List[<rich
+    // variant>]` / `List[<recursive record>]` capture) calls the generated
+    // `__drop_env_rich` tag dispatcher — ALWAYS paired with `CLOSURE_DROP_SRC`
+    // (a program with no rich types gets the tiny always-sound stub).
+    let env_rich_drop = if uses_closures {
+        crate::lower::generate_closure_env_rich_sources(&all_type_decls)
+    } else {
+        String::new()
+    };
     // A `List[<Fn>]` LITERAL (`[(x)=>x+1, (x)=>x*2]`) routes its scope-end drop to the
     // generated `$__drop_list_closure` (per-element `$__drop_closure` — required, not a
     // blind rc_dec, since a captured heap slot would otherwise leak). Needs
@@ -118,7 +127,7 @@ fn build_ir_with_drops(
     // dangling in the WAT.
     let opt_str_int_drop = gated(usage.opt_str_scalar, crate::lower::OPT_STR_INT_DROP_SRC);
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(
@@ -136,6 +145,7 @@ fn build_ir_with_drops(
         // `$__drop_vp_<A>_<B>` per pair the program actually returns/binds.
         crate::lower::generate_variant_pair_result_sources(&ir, &all_type_decls),
         closure_drop,
+        env_rich_drop,
         res_ilsl_drop,
         res_fs_drop,
         res_lsl_drop,

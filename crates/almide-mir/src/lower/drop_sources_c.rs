@@ -91,43 +91,53 @@ fn __drop_map_mclo_loop(h: Int, n: Int, i: Int) -> Unit =
 ";
 
 
-/// Header layout: `n_heap | (n_nested_heap << 16) | (n_closure << 32)` — three
-/// 16-bit counts (ample for any realistic capture count). Widened from the
-/// original 2-field `n_heap | (n_closure << 16)` to add the `n_nested_heap`
-/// class (a `List[String]` capture — each element itself owned heap, freed via
+/// Header layout: `n_heap | (n_nested_heap << 16) | (n_closure << 32) |
+/// (n_cellmap << 48) | (n_rich << 56)` — three 16-bit counts plus two 8-bit
+/// ones (ample for any realistic capture count). Widened twice from the
+/// original 2-field `n_heap | (n_closure << 16)`: first for the
+/// `n_nested_heap` class (a `List[String]` capture — freed via
 /// `__drop_list_str`, NOT the flat `rc_dec` a one-level-exact heap capture
-/// gets — the same class of bug this session's `_str`-dispatch fix and the
-/// `map.find` near-miss both found, caught here BEFORE it shipped).
+/// gets), then for the RICH class (#1547 shapes 2/3 — a `List[<rich variant>]`
+/// / `List[<recursive record>]` capture, held behind a per-capture
+/// `[tag@12][list-handle@20]` wrapper block and freed via the generated
+/// `__drop_env_rich` tag dispatcher, since the header's counts alone cannot
+/// name a type-specific `$__drop_list_<V>`). The rich count steals the top 8
+/// bits of the former 16-bit cellmap field — an old-style header (n_rich = 0,
+/// n_cellmap < 256 always in practice) decodes identically.
 pub const CLOSURE_DROP_SRC: &str = "\
 fn __drop_closure(c: List[Int]) -> Unit = {
   let h = prim.handle(c)
   if prim.load32(h + 0) == 1 then {
     let hdr = prim.load64(h + 20)
-    let ncm = hdr / 281474976710656
-    let rem0 = hdr - ncm * 281474976710656
+    let top = hdr / 281474976710656
+    let nr = top / 256
+    let ncm = top - nr * 256
+    let rem0 = hdr - top * 281474976710656
     let nc = rem0 / 4294967296
     let rem1 = rem0 - nc * 4294967296
     let nnh = rem1 / 65536
     let nh = rem1 - nnh * 65536
-    __drop_closure_loop(h, nc, nnh, nh, ncm, 0)
+    __drop_closure_loop(h, nc, nr, nnh, nh, ncm, 0)
   } else ()
   prim.rc_dec(h)
 }
-fn __drop_closure_loop(h: Int, nc: Int, nnh: Int, nh: Int, ncm: Int, i: Int) -> Unit =
-  if i >= nc + nnh + nh + ncm then ()
+fn __drop_closure_loop(h: Int, nc: Int, nr: Int, nnh: Int, nh: Int, ncm: Int, i: Int) -> Unit =
+  if i >= nc + nr + nnh + nh + ncm then ()
   else {
     if i < nc then {
       let q: List[Int] = prim.load_handle(h + 28 + i * 8)
       __drop_closure(q)
-    } else if i < nc + nnh then {
+    } else if i < nc + nr then {
+      __drop_env_rich(prim.load64(h + 28 + i * 8))
+    } else if i < nc + nr + nnh then {
       let ls: List[String] = prim.load_handle(h + 28 + i * 8)
       __drop_list_str(ls)
-    } else if i < nc + nnh + nh then {
+    } else if i < nc + nr + nnh + nh then {
       prim.rc_dec(prim.load64(h + 28 + i * 8))
     } else {
       __drop_cellmap(prim.load64(h + 28 + i * 8))
     }
-    __drop_closure_loop(h, nc, nnh, nh, ncm, i + 1)
+    __drop_closure_loop(h, nc, nr, nnh, nh, ncm, i + 1)
   }
 fn __drop_cellmap(ch: Int) -> Unit = {
   if prim.load32(ch + 0) == 1 then {
@@ -958,6 +968,112 @@ pub fn generate_variant_pair_result_sources(
                prim.rc_dec(h)\n}}\n",
             slot_free(a, 12, &fa),
             slot_free(b, 20, &fb),
+        ));
+    }
+    out
+}
+
+/// The RICH-capture env tag for a type name — FNV-1a 64 folded positive. Both
+/// sides of the closure-env RICH class (#1547 shapes 2/3) derive tags through
+/// THIS one function: the lowering stamps `rich_env_tag(elem_name)` into the
+/// capture's wrapper block, and `generate_closure_env_rich_sources` emits the
+/// matching `if tag == <same>` dispatcher arm — no shared registry, no
+/// ordering to keep in sync. A collision between two of one program's type
+/// names would mis-dispatch a free, so the generator PANICS on one (64-bit
+/// FNV over a program's handful of short names — unreachable in practice,
+/// loud if ever).
+pub fn rich_env_tag(name: &str) -> i64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in name.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    (h & 0x7fff_ffff_ffff_ffff) as i64
+}
+
+/// The RICH-capture env dispatcher `__drop_env_rich` (#1547 shapes 2/3): frees
+/// ONE rich closure capture — a `[tag@12][list-handle@20]` wrapper block whose
+/// list element type needs a per-element recursive free. Tag-dispatches (via
+/// [`rich_env_tag`]) to `$__drop_list_<V>` for a RICH variant element (emitted
+/// unconditionally for every rich variant by `generate_variant_drop_sources`)
+/// or to a `$__drop_caplist_<R>` loop emitted HERE for a recursive-drop record
+/// element (`$__drop_<R>` is likewise unconditional; the record generator's
+/// own `__drop_list_<R>` is field-usage-gated, so the capture side carries its
+/// own loop under a non-colliding name). Arms cover EVERY admissible type —
+/// admission ⊆ generation by construction, never a silent leak-by-missing-arm.
+/// Injected under the same `usage.closures` gate as [`CLOSURE_DROP_SRC`]
+/// (whose rich walk arm calls this); a program with no rich types gets the
+/// tiny always-sound stub. Trusted prim-only routines, leak-loop class.
+pub fn generate_closure_env_rich_sources(
+    type_decls: &[almide_ir::IrTypeDecl],
+) -> String {
+    let variant_names = variant_type_names(type_decls);
+    let all_record_names: std::collections::HashSet<String> = type_decls
+        .iter()
+        .filter(|d| matches!(&d.kind, almide_ir::IrTypeDeclKind::Record { .. }))
+        .map(|d| d.name.as_str().to_string())
+        .collect();
+    let rich_variants: std::collections::BTreeSet<String> = type_decls
+        .iter()
+        .filter(|d| variant_needs_recursive_drop(d, &variant_names, &all_record_names))
+        .map(|d| d.name.as_str().to_string())
+        .collect();
+    let rec_records: std::collections::BTreeSet<String> =
+        recursive_record_drop_names(type_decls).into_iter().collect();
+
+    // (name, is_variant), variants first then records, BTree order within each —
+    // deterministic emission; tags themselves are order-free (name hashes).
+    let entries: Vec<(&String, bool)> = rich_variants
+        .iter()
+        .map(|n| (n, true))
+        .chain(rec_records.iter().filter(|n| !rich_variants.contains(*n)).map(|n| (n, false)))
+        .collect();
+    {
+        let mut seen: std::collections::HashMap<i64, &str> = std::collections::HashMap::new();
+        for (n, _) in &entries {
+            if let Some(prev) = seen.insert(rich_env_tag(n), n.as_str()) {
+                panic!(
+                    "rich_env_tag collision between type names {prev:?} and {n:?} — \
+                     the closure-env RICH dispatcher cannot distinguish them"
+                );
+            }
+        }
+    }
+
+    let mut out = String::new();
+    if entries.is_empty() {
+        out.push_str("fn __drop_env_rich(wh: Int) -> Unit = prim.rc_dec(wh)\n");
+        return out;
+    }
+    out.push_str(
+        "fn __drop_env_rich(wh: Int) -> Unit = {\n  \
+           if prim.load32(wh + 0) == 1 then {\n    \
+             let tag = prim.load64(wh + 12)\n    ",
+    );
+    for (k, (n, is_variant)) in entries.iter().enumerate() {
+        let fnid = drop_fn_ident(n);
+        let callee = if *is_variant {
+            format!("__drop_list_{fnid}")
+        } else {
+            format!("__drop_caplist_{fnid}")
+        };
+        let kw = if k == 0 { "if" } else { "else if" };
+        out.push_str(&format!(
+            "{kw} tag == {} then {{ let l{k}: List[{n}] = prim.load_handle(wh + 20)\n      {callee}(l{k}) }}\n    ",
+            rich_env_tag(n)
+        ));
+    }
+    out.push_str("else ()\n  } else ()\n  prim.rc_dec(wh)\n}\n");
+    for n in rec_records.iter().filter(|n| !rich_variants.contains(*n)) {
+        let fr = drop_fn_ident(n);
+        out.push_str(&format!(
+            "fn __drop_caplist_{fr}(xs: List[{n}]) -> Unit = {{\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_caplist_{fr}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n\
+             fn __drop_caplist_{fr}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{ let e: {n} = prim.load_handle(h + 12 + i * 8)\n         __drop_{fr}(e)\n         __drop_caplist_{fr}_loop(h, n, i + 1) }}\n"
         ));
     }
     out
