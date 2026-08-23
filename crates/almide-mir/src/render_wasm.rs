@@ -311,13 +311,28 @@ fn resolve_drop_alias(target: &str, resolvable: &BTreeSet<String>) -> Option<Str
 /// DEFINITION carries the DOUBLE mangle (`almide_rt_varlib_varlib_Pigment_encode`
 /// — module prefix + qualified type name, observed in the linked IR). Resolve the
 /// alias at the render boundary: the burned name is undefined, but re-inserting
-/// the module segment hits the defined fn. A module name containing `_` fails the
-/// split and simply keeps the conservative wall.
+/// the module segment hits the defined fn. The module segment's end is not
+/// recoverable from the flat name when the module itself contains `_`
+/// (`ai_types` — #1555: the first-underscore split guessed `ai`, so the shape
+/// walled while the `aitypes` spelling linked), so EVERY split point is tried
+/// against the DEFINED set — and only a UNIQUE hit resolves. An ambiguous
+/// name (two split points both defined) keeps the conservative wall: never
+/// mislink.
 fn resolve_rt_alias(name: &str, resolvable: &BTreeSet<String>) -> Option<String> {
     let rest = name.strip_prefix("almide_rt_")?;
-    let (m, _) = rest.split_once('_')?;
-    let cand = format!("almide_rt_{m}_{rest}");
-    resolvable.contains(&cand).then_some(cand)
+    let mut hit: Option<String> = None;
+    for (i, _) in rest.match_indices('_') {
+        let m = &rest[..i];
+        let cand = format!("almide_rt_{m}_{rest}");
+        if resolvable.contains(&cand) {
+            match &hit {
+                None => hit = Some(cand),
+                Some(prev) if *prev != cand => return None,
+                Some(_) => {}
+            }
+        }
+    }
+    hit
 }
 
 pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower::LowerError> {
