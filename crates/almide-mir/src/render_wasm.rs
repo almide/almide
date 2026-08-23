@@ -374,6 +374,32 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
              Add the callee to the self-host registry or wall the using function."
         )));
     }
+    // The wasm validator caps a function at 50_000 locals, and the renderer
+    // allocates locals SSA-style (one per defined value, no reuse), so a
+    // large-but-ordinary function can genuinely exceed it (#1554: a Markdown
+    // render fn at ~50k). Shipping the module fails VALIDATION with the
+    // "this is an Almide bug" banner and no hint which function to split —
+    // wall it here instead, named, before a byte is emitted. The margin
+    // covers the per-family drop scratch registers declared beyond the
+    // defined-value count. (The real fix — a local-reuse pass — retires this
+    // wall when it lands; until then the wall is the honest surface.)
+    const WASM_MAX_LOCALS: usize = 50_000;
+    const LOCAL_SCRATCH_MARGIN: usize = 16;
+    for f in &pruned.functions {
+        let mut seen: BTreeSet<ValueId> = f.params.iter().map(|p| p.value).collect();
+        for op in &f.ops {
+            if let Some(d) = defined_value(op) {
+                seen.insert(d);
+            }
+        }
+        if seen.len() + LOCAL_SCRATCH_MARGIN > WASM_MAX_LOCALS {
+            return Err(crate::lower::LowerError::Unsupported(format!(
+                "fn `{}` needs {} wasm locals — over the validator's 50,000 ceiling                  (the renderer does not reuse local slots yet, #1554). Split part of                  the function into its own fn to get under the limit.",
+                f.name,
+                seen.len()
+            )));
+        }
+    }
     Ok(render_wasm_program(&pruned))
 }
 
