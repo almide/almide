@@ -243,6 +243,13 @@ impl LowerCtx {
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
+        if let Some(df) = self.variant_pair_result_drop_fn(ty) {
+            // `Result[(V1, V2), String]` (#1547 shape 1) — the same recursive
+            // `$__drop_vp_<A>_<B>` wrapper route the Named-call bind sites seed.
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("resrec:{df}"));
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
         if crate::lower::is_list_list_str_ty(ty) {
             self.value_drops.entry(dst).or_default().list_list_str = true;
             return true;

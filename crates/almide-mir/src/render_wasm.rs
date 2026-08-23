@@ -489,7 +489,7 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
                 // Spill the terminal scope-end drops into a buffer first —
                 // without it every heap temp is live to fn-end and the scan
                 // merges nothing — then share slots by liveness.
-                let spilled = if std::env::var("ALMIDE_NO_SPILL").is_ok() { None } else { spill_terminal_drops(f) };
+                let spilled = spill_terminal_drops(f);
                 let base: &MirFunction = spilled.as_ref().unwrap_or(f);
                 match plan_local_reuse(base) {
                     Some(plan) => {

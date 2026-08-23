@@ -118,7 +118,7 @@ fn build_ir_with_drops(
     // dangling in the WAT.
     let opt_str_int_drop = gated(usage.opt_str_scalar, crate::lower::OPT_STR_INT_DROP_SRC);
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(
@@ -132,6 +132,9 @@ fn build_ir_with_drops(
             &crate::lower::collect_interp_repr_containers(&ir)
         ),
         crate::lower::generate_krec_sources(&ir, &all_type_decls),
+        // `Result[(V1, V2), String]` wrapper drops (#1547 shape 1) — usage-driven,
+        // `$__drop_vp_<A>_<B>` per pair the program actually returns/binds.
+        crate::lower::generate_variant_pair_result_sources(&ir, &all_type_decls),
         closure_drop,
         res_ilsl_drop,
         res_fs_drop,

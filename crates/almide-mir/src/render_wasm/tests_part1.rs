@@ -442,9 +442,12 @@
         // is an instance, so the derived-codec decode tests reach it.
         let res_lsl_drop = if usage.res_lenlist_str { crate::lower::RES_LSL_DROP_SRC } else { "" };
         let drops = format!(
-            "{}{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
+            // `Result[(V1, V2), String]` wrapper drops (#1547 shape 1) —
+            // pipeline_tail's mirror, usage-driven per pair.
+            crate::lower::generate_variant_pair_result_sources(ir, &ir.type_decls),
             crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(ir), &crate::lower::collect_interp_repr_containers(ir)),
             closure_drop,
             lenlist_drop,

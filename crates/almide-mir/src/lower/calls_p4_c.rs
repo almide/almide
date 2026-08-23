@@ -625,6 +625,13 @@ impl LowerCtx {
             self.value_drops.entry(dst).or_default().value_result_list = true;
             return;
         }
+        if let Some(df) = self.variant_pair_result_drop_fn(ty) {
+            // `Result[(V1, V2), String]` arg temp (#1547 shape 1 — a transition
+            // result fed straight to a consumer) — the same recursive
+            // `$__drop_vp_<A>_<B>` wrapper route the bind sites seed.
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("resrec:{df}"));
+            return;
+        }
         if crate::lower::is_list_list_str_ty(ty) {
             self.value_drops.entry(dst).or_default().list_list_str = true;
             return;

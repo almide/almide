@@ -839,3 +839,126 @@ pub fn generate_krec_sources(
     }
     out
 }
+
+/// The `Result[(V1, V2), String]` VARIANT-PAIR wrapper drops (#1547 shape 1 —
+/// the aggregate-transition return `(new_state, event)`): for every such
+/// Result type the program USES, generate `$__drop_vp_<A>_<B>` — the pair
+/// routine `DropWrapperRec` recurses into for the Ok payload (Err is the flat
+/// @12 String the wrapper render already decs). Per slot the free follows the
+/// STRUCTURAL rule the field-frees generators use: a RICH variant recurses via
+/// its generated `$__drop_<V>`; a FLAT variant / String / Bytes is
+/// one-level-exact — one `rc_dec` is its full free. Usage-driven like
+/// `generate_krec_sources` (a per-pair emission over every declared pair
+/// would be quadratic); trusted prim-only routines, leak-loop class.
+pub fn generate_variant_pair_result_sources(
+    program: &almide_ir::IrProgram,
+    type_decls: &[almide_ir::IrTypeDecl],
+) -> String {
+    use almide_ir::visit::walk_expr;
+    use almide_lang::types::constructor::TypeConstructorId;
+
+    let variant_names = variant_type_names(type_decls);
+    let flat_names = flat_variant_type_names(type_decls);
+    let all_record_names: std::collections::HashSet<String> = type_decls
+        .iter()
+        .filter(|d| matches!(&d.kind, almide_ir::IrTypeDeclKind::Record { .. }))
+        .map(|d| d.name.as_str().to_string())
+        .collect();
+    let rich: std::collections::HashSet<String> = type_decls
+        .iter()
+        .filter(|d| variant_needs_recursive_drop(d, &variant_names, &all_record_names))
+        .map(|d| d.name.as_str().to_string())
+        .collect();
+
+    // Is `t` an admissible pair SLOT, and how does it free? `Some(true)` =
+    // recurse via the generated `$__drop_<V>`, `Some(false)` = flat rc_dec.
+    let slot_class = |t: &Ty| -> Option<bool> {
+        match t {
+            Ty::Named(n, args) if args.is_empty() => {
+                let n = n.as_str();
+                if rich.contains(n) {
+                    Some(true)
+                } else if flat_names.contains(n) {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
+            Ty::String | Ty::Bytes => Some(false),
+            _ => None,
+        }
+    };
+
+    // Collect every used pair, deterministically ordered.
+    struct Finder<'a> {
+        pairs: std::collections::BTreeSet<(String, String)>,
+        slot_class: &'a dyn Fn(&Ty) -> Option<bool>,
+    }
+    impl Finder<'_> {
+        fn check(&mut self, ty: &Ty) {
+            if let Ty::Applied(TypeConstructorId::Result, a) = ty {
+                if a.len() == 2 && matches!(a[1], Ty::String) {
+                    if let Ty::Tuple(ts) = &a[0] {
+                        if ts.len() == 2
+                            && (self.slot_class)(&ts[0]).is_some()
+                            && (self.slot_class)(&ts[1]).is_some()
+                            // At least one RICH slot — an all-flat pair frees
+                            // exactly like (String, Int)'s existing routes.
+                            && ((self.slot_class)(&ts[0]) == Some(true)
+                                || (self.slot_class)(&ts[1]) == Some(true))
+                        {
+                            self.pairs.insert((ty_slot_name(&ts[0]), ty_slot_name(&ts[1])));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    fn ty_slot_name(t: &Ty) -> String {
+        match t {
+            Ty::Named(n, _) => n.as_str().to_string(),
+            Ty::String => "String".to_string(),
+            Ty::Bytes => "Bytes".to_string(),
+            _ => unreachable!("slot_class admitted only Named/String/Bytes"),
+        }
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            self.check(&e.ty);
+            walk_expr(self, e);
+        }
+    }
+    let mut finder = Finder { pairs: std::collections::BTreeSet::new(), slot_class: &slot_class };
+    let fns = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in fns {
+        finder.check(&f.ret_ty);
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+    }
+
+    let mut out = String::new();
+    for (a, b) in &finder.pairs {
+        let fa = drop_fn_ident(a);
+        let fb = drop_fn_ident(b);
+        let slot_free = |name: &str, off: u32, ident: &str| -> String {
+            if rich.contains(name) {
+                format!(
+                    "    let s{off}: {name} = prim.load_handle(h + {off})\n    __drop_{ident}(s{off})\n"
+                )
+            } else {
+                format!("    prim.rc_dec(prim.load32(h + {off}))\n")
+            }
+        };
+        out.push_str(&format!(
+            "fn __drop_vp_{fa}_{fb}(p: List[Int]) -> Unit = {{\n  \
+               let h = prim.handle(p)\n  \
+               if prim.load32(h + 0) == 1 then {{\n{}{}  }} else ()\n  \
+               prim.rc_dec(h)\n}}\n",
+            slot_free(a, 12, &fa),
+            slot_free(b, 20, &fb),
+        ));
+    }
+    out
+}
