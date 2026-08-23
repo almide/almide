@@ -386,17 +386,25 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     const WASM_MAX_LOCALS: usize = 50_000;
     const LOCAL_SCRATCH_MARGIN: usize = 16;
     for f in &pruned.functions {
-        let mut seen: BTreeSet<ValueId> = f.params.iter().map(|p| p.value).collect();
-        for op in &f.ops {
-            if let Some(d) = defined_value(op) {
-                seen.insert(d);
-            }
-        }
-        if seen.len() + LOCAL_SCRATCH_MARGIN > WASM_MAX_LOCALS {
+        // Count what will actually be DECLARED: over the reuse threshold the
+        // renderer applies the local-reuse plan (render_wasm_local_reuse.rs),
+        // so the wall judges the post-reuse slot count — it only fires when
+        // even reuse cannot get under the ceiling.
+        let pre = distinct_local_count(f);
+        let declared = if pre > local_reuse_threshold() {
+            let spilled = spill_terminal_drops(f);
+            let base = spilled.as_ref().unwrap_or(f);
+            plan_local_reuse(base)
+                .map(|p| p.slot_count)
+                .unwrap_or_else(|| distinct_local_count(base))
+        } else {
+            pre
+        };
+        if declared + LOCAL_SCRATCH_MARGIN > WASM_MAX_LOCALS {
             return Err(crate::lower::LowerError::Unsupported(format!(
                 "fn `{}` needs {} wasm locals — over the validator's 50,000 ceiling                  (the renderer does not reuse local slots yet, #1554). Split part of                  the function into its own fn to get under the limit.",
                 f.name,
-                seen.len()
+                declared
             )));
         }
     }
@@ -472,8 +480,27 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .functions
         .iter()
         .map(|f| {
-            let body =
-                fold_const_wrap_roundtrips(&render_wasm_fn(f, &func_slots, &param_counts));
+            // Over the threshold, share local slots by liveness and render
+            // PLAIN (break fusion + BCE pattern-match on single-def value
+            // identities the merge no longer guarantees; the const-wrap
+            // peephole self-excludes multi-set locals at the text level).
+            // Under it — every existing proven module — nothing changes.
+            let body = if distinct_local_count(f) > local_reuse_threshold() {
+                // Spill the terminal scope-end drops into a buffer first —
+                // without it every heap temp is live to fn-end and the scan
+                // merges nothing — then share slots by liveness.
+                let spilled = if std::env::var("ALMIDE_NO_SPILL").is_ok() { None } else { spill_terminal_drops(f) };
+                let base: &MirFunction = spilled.as_ref().unwrap_or(f);
+                match plan_local_reuse(base) {
+                    Some(plan) => {
+                        let reused = apply_local_reuse(base, &plan);
+                        fold_const_wrap_roundtrips(&render_wasm_fn(&reused, &func_slots, &param_counts, true))
+                    }
+                    None => fold_const_wrap_roundtrips(&render_wasm_fn(base, &func_slots, &param_counts, true)),
+                }
+            } else {
+                fold_const_wrap_roundtrips(&render_wasm_fn(f, &func_slots, &param_counts, false))
+            };
             strip_region_clone_rc_incs(&f.name, body)
         })
         .collect::<String>();
@@ -707,6 +734,7 @@ include!("render_wasm_bce.rs");
 include!("render_wasm_c.rs");
 include!("render_wasm_dce.rs");
 include!("render_wasm_peephole.rs");
+include!("render_wasm_local_reuse.rs");
 include!("render_wasm_switch.rs");
 
 /// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.

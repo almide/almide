@@ -302,7 +302,7 @@ pub(crate) fn prune_unreachable_functions(prog: &MirProgram) -> MirProgram {
     let bodies: BTreeMap<String, String> = prog
         .functions
         .iter()
-        .map(|f| (f.name.clone(), render_wasm_fn(f, &func_slots, &param_counts)))
+        .map(|f| (f.name.clone(), render_wasm_fn(f, &func_slots, &param_counts, false)))
         .collect();
     // `Op::FuncRef { name, .. }` — "the function-table slot of the lifted
     // function `name`" — renders to a bare `(i64.const {slot})`, NOT a `$name`
