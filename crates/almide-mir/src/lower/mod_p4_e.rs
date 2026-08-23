@@ -522,6 +522,18 @@ fn map_heap_val_named_and_typechange_route(r: MapRoute<'_>) -> Option<MapName> {
     (true, true) if func == "from_list" && is_map_str_named(result_ty) => {
         Some(MapName::Suffix("_hobj"))
     }
+    // The NAMED-value map's new/set/get twins (`Map[String, Acc]` — the
+    // closure_capture_map row's stdlib leg, #1143): the same handle-level
+    // discipline as the from_list arm above (set co-owns the value handle,
+    // get SHARES the stored value back — hshare), and again the bind's
+    // type-driven drop routing decides the exact sweep or walls. `new` has no
+    // args, so its route reads the RESULT type.
+    (true, true)
+        if matches!(func, "new" | "set" | "get")
+            && (arg_tys.first().is_some_and(is_map_str_named) || is_map_str_named(result_ty)) =>
+    {
+        Some(MapName::Suffix("_hobj"))
+    }
     // An ALL-SCALAR record key with a String value (`Map[Color, String]` —
     // the hash_protocol deriving-Hash shape): the key normalizes to the
     // comma-joined decimal string of its slots (map_vkey.almd's _srec

@@ -107,3 +107,25 @@ fn __decode_default_string(v: Value, key: String, default: String) -> Result[Str
   ok(fv) => if __is_null(fv) then ok(default) else value.as_string(fv),
   err(_e) => ok(default),
 }
+
+// ── List defaults (#1520: `tags: List[String] = []`) — the same Null/absent →
+// default rule, a present array decodes strictly through the list family. ──
+fn __decode_default_list_int(v: Value, key: String, default: List[Int]) -> Result[List[Int], String] = match value.field(v, key) {
+  ok(fv) => if __is_null(fv) then ok(default) else __decode_list_int(fv),
+  err(_e) => ok(default),
+}
+
+fn __decode_default_list_float(v: Value, key: String, default: List[Float]) -> Result[List[Float], String] = match value.field(v, key) {
+  ok(fv) => if __is_null(fv) then ok(default) else __decode_list_float(fv),
+  err(_e) => ok(default),
+}
+
+fn __decode_default_list_bool(v: Value, key: String, default: List[Bool]) -> Result[List[Bool], String] = match value.field(v, key) {
+  ok(fv) => if __is_null(fv) then ok(default) else __decode_list_bool(fv),
+  err(_e) => ok(default),
+}
+
+fn __decode_default_list_string(v: Value, key: String, default: List[String]) -> Result[List[String], String] = match value.field(v, key) {
+  ok(fv) => if __is_null(fv) then ok(default) else __decode_list_string(fv),
+  err(_e) => ok(default),
+}

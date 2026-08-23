@@ -3820,6 +3820,7 @@ evidence  = [
   { path = "spec/wasm_cross/codec_extra_keys.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_int_float_boundaries.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_list_list_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_list_default_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_nested_records.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_option_numeric.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_string_escapes.almd", class = "fixture" },
@@ -3866,9 +3867,10 @@ evidence  = [
 id        = "C-319"
 spec      = "ALS-I1"
 title     = "A captured-and-mutated var List is shared storage through a closure"
-statement = "A `var` List that a closure captures AND mutates behaves as ONE shared storage on both targets: a functional rebind inside the closure (`seen = seen + [s]`, the `list.push` desugar) is visible to the enclosing scope, and an enclosing-scope rebind between closure calls is visible to the next call — both directions, byte-identically native == wasm. The admitted element classes are exactly the ones whose cell teardown is already exact under the len-counted OWNED-slots rule (String elements; Flat-ctor elements like Option[Int]); a deeper element (List[List[String]], a record-valued map) keeps the honest lift refusal. The failure mode this pins against is NOT a wall: before the shared-cell admission the capture lowered as an env value-copy and the wasm leg printed a silently wrong value (native 2 / wasm 0). Cell churn is leak-free under the heap cap (flat ceiling across N=2000 vs N=8000)."
+statement = "A `var` List that a closure captures AND mutates behaves as ONE shared storage on both targets: a functional rebind inside the closure (`seen = seen + [s]`, the `list.push` desugar) is visible to the enclosing scope, and an enclosing-scope rebind between closure calls is visible to the next call — both directions, byte-identically native == wasm. The admitted inner classes are exactly the ones whose cell teardown is exact: the len-counted OWNED-slots rule (String elements; Flat-ctor elements like Option[Int]) and the ROUTED map class (`Map[String, <variant>]` / `Map[String, <all-scalar record>]` — the closure_capture_map fold shape, freed via the type-specific generated map sweep at the cell's last ref, both at scope end and through the closure-env capture); a deeper inner (List[List[String]]) keeps the honest lift refusal. The failure mode this pins against is NOT a wall: before the shared-cell admission the capture lowered as an env value-copy and the wasm leg printed a silently wrong value (native 2 / wasm 0). Cell churn is leak-free under the heap cap (flat ceiling across N=2000 vs N=8000)."
 since     = "0.59.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
 ]

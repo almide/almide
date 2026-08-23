@@ -231,10 +231,15 @@ impl LowerCtx {
             // (`$__drop_closure` sweeps the inner map's key slots, then the map, then
             // the cell — a flat/nested dec would leak every key String).
             if self.cell_of.contains_key(&v) {
-                match cell_class_of(&ty) {
+                match self.cell_class_of_ctx(&ty) {
                     Some(CellClass::Scalar) => heap_caps.push((v, ty)),
                     Some(CellClass::FlatHeap) => nested_heap_caps.push((v, ty)),
                     Some(CellClass::LenOwnedSlots) => cellmap_caps.push((v, ty)),
+                    // A ROUTED cell (`Map[String, <record/variant>]`, #1143):
+                    // rides the RICH env class behind a `cell:`-tagged wrapper —
+                    // `__drop_env_rich`'s cell arms free the co-owned cell via
+                    // the inner's type-specific generated map sweep.
+                    Some(CellClass::Routed) => rich_caps.push((v, ty)),
                     None => {
                         crate::trace::trace("ALMIDE_DBG_ANF", || format!(
                             "[lift] {}: cell capture {v:?} class unadmitted ({ty:?})", self.fn_name));
@@ -480,11 +485,13 @@ impl LowerCtx {
                 if i < layout.n_closure {
                     sub.closure_values.insert(val);
                 }
-                // A RICH capture (#1547 shapes 2/3): `val` is the `[tag@12][list@20]`
-                // WRAPPER — the body wants the LIST. One more deref binds it, borrowed
-                // exactly like every other env-owned capture, and the read-shape seed
-                // mirrors `bind_params` so `list.len(db)` / `list.find(db, …)` inside
-                // the lifted body execute over the real block.
+                // A RICH capture (#1547 shapes 2/3): `val` is the `[tag@12][payload@20]`
+                // WRAPPER — the body wants the PAYLOAD. One more deref binds it,
+                // borrowed exactly like every other env-owned capture. A plain rich
+                // LIST capture binds `value_of` with the read-shape seed `bind_params`
+                // gives a List param; a ROUTED CELL capture (#1143) binds the loaded
+                // CELL into `sub.cell_of` instead, so body reads load the shared slot
+                // fresh and body writes store through it.
                 if layout.is_rich(i) {
                     let iwh = sub.fresh_value();
                     sub.ops
@@ -500,8 +507,13 @@ impl LowerCtx {
                         args: vec![laddr],
                     });
                     sub.param_values.insert(lv);
-                    sub.seed_variant_param(lv, ty);
-                    sub.value_of.insert(*v, lv);
+                    if self.cell_of.contains_key(v) {
+                        sub.cell_of.insert(*v, lv);
+                        sub.var_decl_tys.insert(*v, ty.clone());
+                    } else {
+                        sub.seed_variant_param(lv, ty);
+                        sub.value_of.insert(*v, lv);
+                    }
                     continue;
                 }
                 // A SHARED-CELL capture: the loaded handle IS the cell block — map the
@@ -598,10 +610,19 @@ impl LowerCtx {
             if !layout.is_rich(i) {
                 continue;
             }
-            let tag_val = self
-                .rich_capture_elem_name(&layout.captures[i].1)
-                .map(|n| crate::lower::rich_env_tag(&n))
-                .expect("rich class admitted only via rich_capture_elem_name");
+            // A ROUTED cell capture tags `cell:<map drop name>` (the dispatcher's
+            // cell arms free the co-owned CELL — wrapper @20 holds the cell, whose
+            // @12 holds the map); a plain rich list capture tags its element name.
+            let (cap_var, cap_ty) = &layout.captures[i];
+            let tag_name = if self.cell_of.contains_key(cap_var) {
+                self.map_named_value_drop(cap_ty)
+                    .map(|n| format!("cell:{n}"))
+                    .expect("Routed cell admitted only via map_named_value_drop")
+            } else {
+                self.rich_capture_elem_name(cap_ty)
+                    .expect("rich class admitted only via rich_capture_elem_name")
+            };
+            let tag_val = crate::lower::rich_env_tag(&tag_name);
             let two = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: two, value: 2 });
             let w = self.fresh_value();

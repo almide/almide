@@ -1020,6 +1020,26 @@ pub fn generate_closure_env_rich_sources(
         .collect();
     let rec_records: std::collections::BTreeSet<String> =
         recursive_record_drop_names(type_decls).into_iter().collect();
+    // The ROUTED-CELL arm sets (`cell:map_<V>` / `cell:map_rec_<R>` — the #1143
+    // captured `var stats: Map[String, Acc]`): every variant + every ALL-SCALAR
+    // record, the EXACT sets `variant_map_drop_sources` emits `__drop_map_<V>` /
+    // `__drop_map_rec_<R>` for — mirroring `map_named_value_drop`'s admission.
+    let cell_variants: std::collections::BTreeSet<String> = type_decls
+        .iter()
+        .filter(|d| matches!(&d.kind, almide_ir::IrTypeDeclKind::Variant { .. }))
+        .map(|d| d.name.as_str().to_string())
+        .collect();
+    let cell_scalar_recs: std::collections::BTreeSet<String> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            almide_ir::IrTypeDeclKind::Record { fields }
+                if fields.iter().all(|f| !crate::lower::is_heap_ty(&f.ty)) =>
+            {
+                Some(d.name.as_str().to_string())
+            }
+            _ => None,
+        })
+        .collect();
 
     // (name, is_variant), variants first then records, BTree order within each —
     // deterministic emission; tags themselves are order-free (name hashes).
@@ -1028,12 +1048,22 @@ pub fn generate_closure_env_rich_sources(
         .map(|n| (n, true))
         .chain(rec_records.iter().filter(|n| !rich_variants.contains(*n)).map(|n| (n, false)))
         .collect();
+    // (map drop suffix, value type name) per cell arm.
+    let cell_entries: Vec<(String, &String)> = cell_variants
+        .iter()
+        .map(|n| (format!("map_{}", drop_fn_ident(n)), n))
+        .chain(cell_scalar_recs.iter().map(|n| (format!("map_rec_{}", drop_fn_ident(n)), n)))
+        .collect();
     {
-        let mut seen: std::collections::HashMap<i64, &str> = std::collections::HashMap::new();
-        for (n, _) in &entries {
-            if let Some(prev) = seen.insert(rich_env_tag(n), n.as_str()) {
+        let mut seen: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+        let all_tags = entries
+            .iter()
+            .map(|(n, _)| n.to_string())
+            .chain(cell_entries.iter().map(|(sfx, _)| format!("cell:{sfx}")));
+        for n in all_tags {
+            if let Some(prev) = seen.insert(rich_env_tag(&n), n.clone()) {
                 panic!(
-                    "rich_env_tag collision between type names {prev:?} and {n:?} — \
+                    "rich_env_tag collision between {prev:?} and {n:?} — \
                      the closure-env RICH dispatcher cannot distinguish them"
                 );
             }
@@ -1041,7 +1071,7 @@ pub fn generate_closure_env_rich_sources(
     }
 
     let mut out = String::new();
-    if entries.is_empty() {
+    if entries.is_empty() && cell_entries.is_empty() {
         out.push_str("fn __drop_env_rich(wh: Int) -> Unit = prim.rc_dec(wh)\n");
         return out;
     }
@@ -1061,6 +1091,21 @@ pub fn generate_closure_env_rich_sources(
         out.push_str(&format!(
             "{kw} tag == {} then {{ let l{k}: List[{n}] = prim.load_handle(wh + 20)\n      {callee}(l{k}) }}\n    ",
             rich_env_tag(n)
+        ));
+    }
+    // The cell arms: wrapper @20 holds the co-owned CELL; at the cell's last
+    // ref recurse into its @12 inner map via the generated sweep, then free
+    // the cell block.
+    for (k, (sfx, n)) in cell_entries.iter().enumerate() {
+        let kw = if entries.is_empty() && k == 0 { "if" } else { "else if" };
+        out.push_str(&format!(
+            "{kw} tag == {} then {{\n      \
+               let ch{k} = prim.load64(wh + 20)\n      \
+               if prim.load32(ch{k} + 0) == 1 then {{\n        \
+                 let m{k}: Map[String, {n}] = prim.load_handle(ch{k} + 12)\n        \
+                 __drop_{sfx}(m{k})\n      }} else ()\n      \
+               prim.rc_dec(ch{k})\n    }}\n    ",
+            rich_env_tag(&format!("cell:{sfx}"))
         ));
     }
     out.push_str("else ()\n  } else ()\n  prim.rc_dec(wh)\n}\n");

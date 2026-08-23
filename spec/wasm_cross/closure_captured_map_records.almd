@@ -1,0 +1,58 @@
+// @contract: C-319
+// The closure_capture_map fold class (#1143): a captured-and-mutated `var`
+// Map[String, <record>] is ONE shared storage through the closure — the
+// ROUTED cell class. map.new/set/get ride the _hobj handle-level twins; the
+// closure's map.insert writes through the cell and the enclosing scope reads
+// them back; the cell frees via the generated $__drop_map_rec_<R> sweep at
+// its last ref (scope end AND the closure-env capture leg — a len sweep
+// would leak the split layout's value handles). The churn loop is the leak
+// canary: every round builds a cell + closure, feeds it, and tears both down.
+type Acc = { sum: Int, count: Int }
+
+fn main() -> Unit = {
+  var stats: Map[String, Acc] = map.new()
+  let feed = (k: String, t: Int) => {
+    match map.get(stats, k) {
+      some(s) => map.insert(stats, k, Acc { sum: s.sum + t, count: s.count + 1 }),
+      none => map.insert(stats, k, Acc { sum: t, count: 1 }),
+    }
+  }
+  feed("x", 10)
+  feed("x", 20)
+  feed("y", 7)
+  match map.get(stats, "x") {
+    some(s) => println("x sum=${s.sum} count=${s.count}"),
+    none => println("none"),
+  }
+  match map.get(stats, "y") {
+    some(s) => println("y sum=${s.sum} count=${s.count}"),
+    none => println("none"),
+  }
+  match map.get(stats, "zz") {
+    some(s) => println("unexpected"),
+    none => println("missing"),
+  }
+  var round = 0
+  var outer = 0
+  while round < 2000 {
+    var m: Map[String, Acc] = map.new()
+    let bump = (k: String) => {
+      match map.get(m, k) {
+        some(s) => map.insert(m, k, Acc { sum: s.sum + 1, count: s.count + 1 }),
+        none => map.insert(m, k, Acc { sum: 1, count: 1 }),
+      }
+    }
+    bump("kkkkkkkkkkkkkkkk")
+    bump("kkkkkkkkkkkkkkkk")
+    match map.get(m, "kkkkkkkkkkkkkkkk") {
+      some(s) => {
+        outer = outer + s.count
+      },
+      none => {
+        outer = outer - 1000
+      },
+    }
+    round = round + 1
+  }
+  println("outer=${outer}")
+}

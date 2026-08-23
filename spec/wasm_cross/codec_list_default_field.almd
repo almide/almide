@@ -1,0 +1,32 @@
+// @contract: C-298
+// #1520: Codec fields with List defaults (`tags: List[String] = []`,
+// `ns: List[Int] = [1, 2]`) — the __decode_default_list_* family. Missing
+// key takes the default, an explicit null takes the default, a present
+// array decodes strictly and overrides, and encode fills the default.
+import json
+
+type Dep: Codec = { name: String, tags: List[String] = [] }
+
+type Counts: Codec = { label: String, ns: List[Int] = [1, 2] }
+
+fn run() -> Unit! = {
+  println(json.stringify(Dep.encode(Dep { name: "x" })))
+  let d = Dep.decode(json.parse("{\"name\":\"y\"}")!)!
+  println(d.name + " ${list.len(d.tags)}")
+  let e = Dep.decode(json.parse("{\"name\":\"z\",\"tags\":[\"a\",\"b\"]}")!)!
+  println(list.join(e.tags, "+"))
+  let n = Dep.decode(json.parse("{\"name\":\"n\",\"tags\":null}")!)!
+  println("${list.len(n.tags)}")
+  let c = Counts.decode(json.parse("{\"label\":\"k\"}")!)!
+  println("${list.len(c.ns)}")
+  let over = Counts.decode(json.parse("{\"label\":\"k\",\"ns\":[9]}")!)!
+  println("${list.len(over.ns)}")
+  ok(())
+}
+
+fn main() -> Unit = {
+  match run() {
+    ok(u) => (),
+    err(e) => println("err: " + e),
+  }
+}

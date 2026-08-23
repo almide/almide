@@ -82,7 +82,7 @@ impl LowerCtx {
         // an unadmitted class binds normally and `lift_lambda`'s mutated-capture
         // gate refuses the lift — an honest wall, never the value-copy miscompile.
         if self.cell_vars.contains(&var) {
-            if let Some(class) = cell_class_of(ty) {
+            if let Some(class) = self.cell_class_of_ctx(ty) {
                 return self.lower_cell_bind(var, ty, value, class);
             }
         }
