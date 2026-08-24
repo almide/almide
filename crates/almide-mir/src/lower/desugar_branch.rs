@@ -679,6 +679,13 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
     // bare tail-call arms instead of a heap-Option continuation match.
     (RowTrigger::Always, |src, _, _| desugar_unwrap_rewrap_identity(src)),
+    // #1564: hoist a heap CALL payload out of a returned Result/Option ctor
+    // (`ok(list.get(xs, 0))` → `{ let $t = list.get(xs, 0); ok($t) }`) so the
+    // proven bind-position machinery materializes it — the inline spelling
+    // walled while the bind-then-wrap spelling ran (the producer-keyed
+    // spelling axis). AFTER the rewrap identity above, which owns the
+    // `ok(e!)` shape this pass deliberately excludes.
+    (RowTrigger::Always, |src, next_var, _| desugar_returned_ctor_call_payload(src, next_var)),
     (RowTrigger::Always, |src, _, _| if crate::lower::bang_return_probe() { None } else { desugar_let_unwrap(src) }),
     // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
     // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches

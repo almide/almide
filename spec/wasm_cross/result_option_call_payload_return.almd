@@ -1,0 +1,139 @@
+// @contract: C-106
+// #1564 repro-B family: `-> T?!` whose Ok payload is a CALL, in every spelling
+// that used to wall. The measured spelling matrix showed the same value
+// lowering or walling by WHO produced it — a plain ctor payload ran, an
+// inline `ok(<stdlib call>)` walled for record AND variant alike, the
+// bare-call `if`-tail walled for a record while the variant leg ran, and the
+// hand-written bind-then-wrap always ran. The returned-ctor call-payload ANF
+// hoist (desugar_ctor_payload.rs) normalizes the inline spellings to the
+// bind-then-wrap one, deleting the producer axis: one desugar, no new
+// lowering machinery. Cells: inline ok(list.get) record / rich variant /
+// flat variant, inline ok(list.find(lambda)) — the issue's exact repro B —,
+// the bare-call if-tail record cell, a user-fn (Named) call payload, and a
+// churn loop that OOMs the wasm heap if the hoisted binds leak.
+type Row: Eq, Repr = { id: String }
+
+type Ev = | Started(String) | Finished(String)
+
+type Gate = | Open | Shut
+
+fn find_row(rows: List[Row], id: String) -> Row?! = ok(rows |> list.find((r) => r.id == id))
+
+fn first_row(rows: List[Row]) -> Row?! = ok(list.get(rows, 0))
+
+fn first_ev(evs: List[Ev]) -> Ev?! = ok(list.get(evs, 0))
+
+fn first_gate(gs: List[Gate]) -> Gate?! = ok(list.get(gs, 0))
+
+fn pick_row(rows: List[Row], b: Bool) -> Row?! = if b then list.get(rows, 0) else none
+
+fn head_or_make(rows: List[Row]) -> Row?! = ok(make_rows())
+
+fn make_rows() -> Row? = some(Row { id: "made" })
+
+fn show_ev(e: Ev) -> String = match e {
+  Started(id) => "started:" + id,
+  Finished(id) => "finished:" + id,
+}
+
+fn show_gate(g: Gate) -> String = match g {
+  Open => "open",
+  Shut => "shut",
+}
+
+fn show_hit(hit: Row?) -> String = match hit {
+  some(r) => r.id,
+  none => "-",
+}
+
+fn main() -> Unit = {
+  // inline ok(list.find(lambda)) — repro B verbatim, hit and miss
+  let rows = [
+    Row { id: "a" },
+    Row { id: "b" }
+  ]
+  match find_row(rows, "b") {
+    ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  match find_row([
+    Row { id: "a" }
+  ], "zz") {
+    ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  // inline ok(list.get) — record / rich variant / flat variant cells
+  match first_row([
+    Row { id: "r0" }
+  ]) {
+    ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  match first_ev([Started("e0")]) {
+    ok(hit) => match hit {
+      some(e) => println(show_ev(e)),
+      none => println("-"),
+    },
+    err(e) => println(e),
+  }
+  match first_gate([Shut, Open]) {
+    ok(hit) => match hit {
+      some(g) => println(show_gate(g)),
+      none => println("-"),
+    },
+    err(e) => println(e),
+  }
+  // bare-call if-tail, record — the asymmetric cell, both branches
+  match pick_row([
+    Row { id: "p" }
+  ], true) {
+    ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  match pick_row([
+    Row { id: "p" }
+  ], false) {
+    ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  // a user-fn (Named) call payload
+  match head_or_make([]) {
+    ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  // churn: the hoisted bind + wrapper + payload freed each iteration
+  var i = 0
+  var acc = 0
+  while i < 2000 {
+    let churn_rows = [
+      Row { id: "some-longer-id-payload" },
+      Row { id: "b" }
+    ]
+    match find_row(churn_rows, "b") {
+      ok(hit) => match hit {
+        some(r) => {
+          acc = acc + 1
+        },
+        none => {
+          acc = acc - 1
+        },
+      },
+      err(e) => {
+        acc = acc - 10
+      },
+    }
+    match first_ev([Started("evt-payload-string")]) {
+      ok(hit) => match hit {
+        some(e) => {
+          acc = acc + 2
+        },
+        none => (),
+      },
+      err(e) => {
+        acc = acc - 10
+      },
+    }
+    i = i + 1
+  }
+  println("${acc}")
+}
