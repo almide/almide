@@ -3851,6 +3851,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/map_literal_ctor_values.almd", class = "fixture" },
   { path = "tests/heap_cap_test.rs", name = "map_literal_intermediates_do_not_leak_under_the_cap", class = "fixture" },
+  { path = "spec/wasm_cross/list_arg_map_view.almd", class = "fixture" },
 ]
 
 [[contract]]
