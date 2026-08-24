@@ -189,13 +189,16 @@ fn bindings_all_concrete(bindings: &HashMap<String, Ty>) -> bool {
         })
 }
 
-/// Run `v` over EVERY expression in the program: top-level fn bodies and
-/// top-lets, then each module's fn bodies and top-lets.
-///
-/// Module bodies are taken out and put back (`mem::replace` with a Unit
-/// placeholder) because the visitor cannot borrow `program.modules[mi]` while
-/// it also holds the program-wide view it was built from.
-fn walk_program_exprs<V: almide_ir::visit_mut::IrMutVisitor>(
+/// The module-scoped twin of [`walk_program_exprs`]: tells the visitor WHICH
+/// module's bodies it is inside (None = top level), so a BARE Named call to a
+/// SIBLING generic (`doubled(x)` inside genlib's own `quadrupled` — the #1556
+/// user-module chain spelling, beside the flattened and Module-target ones)
+/// can be discovered and rewritten against the right module.
+trait ModuleScoped {
+    fn set_current_module(&mut self, mi: Option<usize>);
+}
+
+fn walk_program_exprs_scoped<V: almide_ir::visit_mut::IrMutVisitor + ModuleScoped>(
     program: &mut IrProgram,
     v: &mut V,
 ) {
@@ -203,6 +206,7 @@ fn walk_program_exprs<V: almide_ir::visit_mut::IrMutVisitor>(
     fn placeholder() -> almide_ir::IrExpr {
         almide_ir::IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None }
     }
+    v.set_current_module(None);
     for func in &mut program.functions {
         v.visit_expr_mut(&mut func.body);
     }
@@ -210,6 +214,7 @@ fn walk_program_exprs<V: almide_ir::visit_mut::IrMutVisitor>(
         v.visit_expr_mut(&mut tl.value);
     }
     for mi in 0..program.modules.len() {
+        v.set_current_module(Some(mi));
         for fi in 0..program.modules[mi].functions.len() {
             let mut body =
                 std::mem::replace(&mut program.modules[mi].functions[fi].body, placeholder());
@@ -308,6 +313,15 @@ struct Discover<'a> {
     flat_names: &'a [Sym],
     /// (mi, fi, bindings, suffix)
     out: Vec<(usize, usize, HashMap<String, Ty>, String)>,
+    /// The module whose bodies are currently being walked (None = top level) —
+    /// resolves BARE sibling calls (#1556).
+    current_mi: Option<usize>,
+}
+
+impl ModuleScoped for Discover<'_> {
+    fn set_current_module(&mut self, mi: Option<usize>) {
+        self.current_mi = mi;
+    }
 }
 
 impl almide_ir::visit_mut::IrMutVisitor for Discover<'_> {
@@ -316,6 +330,7 @@ impl almide_ir::visit_mut::IrMutVisitor for Discover<'_> {
         almide_ir::visit_mut::walk_expr_mut(self, expr);
         if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind {
             self.record_flattened_call(*name, args);
+            self.record_bare_sibling_call(*name, args);
         }
         if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
             &expr.kind
@@ -334,6 +349,22 @@ impl Discover<'_> {
     fn record_flattened_call(&mut self, name: Sym, args: &[almide_ir::IrExpr]) {
         for gi in 0..self.generics.len() {
             if name != self.flat_names[gi] {
+                continue;
+            }
+            self.record(gi, args, None);
+            break;
+        }
+    }
+
+    /// A BARE call to a SIBLING generic inside its own module's bodies
+    /// (`doubled(x)` inside genlib — user-module source spells siblings bare,
+    /// unlike the bundled stdlib's flattened spelling). Only the CURRENT
+    /// module's generics match, so an unrelated same-named generic in another
+    /// module can never be instantiated from here.
+    fn record_bare_sibling_call(&mut self, name: Sym, args: &[almide_ir::IrExpr]) {
+        let Some(mi) = self.current_mi else { return };
+        for (gi, g) in self.generics.iter().enumerate() {
+            if g.mi != mi || g.name != name.as_str() {
                 continue;
             }
             self.record(gi, args, None);
@@ -393,6 +424,14 @@ struct Rewriter<'a> {
     module_names: &'a [String],
     /// Per-generic interned flatten spelling — same table as `Discover`.
     flat_names: &'a [Sym],
+    /// The module whose bodies are currently being walked (None = top level).
+    current_mi: Option<usize>,
+}
+
+impl ModuleScoped for Rewriter<'_> {
+    fn set_current_module(&mut self, mi: Option<usize>) {
+        self.current_mi = mi;
+    }
 }
 
 impl almide_ir::visit_mut::IrMutVisitor for Rewriter<'_> {
@@ -401,6 +440,7 @@ impl almide_ir::visit_mut::IrMutVisitor for Rewriter<'_> {
         almide_ir::visit_mut::walk_expr_mut(self, expr);
         if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind {
             self.rewrite_flattened_call(name, args);
+            self.rewrite_bare_sibling_call(name, args);
         }
         if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
             &mut expr.kind
@@ -441,6 +481,24 @@ impl Rewriter<'_> {
         }
     }
 
+    /// The BARE sibling spelling (Discover's `record_bare_sibling_call` twin):
+    /// rewrite `doubled(x)` inside its own module to the bare specialized name
+    /// (`doubled__Cell`) — the instance lives in the same module, so the later
+    /// module-fn flattening treats it like any sibling call.
+    fn rewrite_bare_sibling_call(&self, name: &mut Sym, args: &[almide_ir::IrExpr]) {
+        let Some(mi) = self.current_mi else { return };
+        for (gi, g) in self.generics.iter().enumerate() {
+            if g.mi != mi || g.name != name.as_str() {
+                continue;
+            }
+            let m = &self.module_names[g.mi];
+            if let Some(new_name) = self.specialized_name(gi, m, args) {
+                *name = sym(new_name);
+            }
+            break;
+        }
+    }
+
     fn rewrite_module_call(&self, m: &str, func: &mut Sym, args: &[almide_ir::IrExpr]) {
         let f = *func;
         for (gi, g) in self.generics.iter().enumerate() {
@@ -468,8 +526,20 @@ fn specialize_discovered(
     for (mi, fi, bindings, suffix) in found {
         let mod_name = program.modules[mi].name.to_string();
         let fn_name = program.modules[mi].functions[fi].name.to_string();
-        let key = (mod_name, fn_name, suffix.clone());
+        let key = (mod_name, fn_name.clone(), suffix.clone());
         if !seen.insert(key.clone()) {
+            continue;
+        }
+        // Existence-based dedup beside the per-call `seen` set: round 2 of the
+        // module mono (#1556) runs with a FRESH `seen`, so an instance round 1
+        // already minted (a direct concrete call beside the generic-caller
+        // chain) would be specialized AGAIN — two definitions of the same
+        // mangled symbol, rustc E0428. The module's own fn list is the ground
+        // truth; a pre-existing instance only needs the rename entry so this
+        // round's call-site rewrite still points at it.
+        let spec_name_probe = format!("{}__{}", fn_name, suffix);
+        if program.modules[mi].functions.iter().any(|f| f.name.as_str() == spec_name_probe) {
+            rename.entry(key).or_insert(spec_name_probe);
             continue;
         }
         any_new = true;
@@ -550,8 +620,9 @@ fn monomorphize_module_fns(program: &mut IrProgram, prune: bool) {
             module_names: &module_names,
             flat_names: &flat_names,
             out: Vec::new(),
+            current_mi: None,
         };
-        walk_program_exprs(program, &mut d);
+        walk_program_exprs_scoped(program, &mut d);
         let found = std::mem::take(&mut d.out);
         drop(d);
         if !specialize_discovered(program, found, &mut seen, &mut rename) {
@@ -576,8 +647,9 @@ fn monomorphize_module_fns(program: &mut IrProgram, prune: bool) {
             rename: &rename,
             module_names: &module_names,
             flat_names: &flat_names,
+            current_mi: None,
         };
-        walk_program_exprs(program, &mut rw);
+        walk_program_exprs_scoped(program, &mut rw);
     }
 
     if prune {
