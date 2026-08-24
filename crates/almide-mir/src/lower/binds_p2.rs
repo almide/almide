@@ -167,11 +167,25 @@ impl LowerCtx {
         let void_fn = fn_fam.is_none()
             && !self.ret_is_result_abi
             && matches!(self.decl_ret_ty_is_unit, true)
+            && !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, _))
             && crate::lower::result_family(&expr.ty) == crate::lower::ResultFamily::Scalar;
+        // An OPTION callee (`let x = find(k)!` over `-> T?`): the carrier has
+        // no err channel — the none path CONSTRUCTS the fn's err("none") (the
+        // desugar's build_option_unwrap_match contract) — so it requires a
+        // String-err Result channel on the FN side (declared Result[_, String]
+        // or the lifted synthetic carrier; a custom-err fn would type-pun the
+        // manufactured message, an Option-returning fn propagates none itself
+        // and a void fn aborts — all three keep their position desugar).
+        let callee_is_option =
+            matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1);
         if fn_fam.is_none() && !void_fn {
             decline!("fn-family");
         }
-        if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
+        if callee_is_option {
+            if void_fn || !matches!(self.decl_fn_err, Some(Ty::String)) {
+                decline!("option-fn-channel");
+            }
+        } else if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
             decline!("callee-family");
         }
         let callee_fam = crate::lower::result_family(&expr.ty);
@@ -184,7 +198,7 @@ impl LowerCtx {
         // `materialize_result_err_str` — whose Err block is the FAMILY
         // SUPERSET (len@4=1 for len-as-tag readers AND tag@16=1 for
         // cap-as-tag readers), so ONE constructor serves both directions.
-        let rebox = !void_fn && callee_fam != fn_fam;
+        let rebox = !void_fn && (callee_is_option || callee_fam != fn_fam);
         let rebox_repr = if rebox {
             match crate::lower::repr_of(&expr.ty) {
                 Ok(r) => Some(r),
@@ -201,7 +215,7 @@ impl LowerCtx {
         // for the next slice.
         let mut adt_payload = false;
         let heap_payload_class = if is_heap_ty(ty) {
-            if callee_fam != crate::lower::ResultFamily::HeapOk {
+            if !callee_is_option && callee_fam != crate::lower::ResultFamily::HeapOk {
                 decline!("heap-payload-scalar-carrier");
             }
             if matches!(ty, Ty::String)
@@ -237,7 +251,7 @@ impl LowerCtx {
         };
         // The err components must agree — the pass-through would type-pun a
         // mismatched err payload (the collect_map! class; v0 map_err-coerces).
-        if self.unwrap_tail_err_mismatch(expr) {
+        if !callee_is_option && self.unwrap_tail_err_mismatch(expr) {
             decline!("err-mismatch");
         }
         // Lower the callee through the FULL existing bind machinery onto a
@@ -259,12 +273,27 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
         // The err tag: Scalar family reads len-as-tag @4; HeapOk reads the
         // dedicated tag slot @16 (len is pinned to 1 there).
-        let tag_off = match callee_fam {
-            crate::lower::ResultFamily::Scalar => 4,
-            crate::lower::ResultFamily::HeapOk => 16,
+        let tag_off = if callee_is_option {
+            4
+        } else {
+            match callee_fam {
+                crate::lower::ResultFamily::Scalar => 4,
+                crate::lower::ResultFamily::HeapOk => 16,
+            }
         };
         let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
-        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        // Result: nonzero tag = err (the exit). Option: len@4 == 0 = none —
+        // invert to an eq-0 scalar so the SAME IfThen(exit) frame serves both.
+        let exit_cond = if callee_is_option {
+            let zero = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+            let is_none = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: is_none, op: crate::IntOp::Eq, a: tag, b: zero });
+            is_none
+        } else {
+            tag
+        };
+        self.ops.push(Op::IfThen { cond: exit_cond, dst: None });
         // The exit path never mutates `live_heap_handles` — the surviving ok
         // continuation still owns everything; the arm only EMITS the drops.
         if void_fn {
@@ -283,9 +312,24 @@ impl LowerCtx {
             self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(mh), args: vec![eb] });
             self.ops.push(Op::Prim { kind: PrimKind::Die, dst: None, args: vec![mh] });
         } else if let Some(repr) = rebox_repr {
-            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
-            let e_dup = self.fresh_value();
-            self.ops.push(Op::Dup { dst: e_dup, src: eb });
+            // The err piece moved into the reboxed block: an OPTION carrier has
+            // none — manufacture the desugar-identical "none" message; a
+            // Result carrier's err String is extracted @12 and Dup'd (inc
+            // strictly before any release — the Lean oproj law).
+            let e_dup = if callee_is_option {
+                let msg = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: msg,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("none".into()),
+                });
+                msg
+            } else {
+                let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                let e_dup = self.fresh_value();
+                self.ops.push(Op::Dup { dst: e_dup, src: eb });
+                e_dup
+            };
             let live: Vec<ValueId> = self.live_heap_handles.clone();
             for other in live {
                 if other != v {
