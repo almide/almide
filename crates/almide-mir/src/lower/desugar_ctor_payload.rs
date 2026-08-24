@@ -26,29 +26,34 @@
 pub(crate) fn desugar_returned_ctor_call_payload(
     body: &IrExpr,
     next_var: &mut u32,
+    layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     let mut out = body.clone();
-    ctor_payload_rewrite_returned(&mut out, next_var).then_some(out)
+    ctor_payload_rewrite_returned(&mut out, next_var, layouts).then_some(out)
 }
 
 /// Walk ONLY the returned-expression tree; hoist in place, true on first hit.
-fn ctor_payload_rewrite_returned(e: &mut IrExpr, next_var: &mut u32) -> bool {
+fn ctor_payload_rewrite_returned(
+    e: &mut IrExpr,
+    next_var: &mut u32,
+    layouts: &crate::lower::VariantLayouts,
+) -> bool {
     use almide_ir::{IrExprKind, IrStmt};
     match &mut e.kind {
         IrExprKind::Block { stmts, expr: Some(t) } => {
-            if let Some((bind, span)) = take_ctor_call_payload(t, next_var) {
+            if let Some((bind, span)) = take_ctor_call_payload(t, next_var, layouts) {
                 stmts.push(IrStmt { kind: bind, span });
                 return true;
             }
-            ctor_payload_rewrite_returned(t, next_var)
+            ctor_payload_rewrite_returned(t, next_var, layouts)
         }
         IrExprKind::If { then, else_, .. } => {
-            ctor_payload_rewrite_returned(then, next_var)
-                || ctor_payload_rewrite_returned(else_, next_var)
+            ctor_payload_rewrite_returned(then, next_var, layouts)
+                || ctor_payload_rewrite_returned(else_, next_var, layouts)
         }
         IrExprKind::Match { arms, .. } => {
             for a in arms.iter_mut() {
-                if ctor_payload_rewrite_returned(&mut a.body, next_var) {
+                if ctor_payload_rewrite_returned(&mut a.body, next_var, layouts) {
                     return true;
                 }
             }
@@ -58,7 +63,7 @@ fn ctor_payload_rewrite_returned(e: &mut IrExpr, next_var: &mut u32) -> bool {
         // or a blockless fn body): wrap it into a Block so the hoisted bind
         // has a statement list to land in.
         _ => {
-            let Some((bind, span)) = take_ctor_call_payload(e, next_var) else {
+            let Some((bind, span)) = take_ctor_call_payload(e, next_var, layouts) else {
                 return false;
             };
             let ty = e.ty.clone();
@@ -87,15 +92,32 @@ fn ctor_payload_rewrite_returned(e: &mut IrExpr, next_var: &mut u32) -> bool {
 fn take_ctor_call_payload(
     e: &mut IrExpr,
     next_var: &mut u32,
+    layouts: &crate::lower::VariantLayouts,
 ) -> Option<(almide_ir::IrStmtKind, Option<almide_ir::Span>)> {
-    use almide_ir::{IrExpr, IrExprKind, IrStmtKind, Mutability, VarId};
+    use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmtKind, Mutability, VarId};
     let inner = match &mut e.kind {
         IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } => expr,
         _ => return None,
     };
-    if !matches!(inner.kind, IrExprKind::Call { .. }) || !crate::lower::is_heap_ty(&inner.ty) {
+    // Only a REAL call payload — and only a class the inline machinery walls.
+    // A `Named` call whose name is a VARIANT CONSTRUCTOR (`err(NegativeInput(x))`
+    // — ctors are Call exprs in this IR) belongs to the inline ctor machinery
+    // (result_ctors); hoisting it walled safe_div's if-tail. A String payload
+    // is owned by the inline str-result piece machinery (the wasm-coverage
+    // baseline proves every call-produced String payload lowers); hoisting one
+    // pushed `ok(int.to_string(v))` match arms off the wasm leg.
+    match &inner.kind {
+        IrExprKind::Call { target: CallTarget::Named { name }, .. }
+            if layouts.ctor_to_type.contains_key(name.as_str()) =>
+        {
+            return None;
+        }
+        IrExprKind::Call { .. } => {}
+        _ => return None,
+    }
+    if !crate::lower::is_heap_ty(&inner.ty) || matches!(inner.ty, almide_lang::types::Ty::String) {
         return None;
     }
     let ty = inner.ty.clone();

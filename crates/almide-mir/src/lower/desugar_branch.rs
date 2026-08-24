@@ -685,7 +685,7 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // walled while the bind-then-wrap spelling ran (the producer-keyed
     // spelling axis). AFTER the rewrap identity above, which owns the
     // `ok(e!)` shape this pass deliberately excludes.
-    (RowTrigger::Always, |src, next_var, _| desugar_returned_ctor_call_payload(src, next_var)),
+    (RowTrigger::Always, |src, next_var, layouts| desugar_returned_ctor_call_payload(src, next_var, layouts)),
     (RowTrigger::Always, |src, _, _| if crate::lower::bang_return_probe() { None } else { desugar_let_unwrap(src) }),
     // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
     // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
