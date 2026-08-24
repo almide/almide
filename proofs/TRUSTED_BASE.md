@@ -88,6 +88,7 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `check_fill_sound` | CallModes.v | Closed under the global context |
 | `check_modes_cert_sound` | CallModes.v | Closed under the global context |
 | `check_bc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_xc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
 | `merge_subset_sound` | Subset.v | Closed under the global context |
 | `subset_check_fast_sound` | Subset.v | Closed under the global context |
 | `rc_inc_bytes_isa_effect` | WasmDecode.v | Closed under the global context |

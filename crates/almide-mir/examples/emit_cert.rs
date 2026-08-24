@@ -185,11 +185,63 @@ fn scenario(which: &str) -> MirFunction {
             ],
             ..Default::default()
         },
+        // Format v5 (law 6): the R2 `!` exit shape — the arm drops everything
+        // it still owns (x) BEFORE the frame-targeted Return, the surviving
+        // arm continues and releases normally, the tail moves the scalar out.
+        // Cert `i{dx|}d` → the proven CBranchRet rule ACCEPTs (the flagged arm
+        // runs entry→0; the continuation joins from the surviving arm alone).
+        "branch-ret" => {
+            let (x, c) = (ValueId(0), ValueId(2));
+            MirFunction {
+                name: "f".into(),
+                ops: vec![
+                    Op::Alloc {
+                        dst: x,
+                        repr: heap(),
+                        init: Init::Opaque,
+                    },
+                    Op::Const { dst: c },
+                    Op::IfThen { cond: c, dst: None },
+                    Op::Drop { v: x },
+                    Op::Return { val: Some(c) },
+                    Op::Else { val: None },
+                    Op::EndIf { val: None },
+                    Op::Drop { v: x },
+                ],
+                ret: Some(c),
+                ..Default::default()
+            }
+        }
+        // The returning arm MISSES the pre-return drop — a leak on the exit
+        // path. Cert `i{x|}d`: the flagged arm sits at count 1, not 0, and the
+        // proven checker REJECTs (cert_xc_exit_leak_rejects mirrors this).
+        "branch-ret-leak" => {
+            let (x, c) = (ValueId(0), ValueId(2));
+            MirFunction {
+                name: "f".into(),
+                ops: vec![
+                    Op::Alloc {
+                        dst: x,
+                        repr: heap(),
+                        init: Init::Opaque,
+                    },
+                    Op::Const { dst: c },
+                    Op::IfThen { cond: c, dst: None },
+                    Op::Return { val: Some(c) },
+                    Op::Else { val: None },
+                    Op::EndIf { val: None },
+                    Op::Drop { v: x },
+                ],
+                ret: Some(c),
+                ..Default::default()
+            }
+        }
         other => {
             eprintln!(
                 "unknown scenario: {other} \
                  (try: balanced | leak | dangling | sandboxed | undeclared | \
-                 branch-agree | branch-mismatch | borrow-live | borrow-uaf)"
+                 branch-agree | branch-mismatch | borrow-live | borrow-uaf | \
+                 branch-ret | branch-ret-leak)"
             );
             std::process::exit(2);
         }
