@@ -879,16 +879,35 @@ pub fn generate_variant_pair_result_sources(
         .filter(|d| variant_needs_recursive_drop(d, &variant_names, &all_record_names))
         .map(|d| d.name.as_str().to_string())
         .collect();
+    // RECORD slots complete the #1564 matrix (#1547 shape 1 was closed on the
+    // variant cell only — an ordinary aggregate is a record): a RECURSIVE-drop
+    // record recurses via its unconditionally-generated `$__drop_<R>` (the
+    // same `__drop_<ident>` spelling the rich-variant arm emits), an
+    // ALL-SCALAR record is one-level-exact under a flat rc_dec.
+    let rich_recs: std::collections::HashSet<String> =
+        recursive_record_drop_names(type_decls).into_iter().collect();
+    let flat_recs: std::collections::HashSet<String> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            almide_ir::IrTypeDeclKind::Record { fields }
+                if fields.iter().all(|f| !crate::lower::is_heap_ty(&f.ty)) =>
+            {
+                Some(d.name.as_str().to_string())
+            }
+            _ => None,
+        })
+        .collect();
 
     // Is `t` an admissible pair SLOT, and how does it free? `Some(true)` =
-    // recurse via the generated `$__drop_<V>`, `Some(false)` = flat rc_dec.
+    // recurse via the generated `$__drop_<V>` / `$__drop_<R>`, `Some(false)` =
+    // flat rc_dec.
     let slot_class = |t: &Ty| -> Option<bool> {
         match t {
             Ty::Named(n, args) if args.is_empty() => {
                 let n = n.as_str();
-                if rich.contains(n) {
+                if rich.contains(n) || rich_recs.contains(n) {
                     Some(true)
-                } else if flat_names.contains(n) {
+                } else if flat_names.contains(n) || flat_recs.contains(n) {
                     Some(false)
                 } else {
                     None
@@ -953,7 +972,7 @@ pub fn generate_variant_pair_result_sources(
         let fa = drop_fn_ident(a);
         let fb = drop_fn_ident(b);
         let slot_free = |name: &str, off: u32, ident: &str| -> String {
-            if rich.contains(name) {
+            if rich.contains(name) || rich_recs.contains(name) {
                 format!(
                     "    let s{off}: {name} = prim.load_handle(h + {off})\n    __drop_{ident}(s{off})\n"
                 )

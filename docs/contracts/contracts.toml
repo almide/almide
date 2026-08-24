@@ -1427,6 +1427,7 @@ evidence  = [
   { path = "spec/wasm_cross/str_result_heap_bind.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_match_rewrap_modcall.almd", class = "fixture" },
   { path = "spec/wasm_cross/variant_pair_result_return.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_pair_result_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
 ]
 

@@ -160,22 +160,33 @@ impl LowerCtx {
         if ts.len() != 2 {
             return None;
         }
-        let class = |t: &Ty| -> Option<(&str, bool)> {
+        let class = |t: &Ty| -> Option<(String, bool)> {
             match t {
                 Ty::Named(n, args) if args.is_empty() => {
-                    let n = n.as_str();
-                    if self.variant_layouts.needs_recursive_drop(n, &|rn| {
+                    let ns = n.as_str();
+                    if self.variant_layouts.needs_recursive_drop(ns, &|rn| {
                         crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
                     }) {
-                        Some((n, true))
+                        Some((ns.to_string(), true))
                     } else if self.variant_layouts.is_flat_variant_ty(t) {
-                        Some((n, false))
+                        Some((ns.to_string(), false))
+                    // RECORD slots (#1564 — the matrix's other cell): a
+                    // recursive-drop record recurses via `$__drop_<R>`
+                    // (record_drop_type_name is the generation mirror), an
+                    // all-scalar record is one-level-exact under the flat dec.
+                    } else if let Some(rn) = self.record_drop_type_name(t) {
+                        Some((rn, true))
+                    } else if self
+                        .aggregate_field_tys(t)
+                        .is_some_and(|(_, tys)| tys.iter().all(|f| !is_heap_ty(f)))
+                    {
+                        Some((ns.to_string(), false))
                     } else {
                         None
                     }
                 }
-                Ty::String => Some(("String", false)),
-                Ty::Bytes => Some(("Bytes", false)),
+                Ty::String => Some(("String".to_string(), false)),
+                Ty::Bytes => Some(("Bytes".to_string(), false)),
                 _ => None,
             }
         };
@@ -184,8 +195,8 @@ impl LowerCtx {
         (a_rich || b_rich).then(|| {
             format!(
                 "vp_{}_{}",
-                crate::lower::drop_fn_ident(an),
-                crate::lower::drop_fn_ident(bn)
+                crate::lower::drop_fn_ident(&an),
+                crate::lower::drop_fn_ident(&bn)
             )
         })
     }
