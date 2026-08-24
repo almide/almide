@@ -214,9 +214,35 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
     let mut mut_fns: MutFns = std::collections::HashMap::new();
     // Program-level functions first, then module ones — the original
     // collection order, which a duplicate name would otherwise decide.
-    for func in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+    for func in program.functions.iter() {
         if let Some(entry) = mut_fn_entry(func, &name_count) {
             mut_fns.insert(func.name.to_string(), entry);
+        }
+    }
+    for m in &program.modules {
+        for func in &m.functions {
+            if let Some(entry) = mut_fn_entry(func, &name_count) {
+                // A MODULE fn's call sites spell THREE names: bare from inside
+                // the module, MODULE-QUALIFIED (`convmut.Box.bump`) pre-resolution,
+                // and the MANGLED runtime symbol (`almide_rt_convmut_Box_bump`)
+                // after `resolve_user_module_calls`. The body rewrite
+                // keys the bare name; the CALL-SITE rewriter must hit either
+                // spelling or the rewritten callee's returned buffer is left
+                // unconsumed on the caller's stack (invalid wasm — the #1549
+                // cross-module mut-receiver leg). The bare name passed the
+                // uniqueness guard above, so the qualified alias is likewise
+                // unambiguous.
+                mut_fns.insert(
+                    format!(
+                        "almide_rt_{}_{}",
+                        m.name.as_str().replace('.', "_"),
+                        func.name.as_str().replace('.', "_")
+                    ),
+                    entry.clone(),
+                );
+                mut_fns.insert(format!("{}.{}", m.name.as_str(), func.name.as_str()), entry.clone());
+                mut_fns.insert(func.name.to_string(), entry);
+            }
         }
     }
     if std::env::var("ALMIDE_MP_PROBE").is_ok() {

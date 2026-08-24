@@ -2,9 +2,10 @@
 // generic must keep its by-reference calling convention — the specialized
 // fn used to take the param by value then `&mut` it (check green, rustc
 // E0596). The same body against the concrete type always worked; the bound
-// is the whole difference. The wasm leg currently walls on the protocol
-// method's in-place param mutation (#1557 leg 1); the native leg is the
-// regression pin.
+// is the whole difference. The NATIVE pin lives in
+// tests/native_mut_param_pins_test.rs (this file's wasm leg never runs the
+// broken native codegen); here the same shape VOTES cross-target — the
+// mono instance carries mutated_params since the specialization fix.
 protocol Counter {
   fn bump(mut self: Self, by: Int) -> Unit
   fn read(self) -> Int

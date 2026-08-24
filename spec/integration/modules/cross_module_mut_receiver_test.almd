@@ -2,9 +2,10 @@
 // self: Box, by)`) must mirror its signature under BOTH emit keys — the
 // dotted `convmut.Box.bump` and the bare `Box.bump` — or the caller's
 // borrow classification misses it and the call site passes by value
-// (check green, rustc E0308). The wasm leg currently walls on the method
-// body's in-place param mutation (#1557 leg 1); the native leg is the
-// regression pin.
+// (check green, rustc E0308). The NATIVE pin lives in
+// tests/native_mut_param_pins_test.rs (this file's wasm leg never runs the
+// broken native codegen); here the same shape VOTES cross-target — the
+// mut-receiver body lowers since the borrowed-param COW admission.
 import convmut
 
 test "mut-receiver convention method mutates across the boundary (#1549)" {

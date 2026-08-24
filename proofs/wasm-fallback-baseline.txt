@@ -16,9 +16,7 @@
 #                       (assert_throws requires catching a panic; wasm traps
 #                       are uncatchable in-process).
 #
-# COMPILER_FRONTIER (2) — the debt, in leverage order:
-spec/integration/modules/cross_module_mut_receiver_test.almd :: COMPILER_FRONTIER :: #1549's mut-receiver native pin; the wasm leg walls on the method body's in-place param mutation (#1557 leg 1)
-spec/lang/mut_param_protocol_bound_test.almd :: COMPILER_FRONTIER :: #1551's protocol-bound mut-param native pin; the wasm leg walls on the same in-place param mutation class (#1557 leg 1)
+# COMPILER_FRONTIER (0) — the debt is EMPTY: every spec file the wasm leg can host, it runs.
 #
 # HOST_CAPABILITY (6):
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
