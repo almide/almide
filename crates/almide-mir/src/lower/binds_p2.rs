@@ -164,11 +164,15 @@ impl LowerCtx {
         // either, but its `!` is NOT an abort — inside a fallible lambda it
         // is the lambda's own propagation (fallible_lambda L1: aborting there
         // killed the process mid-test instead of yielding the `??` fallback).
+        // #1437 L1 lifted the heap-callee narrowing: under the probe every
+        // lifted heap carrier is wrapped and @16-readable, and a declared
+        // Result callee always was — so a void fn's `!` admits ANY Result
+        // family (the abort message is the err String @12, family-uniform)
+        // and an OPTION callee (none aborts with the manufactured "none",
+        // matching the desugar's v0 line byte for byte).
         let void_fn = fn_fam.is_none()
             && !self.ret_is_result_abi
-            && matches!(self.decl_ret_ty_is_unit, true)
-            && !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, _))
-            && crate::lower::result_family(&expr.ty) == crate::lower::ResultFamily::Scalar;
+            && matches!(self.decl_ret_ty_is_unit, true);
         // An OPTION callee (`let x = find(k)!` over `-> T?`): the carrier has
         // no err channel — the none path CONSTRUCTS the fn's err("none") (the
         // desugar's build_option_unwrap_match contract) — so it requires a
@@ -182,7 +186,7 @@ impl LowerCtx {
             decline!("fn-family");
         }
         if callee_is_option {
-            if void_fn || !matches!(self.decl_fn_err, Some(Ty::String)) {
+            if !void_fn && !matches!(self.decl_fn_err, Some(Ty::String)) {
                 decline!("option-fn-channel");
             }
         } else if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
@@ -273,6 +277,43 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
         // The err tag: Scalar family reads len-as-tag @4; HeapOk reads the
         // dedicated tag slot @16 (len is pinned to 1 there).
+        // The void abort's message pieces are allocated BEFORE the branch (the
+        // overflow-abort precedent: pre-branch alloc, in-arm die, continue
+        // path frees at scope end — no ownership event inside an arm). An
+        // OPTION none has no payload, so its line is fully static; a Result
+        // err's line is `"Error: " + <msg @12> + "\n"` (build_main_die_line's
+        // exact spelling), concatenated IN the arm with unreachable balancing
+        // drops after the die (the arm machinery's own shape).
+        let void_msg_pieces = if void_fn {
+            if callee_is_option {
+                let msg = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: msg,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("Error: none\n".into()),
+                });
+                self.live_heap_handles.push(msg);
+                Some((msg, None))
+            } else {
+                let pre = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: pre,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("Error: ".into()),
+                });
+                self.live_heap_handles.push(pre);
+                let nl = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: nl,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("\n".into()),
+                });
+                self.live_heap_handles.push(nl);
+                Some((pre, Some(nl)))
+            }
+        } else {
+            None
+        };
         let tag_off = if callee_is_option {
             4
         } else {
@@ -304,13 +345,40 @@ impl LowerCtx {
             // and `prim.die` never returns, so no ownership event is needed
             // (the process ends — the same accounting the overflow-abort
             // shape uses).
-            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            let (line, balance) = match void_msg_pieces {
+                Some((msg, None)) => (msg, Vec::new()),
+                Some((pre, Some(nl))) => {
+                    let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                    let t1 = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(t1),
+                        name: "__str_concat".to_string(),
+                        args: vec![crate::CallArg::Handle(pre), crate::CallArg::Handle(eb)],
+                        result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+                    });
+                    let t2 = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(t2),
+                        name: "__str_concat".to_string(),
+                        args: vec![crate::CallArg::Handle(t1), crate::CallArg::Handle(nl)],
+                        result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+                    });
+                    (t2, vec![t1, t2])
+                }
+                None => unreachable!("void_fn set but no message pieces"),
+            };
             // `prim.die` takes the message's ADDRESS (i64), not the i32
             // handle — the same `Handle`-then-`Die` pair the overflow abort
-            // emits (calls_p4_b.rs:589-591).
+            // emits (calls_p4_b.rs:589-591). The concat temporaries are
+            // released AFTER the die — unreachable, but they keep the arm's
+            // ownership net at zero (the arm machinery's drop_arm_locals
+            // shape; the process never executes them).
             let mh = self.fresh_value();
-            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(mh), args: vec![eb] });
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(mh), args: vec![line] });
             self.ops.push(Op::Prim { kind: PrimKind::Die, dst: None, args: vec![mh] });
+            for t in balance {
+                self.ops.push(Op::Drop { v: t });
+            }
         } else if let Some(repr) = rebox_repr {
             // The err piece moved into the reboxed block: an OPTION carrier has
             // none — manufacture the desugar-identical "none" message; a
