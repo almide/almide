@@ -1,0 +1,10 @@
+// genlib — the #1556 regression lib: MODULE generics reached from another
+// module's generics. `doubled` is the direct instance; `quadrupled` chains to
+// a SECOND module generic so the round-2 fixed point is exercised too.
+protocol HasValue {
+  fn value(self) -> Int
+}
+
+fn doubled[T: HasValue](x: T) -> Int = x.value() * 2
+
+fn quadrupled[T: HasValue](x: T) -> Int = doubled(x) * 2

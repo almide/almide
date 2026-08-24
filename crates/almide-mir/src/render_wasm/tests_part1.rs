@@ -421,6 +421,13 @@
         // First-class function values need the uniform `$__drop_closure` (same
         // injection as the production pipeline).
         let closure_drop = if usage.closures { crate::lower::CLOSURE_DROP_SRC } else { "" };
+        // `$__drop_closure`'s RICH arm needs `__drop_env_rich` in scope whenever
+        // CLOSURE_DROP_SRC is injected — pipeline_tail's mirror (#1547 shapes 2/3).
+        let env_rich_drop = if usage.closures {
+            crate::lower::generate_closure_env_rich_sources(&ir.type_decls)
+        } else {
+            String::new()
+        };
         let lenlist_drop = if usage.lenlist_elem_lists { crate::lower::LENLIST_DROP_SRC } else { "" };
         // `__drop_list_str` (a `List[String]` record/variant ctor field, OR a closure's
         // nested-heap capture) — SHARED between the record and variant drop generators
@@ -437,16 +444,25 @@
         // An `Option[(String, <scalar>)]` — `$__drop_opt_str_int` (see pipeline.rs's
         // mirror; type-driven gate, #840).
         let opt_str_int_drop = if usage.opt_str_scalar { crate::lower::OPT_STR_INT_DROP_SRC } else { "" };
+        // A heap-Ok `Result[List[<one-level-exact>], String]` — `$__drop_res_lsl`
+        // (pipeline_tail's mirror). The codec `__decode_list_string` helper's return
+        // is an instance, so the derived-codec decode tests reach it.
+        let res_lsl_drop = if usage.res_lenlist_str { crate::lower::RES_LSL_DROP_SRC } else { "" };
         let drops = format!(
-            "{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
+            // `Result[(V1, V2), String]` wrapper drops (#1547 shape 1) —
+            // pipeline_tail's mirror, usage-driven per pair.
+            crate::lower::generate_variant_pair_result_sources(ir, &ir.type_decls),
             crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(ir), &crate::lower::collect_interp_repr_containers(ir)),
             closure_drop,
+            env_rich_drop,
             lenlist_drop,
             list_str_drop,
             list_closure_drop,
             opt_str_int_drop,
+            res_lsl_drop,
         );
         drops
     }

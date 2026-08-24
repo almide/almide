@@ -596,11 +596,29 @@ impl LowerCtx {
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
+        if crate::lower::is_res_lenlist_str_ty(ty) {
+            // Heap-Ok `Result[List[<one-level-exact>], String]` (fs.read_lines /
+            // fold_lines_ls) — the TAG-AWARE `$__drop_res_lsl` (Ok -> slot sweep
+            // then list then wrapper; Err -> message). The one-level wrapper
+            // sweep freed the list BLOCK-ONLY and stranded every element (the
+            // read_lines-in-a-lifted-effect-fn churn leak).
+            self.value_drops.entry(dst).or_default().named_route = Some("res_lsl".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
         if crate::lower::is_res_intlist_strlist_ty(ty) {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
             // either flat class would leak or double-free one side).
             self.value_drops.entry(dst).or_default().named_route = Some("res_ilsl".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
+        if let Some(df) = self.variant_pair_result_drop_fn(ty) {
+            // `Result[(V1, V2), String]` (#1547 shape 1 — a transition fn's
+            // `(new_state, event)` return): the recursive `$__drop_vp_<A>_<B>`
+            // wrapper route; a flat sweep would leak each variant's payload tree.
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("resrec:{df}"));
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }

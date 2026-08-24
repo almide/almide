@@ -688,3 +688,73 @@ fn lower_main_and_sibling_fns(
     }
     functions
 }
+
+/// Fold each REGION's const-String top-let chains to literals (#1552): a
+/// top-let whose value is a `ConcatStr` tree over `LitStr` leaves and `Var`
+/// references to other top-lets in the SAME region that (transitively) fold
+/// to a `LitStr` is replaced by the folded `LitStr`. Regions are the main
+/// program and each module separately — ids are only meaningful within one
+/// region (`disambiguate_module_global_regions` runs first, and cross-module
+/// references resolve by NAME in the bridge, which then copies the folded
+/// value). A non-foldable leaf (a call, a non-String op, a reference to a
+/// computed let) leaves the whole init untouched: the fold only ever REPLACES
+/// a shape the renderer walls on with one it proves, never changes a value —
+/// String concatenation of known literals has one answer on every target.
+pub(crate) fn fold_const_str_toplets(ir: &mut almide_ir::IrProgram) {
+    fn fold_region(top_lets: &mut Vec<almide_ir::IrTopLet>) {
+        use almide_ir::{IrExpr, IrExprKind};
+        fn fold_expr(
+            e: &IrExpr,
+            consts: &std::collections::HashMap<almide_ir::VarId, String>,
+        ) -> Option<String> {
+            match &e.kind {
+                IrExprKind::LitStr { value } => Some(value.clone()),
+                IrExprKind::Var { id } => consts.get(id).cloned(),
+                IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } => {
+                    let l = fold_expr(left, consts)?;
+                    let r = fold_expr(right, consts)?;
+                    Some(format!("{l}{r}"))
+                }
+                _ => None,
+            }
+        }
+        // Fixpoint over the region: each round admits lets whose leaves became
+        // literals last round, so chains fold in declaration-independent order.
+        let mut consts: std::collections::HashMap<almide_ir::VarId, String> =
+            std::collections::HashMap::new();
+        loop {
+            let mut changed = false;
+            for tl in top_lets.iter() {
+                if consts.contains_key(&tl.var) || tl.mutable {
+                    continue;
+                }
+                if let Some(v) = fold_expr(&tl.value, &consts) {
+                    consts.insert(tl.var, v);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        for tl in top_lets.iter_mut() {
+            if tl.mutable {
+                continue;
+            }
+            // Only REWRITE a non-literal init — a plain LitStr stays untouched
+            // byte-for-byte (no churn on the already-proven shapes).
+            if matches!(&tl.value.kind, IrExprKind::LitStr { .. }) {
+                continue;
+            }
+            if let Some(v) = consts.get(&tl.var) {
+                let ty = tl.value.ty.clone();
+                let span = tl.value.span;
+                tl.value = IrExpr { kind: IrExprKind::LitStr { value: v.clone() }, ty, span, def_id: None };
+            }
+        }
+    }
+    fold_region(&mut ir.top_lets);
+    for m in &mut ir.modules {
+        fold_region(&mut m.top_lets);
+    }
+}

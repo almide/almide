@@ -104,16 +104,25 @@ fn $__drop_map_ss
 fn $__drop_map_ss_loop
   (call $rc_dec (i32.wrap_i64 (local.get $v13)))
 fn $__drop_closure
-  (call $__drop_closure_loop (local.get $v1) (local.get $v16) (local.get $v21) (local.get $v24) (local.get $v11) (i64.const 0))
+  (call $__drop_closure_loop (local.get $v1) (local.get $v21) (local.get $v13) (local.get $v26) (local.get $v29) (local.get $v16) (i64.const 0))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
 fn $__drop_closure_loop
-  (call $__drop_closure (local.get $v20))
-  (call $__drop_list_str (local.get $v28))
-  (call $rc_dec (i32.wrap_i64 (local.get $v37)))
-  (call $__drop_cellmap (local.get $v43))
+  (call $__drop_closure (local.get $v22))
+  (call $__drop_env_rich (local.get $v30))
+  (call $__drop_list_str (local.get $v39))
+  (call $rc_dec (i32.wrap_i64 (local.get $v49)))
+  (call $__drop_cellmap (local.get $v55))
 fn $__drop_cellmap
   (call $__drop_list_str (local.get $v8))
   (call $rc_dec (i32.wrap_i64 (local.get $v0)))
+fn $__drop_env_rich
+  (call $__drop_caplist_Element (local.get $v13))
+  (call $rc_dec (i32.wrap_i64 (local.get $v0)))
+fn $__drop_caplist_Element
+  (call $__drop_caplist_Element_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_caplist_Element_loop
+  (call $__drop_Element (local.get $v13))
 fn $__drop_list_str
   (call $__drop_list_str_loop (local.get $v1) (local.get $v9) (i64.const 0))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))

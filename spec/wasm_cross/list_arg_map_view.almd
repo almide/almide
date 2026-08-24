@@ -1,0 +1,66 @@
+// @contract: C-300
+// A LIST-of-MAPS literal in call-argument position (#1527's List-argument top
+// family): `list.get_or([m0, ["k": v]], i, d)` builds a BORROW-VIEW whose
+// slots hold the element handles — tracked Vars borrowed, literal/desugared
+// elements materialized through the single-arg machinery with their exact
+// type-routed scope-end drops — and the hshare accessor shares the hit back.
+// Admission is the ROUTABLE-MAP family (named-value / hval / ivh / msv / mlo /
+// one-level-exact interleaved and split layouts); a nested value class (a
+// Result value whose Err owns a String) stays declined. The churn loop is the
+// leak canary for the literal-element temps.
+fn main() -> Unit = {
+  let mb: Map[String, Bool] = ["k0": true, "k1": false]
+  let mo: Map[String, Bool?] = ["k0": some(true), "k1": none]
+  let mi: Map[Int, String] = [1: "one", 2: "two"]
+  let ms: Map[String, String] = ["a": "x", "b": "y"]
+  let go = list.get_or([
+    mb,
+    ["k2": true]
+  ], 1, [:])
+  println("${map.len(go)}")
+  let go2 = list.get_or([mo, mo, mo], 2, ["kx": none])
+  println("${map.len(go2)}")
+  let gi = list.get_or([mi, mi], 9, [:])
+  println("${map.len(gi)}")
+  let gs = list.get_or([
+    ms,
+    ["only": "z"]
+  ], 0, [:])
+  println(map.get_or(gs, "a", "?"))
+  // the Result-element flat half: Result[<one-level-exact>, String] elements
+  // (Option[Float] / scalar payloads) ride the same view + per-slot sweep
+  let ra: Result[Float?, String] = err("a-err")
+  let rb: Result[Float?, String] = ok(some(1.5))
+  let rd: Result[Float?, String] = err("default-err")
+  let hit = list.get_or([rb, ra], 0, rd)
+  match hit {
+    ok(v) => println("hit-ok"),
+    err(e) => println(e),
+  }
+  let miss = list.get_or([
+    (if false then ra else ra),
+    ra,
+    rb
+  ], 5, rd)
+  match miss {
+    ok(v) => println("miss-ok"),
+    err(e) => println(e),
+  }
+  let si: Result[Int, String] = ok(7)
+  let ge = list.get_or([si, err("nope")], 1, err("d"))
+  match ge {
+    ok(v) => println("${v}"),
+    err(e) => println(e),
+  }
+  var i = 0
+  var acc = 0
+  while i < 2000 {
+    let g = list.get_or([
+      ["kA": "vvvvvvvvvvvv"],
+      ["kB": "wwwwwwwwwwww"]
+    ], i % 3, ["kZ": "z"])
+    acc = acc + map.len(g)
+    i = i + 1
+  }
+  println("acc=${acc}")
+}

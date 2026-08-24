@@ -676,11 +676,15 @@ fn has_propagation_site(expr: &IrExpr) -> bool {
 /// trapped with `call stack exhausted` on the wasm leg while native printed its
 /// three sums.
 fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) -> bool {
+    wrap_return_positions_go(expr, decl_ty, result_ty, false)
+}
+
+fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_branch: bool) -> bool {
     match &mut expr.kind {
         IrExprKind::Block { expr: tail, .. } => {
             let wrapped = tail
                 .as_deref_mut()
-                .map(|t| wrap_return_positions_in_ok(t, decl_ty, result_ty))
+                .map(|t| wrap_return_positions_go(t, decl_ty, result_ty, in_branch))
                 .unwrap_or(false);
             if wrapped {
                 expr.ty = result_ty.clone();
@@ -688,8 +692,8 @@ fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) 
             wrapped
         }
         IrExprKind::If { then, else_, .. } => {
-            let a = wrap_return_positions_in_ok(then, decl_ty, result_ty);
-            let b = wrap_return_positions_in_ok(else_, decl_ty, result_ty);
+            let a = wrap_return_positions_go(then, decl_ty, result_ty, true);
+            let b = wrap_return_positions_go(else_, decl_ty, result_ty, true);
             if a || b {
                 expr.ty = result_ty.clone();
             }
@@ -698,7 +702,7 @@ fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) 
         IrExprKind::Match { arms, .. } => {
             let mut any = false;
             for arm in arms.iter_mut() {
-                any |= wrap_return_positions_in_ok(&mut arm.body, decl_ty, result_ty);
+                any |= wrap_return_positions_go(&mut arm.body, decl_ty, result_ty, true);
             }
             if any {
                 expr.ty = result_ty.clone();
@@ -706,11 +710,36 @@ fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) 
             any
         }
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => false,
-        // A CALL in return position already yields the CARRIER — an effect fn's
-        // own ABI wraps its exits, so wrapping the call site again would build
-        // `ok(ok(..))`. The callee's ABI is the single decider for a call's
-        // shape; this retype only speaks for the values THIS body produces.
-        IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => false,
+        // A call to a NAMED/computed/method callee in return position may
+        // already yield the CARRIER — a lifted effect sibling's ABI wraps its
+        // exits (wrapping the site again would build `ok(ok(..))`), and the
+        // tail SELF-call's unwrapped spine is what lets `effect_tco`
+        // loop-convert — so those stay with the existing machinery. A MODULE
+        // (stdlib) callee is different: it is a plain VALUE producer with no
+        // wrapping ABI of its own, so declining it left the raw value as the
+        // fn's return — `map.len(m)` in the tail of an auto-wrapped fn
+        // returned a raw i64 where every call site `local.set`s the promised
+        // i32 carrier: invalid wasm at validate ("expected i32, found i64").
+        // SPINE positions only (the Block-tail chain), and VALUE-producing only:
+        // a Module call inside a Match/If ARM stays declined — those already
+        // lower through the branch merge + propagation machinery, and wrapping
+        // them retyped previously-fine heap-result matches out of the
+        // executable subset (the fs_streaming/fs_if_exists/fs_fold_lines_chunked
+        // fallback regression this gate's first, arm-wide spelling shipped). A
+        // UNIT-typed Module call tail (`testing.assert_err(..)` ending a test
+        // fn) stays declined too — the unit-tail machinery
+        // (`wrap_unit_body_in_ok`) already turns it into a statement + `ok(())`,
+        // and wrapping the call itself built a heap-result construct the same
+        // subset refuses. A non-Unit Module call answering the DECLARED type
+        // falls through to the value wrap below; a Result-typed one
+        // (fs.read_text) fails ty == decl_ty there and stays untouched.
+        IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+            if in_branch || matches!(expr.ty, Ty::Unit) =>
+        {
+            false
+        }
+        IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Computed { .. } | CallTarget::Method { .. }, .. }
+        | IrExprKind::TailCall { .. } => false,
         _ => {
             // A VALUE in return position. Wrap it when it produces the declared
             // type; anything else (a Never-typed die, an already-Result

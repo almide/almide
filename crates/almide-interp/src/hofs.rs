@@ -350,6 +350,7 @@ impl<'a> Interpreter<'a> {
             "flat_map" => self.hof_result_flat_map(evaled),
             "unwrap_or_else" => self.hof_result_unwrap_or_else(evaled),
             "or_else" => self.hof_result_or_else(evaled),
+            "filter" => self.hof_result_filter(evaled),
             _ => Flow::Unsupported(format!("HOF result.{}", f)),
         }
     }
@@ -854,6 +855,31 @@ impl<'a> Interpreter<'a> {
                 }
             }
             _ => Flow::Abort("internal: result.map on non-Result".into()),
+        }
+    }
+
+    // Ok(v) kept iff pred(v), else Err(err_val — args[2]); Err(e) propagated.
+    // pred never runs on the Err arm (result_map.almd result_filter's contract;
+    // the wasm twins _h/base share it).
+    fn hof_result_filter(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Result(Ok(v))) => {
+                let clo = match Self::recv_closure(args, 1) {
+                    Ok(c) => c,
+                    Err(f) => return f,
+                };
+                let Some(err_val) = args.get(2).cloned() else {
+                    return Flow::Abort("internal: result.filter missing err_val".into());
+                };
+                let verdict = val!(self.apply_closure(&clo, vec![(**v).clone()]));
+                match verdict {
+                    Value::Bool(true) => Flow::val(Value::Result(Ok(v.clone()))),
+                    Value::Bool(false) => Flow::val(Value::Result(Err(Box::new(err_val)))),
+                    _ => Flow::Abort("internal: result.filter pred returned non-Bool".into()),
+                }
+            }
+            Some(Value::Result(Err(e))) => Flow::val(Value::Result(Err(e.clone()))),
+            _ => Flow::Abort("internal: result.filter on non-Result".into()),
         }
     }
 

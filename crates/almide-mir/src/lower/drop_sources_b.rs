@@ -659,6 +659,56 @@ pub fn is_res_fs_ty(ty: &Ty) -> bool {
         && matches!(a[1], Ty::String))
 }
 
+/// The ALMIDE SOURCE of `$__drop_res_lsl` — the TAG-AWARE release of a
+/// `Result[List[<one-level-exact element>], String]` (fs.read_lines /
+/// fs.fold_lines_ls wrappers): tag@16 = Err(1) → the @12 payload is the flat
+/// message String (the dec below is exact); tag = Ok(0) → the @12 payload is a
+/// LIST whose len-counted slots are each an owned handle one `rc_dec` fully
+/// frees — at the list's last ref, sweep the slots, then the list block, then
+/// the wrapper. Without this route the caller-side wrapper sweep dec'd the
+/// list handle only and `$rc_dec` freed it BLOCK-ONLY, stranding every
+/// element: `let ls = fs.read_lines(p)!` in a lifted effect fn leaked its
+/// line Strings on every call (the fold_lines churn's residual ~60B/iter;
+/// trace-attributed to 20-byte blocks ending at rc 1 with no F). Trusted
+/// prim-only, like every `$__drop_*`.
+pub const RES_LSL_DROP_SRC: &str = "\
+fn __drop_res_lsl(r: List[Int]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    let inner = prim.load32(h + 12)
+    if prim.load32(h + 16) == 0 then {
+      if prim.load32(inner + 0) == 1 then __drop_res_lsl_slots(inner, prim.load32(inner + 4), 0) else ()
+    } else ()
+    prim.rc_dec(inner)
+  } else ()
+  prim.rc_dec(h)
+}
+fn __drop_res_lsl_slots(e: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(e + 12 + i * 8))
+    __drop_res_lsl_slots(e, n, i + 1)
+  }
+";
+
+/// Is `ty` a heap-Ok `Result[List[E], String]` whose element E is ONE-LEVEL-EXACT
+/// (one `rc_dec` is a slot's full free — the registry-free subset: String, Bytes,
+/// `List[<scalar>]`, a Flat-class ctor)? The `$__drop_res_lsl` class; String
+/// elements (fs.read_lines) are an instance, not the rule. A DEEPER element
+/// (`List[List[String]]`, a record) is excluded — the one-level slot sweep would
+/// leak its interior, so those keep their existing route or honest wall.
+pub fn is_res_lenlist_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ty, Ty::Applied(TC::Result, a) if a.len() == 2
+        && matches!(a[1], Ty::String)
+        && matches!(&a[0], Ty::Applied(TC::List, e) if e.len() == 1
+            && (matches!(e[0], Ty::String | Ty::Bytes)
+                || matches!(&e[0], Ty::Applied(TC::List, b)
+                    if b.len() == 1 && !crate::lower::is_heap_ty(&b[0]))
+                || crate::lower::lenlist_elem_class(&e[0])
+                    == Some(crate::lower::CtorElemClass::Flat))))
+}
+
 /// Is `ty` exactly `Result[List[Int], List[String]]` (the result.collect return —
 /// the tag-aware `$__drop_res_ilsl` class)?
 pub fn is_res_intlist_strlist_ty(ty: &Ty) -> bool {

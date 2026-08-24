@@ -1,0 +1,56 @@
+// @contract: C-139
+// result.filter over a HEAP-Ok Result — the payload-type-INDEPENDENT `_h`
+// twin (the last unrouted member of the C-139 family: every heap-Ok
+// instantiation fell to the unlinked filter_x wall, 7x/shard on the #1527
+// replay). ok(x) is kept iff pred(x) — the payload is BORROWED into pred and
+// shared back, never read as a typed value — a kept-fail builds err(err_val),
+// and err(e) propagates shared. Covers a nested-heap Ok (Option[Float]), the
+// String Ok, both pred verdicts, err propagation, and a churn loop (the
+// share/build paths must be leak-exact).
+fn keep_all(r: Result[Float?, String]) -> Result[Float?, String] = result.filter(r, ((x) => true), "dropped")
+
+fn keep_none(r: Result[Float?, String]) -> Result[Float?, String] = result.filter(r, ((x) => false), "dropped")
+
+fn keep_long(r: Result[String, String]) -> Result[String, String] = result.filter(r, ((x) => string.len(x) > 3), "short")
+
+fn main() -> Unit = {
+  let a: Result[Float?, String] = ok(some(1.5))
+  let b: Result[Float?, String] = ok(none)
+  let c: Result[Float?, String] = err("boom")
+  match keep_all(a) {
+    ok(v) => println("ka-ok"),
+    err(e) => println(e),
+  }
+  match keep_none(b) {
+    ok(v) => println("kb-ok"),
+    err(e) => println(e),
+  }
+  match keep_all(c) {
+    ok(v) => println("kc-ok"),
+    err(e) => println(e),
+  }
+  let s: Result[String, String] = ok("keepme")
+  let t: Result[String, String] = ok("no")
+  match keep_long(s) {
+    ok(v) => println(v),
+    err(e) => println(e),
+  }
+  match keep_long(t) {
+    ok(v) => println(v),
+    err(e) => println(e),
+  }
+  var i = 0
+  var kept = 0
+  while i < 2000 {
+    let r: Result[Float?, String] = ok(some(2.5))
+    let k = result.filter(r, ((x) => i % 2 == 0), "odd")
+    match k {
+      ok(v) => {
+        kept = kept + 1
+      },
+      err(e) => (),
+    }
+    i = i + 1
+  }
+  println(int.to_string(kept))
+}

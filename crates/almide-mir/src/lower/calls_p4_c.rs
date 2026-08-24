@@ -615,8 +615,21 @@ impl LowerCtx {
             self.value_drops.entry(dst).or_default().named_route = Some("res_fs".to_string());
             return;
         }
+        if crate::lower::is_res_lenlist_str_ty(ty) {
+            // Heap-Ok `Result[List[<one-level-exact>], String]` arg temp — the same
+            // tag-aware `$__drop_res_lsl` route the bind sites seed.
+            self.value_drops.entry(dst).or_default().named_route = Some("res_lsl".to_string());
+            return;
+        }
         if crate::lower::is_result_listval_ty(ty) {
             self.value_drops.entry(dst).or_default().value_result_list = true;
+            return;
+        }
+        if let Some(df) = self.variant_pair_result_drop_fn(ty) {
+            // `Result[(V1, V2), String]` arg temp (#1547 shape 1 — a transition
+            // result fed straight to a consumer) — the same recursive
+            // `$__drop_vp_<A>_<B>` wrapper route the bind sites seed.
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("resrec:{df}"));
             return;
         }
         if crate::lower::is_list_list_str_ty(ty) {

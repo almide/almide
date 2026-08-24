@@ -54,6 +54,11 @@ fn result_call_name_heap_ok_input(func: &str, arg_tys: &[Ty], result_ty: &Ty) ->
         // ANY heap-Ok instantiation admits (`result.to_option(v3)` over
         // `Result[Option[Float], String]` — C-149).
         "to_option" => true,
+        // `filter_h` is likewise payload-type-INDEPENDENT (the Ok payload is
+        // borrowed into pred and shared back; keep re-shares, fail builds the
+        // String err) — ANY heap-Ok admits. The E-repr guard in
+        // `result_call_name` runs BEFORE this arm, so arg 2 is String here.
+        "filter" => true,
         "to_err_option" => ss_in,
         _ => false,
     };

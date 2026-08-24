@@ -59,6 +59,15 @@ fn build_ir_with_drops(
     // First-class function values need the UNIFORM closure-block release
     // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
     let closure_drop = gated(uses_closures, crate::lower::CLOSURE_DROP_SRC);
+    // `$__drop_closure`'s RICH walk arm (#1547 shapes 2/3 — a `List[<rich
+    // variant>]` / `List[<recursive record>]` capture) calls the generated
+    // `__drop_env_rich` tag dispatcher — ALWAYS paired with `CLOSURE_DROP_SRC`
+    // (a program with no rich types gets the tiny always-sound stub).
+    let env_rich_drop = if uses_closures {
+        crate::lower::generate_closure_env_rich_sources(&all_type_decls)
+    } else {
+        String::new()
+    };
     // A `List[<Fn>]` LITERAL (`[(x)=>x+1, (x)=>x*2]`) routes its scope-end drop to the
     // generated `$__drop_list_closure` (per-element `$__drop_closure` — required, not a
     // blind rc_dec, since a captured heap slot would otherwise leak). Needs
@@ -100,6 +109,10 @@ fn build_ir_with_drops(
     // TAG-AWARE `$__drop_res_fs` (Ok → the pair's String slot then the pair;
     // Err → the flat message).
     let res_fs_drop = gated(usage.res_fs, crate::lower::RES_FS_DROP_SRC);
+    // A heap-Ok `Result[List[<one-level-exact>], String]` (fs.read_lines /
+    // fold_lines_ls wrappers) routes its drop to the TAG-AWARE `$__drop_res_lsl`
+    // (Ok -> slot sweep then list then wrapper; Err -> the flat message).
+    let res_lsl_drop = gated(usage.res_lenlist_str, crate::lower::RES_LSL_DROP_SRC);
     // `Result[Map[String, <scalar>], String]` / its chunked List-of-maps sibling
     // (the fs.fold_lines msi twins) route their drops to the TAG-AWARE
     // `$__drop_res_msi` / `$__drop_res_lmsi` (Ok → the skv key sweep; Err → the
@@ -114,7 +127,7 @@ fn build_ir_with_drops(
     // dangling in the WAT.
     let opt_str_int_drop = gated(usage.opt_str_scalar, crate::lower::OPT_STR_INT_DROP_SRC);
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(
@@ -128,9 +141,14 @@ fn build_ir_with_drops(
             &crate::lower::collect_interp_repr_containers(&ir)
         ),
         crate::lower::generate_krec_sources(&ir, &all_type_decls),
+        // `Result[(V1, V2), String]` wrapper drops (#1547 shape 1) — usage-driven,
+        // `$__drop_vp_<A>_<B>` per pair the program actually returns/binds.
+        crate::lower::generate_variant_pair_result_sources(&ir, &all_type_decls),
         closure_drop,
+        env_rich_drop,
         res_ilsl_drop,
         res_fs_drop,
+        res_lsl_drop,
         res_msi_drop,
         res_lmsi_drop,
         lenlist_drop,
@@ -175,6 +193,15 @@ fn build_ir_with_drops(
     // never reads `ir.functions`, so moving it ahead of the synthesis is a pure
     // reordering for every other file.
     disambiguate_module_global_regions(&mut ir);
+    // Fold `let B = "x " + A + " y"` module-level String constants whose leaves
+    // are literals and other SAME-REGION const String top-lets into ONE LitStr
+    // (#1552): a computed String constant is an ordinary shape, and unfolded it
+    // fell out of the renderer's CONST-initializer subset — walling same-module
+    // and degrading to `unbound var` across a module boundary (the bridge
+    // copies the folded init, so both spellings materialize as `Init::Str`
+    // now). Fold-by-substitution only — a leaf that is neither a literal nor a
+    // foldable const reference leaves the init untouched (walls as before).
+    fold_const_str_toplets(&mut ir);
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;
     }

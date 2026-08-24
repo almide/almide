@@ -196,6 +196,10 @@ pub fn render_wasm_fn(
     func: &MirFunction,
     func_slots: &BTreeMap<String, u32>,
     param_counts: &BTreeMap<String, usize>,
+    // `true` = a local-reuse-rewritten function (#1554): skip break fusion
+    // and BCE, whose plans pattern-match on single-def value identities the
+    // slot merge no longer guarantees.
+    plain: bool,
 ) -> String {
     let reprs = value_reprs_wasm(func);
     let floats = classify_f64_locals(func);
@@ -233,7 +237,7 @@ pub fn render_wasm_fn(
     let mut locals = declare_fn_locals(func, &reprs, &floats);
     // #806 step 4: bounds-check elision plans (render_wasm_bce.rs) — versioned
     // loops re-render their region twice, so the op walk is a RANGE renderer.
-    let bce = analyze_bce(func);
+    let bce = if plain { BTreeMap::new() } else { analyze_bce(func) };
     // A lifted lambda's heap params become i32 value locals (narrowed from their i64 raw params).
     locals.extend(lambda_heap_locals);
     let locals_decl = locals.join(" ");
@@ -250,7 +254,11 @@ pub fn render_wasm_fn(
     // sat in EVERY hot loop's header. Int compares negate exactly (total order);
     // float compares wrap in `i32.eqz` instead (¬(a<b) ≠ (a≥b) under NaN).
     // Render-level only: the MIR and its certificate are untouched.
-    let (occ, fused_break, fused_skip) = plan_break_fusion(func, &floats);
+    let (occ, fused_break, fused_skip) = if plain {
+        (BTreeMap::new(), BTreeMap::new(), BTreeSet::new())
+    } else {
+        plan_break_fusion(func, &floats)
+    };
     let tail_calls = tail_call_indexes(func);
     let ctx = RenderFnCtx {
         func,

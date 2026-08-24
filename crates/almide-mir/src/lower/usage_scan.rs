@@ -36,6 +36,9 @@ pub struct ProgramUsage {
     /// `Result[List[Int], List[String]]` anywhere — gates `$__drop_res_ilsl`.
     pub res_intlist_strlist: bool,
     pub res_fs: bool,
+    /// A heap-Ok `Result[List[<one-level-exact>], String]` anywhere (fs.read_lines /
+    /// fold_lines_ls wrappers) — gates `$__drop_res_lsl`.
+    pub res_lenlist_str: bool,
     /// Either fs.fold_lines msi Result class anywhere — gates
     /// `$__drop_res_msi` / `$__drop_res_lmsi`.
     pub res_map_si: bool,
@@ -130,6 +133,7 @@ pub fn measure_program_usage(
             u.anon_list_str_record |= (self.anon_record_matches)(ty);
             u.res_intlist_strlist |= is_res_intlist_strlist_ty(ty);
             u.res_fs |= is_res_fs_ty(ty);
+            u.res_lenlist_str |= crate::lower::is_res_lenlist_str_ty(ty);
             u.res_map_si |= is_res_map_si_ty(ty) || is_res_list_map_si_ty(ty);
             u.opt_str_scalar |= usage_is_opt_str_scalar(ty);
         }
@@ -144,6 +148,15 @@ pub fn measure_program_usage(
                 && u.lenlist_elem_lists
                 && u.anon_list_str_record
                 && u.res_intlist_strlist
+                // EVERY gated flag must sit in this early-exit conjunction: one
+                // missing here can stay false when all the LISTED flags are found
+                // first — the walk stops, the drop-SOURCE gate misses while the
+                // route sites still seed the call, and the module ships a
+                // dangling `$__drop_*` name (invalid wasm; the derived-codec
+                // decode unit test caught exactly that for res_lenlist_str, and
+                // res_fs carried the same latent omission).
+                && u.res_fs
+                && u.res_lenlist_str
                 && u.res_map_si
                 && u.opt_str_scalar
         }
@@ -173,6 +186,7 @@ pub fn measure_program_usage(
             list_str_drop_field,
             res_intlist_strlist: false,
             res_fs: false,
+            res_lenlist_str: false,
             res_map_si: false,
             opt_str_scalar: false,
         },

@@ -1,0 +1,3 @@
+let join2 = (a: String, b: String) => a + "-" + b
+
+fn main() -> Unit = println(join2("x", "y"))

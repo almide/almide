@@ -1426,6 +1426,9 @@ evidence  = [
   { path = "spec/wasm_cross/result_heap_ok_match.almd", class = "fixture" },
   { path = "spec/wasm_cross/str_result_heap_bind.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_match_rewrap_modcall.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_pair_result_return.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_pair_result_return.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1873,6 +1876,7 @@ evidence  = [
   { path = "spec/wasm_cross/nested_unwrap_or_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_result_nested_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_result_custom_e.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_option_payload.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1994,6 +1998,7 @@ since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_combinators_heap_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_filter_heap_ok.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -3818,6 +3823,7 @@ evidence  = [
   { path = "spec/wasm_cross/codec_extra_keys.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_int_float_boundaries.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_list_list_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_list_default_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_nested_records.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_option_numeric.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_string_escapes.almd", class = "fixture" },
@@ -3841,12 +3847,13 @@ evidence  = [
 id        = "C-300"
 spec      = "ALS-T2"
 title     = "map literals with Option-scalar values cross targets, leak-free"
-statement = "A Map[String, Option[<scalar>]] LITERAL — and the (String, Option[<scalar>]) pairs List it desugars through — lowers on the v1 leg and answers byte-identically to native for new/set/len/contains/get_or/keys/from_list (the #1527 top fuzz wall family). The pair element is admitted by the Flat-ctor widening of the StrStr class: an Option[<scalar>] block owns no further heap (scalar payload under len-as-tag; lenlist_elem_class is the single authority on that split), so the both-slot rc_dec frees it exactly; Option[String]/Result values stay excluded by construction. `map.eq` and `map.get` on this family stay HONEST WALLS (eq would bit-compare an Option[Float] payload where native implements f64 `==`; get's nested Option[Option[..]] wrapper has no verified drop class yet). The same change closed a PRE-EXISTING output-invisible leak the #1530 heap-cap harness exposed on its first run: an hval-family map temp in call-argument position (every INTERMEDIATE map of a multi-entry literal via __hvf_at's recursion) dropped through the flat len-slot sweep, which reads len@4 = n over a 2n-slot block — the KEY half swept, every VALUE block leaked, (n-1) blocks per literal per iteration. Arg temps of the hval/ivh families now route to $__drop_map_hval/$__drop_map_ivh like their bind-site twins; the churn probes (Option values, List values, 3-entry literals) run flat under a 256 KiB frontier ceiling at any iteration count."
+statement = "A Map[String, Option[<scalar>]] LITERAL — and the (String, Option[<scalar>]) pairs List it desugars through — lowers on the v1 leg and answers byte-identically to native for new/set/len/contains/get_or/keys/from_list (the #1527 top fuzz wall family). The pair element is admitted by the Flat-ctor widening of the StrStr class: an Option[<scalar>] block owns no further heap (scalar payload under len-as-tag; lenlist_elem_class is the single authority on that split), so the both-slot rc_dec frees it exactly; Option[String]/Result values stay excluded by construction. `map.eq` and `map.get` on this family stay HONEST WALLS (eq would bit-compare an Option[Float] payload where native implements f64 `==`; get's nested Option[Option[..]] wrapper has no verified drop class yet). The same change closed a PRE-EXISTING output-invisible leak the #1530 heap-cap harness exposed on its first run: an hval-family map temp in call-argument position (every INTERMEDIATE map of a multi-entry literal via __hvf_at's recursion) dropped through the flat len-slot sweep, which reads len@4 = n over a 2n-slot block — the KEY half swept, every VALUE block leaked, (n-1) blocks per literal per iteration. Arg temps of the hval/ivh families now route to $__drop_map_hval/$__drop_map_ivh like their bind-site twins; the churn probes (Option values, List values, 3-entry literals) run flat under a 256 KiB frontier ceiling at any iteration count. The same family's CALL-ARGUMENT leg: a List literal of routable-map elements or of Result[<one-level-exact payload>, String] elements materializes as a borrow view (tracked Vars borrowed; literal/ctor/if elements via the single-arg machinery with their exact type-routed temp drops) and the hshare accessors share the hit back — nested value/payload classes stay declined (their per-slot dec would leak)."
 since     = "0.59.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/map_literal_ctor_values.almd", class = "fixture" },
   { path = "tests/heap_cap_test.rs", name = "map_literal_intermediates_do_not_leak_under_the_cap", class = "fixture" },
+  { path = "spec/wasm_cross/list_arg_map_view.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -3864,9 +3871,10 @@ evidence  = [
 id        = "C-319"
 spec      = "ALS-I1"
 title     = "A captured-and-mutated var List is shared storage through a closure"
-statement = "A `var` List that a closure captures AND mutates behaves as ONE shared storage on both targets: a functional rebind inside the closure (`seen = seen + [s]`, the `list.push` desugar) is visible to the enclosing scope, and an enclosing-scope rebind between closure calls is visible to the next call — both directions, byte-identically native == wasm. The admitted element classes are exactly the ones whose cell teardown is already exact under the len-counted OWNED-slots rule (String elements; Flat-ctor elements like Option[Int]); a deeper element (List[List[String]], a record-valued map) keeps the honest lift refusal. The failure mode this pins against is NOT a wall: before the shared-cell admission the capture lowered as an env value-copy and the wasm leg printed a silently wrong value (native 2 / wasm 0). Cell churn is leak-free under the heap cap (flat ceiling across N=2000 vs N=8000)."
+statement = "A `var` List that a closure captures AND mutates behaves as ONE shared storage on both targets: a functional rebind inside the closure (`seen = seen + [s]`, the `list.push` desugar) is visible to the enclosing scope, and an enclosing-scope rebind between closure calls is visible to the next call — both directions, byte-identically native == wasm. The admitted inner classes are exactly the ones whose cell teardown is exact: the len-counted OWNED-slots rule (String elements; Flat-ctor elements like Option[Int]) and the ROUTED map class (`Map[String, <variant>]` / `Map[String, <all-scalar record>]` — the closure_capture_map fold shape, freed via the type-specific generated map sweep at the cell's last ref, both at scope end and through the closure-env capture); a deeper inner (List[List[String]]) keeps the honest lift refusal. The failure mode this pins against is NOT a wall: before the shared-cell admission the capture lowered as an env value-copy and the wasm leg printed a silently wrong value (native 2 / wasm 0). Cell churn is leak-free under the heap cap (flat ceiling across N=2000 vs N=8000)."
 since     = "0.59.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
 ]

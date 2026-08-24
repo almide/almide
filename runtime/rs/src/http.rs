@@ -159,6 +159,36 @@ pub fn almide_http_url_decode(s: &str) -> String {
 
 // ── HTTP Client ──
 
+/// The client read timeout: `default_secs` unless `ALMIDE_HTTP_TIMEOUT_SECS`
+/// overrides it; `0` means NO timeout (block until the server answers). A
+/// local-LLM endpoint (Ollama et al.) routinely needs 30-120 s of prompt
+/// evaluation before the first response byte, so the old hardcoded 30 s
+/// surfaced as `read failed: Resource temporarily unavailable (os error 35)`
+/// on any long call (#1561). One env var governs all three clients
+/// (request / request_bytes at 30 s default, the SSE stream at 120 s).
+/// A read error message the caller can ACT on: the timeout case names the
+/// env var (the raw `Resource temporarily unavailable (os error 35)` gave no
+/// path to the fix — #1561); everything else keeps the original detail.
+fn read_error_msg(e: &std::io::Error) -> String {
+    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+        "read timed out waiting for the server (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)"
+            .to_string()
+    } else {
+        format!("read failed: {}", e)
+    }
+}
+
+fn client_read_timeout(default_secs: u64) -> Option<std::time::Duration> {
+    match std::env::var("ALMIDE_HTTP_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        Some(0) => None,
+        Some(s) => Some(std::time::Duration::from_secs(s)),
+        None => Some(std::time::Duration::from_secs(default_secs)),
+    }
+}
+
 pub fn almide_http_get(url: &str) -> Result<String, String> {
     almide_http_request("GET", url, "", &AlmideMap::new())
 }
@@ -188,7 +218,7 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &Almide
 
     let stream = TcpStream::connect(format!("{}:{}", host, port))
         .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
+    stream.set_read_timeout(client_read_timeout(30)).ok();
 
     if is_https {
         #[cfg(not(target_arch = "wasm32"))]
@@ -221,7 +251,7 @@ pub fn almide_http_request_bytes(method: &str, url: &str, body: &str, headers: &
 
     let stream = TcpStream::connect(format!("{}:{}", host, port))
         .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
+    stream.set_read_timeout(client_read_timeout(30)).ok();
 
     if is_https {
         #[cfg(not(target_arch = "wasm32"))]
@@ -255,7 +285,7 @@ fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, pat
     stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
 
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).map_err(|e| format!("read failed: {}", e))?;
+    stream.read_to_end(&mut response).map_err(|e| read_error_msg(&e))?;
     let text = String::from_utf8_lossy(&response).to_string();
 
     // Split headers and body
@@ -295,7 +325,7 @@ pub fn almide_http_request_stream(
     let stream = TcpStream::connect(format!("{}:{}", host, port))
         .map_err(|e| format!("connection failed: {}", e))?;
     // Long read timeout — SSE responses can be quiet between events.
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(120))).ok();
+    stream.set_read_timeout(client_read_timeout(120)).ok();
 
     let mut wrap = |s: &str| on_chunk(s.to_string());
     if is_https {
@@ -350,7 +380,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
             Ok(n) => n,
             Err(e) => {
                 if acc.is_empty() && !headers_done {
-                    return Err(format!("read failed: {}", e));
+                    return Err(read_error_msg(&e));
                 }
                 break;
             }
@@ -558,7 +588,7 @@ fn http_exchange_bytes(stream: &mut (impl Read + Write), method: &str, host: &st
     stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
 
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).map_err(|e| format!("read failed: {}", e))?;
+    stream.read_to_end(&mut response).map_err(|e| read_error_msg(&e))?;
 
     // Split header/body on the raw bytes — never decode the body as UTF-8.
     if let Some(idx) = response.windows(4).position(|w| w == b"\r\n\r\n") {

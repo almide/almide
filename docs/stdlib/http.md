@@ -188,6 +188,24 @@ Send a custom HTTP request with method, URL, body, and headers
 let resp = http.request("PUT", url, body, headers)
 ```
 
+#### Read timeout (`ALMIDE_HTTP_TIMEOUT_SECS`)
+
+Every client call waits at most **30 seconds** for the server to answer
+(the SSE streaming client: 120 s between events). The
+`ALMIDE_HTTP_TIMEOUT_SECS` environment variable overrides the limit for
+all clients; `0` means **no timeout** — block until the server responds.
+A slow endpoint (a local LLM evaluating a long prompt routinely needs
+30–120 s before the first byte) fails past the limit with:
+
+```
+read timed out waiting for the server (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)
+```
+
+```sh
+ALMIDE_HTTP_TIMEOUT_SECS=300 ./app   # five minutes
+ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
+```
+
 ### `http.get_bytes(url: String) -> Result[Bytes, String]`
 
 Send an HTTP GET and return the raw response body as `Bytes` (no UTF-8

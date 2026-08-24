@@ -1,0 +1,27 @@
+# Release evidence seal — v0.59.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.59.0"
+tag = "v0.59.0"
+tag_commit = "dd4c0642750779642517dcb70542471dfd5ec6b7"
+date = "2026-08-21"
+url = "https://github.com/almide/almide/releases/tag/v0.59.0"
+
+[derived]
+cargo_version = "0.59.0"
+contracts_sha256 = "0e13d95fc94314fb5f3e9fa1758680e3ad98fb6e80816e2184323a2bca0346f4"
+contracts_total = "302"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "06211c5ba984367710c33455eb8c9c52965a672b67799cb8445dd3169ea9a171"
+abstain_ledger_entries = "23"
+wasm_cross_fixtures = "592"
+rust_toolchain = "1.89.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Recorded retroactively 2026-08-24 (the seal was not generated at release time — this file restores the audit trail). Pre-release evidence: scheduled nightly fuzz 32444117132 (2026-08-21 03:38 JST, develop, verdict PASSED, findings=0) on the pre-tag tree. The release-day manual dispatch 32469528095 (09:47) was CANCELLED before completion — the default 60-minute budget exceeds the small-runner lifetime; the -f minutes=8 requirement entered the operational notes from this failure. No dedicated release-gate dispatch completed for this tag; the nightly verdict and the tag-time CI (develop 763842a74 / release merge dd4c06427: full suite green, Trust Spine + Cross-Target + Acceptance Ring all success) are the gate evidence that exists."
+assets = "6: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256"
+known_problems = "#1547 (Result[tuple] return walls honestly on wasm — disclosed in the release notes; resolved in 0.59.1). Discovered POST-release by the DDD ports/adapters verification: the check-green/build-dead batch #1549/#1550/#1551 (cross-module receiver borrow mode, mut-param whole-assign, protocol-bound mut param), #1556 (nested generic mono), #1558 (C-132 bare-name collision), #1559 (fmt drops a protocol mut receiver), #1560 (borrowed-param field/index stores) — all resolved in 0.59.1 with pins."

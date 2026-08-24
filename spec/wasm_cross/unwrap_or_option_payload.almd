@@ -1,0 +1,51 @@
+// @contract: C-149
+// The 9b1f134bf unwrap_or read-shape specimen (#1562 — committed so the shape
+// is never prose-only again): a var bound from result/option.unwrap_or whose
+// RESULT IS ITSELF AN OPTION (`Result[Option[Float], String]` -> Option[Float])
+// then matched with call-bearing arms. The trigger is exactly this nesting —
+// a record/variant/String unwrap_or result takes the custom-variant/eq match
+// machinery and never needed the seed (the five natural variants all ran
+// pre-fix); an Option result needs the bound var's VariantShape::Option, and
+// without the type-keyed seed at the module-call bind the match fell to the
+// untracked linearization wall. Churn keeps the share discipline honest.
+fn main() -> Unit = {
+  let n1: Result[Float?, String] = ok(some(1.5))
+  let e1: Result[Float?, String] = err("boom")
+  let r4 = result.unwrap_or(n1, none)
+  match r4 {
+    some(v) => println("got ${v}"),
+    none => println("none"),
+  }
+  let r5 = result.unwrap_or(e1, none)
+  match r5 {
+    some(v) => println("got ${v}"),
+    none => println("none"),
+  }
+  let r6 = result.unwrap_or(e1, some(9.5))
+  match r6 {
+    some(v) => println("dflt ${v}"),
+    none => println("none"),
+  }
+  let oo: (Int?)? = some(some(7))
+  let r7 = option.unwrap_or(oo, none)
+  match r7 {
+    some(v) => println("inner ${v}"),
+    none => println("none"),
+  }
+  var i = 0
+  var acc = 0
+  while i < 2000 {
+    let t: Result[Float?, String] = ok(some(2.5))
+    let g = result.unwrap_or(t, none)
+    match g {
+      some(v) => {
+        acc = acc + 1
+      },
+      none => {
+        acc = acc - 1
+      },
+    }
+    i = i + 1
+  }
+  println("acc=${acc}")
+}

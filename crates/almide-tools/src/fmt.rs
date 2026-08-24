@@ -929,7 +929,15 @@ fn fmt_decl_protocol(out: &mut String, decl: &Decl, depth: usize) {
         let mut params_str = String::new();
         for (j, p) in m.params.iter().enumerate() {
             if j > 0 { params_str.push_str(", "); }
-            if is_bare_self_param(p) {
+            // `mut` is semantic here exactly as in fmt_decl_fn (a mutable-borrow
+            // receiver/param — `fn bump(mut self: Self, by: Int)`); dropping it
+            // failed the AST-conservation verifier on every protocol spelling a
+            // mut method (#1559). A MUT self keeps the TYPED spelling — the
+            // protocol grammar has no bare `mut self` (`mut self,` fails to
+            // re-parse: Expected Colon), so the shorthand is for the immutable
+            // receiver only.
+            if p.is_mut { params_str.push_str("mut "); }
+            if is_bare_self_param(p) && !p.is_mut {
                 params_str.push_str("self");
             } else {
                 params_str.push_str(&p.name);

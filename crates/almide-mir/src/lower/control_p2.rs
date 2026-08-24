@@ -787,6 +787,14 @@ impl LowerCtx {
             self.value_drops.entry(subj).or_default().named_route = Some(format!("resrec:{drop_fn}"));
             return;
         }
+        if let Some(drop_fn) = self.variant_pair_result_drop_fn(ty) {
+            // VARIANT-PAIR-Ok `Result[(V1, V2), String]` (#1547 shape 1): the same
+            // recursive `resrec:` discipline as the record-Ok arm above — the subject's
+            // scope-end drop recurses via the generated `$__drop_vp_<A>_<B>`; the flat
+            // fallback would free the pair block only and leak both variants' trees.
+            self.value_drops.entry(subj).or_default().named_route = Some(format!("resrec:{drop_fn}"));
+            return;
+        }
         if crate::lower::is_result_listval_ty(ty) {
             self.value_drops.entry(subj).or_default().value_result_list = true;
             return;

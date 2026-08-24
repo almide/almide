@@ -95,3 +95,30 @@ fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
   let n = prim.load32(ph + 4)
   __hobj_from_at(ph, n, 0, prim.alloc_map_kv(0))
 }
+
+// ── new/set/get twins for the NAMED-value map (`Map[String, Acc]` — the
+// closure_capture_map row's stdlib leg, #1143). Handle-level like from_list:
+// set co-owns the value handle (the rc_inc lives in __hobj_set's copy/append
+// helpers), get SHARES the stored value back (the hshare discipline — the
+// `some` payload co-owns via the Option ctor; the map keeps its reference).
+// The map's type-specific DROP stays in generated code (`__drop_map_<V>` /
+// `__drop_map_rec_<R>`), routed by the bind's `map_named_value_drop`.
+fn map_new_hobj() -> Map[String, String] = prim.alloc_map_kv(0)
+
+fn map_set_hobj(m: Map[String, String], k: String, v: String) -> Map[String, String] =
+  __hobj_set(m, k, prim.handle(v))
+
+fn __hobj_none() -> String? = none
+
+fn __hobj_some(h: Int, n: Int, idx: Int) -> String? = {
+  let v: String = prim.load_handle(h + 12 + (n + idx) * 8)
+  some(v)
+}
+
+fn map_get_hobj(m: Map[String, String], k: String) -> String? = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let idx = __hobj_find(h, n, k, 0)
+  if idx < 0 then __hobj_none()
+  else __hobj_some(h, n, idx)
+}

@@ -75,19 +75,21 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
 /// rewriter's own write-back block targeting that same param. Anything else
 /// is left untouched (the lowering's honest wall keeps guarding it).
 fn fold_tail_writebacks(program: &mut IrProgram, mut_fns: &MutFns) {
-    for func in program
-        .functions
-        .iter_mut()
-        .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
-    {
-        fold_one_fn_tail_writebacks(func, mut_fns);
+    for func in program.functions.iter_mut() {
+        fold_one_fn_tail_writebacks(func, "", mut_fns);
+    }
+    for m in program.modules.iter_mut() {
+        let scope = m.name.to_string();
+        for func in m.functions.iter_mut() {
+            fold_one_fn_tail_writebacks(func, &scope, mut_fns);
+        }
     }
 }
 
-fn fold_one_fn_tail_writebacks(func: &mut IrFunction, mut_fns: &MutFns) {
+fn fold_one_fn_tail_writebacks(func: &mut IrFunction, scope: &str, mut_fns: &MutFns) {
     // Only a rewritten was-Unit mut fn (phase 1 cleared `mutated_params`; the
-    // name-keyed entry survives).
-    let Some(&(idx, ref mut_ty, was_unit)) = mut_fns.get(func.name.as_str()) else { return };
+    // scope-keyed entry survives).
+    let Some(&(idx, ref mut_ty, was_unit)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
     if !was_unit {
         return;
     }
@@ -104,7 +106,7 @@ fn fold_one_fn_tail_writebacks(func: &mut IrFunction, mut_fns: &MutFns) {
         return;
     }
     let mut folded = if_expr.clone();
-    if !fold_if_arms(&mut folded, p, mut_ty, mut_fns) {
+    if !fold_if_arms(&mut folded, p, mut_ty, scope, mut_fns) {
         return;
     }
     folded.ty = mut_ty.clone();
@@ -116,10 +118,10 @@ fn fold_one_fn_tail_writebacks(func: &mut IrFunction, mut_fns: &MutFns) {
 /// the direct tail call, any other Unit leaf becomes (or is followed by) the
 /// param read. Returns false (fold declined, tree possibly half-mutated — the
 /// caller drops the clone) if a leaf is outside the recognized set.
-fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, mut_fns: &MutFns) -> bool {
+fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &MutFns) -> bool {
     if let IrExprKind::If { then, else_, .. } = &mut e.kind {
         e.ty = mut_ty.clone();
-        return fold_if_arms(then, p, mut_ty, mut_fns) && fold_if_arms(else_, p, mut_ty, mut_fns);
+        return fold_if_arms(then, p, mut_ty, scope, mut_fns) && fold_if_arms(else_, p, mut_ty, scope, mut_fns);
     }
     let param_read = |span| IrExpr {
         kind: IrExprKind::Var { id: p },
@@ -135,7 +137,7 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, mut_fns: &MutFns) -> bool
         // tail so the fold reaches the leaf.
         if let Some(t) = expr.as_deref_mut() {
             if matches!(t.kind, IrExprKind::Block { .. } | IrExprKind::If { .. }) {
-                if !fold_if_arms(t, p, mut_ty, mut_fns) {
+                if !fold_if_arms(t, p, mut_ty, scope, mut_fns) {
                     return false;
                 }
                 e.ty = mut_ty.clone();
@@ -161,7 +163,7 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, mut_fns: &MutFns) -> bool
                         };
                         matches!(&inner.kind,
                             IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                                if mut_fns.contains_key(name.as_str())
+                                if (mut_fns.contains_key(name.as_str()) || mut_fns.contains_key(&scope_key(scope, name.as_str())))
                                     && args.iter().any(|a| matches!(&a.kind, IrExprKind::Var { id } if *id == p)))
                     }
                     _ => false,
@@ -197,6 +199,17 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, mut_fns: &MutFns) -> bool
     false
 }
 
+/// The SCOPED bare-name key: a bare `CallTarget::Named` call resolves inside
+/// its own scope only (the main file, or one module's own body — every
+/// cross-module spelling is mangled by `resolve_user_module_calls` before this
+/// pass runs), so bare keys are namespaced per scope. `""` is the main scope.
+/// This is what makes a user `fn replace` immune to stdlib/string.almd's
+/// unrelated `replace` (#1558: the old GLOBAL bare count silently excluded the
+/// user fn from the rewrite and the wall message never said why).
+fn scope_key(scope: &str, name: &str) -> String {
+    format!("{scope}\u{1}{name}")
+}
+
 /// Functions eligible for the move-mode rewrite: name → (mut param index, its
 /// type, whether the callee returned Unit before the rewrite).
 ///
@@ -207,16 +220,52 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, mut_fns: &MutFns) -> bool
 /// fn — leaves an invalid module (the pass previously indexed
 /// `mutated_params[0]` on the same-name NON-mut sibling and panicked).
 fn collect_mut_fns(program: &IrProgram) -> MutFns {
-    let mut name_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for func in all_functions(program) {
-        *name_count.entry(func.name.as_str()).or_insert(0) += 1;
+    // Bare-name ambiguity is PER SCOPE: a bare call site can only refer to a
+    // fn in its own scope, so only a same-scope duplicate makes the rewrite
+    // unsafe (#692). The old global count also swept every linked stdlib
+    // module, so a user fn merely SHARING a verb with string.replace et al.
+    // was silently excluded and its wasm leg walled (#1558).
+    let mut name_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for func in program.functions.iter() {
+        *name_count.entry(scope_key("", func.name.as_str())).or_insert(0) += 1;
+    }
+    for m in &program.modules {
+        for func in &m.functions {
+            *name_count.entry(scope_key(m.name.as_str(), func.name.as_str())).or_insert(0) += 1;
+        }
     }
     let mut mut_fns: MutFns = std::collections::HashMap::new();
     // Program-level functions first, then module ones — the original
     // collection order, which a duplicate name would otherwise decide.
-    for func in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
-        if let Some(entry) = mut_fn_entry(func, &name_count) {
-            mut_fns.insert(func.name.to_string(), entry);
+    for func in program.functions.iter() {
+        if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key("", func.name.as_str())).copied().unwrap_or(0)) {
+            mut_fns.insert(scope_key("", func.name.as_str()), entry);
+        }
+    }
+    for m in &program.modules {
+        for func in &m.functions {
+            if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key(m.name.as_str(), func.name.as_str())).copied().unwrap_or(0)) {
+                // A MODULE fn's call sites spell THREE names: bare from inside
+                // the module, MODULE-QUALIFIED (`convmut.Box.bump`) pre-resolution,
+                // and the MANGLED runtime symbol (`almide_rt_convmut_Box_bump`)
+                // after `resolve_user_module_calls`. The body rewrite
+                // keys the bare name; the CALL-SITE rewriter must hit either
+                // spelling or the rewritten callee's returned buffer is left
+                // unconsumed on the caller's stack (invalid wasm — the #1549
+                // cross-module mut-receiver leg). The bare name passed the
+                // uniqueness guard above, so the qualified alias is likewise
+                // unambiguous.
+                mut_fns.insert(
+                    format!(
+                        "almide_rt_{}_{}",
+                        m.name.as_str().replace('.', "_"),
+                        func.name.as_str().replace('.', "_")
+                    ),
+                    entry.clone(),
+                );
+                mut_fns.insert(format!("{}.{}", m.name.as_str(), func.name.as_str()), entry.clone());
+                mut_fns.insert(scope_key(m.name.as_str(), func.name.as_str()), entry);
+            }
         }
     }
     if std::env::var("ALMIDE_MP_PROBE").is_ok() {
@@ -230,12 +279,12 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
 /// One function's [`MutFns`] entry, or `None` when it is not eligible.
 fn mut_fn_entry(
     func: &IrFunction,
-    name_count: &std::collections::HashMap<&str, usize>,
+    same_scope_count: usize,
 ) -> Option<(usize, Ty, bool)> {
     if func.mutated_params.len() != 1 {
         return None;
     }
-    if name_count.get(func.name.as_str()).copied().unwrap_or(0) != 1 {
+    if same_scope_count != 1 {
         return None;
     }
     let idx = func.mutated_params[0];
@@ -247,14 +296,6 @@ fn mut_fn_entry(
     Some((idx, p.ty.clone(), was_unit))
 }
 
-/// Every function in the program, main module first then imported modules.
-fn all_functions(program: &IrProgram) -> impl Iterator<Item = &IrFunction> {
-    program
-        .functions
-        .iter()
-        .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
-}
-
 /// Phase 1: rewrite function bodies. Unit-returning fns return the
 /// mutated param; value-returning fns return (orig, mutated) as a tuple
 /// (#705 — previously the non-Unit case was silently skipped, so the
@@ -262,18 +303,20 @@ fn all_functions(program: &IrProgram) -> impl Iterator<Item = &IrFunction> {
 /// `len=3` native, and mlp's loss printed 0.0).
 fn rewrite_signatures(program: &mut IrProgram, mut_fns: &MutFns) {
     let vt = &mut program.var_table;
-    for func in program
-        .functions
-        .iter_mut()
-        .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
-    {
-        rewrite_one_signature(func, vt, mut_fns);
+    for func in program.functions.iter_mut() {
+        rewrite_one_signature(func, "", vt, mut_fns);
+    }
+    for m in program.modules.iter_mut() {
+        let scope = m.name.to_string();
+        for func in m.functions.iter_mut() {
+            rewrite_one_signature(func, &scope, vt, mut_fns);
+        }
     }
 }
 
 /// Give one eligible function the move-mode signature and body.
-fn rewrite_one_signature(func: &mut IrFunction, vt: &mut VarTable, mut_fns: &MutFns) {
-    let Some(&(entry_idx, _, was_unit)) = mut_fns.get(func.name.as_str()) else { return };
+fn rewrite_one_signature(func: &mut IrFunction, scope: &str, vt: &mut VarTable, mut_fns: &MutFns) {
+    let Some(&(entry_idx, _, was_unit)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
     // Name-keyed entry — confirm THIS func is the one that was
     // collected (unique-name invariant above makes this a plain
     // assertion, but stay defensive).
@@ -369,18 +412,18 @@ fn unit_placeholder() -> IrExpr {
 /// the writeback — native mutates an invisible temp there too.
 fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns) {
     let vt = &mut program.var_table;
-    let mut rw = CallSiteRewriter { mut_fns, vt };
-    for func in program
-        .functions
-        .iter_mut()
-        .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
-    {
+    let mut rw = CallSiteRewriter { mut_fns, vt, scope: String::new() };
+    for func in program.functions.iter_mut() {
         rw.visit_expr_mut(&mut func.body);
     }
     for tl in &mut program.top_lets {
         rw.visit_expr_mut(&mut tl.value);
     }
     for m in &mut program.modules {
+        rw.scope = m.name.to_string();
+        for func in m.functions.iter_mut() {
+            rw.visit_expr_mut(&mut func.body);
+        }
         for tl in &mut m.top_lets {
             rw.visit_expr_mut(&mut tl.value);
         }
@@ -412,6 +455,10 @@ fn mut_arg_place(arg: &IrExpr) -> ArgPlace {
 struct CallSiteRewriter<'a> {
     mut_fns: &'a MutFns,
     vt: &'a mut VarTable,
+    /// The scope whose bodies are currently being rewritten ("" = main): a
+    /// BARE callee name resolves against this scope's key; the mangled and
+    /// dotted spellings are global keys tried first.
+    scope: String,
 }
 
 impl IrMutVisitor for CallSiteRewriter<'_> {
@@ -440,7 +487,12 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
             return;
         };
-        let Some((idx, mut_ty, was_unit)) = self.mut_fns.get(name.as_str()).cloned() else {
+        let Some((idx, mut_ty, was_unit)) = self
+            .mut_fns
+            .get(name.as_str())
+            .or_else(|| self.mut_fns.get(&scope_key(&self.scope, name.as_str())))
+            .cloned()
+        else {
             return;
         };
         let Some(arg) = args.get(idx) else { return };
@@ -547,8 +599,12 @@ impl CallSiteRewriter<'_> {
         let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &value.kind else {
             return false;
         };
-        matches!(self.mut_fns.get(name.as_str()), Some(&(_, _, true)))
-            && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Unit))
+        matches!(
+            self.mut_fns
+                .get(name.as_str())
+                .or_else(|| self.mut_fns.get(&scope_key(&self.scope, name.as_str()))),
+            Some(&(_, _, true))
+        ) && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Unit))
     }
 
     /// Perform the rotation [`Self::wrapper_rotation_applies`] admitted. The

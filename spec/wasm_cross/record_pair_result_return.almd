@@ -1,0 +1,102 @@
+// @contract: C-106
+// Result[(A, B), String] return with RECORD slots — #1564, the record cells
+// of the pair-result matrix (#1547 shape 1 closed only the variant cells; an
+// ordinary aggregate is a record, so `fn advance(s: St) -> (St, Ev)!` with St
+// a record is the same state-machine shape). Exercises the record-widened
+// vp_<A>_<B> classification: (rich record, rich variant) — the issue's repro,
+// (rich record, rich record), (rich record, String) mixed, and an ALL-SCALAR
+// record slot under the flat rc_dec class. The churn loop OOMs the wasm heap
+// if the `$__drop_<R>` recursion route leaks either slot's tree.
+type St: Eq, Repr = { id: String, done: Bool }
+
+type Ev = | Started(String) | Finished(String)
+
+type Note: Eq, Repr = { text: String }
+
+type Flags: Eq, Repr = { hits: Int, live: Bool }
+
+fn advance(s: St) -> (St, Ev)! = match s.done {
+  false => (St { id: s.id, done: true }, Finished(s.id)),
+  true => err("already"),
+}
+
+fn annotate(s: St) -> (St, Note)! = match s.done {
+  false => (St { id: s.id, done: true }, Note { text: "moved:" + s.id }),
+  true => err("stuck:" + s.id),
+}
+
+fn label(s: St) -> (St, String)! = match s.done {
+  false => (St { id: s.id, done: true }, "tagged:" + s.id),
+  true => err("late:" + s.id),
+}
+
+fn count(s: St) -> (Flags, Ev)! = match s.done {
+  false => (Flags { hits: 1, live: true }, Started(s.id)),
+  true => err("closed"),
+}
+
+fn show_ev(e: Ev) -> String = match e {
+  Started(id) => "started:" + id,
+  Finished(id) => "finished:" + id,
+}
+
+fn main() -> Unit = {
+  // (rich record, rich variant) — the issue's repro cell, Ok and Err
+  match advance(St { id: "x", done: false }) {
+    ok(p) => match p {
+      (st, ev) => println(st.id + " " + show_ev(ev))
+    },
+    err(e) => println(e),
+  }
+  match advance(St { id: "y", done: true }) {
+    ok(p) => println("unexpected"),
+    err(e) => println(e),
+  }
+  // (rich record, rich record)
+  match annotate(St { id: "n", done: false }) {
+    ok(p) => match p {
+      (st, note) => println(st.id + " / " + note.text)
+    },
+    err(e) => println(e),
+  }
+  // bind-then-match, (rich record, String) mixed
+  let r = label(St { id: "m", done: false })
+  match r {
+    ok(p) => match p {
+      (st, tag) => println(st.id + " / " + tag)
+    },
+    err(e) => println(e),
+  }
+  // (ALL-SCALAR record, rich variant) — the flat-record slot class
+  match count(St { id: "f", done: false }) {
+    ok(p) => match p {
+      (fl, ev) => println("${fl.hits} " + show_ev(ev))
+    },
+    err(e) => println(e),
+  }
+  // churn: wrapper + record tree + variant tree freed each iteration
+  var i = 0
+  var acc = 0
+  while i < 2000 {
+    match advance(St { id: "some-longer-id-string-payload", done: false }) {
+      ok(p) => match p {
+        (st, ev) => {
+          acc = acc + 1
+        }
+      },
+      err(e) => {
+        acc = acc - 1
+      },
+    }
+    match annotate(St { id: "another-id", done: true }) {
+      ok(p) => {
+        acc = acc + 10
+      },
+      err(e) => {
+        acc = acc + 2
+      },
+    }
+    i = i + 1
+  }
+  println("${acc}")
+}

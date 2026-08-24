@@ -311,13 +311,28 @@ fn resolve_drop_alias(target: &str, resolvable: &BTreeSet<String>) -> Option<Str
 /// DEFINITION carries the DOUBLE mangle (`almide_rt_varlib_varlib_Pigment_encode`
 /// — module prefix + qualified type name, observed in the linked IR). Resolve the
 /// alias at the render boundary: the burned name is undefined, but re-inserting
-/// the module segment hits the defined fn. A module name containing `_` fails the
-/// split and simply keeps the conservative wall.
+/// the module segment hits the defined fn. The module segment's end is not
+/// recoverable from the flat name when the module itself contains `_`
+/// (`ai_types` — #1555: the first-underscore split guessed `ai`, so the shape
+/// walled while the `aitypes` spelling linked), so EVERY split point is tried
+/// against the DEFINED set — and only a UNIQUE hit resolves. An ambiguous
+/// name (two split points both defined) keeps the conservative wall: never
+/// mislink.
 fn resolve_rt_alias(name: &str, resolvable: &BTreeSet<String>) -> Option<String> {
     let rest = name.strip_prefix("almide_rt_")?;
-    let (m, _) = rest.split_once('_')?;
-    let cand = format!("almide_rt_{m}_{rest}");
-    resolvable.contains(&cand).then_some(cand)
+    let mut hit: Option<String> = None;
+    for (i, _) in rest.match_indices('_') {
+        let m = &rest[..i];
+        let cand = format!("almide_rt_{m}_{rest}");
+        if resolvable.contains(&cand) {
+            match &hit {
+                None => hit = Some(cand),
+                Some(prev) if *prev != cand => return None,
+                Some(_) => {}
+            }
+        }
+    }
+    hit
 }
 
 pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower::LowerError> {
@@ -358,6 +373,40 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
              rendering them would emit a dangling `(call $…)` (invalid wasm). \
              Add the callee to the self-host registry or wall the using function."
         )));
+    }
+    // The wasm validator caps a function at 50_000 locals, and the renderer
+    // allocates locals SSA-style (one per defined value, no reuse), so a
+    // large-but-ordinary function can genuinely exceed it (#1554: a Markdown
+    // render fn at ~50k). Shipping the module fails VALIDATION with the
+    // "this is an Almide bug" banner and no hint which function to split —
+    // wall it here instead, named, before a byte is emitted. The margin
+    // covers the per-family drop scratch registers declared beyond the
+    // defined-value count. (The real fix — a local-reuse pass — retires this
+    // wall when it lands; until then the wall is the honest surface.)
+    const WASM_MAX_LOCALS: usize = 50_000;
+    const LOCAL_SCRATCH_MARGIN: usize = 16;
+    for f in &pruned.functions {
+        // Count what will actually be DECLARED: over the reuse threshold the
+        // renderer applies the local-reuse plan (render_wasm_local_reuse.rs),
+        // so the wall judges the post-reuse slot count — it only fires when
+        // even reuse cannot get under the ceiling.
+        let pre = distinct_local_count(f);
+        let declared = if pre > local_reuse_threshold() {
+            let spilled = spill_terminal_drops(f);
+            let base = spilled.as_ref().unwrap_or(f);
+            plan_local_reuse(base)
+                .map(|p| p.slot_count)
+                .unwrap_or_else(|| distinct_local_count(base))
+        } else {
+            pre
+        };
+        if declared + LOCAL_SCRATCH_MARGIN > WASM_MAX_LOCALS {
+            return Err(crate::lower::LowerError::Unsupported(format!(
+                "fn `{}` needs {} wasm locals — over the validator's 50,000 ceiling                  (the renderer does not reuse local slots yet, #1554). Split part of                  the function into its own fn to get under the limit.",
+                f.name,
+                declared
+            )));
+        }
     }
     Ok(render_wasm_program(&pruned))
 }
@@ -431,8 +480,27 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .functions
         .iter()
         .map(|f| {
-            let body =
-                fold_const_wrap_roundtrips(&render_wasm_fn(f, &func_slots, &param_counts));
+            // Over the threshold, share local slots by liveness and render
+            // PLAIN (break fusion + BCE pattern-match on single-def value
+            // identities the merge no longer guarantees; the const-wrap
+            // peephole self-excludes multi-set locals at the text level).
+            // Under it — every existing proven module — nothing changes.
+            let body = if distinct_local_count(f) > local_reuse_threshold() {
+                // Spill the terminal scope-end drops into a buffer first —
+                // without it every heap temp is live to fn-end and the scan
+                // merges nothing — then share slots by liveness.
+                let spilled = spill_terminal_drops(f);
+                let base: &MirFunction = spilled.as_ref().unwrap_or(f);
+                match plan_local_reuse(base) {
+                    Some(plan) => {
+                        let reused = apply_local_reuse(base, &plan);
+                        fold_const_wrap_roundtrips(&render_wasm_fn(&reused, &func_slots, &param_counts, true))
+                    }
+                    None => fold_const_wrap_roundtrips(&render_wasm_fn(base, &func_slots, &param_counts, true)),
+                }
+            } else {
+                fold_const_wrap_roundtrips(&render_wasm_fn(f, &func_slots, &param_counts, false))
+            };
             strip_region_clone_rc_incs(&f.name, body)
         })
         .collect::<String>();
@@ -666,6 +734,7 @@ include!("render_wasm_bce.rs");
 include!("render_wasm_c.rs");
 include!("render_wasm_dce.rs");
 include!("render_wasm_peephole.rs");
+include!("render_wasm_local_reuse.rs");
 include!("render_wasm_switch.rs");
 
 /// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.

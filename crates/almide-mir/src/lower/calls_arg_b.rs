@@ -686,7 +686,24 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 Some(dst)
             }
-            _ => None,
+            // Any OTHER element shape (a desugared map literal — a Module
+            // from_list call — a heap `if`, an Option/Result ctor) delegates to
+            // the SINGLE-ARG lowering: the full call-argument machinery already
+            // materializes each of these as a fresh OWNED temp with its exact
+            // type-routed scope-end drop (`materialized_call_arg`'s seeding),
+            // which is precisely the ownership story a view slot borrows
+            // against. A shape that machinery declines errors out and the view
+            // rolls back — the same honest wall as before.
+            _ => {
+                let mut out: Vec<CallArg> = Vec::new();
+                match self.lower_call_arg_into(e, &mut out) {
+                    Ok(()) => match out.pop() {
+                        Some(CallArg::Handle(v)) => Some(v),
+                        _ => None,
+                    },
+                    Err(_) => None,
+                }
+            }
         }
     }
 
@@ -716,7 +733,47 @@ impl LowerCtx {
                 .aggregate_field_tys(elem_ty)
                 .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
                 .is_some();
-        if !flat_content {
+        // Beyond the flat classes: a ROUTABLE-MAP element (#1527's List-argument
+        // top family — `list.get_or([m0, m1], i, d)` over Map values). The view
+        // itself never reads element bytes (slots are borrowed handles) and the
+        // hshare accessor family the router sends these callees to is likewise
+        // handle-level; what must be EXACT is the scope-end drop story of any
+        // element temp and of the shared-out result — and for every map class
+        // below that is precisely the type-keyed route `materialized_call_arg`'s
+        // seeding ladder already installs (named-value sweep / hval / ivh / msv /
+        // mlo / the skv key sweep / the interleaved Map[heap,heap] DropListStr).
+        // The FAMILY is the parameter (the same router classes the map ops use),
+        // never a hardcoded key type.
+        // ONE-LEVEL-EXACT under a per-slot dec: a scalar side is untouched, a
+        // String/Bytes/flat-block/Flat-ctor side decs clean. Shared by the
+        // map-layout arm below and the Result-element arm.
+        let one_exact = |t: &Ty| !is_heap_ty(t)
+            || matches!(t, Ty::String | Ty::Bytes)
+            || crate::lower::is_flat_scalar_block_ty(t)
+            || crate::lower::lenlist_elem_class(t)
+                == Some(crate::lower::CtorElemClass::Flat);
+        let routable_map = self.map_named_value_drop(elem_ty).is_some()
+            || crate::lower::is_map_hval_ty(elem_ty)
+            || crate::lower::is_map_ivh_ty(elem_ty)
+            || crate::lower::is_map_msv_ty(elem_ty)
+            || crate::lower::is_map_mlo_ty(elem_ty)
+            || matches!(elem_ty,
+                Ty::Applied(TypeConstructorId::Map, a)
+                    if a.len() == 2 && one_exact(&a[0]) && one_exact(&a[1]))
+            // A `Result[<one-level-exact payload>, String]` element
+            // (`list.get_or([acc0, n1], 5, x2)` over Result[Option[Float],
+            // String] — the #1527 List-argument Result bucket's flat half):
+            // the element and the shared-out result both ride the DynListStr
+            // family's per-slot sweep (`is_heap_elem_list_ty` -> flat_elems),
+            // which is exact precisely when the Ok payload is one-level-exact
+            // (the Err String always is). A NESTED payload (Result[Result[..]],
+            // Result[Map[..]], Option[String]) stays declined — its slot-0 dec
+            // would leak the payload's interior.
+            || matches!(elem_ty,
+                Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2 && matches!(a[1], Ty::String) && one_exact(&a[0]))
+            ;
+        if !flat_content && !routable_map {
             return None;
         }
         let ops_mark = self.ops.len();

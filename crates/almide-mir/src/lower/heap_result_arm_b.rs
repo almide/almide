@@ -35,6 +35,11 @@ impl LowerCtx {
                 self.lower_rec_int_result_ctor_arm(arm, result_ty)
             }
             IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if self.variant_pair_result_drop_fn(result_ty).is_some() =>
+            {
+                self.lower_variant_pair_result_ctor_arm(arm, result_ty)
+            }
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
                 if crate::lower::is_value_int_result_ty(result_ty) =>
             {
                 self.lower_value_int_result_ctor_arm(arm, result_ty)
@@ -99,6 +104,19 @@ impl LowerCtx {
     fn lower_rec_int_result_ctor_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         let arm_mark = self.live_heap_handles.len();
         let obj = self.try_lower_result_rec_int_ctor(arm, result_ty)?;
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
+    }
+
+    /// The `(V1, V2)` VARIANT-PAIR result-ctor arm body (#1547 shape 1):
+    /// `ok((Done(id), Finished(id)))` / `err("already")` arms of a
+    /// `Result[(St, Ev), String]`-returning match — the state-machine transition
+    /// return. Same per-arm frame as every sibling (`arm_mark` / ctor / `Consume` /
+    /// `drop_arm_locals`); the ctor's recursive drop is `resrec:vp_<A>_<B>`.
+    fn lower_variant_pair_result_ctor_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let obj = self.try_lower_result_variant_pair_ctor(arm, result_ty)?;
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)

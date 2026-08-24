@@ -142,6 +142,136 @@ impl LowerCtx {
         }
     }
 
+    /// Is `ty` `Result[(V1, V2), String]` where each pair slot is a registry VARIANT
+    /// (RICH — recursive-drop — or FLAT) / String / Bytes, with at least one RICH slot
+    /// (#1547 shape 1 — the aggregate-transition return `(new_state, event)`)? Returns
+    /// the generated wrapper drop's suffix (`vp_<A>_<B>`). The slot classification
+    /// MIRRORS `generate_variant_pair_result_sources`' Finder one for one (the same
+    /// record-widened `needs_recursive_drop` both sides of the rich gate use), so an
+    /// admission here ALWAYS has a generated `$__drop_vp_<A>_<B>`. An all-flat pair
+    /// declines — it frees exactly like `(String, Int)`'s existing flat routes.
+    pub(crate) fn variant_pair_result_drop_fn(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Result, a) = ty else { return None };
+        if a.len() != 2 || !matches!(a[1], Ty::String) {
+            return None;
+        }
+        let Ty::Tuple(ts) = &a[0] else { return None };
+        if ts.len() != 2 {
+            return None;
+        }
+        let class = |t: &Ty| -> Option<(String, bool)> {
+            match t {
+                Ty::Named(n, args) if args.is_empty() => {
+                    let ns = n.as_str();
+                    if self.variant_layouts.needs_recursive_drop(ns, &|rn| {
+                        crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                    }) {
+                        Some((ns.to_string(), true))
+                    } else if self.variant_layouts.is_flat_variant_ty(t) {
+                        Some((ns.to_string(), false))
+                    // RECORD slots (#1564 — the matrix's other cell): a
+                    // recursive-drop record recurses via `$__drop_<R>`
+                    // (record_drop_type_name is the generation mirror), an
+                    // all-scalar record is one-level-exact under the flat dec.
+                    } else if let Some(rn) = self.record_drop_type_name(t) {
+                        Some((rn, true))
+                    } else if self
+                        .aggregate_field_tys(t)
+                        .is_some_and(|(_, tys)| tys.iter().all(|f| !is_heap_ty(f)))
+                    {
+                        Some((ns.to_string(), false))
+                    } else {
+                        None
+                    }
+                }
+                Ty::String => Some(("String".to_string(), false)),
+                Ty::Bytes => Some(("Bytes".to_string(), false)),
+                _ => None,
+            }
+        };
+        let (an, a_rich) = class(&ts[0])?;
+        let (bn, b_rich) = class(&ts[1])?;
+        (a_rich || b_rich).then(|| {
+            format!(
+                "vp_{}_{}",
+                crate::lower::drop_fn_ident(&an),
+                crate::lower::drop_fn_ident(&bn)
+            )
+        })
+    }
+
+    /// Construct a `Result[(V1, V2), String]` `ok((A(..), B(..)))` / `err(<String>)` —
+    /// #1547 shape 1, the state-machine transition return `(Done(id), Finished(id))`.
+    /// Ok lowers BOTH slots as fresh owned heap values (`lower_owned_heap_field` — a
+    /// variant ctor element routes through `try_lower_variant_ctor`), builds the 2-slot
+    /// pair block owning them (handles @12 / @20 — the `try_lower_result_rec_int_ctor`
+    /// pair build with slot 1's scalar store swapped for a second moved-in handle), and
+    /// wraps it via `materialize_result_aggregate`; the wrapper's [`Op::DropWrapperRec`]
+    /// recurses via the generated `$__drop_vp_<A>_<B>` (`resrec:vp_<A>_<B>`), and the
+    /// Err arm is the flat @12 String the wrapper render already decs. Any inadmissible
+    /// piece rolls back and declines — the caller walls (never wrong bytes).
+    pub(crate) fn try_lower_result_variant_pair_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+
+        let drop_fn = self.variant_pair_result_drop_fn(result_ty)?;
+        let repr = repr_of(result_ty).ok()?;
+        match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => {
+                let IrExprKind::Tuple { elements } = &inner.kind else { return None };
+                if elements.len() != 2 {
+                    return None;
+                }
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let a = match self.lower_owned_heap_field(&elements[0]) {
+                    Some(v) => v,
+                    None => return self.rollback_ops(ops_mark, lhh_mark),
+                };
+                let b = match self.lower_owned_heap_field(&elements[1]) {
+                    Some(v) => v,
+                    None => return self.rollback_ops(ops_mark, lhh_mark),
+                };
+                // The 2-slot pair block OWNING both variant blocks (moved in).
+                let two = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: two, value: 2 });
+                let tup = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: tup,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::DynList { len: two },
+                });
+                let th = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(th), args: vec![tup] });
+                let ah = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ah), args: vec![a] });
+                let s0 = self.load_addr(th, 12);
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s0, ah] });
+                self.ops.push(Op::Consume { v: a });
+                self.live_heap_handles.retain(|h| *h != a);
+                let bh = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(bh), args: vec![b] });
+                let s1o = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: s1o, value: 20 });
+                let s1 = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: s1, op: IntOp::Add, a: th, b: s1o });
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s1, bh] });
+                self.ops.push(Op::Consume { v: b });
+                self.live_heap_handles.retain(|h| *h != b);
+                Some(self.materialize_result_aggregate(tup, repr, false, drop_fn))
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                Some(self.materialize_result_aggregate(piece, repr, true, drop_fn))
+            }
+            _ => None,
+        }
+    }
+
     /// Construct a `Result[heap-record, String]` `ok(<record>)` / `err(<String>)` — porta
     /// read_valtype's `ok({val, next})`. Ok materializes the owned record (`try_lower_record_construct`,
     /// recursive-drop) and wraps it (the wrapper's [`Op::DropWrapperRec`] recurses via `$__drop_<R>`);

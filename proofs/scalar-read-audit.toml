@@ -25,9 +25,9 @@
 [[arm]]
 file = "binds.rs"
 fn = "lower_lifted_lambda_body"
-loads = 1
+loads = 2
 verdict = "NOT_SUM_READ"
-why = "Closure env slots 2..2+k are the fixed CaptureLayout capture list (slot 0 fnidx, 1 drop header) — never a len-as-tag sum block."
+why = "Closure env slots 2..2+k are the fixed CaptureLayout capture list (slot 0 fnidx, 1 drop header) — never a len-as-tag sum block. The second load is the RICH capture's payload deref (#1547 shapes 2/3): slot @20 of the [tag@12][payload@20] wrapper the SAME lift built — a fixed 2-slot layout, likewise never a sum block."
 
 [[arm]]
 file = "binds_p3_b.rs"

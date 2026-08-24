@@ -3,9 +3,24 @@ impl LowerCtx {
     pub(crate) fn lower_place_mutation(&mut self, target: VarId) -> Result<(), LowerError> {
         let v = self.value_for(target)?;
         if self.param_values.contains(&v) {
-            return Err(LowerError::Unsupported(
-                "in-place mutation of a borrowed param not in this brick".into(),
-            ));
+            // The C-132 move-mode body (`{ self.n = self.n + by; self }` — a
+            // rewritten `mut` receiver/param, #1557 leg 1): the BORROW cannot
+            // be mutated in place — `MakeUnique` alone would `rc_dec` a count
+            // the borrow never incremented, stealing the CALLER's reference
+            // (undercount → UAF on the rc>1 alias path). Take an OWNED COW
+            // copy instead: `Dup` (+1) then `MakeUnique` (its dec restores
+            // the count, and rc>1 always holds after the Dup, so the local is
+            // a fresh unique clone). The body's stores land on the clone; the
+            // rewrite's tail `p` read RETURNS it (the call site's write-back
+            // owns it) — value semantics exactly, the caller's block and any
+            // alias untouched. From here on the var maps to a plain tracked
+            // local (scope-end drop if the tail is never reached on a path).
+            let owned = self.fresh_value();
+            self.ops.push(Op::Dup { dst: owned, src: v });
+            self.ops.push(Op::MakeUnique { v: owned });
+            self.live_heap_handles.push(owned);
+            self.value_of.insert(target, owned);
+            return Ok(());
         }
         self.ops.push(Op::MakeUnique { v });
         Ok(())

@@ -152,6 +152,19 @@ pub(crate) fn collect_cell_vars(
 pub(crate) enum CellClass {
     Scalar,
     FlatHeap,
+    /// An inner whose exact free is a TYPE-SPECIFIC generated map sweep —
+    /// `Map[String, <variant>]` / `Map[String, <all-scalar record>]` (the
+    /// closure_capture_map fold class, #1143), the `map_named_value_drop` set.
+    /// The len sweep classes above cannot serve it (the split layout's n value
+    /// handles would leak), so: the cell's scope-end drop routes
+    /// `optrec:<name>` (the 1-slot cell IS the wrapper shape — len@4 = 1
+    /// always, so `DropWrapperRec` recurses into the @12 inner via the
+    /// generated `$__drop_<name>` at last ref, then frees the cell), and the
+    /// env capture rides the RICH class with a `cell:`-prefixed tag (the
+    /// `__drop_env_rich` cell arms free the co-owned cell the same way).
+    /// Reads/writes ride the generic heap arms — `materialized_call_arg`
+    /// already seeds the inner's own route on every Dup'd read / taken old.
+    Routed,
     /// An inner whose block is "len@4-counted OWNED slots, nothing deeper" —
     /// the STRUCTURAL rule, with (so far) two instances: a `Map[String,
     /// <scalar>]` (len counts the KEYS; the key slots are owned Strings, the
@@ -207,6 +220,14 @@ pub(crate) fn cell_class_of(ty: &Ty) -> Option<CellClass> {
 }
 
 impl LowerCtx {
+    /// The registry-aware widening of [`cell_class_of`]: the free fn's classes
+    /// first, then the ROUTED map class (`map_named_value_drop` needs the
+    /// variant/record registries a free fn does not have). Every cell-class
+    /// decision goes through THIS method so admission is one set.
+    pub(crate) fn cell_class_of_ctx(&self, ty: &Ty) -> Option<CellClass> {
+        cell_class_of(ty).or_else(|| self.map_named_value_drop(ty).map(|_| CellClass::Routed))
+    }
+
     /// The address of a cell's single value slot (slot 0 of the 1-slot block).
     fn cell_slot_addr(&mut self, cell: ValueId) -> ValueId {
         let h = self.fresh_value();
@@ -240,7 +261,7 @@ impl LowerCtx {
                         "cell var {var:?} scalar initializer outside the value subset"
                     ))
                 })?,
-            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
                 self.lower_owned_heap_field(value).ok_or_else(|| {
                     LowerError::Unsupported(format!(
                         "cell var {var:?} heap initializer outside the value subset"
@@ -265,7 +286,7 @@ impl LowerCtx {
                     args: vec![addr, inner],
                 });
             }
-            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
                 let handle = self.fresh_value();
                 self.ops
                     .push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(handle), args: vec![inner] });
@@ -276,7 +297,19 @@ impl LowerCtx {
                 });
                 self.ops.push(Op::Consume { v: inner });
                 self.live_heap_handles.retain(|x| *x != inner);
-                if class == CellClass::LenOwnedSlots {
+                if class == CellClass::Routed {
+                    // The inner needs its TYPE-SPECIFIC generated sweep
+                    // (`$__drop_map_<V>` / `$__drop_map_rec_<R>`): the 1-slot
+                    // cell IS the optrec wrapper shape (len@4 = 1 always), so
+                    // `optrec:<name>` recurses into the @12 inner at last ref
+                    // then frees the cell — the len sweeps would leak the split
+                    // layout's n value handles.
+                    let name = self
+                        .map_named_value_drop(ty)
+                        .expect("Routed admitted only via map_named_value_drop");
+                    self.value_drops.entry(cell).or_default().named_route =
+                        Some(format!("optrec:{name}"));
+                } else if class == CellClass::LenOwnedSlots {
                     // The inner owns its len-counted slots (skv keys / one-exact
                     // list elements): the cell's scope-end drop is the NESTED
                     // DropListListStr walk (cell slot -> len-slot sweep -> inner
@@ -304,7 +337,7 @@ impl LowerCtx {
         let ty = self.var_decl_tys.get(&var).cloned().ok_or_else(|| {
             LowerError::Unsupported(format!("cell var {var:?} has no recorded type"))
         })?;
-        let class = cell_class_of(&ty).ok_or_else(|| {
+        let class = self.cell_class_of_ctx(&ty).ok_or_else(|| {
             LowerError::Unsupported(format!("cell var {var:?} inner class not in this brick"))
         })?;
         let addr = self.cell_slot_addr(cell);
@@ -318,7 +351,7 @@ impl LowerCtx {
                 });
                 Ok(dst)
             }
-            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
                 let repr = repr_of(&ty)?;
                 let borrowed = self.fresh_value();
                 self.ops.push(Op::Prim {
@@ -358,7 +391,7 @@ impl LowerCtx {
         let ty = self.var_decl_tys.get(&var).cloned().ok_or_else(|| {
             LowerError::Unsupported(format!("cell var {var:?} has no recorded type"))
         })?;
-        let class = cell_class_of(&ty).ok_or_else(|| {
+        let class = self.cell_class_of_ctx(&ty).ok_or_else(|| {
             LowerError::Unsupported(format!("cell var {var:?} inner class not in this brick"))
         })?;
         match class {
@@ -380,7 +413,7 @@ impl LowerCtx {
                 });
                 Ok(())
             }
-            CellClass::FlatHeap | CellClass::LenOwnedSlots => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
                 let new = self.lower_owned_heap_field(value).ok_or_else(|| {
                     LowerError::Unsupported(format!(
                         "heap value assigned to cell var {var:?} outside the executable subset"

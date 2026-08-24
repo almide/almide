@@ -1,0 +1,78 @@
+// @contract: C-106
+// Result[(V1, V2), String] return — #1547 shape 1, the state-machine
+// transition shape: a fn returning ok((new_state, event)) / err(msg) where
+// both tuple slots are user variants. Exercises the vp_<A>_<B> wrapper drop
+// family end to end: the ctor arm (try_lower_result_variant_pair_ctor), the
+// bind + match-subject resrec: seeds, the ok(p) borrow + (st, ev) destructure,
+// the mixed rich/flat pair (St, String), and a churn loop that would OOM the
+// wasm heap if the recursive $__drop_vp_* route leaked either variant's tree.
+type St = | Draft(String) | Done(String)
+
+type Ev = | Started(String) | Finished(String)
+
+fn advance(s: St) -> (St, Ev)! = match s {
+  Draft(id) => (Done(id), Finished(id)),
+  Done(id) => err("already"),
+}
+
+fn tag(s: St) -> (St, String)! = match s {
+  Draft(id) => (Done(id), "moved:" + id),
+  Done(id) => err("stuck:" + id),
+}
+
+fn show(s: St) -> String = match s {
+  Draft(id) => "draft:" + id,
+  Done(id) => "done:" + id,
+}
+
+fn show_ev(e: Ev) -> String = match e {
+  Started(id) => "started:" + id,
+  Finished(id) => "finished:" + id,
+}
+
+fn main() -> Unit = {
+  // direct match-subject consumption, Ok and Err
+  match advance(Draft("a")) {
+    ok(p) => match p {
+      (st, ev) => println(show(st) + " " + show_ev(ev))
+    },
+    err(e) => println(e),
+  }
+  match advance(Done("b")) {
+    ok(p) => println("unexpected"),
+    err(e) => println(e),
+  }
+  // bind-then-match (the call-bind seed), mixed rich/flat pair
+  let r = tag(Draft("x"))
+  match r {
+    ok(p) => match p {
+      (st, note) => println(show(st) + " / " + note)
+    },
+    err(e) => println(e),
+  }
+  // churn: drops the wrapper + both variants each iteration; a leak OOMs wasm
+  var i = 0
+  var acc = 0
+  while i < 2000 {
+    match advance(Draft("some-longer-id-string-payload")) {
+      ok(p) => match p {
+        (st, ev) => {
+          acc = acc + 1
+        }
+      },
+      err(e) => {
+        acc = acc - 1
+      },
+    }
+    match advance(Done("another-id")) {
+      ok(p) => {
+        acc = acc + 10
+      },
+      err(e) => {
+        acc = acc + 2
+      },
+    }
+    i = i + 1
+  }
+  println("${acc}")
+}

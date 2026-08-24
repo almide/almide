@@ -163,7 +163,21 @@ impl LowerCtx {
         // type-keyed entry point (`seed_variant_value_shape`). The blocks
         // below add only the refinements that need &self layout knowledge
         // (the variant-err classes), which the shared seeder cannot host yet.
-        let materialized = crate::lower::is_self_host_materialized_result_fn(module, func);
+        let materialized = crate::lower::is_self_host_materialized_result_fn(module, func)
+            // An ELEMENT-SHARING accessor whose element type IS a Result
+            // (`list.get_or([r0, r1], i, d)` over Result elements — the #1527
+            // List-argument view family): the hshare route shares a REAL
+            // materialized block back (the view admits only real elements), so
+            // the bound var must carry the same type-keyed read shape the
+            // match-subject path would seed — without it a later `match` over
+            // the var fell to the untracked linearization wall.
+            || (module == "list" && func == "get_or")
+            // The unwrap_or family's result is the Ok payload / the default —
+            // a REAL block for every REGISTERED route (an unregistered repr
+            // routes `_x` and walls before any bind exists). Without the seed,
+            // `let r = result.unwrap_or(Result[Option[Float], String], none)`
+            // then `match r { some.. }` fell to the untracked wall.
+            || (matches!(module, "result" | "option") && func == "unwrap_or");
         let family = crate::lower::result_family(ty);
         if materialized {
             self.seed_variant_value_shape(dst, ty);
@@ -225,11 +239,28 @@ impl LowerCtx {
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
+        if crate::lower::is_res_lenlist_str_ty(ty) {
+            // Heap-Ok `Result[List[<one-level-exact>], String]` (fs.read_lines /
+            // fold_lines_ls) — the TAG-AWARE `$__drop_res_lsl` (Ok -> slot sweep
+            // then list then wrapper; Err -> message). The one-level wrapper
+            // sweep freed the list BLOCK-ONLY and stranded every element (the
+            // read_lines-in-a-lifted-effect-fn churn leak).
+            self.value_drops.entry(dst).or_default().named_route = Some("res_lsl".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
         if crate::lower::is_res_intlist_strlist_ty(ty) {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
             // either flat class would leak or double-free one side).
             self.value_drops.entry(dst).or_default().named_route = Some("res_ilsl".to_string());
+            self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
+            return true;
+        }
+        if let Some(df) = self.variant_pair_result_drop_fn(ty) {
+            // `Result[(V1, V2), String]` (#1547 shape 1) — the same recursive
+            // `$__drop_vp_<A>_<B>` wrapper route the Named-call bind sites seed.
+            self.value_drops.entry(dst).or_default().named_route = Some(format!("resrec:{df}"));
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             return true;
         }
@@ -406,6 +437,28 @@ impl LowerCtx {
         if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
             if a.len() == 2 && matches!(a[0], Ty::String)
                 && (!is_heap_ty(&a[1]) || matches!(a[1], Ty::String)))
+        {
+            self.value_drops.entry(dst).or_default().flat_elems = true;
+        }
+        // A LIST-of-one-level-exact closure result (`(acc, line) => acc + [line]`
+        // — the fold walker's per-iteration acc, List[String] being one instance):
+        // the bare default is a FLAT rc_dec, which frees the list BLOCK ONLY and
+        // STRANDS every element's refcount — the fs_fold_lines_ls churn leaked
+        // exactly its per-line Strings (trace: 20-byte blocks ending at rc >= 1
+        // with no F), and the shipped range_ls/chunked_ls walkers ride the same
+        // shape. The predicate is STRUCTURAL (the registry-free one-level-exact
+        // subset cells.rs admits): every len-counted slot is an owned handle one
+        // rc_dec fully frees, so the DropListStr sweep is exact. Deeper elements
+        // (List[List[String]]) stay off this arm — a one-level sweep would leak
+        // THEIR interiors; they keep the flat default until a routed seed exists
+        // (the Opt[List[String]] arm above is the precedent).
+        if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+            if a.len() == 1
+                && (matches!(a[0], Ty::String | Ty::Bytes)
+                    || matches!(&a[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                        if b.len() == 1 && !is_heap_ty(&b[0]))
+                    || crate::lower::lenlist_elem_class(&a[0])
+                        == Some(crate::lower::CtorElemClass::Flat)))
         {
             self.value_drops.entry(dst).or_default().flat_elems = true;
         }

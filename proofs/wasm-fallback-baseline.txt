@@ -16,9 +16,7 @@
 #                       (assert_throws requires catching a panic; wasm traps
 #                       are uncatchable in-process).
 #
-# COMPILER_FRONTIER (2) — the debt, in leverage order:
-spec/lang/closure_capture_map_test.almd :: COMPILER_FRONTIER :: measured (shared-cell brick, closure_captured_list_mutation): only `__almd_test_2` ("closure folds records through a captured map via match") still walls — the Map[String, Int] cell tests now render. The blocker is BELOW the cell class: `map.new`/`map.get`/`map.insert` on a Map[String, <record>] route to the deliberate `*_hval_wall` stubs even with NO closure in the program (probe-measured), so this row needs the record-valued-map stdlib family (new/get/insert twins + Option[<record>] match consumption) FIRST, then the routed cell class (`map_named_value_drop` already names the drop route) and its env-capture leg. Not a one-brick row.
-spec/lang/codec_default_list_test.almd :: COMPILER_FRONTIER :: Codec decode sits on the heap-result-match subset boundary (#1520 pin); native leg is the authority until that brick
+# COMPILER_FRONTIER (0) — the debt is EMPTY: every spec file the wasm leg can host, it runs.
 #
 # HOST_CAPABILITY (6):
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
