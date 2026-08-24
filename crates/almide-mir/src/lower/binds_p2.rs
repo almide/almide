@@ -65,6 +65,18 @@ impl LowerCtx {
                     .into(),
             ));
         }
+        // A `Try` bind (the auto-`?` node the codec DERIVE decoders synthesize
+        // per `?`-bound field — user auto-? was removed by ADR-0008/E041) has
+        // the SAME propagation semantics as `!`. Under the probe the position
+        // desugars that used to restructure it are off, so route it through
+        // the one rule; a decline falls through to the existing chain (the
+        // nested-arm reach wall stays the honest fallback). Probe-off is
+        // untouched — the desugar ladder still owns the node.
+        if crate::lower::bang_return_probe() && matches!(&value.kind, IrExprKind::Try { .. }) {
+            if self.try_lower_bind_unwrap_return(var, ty, value)? {
+                return Ok(());
+            }
+        }
         // A BLOCK-valued bind (`let a = { let n = 5; n * n }` — an inlined pipe-lambda, or any block
         // in value position): lower the block's statements as effects in the current scope, then bind
         // `var` to the block's TAIL by recursing. Without this the Block falls through to the scalar
@@ -134,7 +146,9 @@ impl LowerCtx {
                 return Ok(false);
             }};
         }
-        let IrExprKind::Unwrap { expr } = &value.kind else { return Ok(false) };
+        let (IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }) = &value.kind else {
+            return Ok(false);
+        };
         // A DECLARED-Result fn admits by its declared family; a LIFTED effect
         // fn by its synthetic `Result[T, String]` carrier's family — BOTH are
         // now computed at ctx build (`decl_ret_family` covers the lift; the
@@ -305,6 +319,12 @@ impl LowerCtx {
             Some(v)
         });
         let Some(v) = attempt else { decline!("callee-lowering") };
+        if dbg {
+            eprintln!(
+                "BANG-FIRE {} :: callee_ty={:?} fam={:?} opt={} rebox={} void={}",
+                self.fn_name, expr.ty, callee_fam, callee_is_option, rebox, void_fn
+            );
+        }
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
         // The err tag: Scalar family reads len-as-tag @4; HeapOk reads the
@@ -469,18 +489,23 @@ impl LowerCtx {
             let payload = self.fresh_value();
             self.ops.push(Op::Dup { dst: payload, src: borrowed });
             self.live_heap_handles.push(payload);
+            // EVERY payload class rides the ordinary Named-call bind's
+            // seeding — the SAME route+read pair, in the same order: the
+            // drop-route chain (map key-sweeps, list_<R>, lenlist, the
+            // List[Value]/value sets), then the read shapes (record field
+            // reads, variant read-shape via seed_variant_param, materialized
+            // lists). One seeding story, not a per-class fork: the classic
+            // branch's hand-rolled flat_elems missed value_elem_lists on a
+            // List[Value] payload, and the codec decoder's element reads came
+            // back wrong ("expected Str" on an OK decode — the t3 probe).
+            self.seed_call_named_heap_drop_route(payload, ty);
+            self.seed_call_named_heap_read_shape(payload, ty);
+            self.seed_variant_value_shape(payload, ty);
             if adt_payload {
-                // The ADT classes ride the ordinary Named-call bind's seeding
-                // wholesale — the SAME route+read pair, in the same order:
-                // the drop-route chain (map key-sweeps, list_<R>, lenlist —
-                // the routes the type resolves), then the read shapes (record
-                // field reads via materialized_aggregates + heap-slot mask +
-                // the recursive/anonrec named_route). A USER VARIANT payload
-                // additionally routes its scope-end drop: RICH recurses via
-                // the generated `$__drop_<V>` (named_route -> DropVariant),
-                // FLAT frees one level under the default Drop.
-                self.seed_call_named_heap_drop_route(payload, ty);
-                self.seed_call_named_heap_read_shape(payload, ty);
+                // A USER VARIANT payload additionally routes its scope-end
+                // drop: RICH recurses via the generated `$__drop_<V>`
+                // (named_route -> DropVariant), FLAT frees one level under
+                // the default Drop.
                 if let Ty::Named(n, args) = ty {
                     if args.is_empty()
                         && self.variant_layouts.needs_recursive_drop(n.as_str(), &|rn| {
@@ -491,11 +516,6 @@ impl LowerCtx {
                             Some(n.as_str().to_string());
                     }
                 }
-            } else {
-                if crate::lower::is_heap_elem_list_ty(ty) {
-                    self.value_drops.entry(payload).or_default().flat_elems = true;
-                }
-                self.seed_variant_value_shape(payload, ty);
             }
             self.value_of.insert(var, payload);
         } else {
