@@ -161,3 +161,30 @@ fn mut_param_protocol_bound_native() {
         "1313",
     );
 }
+
+/// #1560: a borrowed-param RHS stored into a field or an indexed slot
+/// (`t.name = s`, `xs[0] = s` where `s: String` renders as `&str`) must own
+/// via the #624 coercion exactly as a Bind's initializer does (rustc E0308
+/// pre-fix; wasm was always correct — native-only emit).
+#[test]
+fn borrowed_param_field_and_index_assign_native() {
+    run_prints(
+        "field_idx_own",
+        &[(
+            "src/main.almd",
+            "import io\n\n\
+             type Tag = { name: String, n: Int }\n\n\
+             fn retag(mut t: Tag, s: String) -> Unit = { t.name = s t.n = t.n + 1 }\n\n\
+             fn set_slot(mut xs: List[String], s: String) -> Unit = { xs[0] = s }\n\n\
+             effect fn main() -> Unit = {\n  \
+               var a = Tag { name: \"orig\", n: 0 }\n  \
+               retag(a, \"fresh\")\n  \
+               io.print(a.name)\n  \
+               io.print(int.to_string(a.n))\n  \
+               var l = [\"x\", \"y\"]\n  \
+               set_slot(l, \"z\")\n  \
+               io.print(list.join(l, \",\"))\n}\n",
+        )],
+        "fresh1z,y",
+    );
+}

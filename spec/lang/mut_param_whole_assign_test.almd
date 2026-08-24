@@ -1,25 +1,27 @@
 // #1550: a WHOLE-parameter assignment to a `mut` param (`b = Box { … }`)
 // must emit the write-back through the &mut binding (`*p = …`), not a plain
 // local rebind — check was green and rustc died E0308, and the caller would
-// otherwise never see the new value. (A FIELD assign of the same param is
-// the in-place-mutation class pinned by mut_param_protocol_bound_test's
-// native leg / #1557; kept out of here so this file votes on wasm.)
+// otherwise never see the new value. The fn is deliberately named `replace`
+// — a bare name stdlib/string.almd also declares — pinning #1558: the C-132
+// rewrite's bare-name ambiguity guard is PER SCOPE now, so sharing a verb
+// with a linked module fn no longer silently excludes the rewrite (pre-fix
+// this file's wasm leg walled on exactly that).
 type Box = { n: Int }
 
-fn swap_in(mut b: Box, by: Int) -> Unit = {
+fn replace(mut b: Box, by: Int) -> Unit = {
   b = Box { n: b.n + by }
 }
 
 test "whole-param assignment writes back to the caller (#1550)" {
   var b = Box { n: 1 }
-  swap_in(b, 4)
+  replace(b, 4)
   assert_eq(b.n, 5)
 }
 
 test "repeated whole-param assignment accumulates (#1550)" {
   var b = Box { n: 10 }
-  swap_in(b, 7)
+  replace(b, 7)
   assert_eq(b.n, 17)
-  swap_in(b, 3)
+  replace(b, 3)
   assert_eq(b.n, 20)
 }

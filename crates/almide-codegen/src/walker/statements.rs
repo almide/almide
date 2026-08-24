@@ -528,7 +528,10 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::IndexAssign { target, index, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
     let idx_str = render_expr(ctx, index);
-    let val_str = render_expr(ctx, value);
+    // Same #624 owning coercion as the field-assign arm above (#1560): a
+    // borrowed-param element value must own into the slot.
+    let val_str = borrowed_param_owning_value(ctx, value)
+        .unwrap_or_else(|| render_expr(ctx, value));
     let var_ty = &ctx.var_table.get(*target).ty;
     let is_bytes = matches!(var_ty, Ty::Bytes);
     let cast_val = if is_bytes { format!("{} as u8", val_str) } else { val_str };
@@ -588,7 +591,12 @@ fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
 fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::FieldAssign { target, field, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
-    let val_str = render_expr(ctx, value);
+    // A borrowed-param RHS (`t.name = s` where `s: String` renders as `&str`)
+    // must own into the field exactly as a Bind's initializer does (#624's
+    // helper; the field-assign arm simply never called it — check green,
+    // rustc E0308, #1560).
+    let val_str = borrowed_param_owning_value(ctx, value)
+        .unwrap_or_else(|| render_expr(ctx, value));
     // Shared-mut non-Copy var (`SharedMut`, P6): assign the field through the cell.
     if ctx.ann.is_shared_mut(target) {
         return format!("{}.borrow_mut().{} = {};", target_str, field, val_str);

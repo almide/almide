@@ -171,7 +171,13 @@ impl LowerCtx {
             // the bound var must carry the same type-keyed read shape the
             // match-subject path would seed — without it a later `match` over
             // the var fell to the untracked linearization wall.
-            || (module == "list" && func == "get_or");
+            || (module == "list" && func == "get_or")
+            // The unwrap_or family's result is the Ok payload / the default —
+            // a REAL block for every REGISTERED route (an unregistered repr
+            // routes `_x` and walls before any bind exists). Without the seed,
+            // `let r = result.unwrap_or(Result[Option[Float], String], none)`
+            // then `match r { some.. }` fell to the untracked wall.
+            || (matches!(module, "result" | "option") && func == "unwrap_or");
         let family = crate::lower::result_family(ty);
         if materialized {
             self.seed_variant_value_shape(dst, ty);

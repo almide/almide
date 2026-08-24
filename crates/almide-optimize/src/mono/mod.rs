@@ -41,9 +41,16 @@ use propagation::propagate_concrete_types;
 /// functions, subsequent rounds only scan newly created specializations.
 /// This reduces transitive discovery from O(N × total_functions) to O(N × new_functions).
 pub fn monomorphize(program: &mut IrProgram) {
-    monomorphize_module_fns(program);
+    // Round 1 keeps the generic module fns ALIVE (prune deferred): a TOP-LEVEL
+    // generic's body may call a MODULE generic (`via_generic[T](x) =
+    // app.doubled(x)` — #1556), and that instance only becomes concrete once
+    // the top-level loop below has specialized the caller. Pruning here made
+    // the round-2 discovery impossible — the callee was already gone, check
+    // stayed green, and the native build died E0425 (wasm: unlinked wall).
+    monomorphize_module_fns(program, false);
     let bound_fns = find_structurally_bounded_fns(&program.functions, &program.type_decls);
     if bound_fns.is_empty() {
+        prune_generic_module_fns(program);
         // Mutual tail-call SCC collapse (#1043) rides monomorphize because
         // this is the ONE stage every consumer shares — v0 codegen, the v1
         // native/wasm renders and almide-interp all take this output — so
@@ -117,6 +124,17 @@ pub fn monomorphize(program: &mut IrProgram) {
     // Remove generic functions: both those with specialized instances AND
     // those with no call sites (unused generics still carry TypeVars).
     //
+    // Round 2 of the MODULE-generic mono (#1556): the top-level loop above may
+    // have specialized a caller whose body names a module generic with now-
+    // CONCRETE args (`via_generic__Cell` → `app.doubled(x: Cell)`); discover
+    // and specialize those before the generics are pruned. Itself a fixed
+    // point, so a module chain exposed here converges too. (A top-level
+    // generic newly exposed FROM a round-2 module body would need another
+    // alternation — no such shape exists in the corpus; the audit below
+    // trips loudly if one appears.)
+    monomorphize_module_fns(program, false);
+    prune_generic_module_fns(program);
+
     // IMPORTANT: tests may share a name with a function (e.g. `fn wrap_all[T]`
     // and `test "wrap_all"` both lower to `name = "wrap_all"`). Only drop
     // *generic non-test* functions — never a test, regardless of name.
@@ -508,9 +526,12 @@ fn prune_generic_module_fns(program: &mut IrProgram) {
 /// codegen on every backend continues to go through the same stdlib
 /// dispatch path — bundled fns are treated as first-class module members,
 /// not lifted to top-level.
-fn monomorphize_module_fns(program: &mut IrProgram) {
+fn monomorphize_module_fns(program: &mut IrProgram, prune: bool) {
     let generics = collect_module_generics(program);
     if generics.is_empty() {
+        if prune {
+            prune_generic_module_fns(program);
+        }
         return;
     }
 
@@ -559,7 +580,9 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         walk_program_exprs(program, &mut rw);
     }
 
-    prune_generic_module_fns(program);
+    if prune {
+        prune_generic_module_fns(program);
+    }
 }
 
 /// Replace remaining TypeVars in VarTable with Unknown.

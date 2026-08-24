@@ -1,0 +1,28 @@
+// #1556: a generic fn calling ANOTHER MODULE's generic fn must monomorphize
+// the callee. The module-generic mono ran once BEFORE the top-level loop and
+// pruned every generic module fn at its end, so an instance that only becomes
+// concrete inside a top-level specialization (`via_generic__Cell` ->
+// `genlib.doubled(x: Cell)`) was never minted — check green, native rustc
+// E0425 (`cannot find function almide_rt_genlib_doubled`), wasm unlinked
+// wall. Both legs were broken, so this fixture pins both.
+import genlib
+
+type Cell: HasValue = { n: Int }
+
+fn Cell.value(self) -> Int = self.n
+
+fn via_generic[T: HasValue](x: T) -> Int = genlib.doubled(x)
+
+fn via_chain[T: HasValue](x: T) -> Int = genlib.quadrupled(x)
+
+test "a top-level generic reaches a module generic (#1556)" {
+  assert_eq(via_generic(Cell { n: 21 }), 42)
+}
+
+test "the direct non-generic call still resolves (#1556)" {
+  assert_eq(genlib.doubled(Cell { n: 5 }), 10)
+}
+
+test "a module-generic chain behind a top-level generic (#1556)" {
+  assert_eq(via_chain(Cell { n: 3 }), 12)
+}
