@@ -1875,6 +1875,7 @@ evidence  = [
   { path = "spec/wasm_cross/nested_unwrap_or_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_result_nested_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_result_custom_e.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_option_payload.almd", class = "fixture" },
 ]
 
 [[contract]]
