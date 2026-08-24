@@ -166,7 +166,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-136 | In-place place mutations persist to the subsequent read on both targets | 0.30.0 | active | fixture | 1 |
 | C-137 | Relative fs paths resolve against the host CWD on wasm | 0.31.0 | active | fixture | 1 |
 | C-138 | ok/err ctor with a stdlib-call payload materializes the real value | 0.31.0 | active | fixture | 1 |
-| C-139 | Heap-Ok Result value combinators keep tag and payload | 0.31.0 | active | fixture | 1 |
+| C-139 | Heap-Ok Result value combinators keep tag and payload | 0.31.0 | active | fixture | 2 |
 | C-140 | float.round preserves the sign of a zero result | 0.31.0 | active | fixture | 1 |
 | C-141 | list.zip_with routes by element repr — String zips work, no wrong-typed link | 0.31.0 | active | fixture | 1 |
 | C-142 | result.unwrap_or_else is valid wasm at the Float instantiation on both legs | 0.31.0 | active | fixture | 1 |

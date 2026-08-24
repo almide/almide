@@ -255,6 +255,29 @@ fn result_unwrap_or_else_h(r: Result[String, String], f: fn(String) -> String) -
   }
 }
 
+// result.filter_h: ok(x) kept iff pred(x) (else err(err_val)); err(e) → err(e
+// shared). Payload-type-INDEPENDENT like to_option_h — the Ok payload is only
+// BORROWED into pred and shared back, never read as a typed value — so ANY
+// heap-Ok instantiation rides this one routine. The E side stays String-pinned
+// by the err_val argument (the #1431 rule: filter's E is argument-pinned, and
+// the router's E guard runs before the heap-Ok arm).
+fn __rmh_filter_ok(x: String, pred: fn(String) -> Bool, err_val: String) -> Result[String, String] = {
+  let keep = pred(x)
+  if keep then ok(x) else err(err_val)
+}
+
+fn result_filter_h(r: Result[String, String], pred: fn(String) -> Bool, err_val: String) -> Result[String, String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag == 0 then {
+    let x: String = prim.load_handle(h + 12)
+    __rmh_filter_ok(x, pred, err_val)
+  } else {
+    let e: String = prim.load_handle(h + 12)
+    __rmh_err_share(e)
+  }
+}
+
 // result.to_option_h: ok(x) → some(x shared), err(_) → none
 fn result_to_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)

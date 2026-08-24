@@ -1996,6 +1996,7 @@ since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_combinators_heap_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_filter_heap_ok.almd", class = "fixture" },
 ]
 
 [[contract]]
