@@ -296,14 +296,6 @@ fn mut_fn_entry(
     Some((idx, p.ty.clone(), was_unit))
 }
 
-/// Every function in the program, main module first then imported modules.
-fn all_functions(program: &IrProgram) -> impl Iterator<Item = &IrFunction> {
-    program
-        .functions
-        .iter()
-        .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
-}
-
 /// Phase 1: rewrite function bodies. Unit-returning fns return the
 /// mutated param; value-returning fns return (orig, mutated) as a tuple
 /// (#705 — previously the non-Unit case was silently skipped, so the
