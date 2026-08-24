@@ -163,7 +163,15 @@ impl LowerCtx {
         // type-keyed entry point (`seed_variant_value_shape`). The blocks
         // below add only the refinements that need &self layout knowledge
         // (the variant-err classes), which the shared seeder cannot host yet.
-        let materialized = crate::lower::is_self_host_materialized_result_fn(module, func);
+        let materialized = crate::lower::is_self_host_materialized_result_fn(module, func)
+            // An ELEMENT-SHARING accessor whose element type IS a Result
+            // (`list.get_or([r0, r1], i, d)` over Result elements — the #1527
+            // List-argument view family): the hshare route shares a REAL
+            // materialized block back (the view admits only real elements), so
+            // the bound var must carry the same type-keyed read shape the
+            // match-subject path would seed — without it a later `match` over
+            // the var fell to the untracked linearization wall.
+            || (module == "list" && func == "get_or");
         let family = crate::lower::result_family(ty);
         if materialized {
             self.seed_variant_value_shape(dst, ty);

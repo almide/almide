@@ -744,6 +744,14 @@ impl LowerCtx {
         // mlo / the skv key sweep / the interleaved Map[heap,heap] DropListStr).
         // The FAMILY is the parameter (the same router classes the map ops use),
         // never a hardcoded key type.
+        // ONE-LEVEL-EXACT under a per-slot dec: a scalar side is untouched, a
+        // String/Bytes/flat-block/Flat-ctor side decs clean. Shared by the
+        // map-layout arm below and the Result-element arm.
+        let one_exact = |t: &Ty| !is_heap_ty(t)
+            || matches!(t, Ty::String | Ty::Bytes)
+            || crate::lower::is_flat_scalar_block_ty(t)
+            || crate::lower::lenlist_elem_class(t)
+                == Some(crate::lower::CtorElemClass::Flat);
         let routable_map = self.map_named_value_drop(elem_ty).is_some()
             || crate::lower::is_map_hval_ty(elem_ty)
             || crate::lower::is_map_ivh_ty(elem_ty)
@@ -751,21 +759,19 @@ impl LowerCtx {
             || crate::lower::is_map_mlo_ty(elem_ty)
             || matches!(elem_ty,
                 Ty::Applied(TypeConstructorId::Map, a)
-                    if a.len() == 2 && {
-                        // The interleaved / split layouts are exact under the
-                        // per-slot sweep only when each OWNED slot is
-                        // ONE-LEVEL-EXACT (one rc_dec is its full free): a
-                        // scalar side is untouched, a String/Bytes/flat-block/
-                        // Flat-ctor side decs clean. A nested value (a Result
-                        // whose Err owns a String, a tuple owning a String)
-                        // stays declined — its per-slot dec would leak.
-                        let one_exact = |t: &Ty| !is_heap_ty(t)
-                            || matches!(t, Ty::String | Ty::Bytes)
-                            || crate::lower::is_flat_scalar_block_ty(t)
-                            || crate::lower::lenlist_elem_class(t)
-                                == Some(crate::lower::CtorElemClass::Flat);
-                        one_exact(&a[0]) && one_exact(&a[1])
-                    })
+                    if a.len() == 2 && one_exact(&a[0]) && one_exact(&a[1]))
+            // A `Result[<one-level-exact payload>, String]` element
+            // (`list.get_or([acc0, n1], 5, x2)` over Result[Option[Float],
+            // String] — the #1527 List-argument Result bucket's flat half):
+            // the element and the shared-out result both ride the DynListStr
+            // family's per-slot sweep (`is_heap_elem_list_ty` -> flat_elems),
+            // which is exact precisely when the Ok payload is one-level-exact
+            // (the Err String always is). A NESTED payload (Result[Result[..]],
+            // Result[Map[..]], Option[String]) stays declined — its slot-0 dec
+            // would leak the payload's interior.
+            || matches!(elem_ty,
+                Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2 && matches!(a[1], Ty::String) && one_exact(&a[0]))
             ;
         if !flat_content && !routable_map {
             return None;
