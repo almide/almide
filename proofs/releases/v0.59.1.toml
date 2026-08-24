@@ -1,0 +1,27 @@
+# Release evidence seal — v0.59.1. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.59.1"
+tag = "v0.59.1"
+tag_commit = "d8f86997844c9495b868d0a552e09ac173ad1919"
+date = "2026-08-24"
+url = "https://github.com/almide/almide/releases/tag/v0.59.1"
+
+[derived]
+cargo_version = "0.59.1"
+contracts_sha256 = "1360e5677ae0d504b880178dbbc89d76cbb07f7df323795de060c98f5f617190"
+contracts_total = "302"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "06211c5ba984367710c33455eb8c9c52965a672b67799cb8445dd3169ea9a171"
+abstain_ledger_entries = "23"
+wasm_cross_fixtures = "600"
+rust_toolchain = "1.89.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Release-gate fuzz dispatch 32711892238 (2026-08-24, develop @ bbce37bfb, -f minutes=8): SUCCESS, findings=0. CI green on both train heads pre-merge: 24/24 checks on bbce37bfb (the code head) and 23/23 on 90aeed67a (the known-frontier correction) — CI, Cross-Target, Acceptance Ring, Trust Spine. Full battery `cargo test --release --workspace` exit 0 on the release tree; contract ledger 302 contracts, 600/600 fixtures with symmetric evidence links; walled-real baseline EMPTY; the #1564 record-pair fix verified by causal point-revert A/B and a 256 KB wasm heap-cap churn."
+assets = "6: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256"
+known_problems = "#1557 legs 2/3 (cross-module protocol-method linking — the obvious resolution fix produces a silent-empty run, scouting recorded on the issue; nested package imports) — honest walls, disclosed in the release notes. #1564 remaining family (`-> T?!`), axis MEASURED (90aeed67a supersedes bbce37bfb's closure-carrying phrasing): a plain-constructor Ok payload lowers for record and variant alike; an inline ok(<stdlib call>) payload walls for BOTH payload kinds; the bare-call if-tail under the ?! lift walls for a RECORD payload while the same call's variant payload lowers — the last open #1564 cell; binding the call first (let hit = list.get(xs, 0) then ok(hit)) lowers everywhere — the in-language workaround. All honest walls (native runs, wasm refuses; never wrong bytes)."
