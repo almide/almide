@@ -253,11 +253,14 @@ impl LowerCtx {
                 // …plus the residue classes the ordinary bind's seeding also
                 // owns: a VALUE payload (runtime-tag-dispatched DropValue via
                 // value_handles), a SCALAR-element list/set (flat block
-                // free), and a tuple whose heap slots are all Strings (the
-                // masked one-level sweep frees exactly those slots). A
-                // Map[String, scalar] payload stays declined — its layout is
-                // the split hval family whose drop story is its own slice.
+                // free), a tuple whose heap slots are all Strings (the masked
+                // one-level sweep frees exactly those slots), and a
+                // Map[String, scalar] (the split layout whose DropListStr
+                // sweep rc_decs exactly the n key Strings — the route
+                // seed_call_named_heap_drop_route_b already carries).
                 || crate::lower::is_value_ty(ty)
+                || matches!(ty, Ty::Applied(TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
                 || matches!(ty, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
                 || matches!(ty, Ty::Tuple(ts)
@@ -468,12 +471,15 @@ impl LowerCtx {
             self.live_heap_handles.push(payload);
             if adt_payload {
                 // The ADT classes ride the ordinary Named-call bind's seeding
-                // wholesale: record field reads (materialized_aggregates) +
-                // heap-slot mask + the recursive/anonrec named_route where one
-                // exists. A USER VARIANT payload additionally routes its
-                // scope-end drop: RICH recurses via the generated
-                // `$__drop_<V>` (named_route -> DropVariant), FLAT frees one
-                // level under the default Drop.
+                // wholesale — the SAME route+read pair, in the same order:
+                // the drop-route chain (map key-sweeps, list_<R>, lenlist —
+                // the routes the type resolves), then the read shapes (record
+                // field reads via materialized_aggregates + heap-slot mask +
+                // the recursive/anonrec named_route). A USER VARIANT payload
+                // additionally routes its scope-end drop: RICH recurses via
+                // the generated `$__drop_<V>` (named_route -> DropVariant),
+                // FLAT frees one level under the default Drop.
+                self.seed_call_named_heap_drop_route(payload, ty);
                 self.seed_call_named_heap_read_shape(payload, ty);
                 if let Ty::Named(n, args) = ty {
                     if args.is_empty()
