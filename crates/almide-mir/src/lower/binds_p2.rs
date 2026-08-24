@@ -195,8 +195,11 @@ impl LowerCtx {
         };
         // The ok-payload bind classes this slice owns: scalar/Unit (value
         // copy), and for a HeapOk callee a String / flat heap-elem list /
-        // tracked-variant payload (Dup'd — see below). Anything else (records,
-        // Value, maps) declines to the wall for the next slice.
+        // Option/Result payload (Dup'd — see below) plus the ADT classes
+        // (variant / record / tuple) the ordinary Named-call bind seeds.
+        // Anything else (Value, maps, generic records) declines to the wall
+        // for the next slice.
+        let mut adt_payload = false;
         let heap_payload_class = if is_heap_ty(ty) {
             if callee_fam != crate::lower::ResultFamily::HeapOk {
                 decline!("heap-payload-scalar-carrier");
@@ -208,6 +211,23 @@ impl LowerCtx {
                     Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _)
                 )
             {
+                true
+            } else if matches!(ty, Ty::Named(n, a)
+                    if a.is_empty() && self.variant_layouts.by_type.contains_key(n.as_str()))
+                || self.aggregate_field_tys(ty).is_some_and(|(_, tys)| {
+                    self.record_or_anon_drop_type_name(ty).is_some()
+                        || tys.iter().all(|f| !is_heap_ty(f))
+                })
+            {
+                // A user ADT payload — variant (rich or flat) or record/tuple
+                // (recursive-drop, anonrec, or all-scalar): the SAME classes a
+                // plain `let r = f()` Named-call bind admits, seeded by the
+                // same routine (`seed_call_named_heap_read_shape` below), so
+                // the admission envelope and the drop/read soundness story are
+                // exactly the ordinary bind's. A record outside that envelope
+                // (a generic decl whose one-level mask would leak a nested
+                // heap field) still declines.
+                adt_payload = true;
                 true
             } else {
                 decline!("heap-payload-class");
@@ -305,10 +325,31 @@ impl LowerCtx {
             let payload = self.fresh_value();
             self.ops.push(Op::Dup { dst: payload, src: borrowed });
             self.live_heap_handles.push(payload);
-            if crate::lower::is_heap_elem_list_ty(ty) {
-                self.value_drops.entry(payload).or_default().flat_elems = true;
+            if adt_payload {
+                // The ADT classes ride the ordinary Named-call bind's seeding
+                // wholesale: record field reads (materialized_aggregates) +
+                // heap-slot mask + the recursive/anonrec named_route where one
+                // exists. A USER VARIANT payload additionally routes its
+                // scope-end drop: RICH recurses via the generated
+                // `$__drop_<V>` (named_route -> DropVariant), FLAT frees one
+                // level under the default Drop.
+                self.seed_call_named_heap_read_shape(payload, ty);
+                if let Ty::Named(n, args) = ty {
+                    if args.is_empty()
+                        && self.variant_layouts.needs_recursive_drop(n.as_str(), &|rn| {
+                            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                        })
+                    {
+                        self.value_drops.entry(payload).or_default().named_route =
+                            Some(n.as_str().to_string());
+                    }
+                }
+            } else {
+                if crate::lower::is_heap_elem_list_ty(ty) {
+                    self.value_drops.entry(payload).or_default().flat_elems = true;
+                }
+                self.seed_variant_value_shape(payload, ty);
             }
-            self.seed_variant_value_shape(payload, ty);
             self.value_of.insert(var, payload);
         } else {
             let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
