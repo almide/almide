@@ -250,6 +250,18 @@ impl LowerCtx {
                     self.record_or_anon_drop_type_name(ty).is_some()
                         || tys.iter().all(|f| !is_heap_ty(f))
                 })
+                // …plus the residue classes the ordinary bind's seeding also
+                // owns: a VALUE payload (runtime-tag-dispatched DropValue via
+                // value_handles), a SCALAR-element list/set (flat block
+                // free), and a tuple whose heap slots are all Strings (the
+                // masked one-level sweep frees exactly those slots). A
+                // Map[String, scalar] payload stays declined — its layout is
+                // the split hval family whose drop story is its own slice.
+                || crate::lower::is_value_ty(ty)
+                || matches!(ty, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set, a)
+                    if a.len() == 1 && !is_heap_ty(&a[0]))
+                || matches!(ty, Ty::Tuple(ts)
+                    if ts.iter().all(|f| !is_heap_ty(f) || matches!(f, Ty::String)))
             {
                 // A user ADT payload — variant (rich or flat) or record/tuple
                 // (recursive-drop, anonrec, or all-scalar): the SAME classes a
@@ -262,6 +274,9 @@ impl LowerCtx {
                 adt_payload = true;
                 true
             } else {
+                if dbg {
+                    eprintln!("BANG-PAYLOAD-TY {:?} :: {}", ty, self.fn_name);
+                }
                 decline!("heap-payload-class");
             }
         } else {
