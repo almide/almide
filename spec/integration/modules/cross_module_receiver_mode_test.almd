@@ -1,0 +1,14 @@
+// #1549: a convention method's receiver BORROW MODE crosses the module
+// boundary. `fn Box.twice(self)` in convmut is emitted with a by-reference
+// receiver; a method-form call from THIS module used to pass it by value —
+// check green, rustc E0308 (found by the DDD ports/adapters verification).
+import convmut
+
+test "method-form call on another module's type (#1549)" {
+  assert_eq(convmut.Box { n: 21 }.twice(), 42)
+}
+
+test "method-form call on a bound var of another module's type (#1549)" {
+  let b = convmut.Box { n: 5 }
+  assert_eq(b.twice(), 10)
+}

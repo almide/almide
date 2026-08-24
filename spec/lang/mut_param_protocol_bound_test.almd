@@ -1,0 +1,37 @@
+// #1551: monomorphizing a `mut` param whose type is a PROTOCOL-BOUND
+// generic must keep its by-reference calling convention — the specialized
+// fn used to take the param by value then `&mut` it (check green, rustc
+// E0596). The same body against the concrete type always worked; the bound
+// is the whole difference. The wasm leg currently walls on the protocol
+// method's in-place param mutation (#1557 leg 1); the native leg is the
+// regression pin.
+protocol Counter {
+  fn bump(mut self: Self, by: Int) -> Unit
+  fn read(self) -> Int
+}
+
+type Tally: Counter = { n: Int }
+
+fn Tally.bump(mut self: Tally, by: Int) -> Unit = {
+  self.n = self.n + by
+}
+
+fn Tally.read(self) -> Int = self.n
+
+fn bump_twice[C: Counter](mut c: C) -> Int = {
+  c.bump(1)
+  c.bump(2)
+  c.read()
+}
+
+test "protocol-bound mut param keeps &mut through monomorphization (#1551)" {
+  var t = Tally { n: 0 }
+  assert_eq(bump_twice(t), 3)
+}
+
+test "the mutation is visible at the caller after the generic call (#1551)" {
+  var t = Tally { n: 10 }
+  let r = bump_twice(t)
+  assert_eq(r, 13)
+  assert_eq(t.n, 13)
+}

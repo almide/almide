@@ -1,0 +1,12 @@
+// convmut — the #1549 regression lib: convention methods whose RECEIVER MODE
+// must travel across the module boundary. `twice` is the plain by-ref
+// receiver (the E0308 class: emitted `almide_self: &T`, called by value);
+// `bump` is the mut receiver whose signature must mirror under BOTH emit
+// keys (`convmut.Box.bump` and bare `Box.bump`).
+type Box = { n: Int }
+
+fn Box.twice(self) -> Int = self.n * 2
+
+fn Box.bump(mut self: Box, by: Int) -> Unit = {
+  self.n = self.n + by
+}
