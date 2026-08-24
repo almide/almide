@@ -9,7 +9,9 @@
 // bind-then-wrap one, deleting the producer axis: one desugar, no new
 // lowering machinery. Cells: inline ok(list.get) record / rich variant /
 // flat variant, inline ok(list.find(lambda)) — the issue's exact repro B —,
-// the bare-call if-tail record cell, a user-fn (Named) call payload, and a
+// the bare-call if-tail record cell, a user-fn (Named) call payload, the
+// map.get lookup producer (record and variant — a different route than the
+// list producers), and a
 // churn loop that OOMs the wasm heap if the hoisted binds leak.
 type Row: Eq, Repr = { id: String }
 
@@ -26,6 +28,10 @@ fn first_ev(evs: List[Ev]) -> Ev?! = ok(list.get(evs, 0))
 fn first_gate(gs: List[Gate]) -> Gate?! = ok(list.get(gs, 0))
 
 fn pick_row(rows: List[Row], b: Bool) -> Row?! = if b then list.get(rows, 0) else none
+
+fn look_row(m: Map[String, Row]) -> Row?! = ok(map.get(m, "a"))
+
+fn look_ev(m: Map[String, Ev]) -> Ev?! = ok(map.get(m, "a"))
 
 fn head_or_make(rows: List[Row]) -> Row?! = ok(make_rows())
 
@@ -99,6 +105,24 @@ fn main() -> Unit = {
   // a user-fn (Named) call payload
   match head_or_make([]) {
     ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  // inline ok(map.get) — the Map-lookup producer path (record and variant):
+  // the fix generalized over producers, and this row pins the one that rides
+  // a different lookup route than list.get/list.find
+  var mrow = map.new()
+  mrow = map.set(mrow, "a", Row { id: "ma" })
+  match look_row(mrow) {
+    ok(hit) => println(show_hit(hit)),
+    err(e) => println(e),
+  }
+  var mev = map.new()
+  mev = map.set(mev, "a", Finished("me"))
+  match look_ev(mev) {
+    ok(hit) => match hit {
+      some(e) => println(show_ev(e)),
+      none => println("-"),
+    },
     err(e) => println(e),
   }
   // churn: the hoisted bind + wrapper + payload freed each iteration
