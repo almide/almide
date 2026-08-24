@@ -506,6 +506,14 @@ impl LowerCtx {
                     | IrExprKind::Range { .. }
             )
         {
+            if std::env::var_os("ALMIDE_DBG_BANG").is_some() {
+                eprintln!(
+                    "BIND-TERMINAL-WALL {} :: kind={} ty={:?}",
+                    self.fn_name,
+                    kind_name(&value.kind),
+                    ty
+                );
+            }
             return Err(LowerError::Unsupported(format!(
                 "{} heap bind cannot be faithfully materialized in this brick \
                  (walled, not deferred to an empty block the program could read)",

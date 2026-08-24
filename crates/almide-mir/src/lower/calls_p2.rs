@@ -418,7 +418,15 @@ impl LowerCtx {
                 // this widening strictly ADDITIVE: shapes that lowered before still
                 // take the same path, and only the ones that walled gain a route
                 // (#888/#904).
-                None if shape.record_elem.is_some() => false,
+                // An EMPTY literal has no fields to mis-order — the generic
+                // path's real len-0 block is exact for every element shape
+                // (the TCO upfront slot copy `acc + []` is this operand; the
+                // record-elem forced route declines empties by construction).
+                None if shape.record_elem.is_some()
+                    && !matches!(&a.kind, IrExprKind::List { elements } if elements.is_empty()) =>
+                {
+                    false
+                }
                 None => match self.lower_call_args(std::slice::from_ref(a)) {
                     Ok(mut la) => {
                         out.append(&mut la);
