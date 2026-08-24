@@ -182,11 +182,25 @@ impl LowerCtx {
         // and a void fn aborts — all three keep their position desugar).
         let callee_is_option =
             matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1);
-        if fn_fam.is_none() && !void_fn {
+        // An OPTION-RETURNING fn (declared `-> T?`): its `!` on an Option
+        // callee PROPAGATES THE NONE ITSELF (#1067 — the pass-through is
+        // repr-identical: every Option none is a len@4 = 0 block), so the
+        // exit arm is the SAME drops + Return(carrier) the same-family
+        // Result case uses — no rebox, no manufactured message. Identified
+        // by the declared-variant flag with NO err channel (decl_fn_err is
+        // None exactly for a declared Option / an Option-typed lambda body).
+        let opt_fn = self.decl_ret_is_result && self.decl_fn_err.is_none();
+        if fn_fam.is_none() && !void_fn && !opt_fn {
             decline!("fn-family");
         }
+        // A RESULT callee inside an Option-returning fn has an err payload
+        // with nowhere to go (returning the carrier would type-pun err as
+        // some) — keep its honest wall.
+        if opt_fn && !callee_is_option && !void_fn {
+            decline!("result-in-option-fn");
+        }
         if callee_is_option {
-            if !void_fn && !matches!(self.decl_fn_err, Some(Ty::String)) {
+            if !void_fn && !opt_fn && !matches!(self.decl_fn_err, Some(Ty::String)) {
                 decline!("option-fn-channel");
             }
         } else if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
@@ -202,7 +216,7 @@ impl LowerCtx {
         // `materialize_result_err_str` — whose Err block is the FAMILY
         // SUPERSET (len@4=1 for len-as-tag readers AND tag@16=1 for
         // cap-as-tag readers), so ONE constructor serves both directions.
-        let rebox = !void_fn && (callee_is_option || callee_fam != fn_fam);
+        let rebox = !void_fn && !opt_fn && (callee_is_option || callee_fam != fn_fam);
         let rebox_repr = if rebox {
             match crate::lower::repr_of(&expr.ty) {
                 Ok(r) => Some(r),
