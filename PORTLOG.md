@@ -2275,3 +2275,50 @@ the full nets. And the oracle-fetch step failed on a lesson worth one
 line: `git fetch` of a SHORT sha is not a thing — remote object
 requests need the full 40 characters. Both fixes land together; the
 release-shape job now builds the pinned oracle for real.
+
+## Stage 70 — the long-tail burn: 401 → 442, six slices, two real bugs, two new invariants
+
+Six landed slices (c14f2ce9 → ff78128b2), zero divergence held the
+whole way:
+
+- **C-229 bytes matrix**: every scalar read/set width × both
+  endiannesses, TOTAL (OOB read = default, OOB set = no-op) on the
+  SUBTRACT-form room test — and the audit killed five latent trap-form
+  arms (read_u8/set_at/set_u8/set_f32_le/read_f16_le) plus get_or's
+  conditionally-evaluated default, all landed before any fixture could
+  observe them.
+- **Scalars/strings/lists**: to_bits (C-210 canonical), bits_to_float,
+  sqrt (= f64.sqrt, correctly rounded on both), NaN-ignoring float
+  min/max, math.pow (the ** lowering, one definition two spellings),
+  int.abs (branchless, MIN wraps like release native), remove_at,
+  reverse, filter_map, flat_map, set, swap, update, take_end, drop_end,
+  set.fold, string get/codepoint/drop/chars/lines/is_empty/
+  starts_with/pad_start+pad_end, ToOption (the is_sum_shape routing
+  list AGAIN — the expr:Try lesson, now with its own comment).
+- **Linked impls**: to_lower + take_end/drop_end joined the whitelist;
+  string_from_bytes was REJECTED by its own audit — `prim.load32(h+4)`
+  reads the list len header as a COUNT where ours holds BYTES. New
+  whitelist rule: a RAW HEADER READ couples an impl to the incumbent
+  layout even when every slot matches; prim-MEDIATED alloc stays safe.
+- **Bug 1 (C-054)**: list.slice's end clamp was SIGNED min — `slice(xs,
+  0, -1)` emptied instead of taking the whole list. Unsigned-saturate
+  fixed; mutants 010 refreshed + 042 pins the clamp.
+- **Bug 2 (the fake wall)**: string.get held 4 i32 and released 5 — the
+  u32 depth WRAPPED and poisoned every later hold as "hold-depth-i32"
+  on three unrelated fixtures (and PANICKED CI's debug tier). Fixed;
+  the hold-balance invariant now checks all three depths at every
+  function end and reports `BUG:hold-imbalance` — an emitter bug can
+  never masquerade as an honest wall again.
+- **break/continue**: walker-tracked label depth (while: br to the
+  loop head = next charged cond check; for-in: an inner block so the
+  step still runs). Match arms suspend the context — a continue there
+  walls honestly rather than branching to a wrong depth.
+- **Float-display demand** generalized: any Float-REACHING interp/print
+  type splices the compound Dragon4 (was: exactly Float and
+  List[Float] — `${b}` over `Float?` was the ×4 wall). Record-shaped
+  variant cases now display in the record form (C-008).
+- **codopsy**: B(89) at slice 3 (the gate caught it in CI, 2nd
+  consecutive win for the mechanized discipline); A(90) restored by
+  splitting string_scan.rs out and giving the bytes matrix its own
+  dispatcher. 35 issues — the boundary again; touching PRs keep
+  measuring A/B.
