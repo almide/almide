@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/matrix.rs b/crates/almide-wasm/src/matrix.rs
-index 3fd132643..e7912d60a 100644
+index 14a412b5a..42f2add77 100644
 --- a/crates/almide-wasm/src/matrix.rs
 +++ b/crates/almide-wasm/src/matrix.rs
-@@ -179,7 +179,7 @@ impl Emitter<'_> {
-                 // form as `xs[i]`. Compared as i64 BEFORE any cast, so a
-                 // negative can never wrap past the test.
-                 let msg = self.pool.intern("matrix index out of bounds");
--                for (idx, ext_off) in [(hr, 0), (hc, 4)] {
-+                for (idx, ext_off) in [(hr, 0)] { // [MUTANT: col bound dropped]
-                     {
-                         let mut i = self.f.instructions();
-                         i.local_get(idx).i64_const(0).i64_lt_s();
+@@ -183,7 +183,7 @@ impl Emitter<'_> {
+             // form as `xs[i]`. Compared as i64 BEFORE any cast, so a
+             // negative can never wrap past the test.
+             let msg = self.pool.intern("matrix index out of bounds");
+-            for (idx, ext_off) in [(hr, 0), (hc, 4)] {
++            for (idx, ext_off) in [(hr, 0)] { // [MUTANT: col bound dropped]
+                 {
+                     let mut i = self.f.instructions();
+                     i.local_get(idx).i64_const(0).i64_lt_s();
