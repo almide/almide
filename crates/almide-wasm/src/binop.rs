@@ -89,96 +89,13 @@ impl Emitter<'_> {
             // Guard BOTH operands and abort with the exact native frame
             // ("Error: division by zero" / "Error: integer overflow" +
             // exit 1) before the op, so the op itself can never trap.
-            DivInt | ModInt => {
-                let unsigned = is_uint64(&left.ty) || is_uint64(&right.ty);
-                // LITERAL divisor: strength-reduce (multiply-shift, no
-                // guards — the abortable divisors are excluded here).
-                // c in {0, -1, MIN} keeps the guarded runtime path; /1
-                // is the operand, %1 is zero (operand still evaluated).
-                // The magic sequence is SIGNED — a UInt64 lane keeps the
-                // runtime path (C-179), as does a narrow signed operand
-                // (its own MIN/-1 trap, C-002).
-                if !unsigned
-                    && narrow_width(&left.ty).is_none()
-                    && narrow_width(&right.ty).is_none()
-                    && let IrExprKind::LitInt { value: c } = &right.kind
-                {
-                    let c = *c;
-                    if !matches!(c, 0 | -1 | i64::MIN) {
-                        self.lower(left, Some(INT))?;
-                        if c == 1 {
-                            if matches!(op, ModInt) {
-                                self.f.instructions().i64_const(0).i64_and();
-                            }
-                            return Ok(INT);
-                        }
-                        self.emit_const_div(c, matches!(op, DivInt))?;
-                        return Ok(INT);
-                    }
-                }
-                self.lower(left, Some(INT))?;
-                self.lower(right, Some(INT))?;
-                let div0 = self.pool.intern("Error: division by zero");
-                let ovf = self.pool.intern("Error: integer overflow");
-                let r = self.hold_i64()?;
-                let l = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(r).local_set(l);
-                i.local_get(r).i64_eqz().if_(BlockType::Empty);
-                i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                if unsigned {
-                    // C-179: no overflow case exists in the unsigned lane.
-                    i.local_get(l).local_get(r);
-                    match op {
-                        DivInt => i.i64_div_u(),
-                        _ => i.i64_rem_u(),
-                    };
-                } else {
-                    // C-002: the overflow trap compares the TRUE declared
-                    // MIN — i64::MIN, or the narrow width's own (-128 for
-                    // Int8, where i64 division would happily return 128).
-                    let min = match narrow_width(&left.ty)
-                        .or_else(|| narrow_width(&right.ty))
-                    {
-                        Some((bits, true)) => -(1i64 << (bits - 1)),
-                        _ => i64::MIN,
-                    };
-                    i.local_get(l).i64_const(min).i64_eq();
-                    i.local_get(r).i64_const(-1).i64_eq();
-                    i.i32_and().if_(BlockType::Empty);
-                    i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                    i.local_get(l).local_get(r);
-                    match op {
-                        DivInt => i.i64_div_s(),
-                        _ => i.i64_rem_s(),
-                    };
-                }
-                self.release_i64();
-                self.release_i64();
-                Ok(INT)
-            }
+            DivInt | ModInt => self.lower_div_mod(op, left, right),
             PowInt => {
                 let t = self.lower_pow_int(left, right)?;
                 self.emit_narrow_wrap(&left.ty, &right.ty);
                 Ok(t)
             }
-            // `**` on floats IS the vendored libm pow (the interp's
-            // PowFloat → almide_rt_libm_pow) — one table, bit parity.
-            PowFloat => {
-                let Some(fi) = self.resolve_qualified("math.fpow") else {
-                    return unsup("binop:PowFloat-unlinked");
-                };
-                let info = &self.table.infos[fi];
-                if info.refuse.is_some() || info.ret != Some(FLOAT) {
-                    return unsup("binop:PowFloat-impl");
-                }
-                let idx = info.wasm_index;
-                self.calls.insert(fi);
-                self.lower(left, Some(FLOAT))?;
-                self.lower(right, Some(FLOAT))?;
-                self.f.instructions().call(idx);
-                Ok(FLOAT)
-            }
+            PowFloat => self.lower_pow_float(left, right),
             Lt | Gt | Lte | Gte | Eq | Neq => self.lower_cmp(op, left, right),
             // SHORT-CIRCUIT: the right operand must not evaluate (and
             // possibly trap) when the left already decides — an `if`
@@ -310,5 +227,100 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i64();
                 Ok(INT)
+    }
+
+    /// C-002 / C-179: the guarded division family (extracted from
+    /// lower_binop for the complexity budget).
+    fn lower_div_mod(
+        &mut self,
+        op: BinOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Result<SliceTy, EmitError> {
+        use BinOp::*;
+                let unsigned = is_uint64(&left.ty) || is_uint64(&right.ty);
+                // LITERAL divisor: strength-reduce (multiply-shift, no
+                // guards — the abortable divisors are excluded here).
+                // c in {0, -1, MIN} keeps the guarded runtime path; /1
+                // is the operand, %1 is zero (operand still evaluated).
+                // The magic sequence is SIGNED — a UInt64 lane keeps the
+                // runtime path (C-179), as does a narrow signed operand
+                // (its own MIN/-1 trap, C-002).
+                if !unsigned
+                    && narrow_width(&left.ty).is_none()
+                    && narrow_width(&right.ty).is_none()
+                    && let IrExprKind::LitInt { value: c } = &right.kind
+                {
+                    let c = *c;
+                    if !matches!(c, 0 | -1 | i64::MIN) {
+                        self.lower(left, Some(INT))?;
+                        if c == 1 {
+                            if matches!(op, ModInt) {
+                                self.f.instructions().i64_const(0).i64_and();
+                            }
+                            return Ok(INT);
+                        }
+                        self.emit_const_div(c, matches!(op, DivInt))?;
+                        return Ok(INT);
+                    }
+                }
+                self.lower(left, Some(INT))?;
+                self.lower(right, Some(INT))?;
+                let div0 = self.pool.intern("Error: division by zero");
+                let ovf = self.pool.intern("Error: integer overflow");
+                let r = self.hold_i64()?;
+                let l = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(r).local_set(l);
+                i.local_get(r).i64_eqz().if_(BlockType::Empty);
+                i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+                if unsigned {
+                    // C-179: no overflow case exists in the unsigned lane.
+                    i.local_get(l).local_get(r);
+                    match op {
+                        DivInt => i.i64_div_u(),
+                        _ => i.i64_rem_u(),
+                    };
+                } else {
+                    // C-002: the overflow trap compares the TRUE declared
+                    // MIN — i64::MIN, or the narrow width's own (-128 for
+                    // Int8, where i64 division would happily return 128).
+                    let min = match narrow_width(&left.ty)
+                        .or_else(|| narrow_width(&right.ty))
+                    {
+                        Some((bits, true)) => -(1i64 << (bits - 1)),
+                        _ => i64::MIN,
+                    };
+                    i.local_get(l).i64_const(min).i64_eq();
+                    i.local_get(r).i64_const(-1).i64_eq();
+                    i.i32_and().if_(BlockType::Empty);
+                    i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+                    i.local_get(l).local_get(r);
+                    match op {
+                        DivInt => i.i64_div_s(),
+                        _ => i.i64_rem_s(),
+                    };
+                }
+                self.release_i64();
+                self.release_i64();
+                Ok(INT)
+    }
+
+    /// `**` on floats IS the vendored libm pow (the interp's PowFloat →
+    /// almide_rt_libm_pow) — one table, bit parity.
+    fn lower_pow_float(&mut self, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
+                let Some(fi) = self.resolve_qualified("math.fpow") else {
+                    return unsup("binop:PowFloat-unlinked");
+                };
+                let info = &self.table.infos[fi];
+                if info.refuse.is_some() || info.ret != Some(FLOAT) {
+                    return unsup("binop:PowFloat-impl");
+                }
+                let idx = info.wasm_index;
+                self.calls.insert(fi);
+                self.lower(left, Some(FLOAT))?;
+                self.lower(right, Some(FLOAT))?;
+                self.f.instructions().call(idx);
+                Ok(FLOAT)
     }
 }
