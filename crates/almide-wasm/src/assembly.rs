@@ -222,6 +222,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
     exports.export("main", ExportKind::Func, main_index);
+    // The bump-heap watermark: monotonic, so its final value IS the
+    // allocation total (plus the fixed base) — the alloc-ledger
+    // observable (#1586). Behavior-neutral: nothing in-module reads
+    // exports.
+    exports.export("__heap", ExportKind::Global, G_HEAP);
 
     let mut code = CodeSection::new();
     code.function(&emit_block_print(F_PRINTLN_IMPORT));

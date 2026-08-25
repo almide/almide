@@ -19,6 +19,11 @@ pub struct RunResult {
     pub stdout: String,
     pub stderr: String,
     pub exit: i32,
+    /// The bump-heap watermark (exported `__heap` global) after the run:
+    /// total bytes the module ever allocated plus the fixed base — the
+    /// allocation-ledger observable (#1586). None if the module predates
+    /// the export.
+    pub heap_end: Option<u64>,
 }
 
 struct Host {
@@ -513,9 +518,15 @@ fn run_wasm_src(bytes: &[u8], stdin: StdinSource) -> anyhow::Result<RunResult> {
         }
     };
     drop(ticker);
+    let heap_end = instance.get_global(&mut store, "__heap").map(|g| match g.get(&mut store) {
+        wasmtime::Val::I32(v) => v as u32 as u64,
+        wasmtime::Val::I64(v) => v as u64,
+        _ => 0,
+    });
     Ok(RunResult {
         stdout: out.lock().expect("test harness invariant").clone(),
         stderr: err.lock().expect("test harness invariant").clone(),
         exit: exit_code,
+        heap_end,
     })
 }
