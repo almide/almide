@@ -16,7 +16,9 @@ protocol Counter {
 
 type Tally: Counter = { n: Int }
 
-fn Tally.bump(mut self: Tally, by: Int) -> Unit = { self.n = self.n + by }
+fn Tally.bump(mut self: Tally, by: Int) -> Unit = {
+  self.n = self.n + by
+}
 
 fn Tally.read(self) -> Int = self.n
 
@@ -35,14 +37,12 @@ fn go_plain[C: Counter](mut c: C) -> Int = {
 effect fn main() -> Unit = {
   var t = Tally { n: 1 }
   let a = go_effect(t)!
+  // a = 6, then t.n = 6 (the writeback is visible in the caller),
+  // then the plain twin repeats the same pair: 6 6 6 6 total.
   println("${a}")
-  // 6 — and the writeback is visible in the caller:
   println("${t.n}")
-  // 6
   var u = Tally { n: 1 }
   let b = go_plain(u)
   println("${b}")
-  // 6
   println("${u.n}")
-  // 6
 }
