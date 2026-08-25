@@ -73,6 +73,9 @@ call:bytes.read_i32_le_array
 call:bytes.read_i64_be
 call:bytes.read_i64_le
 call:bytes.read_int32
+call:bytes.read_length_prefixed_strings_le
+call:bytes.read_string_at
+call:bytes.read_string_be
 call:bytes.read_u16_be
 call:bytes.read_u16_le
 call:bytes.read_u32_be
@@ -100,6 +103,7 @@ call:bytes.set_u32_le
 call:bytes.set_u8
 call:bytes.set_uint16
 call:bytes.set_uint32
+call:bytes.skip_length_prefixed_le
 call:bytes.slice
 call:bytes.to_list
 call:bytes.to_string

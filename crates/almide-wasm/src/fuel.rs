@@ -52,7 +52,8 @@ pub(crate) fn program_has_regions(ir: &IrProgram) -> bool {
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::RuntimeCall { symbol, .. } = &e.kind
-                && symbol.as_str().starts_with("almide_rt_prim_budget")
+                && (symbol.as_str().starts_with("almide_rt_prim_budget")
+                    || symbol.as_str().starts_with("almide_rt_prim_timeout"))
             {
                 self.found = true;
             }
@@ -188,6 +189,42 @@ impl Emitter<'_> {
                 self.release_i64();
                 Ok(Some(INT))
             }
+            // T5-1 wall-deadline trio: enter min-caps the ABSOLUTE
+            // deadline (now + ns vs the outer) and returns the outer;
+            // exit persists the hit verdict and restores; hit reads it.
+            ("almide_rt_prim_timeout_enter", [ns]) => {
+                self.lower(ns, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let hd = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                i.global_get(G_T_DEADLINE).local_set(hd);
+                i.i32_const(crate::fs_meta::OP_WALL_NOW);
+                i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+                i.call(F_FS_CALL);
+                i.local_get(hn).i64_add().local_set(hn); // now + ns
+                i.local_get(hn).global_get(G_T_DEADLINE).i64_lt_s().if_(BlockType::Empty);
+                i.local_get(hn).global_set(G_T_DEADLINE);
+                i.end();
+                i.local_get(hd);
+                let _ = i;
+                self.release_i64();
+                self.release_i64();
+                Ok(Some(INT))
+            }
+            ("almide_rt_prim_timeout_exit", [saved]) => {
+                self.lower(saved, Some(INT))?;
+                let mut i = self.f.instructions();
+                i.global_get(G_T_HIT).i64_extend_i32_u().global_set(G_T_VERDICT);
+                i.i32_const(0).global_set(G_T_HIT);
+                i.global_set(G_T_DEADLINE);
+                i.i64_const(0);
+                Ok(Some(INT))
+            }
+            ("almide_rt_prim_timeout_hit", []) => {
+                self.f.instructions().global_get(G_T_VERDICT);
+                Ok(Some(INT))
+            }
             ("almide_rt_prim_budget_exhausted", []) => {
                 self.f.instructions().global_get(G_DET_VERDICT);
                 Ok(Some(INT))
@@ -262,6 +299,41 @@ impl Emitter<'_> {
                 }
             },
         }
+        i.return_();
+        i.end();
+        i.end();
+        let _ = i;
+        // T5-1 wall deadline: armed regions only (deadline != MAX keeps
+        // the host clock un-consulted for budget-only programs).
+        let mut i = self.f.instructions();
+        i.global_get(G_T_DEADLINE).i64_const(i64::MAX).i64_ne();
+        i.if_(BlockType::Empty);
+        i.global_get(G_T_HIT).i32_eqz().if_(BlockType::Empty);
+        i.i32_const(crate::fs_meta::OP_WALL_NOW);
+        i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+        i.call(F_FS_CALL);
+        i.global_get(G_T_DEADLINE).i64_ge_s().if_(BlockType::Empty);
+        i.i32_const(1).global_set(G_T_HIT);
+        i.end();
+        i.end();
+        i.global_get(G_T_HIT);
+        i.if_(BlockType::Empty);
+        let _ = i;
+        match self.fn_ret {
+            None => {}
+            Some(t) => match t.val_type() {
+                ValType::I64 => {
+                    self.f.instructions().i64_const(0);
+                }
+                ValType::F64 => {
+                    self.f.instructions().f64_const(0.0.into());
+                }
+                _ => {
+                    self.f.instructions().i32_const(0);
+                }
+            },
+        }
+        let mut i = self.f.instructions();
         i.return_();
         i.end();
         i.end();

@@ -212,6 +212,11 @@ const G_LINE_END: u32 = 3;
 const G_DET_FUEL: u32 = 4;
 /// The active region's entry units (i64).
 const G_DET_ENTRY: u32 = 5;
+/// T5-1 wall deadline (i64, i64::MAX = unarmed), the hit flag (i32)
+/// and the persisted verdict (i64) — globals 9/10/11.
+const G_T_DEADLINE: u32 = 9;
+const G_T_HIT: u32 = 10;
+const G_T_VERDICT: u32 = 11;
 /// Last region's exhausted verdict (i64 0/1).
 const G_DET_VERDICT: u32 = 6;
 /// Last region's consumed units (i64).
@@ -219,7 +224,7 @@ const G_DET_SPEND: u32 = 7;
 /// Region nesting depth (i32) — the cut condition needs depth > 0.
 const G_DET_DEPTH: u32 = 8;
 /// Fixed runtime globals above; top-let globals start here.
-const G_FIXED_COUNT: u32 = 9;
+const G_FIXED_COUNT: u32 = 12;
 
 // ── slice value model ───────────────────────────────────────────────────
 

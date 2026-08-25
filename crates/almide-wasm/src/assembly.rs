@@ -168,6 +168,19 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
         &ConstExpr::i32_const(0),
     );
+    // T5-1 wall deadline / hit / verdict (globals 9/10/11).
+    globals.global(
+        GlobalType { val_type: ValType::I64, mutable: true, shared: false },
+        &ConstExpr::i64_const(i64::MAX),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(0),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I64, mutable: true, shared: false },
+        &ConstExpr::i64_const(0),
+    );
 
     // The funcref table always exists (a call_indirect in ANY body needs
     // it, entries or not); slot 0 stays uninitialized — null funcref =

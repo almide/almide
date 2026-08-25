@@ -10,6 +10,111 @@ use crate::emitter::Emitter;
 use crate::*;
 
 impl Emitter<'_> {
+    /// `bytes.read_length_prefixed_strings_le(b, pos, count)` — up to
+    /// count [u32-LE length][bytes] entries decoded LOSSILY; a truncated
+    /// prefix or body STOPS the scan; negative pos reads nothing. Both
+    /// bounds SUBTRACTIVE (the additive forms wrap — the self-host's
+    /// own doctrine). Two passes: count, then fill 4-byte slots.
+    pub(crate) fn lower_bytes_lenprefix(
+        &mut self,
+        b: &IrExpr,
+        pos: &IrExpr,
+        count: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let lossy = self.work.helper(crate::work::Helper::Utf8Lossy);
+        self.lower(b, Some(BYTES))?;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(pos, Some(INT))?;
+        let hp0 = self.hold_i64()?;
+        self.f.instructions().local_set(hp0);
+        self.lower(count, Some(INT))?;
+        let hrem = self.hold_i64()?;
+        let hp = self.hold_i64()?;
+        let hsl = self.hold_i64()?;
+        let hn = self.hold_i32()?;
+        let hout = self.hold_i32()?;
+        let hi = self.hold_i32()?;
+        let hs = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        // rem = max(count, 0)
+        i.local_set(hrem);
+        i.i64_const(0).local_get(hrem).local_get(hrem).i64_const(0).i64_lt_s().select();
+        i.local_set(hrem);
+        // pass 1: count
+        i.i32_const(0).local_set(hn);
+        i.local_get(hp0).local_set(hp);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hrem).i64_eqz().br_if(1);
+        i.local_get(hp).i64_const(0).i64_lt_s().br_if(1);
+        i.local_get(hp);
+        i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u().i64_const(4).i64_sub();
+        i.i64_gt_s().br_if(1);
+        i.local_get(hb).local_get(hp).i32_wrap_i64().i32_add();
+        i.i32_load(wasm_encoder::MemArg {
+            offset: u64::from(almide_layout::PAYLOAD),
+            align: 0,
+            memory_index: 0,
+        });
+        i.i64_extend_i32_u().local_set(hsl);
+        i.local_get(hsl);
+        i.local_get(hb)
+            .i32_load(len_memarg())
+            .i64_extend_i32_u()
+            .i64_const(4)
+            .i64_sub()
+            .local_get(hp)
+            .i64_sub();
+        i.i64_gt_s().br_if(1);
+        i.local_get(hp).i64_const(4).i64_add().local_get(hsl).i64_add().local_set(hp);
+        i.local_get(hrem).i64_const(1).i64_sub().local_set(hrem);
+        i.local_get(hn).i32_const(1).i32_add().local_set(hn);
+        i.br(0).end().end();
+        // pass 2: fill
+        i.local_get(hn).i32_const(4).i32_mul().call(F_ALLOC).local_set(hout);
+        i.local_get(hp0).local_set(hp);
+        i.i32_const(0).local_set(hi);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hi).local_get(hn).i32_ge_u().br_if(1);
+        i.local_get(hb).local_get(hp).i32_wrap_i64().i32_add();
+        i.i32_load(wasm_encoder::MemArg {
+            offset: u64::from(almide_layout::PAYLOAD),
+            align: 0,
+            memory_index: 0,
+        });
+        i.i64_extend_i32_u().local_set(hsl);
+        // slice = fresh block of sl bytes at p+4, then the lossy decode
+        i.local_get(hsl).i32_wrap_i64().call(F_ALLOC).local_set(hs);
+        i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(hp)
+            .i32_wrap_i64()
+            .i32_add()
+            .i32_const(4)
+            .i32_add();
+        i.local_get(hsl).i32_wrap_i64();
+        i.memory_copy(0, 0);
+        i.local_get(hout).local_get(hi).i32_const(4).i32_mul().i32_add();
+        i.local_get(hs).call(lossy);
+        i.i32_store(slot_memarg(0));
+        i.local_get(hp).i64_const(4).i64_add().local_get(hsl).i64_add().local_set(hp);
+        i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+        i.br(0).end().end();
+        i.local_get(hout);
+        let _ = i;
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        for _ in 0..3 {
+            self.release_i64();
+        }
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(SliceTy::List(self.types.intern(STR))))
+    }
+
     /// Append `k` big-endian bytes of the value (LSB-only when k = 1 —
     /// `val as u8`); `float` reinterprets an f64 to its bit pattern
     /// first (write_f64_be).

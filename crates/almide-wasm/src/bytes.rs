@@ -401,6 +401,9 @@ impl Emitter<'_> {
                 self.lower_bytes_pair(func, a, b)
             }
             ("set" | "slice" | "get_or", [a, b, c]) => self.lower_bytes_triple(func, a, b, c),
+            ("read_length_prefixed_strings_le", [b, p, c]) => {
+                self.lower_bytes_lenprefix(b, p, c)
+            }
             ("fill", [b, v]) => self.lower_bytes_fill(b, v),
             // some(byte) / none (native b.get — usize-wrap: negative i
             // is huge and misses). Its default is NONE, not 0, so it

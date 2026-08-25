@@ -390,6 +390,14 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
             // op 30 = raw stdout append (io.write / io.write_bytes):
             // PROGRAM order with println is the C-contract, so it goes
             // straight into the same sink, no trailing newline.
+            // op 34 = wall clock (nanos, RAW i64 — no status packing).
+            if op == 34 {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as i64;
+                return Ok(now);
+            }
             if op == 30 {
                 let mut o = caller.data().out.lock().expect("test harness invariant");
                 o.push_str(&String::from_utf8_lossy(&b));

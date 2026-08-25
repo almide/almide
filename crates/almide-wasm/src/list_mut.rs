@@ -29,13 +29,7 @@ impl Emitter<'_> {
                 let hlen = self.hold_i32()?;
                 let hres = self.hold_i32()?;
                 let hnew = self.hold_i32()?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(var_idx);
-                }
-                if self.cells.contains(id) {
-                    self.load_ty_slot(var_ty, 0);
-                }
+                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hb);

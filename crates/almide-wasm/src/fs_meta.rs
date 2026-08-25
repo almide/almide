@@ -26,6 +26,7 @@ pub(crate) const OP_STDOUT_RAW: i32 = 30;
 pub(crate) const OP_STDIN_READ: i32 = 31;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;
+pub(crate) const OP_WALL_NOW: i32 = 34;
 const OP_READ_BYTES: i32 = 14;
 
 impl Emitter<'_> {
