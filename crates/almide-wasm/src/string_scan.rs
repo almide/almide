@@ -238,6 +238,182 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::List(self.types.intern(STR))))
     }
 
+    /// First char to_uppercase + rest verbatim (native capitalize).
+    /// The 1:N SpecialCasing (ß→SS) rides the LINKED to_upper over the
+    /// one-char prefix — one mapping table, two surfaces.
+    pub(crate) fn lower_string_capitalize(
+        &mut self,
+        s: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let Some(fi) = self.resolve_qualified("string.to_upper") else {
+            return unsup("capitalize:to-upper-unlinked");
+        };
+        let info = &self.table.infos[fi];
+        if info.refuse.is_some() || info.ret != Some(STR) {
+            return unsup("capitalize:to-upper-impl");
+        }
+        let upper_idx = info.wasm_index;
+        self.calls.insert(fi);
+        self.lower(s, Some(STR))?;
+        let hs = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hb = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hs);
+        i.local_get(hs).i32_load(len_memarg()).i32_eqz();
+        i.if_(BlockType::Result(ValType::I32));
+        i.i32_const(0).call(F_ALLOC);
+        i.else_();
+        i.local_get(hs).i32_load8_u(str_byte()).local_set(hw);
+        i.i32_const(1);
+        i.local_get(hw).i32_const(0xC0).i32_ge_u().i32_add();
+        i.local_get(hw).i32_const(0xE0).i32_ge_u().i32_add();
+        i.local_get(hw).i32_const(0xF0).i32_ge_u().i32_add();
+        i.local_set(hw);
+        // first char as its own string → linked to_upper
+        i.local_get(hw).call(F_ALLOC).local_set(hb);
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hw);
+        i.memory_copy(0, 0);
+        i.local_get(hb).call(upper_idx);
+        // rest verbatim
+        i.local_get(hs).i32_load(len_memarg()).local_get(hw).i32_sub();
+        i.call(F_ALLOC).local_set(hb);
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hs)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(hw)
+            .i32_add();
+        i.local_get(hs).i32_load(len_memarg()).local_get(hw).i32_sub();
+        i.memory_copy(0, 0);
+        i.local_get(hb).call(F_CONCAT);
+        i.end();
+        let _ = i;
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        Ok(Some(STR))
+    }
+
+    /// One (char, count) tuple pushed onto the accumulator: the run's
+    /// char is copied out of the source at [ps, ps+pw).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_rle_flush(
+        &mut self,
+        hs: u32,
+        hps: u32,
+        hpw: u32,
+        hcnt: u32,
+        hacc: u32,
+        hb: u32,
+        tuple_size: u32,
+        str_off: u32,
+        cnt_off: u32,
+    ) {
+        let mut i = self.f.instructions();
+        i.local_get(hpw).call(F_ALLOC).local_set(hb);
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hs)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(hps)
+            .i32_add();
+        i.local_get(hpw);
+        i.memory_copy(0, 0);
+        // the pair block: (String, Int)
+        i.i32_const(tuple_size as i32).call(F_ALLOC);
+        i.local_tee(hps); // hps is dead for this run — reuse as the pair
+        i.local_get(hb).i32_store(slot_memarg(str_off));
+        i.local_get(hps).local_get(hcnt).i64_extend_i32_u().i64_store(slot_memarg(cnt_off));
+        i.local_get(hacc).local_get(hps).call(F_LIST_PUSH_4).local_set(hacc);
+    }
+
+    /// CHAR-level runs (native: equal adjacent chars fold into a
+    /// (char, count) pair, in order).
+    pub(crate) fn lower_string_rle(&mut self, s: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let ti = self.types.tuple(vec![STR, INT]);
+        let def = self.types.tuple_def(ti);
+        let (str_off, cnt_off) = (def.fields[0].1, def.fields[1].1);
+        let tuple_size = def.size;
+        self.lower(s, Some(STR))?;
+        let hs = self.hold_i32()?;
+        let hl = self.hold_i32()?;
+        let hk = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hps = self.hold_i32()?;
+        let hpw = self.hold_i32()?;
+        let hcnt = self.hold_i32()?;
+        let hacc = self.hold_i32()?;
+        let hb = self.hold_i32()?;
+        let hj = self.hold_i32()?;
+        let hf = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hs);
+            i.local_get(hs).i32_load(len_memarg()).local_set(hl);
+            i.i32_const(0).call(F_ALLOC).local_set(hacc);
+            i.local_get(hl).if_(BlockType::Empty);
+            // first run opens at 0
+            i.local_get(hs).i32_load8_u(str_byte()).local_set(hpw);
+            i.i32_const(1);
+            i.local_get(hpw).i32_const(0xC0).i32_ge_u().i32_add();
+            i.local_get(hpw).i32_const(0xE0).i32_ge_u().i32_add();
+            i.local_get(hpw).i32_const(0xF0).i32_ge_u().i32_add();
+            i.local_set(hpw);
+            i.i32_const(0).local_set(hps);
+            i.i32_const(1).local_set(hcnt);
+            i.local_get(hpw).local_set(hk);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hk).local_get(hl).i32_ge_u().br_if(1);
+            i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte()).local_set(hw);
+            i.i32_const(1);
+            i.local_get(hw).i32_const(0xC0).i32_ge_u().i32_add();
+            i.local_get(hw).i32_const(0xE0).i32_ge_u().i32_add();
+            i.local_get(hw).i32_const(0xF0).i32_ge_u().i32_add();
+            i.local_set(hw);
+            // same char? width equal AND every byte equal
+            i.local_get(hw).local_get(hpw).i32_eq().local_set(hf);
+            i.local_get(hf).if_(BlockType::Empty);
+            i.i32_const(0).local_set(hj);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hj).local_get(hw).i32_ge_u().br_if(1);
+            i.local_get(hs).local_get(hps).i32_add().local_get(hj).i32_add();
+            i.i32_load8_u(str_byte());
+            i.local_get(hs).local_get(hk).i32_add().local_get(hj).i32_add();
+            i.i32_load8_u(str_byte());
+            i.i32_ne().if_(BlockType::Empty);
+            i.i32_const(0).local_set(hf);
+            i.br(2);
+            i.end();
+            i.local_get(hj).i32_const(1).i32_add().local_set(hj);
+            i.br(0).end().end();
+            i.end();
+            i.local_get(hf).if_(BlockType::Empty);
+            i.local_get(hcnt).i32_const(1).i32_add().local_set(hcnt);
+            i.else_();
+        }
+        self.emit_rle_flush(hs, hps, hpw, hcnt, hacc, hb, tuple_size, str_off, cnt_off);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hk).local_set(hps);
+            i.local_get(hw).local_set(hpw);
+            i.i32_const(1).local_set(hcnt);
+            i.end();
+            i.local_get(hk).local_get(hw).i32_add().local_set(hk);
+            i.br(0).end().end();
+        }
+        // the final run always exists (len > 0 guard)
+        self.emit_rle_flush(hs, hps, hpw, hcnt, hacc, hb, tuple_size, str_off, cnt_off);
+        self.f.instructions().end();
+        self.f.instructions().local_get(hacc);
+        for _ in 0..11 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(ti)))))
+    }
+
     /// First char's codepoint (native `chars().next()`): "" → none.
     /// The lead byte classes the width; continuations add 6 bits.
     pub(crate) fn lower_string_codepoint(

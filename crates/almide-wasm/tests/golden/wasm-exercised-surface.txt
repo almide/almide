@@ -172,6 +172,7 @@ call:set.from_list
 call:set.insert
 call:set.len
 call:set.new
+call:string.capitalize
 call:string.chars
 call:string.codepoint
 call:string.drop
@@ -187,6 +188,8 @@ call:string.pad_start
 call:string.push
 call:string.repeat
 call:string.replace
+call:string.replace_first
+call:string.run_length_encode
 call:string.slice
 call:string.split
 call:string.starts_with

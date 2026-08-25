@@ -50,6 +50,8 @@ impl Emitter<'_> {
             }
             ("lines", [s]) => self.lower_string_lines(s),
             ("chars", [s]) => self.lower_string_chars(s),
+            ("capitalize", [s]) => self.lower_string_capitalize(s),
+            ("run_length_encode", [s]) => self.lower_string_rle(s),
             ("codepoint", [s]) => self.lower_string_codepoint(s),
             ("get", [s, i]) => self.lower_string_get(s, i),
             ("drop", [s, n]) => self.lower_string_drop(s, n),
