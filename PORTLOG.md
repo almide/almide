@@ -2638,3 +2638,20 @@ record the closure.
   performed: a one-char manifest edit goes red with the ratification
   message. This is the burn-up's missing second axis (README §1):
   program-shaped acceptance, not tracker harvest.
+
+## Stage 97 (2026-08-26): the c3 lesson becomes a discipline gate
+
+- fn_clone_discipline.rs (almide-ir): an EMPTY `mutated_params`
+  assignment anywhere in the workspace needs a same-line
+  `// fresh-fn: <why>` marker; clone sites propagate and pass unmarked;
+  omission is unrepresentable (no Default on IrFunction — a literal
+  names the field or spreads the original). All 37 construction sites
+  audited: exactly ONE was a clone-of-original (mono specialization —
+  the c3 bug, already fixed), the other 19 empty-flag sites are genuine
+  synthesis, each now carrying its reason. Negative check: stripping
+  one marker goes red naming the site.
+- Moving the gauntlet under spec/ put it inside the check/ast parity
+  partitions ("every spec/**/*.almd in exactly one of
+  manifest/exclusions") — registered as excluded rows with the reason
+  pointing at the gauntlet's own gate. The partition rule did its job:
+  a new corpus citizen cannot exist unjudged.
