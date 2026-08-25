@@ -69,6 +69,17 @@ impl Emitter<'_> {
             STR | SliceTy::Scalar(Scalar::Bytes) => {
                 self.f.instructions().call(F_STR_EQ);
             }
+            // Deep structural Value equality via the recursive helper
+            // (tags, IEEE floats, in-order arrays/objects).
+            SliceTy::Value => {
+                let ti = self.types.tuple(vec![STR, SliceTy::Value]);
+                let def = self.types.tuple_def(ti);
+                let eq = self.work.helper(Helper::ValueEq {
+                    key_off: def.fields[0].1,
+                    val_off: def.fields[1].1,
+                });
+                self.f.instructions().call(eq);
+            }
             SliceTy::Unit => {
                 self.f.instructions().drop();
                 self.f.instructions().drop();

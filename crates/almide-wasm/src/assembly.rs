@@ -282,7 +282,7 @@ pub(crate) fn resolve_extras(
     // Emitted helpers assemble FIRST — their indices were promised during
     // lowering; the table-entry extras follow.
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
-    for h in &helper_snapshot {
+    for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match h {
             Helper::ValueKeys => vec![ValType::I32],
             _ => vec![ValType::I32, ValType::I32],
@@ -297,6 +297,14 @@ pub(crate) fn resolve_extras(
             ),
             Helper::JsonQuote { frags } => value::emit_json_quote_helper(*frags),
             Helper::ValueField => value::emit_value_field_helper(),
+            Helper::ValueEq { key_off, val_off } => value::emit_value_eq_helper(
+                work.helper_base.get() + hpos as u32,
+                *key_off,
+                *val_off,
+            ),
+            Helper::ValueMerge { key_off, val_off } => {
+                value::emit_value_merge_helper(*key_off, *val_off)
+            }
             Helper::ValueKeys => value::emit_value_keys_helper(),
             Helper::StringSplit => value::emit_string_split_helper(),
             Helper::DisplayNamed { ti } => {

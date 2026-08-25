@@ -26,6 +26,14 @@ pub(crate) enum Helper {
     /// `$vkeys(value) -> i32`: the object's keys as a List[String]
     /// (addresses shared — strings are immutable).
     ValueKeys,
+    /// `$value_eq(a, b) -> i32` — deep structural Value equality
+    /// (recursive): tags must match, Float is IEEE ==, Array/Object
+    /// compare element/pair-wise IN ORDER (the oracle's value_eq).
+    ValueEq { key_off: u32, val_off: u32 },
+    /// `$value_merge(a, b) -> i32` — object merge: A's keys in order
+    /// (B's value wins on a shared key), then B's new keys in B order;
+    /// any non-Object operand yields b (the oracle's value_merge).
+    ValueMerge { key_off: u32, val_off: u32 },
     /// `$split(str, sep) -> i32` — Rust split semantics: byte-level
     /// full-separator match, non-overlapping left-to-right, empty pieces
     /// kept, count = separators + 1. Empty separator traps (Rust's

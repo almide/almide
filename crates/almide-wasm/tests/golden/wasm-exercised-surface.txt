@@ -214,6 +214,7 @@ call:value.field
 call:value.float
 call:value.int
 call:value.keys
+call:value.merge
 call:value.null
 call:value.object
 call:value.str
