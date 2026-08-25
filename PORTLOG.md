@@ -2444,3 +2444,39 @@ mut-param fns, and singles.
   author again).
 
 501/599 — the 500 line crossed. Divergence zero throughout.
+
+## Stage 75 — 502 → 518: the closure artifacts + Float32 + the lossy machine
+
+- **The stop-condition artifacts closed by construction**: PORT-MATRIX.md
+  is GENERATED over all 1236 registry impls (374 linked / 6
+  rejected-with-reason / 856 unreached-with-meaning — nothing links
+  silently); NON-CARRYOVER.md now states the closure MECHANISM: the
+  599-fixture corpus is the incumbent's one closed defect enumeration
+  (every shipped defect distills to a fixture; the GitHub label taxonomy
+  is NOT that closure — #1542 ships unlabeled), and the burn-up replays
+  all of it byte-verified, naming every unclaimed row.
+- **The WHATWG lossy decoder** as a native helper ($utf8_lossy —
+  Table 3-7 ranges, maximal-subpart FFFD), desk-verified against every
+  invalid-byte fixture case before landing and then byte-verified by
+  the claim. Found on the way: the self-host bytes_to_string_lossy is
+  a RAW COPY (its name lies), and the first composition through it
+  diverged 5 rows — the gate caught it, the helper replaced it.
+- **Float32 lands** on the interp's widened-f64-carrier doctrine:
+  literals narrow AT BIRTH (C-182, compile-time `as f32 as f64`), the
+  f32 prim lane (f2f32/f32bits/…) maps to demote/promote/reinterpret,
+  float32.to_string delegates to the linked Dragon4 over the widened
+  value. All three Float32 fixtures claim bit-exactly.
+- The handle(Value) widening was tried, measurably diverged (4 codec
+  fixtures), and REVERTED the same hour — the divergence gate as the
+  admission judge, again.
+- Dispatcher fallthroughs (bytes/map/set → the linked path), the int
+  bit family + wrap_add/wrap_mul, float ceil/is_infinite, Float64
+  alias, the datetime batch (minus the host-clock rows), set display.
+- **The new local codopsy hook fired its first live block** (B(89)
+  stopped at push, repaired by extraction, pushed at A) — the
+  twice-failed→mechanize doctrine, now closing the loop it was built
+  for.
+
+518/599 (86.5%). Divergence zero. CI full greens: 83e194ea9,
+9bb954dd6, 6fdad9ad0, 9325d4c91 (the queue processes the rest; the one
+red — e72310049 — is the pre-hook B commit, repaired next-commit).
