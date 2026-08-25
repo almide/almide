@@ -38,9 +38,12 @@ rejected = {
     'string_from_bytes': 'raw list-header read (len=count vs bytes) — from_bytes composes from_list + linked lossy instead',
     'value_eq': 'incumbent len-as-tag Value layout — native helper $value_eq instead',
     'value_merge': 'incumbent len-as-tag Value layout — native helper $value_merge instead',
-    'json_path_get': 'raw Value internals (alloc_value/load_handle on the incumbent layout)',
     'value_pick': 'raw Value internals',
     'result_partition': 'raw list/tuple internals (load_str/store_str + list header reads)',
+    'json_path_set': 'incumbent inline-pairs Value layout (tag@h+4, count@h+8) — native helper $jp_set instead',
+    'json_path_remove': 'incumbent inline-pairs Value layout — native helper $jp_remove instead',
+    'json_stringify_pretty': 'incumbent len-as-tag Value layout — native helper $vjson_pretty instead',
+    'bytes_read_length_prefixed_strings_le': '8-byte List[String] slot stores (store_str at i*8) — native decoder instead',
 }
 
 linked = {}

@@ -2534,3 +2534,37 @@ recursive-type eq depth, fn-value HOF callbacks, globals write-back).
 - Codopsy doctrine measured: match ARMS each count cyclomatic +1 but
   or-patterns count once — dispatchers are now shape-grouped
   (list/bytes/matrix), with per-shape name subs.
+
+## Stage 83-90 (2026-08-25): 568 → 599/599 — the corpus CLOSES
+
+- Host protocol arc (ops 17-34): fs metadata/rename/walk/if-exists/
+  raw-bytes/fallible-fold, env get/os/cwd/temp_dir/args, io write/
+  write_bytes/read_n_bytes (n never crosses the boundary — a wrapped
+  i64::MAX once asked the host to read 4 GiB of guest memory),
+  process.args, prim.random_get entropy, the T5-1 wall clock.
+- Effect-ABI raise leaves: `ok(x)` in raw position is the payload
+  (the wrap lives at the fn boundary); a pure Option-fn `!` propagates
+  none as none (#1067). Runtime-recursive Named equality + the
+  ScanDeep compound-key lane (Set/Map of tuples/records) via the
+  display-helper fixed-point machinery.
+- HttpResponse/JsonPath published erasures; TypeVar/Unknown default to
+  Unit (#1428). RawPtr = address scalar with identity casts; the
+  rawptr/skip/heap self-hosts admitted. bytes.new clamps negatives.
+- T5-1 timeout: wall-deadline globals + op-34 clock + wall-hit cut at
+  the det charge sites; the fixed-globals base shift EXPOSED a latent
+  list.pop bug (a global read as a local index that happened to line
+  up before) — the kind of silent-wrong the shift-then-burn caught.
+- C-132 mut-params: the SHARED almide-ir move-mode rewrite now runs in
+  the spine post-link (the incumbent v1 pipeline's exact pass); the
+  wasm wall rekeys on surviving `mutated_params`. Three fixtures, one
+  pass, zero emission code.
+- regex: the whole backtracking engine ADMITTED on the established
+  audit (byte walks on the digest-shared string layout, prim-mediated
+  scratch) — both fixtures byte-matched immediately.
+- json: `$vjson_pretty` (the two-space pretty printer) and the
+  `$jp_set`/`$jp_remove` recursive path builders on THIS layout close
+  the final two fixtures.
+
+**599/599, divergence zero, floor 599.** NON-CARRYOVER.md and
+PORT-MATRIX.md (435 linked / 9 rejected / 792 native-or-walled)
+record the closure.

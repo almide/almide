@@ -1,6 +1,6 @@
 # The Non-Carryover Ledger
 
-> Last updated: 2026-08-25 (stage 74, burn-up 502/599).
+> Last updated: 2026-08-25 (stage 90, burn-up **599/599 — COMPLETE**).
 
 ## 0. How this ledger CLOSES (the mechanism, not a sample)
 
@@ -21,6 +21,18 @@ ledger below is the narrative index of the interesting classes; the
 closed verification is `backend_parity.rs` at its current floor, and
 the ledger is COMPLETE exactly when the burn-up reaches 599/599 (the
 remaining rows are enumerated by reason-label at every run).
+
+**CLOSED 2026-08-25**: the burn-up stands at **599/599, divergence
+zero** — every fixture in the incumbent's closed conformance
+enumeration byte-matches on this engine (stdout hash + exit code), and
+the grow-only floor (`SUPPORTED_FLOOR: 599`) makes any future
+regression a test failure, not a drift. The port-vs-rebuild record is
+simultaneously closed: PORT-MATRIX.md (regenerated at 599) records
+435 linked admissions (each with its audit tier), 9 explicit
+rejections with their layout-coupling reasons, and 792 impls whose
+surfaces are covered by native arms in this emitter or sit outside
+the corpus behind honest walls — nothing links silently, and nothing
+in the corpus is unverified.
 
 The port-vs-rebuild record has the same shape: `PORT-MATRIX.md` is
 GENERATED (scripts/gen-port-matrix.py) over every one of the 1236

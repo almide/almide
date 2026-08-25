@@ -1,6 +1,6 @@
 # The Port Matrix (generated — scripts/gen-port-matrix.py)
 
-Registry impls: 1236 — linked 374, rejected 6, unreached 856.
+Registry impls: 1236 — linked 435, rejected 9, unreached 792.
 
 An `unreached` row is an impl no admission decision has touched:
 its surface either has a NATIVE arm in the emitter or stays an
@@ -55,27 +55,27 @@ honest wall in the burn-up histogram. Nothing links silently.
 | bytes_append_u16_le | bytes.append_u16_le | linked (bytes family) |
 | bytes_append_u32_be | bytes.append_u32_be | linked (bytes family) |
 | bytes_append_u32_le | bytes.append_u32_le | linked (bytes family) |
-| bytes_as_mut_ptr | bytes.as_mut_ptr | unreached (honest wall / native arm covers the surface) |
-| bytes_as_ptr | bytes.as_ptr | unreached (honest wall / native arm covers the surface) |
+| bytes_as_mut_ptr | bytes.as_mut_ptr | linked (bytes family SUM) |
+| bytes_as_ptr | bytes.as_ptr | linked (bytes family SUM) |
 | bytes_chunks | bytes.chunks | unreached (honest wall / native arm covers the surface) |
 | bytes_clear | bytes.clear | unreached (honest wall / native arm covers the surface) |
 | bytes_cmp | bytes.cmp | unreached (honest wall / native arm covers the surface) |
 | bytes_concat | bytes.concat | unreached (honest wall / native arm covers the surface) |
 | bytes_contains | bytes.contains | unreached (honest wall / native arm covers the surface) |
 | bytes_copy_from | bytes.copy_from | unreached (honest wall / native arm covers the surface) |
-| bytes_copy_to_ptr | bytes.copy_to_ptr | unreached (honest wall / native arm covers the surface) |
+| bytes_copy_to_ptr | bytes.copy_to_ptr | linked (bytes family SUM) |
 | bytes_copy_within | bytes.copy_within | unreached (honest wall / native arm covers the surface) |
 | bytes_data_ptr | bytes.data_ptr | unreached (honest wall / native arm covers the surface) |
 | bytes_ends_with | bytes.ends_with | unreached (honest wall / native arm covers the surface) |
 | bytes_eof | bytes.eof | unreached (honest wall / native arm covers the surface) |
 | bytes_fill | bytes.fill | unreached (honest wall / native arm covers the surface) |
 | bytes_from_list | bytes.from_list | unreached (honest wall / native arm covers the surface) |
-| bytes_from_raw_ptr | bytes.from_raw_ptr | unreached (honest wall / native arm covers the surface) |
+| bytes_from_raw_ptr | bytes.from_raw_ptr | linked (bytes family SUM) |
 | bytes_from_string | bytes.from_string | unreached (honest wall / native arm covers the surface) |
 | bytes_get | bytes.get | unreached (honest wall / native arm covers the surface) |
 | bytes_get_or | bytes.get_or | unreached (honest wall / native arm covers the surface) |
-| bytes_heap_restore | bytes.heap_restore | unreached (honest wall / native arm covers the surface) |
-| bytes_heap_save | bytes.heap_save | unreached (honest wall / native arm covers the surface) |
+| bytes_heap_restore | bytes.heap_restore | linked (bytes family SUM) |
+| bytes_heap_save | bytes.heap_save | linked (bytes family SUM) |
 | bytes_index | bytes.index | unreached (honest wall / native arm covers the surface) |
 | bytes_index_of | bytes.index_of | unreached (honest wall / native arm covers the surface) |
 | bytes_insert | bytes.insert | unreached (honest wall / native arm covers the surface) |
@@ -104,7 +104,7 @@ honest wall in the burn-up histogram. Nothing links silently.
 | bytes_read_f64_le | bytes.read_f64_le | unreached (honest wall / native arm covers the surface) |
 | bytes_read_f64_le_array | bytes.read_f64_le_array | linked (bytes family) |
 | bytes_read_f64_le_at | bytes.read_f64_le_at | linked (bytes family SUM) |
-| bytes_read_float32 | bytes.read_float32 | unreached (honest wall / native arm covers the surface) |
+| bytes_read_float32 | bytes.read_float32 | linked (bytes family) |
 | bytes_read_i16_be | bytes.read_i16_be | unreached (honest wall / native arm covers the surface) |
 | bytes_read_i16_be_array | bytes.read_i16_be_array | linked (bytes family) |
 | bytes_read_i16_be_at | bytes.read_i16_be_at | linked (bytes family SUM) |
@@ -123,8 +123,8 @@ honest wall in the burn-up histogram. Nothing links silently.
 | bytes_read_i64_le | bytes.read_i64_le | unreached (honest wall / native arm covers the surface) |
 | bytes_read_i64_le_array | bytes.read_i64_le_array | linked (bytes family) |
 | bytes_read_i64_le_at | bytes.read_i64_le_at | linked (bytes family SUM) |
-| bytes_read_int32 | bytes.read_int32 | unreached (honest wall / native arm covers the surface) |
-| bytes_read_length_prefixed_strings_le | bytes.read_length_prefixed_strings_le | unreached (honest wall / native arm covers the surface) |
+| bytes_read_int32 | bytes.read_int32 | linked (bytes family) |
+| bytes_read_length_prefixed_strings_le | bytes.read_length_prefixed_strings_le | REJECTED: 8-byte List[String] slot stores (store_str at i*8) — native decoder instead |
 | bytes_read_string_at | bytes.read_string_at | linked (bytes family SUM) |
 | bytes_read_string_be | bytes.read_string_be | linked (bytes family) |
 | bytes_read_string_be_at | bytes.read_string_be_at | linked (bytes family SUM) |
@@ -142,8 +142,8 @@ honest wall in the burn-up histogram. Nothing links silently.
 | bytes_read_u32_le_at | bytes.read_u32_le_at | linked (bytes family SUM) |
 | bytes_read_u8 | bytes.read_u8 | unreached (honest wall / native arm covers the surface) |
 | bytes_read_u8_at | bytes.read_u8_at | linked (bytes family SUM) |
-| bytes_read_uint16 | bytes.read_uint16 | unreached (honest wall / native arm covers the surface) |
-| bytes_read_uint32 | bytes.read_uint32 | unreached (honest wall / native arm covers the surface) |
+| bytes_read_uint16 | bytes.read_uint16 | linked (bytes family) |
+| bytes_read_uint32 | bytes.read_uint32 | linked (bytes family) |
 | bytes_remove_at | bytes.remove_at | unreached (honest wall / native arm covers the surface) |
 | bytes_repeat | bytes.repeat | unreached (honest wall / native arm covers the surface) |
 | bytes_reverse | bytes.reverse | unreached (honest wall / native arm covers the surface) |
@@ -153,59 +153,59 @@ honest wall in the burn-up histogram. Nothing links silently.
 | bytes_set_f32_le | bytes.set_f32_le | unreached (honest wall / native arm covers the surface) |
 | bytes_set_f64_be | bytes.set_f64_be | unreached (honest wall / native arm covers the surface) |
 | bytes_set_f64_le | bytes.set_f64_le | unreached (honest wall / native arm covers the surface) |
-| bytes_set_float32 | bytes.set_float32 | unreached (honest wall / native arm covers the surface) |
+| bytes_set_float32 | bytes.set_float32 | linked (bytes family) |
 | bytes_set_i16_be | bytes.set_i16_be | unreached (honest wall / native arm covers the surface) |
 | bytes_set_i16_le | bytes.set_i16_le | unreached (honest wall / native arm covers the surface) |
 | bytes_set_i32_be | bytes.set_i32_be | unreached (honest wall / native arm covers the surface) |
 | bytes_set_i32_le | bytes.set_i32_le | unreached (honest wall / native arm covers the surface) |
 | bytes_set_i64_be | bytes.set_i64_be | unreached (honest wall / native arm covers the surface) |
 | bytes_set_i64_le | bytes.set_i64_le | unreached (honest wall / native arm covers the surface) |
-| bytes_set_int32 | bytes.set_int32 | unreached (honest wall / native arm covers the surface) |
+| bytes_set_int32 | bytes.set_int32 | linked (bytes family) |
 | bytes_set_u16_be | bytes.set_u16_be | unreached (honest wall / native arm covers the surface) |
 | bytes_set_u16_le | bytes.set_u16_le | unreached (honest wall / native arm covers the surface) |
 | bytes_set_u32_be | bytes.set_u32_be | unreached (honest wall / native arm covers the surface) |
 | bytes_set_u32_le | bytes.set_u32_le | unreached (honest wall / native arm covers the surface) |
 | bytes_set_u8 | bytes.set_u8 | unreached (honest wall / native arm covers the surface) |
-| bytes_set_uint16 | bytes.set_uint16 | unreached (honest wall / native arm covers the surface) |
-| bytes_set_uint32 | bytes.set_uint32 | unreached (honest wall / native arm covers the surface) |
+| bytes_set_uint16 | bytes.set_uint16 | linked (bytes family) |
+| bytes_set_uint32 | bytes.set_uint32 | linked (bytes family) |
 | bytes_skip | bytes.skip | unreached (honest wall / native arm covers the surface) |
-| bytes_skip_length_prefixed_le | bytes.skip_length_prefixed_le | unreached (honest wall / native arm covers the surface) |
+| bytes_skip_length_prefixed_le | bytes.skip_length_prefixed_le | linked (bytes family SUM) |
 | bytes_slice | bytes.slice | unreached (honest wall / native arm covers the surface) |
 | bytes_split | bytes.split | unreached (honest wall / native arm covers the surface) |
 | bytes_starts_with | bytes.starts_with | unreached (honest wall / native arm covers the surface) |
 | bytes_take_at | bytes.take_at | linked (bytes family SUM) |
 | bytes_to_list | bytes.to_list | unreached (honest wall / native arm covers the surface) |
 | bytes_to_string | bytes.to_string | unreached (honest wall / native arm covers the surface) |
-| bytes_to_string_lossy | bytes.to_string_lossy | linked (bytes family) |
-| bytes_write_bool | bytes.write_bool | unreached (honest wall / native arm covers the surface) |
-| bytes_write_float32 | bytes.write_float32 | unreached (honest wall / native arm covers the surface) |
-| bytes_write_int32 | bytes.write_int32 | unreached (honest wall / native arm covers the surface) |
-| bytes_write_string_be | bytes.write_string_be | unreached (honest wall / native arm covers the surface) |
-| bytes_write_uint16 | bytes.write_uint16 | unreached (honest wall / native arm covers the surface) |
-| bytes_write_uint32 | bytes.write_uint32 | unreached (honest wall / native arm covers the surface) |
+| bytes_to_string_lossy | bytes.to_string_lossy | unreached (honest wall / native arm covers the surface) |
+| bytes_write_bool | bytes.write_bool | linked (bytes family) |
+| bytes_write_float32 | bytes.write_float32 | linked (bytes family) |
+| bytes_write_int32 | bytes.write_int32 | linked (bytes family) |
+| bytes_write_string_be | bytes.write_string_be | linked (bytes family) |
+| bytes_write_uint16 | bytes.write_uint16 | linked (bytes family) |
+| bytes_write_uint32 | bytes.write_uint32 | linked (bytes family) |
 | bytes_xor | bytes.xor | unreached (honest wall / native arm covers the surface) |
-| datetime_add_days | datetime.add_days | unreached (honest wall / native arm covers the surface) |
-| datetime_add_hours | datetime.add_hours | unreached (honest wall / native arm covers the surface) |
-| datetime_add_minutes | datetime.add_minutes | unreached (honest wall / native arm covers the surface) |
-| datetime_add_seconds | datetime.add_seconds | unreached (honest wall / native arm covers the surface) |
-| datetime_day | datetime.day | unreached (honest wall / native arm covers the surface) |
-| datetime_diff_seconds | datetime.diff_seconds | unreached (honest wall / native arm covers the surface) |
-| datetime_format | datetime.format | unreached (honest wall / native arm covers the surface) |
+| datetime_add_days | datetime.add_days | linked (scalar/text) |
+| datetime_add_hours | datetime.add_hours | linked (scalar/text) |
+| datetime_add_minutes | datetime.add_minutes | linked (scalar/text) |
+| datetime_add_seconds | datetime.add_seconds | linked (scalar/text) |
+| datetime_day | datetime.day | linked (scalar/text) |
+| datetime_diff_seconds | datetime.diff_seconds | linked (scalar/text) |
+| datetime_format | datetime.format | linked (scalar/text) |
 | datetime_from_parts | datetime.from_parts | linked (scalar/text) |
-| datetime_from_unix | datetime.from_unix | unreached (honest wall / native arm covers the surface) |
-| datetime_hour | datetime.hour | unreached (honest wall / native arm covers the surface) |
-| datetime_is_after | datetime.is_after | unreached (honest wall / native arm covers the surface) |
-| datetime_is_before | datetime.is_before | unreached (honest wall / native arm covers the surface) |
-| datetime_minute | datetime.minute | unreached (honest wall / native arm covers the surface) |
+| datetime_from_unix | datetime.from_unix | linked (scalar/text) |
+| datetime_hour | datetime.hour | linked (scalar/text) |
+| datetime_is_after | datetime.is_after | linked (scalar/text) |
+| datetime_is_before | datetime.is_before | linked (scalar/text) |
+| datetime_minute | datetime.minute | linked (scalar/text) |
 | datetime_monotonic_ns | datetime.monotonic_ns | unreached (honest wall / native arm covers the surface) |
-| datetime_month | datetime.month | unreached (honest wall / native arm covers the surface) |
+| datetime_month | datetime.month | linked (scalar/text) |
 | datetime_now | datetime.now | unreached (honest wall / native arm covers the surface) |
 | datetime_parse_iso | datetime.parse_iso | unreached (honest wall / native arm covers the surface) |
-| datetime_second | datetime.second | unreached (honest wall / native arm covers the surface) |
+| datetime_second | datetime.second | linked (scalar/text) |
 | datetime_to_iso | datetime.to_iso | linked (scalar/text) |
-| datetime_to_unix | datetime.to_unix | unreached (honest wall / native arm covers the surface) |
-| datetime_weekday | datetime.weekday | unreached (honest wall / native arm covers the surface) |
-| datetime_year | datetime.year | unreached (honest wall / native arm covers the surface) |
+| datetime_to_unix | datetime.to_unix | linked (scalar/text) |
+| datetime_weekday | datetime.weekday | linked (scalar/text) |
+| datetime_year | datetime.year | linked (scalar/text) |
 | env_args | env.args | unreached (honest wall / native arm covers the surface) |
 | env_cwd | env.cwd | unreached (honest wall / native arm covers the surface) |
 | env_get | env.get | unreached (honest wall / native arm covers the surface) |
@@ -257,7 +257,7 @@ honest wall in the burn-up histogram. Nothing links silently.
 | float_ceil | float.ceil | unreached (honest wall / native arm covers the surface) |
 | float_clamp | float.clamp | unreached (honest wall / native arm covers the surface) |
 | float_floor | float.floor | linked (scalar/text) |
-| float_from_float32 | float.from_float32 | unreached (honest wall / native arm covers the surface) |
+| float_from_float32 | float.from_float32 | linked (scalar/text) |
 | float_from_float64 | float.from_float64 | linked (scalar/text) |
 | float_from_int | float.from_int | unreached (honest wall / native arm covers the surface) |
 | float_is_infinite | float.is_infinite | unreached (honest wall / native arm covers the surface) |
@@ -270,7 +270,7 @@ honest wall in the burn-up histogram. Nothing links silently.
 | float_sqrt | float.sqrt | unreached (honest wall / native arm covers the surface) |
 | float_to_bits | float.to_bits | unreached (honest wall / native arm covers the surface) |
 | float_to_fixed | float.to_fixed | linked (calls.rs VERIFIED) |
-| float_to_float32 | float.to_float32 | unreached (honest wall / native arm covers the surface) |
+| float_to_float32 | float.to_float32 | linked (scalar/text) |
 | float_to_float32_checked | float.to_float32_checked | unreached (honest wall / native arm covers the surface) |
 | float_to_float64 | float.to_float64 | linked (sized-convert) |
 | float_to_int | float.to_int | linked (sized-convert) |
@@ -337,21 +337,21 @@ honest wall in the burn-up histogram. Nothing links silently.
 | fs_write_bytes | fs.write_bytes | unreached (honest wall / native arm covers the surface) |
 | fs_write_bytes_raw | fs.write_bytes_raw | unreached (honest wall / native arm covers the surface) |
 | hash_fnv1a32 | hash.fnv1a32 | linked (scalar/text) |
-| hash_fnv1a32_bytes | hash.fnv1a32_bytes | unreached (honest wall / native arm covers the surface) |
-| hash_sha256 | hash.sha256 | unreached (honest wall / native arm covers the surface) |
-| hash_sha256_hex | hash.sha256_hex | unreached (honest wall / native arm covers the surface) |
-| hex_decode | hex.decode | unreached (honest wall / native arm covers the surface) |
-| hex_encode | hex.encode | unreached (honest wall / native arm covers the surface) |
-| hex_encode_upper | hex.encode_upper | unreached (honest wall / native arm covers the surface) |
-| http_body | http.body | unreached (honest wall / native arm covers the surface) |
+| hash_fnv1a32_bytes | hash.fnv1a32_bytes | linked (scalar/text) |
+| hash_sha256 | hash.sha256 | linked (scalar/text) |
+| hash_sha256_hex | hash.sha256_hex | linked (scalar/text) |
+| hex_decode | hex.decode | linked (scalar/text) |
+| hex_encode | hex.encode | linked (scalar/text) |
+| hex_encode_upper | hex.encode_upper | linked (scalar/text) |
+| http_body | http.body | linked (bytes family SUM) |
 | http_get_header | http.get_header | unreached (honest wall / native arm covers the surface) |
-| http_json | http.json | unreached (honest wall / native arm covers the surface) |
-| http_redirect | http.redirect | unreached (honest wall / native arm covers the surface) |
-| http_response | http.response | unreached (honest wall / native arm covers the surface) |
-| http_set_header | http.set_header | unreached (honest wall / native arm covers the surface) |
-| http_status | http.status | unreached (honest wall / native arm covers the surface) |
+| http_json | http.json | linked (bytes family SUM) |
+| http_redirect | http.redirect | linked (bytes family SUM) |
+| http_response | http.response | linked (bytes family SUM) |
+| http_set_header | http.set_header | linked (bytes family SUM) |
+| http_status | http.status | linked (bytes family SUM) |
 | http_url_decode | http.url_decode | unreached (honest wall / native arm covers the surface) |
-| http_with_headers | http.with_headers | unreached (honest wall / native arm covers the surface) |
+| http_with_headers | http.with_headers | linked (bytes family SUM) |
 | int16_max_value | int16.max_value | linked (sized-convert) |
 | int16_min_value | int16.min_value | linked (sized-convert) |
 | int16_to_float32 | int16.to_float32 | unreached (honest wall / native arm covers the surface) |
@@ -520,20 +520,20 @@ honest wall in the burn-up histogram. Nothing links silently.
 | io_read_n_bytes | io.read_n_bytes | unreached (honest wall / native arm covers the surface) |
 | io_write | io.write | unreached (honest wall / native arm covers the surface) |
 | io_write_bytes | io.write_bytes | unreached (honest wall / native arm covers the surface) |
-| json_get_array | json.get_array | linked (bytes family) |
-| json_get_bool | json.get_bool | linked (bytes family) |
-| json_get_float | json.get_float | linked (bytes family) |
-| json_get_int | json.get_int | linked (bytes family) |
-| json_get_string | json.get_string | linked (bytes family) |
+| json_get_array | json.get_array | linked (bytes family SUM) |
+| json_get_bool | json.get_bool | linked (bytes family SUM) |
+| json_get_float | json.get_float | linked (bytes family SUM) |
+| json_get_int | json.get_int | linked (bytes family SUM) |
+| json_get_string | json.get_string | linked (bytes family SUM) |
 | json_parse | json.parse | linked (calls.rs SUM tier) |
 | json_path_field | json.field | unreached (honest wall / native arm covers the surface) |
-| json_path_get | json.get_path | REJECTED: raw Value internals (alloc_value/load_handle on the incumbent layout) |
+| json_path_get | json.get_path | unreached (honest wall / native arm covers the surface) |
 | json_path_index | json.index | unreached (honest wall / native arm covers the surface) |
-| json_path_remove | json.remove_path | unreached (honest wall / native arm covers the surface) |
+| json_path_remove | json.remove_path | REJECTED: incumbent inline-pairs Value layout — native helper $jp_remove instead |
 | json_path_root | json.root | unreached (honest wall / native arm covers the surface) |
-| json_path_set | json.set_path | unreached (honest wall / native arm covers the surface) |
+| json_path_set | json.set_path | REJECTED: incumbent inline-pairs Value layout (tag@h+4, count@h+8) — native helper $jp_set instead |
 | json_stringify | json.stringify | unreached (honest wall / native arm covers the surface) |
-| json_stringify_pretty | json.stringify_pretty | unreached (honest wall / native arm covers the surface) |
+| json_stringify_pretty | json.stringify_pretty | REJECTED: incumbent len-as-tag Value layout — native helper $vjson_pretty instead |
 | list_all | list.all | unreached (honest wall / native arm covers the surface) |
 | list_all_str | list.all_str | unreached (honest wall / native arm covers the surface) |
 | list_any | list.any | unreached (honest wall / native arm covers the surface) |
@@ -982,18 +982,18 @@ honest wall in the burn-up histogram. Nothing links silently.
 | random_choice_pair | random.choice_pair | unreached (honest wall / native arm covers the surface) |
 | random_choice_str | random.choice_str | unreached (honest wall / native arm covers the surface) |
 | random_float | random.float | unreached (honest wall / native arm covers the surface) |
-| random_int | random.int | unreached (honest wall / native arm covers the surface) |
+| random_int | random.int | linked (bytes family SUM) |
 | random_shuffle | random.shuffle | unreached (honest wall / native arm covers the surface) |
 | random_shuffle_pair | random.shuffle_pair | unreached (honest wall / native arm covers the surface) |
 | random_shuffle_str | random.shuffle_str | unreached (honest wall / native arm covers the surface) |
 | regex_captures | regex.captures | unreached (honest wall / native arm covers the surface) |
 | regex_find | regex.find | unreached (honest wall / native arm covers the surface) |
-| regex_find_all | regex.find_all | unreached (honest wall / native arm covers the surface) |
-| regex_full_match | regex.full_match | unreached (honest wall / native arm covers the surface) |
-| regex_is_match | regex.is_match | unreached (honest wall / native arm covers the surface) |
-| regex_replace | regex.replace | unreached (honest wall / native arm covers the surface) |
-| regex_replace_first | regex.replace_first | unreached (honest wall / native arm covers the surface) |
-| regex_split | regex.split | unreached (honest wall / native arm covers the surface) |
+| regex_find_all | regex.find_all | linked (bytes family SUM) |
+| regex_full_match | regex.full_match | linked (bytes family SUM) |
+| regex_is_match | regex.is_match | linked (bytes family SUM) |
+| regex_replace | regex.replace | linked (bytes family SUM) |
+| regex_replace_first | regex.replace_first | linked (bytes family SUM) |
+| regex_split | regex.split | linked (bytes family SUM) |
 | result_filter | result.filter | unreached (honest wall / native arm covers the surface) |
 | result_flat_map | result.flat_map | unreached (honest wall / native arm covers the surface) |
 | result_flat_map_h | result.flat_map_h | unreached (honest wall / native arm covers the surface) |
@@ -1100,8 +1100,8 @@ honest wall in the burn-up histogram. Nothing links silently.
 | string_is_alphanumeric_uni | string.is_alphanumeric | linked (scalar/text) |
 | string_is_digit | string.is_digit | linked (scalar/text) |
 | string_is_empty | string.is_empty | unreached (honest wall / native arm covers the surface) |
-| string_is_lower | string.is_lower | unreached (honest wall / native arm covers the surface) |
-| string_is_upper | string.is_upper | unreached (honest wall / native arm covers the surface) |
+| string_is_lower | string.is_lower | linked (scalar/text) |
+| string_is_upper | string.is_upper | linked (scalar/text) |
 | string_is_whitespace | string.is_whitespace | linked (scalar/text) |
 | string_join | string.join | unreached (honest wall / native arm covers the surface) |
 | string_last | string.last | unreached (honest wall / native arm covers the surface) |
