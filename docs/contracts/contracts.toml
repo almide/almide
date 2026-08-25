@@ -1674,6 +1674,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_chain_unwrap_or.almd", class = "fixture" },
+  { path = "spec/wasm_cross/qq_record_fallback.almd", class = "fixture" },
 ]
 
 [[contract]]

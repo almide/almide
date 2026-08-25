@@ -649,9 +649,12 @@ impl<'a> Interpreter<'a> {
         let Some(decl) = self.record_decls.get(&key).copied() else {
             return Ok(out);
         };
-        if decl.iter().all(|f| f.default.is_none()) {
-            return Ok(out);
-        }
+        // ALWAYS rebuild in DECLARATION order, defaults or not: a permuted
+        // literal (`ERec { y: 2, x: 1 }`) must equal the declared-order value
+        // — both backends normalize at lowering, and the payload Vec's
+        // PartialEq is positional, so the old defaults-only early return made
+        // the interp dissent `ne` against a native==wasm `eq` (caught by the
+        // 3-way oracle while graduating variant_record_literal_equality).
         let mut filled = Vec::with_capacity(decl.len());
         for f in decl {
             if let Some(pos) = out.iter().position(|(k, _)| *k == f.name) {

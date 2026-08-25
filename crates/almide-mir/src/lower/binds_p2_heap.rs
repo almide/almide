@@ -28,6 +28,7 @@ impl LowerCtx {
         // (a non-String heap payload, a non-materialized operand) it falls through to the deferred
         // `Alloc{Opaque}` arm below — unchanged, the existing memory-safe incompleteness.
         if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
+            crate::trace::trace("ALMIDE_DBG_QQ", || format!("[qq-bind] reached: expr.ty={:?} is_result={} is_option={}", expr.ty, expr.ty.is_result(), expr.ty.is_option()));
             let lifted_mark = self.lifted.len();
             if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
                 self.value_of.insert(var, dst);
@@ -51,7 +52,9 @@ impl LowerCtx {
                 let ops_mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
                 let rewritten = Self::unwrap_or_as_result_match(value, expr, fallback);
-                if self.lower_bind(var, ty, &rewritten).is_ok() {
+                let r = self.lower_bind(var, ty, &rewritten);
+                crate::trace::trace("ALMIDE_DBG_QQ", || format!("[qq-bind] result-match rewrite: {:?}", r.as_ref().err()));
+                if r.is_ok() {
                     return Ok(true);
                 }
                 self.ops.truncate(ops_mark);
