@@ -83,6 +83,28 @@ impl LowerCtx {
                 return Ok(Some(dst));
             }
         }
+        // A tail-position Result ctor the pointwise family above declined
+        // (`ok((d, 2))` for `(Int, Int)!`, `ok((A{..}, B{..}))` for a
+        // record-pair — the never-err `!`-lift value tail): the fn tail is a
+        // DEGENERATE SINGLE ARM, so route it through the SAME
+        // `lower_heap_result_arm` the heap-result `if`/`match` arms use.
+        // That family is already the wide one — the identical payload passes
+        // today the moment the body has any branch (an err arm, a two-ok
+        // `if`) — the asymmetry was the tail spelling only. The arm helper
+        // materializes the carrier and balances its own move-out, exactly as
+        // in arm position; the value is moved out as the return.
+        if matches!(tail.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
+            && matches!(
+                &tail.ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                    if a.len() == 2
+            )
+        {
+            let ty = tail.ty.clone();
+            if let Some(dst) = self.lower_heap_result_arm(tail, &ty) {
+                return Ok(Some(dst));
+            }
+        }
         let repr = repr_of(&tail.ty)?;
         let init = alloc_init(tail);
         // `alloc_init` faithfully materializes a string literal and a scalar-
