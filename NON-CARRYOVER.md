@@ -137,5 +137,15 @@ The comparative claims are per-mechanism, each grounded in
   als normative rulings — the judge repo is the oracle, never another
   implementation (F1: no oracle circularity).
 
-Open comparative fronts (not yet claimable, tracked): vendored libm
-bit-parity (C-305), the matrix/f32 kernels, regex, WASI host surface.
+**2026-08-25 — the fronts above are resolved and the determination is
+made in [VERDICT.md](./VERDICT.md)** (the W-canon table, the
+championship axes, the corpus-wide incumbent A/B, and the scoped
+absolute claim). Of the four fronts once tracked here: the matrix/f32
+kernels and regex closed inside the 599/599 burn-up (byte-exact on
+both legs); vendored libm is corpus-proven byte-exact on every float
+fixture, and the fuller C-305 per-function claim belongs to the
+contract ledger, not this file; the host surface is the ratified W-7
+architecture (roc-model host ownership — the `almide-wasm-run` product
+host ships in-tree), not a WASI gap: targeting third-party WASI
+runtimes would be a new field per VERDICT §4, re-opened only by the
+measure-gate-claim mechanism.

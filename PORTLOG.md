@@ -2568,3 +2568,35 @@ recursive-type eq depth, fn-value HOF callbacks, globals write-back).
 **599/599, divergence zero, floor 599.** NON-CARRYOVER.md and
 PORT-MATRIX.md (435 linked / 9 rejected / 792 native-or-walled)
 record the closure.
+
+## Stage 91-94 (2026-08-25): the deficits close, the verdict lands
+
+- Two-pass DCE (emit.rs): pass 1 lowers the whole linked graph and
+  BFS-reaches from main; if dead functions exist, pass 2 re-emits with
+  the table filtered to the reachable set (deterministic order keeps
+  indices stable). 24.7 KB kernels → 3.1 KB class; 599/599 and perf
+  preserved. Non-reachable lowered bodies stub to 3-byte
+  `unreachable` in pass 1's module too.
+- `almide-wasm-run`: the harness host PROMOTED to a product crate —
+  one host (host.rs) serves the CLI and the almide-wasm test harness
+  (now a 5-line delegate). Real stdin, `--emit`, exit passthrough.
+- `list.sort_by`: the lockstep insertion sort (the survey's C2 defect
+  class, carried from the incumbent) replaced by a keys+values
+  ping-pong merge sort reusing `emit_le_flag`; stability stays pinned
+  by `sort_by_str_key_heap`. 200k elements: 33 ms end-to-end. A
+  `sort_by` kernel row joins the perf probe so the asymptotic class
+  is measured, not assumed.
+- Runner stdin goes LAZY (`StdinSource`): op 31 reads the real stream
+  on first guest read — a program that never touches stdin never
+  blocks on an open terminal. (Found the hard way: an eager
+  read-to-end under a held-open pipe masqueraded as a hang cascade
+  through every subsequent measurement — diagnose by probe, and check
+  the environment before the compiler.)
+- Corpus-wide size A/B vs incumbent 0.59.1 (all 599, both compilers):
+  greenfield smaller on 450/599, median ratio 0.675, aggregate
+  4.11 MB vs 10.54 MB. The 149 losses are near-empty programs under
+  the ~3.1 KB fixed preamble; string-bearing programs reach 0.10.
+- **VERDICT.md**: the formal determination against ../almide-references
+  — the W-canon position table (met/exceeded/documented-divergence on
+  all nine), the championship axes, the incumbent A/B, and the scoped
+  absolute claim. NON-CARRYOVER §4's open fronts resolved into it.
