@@ -500,6 +500,55 @@ mod hoist_impl {
         }
     }
 
+    /// #1581: a `!` PROPAGATION inline in a record-literal FIELD
+    /// (`Out { a: label(r)! }` — the fallible-DTO shape) walled whenever the
+    /// field is heap-typed and the literal is a Result carrier's Ok payload;
+    /// the hoisted `let` spelling always lowered. Mechanize that spelling:
+    /// hoist every field up to and including the LAST `!` field that is not a
+    /// trivially pure read (Var / literal) to its own `__rec_fld` bind —
+    /// evaluation order is preserved among the hoisted fields, later fields
+    /// stay inline and still evaluate after them, and the `!`'s early return
+    /// fires before the record materializes exactly as it did inline.
+    /// Descends through the ADR-0002 lifted tail's ctor (`ok(Out { … })`) to
+    /// the literal. The Unwrap/Try node carries the PAYLOAD type (the call
+    /// under it carries the carrier), so the hoisted bind is the proven C-222
+    /// bind-position unwrap verbatim.
+    fn hoist_bang_record_fields(
+        value: &mut IrExpr,
+        vt: &mut VarTable,
+        hoists: &mut Vec<IrStmt>,
+    ) {
+        let rec = match &mut value.kind {
+            IrExprKind::ResultOk { expr }
+            | IrExprKind::ResultErr { expr }
+            | IrExprKind::OptionSome { expr } => &mut **expr,
+            _ => value,
+        };
+        let IrExprKind::Record { fields, .. } = &mut rec.kind else { return };
+        let Some(last_bang) = fields.iter().rposition(|(_, fe)| {
+            matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+        }) else {
+            return;
+        };
+        for (idx, (_, fe)) in fields.iter_mut().enumerate() {
+            if idx > last_bang {
+                break;
+            }
+            let trivially_pure = matches!(
+                fe.kind,
+                IrExprKind::Var { .. }
+                    | IrExprKind::LitInt { .. }
+                    | IrExprKind::LitFloat { .. }
+                    | IrExprKind::LitStr { .. }
+                    | IrExprKind::LitBool { .. }
+                    | IrExprKind::Unit
+            );
+            if !trivially_pure {
+                hoists.push(hoist_to_bind(fe, vt, "__rec_fld"));
+            }
+        }
+    }
+
     fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {
         let mut i = 0;
         while i < stmts.len() {
@@ -514,6 +563,7 @@ mod hoist_impl {
                     // No behavior change — see docs/roadmap/active/code-health-codopsy.md.
                     hoist_record_literal_call_args(value, vt, &mut hoists);
                     hoist_scalar_call_record_fields(value, vt, &mut hoists);
+                    hoist_bang_record_fields(value, vt, &mut hoists);
                 }
                 IrStmtKind::Expr { expr } => rewrite_expr(expr, vt),
                 _ => {}
@@ -539,6 +589,13 @@ mod hoist_impl {
                 rewrite_block(stmts, vt);
                 if let Some(t) = expr.as_deref_mut() {
                     rewrite_expr(t, vt);
+                    // A TAIL-position record literal with a `!` field
+                    // (`fn f(r) = { …; Out { a: label(r)! } }` and the lifted
+                    // `ok(Out { … })` spelling — #1581): hoist the fields into
+                    // this block's own statements, right before the tail.
+                    let mut hoists: Vec<IrStmt> = Vec::new();
+                    hoist_bang_record_fields(t, vt, &mut hoists);
+                    stmts.extend(hoists);
                 }
             }
             IrExprKind::If { cond, then, else_ } => {
@@ -555,7 +612,25 @@ mod hoist_impl {
     }
 
     pub(crate) fn rewrite_expr_entry(e: &mut IrExpr, vt: &mut VarTable) {
-        rewrite_expr(e, vt)
+        rewrite_expr(e, vt);
+        // A NON-Block fn body (`fn f(r) = Out { a: label(r)! }` — the 5-line
+        // #1581 repro): there is no statement list to hoist into, so wrap the
+        // body in a Block carrying the hoisted binds ahead of the literal.
+        let mut hoists: Vec<IrStmt> = Vec::new();
+        hoist_bang_record_fields(e, vt, &mut hoists);
+        if !hoists.is_empty() {
+            let ty = e.ty.clone();
+            let tail = std::mem::replace(
+                e,
+                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+            );
+            *e = IrExpr {
+                kind: IrExprKind::Block { stmts: hoists, expr: Some(Box::new(tail)) },
+                ty,
+                span: None,
+                def_id: None,
+            };
+        }
     }
 }
 

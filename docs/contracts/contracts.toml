@@ -2039,6 +2039,7 @@ evidence  = [
   { path = "spec/wasm_cross/fallible_tuple_value_tail.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_tuple_variant_payload.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_tuple_list_slots.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bang_in_record_literal_field.almd", class = "fixture" },
 ]
 
 [[contract]]
