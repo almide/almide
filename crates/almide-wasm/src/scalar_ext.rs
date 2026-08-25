@@ -80,6 +80,13 @@ impl Emitter<'_> {
             // Same square-and-multiply (wrapping) + negative-exponent
             // abort as the `**` operator — one definition, two spellings.
             ("math", "pow", [b, e]) => Some(self.lower_pow_int(b, e)?),
+            // `n as f64` IS f64.convert_i64_s (IEEE round-to-nearest-even)
+            // — int.to_float with the module spelled the other way.
+            ("float", "from_int", [n]) => {
+                self.lower(n, Some(INT))?;
+                self.f.instructions().f64_convert_i64_s();
+                Some(FLOAT)
+            }
             // Branchless (x ^ (x>>63)) - (x>>63): i64::MIN stays i64::MIN,
             // the release-build native wrap.
             ("int", "abs", [n]) => {

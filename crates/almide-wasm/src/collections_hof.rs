@@ -302,7 +302,7 @@ impl Emitter<'_> {
             i.local_get(ho);
         }
         self.release_for(k);
-        for _ in 0..6 {
+        for _ in 0..7 {
             self.release_i32();
         }
         Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
