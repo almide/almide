@@ -2262,3 +2262,16 @@ fields — mutant 015's origin class). The referee is now the oracle's
 WASM leg (the manifest's own reference definition), wasmtime installed
 in CI for it. Both fuzz modes green; the C-319 exclusion note now
 records the gap as CLOSED.
+
+---
+
+## Unit 6 — stage 69: the gates bite their author again — and are obeyed (2026-08-25)
+
+Stage 68's CI red was two gates doing their jobs. aviation-quality
+measured B(89) — the C-319/C-320 work had grown lower_binop (PowInt)
+and lower_record past the thresholds — repaired by two extractions
+(lower_pow_int, lower_named_record), back to A(91), behavior-proven by
+the full nets. And the oracle-fetch step failed on a lesson worth one
+line: `git fetch` of a SHORT sha is not a thing — remote object
+requests need the full 40 characters. Both fixes land together; the
+release-shape job now builds the pinned oracle for real.

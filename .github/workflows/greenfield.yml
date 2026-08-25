@@ -69,8 +69,8 @@ jobs:
       # immutable, so its build caches perfectly.
       - name: fetch the oracle source at the manifest pin
         run: |
-          git fetch --depth 1 origin a877d2138
-          git worktree add --detach /tmp/oracle-src a877d2138
+          git fetch --depth 1 origin a877d2138d7711eafe62d88faaab7cf45822a5e9
+          git worktree add --detach /tmp/oracle-src a877d2138d7711eafe62d88faaab7cf45822a5e9
       - uses: actions/cache@v4
         with:
           path: /tmp/oracle-src/target

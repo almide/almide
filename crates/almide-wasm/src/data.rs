@@ -192,76 +192,7 @@ impl Emitter<'_> {
                 ty
             }
             IrExprKind::Record { name, fields } if name.is_some() => {
-                let ty = want.map_or_else(|| self.infer(e), Ok)?;
-                let SliceTy::Named(ti) = ty else {
-                    return unsup(&format!("ty-mismatch:record-vs-{ty:?}"));
-                };
-                // A record LITERAL with a variant type is a record-shaped
-                // CASE construction (`Scroll { dy: 3 }`).
-                if let NamedDef::Variant(v) = &self.types.def(ti) {
-                    let Some(cname) = name else {
-                        return unsup("record-case-unnamed");
-                    };
-                    let Some(c) = v.cases.iter().find(|c| c.name == cname.as_str()) else {
-                        return unsup("record-case-unknown");
-                    };
-                    if c.fields.len() != fields.len() {
-                        return unsup("record-case-defaults");
-                    }
-                    let mut slots = Vec::new();
-                    for (fname, _) in fields {
-                        match c.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                            Some(fi) => slots.push((fi.ty, fi.offset)),
-                            None => return unsup("record-case-unknown-field"),
-                        }
-                    }
-                    let (size, tag) = (c.size, c.tag);
-                    let hold = self.hold_i32()?;
-                    self.f
-                        .instructions()
-                        .i32_const(size as i32)
-                        .call(F_ALLOC)
-                        .local_tee(hold)
-                        .i32_const(tag as i32)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
-                        self.f.instructions().local_get(hold);
-                        self.lower(fexpr, Some(fty))?;
-                        self.store_ty_slot(fty, off);
-                    }
-                    self.f.instructions().local_get(hold);
-                    self.release_i32();
-                    return Ok(ty);
-                }
-                let NamedDef::Record(def) = &self.types.def(ti) else {
-                    return unsup("record-of-variant-ty");
-                };
-                // Defaulted fields: until we verify the checker fills
-                // omissions into the literal, a literal that supplies
-                // fewer fields than the layout is REFUSED — a missing
-                // store would leave header-garbage in the slot.
-                if fields.len() != def.fields.len() {
-                    return unsup("record-defaults");
-                }
-                let size = def.size;
-                // (name → (offset, ty)) resolved up front to end the borrow.
-                let mut slots = Vec::new();
-                for (fname, _) in fields {
-                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
-                        Some(fi) => slots.push((fi.ty, fi.offset)),
-                        None => return unsup("record-unknown-field"),
-                    }
-                }
-                let hold = self.hold_i32()?;
-                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
-                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
-                    self.f.instructions().local_get(hold);
-                    self.lower(fexpr, Some(fty))?;
-                    self.store_ty_slot(fty, off);
-                }
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                ty
+                self.lower_named_record(e, name, fields, want)?
             }
             // {...base, f: v}: copy then overwrite — functional update.
             IrExprKind::SpreadRecord { base, fields } => {
@@ -425,6 +356,92 @@ impl Emitter<'_> {
                 }
                 let hold = self.hold_i32()?;
                 self.f.instructions().call(F_BLOCK_COPY).local_set(hold);
+                for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    self.f.instructions().local_get(hold);
+                    self.lower(fexpr, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+                ty
+        })
+    }
+}
+
+impl Emitter<'_> {
+    /// NAMED record literal (split from lower_record for the
+    /// complexity budget).
+    fn lower_named_record(
+        &mut self,
+        e: &IrExpr,
+        name: &Option<almide_base::intern::Sym>,
+        fields: &[(almide_base::intern::Sym, IrExpr)],
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+        Ok({
+
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Named(ti) = ty else {
+                    return unsup(&format!("ty-mismatch:record-vs-{ty:?}"));
+                };
+                // A record LITERAL with a variant type is a record-shaped
+                // CASE construction (`Scroll { dy: 3 }`).
+                if let NamedDef::Variant(v) = &self.types.def(ti) {
+                    let Some(cname) = name else {
+                        return unsup("record-case-unnamed");
+                    };
+                    let Some(c) = v.cases.iter().find(|c| c.name == cname.as_str()) else {
+                        return unsup("record-case-unknown");
+                    };
+                    if c.fields.len() != fields.len() {
+                        return unsup("record-case-defaults");
+                    }
+                    let mut slots = Vec::new();
+                    for (fname, _) in fields {
+                        match c.fields.iter().find(|fi| fi.name == fname.as_str()) {
+                            Some(fi) => slots.push((fi.ty, fi.offset)),
+                            None => return unsup("record-case-unknown-field"),
+                        }
+                    }
+                    let (size, tag) = (c.size, c.tag);
+                    let hold = self.hold_i32()?;
+                    self.f
+                        .instructions()
+                        .i32_const(size as i32)
+                        .call(F_ALLOC)
+                        .local_tee(hold)
+                        .i32_const(tag as i32)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                        self.f.instructions().local_get(hold);
+                        self.lower(fexpr, Some(fty))?;
+                        self.store_ty_slot(fty, off);
+                    }
+                    self.f.instructions().local_get(hold);
+                    self.release_i32();
+                    return Ok(ty);
+                }
+                let NamedDef::Record(def) = &self.types.def(ti) else {
+                    return unsup("record-of-variant-ty");
+                };
+                // Defaulted fields: until we verify the checker fills
+                // omissions into the literal, a literal that supplies
+                // fewer fields than the layout is REFUSED — a missing
+                // store would leave header-garbage in the slot.
+                if fields.len() != def.fields.len() {
+                    return unsup("record-defaults");
+                }
+                let size = def.size;
+                // (name → (offset, ty)) resolved up front to end the borrow.
+                let mut slots = Vec::new();
+                for (fname, _) in fields {
+                    match def.fields.iter().find(|fi| fi.name == fname.as_str()) {
+                        Some(fi) => slots.push((fi.ty, fi.offset)),
+                        None => return unsup("record-unknown-field"),
+                    }
+                }
+                let hold = self.hold_i32()?;
+                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;

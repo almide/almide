@@ -89,38 +89,7 @@ impl Emitter<'_> {
                 self.release_i64();
                 Ok(INT)
             }
-            // Wrapping square-multiply, verbatim from the oracle's
-            // int_pow (#895): a negative exponent has no integer result
-            // and aborts on every target; products wrap like `*` does.
-            PowInt => {
-                self.lower(left, Some(INT))?;
-                self.lower(right, Some(INT))?;
-                let neg = self.pool.intern("Error: negative exponent");
-                let e = self.hold_i64()?;
-                let b = self.hold_i64()?;
-                let acc = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(e).local_set(b);
-                i.local_get(e).i64_const(0).i64_lt_s().if_(BlockType::Empty);
-                i.i32_const(neg as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                i.i64_const(1).local_set(acc);
-                i.block(BlockType::Empty).loop_(BlockType::Empty);
-                i.local_get(e).i64_eqz().br_if(1);
-                i.local_get(e).i64_const(1).i64_and().i64_const(0).i64_ne().if_(BlockType::Empty);
-                i.local_get(acc).local_get(b).i64_mul().local_set(acc);
-                i.end();
-                i.local_get(e).i64_const(1).i64_shr_u().local_set(e);
-                i.local_get(e).i64_eqz().i32_eqz().if_(BlockType::Empty);
-                i.local_get(b).local_get(b).i64_mul().local_set(b);
-                i.end();
-                i.br(0).end().end();
-                i.local_get(acc);
-                let _ = i;
-                self.release_i64();
-                self.release_i64();
-                self.release_i64();
-                Ok(INT)
-            }
+            PowInt => self.lower_pow_int(left, right),
             Lt | Gt | Lte | Gte | Eq | Neq => self.lower_cmp(op, left, right),
             // SHORT-CIRCUIT: the right operand must not evaluate (and
             // possibly trap) when the left already decides — an `if`
@@ -218,5 +187,39 @@ impl Emitter<'_> {
         let _ = i;
         self.release_i64();
         Ok(())
+    }
+
+    /// Wrapping square-multiply, verbatim from the oracle's
+    /// int_pow (#895): a negative exponent has no integer result
+    /// and aborts on every target; products wrap like `*` does.
+    fn lower_pow_int(&mut self, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
+
+                self.lower(left, Some(INT))?;
+                self.lower(right, Some(INT))?;
+                let neg = self.pool.intern("Error: negative exponent");
+                let e = self.hold_i64()?;
+                let b = self.hold_i64()?;
+                let acc = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(e).local_set(b);
+                i.local_get(e).i64_const(0).i64_lt_s().if_(BlockType::Empty);
+                i.i32_const(neg as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+                i.i64_const(1).local_set(acc);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(e).i64_eqz().br_if(1);
+                i.local_get(e).i64_const(1).i64_and().i64_const(0).i64_ne().if_(BlockType::Empty);
+                i.local_get(acc).local_get(b).i64_mul().local_set(acc);
+                i.end();
+                i.local_get(e).i64_const(1).i64_shr_u().local_set(e);
+                i.local_get(e).i64_eqz().i32_eqz().if_(BlockType::Empty);
+                i.local_get(b).local_get(b).i64_mul().local_set(b);
+                i.end();
+                i.br(0).end().end();
+                i.local_get(acc);
+                let _ = i;
+                self.release_i64();
+                self.release_i64();
+                self.release_i64();
+                Ok(INT)
     }
 }
