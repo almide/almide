@@ -914,6 +914,10 @@ pub fn generate_variant_pair_result_sources(
                 }
             }
             Ty::String | Ty::Bytes => Some(false),
+            // A SCALAR slot (#1579's mixed pair, `(Int, Note("a", n))`): the
+            // slot holds a raw value, not a handle — the emitted drop SKIPS
+            // it entirely (see `slot_free`; an rc_dec would dec a non-handle).
+            _ if !crate::lower::is_heap_ty(t) => Some(false),
             _ => None,
         }
     };
@@ -948,7 +952,11 @@ pub fn generate_variant_pair_result_sources(
             Ty::Named(n, _) => n.as_str().to_string(),
             Ty::String => "String".to_string(),
             Ty::Bytes => "Bytes".to_string(),
-            _ => unreachable!("slot_class admitted only Named/String/Bytes"),
+            // The lowercase spelling is the ctor gate's reserved scalar name
+            // (`variant_pair_result_drop_fn`): type names are
+            // Uppercase-initial, so no user type can collide with it.
+            _ if !crate::lower::is_heap_ty(t) => "scalar".to_string(),
+            _ => unreachable!("slot_class admitted only Named/String/Bytes/scalar"),
         }
     }
     impl almide_ir::visit::IrVisitor for Finder<'_> {
@@ -972,6 +980,11 @@ pub fn generate_variant_pair_result_sources(
         let fa = drop_fn_ident(a);
         let fb = drop_fn_ident(b);
         let slot_free = |name: &str, off: u32, ident: &str| -> String {
+            if name == "scalar" {
+                // A raw scalar slot owns nothing — freeing it would rc_dec a
+                // non-handle. Emit no free for the slot.
+                return String::new();
+            }
             if rich.contains(name) || rich_recs.contains(name) {
                 format!(
                     "    let s{off}: {name} = prim.load_handle(h + {off})\n    __drop_{ident}(s{off})\n"
