@@ -109,6 +109,7 @@ impl Emitter<'_> {
             }
             ("i2f" | "f2i" | "fbits" | "ffrombits" | "fadd" | "fsub" | "fmul"
             | "fdiv" | "fceil" | "ffloor" | "fneg" | "fabs" | "fsqrt" | "fcopysign"
+            | "f2f32" | "f32_2f" | "i2f32" | "f32bits" | "bits_to_f32"
             | "feq" | "fne" | "flt" | "fle" | "fgt" | "fge", _) => {
                 self.lower_prim_float(func, args)
             }
@@ -193,6 +194,34 @@ impl Emitter<'_> {
                     "fmul" => i.f64_mul(),
                     _ => i.f64_div(),
                 };
+                Ok(Some(FLOAT))
+            }
+            // The f32 lane over the widened carrier: f2f32 narrows
+            // (demote+promote), f32_2f is the carrier identity, i2f32
+            // converts then narrows, f32bits/bits_to_f32 reinterpret at
+            // 32 bits.
+            ("f2f32", [a]) => {
+                self.lower(a, Some(FLOAT))?;
+                self.f.instructions().f32_demote_f64().f64_promote_f32();
+                Ok(Some(FLOAT))
+            }
+            ("f32_2f", [a]) => {
+                self.lower(a, Some(FLOAT))?;
+                Ok(Some(FLOAT))
+            }
+            ("i2f32", [a]) => {
+                self.lower(a, Some(INT))?;
+                self.f.instructions().f64_convert_i64_s().f32_demote_f64().f64_promote_f32();
+                Ok(Some(FLOAT))
+            }
+            ("f32bits", [a]) => {
+                self.lower(a, Some(FLOAT))?;
+                self.f.instructions().f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
+                Ok(Some(INT))
+            }
+            ("bits_to_f32", [a]) => {
+                self.lower(a, Some(INT))?;
+                self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
                 Ok(Some(FLOAT))
             }
             ("fceil", [a]) => {

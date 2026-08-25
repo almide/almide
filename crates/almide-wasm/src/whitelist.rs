@@ -74,6 +74,7 @@ pub(crate) const SIZED_CONVERT_VERIFIED: &[&str] = &[
 /// claim is byte-verified by the burn-up before it counts.
 pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "float_abs", "float_floor", "float_round", "float_is_nan", "float_from_float64",
+    "float_from_float32", "float_to_float32",
     "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni",

@@ -22,7 +22,10 @@ pub(crate) fn scalar_of(ty: &Ty) -> Option<Scalar> {
         | Ty::UInt16
         | Ty::UInt32
         | Ty::UInt64 => Some(Scalar::Int),
-        Ty::Float | Ty::Float64 => Some(Scalar::Float),
+        // Float32 rides the WIDENED f64 carrier (the interp's doctrine):
+        // literals narrow at birth; the slot always holds an
+        // f32-representable f64.
+        Ty::Float | Ty::Float64 | Ty::Float32 => Some(Scalar::Float),
         Ty::Bool => Some(Scalar::Bool),
         Ty::String => Some(Scalar::Str),
         Ty::Bytes => Some(Scalar::Bytes),

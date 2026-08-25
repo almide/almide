@@ -313,7 +313,14 @@ impl Emitter<'_> {
                 SliceTy::Unit
             }
             IrExprKind::LitFloat { value } => {
-                self.f.instructions().f64_const((*value).into());
+                // A Float32-typed literal narrows AT BIRTH (C-182) —
+                // the widened carrier holds the f32-representable value.
+                let v = if matches!(e.ty, almide_types::types::Ty::Float32) {
+                    *value as f32 as f64
+                } else {
+                    *value
+                };
+                self.f.instructions().f64_const(v.into());
                 FLOAT
             }
             IrExprKind::LitBool { value } => {
