@@ -187,6 +187,24 @@ impl LowerCtx {
                 }
                 Ty::String => Some(("String".to_string(), false)),
                 Ty::Bytes => Some(("Bytes".to_string(), false)),
+                // LIST slots (#1580 — `(state, List[event])`, the multi-event
+                // pair): a SCALAR-element list is one-level-exact (one rc_dec
+                // frees the block — no owned inner heap); a `List[String]`
+                // slot frees per-element via the vp-private
+                // `__drop_vp_list_str` (the shared `__drop_list_str` is gated
+                // on record/variant FIELD usage and would dangle here).
+                // Deeper element classes (records, variants, nested lists)
+                // keep the honest decline. Reserved lowercase names, as with
+                // `scalar` below.
+                Ty::Applied(TypeConstructorId::List, la) if la.len() == 1 => {
+                    if !is_heap_ty(&la[0]) {
+                        Some(("list_scalar".to_string(), false))
+                    } else if matches!(la[0], Ty::String) {
+                        Some(("list_str".to_string(), true))
+                    } else {
+                        None
+                    }
+                }
                 // A SCALAR slot (`(Int, Note("a", n))` — #1579's mixed pair):
                 // stored raw, freed by nothing — the generated drop SKIPS the
                 // slot (an rc_dec there would dec a non-handle). The lowercase
