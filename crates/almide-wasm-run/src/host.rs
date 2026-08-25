@@ -27,9 +27,33 @@ struct Host {
     exit: Arc<Mutex<Option<i32>>>,
     /// The fs result parking buffer (host_read copies it to the guest).
     fs_buf: Arc<Mutex<Vec<u8>>>,
-    /// The stdin stream (op 31 drains the remaining bytes — the guest
-    /// caps counts on its side); tests run with an empty stream.
-    stdin: Arc<Mutex<Vec<u8>>>,
+    /// The stdin stream (op 31 drains it — the guest caps counts on its
+    /// side); tests run with a fixed buffer, the runner reads lazily.
+    stdin: Arc<Mutex<StdinSource>>,
+}
+
+/// Where op 31 gets its bytes: a fixed buffer (tests, piped runs), or
+/// the process's real stdin read at the FIRST guest read — so a program
+/// that never touches stdin never blocks on an open terminal.
+pub enum StdinSource {
+    Buf(Vec<u8>),
+    RealOnce,
+    Drained,
+}
+
+impl StdinSource {
+    fn drain(&mut self) -> Vec<u8> {
+        match std::mem::replace(self, StdinSource::Drained) {
+            StdinSource::Buf(b) => b,
+            StdinSource::RealOnce => {
+                use std::io::Read;
+                let mut v = Vec::new();
+                let _ = std::io::stdin().read_to_end(&mut v);
+                v
+            }
+            StdinSource::Drained => Vec::new(),
+        }
+    }
 }
 
 /// io_err = Display — VERBATIM the native runtime's formatting, so error
@@ -346,8 +370,18 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
     run_wasm_with(bytes, &[])
 }
 
-/// Run with a stdin stream (the product runner feeds the real one).
+/// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()))
+}
+
+/// Run with the process's real stdin, read lazily on first guest read
+/// (the product runner — never blocks for programs that skip stdin).
+pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
+    run_wasm_src(bytes, StdinSource::RealOnce)
+}
+
+fn run_wasm_src(bytes: &[u8], stdin: StdinSource) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
     // Epoch deadline: a fixture (or a MUTANT under the gate) that
     // diverges must FAIL the run, never hang the suite. 30s of real time
@@ -360,7 +394,7 @@ pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
     let err = Arc::new(Mutex::new(String::new()));
     let exit = Arc::new(Mutex::new(None));
     let fs_buf = Arc::new(Mutex::new(Vec::new()));
-    let stdin_buf = Arc::new(Mutex::new(stdin.to_vec()));
+    let stdin_buf = Arc::new(Mutex::new(stdin));
     let mut store = wasmtime::Store::new(
         &engine,
         Host {
@@ -421,8 +455,7 @@ pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
             // op 31 = stdin: drain the remaining stream into the
             // parking buffer (native read-to-end semantics).
             if op == 31 {
-                let mut sb = caller.data().stdin.lock().expect("stdin");
-                let drained: Vec<u8> = std::mem::take(&mut *sb);
+                let drained = caller.data().stdin.lock().expect("stdin").drain();
                 let len = drained.len();
                 *caller.data().fs_buf.lock().expect("fs buf") = drained;
                 return Ok((len as i64) & 0xFFFF_FFFF);

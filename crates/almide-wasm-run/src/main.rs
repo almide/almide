@@ -3,7 +3,7 @@
 //! SAME host the conformance gates verify. Stdout/stderr pass through;
 //! the process exits with the module's exit code.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -48,9 +48,7 @@ fn main() -> ExitCode {
         eprintln!("error: {out}: {e}");
         return ExitCode::from(2);
     }
-    let mut stdin = Vec::new();
-    let _ = std::io::stdin().read_to_end(&mut stdin);
-    match almide_wasm_run::run_wasm_with(&bytes, &stdin) {
+    match almide_wasm_run::run_wasm_real_stdin(&bytes) {
         Ok(r) => {
             print!("{}", r.stdout);
             eprint!("{}", r.stderr);
