@@ -30,5 +30,5 @@ reject	type errors: 1	cells/c8_generic_applied_at_letter
 reject	parse errors: 2	cells/s3_module_qualified_protocol
 wall	call:MemStore.count	cells/x14_layered_ports
 run	exit=0 sha256=21033a6a6014440d5c1fb029758d979be090b0a0c3935fd399899dccf73be9a4	cells/x15_directory_namespace
-wall	bind-ty:Named	pkg/functional_port
+wall	call:MemoryOrderRepo.find	pkg/functional_port
 wall	call-fn:place_order.place_order__system_clock_FixedClock_memory_repo_MemoryOrderRepo:mut-param	pkg/mut_port

@@ -217,14 +217,26 @@ fn emit_program_pass(
         }
     }
     let mut visited: HashSet<usize> = HashSet::new();
+    // The per-fn call sets are HashSets, so traversal order is
+    // process-seeded — complete the walk and report the reachable
+    // failure with the SMALLEST function index (program order), never
+    // whichever the walk happened to step on first (the gauntlet's
+    // functional_port refused with three different reasons across
+    // twelve runs before this pick was made deterministic).
+    let mut first_err: Option<usize> = None;
     while let Some(i) = queue.pop() {
         if !visited.insert(i) {
             continue;
         }
         match &lowered[i] {
-            Err(reason) => return unsup(reason),
+            Err(_) => first_err = Some(first_err.map_or(i, |p| p.min(i))),
             Ok((_, calls)) => queue.extend(calls.iter().copied()),
         }
+    }
+    if let Some(i) = first_err
+        && let Err(reason) = &lowered[i]
+    {
+        return unsup(reason);
     }
 
     // Extra functions (ok-wrap adapters + lifted lambdas) resolve BEFORE
