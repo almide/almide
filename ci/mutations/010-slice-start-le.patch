@@ -1,10 +1,10 @@
 diff --git a/crates/almide-wasm/src/list.rs b/crates/almide-wasm/src/list.rs
-index 93633c657..227a8c8e6 100644
+index 04a73063c..e7fd21447 100644
 --- a/crates/almide-wasm/src/list.rs
 +++ b/crates/almide-wasm/src/list.rs
-@@ -202,7 +202,7 @@ impl Emitter<'_> {
-                     .i64_div_s();
-                 ins.i64_lt_s().select().local_set(eh);
+@@ -186,7 +186,7 @@ impl Emitter<'_> {
+                 ins.local_get(eh).i64_const(0).i64_ge_s().i32_and();
+                 ins.select().local_set(eh);
                  // empty when a < 0 (usize-wrap semantics) or a >= e
 -                ins.local_get(ah).i64_const(0).i64_lt_s();
 +                ins.local_get(ah).i64_const(0).i64_le_s(); // [MUTANT]
