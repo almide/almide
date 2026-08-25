@@ -56,7 +56,7 @@ impl Emitter<'_> {
         }
         let lt = self.lower(left, None)?;
         self.lower(right, Some(lt))?;
-        self.emit_val_eq_at(lt, &mut Vec::new())?;
+        self.emit_val_eq(lt)?;
         if matches!(op, Neq) {
             self.f.instructions().i32_eqz();
         }
