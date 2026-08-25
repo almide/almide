@@ -46,9 +46,9 @@ documented contract-forced decision. No position is unmet.
   pre-push and in CI. Zero of the reference wasm backends carry one.
 - **Performance, measured not asserted** — probe with a measured empty-program
   baseline (perf_probe.rs), 7 kernels. Against incumbent v0.59.1 wasm:
-  scalar kernels parity within noise (Δ ≤ 2 ms), list kernels 2× faster
-  (list_sort 7 ms vs 17 ms, list_pipeline 5 ms vs 10 ms). Emit is 14–17 ms
-  per kernel.
+  every kernel at or ahead — scalar kernels 2–4 ms ahead (int_loop 80 vs 82,
+  float_math 24 vs 28, str_build 55 vs 59, recursion 80 vs 82), list kernels
+  2× (list_sort 7 vs 17, list_pipeline 5 vs 10). Emit is 14–17 ms per kernel.
 - **Module size, corpus-wide** — all 599 fixtures emitted by both compilers
   (2026-08-25): greenfield smaller on **450 of 599**, median ratio **0.675**,
   aggregate **4.11 MB vs 10.54 MB (2.6× smaller)**. The 149 losses are
@@ -71,7 +71,7 @@ The charter forbids carrying the incumbent's deficits forward. Measured state:
 | dimension | incumbent 0.59.1 (wasm leg) | greenfield |
 |---|---|---|
 | conformance (599 manifest) | 599/599 (48 s sweep, ~70 ms/fixture median) | 599/599 (13.6 s in-process) |
-| scalar perf kernels | parity | parity (Δ ≤ 2 ms) |
+| scalar perf kernels | 1× | **1.03–1.17×** (ahead on all four) |
 | list perf kernels | 1× | **2×** |
 | module size, corpus aggregate | 10.54 MB | **4.11 MB** |
 | sort asymptotics | O(n²) family (survey C2) | **O(n log n), measured** |
