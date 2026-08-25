@@ -2159,3 +2159,30 @@ VALUE. Closure is structural this time: take/drop/insert join the
 fuzz generator's list expressions (negative counts included), and the
 mutant below pins the exact inversion. Burn-up: 388 → 398 / 591,
 floor 398, zero divergence.
+
+---
+
+## Unit 6 — stage 64: the post-cut hole — quarantined, not papered (2026-08-25)
+
+The debug-tier CI red (13 findings) unwound into the deepest semantic
+hole of the burn: when a deterministic-budget CUT fires in a loop
+sitting DIRECTLY in the region's outlined arm, the cut's early return
+skips the arm's own trailing budget_exit — depth and fuel LEAK, the
+verdict goes stale, and every leg improvises downstream: the wasm leg's
+metered linked Dragon4 helpers collapsed float.to_string(2.5) to "0.",
+the interp's ungated det_cut truncated a pool map-build into Int(0)
+(then aborted "string concat on String and Int"), and — decisive — the
+PINNED NATIVE ORACLE itself returns the stale ok(0) verdict on the same
+program (f18d: every fuel fixture passes only because their loops live
+in CALLEES, where the cut unwinds safely and exit still runs).
+
+Post-cut meter state is UNSPECIFIED upstream. Two candidate "fixes"
+(gating the interp's det_cut on user frames; unmetering spliced pool
+modules wholesale) were implemented, measured to move the divergence
+rather than close it, and REVERTED — the referee's semantics are not
+this session's to redefine. The resolution is the walls doctrine
+applied to semantics: the fuzz's fuel arm moves onto specified
+territory (the loop lives in a helper fn, the fixture family's shape),
+both modes run green (debug included — a first), and the hole goes to
+adjudication as als C-320 with the four-leg reproducer. The generator's
+direct-in-arm shape returns the day the ruling lands.

@@ -141,16 +141,18 @@ impl Gen {
     fn stmt_fuel_region(&mut self) {
         self.needs_effect = true;
         let name = self.fresh();
-        let (s, i) = (self.fresh(), self.fresh());
         let k = self.rng.below(9);
         let ns = self.rng.below(3 * (k + 6));
-        let body = format!(
-            "{{\n  var {s} = 0\n  for {i} in 0..<{k} {{\n    {s} = {s} + {i}\n  }}\n  {s}\n}}"
-        );
-        // (Syntactic nesting is E007 — a region's outlined body is not
-        // an effect fn; the EIP-150 nesting cells stay fixture-pinned.)
+        // The loop lives in a HELPER fn (the fixture family's shape):
+        // an exhaustion cut then fires in the CALLEE and the region's
+        // own budget_exit still runs. A loop DIRECTLY in the arm makes
+        // the cut skip the exit — post-cut meter state is UNSPECIFIED
+        // upstream (stage-64 finding: native itself leaks a stale
+        // verdict there; als C-320 adjudication filed) — so the
+        // generator stays on specified territory until the ruling.
+        self.needs_fuel_helper = true;
         self.line(&format!(
-            "let {name} = fan.bounded(compute.ns({ns})) {body} ?? -1"
+            "let {name} = fan.bounded(compute.ns({ns})) {{ fz_loop({k}) }} ?? -1"
         ));
         self.line(&format!("println(\"${{{name}}}\")"));
         self.vars.push(Var { name, ty: Ty::Int, mutable: false });

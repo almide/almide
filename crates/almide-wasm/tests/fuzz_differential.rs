@@ -113,6 +113,7 @@ struct Gen {
     /// the header is chosen AFTER generation.
     needs_effect: bool,
     needs_fs: bool,
+    needs_fuel_helper: bool,
 }
 
 // NB: i64::MIN itself cannot be written as one literal (it is -(MAX+1));
@@ -125,7 +126,7 @@ const FLOAT_POOL: &[&str] = &[
 
 impl Gen {
     fn new(seed: u64) -> Gen {
-        Gen { rng: Rng::new(seed), vars: Vec::new(), next_id: 0, out: String::new(), indent: 1, needs_effect: false, needs_fs: false }
+        Gen { rng: Rng::new(seed), vars: Vec::new(), next_id: 0, out: String::new(), indent: 1, needs_effect: false, needs_fs: false, needs_fuel_helper: false }
     }
 
     fn fresh(&mut self) -> String {
@@ -556,6 +557,9 @@ impl Gen {
         }
         p.push_str("type Pt = { px: Int, py: Int }\n");
         p.push_str("type Tr = | Lf(Int) | Nd(Int, Int) | Mt\n");
+        if self.needs_fuel_helper {
+            p.push_str("fn fz_loop(k: Int) -> Int = {\n  var s = 0\n  for i in 0..<k {\n    s = s + i\n  }\n  s\n}\n");
+        }
         if self.needs_effect {
             p.push_str("effect fn main() -> Unit = {\n");
         } else {
