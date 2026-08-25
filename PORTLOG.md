@@ -2209,3 +2209,25 @@ cut placements again (the ruling makes them equivalent), green in
 debug and release. The incumbent's stale-verdict twin is
 almide/almide#1572; the als fixture (fuel_cut_in_arm_loop, since
 0.60.0) is claimed at the next pin advance.
+
+---
+
+## Unit 6 — stage 67: the pin advances — the judge's new law arrives (2026-08-25)
+
+The als pin moves 77030eb → b6f5b73 (+10 wasm_cross fixtures, the C-320
+ruling, the numeric-determinism family, the bounded-profile chapter,
+e07x diagnostics). All three golden manifests regenerate at the a877
+oracle. The retroactive float family (C-302..305, C-307) claims
+cleanly. Two judge-ahead rows enter the shrink-only exclusion
+register, each verified before registration: fuel_cut_in_arm_loop —
+the oracle RUNS it but emits the stale-verdict sequence C-320 outlaws
+(its own #1572), while both greenfield legs print the ruled sequence
+verbatim; and closure_captured_list_mutation — no referee at the pin
+(the oracle aborts), and the honest note alongside: a REAL greenfield
+gap surfaced here, the interp implements the C-319 shared-cell capture
+and the wasm leg still snapshots by value. That gap is the next
+implementation stage, refereed by the interp until the wasm leg
+catches up.
+
+**Burn-up: 398/591 → 401/599**, floor 401, zero divergence, workspace
+0 failures.
