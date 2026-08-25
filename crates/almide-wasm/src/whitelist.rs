@@ -78,10 +78,12 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni",
     "base64_encode", "base64_decode", "datetime_to_iso", "datetime_from_parts",
+    "string_is_whitespace",
 ];
 
 /// Same audit, Option-returning (constructor-built sums).
-pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] = &["string_index_of"];
+pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] =
+    &["string_index_of", "string_last_index_of"];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL
 /// transcription of libm 0.2.16 with constants via prim.ffrombits —

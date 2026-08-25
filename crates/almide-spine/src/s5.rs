@@ -151,6 +151,11 @@ fn link_self_host(
                     _ => {}
                 }
             }
+            // `**` on floats lowers to the LINKED vendored pow — the
+            // demand is implicit in the operator.
+            almide::ir::IrExprKind::BinOp { op: almide::ir::BinOp::PowFloat, .. } => {
+                out.insert("math.fpow".to_string());
+            }
             // A Float-reaching interpolation part formats through
             // float.to_string at emission — the demand is implicit.
             almide::ir::IrExprKind::StringInterp { parts } => {

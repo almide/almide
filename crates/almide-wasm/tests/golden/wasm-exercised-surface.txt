@@ -15,6 +15,7 @@ binop:MulFloat
 binop:MulInt
 binop:Neq
 binop:Or
+binop:PowFloat
 binop:PowInt
 binop:SubFloat
 binop:SubInt
@@ -240,6 +241,7 @@ call:string.capitalize
 call:string.chars
 call:string.codepoint
 call:string.contains
+call:string.count
 call:string.drop
 call:string.drop_end
 call:string.ends_with
@@ -248,7 +250,9 @@ call:string.get
 call:string.index_of
 call:string.is_alphanumeric
 call:string.is_empty
+call:string.is_whitespace
 call:string.join
+call:string.last_index_of
 call:string.len
 call:string.lines
 call:string.pad_end
@@ -266,6 +270,8 @@ call:string.take_end
 call:string.to_lower
 call:string.to_upper
 call:string.trim
+call:string.trim_end
+call:string.trim_start
 call:uint16.to_string
 call:uint32.to_string
 call:uint64.to_string

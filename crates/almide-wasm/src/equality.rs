@@ -35,6 +35,11 @@ impl Emitter<'_> {
                 (INT, Gt) => i.i64_gt_s(),
                 (INT, Lte) => i.i64_le_s(),
                 (INT, Gte) => i.i64_ge_s(),
+                // Bool: false < true (Rust Ord), i32 unsigned compares.
+                (BOOL, Lt) => i.i32_lt_u(),
+                (BOOL, Gt) => i.i32_gt_u(),
+                (BOOL, Lte) => i.i32_le_u(),
+                (BOOL, Gte) => i.i32_ge_u(),
                 (FLOAT, Lt) => i.f64_lt(),
                 (FLOAT, Gt) => i.f64_gt(),
                 (FLOAT, Lte) => i.f64_le(),

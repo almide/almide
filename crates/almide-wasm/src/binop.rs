@@ -162,6 +162,23 @@ impl Emitter<'_> {
                 self.emit_narrow_wrap(&left.ty, &right.ty);
                 Ok(t)
             }
+            // `**` on floats IS the vendored libm pow (the interp's
+            // PowFloat → almide_rt_libm_pow) — one table, bit parity.
+            PowFloat => {
+                let Some(fi) = self.resolve_qualified("math.fpow") else {
+                    return unsup("binop:PowFloat-unlinked");
+                };
+                let info = &self.table.infos[fi];
+                if info.refuse.is_some() || info.ret != Some(FLOAT) {
+                    return unsup("binop:PowFloat-impl");
+                }
+                let idx = info.wasm_index;
+                self.calls.insert(fi);
+                self.lower(left, Some(FLOAT))?;
+                self.lower(right, Some(FLOAT))?;
+                self.f.instructions().call(idx);
+                Ok(FLOAT)
+            }
             Lt | Gt | Lte | Gte | Eq | Neq => self.lower_cmp(op, left, right),
             // SHORT-CIRCUIT: the right operand must not evaluate (and
             // possibly trap) when the left already decides — an `if`
