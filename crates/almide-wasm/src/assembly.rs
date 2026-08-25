@@ -285,6 +285,7 @@ pub(crate) fn resolve_extras(
     for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match h {
             Helper::ValueKeys | Helper::Utf8Lossy => vec![ValType::I32],
+            Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             _ => vec![ValType::I32, ValType::I32],
         };
         let ti = work.itype(params, Some(ValType::I32));
@@ -308,6 +309,7 @@ pub(crate) fn resolve_extras(
             }
             Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
             Helper::StringSplit => value_helpers::emit_string_split_helper(),
+            Helper::ScanF64 => runtime::emit_scan_f64(),
             Helper::DisplayNamed { ti } => {
                 match work.display_bodies.borrow_mut().remove(ti) {
                     Some(work::DisplayBuild::Built(f)) => f,

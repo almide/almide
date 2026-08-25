@@ -273,6 +273,7 @@ impl Emitter<'_> {
             ("sum", [xs]) => self.lower_list_sum(xs),
             ("dedup", [xs]) => self.lower_list_dedup(xs),
             ("any", [xs, cb]) => self.lower_list_any(xs, cb),
+            ("count", [xs, cb]) => self.lower_list_count(xs, cb),
             ("drop_while", [xs, cb]) => self.lower_list_drop_while(xs, cb),
             // length is len with the long spelling
             ("length", [xs]) => {
@@ -401,7 +402,8 @@ impl Emitter<'_> {
         xs: &IrExpr,
     ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
         let elem = match self.lower(xs, None)? {
-            SliceTy::List(h) => self.types.el(h),
+            // Set is layout-identical; order-preserving HOFs apply as-is.
+            SliceTy::List(h) | SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("list-hof-of:{other:?}")),
         };
         let bh = self.hold_i32()?;
@@ -478,7 +480,7 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::List(self.types.intern(u))))
     }
 
-    fn lower_list_filter(
+    pub(crate) fn lower_list_filter(
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
@@ -538,7 +540,7 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::List(self.types.intern(elem))))
     }
 
-    fn lower_list_fold(
+    pub(crate) fn lower_list_fold(
         &mut self,
         xs: &IrExpr,
         init: &IrExpr,

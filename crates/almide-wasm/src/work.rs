@@ -38,6 +38,11 @@ pub(crate) enum Helper {
     /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
     /// subpart (the WHATWG replacement walk).
     Utf8Lossy,
+    /// `$scan_f64(block, stride, off, needle) -> i32` — the float lane of
+    /// the scan family (native PartialEq: -0.0 == 0.0, NaN never matches;
+    /// a Helper, not a fixed function, because its f64 param breaks the
+    /// fixed-index signature set).
+    ScanF64,
     /// `$split(str, sep) -> i32` — Rust split semantics: byte-level
     /// full-separator match, non-overlapping left-to-right, empty pieces
     /// kept, count = separators + 1. Empty separator traps (Rust's

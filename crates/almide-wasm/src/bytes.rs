@@ -492,6 +492,77 @@ impl Emitter<'_> {
                 self.release_i32();
                 Ok(None)
             }
+            // One i64 slot per byte (native to_list).
+            ("to_list", [b]) => {
+                self.lower(b, Some(BYTES))?;
+                let bh = self.hold_i32()?;
+                let hc = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(bh);
+                i.local_get(bh).i32_load(len_memarg()).i32_const(8).i32_mul();
+                i.call(F_ALLOC).local_set(ho);
+                i.i32_const(0).local_set(hc);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hc).local_get(bh).i32_load(len_memarg()).i32_ge_u().br_if(1);
+                i.local_get(ho).local_get(hc).i32_const(8).i32_mul().i32_add();
+                i.local_get(bh).local_get(hc).i32_add().i64_load8_u(byte_k(0));
+                i.i64_store(slot_memarg(0));
+                i.local_get(hc).i32_const(1).i32_add().local_set(hc);
+                i.br(0).end().end();
+                i.local_get(ho);
+                let _ = i;
+                for _ in 0..3 {
+                    self.release_i32();
+                }
+                Ok(Some(SliceTy::List(self.types.intern(INT))))
+            }
+            // n copies (native n.max(0); the C-197 structural bound dies
+            // as OOM — no chosen ceiling, ratified A 2026-08-17).
+            ("repeat", [b, n]) => {
+                self.lower(b, Some(BYTES))?;
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let ho = self.hold_i32()?;
+                let hw = self.hold_i32()?;
+                let oom = self.pool.intern("Error: out of memory");
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                // n = max(n, 0)  (select: v1 first)
+                i.local_get(hn).i64_const(0);
+                i.local_get(hn).i64_const(0).i64_gt_s();
+                i.select().local_set(hn);
+                // total = len * n, judged in i64 BEFORE the i32 wrap —
+                // past the structural bound is the C-197 die.
+                i.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
+                i.local_get(hn).i64_mul();
+                i.i64_const(0x7FFF_0000).i64_gt_s().if_(BlockType::Empty);
+                i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
+                i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+                i.end();
+                i.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
+                i.local_get(hn).i64_mul().i32_wrap_i64();
+                i.call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hw);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hn).i64_eqz().br_if(1);
+                i.local_get(hw);
+                i.local_get(bh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(bh).i32_load(len_memarg());
+                i.memory_copy(0, 0);
+                i.local_get(hw).local_get(bh).i32_load(len_memarg()).i32_add().local_set(hw);
+                i.local_get(hn).i64_const(1).i64_sub().local_set(hn);
+                i.br(0).end().end();
+                i.local_get(ho);
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(BYTES))
+            }
             // Native from_utf8_lossy (the WHATWG helper) — the self-host
             // impl is a raw copy and must not shadow this.
             ("to_string_lossy", [b]) => {

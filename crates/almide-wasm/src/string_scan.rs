@@ -468,4 +468,105 @@ impl Emitter<'_> {
         }
         Ok(Some(SliceTy::Option(self.types.intern(INT))))
     }
+
+    /// First/last CHAR as some(String), none on empty (native
+    /// `chars().next()/last()`). Last walks back over continuation
+    /// bytes (0b10xxxxxx) to its lead.
+    pub(crate) fn lower_string_first_last(
+        &mut self,
+        last: bool,
+        s: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        self.lower(s, Some(STR))?;
+        let hs = self.hold_i32()?;
+        let hp = self.hold_i32()?;
+        let hl = self.hold_i32()?;
+        let hb = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hs);
+        i.local_get(hs).i32_load(len_memarg()).i32_eqz();
+        i.if_(BlockType::Result(ValType::I32));
+        i.i32_const(almide_layout::NULL_ADDR as i32);
+        i.else_();
+        if last {
+            // p = len-1, back over continuations; the char spans p..len
+            i.local_get(hs).i32_load(len_memarg()).i32_const(1).i32_sub().local_set(hp);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hp).i32_eqz().br_if(1);
+            i.local_get(hs).local_get(hp).i32_add().i32_load8_u(str_byte());
+            i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().br_if(1);
+            i.local_get(hp).i32_const(1).i32_sub().local_set(hp);
+            i.br(0).end().end();
+            i.local_get(hs).i32_load(len_memarg()).local_get(hp).i32_sub().local_set(hl);
+        } else {
+            i.i32_const(0).local_set(hp);
+            i.local_get(hs).i32_load8_u(str_byte()).local_set(hl);
+            i.i32_const(1);
+            i.local_get(hl).i32_const(0xC0).i32_ge_u().i32_add();
+            i.local_get(hl).i32_const(0xE0).i32_ge_u().i32_add();
+            i.local_get(hl).i32_const(0xF0).i32_ge_u().i32_add();
+            i.local_set(hl);
+        }
+        i.local_get(hl).call(F_ALLOC).local_set(hb);
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_get(hp).i32_add();
+        i.local_get(hl);
+        i.memory_copy(0, 0);
+        // some(str): a 4-byte option cell holding the handle
+        i.i32_const(4).call(F_ALLOC).local_tee(hp).local_get(hb);
+        i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+        i.local_get(hp);
+        i.end();
+        let _ = i;
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::Option(self.types.intern(STR))))
+    }
+
+    /// Codepoint-wise reverse (native `chars().rev()`): each UTF-8
+    /// sequence keeps its internal byte order, sequences swap ends.
+    pub(crate) fn lower_string_reverse(&mut self, s: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        self.lower(s, Some(STR))?;
+        let hs = self.hold_i32()?;
+        let hn = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        let hl = self.hold_i32()?;
+        let ho = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hs);
+        i.local_get(hs).i32_load(len_memarg()).local_set(hn);
+        i.local_get(hn).call(F_ALLOC).local_set(ho);
+        i.i32_const(0).local_set(hc);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hc).local_get(hn).i32_ge_u().br_if(1);
+        // seq length from the lead byte: 1 + (b≥C0) + (b≥E0) + (b≥F0)
+        i.local_get(hs).local_get(hc).i32_add().i32_load8_u(str_byte()).local_set(hl);
+        i.i32_const(1);
+        i.local_get(hl).i32_const(0xC0).i32_ge_u().i32_add();
+        i.local_get(hl).i32_const(0xE0).i32_ge_u().i32_add();
+        i.local_get(hl).i32_const(0xF0).i32_ge_u().i32_add();
+        i.local_set(hl);
+        // dst = out.payload + (n − pos − len); src = in.payload + pos
+        i.local_get(ho)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(hn)
+            .i32_add()
+            .local_get(hc)
+            .i32_sub()
+            .local_get(hl)
+            .i32_sub();
+        i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_get(hc).i32_add();
+        i.local_get(hl);
+        i.memory_copy(0, 0);
+        i.local_get(hc).local_get(hl).i32_add().local_set(hc);
+        i.br(0).end().end();
+        i.local_get(ho);
+        let _ = i;
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        Ok(Some(STR))
+    }
 }

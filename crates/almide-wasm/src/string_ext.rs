@@ -40,6 +40,8 @@ impl Emitter<'_> {
             ("capitalize", [s]) => self.lower_string_capitalize(s),
             ("run_length_encode", [s]) => self.lower_string_rle(s),
             ("codepoint", [s]) => self.lower_string_codepoint(s),
+            ("reverse", [s]) => self.lower_string_reverse(s),
+            ("first" | "last", [s]) => self.lower_string_first_last(func == "last", s),
             ("get", [s, i]) => self.lower_string_get(s, i),
             ("drop", [s, n]) => self.lower_string_drop(s, n),
             ("take", [s, n]) => self.lower_string_take(s, n),

@@ -339,6 +339,32 @@ impl Emitter<'_> {
         Ok(Some(BOOL))
     }
 
+    /// Matching-element count (native `filter().count()` — every element
+    /// runs through the callback, no early exit).
+    pub(crate) fn lower_list_count(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let hn = self.hold_i64()?;
+        self.f.instructions().i64_const(0).local_set(hn);
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.lower(body, Some(BOOL))?;
+        self.f.instructions().if_(BlockType::Empty);
+        self.f.instructions().local_get(hn).i64_const(1).i64_add().local_set(hn);
+        self.f.instructions().end();
+        self.hof_step(ih);
+        self.f.instructions().local_get(hn);
+        self.release_i64();
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        Ok(Some(INT))
+    }
+
     /// Prefix while true (the callback runs through the FIRST false).
     pub(crate) fn lower_list_take_while(
         &mut self,

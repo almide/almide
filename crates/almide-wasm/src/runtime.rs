@@ -128,6 +128,29 @@ pub(crate) fn emit_scan_w64() -> Function {
     f
 }
 
+/// The f64 lane of the scan family — a Helper (not a fixed function)
+/// because of its f64 needle. Comparison is f64.eq: native PartialEq
+/// verbatim (-0.0 matches 0.0, NaN matches nothing).
+pub(crate) fn emit_scan_f64() -> Function {
+    let (blk, stride, off, needle, p, end) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
+    let slot = MemArg { offset: 0, align: 2, memory_index: 0 };
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(blk).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p);
+    i.local_get(blk).i32_load(len_memarg()).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(p).local_get(off).i32_add().f64_load(slot);
+    i.local_get(needle).f64_eq().if_(BlockType::Empty);
+    i.local_get(p).return_();
+    i.end();
+    i.local_get(p).local_get(stride).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.i32_const(almide_layout::NULL_ADDR as i32);
+    i.end();
+    f
+}
+
 pub(crate) fn emit_scan_w32() -> Function {
     let (blk, stride, off, needle, p, end) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
     let slot = MemArg { offset: 0, align: 2, memory_index: 0 };

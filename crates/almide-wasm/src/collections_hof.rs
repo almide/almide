@@ -371,6 +371,97 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
     }
 
+    /// Upsert (native): a present key keeps its POSITION and its value
+    /// passes through the callback; an absent key APPENDS (k, init).
+    /// `init` is evaluated eagerly either way (Rust call-site order).
+    pub(crate) fn lower_map_upsert(
+        &mut self,
+        m: &IrExpr,
+        key: &IrExpr,
+        init: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (mh, k, v) = self.map_hof_open(m)?;
+        let scan = self.map_scan_fn(k)?;
+        let (koff, voff, esz) = entry_layout(k, v);
+        let hkey = self.hold_for(k)?;
+        self.lower(key, Some(k))?;
+        self.f.instructions().local_set(hkey);
+        let hinit = self.hold_for(v)?;
+        self.lower(init, Some(v))?;
+        self.f.instructions().local_set(hinit);
+        let ho = self.hold_i32()?;
+        let he = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            // out = wholesale copy, over-allocated by one entry for the
+            // append case; each branch patches len to its own truth.
+            i.local_get(mh)
+                .i32_load(len_memarg())
+                .i32_const(esz as i32)
+                .i32_add()
+                .call(F_ALLOC)
+                .local_set(ho);
+            i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(mh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(mh).i32_load(len_memarg());
+            i.memory_copy(0, 0);
+            i.local_get(mh).i32_const(esz as i32).i32_const(koff as i32).local_get(hkey);
+            i.call(scan).local_tee(he).if_(BlockType::Empty);
+            i.local_get(ho).local_get(mh).i32_load(len_memarg()).i32_store(len_memarg());
+            // he → the entry's OFFSET, replayed into out
+            i.local_get(he)
+                .local_get(mh)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .i32_sub()
+                .local_set(he);
+            i.local_get(he).i32_const(voff as i32).i32_add();
+            i.local_get(mh).i32_const(almide_layout::PAYLOAD as i32).i32_add().i32_add();
+        }
+        self.load_ty_slot_at(v);
+        self.f.instructions().local_set(params[0]);
+        self.f
+            .instructions()
+            .local_get(ho)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(he)
+            .i32_add()
+            .i32_const(voff as i32)
+            .i32_add();
+        self.lower(body, Some(v))?;
+        self.store_ty_slot_at(v);
+        {
+            let mut i = self.f.instructions();
+            i.else_();
+            i.local_get(ho)
+                .local_get(mh)
+                .i32_load(len_memarg())
+                .i32_const(esz as i32)
+                .i32_add()
+                .i32_store(len_memarg());
+            i.local_get(ho).local_get(mh).i32_load(len_memarg()).i32_add();
+            i.local_get(hkey);
+        }
+        self.store_ty_slot(k, koff);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ho).local_get(mh).i32_load(len_memarg()).i32_add();
+            i.local_get(hinit);
+        }
+        self.store_ty_slot(v, voff);
+        self.f.instructions().end();
+        self.f.instructions().local_get(ho);
+        self.release_i32();
+        self.release_i32();
+        self.release_for(v);
+        self.release_for(k);
+        self.release_i32();
+        Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+    }
+
     /// The scan helper for this key class (shared with the map ops).
     fn map_scan_fn(&mut self, k: SliceTy) -> Result<u32, EmitError> {
         match k {

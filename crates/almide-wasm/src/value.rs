@@ -71,6 +71,66 @@ impl Emitter<'_> {
                 self.f.instructions().call(m);
                 Some(SliceTy::Value)
             }
+            // pick/omit: keep (drop) the named keys, kept pairs SHARED with
+            // the source (native filter+clone of the pair vec — the pair
+            // blocks themselves are never copied). Non-object passes through.
+            ("pick" | "omit", [v, keys]) => {
+                let keep_found = i32::from(func == "pick");
+                self.lower(v, Some(SliceTy::Value))?;
+                let hv = self.hold_i32()?;
+                self.f.instructions().local_set(hv);
+                match self.lower(keys, None)? {
+                    SliceTy::List(h) if self.types.el(h) == STR => {}
+                    other => return Err(EmitError::Unsupported(format!("value.{func}-keys:{other:?}"))),
+                }
+                let hk = self.hold_i32()?;
+                self.f.instructions().local_set(hk);
+                let scan = self.scan_helper(STR)?;
+                let ti = self.types.tuple(vec![STR, SliceTy::Value]);
+                let key_off = self.types.tuple_def(ti).fields[0].1;
+                let hp = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let hw = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_get(hv)
+                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                    .i32_const(VT_OBJECT)
+                    .i32_ne()
+                    .if_(BlockType::Result(wasm_encoder::ValType::I32));
+                i.local_get(hv);
+                i.else_();
+                i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hp);
+                i.local_get(hp).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
+                i.i32_const(0).local_set(hw);
+                i.i32_const(0).local_set(hv); // reuse: read cursor (bytes)
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hv).local_get(hp).i32_load(len_memarg()).i32_ge_u().br_if(1);
+                // pair handle → its key → membership scan
+                i.local_get(hk).i32_const(4).i32_const(0);
+                i.local_get(hp).local_get(hv).i32_add().i32_load(slot_memarg(0));
+                i.i32_load(slot_memarg(key_off));
+                i.call(scan).i32_const(0).i32_ne();
+                i.i32_const(keep_found).i32_eq().if_(BlockType::Empty);
+                i.local_get(ho).local_get(hw).i32_add();
+                i.local_get(hp).local_get(hv).i32_add().i32_load(slot_memarg(0));
+                i.i32_store(slot_memarg(0));
+                i.local_get(hw).i32_const(4).i32_add().local_set(hw);
+                i.end();
+                i.local_get(hv).i32_const(4).i32_add().local_set(hv);
+                i.br(0).end().end();
+                i.local_get(ho).local_get(hw).i32_store(len_memarg());
+                // box a fresh Object value
+                i.i32_const(16).call(F_ALLOC).local_set(hp);
+                i.local_get(hp).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
+                i.local_get(hp).local_get(ho).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                i.local_get(hp);
+                i.end();
+                let _ = i;
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+                Some(SliceTy::Value)
+            }
             // Object: tag 6, payload = the (String, Value) pairs list —
             // insertion order IS the block, exactly the interp's ordered
             // object model.
