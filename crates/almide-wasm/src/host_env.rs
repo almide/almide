@@ -99,6 +99,29 @@ impl Emitter<'_> {
                 self.io_stdout_raw()?;
                 None
             }
+            // String bytes to the same raw sink (print is write minus the
+            // Bytes spelling — Strings share the len=bytes layout), then
+            // the always-ok unit carrier: print has no failure channel,
+            // but the effect ABI still hands the caller a Result block.
+            ("io", "print", [s]) => {
+                self.lower(s, Some(STR))?;
+                self.io_stdout_raw()?;
+                let hb = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.i32_const(16)
+                        .call(F_ALLOC)
+                        .local_tee(hb)
+                        .i32_const(0)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    i.local_get(hb);
+                }
+                self.release_i32();
+                let uh = self.types.intern(SliceTy::Unit);
+                let sh = self.types.intern(STR);
+                Some(SliceTy::Result(uh, sh))
+            }
             // List[Int] → low bytes, then the same raw sink.
             ("io", "write_bytes", [xs]) => {
                 match self.lower(xs, None)? {
