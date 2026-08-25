@@ -1,0 +1,6 @@
+import io
+
+fn f(n: Int) -> (Int, List[String])! = (n, ["a"])
+
+effect fn main() -> Unit = { let (a, r) = f(1)!
+  io.print("${a}${list.len(r)}") }

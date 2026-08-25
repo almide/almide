@@ -1,0 +1,7 @@
+import io
+
+type R = | Empty | Note(String, Int)
+fn f(n: Int) -> (Int, R)! = (n, Note("a", n))
+
+effect fn main() -> Unit = { let (a, r) = f(1)!
+  io.print("${a}") }

@@ -1,0 +1,3 @@
+protocol Store {
+  fn read(self) -> Int
+}

@@ -1,0 +1,10 @@
+import io
+
+type Rec: Eq, Repr = { a: String }
+
+fn get(b: Bool) -> Rec! = if b then ok(Rec { a: "x" }) else err("no")
+
+effect fn main() -> Unit = {
+  let v = get(false) ?? Rec { a: "fb" }
+  io.print(v.a)
+}

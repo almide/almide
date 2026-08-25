@@ -1,0 +1,6 @@
+type Row: Eq, Repr = { id: String }
+
+protocol RowStore {
+  effect fn get(self, id: String) -> Row?
+  effect fn count(self) -> Int
+}

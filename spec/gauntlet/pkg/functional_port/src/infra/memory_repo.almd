@@ -1,0 +1,13 @@
+import self.domain.order
+import self.domain.ports
+
+type MemoryOrderRepo: OrderRepository = { rows: List[order.Order] }
+
+fn empty_repo() -> MemoryOrderRepo = MemoryOrderRepo { rows: [] }
+
+effect fn MemoryOrderRepo.find(self, id: String) -> order.Order? = self.rows |> list.find((o) => o.id == id)
+
+effect fn MemoryOrderRepo.save(self, o: order.Order) -> MemoryOrderRepo =
+  MemoryOrderRepo { rows: (self.rows |> list.filter((r) => r.id != o.id)) + [o] }
+
+effect fn MemoryOrderRepo.all(self) -> List[order.Order] = self.rows

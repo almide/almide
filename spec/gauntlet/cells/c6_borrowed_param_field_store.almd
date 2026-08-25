@@ -1,0 +1,15 @@
+import io
+
+type Tag = { name: String, n: Int }
+
+fn retag(mut t: Tag, s: String) -> Unit = { t.name = s t.n = t.n + 1 }
+
+fn set_slot(mut xs: List[String], s: String) -> Unit = { xs[0] = s }
+
+effect fn main() -> Unit = {
+  var a = Tag { name: "orig", n: 0 }
+  retag(a, "fresh")
+  var l = ["x", "y"]
+  set_slot(l, "z")
+  io.print("${a.name}${a.n}${list.join(l, ",")}")
+}

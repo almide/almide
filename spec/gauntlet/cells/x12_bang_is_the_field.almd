@@ -1,0 +1,10 @@
+import io
+
+type Row: Eq, Repr = { id: String }
+type Out: Eq, Repr = { a: String }
+
+fn label(r: Row) -> String! = r.id
+
+fn f(r: Row) -> Out! = Out { a: label(r)! }
+
+effect fn main() -> Unit = { io.print(f(Row { id: "z" })!.a) }

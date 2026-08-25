@@ -1,0 +1,11 @@
+import io
+
+fn nested(b: Bool) -> Result[Float?, String] = if b then ok(some(1.5)) else err("boom")
+
+effect fn main() -> Unit = {
+  let r = result.unwrap_or(nested(false), none)
+  match r {
+    some(v) => io.print("got ${v}"),
+    none => io.print("none"),
+  }
+}

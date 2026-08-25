@@ -1,0 +1,7 @@
+import self.ports
+
+type MemStore: RowStore = { rows: List[ports.Row] }
+
+effect fn MemStore.get(self, id: String) -> ports.Row? = self.rows |> list.find((r) => r.id == id)
+
+effect fn MemStore.count(self) -> Int = list.len(self.rows)

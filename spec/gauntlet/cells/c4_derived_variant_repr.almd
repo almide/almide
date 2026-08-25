@@ -1,0 +1,5 @@
+import io
+
+type Kind: Eq, Repr = | Hot | Cold
+
+effect fn main() -> Unit = { io.print(Hot.repr()) }

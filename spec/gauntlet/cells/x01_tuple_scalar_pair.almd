@@ -1,0 +1,7 @@
+import io
+
+fn f(n: Int) -> (Int, Int)! = { let d = n + 1
+  (d, 2) }
+
+effect fn main() -> Unit = { let (a, b) = f(1)!
+  io.print("${a}${b}") }

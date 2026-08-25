@@ -1,0 +1,5 @@
+import self.ports
+
+type T: Proto = { n: Int }
+
+fn T.read(self) -> Int = self.n

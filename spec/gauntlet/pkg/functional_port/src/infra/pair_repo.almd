@@ -1,0 +1,18 @@
+import self.domain.order
+import self.domain.ports
+
+type PairOrderRepo: OrderRepository = { ids: List[String], orders: List[order.Order] }
+
+effect fn PairOrderRepo.find(self, id: String) -> order.Order? =
+  match list.index_of(self.ids, id) {
+    some(i) => list.get(self.orders, i),
+    none => none,
+  }
+
+effect fn PairOrderRepo.save(self, o: order.Order) -> PairOrderRepo =
+  match list.index_of(self.ids, o.id) {
+    some(i) => PairOrderRepo { ids: self.ids, orders: list.set(self.orders, i, o) },
+    none => PairOrderRepo { ids: self.ids + [o.id], orders: self.orders + [o] },
+  }
+
+effect fn PairOrderRepo.all(self) -> List[order.Order] = self.orders

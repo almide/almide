@@ -1,0 +1,9 @@
+import self.app
+import self.infra
+import self.ports
+import io
+
+effect fn main() -> Unit = {
+  let s = infra.MemStore { rows: [ports.Row { id: "a" }, ports.Row { id: "b" }] }
+  io.print(app.report(s)!)
+}

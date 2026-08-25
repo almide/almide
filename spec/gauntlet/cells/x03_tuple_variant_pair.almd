@@ -1,0 +1,9 @@
+import io
+
+type St = | Draft(String) | Done(String)
+type Ev = | Started(String) | Finished(String)
+fn f(s: St) -> (St, Ev)! = { let d = Done("x")
+  (d, Finished("y")) }
+
+effect fn main() -> Unit = { let (a, b) = f(Draft("z"))!
+  io.print("${a}${b}") }

@@ -1,0 +1,16 @@
+import io
+
+type Row: Eq, Repr = { id: String }
+
+fn pick(xs: List[Row], b: Bool) -> Row?! = if b then list.get(xs, 0) else none
+
+fn find(xs: List[Row], id: String) -> Row?! = ok(xs |> list.find((r) => r.id == id))
+
+fn look(m: Map[String, Row]) -> Row?! = ok(map.get(m, "a"))
+
+effect fn main() -> Unit = {
+  let rows = [Row { id: "a" }]
+  var m: Map[String, Row] = [:]
+  map.insert(m, "a", Row { id: "a" })
+  io.print("${pick(rows, true)!}${find(rows, "a")!}${look(m)!}")
+}

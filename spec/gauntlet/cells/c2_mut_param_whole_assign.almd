@@ -1,0 +1,11 @@
+import io
+
+type Box = { n: Int }
+
+fn bump(mut b: Box, by: Int) -> Unit = { b = Box { n: b.n + by } }
+
+effect fn main() -> Unit = {
+  var b = Box { n: 1 }
+  bump(b, 4)
+  io.print(int.to_string(b.n))
+}

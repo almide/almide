@@ -1,0 +1,22 @@
+import self.application.place_order
+import self.infra.memory_repo
+import self.infra.pair_repo
+import self.infra.system_clock
+import io
+
+effect fn main() -> Unit = {
+  let clock = system_clock.FixedClock { stamp: "2026-08-24T00:00:00Z" }
+  let cmd = place_order.PlaceOrderCommand {
+    order_id: "o-1", customer: "ada", sku: "widget", qty: 3, unit_cents: 1250,
+  }
+
+  var mem = memory_repo.empty_repo()
+  let a = place_order.place_order(mem, clock, cmd)!
+  io.print("memory: total=${a.total} rev=${place_order.revenue(mem)!}")
+  io.print(" ${place_order.cancel_order(mem, "o-1")!} rev=${place_order.revenue(mem)!}\n")
+
+  var pair = pair_repo.PairOrderRepo { ids: [], orders: [] }
+  let b = place_order.place_order(pair, clock, cmd)!
+  io.print("pair:   total=${b.total} rev=${place_order.revenue(pair)!}")
+  io.print(" ${place_order.cancel_order(pair, "o-1")!} rev=${place_order.revenue(pair)!}\n")
+}

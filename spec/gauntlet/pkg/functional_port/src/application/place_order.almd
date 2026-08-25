@@ -1,0 +1,40 @@
+import self.domain.order
+import self.domain.money
+import self.domain.ports
+
+type PlaceOrderCommand = { order_id: String, customer: String, sku: String, qty: Int, unit_cents: Int }
+
+type PlaceOrderResult = { order_id: String, total: String, placed_at: String }
+
+effect fn place_order[R: OrderRepository, C: Clock](repo: R, clock: C, cmd: PlaceOrderCommand) -> (R, PlaceOrderResult) = {
+  let existing = repo.find(cmd.order_id)!
+  guard existing == none else err("order ${cmd.order_id} already exists")
+
+  let price = money.money(cmd.unit_cents)!
+  let line = order.OrderLine { sku: cmd.sku, qty: cmd.qty, unit_price: price }
+  let placed = order.new_order(cmd.order_id, cmd.customer).add_line(line)!.place()!
+  let next = repo.save(placed)!
+
+  (next, PlaceOrderResult { order_id: placed.id, total: money.display(placed.total()!), placed_at: clock.now_iso() })
+}
+
+effect fn cancel_order[R: OrderRepository](repo: R, id: String) -> (R, String) = {
+  let found = repo.find(id)!
+  match found {
+    some(o) => {
+      let c = o.cancel()!
+      let next = repo.save(c)!
+      (next, "cancelled ${c.id}")
+    },
+    none => err("no such order: ${id}"),
+  }
+}
+
+effect fn revenue[R: OrderRepository](repo: R) -> String = {
+  let orders = repo.all()!
+  let total = orders
+    |> list.filter((o) => o.status == order.Placed)
+    |> list.map((o) => o.total()!)!
+    |> list.fold(money.zero(), (acc, m) => money.add(acc, m))
+  money.display(total)
+}

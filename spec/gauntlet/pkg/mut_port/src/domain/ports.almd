@@ -1,0 +1,11 @@
+import self.domain.order
+
+protocol OrderRepository {
+  effect fn find(self, id: String) -> order.Order?
+  effect fn save(mut self: Self, o: order.Order) -> Unit
+  effect fn all(self) -> List[order.Order]
+}
+
+protocol Clock {
+  fn now_iso(self) -> String
+}
