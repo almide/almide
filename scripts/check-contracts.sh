@@ -316,7 +316,8 @@ done <<< "$(grep -rhoE '(crates|runtime|stdlib|spec|tests|scripts|proofs)/[A-Za-
 # C-302 -> C-319 to match the canonical id. The reserved range is NOT mintable
 # here — it is a documented hole that DIES at the Stage B cutover (als
 # BOUNDARY.md: mount als, delete the copies). New ids in the copy must land in
-# als FIRST (two-PR order, als CONTRIBUTING; next free per #1544: C-320).
+# als FIRST (two-PR order, als CONTRIBUTING; next free per #1544: C-321 —
+# C-320 landed als-first 2026-08-25, ported here for the #1572 cut fix).
 RESERVED_CANONICAL_LO=302
 RESERVED_CANONICAL_HI=318
 sorted_ids="$(printf '%s\n' "$ALL_IDS" | sort -u)"

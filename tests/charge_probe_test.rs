@@ -53,6 +53,7 @@ fn fixture_path(name: &str) -> PathBuf {
         "divergence_cut" => Some("fuel_divergence_cut"),
         "trap_cut" => Some("fuel_trap_cut"),
         "trap_window" => Some("fuel_trap_window"),
+        "cut_arm" => Some("fuel_cut_in_arm_loop"),
         "dyn_charge" => Some("fuel_dyn_charge"),
         "timeout_ends" => Some("fuel_timeout_ends"),
         _ => None,
@@ -109,6 +110,7 @@ fn charge_probe_gate() {
     native_wall_fails_loudly_under_probe();
     dynamic_three_point_comparison();
     bounded_deterministic_across_targets();
+    cut_bookkeeping_pins_normative_values();
     race_deterministic_across_targets();
     time_ctor_guard_cross_target();
     time_report_prints_dual_time();
@@ -226,7 +228,7 @@ fn metered_clones_keep_nonregion_paths_charge_free() {
 /// placement flips a verdict. Compared against the native leg (which the
 /// dynamic layer already pins against wasm).
 fn interp_third_vote_on_metered_fixtures() {
-    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip", "divergence_cut", "trap_cut", "dyn_charge"] {
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip", "divergence_cut", "trap_cut", "dyn_charge", "cut_arm"] {
         let source = std::fs::read_to_string(fixture_path(name)).unwrap();
         let ir = lower_for_interp(&source);
         let outcome = almide_interp::Interpreter::new(&ir).run_main();
@@ -580,6 +582,37 @@ fn bounded_deterministic_across_targets() {
     assert!(out.contains("30051"), "ns=3005 must exhaust (flag 1)");
     assert!(out.contains("30060"), "ns=3006 must succeed (flag 0)");
     assert!(!out.contains("30061"), "ns=3006 must not exhaust");
+}
+
+/// C-320 (ALS-DT2): a budget cut performs the same meter bookkeeping as a
+/// normal region exit. The 0.58/0.59 violation was IDENTICAL on both targets
+/// (a direct-in-arm cut skipped BudgetExit: stale ok(0) verdict + leaked
+/// negative fuel poisoning every later region), so cross-target agreement
+/// cannot see it — this reference-leg pin asserts the normative VALUES.
+fn cut_bookkeeping_pins_normative_values() {
+    const NORMATIVE: &str = "6\n6\n-1\n-1\n6\n6\n-1\n6\n-1";
+    let fixture = fixture_path("cut_arm");
+    let plain = |wasm: bool| {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(&fixture);
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        let out = cmd.output().expect("spawn almide");
+        assert!(
+            out.status.success(),
+            "cut_arm: run failed ({})",
+            if wasm { "wasm" } else { "native" }
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(plain(false), NORMATIVE, "cut_arm: native diverged from the C-320 normative values");
+    if wasmtime_available() {
+        assert_eq!(plain(true), NORMATIVE, "cut_arm: wasm diverged from the C-320 normative values");
+    } else {
+        eprintln!("skip: wasmtime not on PATH (cut_arm wasm leg)");
+    }
 }
 
 fn dynamic_three_point_comparison() {

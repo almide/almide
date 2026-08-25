@@ -3880,3 +3880,15 @@ evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-320"
+spec      = "ALS-D2"
+title     = "A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable"
+statement = "A `fan.bounded` cut runs the same meter bookkeeping as a normal region exit, so (1) an exhausted region's verdict is Err — never a stale Ok carrying a partial or zero value; (2) a region's verdict and value do not depend on any other region in the program (meter state cannot leak across regions); (3) whether the cut fires in a loop directly in the arm or inside a callee is unobservable, and the arm's value is the block's value regardless of loop form; (4) the meter charges the budgeted body only — runtime services that materialize observables (formatting, the `??` fallback path) are neither charged nor cut. Adjudicated 2026-08-25 from greenfield's stage-64 finding; through 0.59.1 the violation was IDENTICAL on both targets (a direct-arm cut returned from the region fn past BudgetExit: stale ok(0) instead of Err, and the leaked meter state poisoned every later region — the pre-existing fuel fixtures only exercise callee-loop cuts, which reach the exit and were correct), so cross-target agreement cannot see it: the reference-leg pin asserts the normative values (almide/almide#1572; canonical row: als ledger C-320, spec ALS-DT2). Mechanism: BudgetEnter stashes the saved outer fuel in a global and keeps the entry-units global armed (>= 0) while the region is open; BudgetExit disarms it; the BudgetExhausted read — the one point every region converges, the wrapper's verdict bind — performs the identical exit bookkeeping first when it finds the region still armed."
+since     = "0.59.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fuel_cut_in_arm_loop.almd", class = "fixture" },
+  { path = "tests/charge_probe_test.rs", name = "cut_bookkeeping_pins_normative_values", class = "fixture" },
+]

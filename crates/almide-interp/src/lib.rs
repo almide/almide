@@ -179,9 +179,15 @@ pub struct Interpreter<'a> {
     /// backends) — and the renderers' budget arithmetic (min-cap entry, lazy
     /// verdict, streaming exit). Counts DOWN from i64::MAX like both legs.
     pub(crate) det_fuel: Cell<i64>,
+    /// Entry units of the OPEN region, -1 when none is open — the C-320 reap
+    /// sentinel: a cut leaves it armed, and the exhausted read performs the
+    /// missed exit bookkeeping before answering (see `budget_prim_rt`).
     pub(crate) det_entry: Cell<i64>,
     pub(crate) det_verdict: Cell<i64>,
     pub(crate) det_spend: Cell<i64>,
+    /// The open region's saved outer fuel — the reap's restore source (the
+    /// exit prim's `saved` operand dies with the cut frame).
+    pub(crate) det_saved: Cell<i64>,
     /// True while evaluating a USER fn body. Charges apply only there: the
     /// stdlib pool bodies are unmetered on every leg (both backends meter
     /// user functions only), so a pool fn's internal loops must not charge.
@@ -434,9 +440,10 @@ impl<'a> Interpreter<'a> {
             fuel: Cell::new(DEFAULT_FUEL),
             depth: Cell::new(0),
             det_fuel: Cell::new(i64::MAX),
-            det_entry: Cell::new(0),
+            det_entry: Cell::new(-1),
             det_verdict: Cell::new(0),
             det_spend: Cell::new(0),
+            det_saved: Cell::new(0),
             det_in_user: Cell::new(false),
             det_region_depth: Cell::new(0),
             user_fn_names,
