@@ -313,6 +313,54 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// `[value]` -> `[String]` — the PRETTY twin: `$vjson_pretty` from
+    /// depth 0 over the line buffer, captured as a block.
+    pub(crate) fn emit_value_stringify_pretty(&mut self) -> Result<(), EmitError> {
+        let Some(fi) = self.resolve_qualified("float.to_string") else {
+            return Err(EmitError::Unsupported("stringify:float-unlinked".into()));
+        };
+        let info = &self.table.infos[fi];
+        if info.refuse.is_some() || info.ret != Some(STR) {
+            return Err(EmitError::Unsupported("stringify:float-impl".into()));
+        }
+        let float_idx = info.wasm_index;
+        self.calls.insert(fi);
+        let frags = self.json_frags();
+        let pfrags = crate::work::PrettyFrags {
+            nl: self.pool.intern("\n"),
+            colon_sp: self.pool.intern(": "),
+            comma_nl: self.pool.intern(",\n"),
+            indent2: self.pool.intern("  "),
+            empty_arr: self.pool.intern("[]"),
+            empty_obj: self.pool.intern("{}"),
+        };
+        let _ = self.work.helper(Helper::JsonQuote { frags });
+        let vp = self.work.helper(Helper::JsonValuePretty {
+            float_to_string: float_idx,
+            frags,
+            pfrags,
+        });
+        let hv = self.hold_i32()?;
+        let start = self.hold_i32()?;
+        self.f.instructions().local_set(hv);
+        self.f.instructions().global_get(G_LINE_CURSOR).local_set(start);
+        self.f
+            .instructions()
+            .local_get(start)
+            .local_get(hv)
+            .i32_const(0)
+            .call(vp)
+            .local_set(self.tmp_i32_local);
+        self.f
+            .instructions()
+            .local_get(start)
+            .local_get(self.tmp_i32_local)
+            .call(F_BUF_TO_BLOCK);
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
+
     /// `[payload?]` -> `[value block]`: alloc, tag, store the 8-byte slot.
     /// `payload_kind` picks the store width (None = tag-only Null).
     fn emit_value_box(

@@ -480,6 +480,55 @@ impl Emitter<'_> {
                 self.emit_value_stringify()?;
                 Ok(Some(STR))
             }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "json"
+                    && func.as_str() == "stringify_pretty"
+                    && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.emit_value_stringify_pretty()?;
+                Ok(Some(STR))
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "json"
+                    && func.as_str() == "set_path"
+                    && args.len() == 3 =>
+            {
+                let h = self.work.helper(crate::work::Helper::JsonPathSet);
+                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.lower(&args[1], None)?;
+                self.f.instructions().i32_const(0);
+                self.lower(&args[2], Some(SliceTy::Value))?;
+                self.f.instructions().call(h);
+                // ok(v) — the surface is Result[Value, String], always ok.
+                let hv = self.tmp_i32_local;
+                let mut i = self.f.instructions();
+                i.local_set(hv);
+                i.i32_const(16)
+                    .call(F_ALLOC)
+                    .local_tee(self.scr_i32_local)
+                    .i32_const(0)
+                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                i.local_get(self.scr_i32_local)
+                    .local_get(hv)
+                    .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                i.local_get(self.scr_i32_local);
+                let _ = i;
+                let vh = self.types.intern(SliceTy::Value);
+                Ok(Some(SliceTy::Result(vh, self.types.intern(STR))))
+            }
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "json"
+                    && func.as_str() == "remove_path"
+                    && args.len() == 2 =>
+            {
+                let h = self.work.helper(crate::work::Helper::JsonPathRemove);
+                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.lower(&args[1], None)?;
+                self.f.instructions().i32_const(0);
+                self.f.instructions().call(h);
+                Ok(Some(SliceTy::Value))
+            }
             _ => self.lower_module_call_b(target, args, tail, ret_hint),
         }
     }

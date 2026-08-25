@@ -19,6 +19,9 @@ pub(crate) enum Helper {
     JsonValue { float_to_string: u32, frags: JsonFrags },
     /// `$vjson_quote(cursor, str) -> cursor` — the 5-escape quoted form.
     JsonQuote { frags: JsonFrags },
+    /// `$vjson_pretty(cursor, v, depth) -> cursor` — the two-space
+    /// indented form (json.stringify_pretty), same leaves as JsonValue.
+    JsonValuePretty { float_to_string: u32, frags: JsonFrags, pfrags: PrettyFrags },
     /// `$vfield(value, key) -> i32`: 0 = not an Object, 1 = missing key,
     /// else the found Value's address (real addresses never collide with
     /// the sentinels — the heap starts past the null guard).
@@ -43,6 +46,11 @@ pub(crate) enum Helper {
     /// `$named_eq_<ti>(a, b) -> i32` — runtime-recursive deep equality
     /// of a RECURSIVE Named type (the DisplayNamed doctrine for `==`).
     NamedEq { ti: u32 },
+    /// `$jp_set(j, path, k, nv) -> Value` — json.set_path's recursive
+    /// core over THIS backend's Value layout.
+    JsonPathSet,
+    /// `$jp_remove(j, path, k) -> Value` — json.remove_path's core.
+    JsonPathRemove,
     /// `$scan_deep_<key>(block, stride, off, needle) -> i32` — the scan
     /// family's DEEP lane: compound keys (tuples, records) compare by
     /// the type-directed `==` instead of a word/byte class.
@@ -70,6 +78,17 @@ pub(crate) enum Helper {
     /// type shape and cycles are cut here; the body is Emitter-built in
     /// the display-helper phase and stored in `display_bodies`).
     DisplayNamed { ti: u32 },
+}
+
+/// The pretty printer's extra pooled fragments.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct PrettyFrags {
+    pub(crate) nl: u32,
+    pub(crate) colon_sp: u32,
+    pub(crate) comma_nl: u32,
+    pub(crate) indent2: u32,
+    pub(crate) empty_arr: u32,
+    pub(crate) empty_obj: u32,
 }
 
 /// Pooled fragment addresses the JSON helpers append from.

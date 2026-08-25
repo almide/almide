@@ -294,6 +294,15 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
         *frags,
     ),
     Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
+    Helper::JsonValuePretty { float_to_string, frags, pfrags } => {
+        value_helpers::emit_json_value_pretty_helper(
+            work.helper_base.get(),
+            helper_snapshot,
+            *float_to_string,
+            *frags,
+            *pfrags,
+        )
+    }
     Helper::ValueField => value_helpers::emit_value_field_helper(),
     Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
     Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
@@ -333,6 +342,12 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
             f
         }
     },
+    Helper::JsonPathSet => {
+        json_path_helpers::emit_json_path_set_helper(work.helper_base.get(), helper_snapshot)
+    }
+    Helper::JsonPathRemove => {
+        json_path_helpers::emit_json_path_remove_helper(work.helper_base.get(), helper_snapshot)
+    }
     Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
         Some(work::DisplayBuild::Built(f)) => f,
         _ => {
@@ -363,6 +378,12 @@ pub(crate) fn resolve_extras(
             }
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             Helper::ScanDeep { .. } => {
+                vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
+            }
+            Helper::JsonValuePretty { .. } | Helper::JsonPathRemove => {
+                vec![ValType::I32, ValType::I32, ValType::I32]
+            }
+            Helper::JsonPathSet => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
             Helper::FastExp | Helper::GeluScalar { .. } => vec![ValType::F64],
