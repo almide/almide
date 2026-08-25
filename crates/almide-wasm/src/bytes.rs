@@ -5,7 +5,7 @@
 //! bump allocator's zero guarantee (fresh pages are zero and the bump
 //! head never reuses).
 
-use almide_ir::IrExpr;
+use almide_ir::{IrExpr, IrExprKind};
 use wasm_encoder::{BlockType, MemArg, ValType};
 
 use crate::emitter::Emitter;
@@ -586,6 +586,24 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i32();
                 Ok(Some(INT))
+            }
+            // The linked append/write family is FUNCTIONAL in the
+            // self-host but MUT on the native surface — a statement call
+            // on a var writes the fresh result back (the list.push
+            // convention).
+            (f, [b, ..]) if f.starts_with("append_") || f.starts_with("write_") => {
+                let IrExprKind::Var { id } = &b.kind else {
+                    return unsup("bytes-append-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                match self.lower_linked_call("bytes", func, args, false)? {
+                    Some(SliceTy::Scalar(Scalar::Bytes)) => {}
+                    other => return unsup(&format!("bytes-append-ret:{other:?}")),
+                }
+                self.emit_store_var(*id, var_idx, var_ty)?;
+                Ok(None)
             }
             // Not a native arm: the audited linked path before the wall.
             _ => self.lower_linked_call("bytes", func, args, false),

@@ -270,6 +270,26 @@ impl Emitter<'_> {
                 Ok(Some(BOOL))
             }
             ("last", [xs]) => self.lower_list_last(xs),
+            ("sum", [xs]) => self.lower_list_sum(xs),
+            ("dedup", [xs]) => self.lower_list_dedup(xs),
+            ("any", [xs, cb]) => self.lower_list_any(xs, cb),
+            ("drop_while", [xs, cb]) => self.lower_list_drop_while(xs, cb),
+            // length is len with the long spelling
+            ("length", [xs]) => {
+                match self.lower(xs, None)? {
+                    SliceTy::List(h) => {
+                        let stride = self.types.el(h).slot_size() as i32;
+                        self.f
+                            .instructions()
+                            .i32_load(len_memarg())
+                            .i32_const(stride)
+                            .i32_div_u()
+                            .i64_extend_i32_u();
+                        Ok(Some(INT))
+                    }
+                    other => unsup(&format!("list-length-of:{other:?}")),
+                }
+            }
             ("product", [xs]) => self.lower_list_product(xs),
             ("flatten", [xs]) => self.lower_list_flatten(xs),
             ("all", [xs, cb]) => self.lower_list_all(xs, cb),

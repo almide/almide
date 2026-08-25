@@ -118,6 +118,202 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::List(inner)))
     }
 
+    /// Sequential sum (native: Int wrapping fold from 0; Float
+    /// `iter().sum()` — the same left fold from 0.0).
+    pub(crate) fn lower_list_sum(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-sum-of:{other:?}")),
+        };
+        let elem = self.types.el(h);
+        if !matches!(elem, INT | FLOAT) {
+            return unsup(&format!("list-sum-elem:{elem:?}"));
+        }
+        let stride = elem.slot_size() as i32;
+        let hb = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        let hacc = if elem == INT { self.hold_i64()? } else { self.hold_f64()? };
+        let mut i = self.f.instructions();
+        i.local_set(hb);
+        i.i32_const(0).local_set(hc);
+        if elem == INT {
+            i.i64_const(0).local_set(hacc);
+        } else {
+            i.f64_const(0.0.into()).local_set(hacc);
+        }
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
+        i.local_get(hacc);
+        i.local_get(hb).local_get(hc).i32_add();
+        let _ = i;
+        self.load_ty_slot(elem, 0);
+        let mut i = self.f.instructions();
+        if elem == INT {
+            i.i64_add();
+        } else {
+            i.f64_add();
+        }
+        i.local_set(hacc);
+        i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
+        i.br(0).end().end();
+        i.local_get(hacc);
+        let _ = i;
+        if elem == INT {
+            self.release_i64();
+        } else {
+            self.release_f64();
+        }
+        self.release_i32();
+        self.release_i32();
+        Ok(Some(elem))
+    }
+
+    /// CONSECUTIVE dedup (native `r.last() != Some(x)` — unlike unique,
+    /// only adjacent equals fold).
+    pub(crate) fn lower_list_dedup(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-dedup-of:{other:?}")),
+        };
+        let elem = self.types.el(h);
+        if !matches!(elem, INT | FLOAT | STR | BOOL) {
+            return unsup(&format!("list-dedup-elem:{elem:?}"));
+        }
+        let stride = elem.slot_size() as i32;
+        let hb = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        let hacc = self.hold_i32()?;
+        let hx = self.hold_val(elem)?;
+        let push = match elem.slot_size() {
+            8 => F_LIST_PUSH_8,
+            _ => F_LIST_PUSH_4,
+        };
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hb);
+            i.i32_const(0).call(F_ALLOC).local_set(hacc);
+            i.i32_const(0).local_set(hc);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
+            i.local_get(hb).local_get(hc).i32_add();
+        }
+        self.load_ty_slot(elem, 0);
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hx);
+            // keep unless equal to the LAST kept element
+            i.local_get(hacc).i32_load(len_memarg()).i32_eqz();
+            i.if_(BlockType::Result(ValType::I32));
+            i.i32_const(1);
+            i.else_();
+            i.local_get(hacc)
+                .local_get(hacc)
+                .i32_load(len_memarg())
+                .i32_add()
+                .i32_const(stride)
+                .i32_sub();
+        }
+        self.load_ty_slot(elem, 0);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hx);
+            match elem {
+                INT => {
+                    i.i64_ne();
+                }
+                FLOAT => {
+                    i.f64_ne();
+                }
+                STR => {
+                    i.call(F_STR_EQ).i32_eqz();
+                }
+                _ => {
+                    i.i32_ne();
+                }
+            }
+            i.end();
+            i.if_(BlockType::Empty);
+            i.local_get(hacc).local_get(hx);
+            if elem.val_type() == ValType::F64 {
+                i.i64_reinterpret_f64();
+            }
+            i.call(push).local_set(hacc);
+            i.end();
+            i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
+            i.br(0).end().end();
+            i.local_get(hacc);
+        }
+        self.release_val(elem);
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::List(h)))
+    }
+
+    /// Suffix after the first false (native skip_while: the callback
+    /// runs through the first failing element).
+    pub(crate) fn lower_list_drop_while(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let hacc = self.hold_i32()?;
+        let hd = self.hold_i32()?;
+        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+        self.f.instructions().i32_const(0).local_set(hd);
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        // still dropping? run the callback; a false flips to keeping
+        self.f.instructions().local_get(hd).i32_eqz().if_(BlockType::Empty);
+        self.lower(body, Some(BOOL))?;
+        self.f.instructions().i32_eqz().local_set(hd);
+        self.f.instructions().end();
+        self.f.instructions().local_get(hd).if_(BlockType::Empty);
+        self.f.instructions().local_get(hacc).local_get(params[0]);
+        if elem.val_type() == ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
+        }
+        let push = match elem.slot_size() {
+            8 => F_LIST_PUSH_8,
+            _ => F_LIST_PUSH_4,
+        };
+        self.f.instructions().call(push).local_set(hacc);
+        self.f.instructions().end();
+        self.hof_step(ih);
+        self.f.instructions().local_get(hacc);
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::List(self.types.intern(elem))))
+    }
+
+    /// Exists (native `iter().any`): the first true wins, empty = false.
+    pub(crate) fn lower_list_any(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let hr = self.hold_i32()?;
+        self.f.instructions().i32_const(0).local_set(hr);
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.lower(body, Some(BOOL))?;
+        self.f.instructions().if_(BlockType::Empty);
+        self.f.instructions().i32_const(1).local_set(hr);
+        self.f.instructions().br(2);
+        self.f.instructions().end();
+        self.hof_step(ih);
+        self.f.instructions().local_get(hr);
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        Ok(Some(BOOL))
+    }
+
     /// Forall (native `iter().all`): the first false wins, empty = true.
     pub(crate) fn lower_list_all(
         &mut self,

@@ -75,6 +75,11 @@ impl Emitter<'_> {
                 self.f.instructions().i64_store(raw(()));
                 Ok(None)
             }
+            ("alloc_bytes", [n]) => {
+                self.lower(n, Some(INT))?;
+                self.f.instructions().i32_wrap_i64().call(F_ALLOC);
+                Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
+            }
             ("alloc_str", [n]) => {
                 self.lower(n, Some(INT))?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);

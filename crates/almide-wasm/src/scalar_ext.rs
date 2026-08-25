@@ -82,7 +82,7 @@ impl Emitter<'_> {
             ("math", "pow", [b, e]) => Some(self.lower_pow_int(b, e)?),
             // `n as f64` IS f64.convert_i64_s (IEEE round-to-nearest-even)
             // — int.to_float with the module spelled the other way.
-            ("float", "from_int", [n]) => {
+            ("float" | "float64", "from_int", [n]) | ("int", "to_float64", [n]) => {
                 self.lower(n, Some(INT))?;
                 self.f.instructions().f64_convert_i64_s();
                 Some(FLOAT)
