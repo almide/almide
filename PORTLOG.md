@@ -2600,3 +2600,29 @@ record the closure.
   — the W-canon position table (met/exceeded/documented-divergence on
   all nine), the championship axes, the incumbent A/B, and the scoped
   absolute claim. NON-CARRYOVER §4's open fronts resolved into it.
+
+## Stage 95 (2026-08-26): the DDD gauntlet runs against greenfield
+
+- The incumbent session's 34-cell gauntlet (ddd-gauntlet/, every shape
+  the 2026-08-22..26 ports-and-adapters exercise broke) replayed on the
+  greenfield legs. Definitive table: **18 MATCH / 7 WALL / 9
+  FRONT-REJECT / 0 DIFF** — no silent carryover anywhere. All 16
+  x-matrix cells (the family the incumbent closed across seven issues,
+  including #1583 still open there) are correct here from the start.
+- TWO real findings, both fixed + point-revert-A/B pinned same day:
+  the mono specialization clone dropped `mutated_params`, so a
+  protocol-bound `mut c` writeback vanished silently (13/10 — the
+  gauntlet's one DIFF; one-line port from develop, pinned by
+  mut_param_mono.rs where the interp oracle also catches it); and
+  `io.print` — a real stdlib fn no corpus fixture exercises — walled
+  (now the raw-sink arm + always-ok unit carrier, pinned by io_print.rs
+  with the interp abstention recorded).
+- The 7 walls are honest refusals in three families: the vendored
+  front snapshot predates the 8/22+ fixes (derive-Repr variant method,
+  cross-module convention/generic linking), and effect×mut-param holds
+  for #1576's ratified answer (x16 now WALLS where the dropped flag had
+  let it pass on value semantics — the fix made the wall see it).
+- The 9 front-rejects: s3–s7 are the open design questions greenfield
+  gets to answer once, deliberately; s1/s2/c7/c8 are the old front
+  snapshot rejecting where develop now accepts — the reject side is
+  safe, and the fixes come with the planned front resync.
