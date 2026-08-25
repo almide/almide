@@ -239,6 +239,7 @@ impl Emitter<'_> {
                 && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::SCALAR_TEXT_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
+                && !crate::whitelist::MATH_VERIFIED.contains(&impl_fn)
             {
                 return None;
             }

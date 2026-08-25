@@ -83,6 +83,19 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
 /// Same audit, Option-returning (constructor-built sums).
 pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] = &["string_index_of"];
 
+/// The vendored-libm family (C-305): every body is a FAITHFUL
+/// transcription of libm 0.2.16 with constants via prim.ffrombits —
+/// pure scalar prims throughout; math_trig's coefficient tables go
+/// through prim-MEDIATED alloc_list_f64 with 8-byte Float slot stores
+/// (the one list class both layouts share). One vendored libm on every
+/// target is the bit-parity mechanism itself.
+pub(crate) const MATH_VERIFIED: &[&str] = &[
+    "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
+    "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",
+    "math_log2", "math_log_gamma", "math_max", "math_min", "math_pi", "math_pow",
+    "math_sign", "math_sin", "math_sqrt", "math_tan", "math_tanh",
+];
+
 /// Option-returning members (the checked trio cells).
 pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
     "float_to_int16_checked", "float_to_int32_checked", "float_to_int64_checked",

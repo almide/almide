@@ -85,6 +85,12 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
                 Ok(Some(SliceTy::List(self.types.intern(INT))))
             }
+            ("alloc_list_f64", [n]) => {
+                // List[Float]: the same 8-byte slots, Float-typed.
+                self.lower(n, Some(INT))?;
+                self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
+                Ok(Some(SliceTy::List(self.types.intern(FLOAT))))
+            }
             ("band", [a, b]) | ("bor", [a, b]) | ("bxor", [a, b]) | ("bshl", [a, b])
             | ("bshr", [a, b]) | ("bshr_u", [a, b]) => {
                 self.lower(a, Some(INT))?;
@@ -101,8 +107,10 @@ impl Emitter<'_> {
                 Ok(Some(INT))
             }
             ("i2f" | "f2i" | "fbits" | "ffrombits" | "fadd" | "fsub" | "fmul"
-            | "fdiv" | "fceil" | "ffloor" | "fneg" | "fabs" | "feq" | "fne" | "flt"
-            | "fle" | "fgt" | "fge", _) => self.lower_prim_float(func, args),
+            | "fdiv" | "fceil" | "ffloor" | "fneg" | "fabs" | "fsqrt" | "fcopysign"
+            | "feq" | "fne" | "flt" | "fle" | "fgt" | "fge", _) => {
+                self.lower_prim_float(func, args)
+            }
             // die(msg_handle): the guarded-abort floor — surface the line
             // on stderr, then trap (abort parity is its own gate class).
             ("die", [msg]) => {
@@ -204,6 +212,19 @@ impl Emitter<'_> {
             ("fabs", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f64_abs();
+                Ok(Some(FLOAT))
+            }
+            // f64.sqrt is IEEE-correctly-rounded on every target — the
+            // one transcendental wasm itself guarantees bit-exact.
+            ("fsqrt", [a]) => {
+                self.lower(a, Some(FLOAT))?;
+                self.f.instructions().f64_sqrt();
+                Ok(Some(FLOAT))
+            }
+            ("fcopysign", [a, b]) => {
+                self.lower(a, Some(FLOAT))?;
+                self.lower(b, Some(FLOAT))?;
+                self.f.instructions().f64_copysign();
                 Ok(Some(FLOAT))
             }
             ("feq", [a, b]) | ("fne", [a, b]) | ("flt", [a, b]) | ("fle", [a, b])
