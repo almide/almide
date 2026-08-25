@@ -1,6 +1,31 @@
 # The Non-Carryover Ledger
 
-> Last updated: 2026-08-25 (stage 73, burn-up 481/599).
+> Last updated: 2026-08-25 (stage 74, burn-up 502/599).
+
+## 0. How this ledger CLOSES (the mechanism, not a sample)
+
+"Every incumbent weakness" is only checkable against a CLOSED
+enumeration, and the incumbent maintains exactly one: the 599-fixture
+conformance corpus. Its practice (enforced by the als gates) is that
+every shipped defect distills into a fixture citing its issue and its
+contract (`// @contract: C-NNN` headers; fixture prose cites #NNN) —
+the corpus IS the executable union of every ruled behavior and every
+regression ever caught. The GitHub label taxonomy is NOT that closure
+(defect issues ship unlabeled — #1542 carries no label), so this ledger
+does not pretend to enumerate the tracker.
+
+Therefore the closure mechanism is: **the burn-up gate replays the
+whole corpus against this engine and byte-verifies every claim; a row
+it cannot claim yet is NAMED in the histogram, never silent.** The
+ledger below is the narrative index of the interesting classes; the
+closed verification is `backend_parity.rs` at its current floor, and
+the ledger is COMPLETE exactly when the burn-up reaches 599/599 (the
+remaining rows are enumerated by reason-label at every run).
+
+The port-vs-rebuild record has the same shape: `PORT-MATRIX.md` is
+GENERATED (scripts/gen-port-matrix.py) over every one of the 1236
+self-host registry impls — linked / rejected-with-reason / unreached —
+so no admission decision can be sampled or forgotten.
 
 The standing goal forbids carrying forward any weakness of the incumbent
 `develop` compiler, requires every port to be justified, and requires the
