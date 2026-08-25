@@ -2322,3 +2322,31 @@ whole way:
   splitting string_scan.rs out and giving the bytes matrix its own
   dispatcher. 35 issues — the boundary again; touching PRs keep
   measuring A/B.
+
+## Stage 71 — 442 → 453: capitalize/rle, record defaults, the raise leaf, Value deep-eq/merge
+
+- **capitalize** composes the LINKED to_upper over a one-char prefix
+  (one SpecialCasing table, two surfaces); **run_length_encode** builds
+  its (char, count) tuples natively — the self-host reads the incumbent
+  len-as-tag header and stays unlinkable.
+- **Record decl defaults**: `IrFieldDecl.default` now travels through
+  the TypeTable into the literal lowering — omitted fields lower their
+  decl defaults after the literal's own (effect order preserved). The
+  codec fixtures' `maybe: Bool? = none` shape claims.
+- **guard** raises via the wasm `return` instruction; the bare-`err`
+  RAISE LEAF (#1340's wasm half) covers guard-let's desugared else-arm:
+  an `err(e)` met where the RAW type is expected inside an effect fn
+  builds the fn's Err and returns — the code after is unreachable, so
+  the claimed raw type keeps callers' stack bookkeeping true. Region
+  arms and main wall honestly (exit bookkeeping / abort frame differ).
+- **strip_prefix/strip_suffix** (pair), **index_of**, the statement
+  value-discard fallback (bare `ok(x)` statements), and **Value
+  deep-eq + object merge** as synthesized helpers over the NATIVE
+  Value layout (tags @SUM_TAG — the self-host value_eq/value_merge
+  read the incumbent's len-as-tag and stay unlinkable; the helpers
+  reproduce their exact walks: IEEE float ==, in-order object pairs,
+  B-wins-on-shared-key merge).
+- value_helpers.rs split keeps the 800 budget; codopsy A(90) held by
+  extraction at every slice (the push gate caught one B(89) mid-stage
+  and it was repaired BEFORE pushing).
+- CI: 83e194ea9 full green (all five jobs). 453/599, divergence zero.
