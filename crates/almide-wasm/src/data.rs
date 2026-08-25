@@ -54,7 +54,7 @@ impl Emitter<'_> {
                 let is_ok = matches!(&e.kind, IrExprKind::ResultOk { .. });
                 let (hty, o, er) = match want.map_or_else(|| self.infer(e), Ok)? {
                     SliceTy::Result(o, er) => (SliceTy::Result(o, er), o, er),
-                    other => return unsup(&format!("ty-mismatch:result-vs-{other:?}")),
+                    other => return self.lower_err_raise(e, is_ok, other),
                 };
                 let side = self.types.el(if is_ok { o } else { er });
                 // Hold-local, not shared tmp — same seed-79 lesson as
@@ -145,6 +145,29 @@ impl Emitter<'_> {
             other => return unsup(&format!("expr:{}", expr_kind_name(other))),
         };
         Ok(got)
+    }
+
+    /// The RAISE leaf (ALS-ST5/ST6, #1340's wasm half): a bare `err(e)`
+    /// where the RAW type is expected inside an effect fn early-returns
+    /// the Err — guard-let's desugared else-arm. The code after `return`
+    /// is unreachable, so claiming the raw type keeps the caller's
+    /// stack bookkeeping true.
+    fn lower_err_raise(
+        &mut self,
+        e: &IrExpr,
+        is_ok: bool,
+        raw: SliceTy,
+    ) -> Result<SliceTy, EmitError> {
+        if !is_ok
+            && !self.in_main
+            && self.region_repair.is_none()
+            && let Some(ret @ SliceTy::Result(..)) = self.fn_ret
+        {
+            self.lower(e, Some(ret))?;
+            self.f.instructions().return_();
+            return Ok(raw);
+        }
+        unsup(&format!("ty-mismatch:result-vs-{raw:?}"))
     }
 
     /// Record-shaped values: literals, spreads, member reads — split from
@@ -455,13 +478,6 @@ impl Emitter<'_> {
                 let NamedDef::Record(def) = &self.types.def(ti) else {
                     return unsup("record-of-variant-ty");
                 };
-                // Defaulted fields: until we verify the checker fills
-                // omissions into the literal, a literal that supplies
-                // fewer fields than the layout is REFUSED — a missing
-                // store would leave header-garbage in the slot.
-                if fields.len() != def.fields.len() {
-                    return unsup("record-defaults");
-                }
                 let size = def.size;
                 // (name → (offset, ty)) resolved up front to end the borrow.
                 let mut slots = Vec::new();
@@ -471,11 +487,29 @@ impl Emitter<'_> {
                         None => return unsup("record-unknown-field"),
                     }
                 }
+                // Omitted fields lower their DECL DEFAULTS (after the
+                // literal's own fields, preserving the literal's effect
+                // order); omitted with no default is a checker miss.
+                let mut defaults = Vec::new();
+                for fi in def.fields.iter() {
+                    if fields.iter().any(|(fname, _)| fi.name == fname.as_str()) {
+                        continue;
+                    }
+                    let Some(d) = &fi.default else {
+                        return unsup("record-missing-field");
+                    };
+                    defaults.push((fi.ty, fi.offset, d.clone()));
+                }
                 let hold = self.hold_i32()?;
                 self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(hold);
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
+                    self.store_ty_slot(fty, off);
+                }
+                for (fty, off, d) in defaults {
+                    self.f.instructions().local_get(hold);
+                    self.lower(&d, Some(fty))?;
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);

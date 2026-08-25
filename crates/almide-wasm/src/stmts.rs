@@ -30,23 +30,7 @@ impl Emitter<'_> {
                 }
                 Ok(())
             }
-            // Unit-position `if`: both arms are statement bodies. The
-            // if_ label shifts break/continue targets one deeper.
-            IrExprKind::If { cond, then, else_ } => {
-                self.lower(cond, Some(BOOL))?;
-                self.f.instructions().if_(BlockType::Empty);
-                if let Some((extra, _)) = self.loop_ctl.as_mut() {
-                    *extra += 1;
-                }
-                self.lower_stmt_expr(then)?;
-                self.f.instructions().else_();
-                self.lower_stmt_expr(else_)?;
-                self.f.instructions().end();
-                if let Some((extra, _)) = self.loop_ctl.as_mut() {
-                    *extra -= 1;
-                }
-                Ok(())
-            }
+            IrExprKind::If { cond, then, else_ } => self.lower_stmt_if(cond, then, else_),
             IrExprKind::While { cond, body } => self.lower_while(cond, body),
             // Match opens labels the walker does not track — suspend the
             // loop context so a Continue inside an arm walls honestly
@@ -83,9 +67,14 @@ impl Emitter<'_> {
                 self.f.instructions().drop();
                 Ok(())
             }
-            // `{}` in statement position is a no-op value; in value
-            // position the arm below builds the empty map.
-            other => unsup(&format!("expr:{}", expr_kind_name(other))),
+            // Any other value expression in statement position: evaluate
+            // and discard (a bare `ok(x)` statement is legal IR).
+            _ => {
+                if self.lower(e, None)? != SliceTy::Unit {
+                    self.f.instructions().drop();
+                }
+                Ok(())
+            }
         }
     }
 
@@ -124,6 +113,50 @@ impl Emitter<'_> {
             self.f.instructions().end();
         }
         self.loop_ctl = saved;
+        Ok(())
+    }
+
+    /// Unit-position `if`: both arms are statement bodies. The if_
+    /// label shifts break/continue targets one deeper.
+    fn lower_stmt_if(
+        &mut self,
+        cond: &IrExpr,
+        then: &IrExpr,
+        else_: &IrExpr,
+    ) -> Result<(), EmitError> {
+        self.lower(cond, Some(BOOL))?;
+        self.f.instructions().if_(BlockType::Empty);
+        if let Some((extra, _)) = self.loop_ctl.as_mut() {
+            *extra += 1;
+        }
+        self.lower_stmt_expr(then)?;
+        self.f.instructions().else_();
+        self.lower_stmt_expr(else_)?;
+        self.f.instructions().end();
+        if let Some((extra, _)) = self.loop_ctl.as_mut() {
+            *extra -= 1;
+        }
+        Ok(())
+    }
+
+    /// `guard cond else raise`: cond false → the else value IS the
+    /// function's return (the interp's Flow::Return). Region arms
+    /// would skip their exit bookkeeping on this early return, and
+    /// main's raise-abort frame is a different shape — both wall.
+    fn lower_stmt_guard(&mut self, cond: &IrExpr, else_: &IrExpr) -> Result<(), EmitError> {
+        if self.region_repair.is_some() {
+            return unsup("guard-in-region-arm");
+        }
+        if self.in_main {
+            return unsup("guard-in-main");
+        }
+        let Some(want) = self.fn_ret else {
+            return unsup("guard-in-unit-fn");
+        };
+        self.lower(cond, Some(BOOL))?;
+        self.f.instructions().i32_eqz().if_(BlockType::Empty);
+        self.lower(else_, Some(want))?;
+        self.f.instructions().return_().end();
         Ok(())
     }
 
@@ -279,6 +312,7 @@ impl Emitter<'_> {
                 self.emit_pattern_binds(pattern, ty, scr)
             }
             IrStmtKind::Comment { .. } => Ok(()),
+            IrStmtKind::Guard { cond, else_ } => self.lower_stmt_guard(cond, else_),
             other => unsup(&format!("stmt:{}", stmt_kind_name(other))),
         }
     }

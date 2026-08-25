@@ -15,6 +15,20 @@ pub(crate) fn str_byte() -> MemArg {
     MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
 }
 
+/// The rle scanner's register file (holds + tuple layout), so the
+/// flush helper takes one parameter.
+struct RleRegs {
+    hs: u32,
+    hps: u32,
+    hpw: u32,
+    hcnt: u32,
+    hacc: u32,
+    hb: u32,
+    tuple_size: u32,
+    str_off: u32,
+    cnt_off: u32,
+}
+
 impl Emitter<'_> {
     /// stdlib/string_pad.almd verbatim: pad with copies of the FIRST
     /// codepoint of `pad` (a space if empty) until the CODEPOINT count
@@ -299,19 +313,8 @@ impl Emitter<'_> {
 
     /// One (char, count) tuple pushed onto the accumulator: the run's
     /// char is copied out of the source at [ps, ps+pw).
-    #[allow(clippy::too_many_arguments)]
-    fn emit_rle_flush(
-        &mut self,
-        hs: u32,
-        hps: u32,
-        hpw: u32,
-        hcnt: u32,
-        hacc: u32,
-        hb: u32,
-        tuple_size: u32,
-        str_off: u32,
-        cnt_off: u32,
-    ) {
+    fn emit_rle_flush(&mut self, r: &RleRegs) {
+        let RleRegs { hs, hps, hpw, hcnt, hacc, hb, tuple_size, str_off, cnt_off } = *r;
         let mut i = self.f.instructions();
         i.local_get(hpw).call(F_ALLOC).local_set(hb);
         i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
@@ -349,6 +352,7 @@ impl Emitter<'_> {
         let hb = self.hold_i32()?;
         let hj = self.hold_i32()?;
         let hf = self.hold_i32()?;
+        let regs = RleRegs { hs, hps, hpw, hcnt, hacc, hb, tuple_size, str_off, cnt_off };
         {
             let mut i = self.f.instructions();
             i.local_set(hs);
@@ -394,7 +398,7 @@ impl Emitter<'_> {
             i.local_get(hcnt).i32_const(1).i32_add().local_set(hcnt);
             i.else_();
         }
-        self.emit_rle_flush(hs, hps, hpw, hcnt, hacc, hb, tuple_size, str_off, cnt_off);
+        self.emit_rle_flush(&regs);
         {
             let mut i = self.f.instructions();
             i.local_get(hk).local_set(hps);
@@ -405,7 +409,7 @@ impl Emitter<'_> {
             i.br(0).end().end();
         }
         // the final run always exists (len > 0 guard)
-        self.emit_rle_flush(hs, hps, hpw, hcnt, hacc, hb, tuple_size, str_off, cnt_off);
+        self.emit_rle_flush(&regs);
         self.f.instructions().end();
         self.f.instructions().local_get(hacc);
         for _ in 0..11 {

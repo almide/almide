@@ -25,21 +25,7 @@ impl Emitter<'_> {
         }
         match (func.as_str(), args) {
             // mut append (native s.push_str): var write-back of concat.
-            ("push", [v, x]) => {
-                let IrExprKind::Var { id } = &v.kind else {
-                    return unsup("string-push-nonvar");
-                };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
-                    return unsup("var:unmapped");
-                };
-                if var_ty != STR {
-                    return unsup(&format!("string-push-of:{var_ty:?}"));
-                }
-                self.f.instructions().local_get(var_idx);
-                self.lower(x, Some(STR))?;
-                self.f.instructions().call(F_CONCAT).local_set(var_idx);
-                Ok(None)
-            }
+            ("push", [v, x]) => self.lower_string_push(v, x),
             ("is_empty", [s]) => {
                 self.lower(s, Some(STR))?;
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
@@ -57,6 +43,9 @@ impl Emitter<'_> {
             ("drop", [s, n]) => self.lower_string_drop(s, n),
             ("take", [s, n]) => self.lower_string_take(s, n),
             ("starts_with", [s, p]) => self.lower_string_starts_with(s, p),
+            ("strip_prefix" | "strip_suffix", [s, p]) => {
+                self.lower_string_strip(s, p, func.as_str() == "strip_prefix")
+            }
             // Rust str::replace / replace_first byte-for-byte via the
             // shared helper (the `first` flag selects the form). The
             // empty-pattern char-boundary rule (C-100) lives in the helper.
@@ -206,6 +195,91 @@ impl Emitter<'_> {
         }
         self.release_i64();
         self.release_i32();
+        Ok(Some(SliceTy::Option(self.types.intern(STR))))
+    }
+
+    /// mut append (native s.push_str): var write-back of concat.
+    fn lower_string_push(&mut self, v: &IrExpr, x: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let IrExprKind::Var { id } = &v.kind else {
+            return unsup("string-push-nonvar");
+        };
+        let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+            return unsup("var:unmapped");
+        };
+        if var_ty != STR {
+            return unsup(&format!("string-push-of:{var_ty:?}"));
+        }
+        self.f.instructions().local_get(var_idx);
+        self.lower(x, Some(STR))?;
+        self.f.instructions().call(F_CONCAT).local_set(var_idx);
+        Ok(None)
+    }
+
+    /// strip_prefix/strip_suffix (native Option-returning): the byte
+    /// affix matches → some(rest), else none.
+    fn lower_string_strip(
+        &mut self,
+        s: &IrExpr,
+        p: &IrExpr,
+        prefix: bool,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        self.lower(s, Some(STR))?;
+        let hs = self.hold_i32()?;
+        self.f.instructions().local_set(hs);
+        self.lower(p, Some(STR))?;
+        let hp = self.hold_i32()?;
+        let hn = self.hold_i32()?;
+        let hk = self.hold_i32()?;
+        let hr = self.hold_i32()?;
+        let hoff = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hp);
+        i.local_get(hp).i32_load(len_memarg()).local_set(hn);
+        // the affix's start within s: 0 (prefix) or slen - plen (suffix)
+        if prefix {
+            i.i32_const(0).local_set(hoff);
+        } else {
+            i.local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub().local_set(hoff);
+        }
+        i.local_get(hn).local_get(hs).i32_load(len_memarg()).i32_gt_u();
+        i.if_(BlockType::Result(ValType::I32));
+        i.i32_const(0);
+        i.else_();
+        i.i32_const(1).local_set(hr);
+        i.i32_const(0).local_set(hk);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
+        i.local_get(hs).local_get(hoff).i32_add().local_get(hk).i32_add();
+        i.i32_load8_u(str_byte());
+        i.local_get(hp).local_get(hk).i32_add().i32_load8_u(str_byte());
+        i.i32_ne().if_(BlockType::Empty);
+        i.i32_const(0).local_set(hr);
+        i.br(2);
+        i.end();
+        i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+        i.br(0).end().end();
+        i.local_get(hr).if_(BlockType::Result(ValType::I32));
+        // some(rest): the bytes OUTSIDE the affix
+        i.local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub();
+        i.call(F_ALLOC).local_set(hk);
+        i.local_get(hk).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        if prefix {
+            i.local_get(hn).i32_add();
+        }
+        i.local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub();
+        i.memory_copy(0, 0);
+        i.i32_const(4).call(F_ALLOC).local_tee(hr).local_get(hk);
+        i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+        i.local_get(hr);
+        i.else_();
+        i.i32_const(0);
+        i.end();
+        i.end();
+        let _ = i;
+        for _ in 0..6 {
+            self.release_i32();
+        }
         Ok(Some(SliceTy::Option(self.types.intern(STR))))
     }
 

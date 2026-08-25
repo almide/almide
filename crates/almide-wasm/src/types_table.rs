@@ -19,6 +19,9 @@ pub(crate) struct FieldInfo {
     /// Payload-relative offset (records) — variant case fields already
     /// include the SUM_FIELD shift.
     pub(crate) offset: u32,
+    /// The decl's default expression (records only): a literal omitting
+    /// the field lowers this instead of refusing.
+    pub(crate) default: Option<std::rc::Rc<almide_ir::IrExpr>>,
 }
 
 #[derive(Clone)]
@@ -157,7 +160,7 @@ impl TypeTable {
             .iter()
             .cloned()
             .zip(offsets)
-            .map(|((name, ty), offset)| FieldInfo { name, ty, offset })
+            .map(|((name, ty), offset)| FieldInfo { name, ty, offset, default: None })
             .collect();
         let i = {
             let mut defs = self.defs.borrow_mut();
@@ -264,6 +267,7 @@ fn build_case(
             name,
             ty,
             offset: almide_layout::SUM_FIELD + off,
+            default: None,
         })
         .collect();
     Some(CaseDef {
@@ -282,14 +286,14 @@ fn build_record_def(
     let mut infos = Vec::new();
     for f in fields {
         let t = slice_ty_of(&subst(&f.ty, env), table)?;
-        infos.push((f.name.as_str().to_string(), t));
+        infos.push((f.name.as_str().to_string(), t, f.default.clone().map(std::rc::Rc::new)));
     }
-    let widths: Vec<u32> = infos.iter().map(|(_, t)| t.slot_size()).collect();
+    let widths: Vec<u32> = infos.iter().map(|(_, t, _)| t.slot_size()).collect();
     let (offsets, size) = almide_layout::pack_fields(&widths);
     let fields = infos
         .into_iter()
         .zip(offsets)
-        .map(|((name, ty), offset)| FieldInfo { name, ty, offset })
+        .map(|((name, ty, default), offset)| FieldInfo { name, ty, offset, default })
         .collect();
     Some(NamedDef::Record(RecordDef { fields, size }))
 }
@@ -424,7 +428,11 @@ fn add_record(table: &mut TypeTable, name: &str, fields: &[almide_ir::IrFieldDec
     let mut ok = true;
     for f in fields {
         match slice_ty_of(&f.ty, table) {
-            Some(t) => infos.push((f.name.as_str().to_string(), t)),
+            Some(t) => infos.push((
+                f.name.as_str().to_string(),
+                t,
+                f.default.clone().map(std::rc::Rc::new),
+            )),
             None => {
                 ok = false;
                 break;
@@ -434,12 +442,12 @@ fn add_record(table: &mut TypeTable, name: &str, fields: &[almide_ir::IrFieldDec
     if !ok {
         return;
     }
-    let widths: Vec<u32> = infos.iter().map(|(_, t)| t.slot_size()).collect();
+    let widths: Vec<u32> = infos.iter().map(|(_, t, _)| t.slot_size()).collect();
     let (offsets, size) = almide_layout::pack_fields(&widths);
     let fields = infos
         .into_iter()
         .zip(offsets)
-        .map(|((name, ty), offset)| FieldInfo { name, ty, offset })
+        .map(|((name, ty, default), offset)| FieldInfo { name, ty, offset, default })
         .collect();
     let idx = table.by_name[name];
     table.defs.borrow_mut()[idx as usize] = NamedDef::Record(RecordDef { fields, size });

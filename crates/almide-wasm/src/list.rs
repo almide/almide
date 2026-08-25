@@ -261,6 +261,7 @@ impl Emitter<'_> {
             ("set", [xs, idx, v]) => self.lower_list_set(xs, idx, v),
             ("swap", [xs, ia, ib]) => self.lower_list_swap(xs, ia, ib),
             ("update", [xs, idx, cb]) => self.lower_list_update(xs, idx, cb),
+            ("index_of", [xs, x]) => self.lower_list_index_of(xs, x),
             // List-returning map: each callback list concatenates onto
             // the accumulator (native flat_map order).
             ("flat_map", [xs, cb]) => {

@@ -18,6 +18,10 @@ binop:Or
 binop:PowInt
 binop:SubFloat
 binop:SubInt
+call:args.flag
+call:args.option_or
+call:args.positional
+call:args.raw
 call:bytes.from_list
 call:bytes.get_or
 call:bytes.len
@@ -269,6 +273,7 @@ stmt:BindDestructure
 stmt:Comment
 stmt:Expr
 stmt:FieldAssign
+stmt:Guard
 stmt:IndexAssign
 stmt:MapInsert
 unop:NegInt

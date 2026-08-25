@@ -270,6 +270,74 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::List(h)))
     }
 
+    /// First position of an equal element (native `position(== x)`):
+    /// some(i) or none. Scalar and String elements; Float is IEEE ==
+    /// (NaN never matches), exactly the native PartialEq.
+    pub(crate) fn lower_list_index_of(
+        &mut self,
+        xs: &IrExpr,
+        x: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-index-of-of:{other:?}")),
+        };
+        let elem = self.types.el(h);
+        if !matches!(elem, INT | FLOAT | STR | BOOL) {
+            return unsup(&format!("list-index-of-elem:{elem:?}"));
+        }
+        let stride = elem.slot_size() as i32;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(x, Some(elem))?;
+        let hx = self.hold_val(elem)?;
+        self.f.instructions().local_set(hx);
+        let hc = self.hold_i32()?;
+        let hi = self.hold_i32()?;
+        let hr = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().local_set(hc);
+        i.i32_const(0).local_set(hi);
+        i.i32_const(0).local_set(hr);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hi).local_get(hc).i32_ge_u().br_if(1);
+        i.local_get(hb).local_get(hi).i32_const(stride).i32_mul().i32_add();
+        let _ = i;
+        self.load_ty_slot(elem, 0);
+        let mut i = self.f.instructions();
+        i.local_get(hx);
+        match elem {
+            INT => {
+                i.i64_eq();
+            }
+            FLOAT => {
+                i.f64_eq();
+            }
+            STR => {
+                i.call(F_STR_EQ);
+            }
+            _ => {
+                i.i32_eq();
+            }
+        }
+        i.if_(BlockType::Empty);
+        i.i32_const(8).call(F_ALLOC).local_tee(hr);
+        i.local_get(hi).i64_extend_i32_u();
+        i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
+        i.br(2);
+        i.end();
+        i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+        i.br(0).end().end();
+        i.local_get(hr);
+        let _ = i;
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        self.release_val(elem);
+        self.release_i32();
+        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+    }
+
     /// Native `if let Some(s) = get_mut(i) { *s = f(s.clone()) }` over a
     /// fresh copy: the callback runs ONLY in bounds, once.
     pub(crate) fn lower_list_update(
