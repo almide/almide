@@ -29,6 +29,7 @@ fn lower_and_link_one_runtime_fn(
     functions: &mut Vec<crate::MirFunction>,
 ) {
     let lowered = crate::lower::lower_function(f, &layouts.globals);
+
     if let Err(e) = &lowered {
         if verbose
             && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)

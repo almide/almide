@@ -477,6 +477,9 @@ impl LowerCtx {
                 // a Unit effect call, a nested branch, or a deferred value whose calls
                 // we capture (its value is discarded in statement position).
                 IrExprKind::Block { stmts, expr: tail } => {
+                    if std::env::var_os("ALMIDE_DBG_WHILE").is_some() {
+                        eprintln!("STMT-BLOCK lowering ({} stmts, tail={})", stmts.len(), tail.is_some());
+                    }
                     for s in stmts {
                         self.lower_stmt(s)?;
                     }
@@ -579,7 +582,35 @@ impl LowerCtx {
                 self.lower_for_in(*var, var_tuple, iterable, body)
             }
             IrExprKind::While { cond, body } => self.lower_while(cond, body),
+            // A BLOCK tail executes: statements in order, then its own tail
+            // through this same dispatcher. Without this arm the
+            // never-err match rewrite's ok-arm body (a Block landed as the
+            // rewritten block's tail) fell to the elision below and a
+            // match-on-effect-call inside a while body ran its arms ZERO
+            // times, silently (#1571).
+            IrExprKind::Block { stmts, expr } => {
+                for s in stmts {
+                    self.lower_stmt(s)?;
+                }
+                match expr.as_deref() {
+                    Some(t2) => self.lower_block_stmt_tail(t2),
+                    None => Ok(()),
+                }
+            }
             _ => {
+                // NO THIRD STATE (#810): a call-bearing tail this dispatcher
+                // cannot execute must WALL under strict mode — eliding it
+                // drops its effects entirely (the #1571 class). An
+                // effect-free tail (Unit, a bare var, a literal) keeps the
+                // no-op elide: there is nothing to drop.
+                if crate::lower::strict_values() && crate::lower::expr_contains_call(t) {
+                    return Err(LowerError::Unsupported(format!(
+                        "call-bearing `{}` tail of a statement block cannot be \
+                         faithfully executed in this brick (eliding it would drop \
+                         its effects — a silently wrong value)",
+                        kind_name(&t.kind)
+                    )));
+                }
                 self.record_elided_calls(t);
                 Ok(())
             }

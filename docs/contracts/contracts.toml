@@ -967,6 +967,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_tco.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_tco_err_rewrap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/loop_effect_match_stmt.almd", class = "fixture" },
 ]
 
 [[contract]]

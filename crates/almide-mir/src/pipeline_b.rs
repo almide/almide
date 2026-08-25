@@ -451,6 +451,12 @@ fn inline_and_classify_cross_module_fns(
                 &self_name,
             );
             crate::lower::rewrite_never_err_effect_match(&mut f.body, &wide_can_err, &wide_lifted);
+            crate::lower::strip_never_err_unwraps(
+                &mut f.body,
+                &wide_can_err,
+                &wide_lifted,
+                &self_name,
+            );
             crate::lower::unwrap_never_err_call_types(&mut f.body, &wide_can_err, &wide_lifted);
             crate::lower::rewrap_never_err_into_result_targets(
                 &mut f.body,
