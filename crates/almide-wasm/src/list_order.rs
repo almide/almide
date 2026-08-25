@@ -60,6 +60,8 @@ impl Emitter<'_> {
                 Ok(Some(Some(SliceTy::List(h))))
             }
             ("min" | "max", [xs]) => self.lower_list_min_max(func, xs).map(Some),
+            ("remove_at", [xs, idx]) => self.lower_list_remove_at(xs, idx).map(Some),
+            ("reverse", [xs]) => self.lower_list_reverse(xs).map(Some),
             // Bottom-up MERGE SORT over a fresh copy (O(n log n) — the
             // first perf measurement showed insertion sort 26x behind the
             // incumbent on 2k elements). Take-from-left on `<=` (stable);

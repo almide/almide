@@ -17,16 +17,153 @@ fn byte_at() -> MemArg {
     MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
 }
 
+/// Payload-relative byte address: byte k of the current window.
+fn byte_k(k: u8) -> MemArg {
+    MemArg {
+        offset: u64::from(almide_layout::PAYLOAD) + u64::from(k),
+        align: 0,
+        memory_index: 0,
+    }
+}
+
 impl Emitter<'_> {
-    /// Bounds guard: absolute index (i64) already wrapped on the stack is
-    /// NOT the shape here — this takes (block hold, index hold i64) and
-    /// traps unless 0 <= i < len (the oracle aborts out of bounds).
-    fn bytes_bounds(&mut self, bh: u32, ih: u32) {
+    /// C-229 totality: a read DEFAULTS and a write NO-OPS when the window
+    /// [pos, pos+width) leaves the buffer — negative pos included, never a
+    /// trap. The room test SUBTRACTS (`pos <= len - width`): the
+    /// `pos + width` sum wraps for a pos near the top of i64 and once let
+    /// a store land back inside the buffer (fuzz seed 510754018593).
+    /// Leaves the in-room boolean (i32) on the stack.
+    fn bytes_room(&mut self, bh: u32, ih: u32, width: u8) {
         let mut i = self.f.instructions();
-        i.local_get(ih).i64_const(0).i64_lt_s();
+        i.local_get(ih).i64_const(0).i64_ge_s();
         i.local_get(ih);
         i.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
-        i.i64_ge_s().i32_or().if_(BlockType::Empty).unreachable().end();
+        i.i64_const(i64::from(width)).i64_sub();
+        i.i64_le_s().i32_and();
+    }
+
+    /// The whole scalar-read family as ONE shape: guard → window bits as
+    /// i64 (sign-extended per the surface), out of room → 0. Floats, bool
+    /// and f16 convert the bits afterwards — 0 bits IS each type's
+    /// native default (0.0 / false), so the default needs no second path.
+    fn lower_bytes_read_bits(
+        &mut self,
+        b: &IrExpr,
+        pos: &IrExpr,
+        width: u8,
+        signed: bool,
+        be: bool,
+    ) -> Result<(), EmitError> {
+        self.lower(b, Some(BYTES))?;
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        self.lower(pos, Some(INT))?;
+        let ih = self.hold_i64()?;
+        let ha = self.hold_i32()?;
+        self.f.instructions().local_set(ih);
+        self.bytes_room(bh, ih, width);
+        let mut i = self.f.instructions();
+        i.if_(BlockType::Result(ValType::I64));
+        i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
+        if be {
+            // compose MSB-first: acc = (acc << 8) | byte[k]
+            i.local_set(ha);
+            i.local_get(ha).i64_load8_u(byte_k(0));
+            for k in 1..width {
+                i.i64_const(8).i64_shl();
+                i.local_get(ha).i64_load8_u(byte_k(k)).i64_or();
+            }
+            if signed {
+                match width {
+                    2 => {
+                        i.i64_extend16_s();
+                    }
+                    4 => {
+                        i.i64_extend32_s();
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            match (width, signed) {
+                (1, true) => i.i64_load8_s(byte_k(0)),
+                (1, false) => i.i64_load8_u(byte_k(0)),
+                (2, true) => i.i64_load16_s(byte_k(0)),
+                (2, false) => i.i64_load16_u(byte_k(0)),
+                (4, true) => i.i64_load32_s(byte_k(0)),
+                (4, false) => i.i64_load32_u(byte_k(0)),
+                _ => i.i64_load(byte_k(0)),
+            };
+        }
+        i.else_().i64_const(0).end();
+        let _ = i;
+        self.release_i32();
+        self.release_i64();
+        self.release_i32();
+        Ok(())
+    }
+
+    /// The scalar-set family: value bits ALWAYS evaluate (argument order
+    /// is unconditional), then the guarded store — or nothing.
+    fn lower_bytes_set(
+        &mut self,
+        b: &IrExpr,
+        pos: &IrExpr,
+        v: &IrExpr,
+        width: u8,
+        be: bool,
+        float: bool,
+    ) -> Result<(), EmitError> {
+        self.lower(b, Some(BYTES))?;
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        self.lower(pos, Some(INT))?;
+        let ih = self.hold_i64()?;
+        self.f.instructions().local_set(ih);
+        if float {
+            self.lower(v, Some(FLOAT))?;
+            let mut i = self.f.instructions();
+            if width == 4 {
+                i.f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
+            } else {
+                i.i64_reinterpret_f64();
+            }
+        } else {
+            self.lower(v, Some(INT))?;
+        }
+        let hv = self.hold_i64()?;
+        let ha = self.hold_i32()?;
+        self.f.instructions().local_set(hv);
+        self.bytes_room(bh, ih, width);
+        let mut i = self.f.instructions();
+        i.if_(BlockType::Empty);
+        i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
+        if be {
+            i.local_set(ha);
+            for k in 0..width {
+                i.local_get(ha).local_get(hv);
+                let sh = i64::from(width - 1 - k) * 8;
+                if sh > 0 {
+                    i.i64_const(sh).i64_shr_u();
+                }
+                i.i64_store8(byte_k(k));
+            }
+        } else {
+            i.local_get(hv);
+            match width {
+                1 => i.i64_store8(byte_k(0)),
+                2 => i.i64_store16(byte_k(0)),
+                4 => i.i64_store32(byte_k(0)),
+                _ => i.i64_store(byte_k(0)),
+            };
+        }
+        i.end();
+        let _ = i;
+        self.release_i32();
+        self.release_i64();
+        self.release_i64();
+        self.release_i32();
+        Ok(())
     }
 
     pub(crate) fn lower_bytes_call(
@@ -106,146 +243,92 @@ impl Emitter<'_> {
                 self.lower(i, Some(INT))?;
                 let ih = self.hold_i64()?;
                 self.f.instructions().local_set(ih);
-                let mut ins = self.f.instructions();
-                ins.local_get(ih).i64_const(0).i64_lt_s();
-                ins.local_get(ih);
-                ins.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
-                ins.i64_ge_s().i32_or().if_(BlockType::Result(ValType::I64));
+                // the default ALWAYS evaluates (native argument order) —
+                // in-branch lowering would skip its effects in-bounds
                 self.lower(d, Some(INT))?;
-                self.f.instructions().else_();
-                self.f
-                    .instructions()
-                    .local_get(bh)
-                    .local_get(ih)
-                    .i32_wrap_i64()
-                    .i32_add()
-                    .i32_load8_u(byte_at())
-                    .i64_extend_i32_u()
-                    .end();
-                self.release_i64();
-                self.release_i32();
-                Ok(Some(INT))
-            }
-            ("read_u8", [b, i]) | ("get", [b, i]) if func == "read_u8" => {
-                self.lower(b, Some(BYTES))?;
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                self.lower(i, Some(INT))?;
-                let ih = self.hold_i64()?;
-                self.f.instructions().local_set(ih);
-                self.bytes_bounds(bh, ih);
-                self.f
-                    .instructions()
-                    .local_get(bh)
+                let hd = self.hold_i64()?;
+                self.f.instructions().local_set(hd);
+                self.bytes_room(bh, ih, 1);
+                let mut ins = self.f.instructions();
+                ins.if_(BlockType::Result(ValType::I64));
+                ins.local_get(bh)
                     .local_get(ih)
                     .i32_wrap_i64()
                     .i32_add()
                     .i32_load8_u(byte_at())
                     .i64_extend_i32_u();
+                ins.else_().local_get(hd).end();
+                let _ = ins;
+                self.release_i64();
                 self.release_i64();
                 self.release_i32();
                 Ok(Some(INT))
             }
-            ("set_at", [b, i, v]) | ("set_u8", [b, i, v]) => {
-                self.lower(b, Some(BYTES))?;
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                self.lower(i, Some(INT))?;
-                let ih = self.hold_i64()?;
-                self.f.instructions().local_set(ih);
-                self.bytes_bounds(bh, ih);
-                self.f.instructions().local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
-                self.lower(v, Some(INT))?;
-                self.f.instructions().i32_wrap_i64().i32_store8(byte_at());
-                self.release_i64();
-                self.release_i32();
+            // ── C-229: the scalar read/set matrix — every width, both
+            // endiannesses, TOTAL: an out-of-room read is the type's
+            // default, an out-of-room set is a no-op (negative and
+            // top-of-i64 positions included).
+            ("read_u8" | "read_bool", [b, i]) => {
+                self.lower_bytes_read_bits(b, i, 1, false, false)?;
+                if func == "read_bool" {
+                    self.f.instructions().i64_const(0).i64_ne();
+                    return Ok(Some(BOOL));
+                }
+                Ok(Some(INT))
+            }
+            ("read_u16_le" | "read_u16_be" | "read_i16_le" | "read_i16_be" | "read_u32_le"
+            | "read_u32_be" | "read_i32_le" | "read_i32_be" | "read_i64_le" | "read_i64_be", [b, i]) => {
+                let width = if func.contains("16") {
+                    2
+                } else if func.contains("32") {
+                    4
+                } else {
+                    8
+                };
+                self.lower_bytes_read_bits(
+                    b,
+                    i,
+                    width,
+                    func.starts_with("read_i"),
+                    func.ends_with("_be"),
+                )?;
+                Ok(Some(INT))
+            }
+            ("set_at" | "set_u8", [b, i, v]) => {
+                self.lower_bytes_set(b, i, v, 1, false, false)?;
                 Ok(None)
             }
-            ("set_f32_le", [b, i, v]) => {
-                self.lower(b, Some(BYTES))?;
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                self.lower(i, Some(INT))?;
-                let ih = self.hold_i64()?;
-                self.f.instructions().local_set(ih);
-                // bounds for i .. i+3
-                let mut ins = self.f.instructions();
-                ins.local_get(ih).i64_const(0).i64_lt_s();
-                ins.local_get(ih).i64_const(3).i64_add();
-                ins.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
-                ins.i64_ge_s().i32_or().if_(BlockType::Empty).unreachable().end();
-                self.f.instructions().local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
-                self.lower(v, Some(FLOAT))?;
-                // f64 → f32 bits, little-endian store (wasm stores are LE)
-                self.f
-                    .instructions()
-                    .f32_demote_f64()
-                    .i32_reinterpret_f32()
-                    .i32_store(MemArg {
-                        offset: u64::from(almide_layout::PAYLOAD),
-                        align: 0,
-                        memory_index: 0,
-                    });
-                self.release_i64();
-                self.release_i32();
+            ("set_u16_le" | "set_u16_be" | "set_i16_le" | "set_i16_be" | "set_u32_le"
+            | "set_u32_be" | "set_i32_le" | "set_i32_be" | "set_i64_le" | "set_i64_be", [b, i, v]) => {
+                let width = if func.contains("16") {
+                    2
+                } else if func.contains("32") {
+                    4
+                } else {
+                    8
+                };
+                self.lower_bytes_set(b, i, v, width, func.ends_with("_be"), false)?;
                 Ok(None)
             }
-            // OOB (or a negative pos) is DEFINED 0.0 for the f32 reader
-            // (native: checked_add + len test), unlike f16's trap form.
-            ("read_f32_le", [b, i]) => {
-                self.lower(b, Some(BYTES))?;
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                self.lower(i, Some(INT))?;
-                let ih = self.hold_i64()?;
-                let mut ins = self.f.instructions();
-                ins.local_set(ih);
-                ins.local_get(ih).i64_const(0).i64_lt_s();
-                ins.local_get(ih).i64_const(4).i64_add();
-                ins.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
-                ins.i64_gt_s().i32_or();
-                ins.if_(BlockType::Result(ValType::F64));
-                ins.f64_const(0.0.into());
-                ins.else_();
-                ins.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
-                ins.f32_load(MemArg {
-                    offset: u64::from(almide_layout::PAYLOAD),
-                    align: 0,
-                    memory_index: 0,
-                });
-                ins.f64_promote_f32();
-                ins.end();
-                let _ = ins;
-                self.release_i64();
-                self.release_i32();
+            ("set_f32_le" | "set_f32_be" | "set_f64_le" | "set_f64_be", [b, i, v]) => {
+                let width = if func.contains("32") { 4 } else { 8 };
+                self.lower_bytes_set(b, i, v, width, func.ends_with("_be"), true)?;
+                Ok(None)
+            }
+            ("read_f32_le" | "read_f32_be" | "read_f64_le" | "read_f64_be", [b, i]) => {
+                let width = if func.contains("32") { 4 } else { 8 };
+                self.lower_bytes_read_bits(b, i, width, false, func.ends_with("_be"))?;
+                if width == 4 {
+                    self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
+                } else {
+                    self.f.instructions().f64_reinterpret_i64();
+                }
                 Ok(Some(FLOAT))
             }
+            // f16 bits through the same total window; 0 bits = 0.0.
             ("read_f16_le", [b, i]) => {
-                self.lower(b, Some(BYTES))?;
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                self.lower(i, Some(INT))?;
-                let ih = self.hold_i64()?;
-                self.f.instructions().local_set(ih);
-                let mut ins = self.f.instructions();
-                ins.local_get(ih).i64_const(0).i64_lt_s();
-                ins.local_get(ih).i64_const(1).i64_add();
-                ins.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
-                ins.i64_ge_s().i32_or().if_(BlockType::Empty).unreachable().end();
-                self.f
-                    .instructions()
-                    .local_get(bh)
-                    .local_get(ih)
-                    .i32_wrap_i64()
-                    .i32_add()
-                    .i32_load16_u(MemArg {
-                        offset: u64::from(almide_layout::PAYLOAD),
-                        align: 0,
-                        memory_index: 0,
-                    })
-                    .call(F_F16_TO_F64);
-                self.release_i64();
-                self.release_i32();
+                self.lower_bytes_read_bits(b, i, 2, false, false)?;
+                self.f.instructions().i32_wrap_i64().call(F_F16_TO_F64);
                 Ok(Some(FLOAT))
             }
             _ => unsup(&format!("call:bytes.{func}")),

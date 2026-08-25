@@ -192,7 +192,7 @@ impl Emitter<'_> {
     /// Wrapping square-multiply, verbatim from the oracle's
     /// int_pow (#895): a negative exponent has no integer result
     /// and aborts on every target; products wrap like `*` does.
-    fn lower_pow_int(&mut self, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
+    pub(crate) fn lower_pow_int(&mut self, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
 
                 self.lower(left, Some(INT))?;
                 self.lower(right, Some(INT))?;

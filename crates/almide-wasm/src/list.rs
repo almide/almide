@@ -2,7 +2,7 @@
 //! from calls.rs for the complexity budget.
 
 use almide_ir::{IrExpr, IrExprKind};
-use wasm_encoder::BlockType;
+use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -253,6 +253,40 @@ impl Emitter<'_> {
             // insertion sort as list.sort moves keys and values in
             // lockstep.
             ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
+            // Option-returning map: none (null handle) skips, some's
+            // payload collects in order — fan.map's collect idiom minus
+            // the short-circuit.
+            ("filter_map", [xs, cb]) => {
+                let (params, body) = self.hof_lambda(cb, 1)?;
+                let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+                let hr = self.hold_i32()?;
+                let hacc = self.hold_i32()?;
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.hof_elem_into(elem, bh, ch, ih, params[0]);
+                let got = self.lower(body, None)?;
+                let SliceTy::Option(oi) = got else {
+                    return unsup(&format!("filter-map-body:{got:?}"));
+                };
+                let b = self.types.el(oi);
+                self.f.instructions().local_tee(hr).if_(BlockType::Empty);
+                self.f.instructions().local_get(hacc).local_get(hr);
+                self.load_ty_slot(b, almide_layout::OPTION_FIELD);
+                if b.val_type() == ValType::F64 {
+                    self.f.instructions().i64_reinterpret_f64();
+                }
+                let push = match b.slot_size() {
+                    8 => F_LIST_PUSH_8,
+                    _ => F_LIST_PUSH_4,
+                };
+                self.f.instructions().call(push).local_set(hacc).end();
+                self.hof_step(ih);
+                self.f.instructions().local_get(hacc);
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+                Ok(Some(SliceTy::List(self.types.intern(b))))
+            }
             ("fold", [xs, init, cb]) => {
                 if let Some(out) = self.lower_list_fold_fused(xs, init, cb)? {
                     return Ok(out);

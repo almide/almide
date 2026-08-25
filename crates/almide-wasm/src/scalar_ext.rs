@@ -103,6 +103,77 @@ impl Emitter<'_> {
                 self.f.instructions().i32_const(0).call(F_ALLOC);
                 Some(SliceTy::List(self.types.intern(STR)))
             }
+            // C-210: NaN OBSERVATION IS CANONICAL — to_bits collapses every
+            // NaN to 0x7FF8000000000000; non-NaN bits stay raw.
+            ("float", "to_bits", [x]) => {
+                self.lower(x, Some(FLOAT))?;
+                let h = self.hold_f64()?;
+                let mut i = self.f.instructions();
+                i.local_set(h);
+                i.local_get(h).local_get(h).f64_ne();
+                i.if_(BlockType::Result(ValType::I64));
+                i.i64_const(0x7FF8_0000_0000_0000_u64 as i64);
+                i.else_();
+                i.local_get(h).i64_reinterpret_f64();
+                i.end();
+                let _ = i;
+                self.release_f64();
+                Some(INT)
+            }
+            // The smuggling door C-210 tolerates: bits go in RAW (payload
+            // NaNs live internally; only observation canonicalizes).
+            ("int", "bits_to_float", [x]) => {
+                self.lower(x, Some(INT))?;
+                self.f.instructions().f64_reinterpret_i64();
+                Some(FLOAT)
+            }
+            // IEEE-754 requires sqrt correctly rounded: wasm f64.sqrt and
+            // Rust's `f64::sqrt` are the SAME function, bit for bit.
+            ("math", "sqrt", [x]) => {
+                self.lower(x, Some(FLOAT))?;
+                self.f.instructions().f64_sqrt();
+                Some(FLOAT)
+            }
+            // NaN-IGNORING min/max (native chain verbatim; C-306 side):
+            // one NaN yields the OTHER operand, equal operands yield `a` —
+            // so f64.min/max (NaN-propagating, -0-sign-joining) is wrong
+            // on both counts and a comparison+select is used instead.
+            ("float", "max" | "min", [a, b]) => {
+                let is_max = func.as_str() == "max";
+                self.lower(a, Some(FLOAT))?;
+                let ha = self.hold_f64()?;
+                self.f.instructions().local_set(ha);
+                self.lower(b, Some(FLOAT))?;
+                let hb = self.hold_f64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hb);
+                i.local_get(ha).local_get(ha).f64_ne();
+                i.if_(BlockType::Result(ValType::F64));
+                i.local_get(hb);
+                i.else_();
+                i.local_get(hb).local_get(hb).f64_ne();
+                i.if_(BlockType::Result(ValType::F64));
+                i.local_get(ha);
+                i.else_();
+                // select(v1, v2, cond) = cond ? v1 : v2 — push v1 first
+                i.local_get(hb).local_get(ha);
+                i.local_get(ha).local_get(hb);
+                if is_max {
+                    i.f64_lt();
+                } else {
+                    i.f64_gt();
+                }
+                i.select();
+                i.end();
+                i.end();
+                let _ = i;
+                self.release_f64();
+                self.release_f64();
+                Some(FLOAT)
+            }
+            // Same square-and-multiply (wrapping) + negative-exponent
+            // abort as the `**` operator — one definition, two spellings.
+            ("math", "pow", [b, e]) => Some(self.lower_pow_int(b, e)?),
             _ => return Ok(None),
         };
         Ok(Some(out))
