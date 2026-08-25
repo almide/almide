@@ -276,7 +276,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     match h {
     Helper::JsonValue { float_to_string, frags } => value_helpers::emit_json_value_helper(
         work.helper_base.get(),
-        &helper_snapshot,
+        helper_snapshot,
         *float_to_string,
         *frags,
     ),
