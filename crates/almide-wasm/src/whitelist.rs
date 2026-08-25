@@ -77,13 +77,13 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni",
-    "base64_encode", "base64_decode", "base64_encode_url", "base64_decode_url", "datetime_to_iso", "datetime_from_parts",
-    "string_is_whitespace",
+    "base64_encode", "base64_encode_url", "datetime_to_iso", "datetime_from_parts",
+    "string_is_whitespace", "string_to_bytes",
 ];
 
 /// Same audit, Option-returning (constructor-built sums).
 pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] =
-    &["string_index_of", "string_last_index_of"];
+    &["string_index_of", "string_last_index_of", "base64_decode", "base64_decode_url"];
 
 /// The Codec-derive encode splices: their bodies carry ZERO prims —
 /// every Value is built through the public value.* surface, which THIS
@@ -102,6 +102,38 @@ pub(crate) const CODEC_ENCODE_VERIFIED: &[&str] = &[
     "__decode_option_int", "__decode_option_float", "__decode_option_bool",
     "__decode_option_string", "__decode_default_int", "__decode_default_float",
     "__decode_default_bool", "__decode_default_string",
+];
+
+/// The bytes append/array/cursor/string family (stage-74 audit):
+/// byte-domain bodies over the digest-shared Bytes layout (len IS the
+/// byte count on BOTH sides — unlike lists), alloc_bytes/alloc_str/
+/// prim-mediated list allocs for their own outputs, 8-byte Int/Float
+/// slot stores only. The `_at` cursor forms return (Int, T?) tuples
+/// BUILT AS LITERALS (no raw tuple ops) and sit in the exempt tier.
+/// json_get_* are prim-free (public value surface only).
+pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
+    "bytes_append_f32_be", "bytes_append_f32_le", "bytes_append_f64_be", "bytes_append_f64_le",
+    "bytes_append_i16_be", "bytes_append_i16_le", "bytes_append_i32_be", "bytes_append_i32_le",
+    "bytes_append_i64_be", "bytes_append_i64_le", "bytes_append_u16_be", "bytes_append_u16_le",
+    "bytes_append_u32_be", "bytes_append_u32_le", "bytes_read_f16_le_array",
+    "bytes_read_f32_be_array", "bytes_read_f32_le_array", "bytes_read_f64_be_array",
+    "bytes_read_f64_le_array", "bytes_read_i16_be_array", "bytes_read_i16_le_array",
+    "bytes_read_i32_be_array", "bytes_read_i32_le_array", "bytes_read_i64_be_array",
+    "bytes_read_i64_le_array", "bytes_read_string_be", "bytes_read_u16_be_array",
+    "bytes_read_u16_le_array", "bytes_read_u32_be_array", "bytes_read_u32_le_array",
+    "bytes_to_string_lossy", "json_get_array", "json_get_bool", "json_get_float",
+    "json_get_int", "json_get_string",
+];
+
+/// The exempt-tier members of the same audit (tuple/Option returners
+/// with literal-built sums).
+pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
+    "bytes_read_bool_at", "bytes_read_f16_le_at", "bytes_read_f32_be_at", "bytes_read_f32_le_at",
+    "bytes_read_f64_be_at", "bytes_read_f64_le_at", "bytes_read_i16_be_at", "bytes_read_i16_le_at",
+    "bytes_read_i32_be_at", "bytes_read_i32_le_at", "bytes_read_i64_be_at", "bytes_read_i64_le_at",
+    "bytes_read_string_at", "bytes_read_string_be_at", "bytes_read_u16_be_at",
+    "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
+    "bytes_take_at",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL

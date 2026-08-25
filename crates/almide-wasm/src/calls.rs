@@ -261,6 +261,8 @@ impl Emitter<'_> {
                 && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::MATH_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
+                && !crate::whitelist::BYTES_FAMILY_VERIFIED.contains(&impl_fn)
+                && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
             {
                 return None;
             }
@@ -294,6 +296,7 @@ impl Emitter<'_> {
                 && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
+                && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
                 && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
             {
                 return None;
@@ -567,13 +570,6 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 Ok(Some(SliceTy::List(self.types.intern(STR))))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "string" && func.as_str() == "to_bytes" && args.len() == 1 =>
-            {
-                self.lower(&args[0], Some(STR))?;
-                self.f.instructions().call(F_BLOCK_COPY);
-                Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
             }
             _ => self.lower_module_call_c(target, args, tail, ret_hint),
         }

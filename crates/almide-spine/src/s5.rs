@@ -138,6 +138,11 @@ fn link_self_host(
                         {
                             out.insert("float.to_string".to_string());
                         }
+                        // string.from_bytes lowers as from_list ∘ the
+                        // linked lossy decoder (same WHATWG algorithm).
+                        if module.as_str() == "string" && func.as_str() == "from_bytes" {
+                            out.insert("bytes.to_string_lossy".to_string());
+                        }
                         out.insert(format!("{}.{}", module.as_str(), func.as_str()));
                     }
                     // Bare println/print display their argument — the

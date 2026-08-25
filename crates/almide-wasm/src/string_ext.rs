@@ -26,6 +26,27 @@ impl Emitter<'_> {
         match (func.as_str(), args) {
             // mut append (native s.push_str): var write-back of concat.
             ("push", [v, x]) => self.lower_string_push(v, x),
+            // from_bytes = from_list ∘ the LINKED lossy decoder — the
+            // native from_utf8_lossy IS bytes.to_string_lossy's WHATWG
+            // walk; the self-host string_from_bytes stays unlinkable
+            // (it reads the list len header raw).
+            ("from_bytes", [xs]) => {
+                let Some(fi) = self.resolve_qualified("bytes.to_string_lossy") else {
+                    return unsup("from-bytes-lossy-unlinked");
+                };
+                let info = &self.table.infos[fi];
+                if info.refuse.is_some() || info.ret != Some(STR) {
+                    return unsup("from-bytes-lossy-impl");
+                }
+                let idx = info.wasm_index;
+                self.calls.insert(fi);
+                match self.lower_bytes_call("from_list", std::slice::from_ref(xs))? {
+                    Some(SliceTy::Scalar(Scalar::Bytes)) => {}
+                    other => return unsup(&format!("from-bytes-of:{other:?}")),
+                }
+                self.f.instructions().call(idx);
+                Ok(Some(STR))
+            }
             ("is_empty", [s]) => {
                 self.lower(s, Some(STR))?;
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
