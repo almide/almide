@@ -602,6 +602,53 @@ impl Emitter<'_> {
                 self.release_i32(); // sh
                 Ok(Some(SliceTy::Set(self.types.intern(e))))
             }
+            // The set IS an insertion-ordered flat array (to_list is a
+            // cast), so fold walks it exactly like map.fold walks entries.
+            ("fold", [s, init, cb]) => {
+                let (params, body) = self.hof_lambda(cb, 2)?;
+                let (acc_p, x_p) = (params[0], params[1]);
+                let Some(b) = slice_ty_of(&init.ty, self.types) else {
+                    return unsup(&format!("set-fold-acc:{}", ty_name(&init.ty)));
+                };
+                self.lower(init, Some(b))?;
+                self.f.instructions().local_set(acc_p);
+                let e = match self.lower(s, None)? {
+                    SliceTy::Set(h) => self.types.el(h),
+                    other => return unsup(&format!("set-fold-of:{other:?}")),
+                };
+                let stride = e.slot_size() as i32;
+                let bh = self.hold_i32()?;
+                let cur = self.hold_i32()?;
+                let end = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(bh);
+                    i.local_get(bh)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_set(cur);
+                    i.local_get(cur).local_get(bh).i32_load(len_memarg()).i32_add().local_set(end);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+                    i.local_get(cur);
+                }
+                self.load_ty_slot_at(e);
+                self.f.instructions().local_set(x_p);
+                self.lower(body, Some(b))?;
+                self.f.instructions().local_set(acc_p);
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
+                    i.br(0);
+                    i.end();
+                    i.end();
+                    i.local_get(acc_p);
+                }
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Ok(Some(b))
+            }
             ("from_list", [xs]) => {
                 let e = match self.lower(xs, None)? {
                     SliceTy::List(h) => self.types.el(h),

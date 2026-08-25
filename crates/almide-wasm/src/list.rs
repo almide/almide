@@ -179,7 +179,12 @@ impl Emitter<'_> {
                     .i64_extend_i32_u()
                     .i64_const(stride)
                     .i64_div_s();
-                ins.i64_lt_s().select().local_set(eh);
+                // keep b only when 0 <= b < count — `end as usize` is
+                // UNSIGNED, so a negative end is huge and saturates to
+                // count (C-054; slice 0..-1 is the WHOLE list)
+                ins.i64_lt_s();
+                ins.local_get(eh).i64_const(0).i64_ge_s().i32_and();
+                ins.select().local_set(eh);
                 // empty when a < 0 (usize-wrap semantics) or a >= e
                 ins.local_get(ah).i64_const(0).i64_lt_s();
                 ins.local_get(ah).local_get(eh).i64_ge_s();
@@ -255,6 +260,7 @@ impl Emitter<'_> {
             ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
             ("set", [xs, idx, v]) => self.lower_list_set(xs, idx, v),
             ("swap", [xs, ia, ib]) => self.lower_list_swap(xs, ia, ib),
+            ("update", [xs, idx, cb]) => self.lower_list_update(xs, idx, cb),
             // List-returning map: each callback list concatenates onto
             // the accumulator (native flat_map order).
             ("flat_map", [xs, cb]) => {

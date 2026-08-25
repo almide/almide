@@ -62,6 +62,53 @@ impl Emitter<'_> {
             ("min" | "max", [xs]) => self.lower_list_min_max(func, xs).map(Some),
             ("remove_at", [xs, idx]) => self.lower_list_remove_at(xs, idx).map(Some),
             ("reverse", [xs]) => self.lower_list_reverse(xs).map(Some),
+            ("drop_end", [xs, n]) => self.lower_list_drop_end(xs, n).map(Some),
+            // Last n elements (native `n as usize >= len ? whole : tail`):
+            // a NEGATIVE n reinterprets huge and takes the WHOLE list.
+            ("take_end", [xs, n]) => {
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
+                    other => return unsup(&format!("list-take-end-of:{other:?}")),
+                };
+                let stride = self.types.el(h).slot_size() as i32;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let hl = self.hold_i32()?;
+                let hst = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                i.local_get(hb).i32_load(len_memarg()).local_set(hl);
+                // start = big ? 0 : len - n*stride (index-domain big test
+                // first — the byte product wraps for a huge n)
+                i.i32_const(0);
+                i.local_get(hl);
+                i.local_get(hn).i64_const(i64::from(stride)).i64_mul().i32_wrap_i64();
+                i.i32_sub();
+                i.local_get(hn).i64_const(0).i64_lt_s();
+                i.local_get(hn);
+                i.local_get(hl).i32_const(stride).i32_div_u().i64_extend_i32_u();
+                i.i64_ge_s().i32_or();
+                i.select().local_set(hst);
+                i.local_get(hl).local_get(hst).i32_sub().call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hst)
+                    .i32_add();
+                i.local_get(hl).local_get(hst).i32_sub();
+                i.memory_copy(0, 0);
+                i.local_get(ho);
+                let _ = i;
+                for _ in 0..4 {
+                    self.release_i32();
+                }
+                self.release_i64();
+                Ok(Some(Some(SliceTy::List(h))))
+            }
             // Bottom-up MERGE SORT over a fresh copy (O(n log n) — the
             // first perf measurement showed insertion sort 26x behind the
             // incumbent on 2k elements). Take-from-left on `<=` (stable);

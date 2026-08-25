@@ -173,6 +173,103 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::List(h)))
     }
 
+    /// All but the last n (native `n as usize >= len ? empty : head`):
+    /// a NEGATIVE n reinterprets huge and drops EVERYTHING.
+    pub(crate) fn lower_list_drop_end(
+        &mut self,
+        xs: &IrExpr,
+        n: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-drop-end-of:{other:?}")),
+        };
+        let stride = self.types.el(h).slot_size() as i32;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(n, Some(INT))?;
+        let hn = self.hold_i64()?;
+        let hl = self.hold_i32()?;
+        let hend = self.hold_i32()?;
+        let ho = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hn);
+        i.local_get(hb).i32_load(len_memarg()).local_set(hl);
+        // end = big ? 0 : len - n*stride (index-domain big test first)
+        i.i32_const(0);
+        i.local_get(hl);
+        i.local_get(hn).i64_const(i64::from(stride)).i64_mul().i32_wrap_i64();
+        i.i32_sub();
+        i.local_get(hn).i64_const(0).i64_lt_s();
+        i.local_get(hn);
+        i.local_get(hl).i32_const(stride).i32_div_u().i64_extend_i32_u();
+        i.i64_ge_s().i32_or();
+        i.select().local_set(hend);
+        i.local_get(hend).call(F_ALLOC).local_set(ho);
+        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hend);
+        i.memory_copy(0, 0);
+        i.local_get(ho);
+        let _ = i;
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        self.release_i64();
+        Ok(Some(SliceTy::List(h)))
+    }
+
+    /// Native `if let Some(s) = get_mut(i) { *s = f(s.clone()) }` over a
+    /// fresh copy: the callback runs ONLY in bounds, once.
+    pub(crate) fn lower_list_update(
+        &mut self,
+        xs: &IrExpr,
+        idx: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-update-of:{other:?}")),
+        };
+        let et = self.types.el(h);
+        let stride = et.slot_size() as i32;
+        self.f.instructions().call(F_BLOCK_COPY);
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(idx, Some(INT))?;
+        let hn = self.hold_i64()?;
+        let ha = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hn);
+        i.local_get(hn).i64_const(0).i64_ge_s();
+        i.local_get(hn);
+        i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().i64_extend_i32_u();
+        i.i64_lt_s().i32_and().if_(BlockType::Empty);
+        i.local_get(hb)
+            .local_get(hn)
+            .i32_wrap_i64()
+            .i32_const(stride)
+            .i32_mul()
+            .i32_add()
+            .local_set(ha);
+        i.local_get(ha);
+        let _ = i;
+        self.load_ty_slot(et, 0);
+        self.f.instructions().local_set(params[0]);
+        self.lower(body, Some(et))?;
+        let hv = self.hold_val(et)?;
+        self.f.instructions().local_set(hv);
+        self.f.instructions().local_get(ha).local_get(hv);
+        self.store_ty_slot(et, 0);
+        self.release_val(et);
+        self.f.instructions().end().local_get(hb);
+        self.release_i32();
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(SliceTy::List(h)))
+    }
+
     /// Native `if a < len && b < len { r.swap(a, b) }` over a fresh copy:
     /// EITHER index out of range (negative wraps huge) is a whole no-op.
     pub(crate) fn lower_list_swap(

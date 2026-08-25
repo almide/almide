@@ -69,6 +69,7 @@ call:float.to_fixed
 call:float.to_string
 call:fs.create_temp_dir
 call:fs.exists
+call:fs.list_dir
 call:fs.mkdir_p
 call:fs.read_lines
 call:fs.read_text
@@ -87,6 +88,7 @@ call:json.stringify
 call:list.chunk
 call:list.clear
 call:list.drop
+call:list.drop_end
 call:list.enumerate
 call:list.filter
 call:list.filter_map
@@ -114,6 +116,8 @@ call:list.sort
 call:list.sort_by
 call:list.swap
 call:list.take
+call:list.take_end
+call:list.update
 call:list.windows
 call:list.with_capacity
 call:map.contains
@@ -161,12 +165,21 @@ call:result.to_option
 call:result.unwrap_or
 call:result.unwrap_or_else
 call:set.contains
+call:set.fold
 call:set.from_list
 call:set.insert
 call:set.len
 call:set.new
+call:string.chars
+call:string.codepoint
+call:string.drop
+call:string.get
+call:string.is_empty
 call:string.join
 call:string.len
+call:string.lines
+call:string.pad_end
+call:string.pad_start
 call:string.push
 call:string.repeat
 call:string.replace
