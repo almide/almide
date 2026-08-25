@@ -164,6 +164,9 @@ pub struct Interpreter<'a> {
     /// cut (T1-1) fires only inside a region — outside one, fuel below zero
     /// is impossible in budget mode and irrelevant in probe mode.
     pub(crate) det_region_depth: Cell<u32>,
+    /// C-320: saved-fuel stack, pushed by budget_enter, popped by
+    /// budget_exit — the repair pops what a skipped exit left behind.
+    pub(crate) det_saved_stack: std::cell::RefCell<Vec<i64>>,
     /// The user program's own fn names — captured BEFORE the stdlib pool is
     /// layered into `fns`, so the meter can tell the two apart at call time.
     pub(crate) user_fn_names: HashSet<Sym>,
@@ -385,6 +388,7 @@ impl<'a> Interpreter<'a> {
             det_spend: Cell::new(0),
             det_in_user: Cell::new(false),
             det_region_depth: Cell::new(0),
+            det_saved_stack: std::cell::RefCell::new(Vec::new()),
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
             t_deadline: Cell::new(i64::MAX),
@@ -829,6 +833,11 @@ impl<'a> Interpreter<'a> {
         }
         self.depth.set(d + 1);
         let det_was_user = self.det_in_user.get();
+        // C-320: the meter's region depth at call entry — if the callee
+        // leaves it HIGHER, a det cut skipped a region's budget_exit and
+        // the exit bookkeeping runs here (exhausted ⇒ Err, never stale).
+        let region_depth_was = self.det_region_depth.get();
+
 
         // First hop's frame — what mut-param copy-out reads. Meaningful only
         // when no transfer happened, and a transfer implies no mut params.
@@ -866,6 +875,16 @@ impl<'a> Interpreter<'a> {
         };
 
         let result = self.fold_pending_try(result, &pending);
+        while self.det_region_depth.get() > region_depth_was {
+            // budget_exit verbatim (C-320 repair): a det cut's early
+            // return skipped the region's own exit inside this frame.
+            let saved = self.det_saved_stack.borrow_mut().pop().unwrap_or(i64::MAX);
+            self.det_verdict.set(i64::from(self.det_fuel.get() < 0));
+            let consumed = self.det_entry.get() - self.det_fuel.get();
+            self.det_spend.set(consumed);
+            self.det_fuel.set(saved - consumed);
+            self.det_region_depth.set(self.det_region_depth.get() - 1);
+        }
         self.det_in_user.set(det_was_user);
         self.depth.set(self.depth.get() - 1);
         (result, first_frame.unwrap_or_else(|| base.child()))

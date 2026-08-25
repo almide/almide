@@ -2186,3 +2186,26 @@ territory (the loop lives in a helper fn, the fixture family's shape),
 both modes run green (debug included — a first), and the hole goes to
 adjudication as als C-320 with the four-leg reproducer. The generator's
 direct-in-arm shape returns the day the ruling lands.
+
+---
+
+## Unit 6 — stage 65: C-320 implemented — the cut runs the exit's books (2026-08-25)
+
+The ruling landed within the hour (als PR #50: exhausted ⇒ Err, never
+a stale Ok; regions independent; cut placement unobservable; runtime
+services exempt by rule) and greenfield now implements it on both legs.
+WASM: a region-ARM fn (its body binds budget_enter) records the meter
+depth at entry, and a CUT there runs the budget_exit bookkeeping
+inline — verdict, spend, fuel restore, depth — before its early
+return; the depth-at-entry guard makes a post-exit or outer-region cut
+a plain cut (no double-booking, nesting safe). INTERP: budget_enter
+pushes the saved fuel on a stack, budget_exit pops, and the callable
+epilogue repairs any depth the callee left elevated — the first
+frame-scan attempt read the arm's scope and missed (bind scoping), so
+the stack owns the truth. Both legs now print the ruling's own
+poisoning sequence verbatim (6 6 -1 -1 6 6 -1 6 -1) and f18d gives
+exhausted ⇒ -1 with clean floats after. The fuzz generator runs BOTH
+cut placements again (the ruling makes them equivalent), green in
+debug and release. The incumbent's stale-verdict twin is
+almide/almide#1572; the als fixture (fuel_cut_in_arm_loop, since
+0.60.0) is claimed at the next pin advance.

@@ -218,6 +218,10 @@ impl Emitter<'_> {
     }
 
     /// depth > 0 && fuel < 0 → return the zero of this fn's return type.
+    /// In a region ARM (C-320), the exit bookkeeping runs FIRST — the
+    /// cut's early return must observe the same meter state a normal
+    /// exit leaves (exhausted ⇒ Err, regions independent, placement
+    /// unobservable).
     pub(crate) fn emit_det_cut_check(&mut self) {
         if !self.metered {
             return;
@@ -227,6 +231,23 @@ impl Emitter<'_> {
         i.if_(BlockType::Empty);
         i.global_get(G_DET_FUEL).i64_const(0).i64_lt_s();
         i.if_(BlockType::Empty);
+        let _ = i;
+        if let Some((saved, depth_entry)) = self.region_repair {
+            let mut i = self.f.instructions();
+            i.global_get(G_DET_DEPTH).local_get(depth_entry).i32_gt_s();
+            i.if_(BlockType::Empty);
+            // verdict = fuel < 0 (true here); spend = entry - fuel;
+            // fuel = saved - spend; depth -= 1 — budget_exit verbatim.
+            i.global_get(G_DET_FUEL).i64_const(0).i64_lt_s().i64_extend_i32_u();
+            i.global_set(G_DET_VERDICT);
+            i.global_get(G_DET_ENTRY).global_get(G_DET_FUEL).i64_sub();
+            i.global_set(G_DET_SPEND);
+            i.local_get(saved).global_get(G_DET_SPEND).i64_sub();
+            i.global_set(G_DET_FUEL);
+            i.global_get(G_DET_DEPTH).i32_const(1).i32_sub().global_set(G_DET_DEPTH);
+            i.end();
+        }
+        let mut i = self.f.instructions();
         match self.fn_ret {
             None => {}
             Some(t) => match t.val_type() {

@@ -562,6 +562,7 @@ impl<'a> Interpreter<'a> {
                 let units = int0() / almide_lang::time_units::CM1_NS_PER_CHARGE;
                 self.det_entry.set(units);
                 let saved = self.det_fuel.get();
+                self.det_saved_stack.borrow_mut().push(saved);
                 if units < saved {
                     self.det_fuel.set(units);
                 }
@@ -570,6 +571,7 @@ impl<'a> Interpreter<'a> {
             }
             "almide_rt_prim_budget_exhausted" => Flow::val(Value::Int(self.det_verdict.get())),
             "almide_rt_prim_budget_exit" => {
+                self.det_saved_stack.borrow_mut().pop();
                 self.det_verdict.set(i64::from(self.det_fuel.get() < 0));
                 let consumed = self.det_entry.get() - self.det_fuel.get();
                 self.det_spend.set(consumed);

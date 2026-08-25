@@ -40,6 +40,11 @@ pub(crate) struct Emitter<'a> {
     /// USER code: loop heads / entries / dyn ops charge the deterministic
     /// meter (ALS-DT2). Pool bodies and synthesized helpers never charge.
     pub(crate) metered: bool,
+    /// C-320: Some((saved_local, depth_entry_local)) when this fn is a
+    /// region ARM — a cut here runs the exit bookkeeping its early
+    /// return would otherwise skip (guarded by depth > depth-at-entry,
+    /// so a post-exit cut never double-books).
+    pub(crate) region_repair: Option<(u32, u32)>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits

@@ -143,17 +143,20 @@ impl Gen {
         let name = self.fresh();
         let k = self.rng.below(9);
         let ns = self.rng.below(3 * (k + 6));
-        // The loop lives in a HELPER fn (the fixture family's shape):
-        // an exhaustion cut then fires in the CALLEE and the region's
-        // own budget_exit still runs. A loop DIRECTLY in the arm makes
-        // the cut skip the exit — post-cut meter state is UNSPECIFIED
-        // upstream (stage-64 finding: native itself leaks a stale
-        // verdict there; als C-320 adjudication filed) — so the
-        // generator stays on specified territory until the ruling.
-        self.needs_fuel_helper = true;
-        self.line(&format!(
-            "let {name} = fan.bounded(compute.ns({ns})) {{ fz_loop({k}) }} ?? -1"
-        ));
+        // BOTH cut placements (C-320: placement is unobservable) — the
+        // callee-loop shape and the direct-in-arm shape, which exercises
+        // the cut's exit-bookkeeping repair on every leg.
+        if self.rng.chance(50) {
+            self.needs_fuel_helper = true;
+            self.line(&format!(
+                "let {name} = fan.bounded(compute.ns({ns})) {{ fz_loop({k}) }} ?? -1"
+            ));
+        } else {
+            let (s, i) = (self.fresh(), self.fresh());
+            self.line(&format!(
+                "let {name} = fan.bounded(compute.ns({ns})) {{\n  var {s} = 0\n  for {i} in 0..<{k} {{\n    {s} = {s} + {i}\n  }}\n  {s}\n}} ?? -1"
+            ));
+        }
         self.line(&format!("println(\"${{{name}}}\")"));
         self.vars.push(Var { name, ty: Ty::Int, mutable: false });
     }

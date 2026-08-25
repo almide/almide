@@ -122,6 +122,12 @@ pub(crate) fn lower_fn(
     }
     collect_binds(body, &mut binds, &mut seen, ctx.types)?;
 
+    // C-320: a region ARM fn (its body binds budget_enter) repairs the
+    // meter at a CUT — the cut's early return would skip the arm's own
+    // trailing budget_exit, leaking depth/fuel and staling the verdict
+    // (the incumbent's #1572). The saved-fuel bind var feeds the repair.
+    let region_saved_var: Option<VarId> = body_region_enter_var(body);
+
     // Bound-range deferral (C-238): head-only range binds leave the
     // locals table entirely — they live as (start, end) i64 pairs after
     // the hold pools, and every for-in over them counts.
@@ -151,8 +157,18 @@ pub(crate) fn lower_fn(
     local_decls.push((HOLD_F64_POOL, ValType::F64));
     // Deferred-range (start, end) i64 pairs after the pools.
     let mut deferred_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
+    let mut next_extra = hold_f64_base + HOLD_F64_POOL;
+    // C-320 repair locals: depth-at-entry (i32).
+    let region_depth_entry = if region_saved_var.is_some() {
+        local_decls.push((1, ValType::I32));
+        let l = next_extra;
+        next_extra += 1;
+        Some(l)
+    } else {
+        None
+    };
     {
-        let mut next = hold_f64_base + HOLD_F64_POOL;
+        let mut next = next_extra;
         let mut vars: Vec<_> = deferred.iter().collect();
         vars.sort_by_key(|(v, _)| **v);
         for (v, inc) in vars {
@@ -192,8 +208,15 @@ pub(crate) fn lower_fn(
             globals: ctx.globals,
             deferred_ranges: &deferred_ranges,
             metered,
+            region_repair: region_saved_var.and_then(|v| {
+                let saved = locals.get(&v)?.0;
+                Some((saved, region_depth_entry.expect("allocated with the var")))
+            }),
             f: &mut f,
         };
+        if let Some((_, dl)) = em.region_repair {
+            em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
+        }
         if let Some(caps) = &env_captures {
             // env (raw param 0) → capture locals, by-value snapshot.
             for (var, ty, off) in caps {
@@ -284,4 +307,21 @@ pub(crate) fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<Sli
         },
     };
     Ok((params, ret))
+}
+
+/// The var bound to `almide_rt_prim_budget_enter` at the TOP LEVEL of a
+/// region-arm body (the frontend desugar's shape), if any.
+fn body_region_enter_var(body: &IrExpr) -> Option<VarId> {
+    let IrExprKind::Block { stmts, .. } = &body.kind else {
+        return None;
+    };
+    for st in stmts {
+        if let almide_ir::IrStmtKind::Bind { var, value, .. } = &st.kind
+            && let IrExprKind::RuntimeCall { symbol, .. } = &value.kind
+            && symbol.as_str() == "almide_rt_prim_budget_enter"
+        {
+            return Some(*var);
+        }
+    }
+    None
 }
