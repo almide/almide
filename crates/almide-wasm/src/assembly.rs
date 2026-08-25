@@ -312,6 +312,14 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
             }
         }
     }
+    Helper::NamedEq { ti } => match work.eq_bodies.borrow_mut().remove(ti) {
+        Some(work::DisplayBuild::Built(f)) => f,
+        _ => {
+            let mut f = Function::new([]);
+            f.instructions().unreachable().end();
+            f
+        }
+    },
     }
 }
 

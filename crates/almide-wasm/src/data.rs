@@ -158,6 +158,16 @@ impl Emitter<'_> {
         is_ok: bool,
         raw: SliceTy,
     ) -> Result<SliceTy, EmitError> {
+        // `ok(x)` where the RAW type is expected: the effect ABI's
+        // transparent spot — the payload IS the value (the Result layer
+        // exists only at the fn boundary, where wrap_ok adds it).
+        if is_ok
+            && let IrExprKind::ResultOk { expr } = &e.kind
+            && matches!(self.fn_ret, Some(SliceTy::Result(..)))
+        {
+            self.lower(expr, Some(raw))?;
+            return Ok(raw);
+        }
         if !is_ok
             && !self.in_main
             && self.region_repair.is_none()
@@ -303,8 +313,26 @@ impl Emitter<'_> {
                     _ => None,
                 };
                 let in_effect = fn_err.is_some();
-                if !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_))) {
-                    return unsup("unwrap-propagating");
+                // #1067: `!` in a pure Option-returning fn PROPAGATES a
+                // none as none (a Result operand there stays refused —
+                // no oracle row pins its shape).
+                let in_option_fn =
+                    !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_)));
+                if in_option_fn {
+                    match self.lower(expr, None)? {
+                        SliceTy::Option(h) => {
+                            let et = self.types.el(h);
+                            let mut i = self.f.instructions();
+                            i.local_tee(self.scr_i32_local).i32_eqz().if_(BlockType::Empty);
+                            i.i32_const(almide_layout::NULL_ADDR as i32).return_();
+                            i.end();
+                            i.local_get(self.scr_i32_local);
+                            let _ = i;
+                            self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                            return Ok(et);
+                        }
+                        _ => return unsup("unwrap-propagating"),
+                    }
                 }
                 match self.lower(expr, None)? {
                     got @ SliceTy::Option(_)

@@ -143,6 +143,7 @@ call:float.to_int8_checked
 call:float.to_string
 call:float.to_uint8_checked
 call:float32.to_string
+call:fs.__fallible_fold_lines
 call:fs.append
 call:fs.copy
 call:fs.create_temp_dir

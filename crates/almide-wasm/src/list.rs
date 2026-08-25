@@ -523,6 +523,11 @@ impl Emitter<'_> {
         xs: &IrExpr,
         cb: &IrExpr,
     ) -> Result<Option<SliceTy>, EmitError> {
+        // A FN-VALUE callback (a HOF param forwarded to list.map, #653)
+        // has no body to inline — it call_indirects per element.
+        if !matches!(&cb.kind, IrExprKind::Lambda { .. }) {
+            return self.lower_list_map_fnvalue(xs, cb);
+        }
         let (params, body) = self.hof_lambda(cb, 1)?;
         let Some(u) = slice_ty_of(&body.ty, self.types) else {
             return unsup(&format!("list-map-ret:{}", ty_name(&body.ty)));

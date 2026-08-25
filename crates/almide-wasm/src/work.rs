@@ -40,6 +40,9 @@ pub(crate) enum Helper {
     Utf8Lossy,
     /// `$fast_exp(f64) -> f64` — the canonical unfused fast-exp (#1197).
     FastExp,
+    /// `$named_eq_<ti>(a, b) -> i32` — runtime-recursive deep equality
+    /// of a RECURSIVE Named type (the DisplayNamed doctrine for `==`).
+    NamedEq { ti: u32 },
     /// `$q10_val(data, off, k) -> f64` — one Q1_0 weight (global-k).
     Q10Val,
     /// `$gelu(f64) -> f64` — tanh-approximation gelu over `$fast_exp`.
@@ -105,6 +108,7 @@ pub(crate) struct FnWork {
     /// callers see Failed and refuse themselves, and assembly stubs the
     /// promised index with `unreachable`).
     pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
+    pub(crate) eq_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
 }
 
 pub(crate) enum DisplayBuild {

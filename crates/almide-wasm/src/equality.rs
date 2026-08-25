@@ -56,7 +56,7 @@ impl Emitter<'_> {
         }
         let lt = self.lower(left, None)?;
         self.lower(right, Some(lt))?;
-        self.emit_val_eq(lt)?;
+        self.emit_val_eq_at(lt, &mut Vec::new())?;
         if matches!(op, Neq) {
             self.f.instructions().i32_eqz();
         }
@@ -68,6 +68,17 @@ impl Emitter<'_> {
     /// bytes, Int/Bool lists); address-carrying elements compare
     /// ELEMENT-WISE (byte-compare would be an identity test).
     pub(crate) fn emit_val_eq(&mut self, ty: SliceTy) -> Result<(), EmitError> {
+        self.emit_val_eq_at(ty, &mut Vec::new())
+    }
+
+    /// The recursive core: `path` carries the Named types currently being
+    /// inlined — a CYCLE (recursive type) is cut with a call to the
+    /// runtime-recursive `$named_eq_<ti>` helper (the display doctrine).
+    pub(crate) fn emit_val_eq_at(
+        &mut self,
+        ty: SliceTy,
+        path: &mut Vec<u32>,
+    ) -> Result<(), EmitError> {
         match ty {
             INT => {
                 self.f.instructions().i64_eq();
@@ -105,7 +116,7 @@ impl Emitter<'_> {
             {
                 self.f.instructions().call(F_STR_EQ);
             }
-            SliceTy::List(h) => self.emit_list_eq(h)?,
+            SliceTy::List(h) => self.emit_list_eq(h, path)?,
             SliceTy::Option(h) => {
                 // Null-ness must agree; both-null is equal; both-some
                 // compares the payload (recursive).
@@ -126,7 +137,7 @@ impl Emitter<'_> {
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hb);
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_val_eq(et)?;
+                self.emit_val_eq_at(et, path)?;
                 self.f.instructions().end().end();
                 self.release_i32();
                 self.release_i32();
@@ -151,18 +162,33 @@ impl Emitter<'_> {
                 self.load_ty_slot(ot, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hb);
                 self.load_ty_slot(ot, almide_layout::SUM_FIELD);
-                self.emit_val_eq(ot)?;
+                self.emit_val_eq_at(ot, path)?;
                 self.f.instructions().else_();
                 self.f.instructions().local_get(ha);
                 self.load_ty_slot(et, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hb);
                 self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                self.emit_val_eq(et)?;
+                self.emit_val_eq_at(et, path)?;
                 self.f.instructions().end().end();
                 self.release_i32();
                 self.release_i32();
             }
-            SliceTy::Named(ti) => self.emit_named_eq(ti)?,
+            SliceTy::Named(ti) => {
+                if path.contains(&ti) {
+                    if matches!(
+                        self.work.eq_bodies.borrow().get(&ti),
+                        Some(crate::work::DisplayBuild::Failed)
+                    ) {
+                        return unsup("eq-helper-failed");
+                    }
+                    let idx = self.work.helper(Helper::NamedEq { ti });
+                    self.f.instructions().call(idx);
+                } else {
+                    path.push(ti);
+                    self.emit_named_eq(ti, path)?;
+                    path.pop();
+                }
+            }
             SliceTy::Tuple(id) => {
                 // Field-wise AND, each field recursing through emit_val_eq.
                 let fields = self.types.tuple_def(id).fields;
@@ -176,7 +202,7 @@ impl Emitter<'_> {
                     self.load_ty_slot(fty, off);
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fty, off);
-                    self.emit_val_eq(fty)?;
+                    self.emit_val_eq_at(fty, path)?;
                     self.f.instructions().else_().i32_const(0).end();
                 }
                 self.release_i32();
@@ -226,7 +252,7 @@ impl Emitter<'_> {
                 self.load_ty_slot_at(vt);
                 self.f.instructions().local_get(he).i32_const(voff as i32).i32_add();
                 self.load_ty_slot_at(vt);
-                self.emit_val_eq(vt)?;
+                self.emit_val_eq_at(vt, path)?;
                 {
                     let mut i = self.f.instructions();
                     i.i32_eqz().if_(BlockType::Empty);
@@ -296,7 +322,7 @@ impl Emitter<'_> {
     /// Element-wise list equality (recursive): same len, then every
     /// element equal under `emit_val_eq`. Five holds per nesting level;
     /// the pool bound turns absurd nesting into an honest refusal.
-    fn emit_list_eq(&mut self, h: ETy) -> Result<(), EmitError> {
+    fn emit_list_eq(&mut self, h: ETy, path: &mut Vec<u32>) -> Result<(), EmitError> {
         let el = self.types.el(h);
         let stride = el.slot_size() as i32;
         let hb = self.hold_i32()?;
@@ -326,7 +352,7 @@ impl Emitter<'_> {
             i.local_get(cur).local_get(ha).i32_sub().local_get(hb).i32_add();
         }
         self.load_ty_slot_at(el);
-        self.emit_val_eq(el)?;
+        self.emit_val_eq_at(el, path)?;
         {
             let mut i = self.f.instructions();
             i.i32_eqz().if_(BlockType::Empty);
@@ -349,7 +375,7 @@ impl Emitter<'_> {
     }
 
     /// Named (record/variant) equality (split from emit_val_eq for the complexity budget).
-    fn emit_named_eq(&mut self, ti: u32) -> Result<(), EmitError> {
+    pub(crate) fn emit_named_eq(&mut self, ti: u32, path: &mut Vec<u32>) -> Result<(), EmitError> {
 
                 enum Shape {
                     Record(Vec<(SliceTy, u32)>),
@@ -412,7 +438,7 @@ impl Emitter<'_> {
                                 self.load_ty_slot(*fty, *off);
                                 self.f.instructions().local_get(hb);
                                 self.load_ty_slot(*fty, *off);
-                                self.emit_val_eq(*fty)?;
+                                self.emit_val_eq_at(*fty, path)?;
                                 self.f.instructions().else_().i32_const(0).end();
                             }
                             self.f.instructions().else_();
@@ -436,7 +462,7 @@ impl Emitter<'_> {
                             self.load_ty_slot(fty, off);
                             self.f.instructions().local_get(hb);
                             self.load_ty_slot(fty, off);
-                            self.emit_val_eq(fty)?;
+                            self.emit_val_eq_at(fty, path)?;
                             self.f.instructions().else_().i32_const(0).end();
                         }
                         self.release_i32();

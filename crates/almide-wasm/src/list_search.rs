@@ -165,6 +165,63 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::List(self.types.intern(SliceTy::List(inner)))))
     }
 
+    /// `list.map(xs, f)` with a FN-VALUE callback: the closure
+    /// convention (env block first, table slot in payload[0]) per
+    /// element via call_indirect.
+    pub(crate) fn lower_list_map_fnvalue(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let got = self.lower(cb, None)?;
+        let SliceTy::Fn(sig) = got else {
+            return unsup("list-hof-nonlambda");
+        };
+        let def = self.types.fn_sig_def(sig);
+        if def.params.len() != 1 {
+            return unsup("list-hof-arity");
+        }
+        let Some(u) = def.ret else {
+            return unsup("list-map-fn-unit");
+        };
+        let henv = self.hold_i32()?;
+        self.f.instructions().local_set(henv);
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        if def.params[0] != elem {
+            return unsup("list-map-fn-param");
+        }
+        let hx = self.hold_for(elem)?;
+        let rh = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ch).i32_const(u.slot_size() as i32).i32_mul().call(F_ALLOC).local_set(rh);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+        }
+        self.hof_elem_into(elem, bh, ch, ih, hx);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(rh).local_get(ih).i32_const(u.slot_size() as i32).i32_mul().i32_add();
+            i.local_get(henv);
+            i.local_get(hx);
+            i.local_get(henv).i32_load(slot_memarg(0));
+        }
+        let ti = self.work.itype(
+            vec![ValType::I32, elem.val_type()],
+            Some(u.val_type()),
+        );
+        self.f.instructions().call_indirect(0, ti);
+        self.store_ty_slot(u, 0);
+        self.hof_step(ih);
+        self.f.instructions().local_get(rh);
+        self.release_i32();
+        self.release_for(elem);
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        self.release_i32();
+        Ok(Some(SliceTy::List(self.types.intern(u))))
+    }
+
     /// `list.unique_by(xs, f)` — first-seen dedup keyed by the callback's
     /// result (Int / Bool / String / Float key classes via the scan
     /// family); elements keep first-occurrence order.

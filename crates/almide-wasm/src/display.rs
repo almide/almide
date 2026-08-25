@@ -435,17 +435,27 @@ pub(crate) fn build_display_helpers(
 ) -> Result<std::collections::HashSet<usize>, EmitError> {
     let mut all_calls = std::collections::HashSet::new();
     loop {
-        let todo: Vec<u32> = {
+        let (todo, todo_eq): (Vec<u32>, Vec<u32>) = {
             let hs = work.helpers.borrow();
             let bodies = work.display_bodies.borrow();
-            hs.iter()
+            let eq_bodies = work.eq_bodies.borrow();
+            let d = hs
+                .iter()
                 .filter_map(|h| match h {
                     Helper::DisplayNamed { ti } if !bodies.contains_key(ti) => Some(*ti),
                     _ => None,
                 })
-                .collect()
+                .collect();
+            let e = hs
+                .iter()
+                .filter_map(|h| match h {
+                    Helper::NamedEq { ti } if !eq_bodies.contains_key(ti) => Some(*ti),
+                    _ => None,
+                })
+                .collect();
+            (d, e)
         };
-        if todo.is_empty() {
+        if todo.is_empty() && todo_eq.is_empty() {
             return Ok(all_calls);
         }
         for ti in todo {
@@ -462,7 +472,84 @@ pub(crate) fn build_display_helpers(
                 }
             }
         }
+        for ti in todo_eq {
+            match build_one_eq_helper(table, types, work, pool, ti) {
+                Ok((f, calls)) => {
+                    all_calls.extend(calls.iter().copied());
+                    work.eq_bodies.borrow_mut().insert(ti, crate::work::DisplayBuild::Built(f));
+                }
+                Err(e) => {
+                    work.eq_bodies.borrow_mut().insert(ti, crate::work::DisplayBuild::Failed);
+                    return Err(e);
+                }
+            }
+        }
     }
+}
+
+/// One `(a, b) -> i32` deep-equality body for a RECURSIVE Named type —
+/// the same scaffold as the display helper; `path` starts with `ti`, so
+/// the self-referencing fields call THIS helper's promised index.
+fn build_one_eq_helper(
+    table: &FnTable,
+    types: &TypeTable,
+    work: &FnWork,
+    pool: &mut Pool,
+    ti: u32,
+) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
+    use crate::emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
+    use wasm_encoder::ValType;
+    let local_decls = [
+        (3, ValType::I32),
+        (1, ValType::I64),
+        (1, ValType::F64),
+        (HOLD_I32_POOL, ValType::I32),
+        (HOLD_I64_POOL, ValType::I64),
+        (HOLD_F64_POOL, ValType::F64),
+    ];
+    let mut f = wasm_encoder::Function::new(local_decls);
+    let mut calls = std::collections::HashSet::new();
+    let empty_locals = std::collections::HashMap::new();
+    let empty_globals = std::collections::HashMap::new();
+    let empty_ranges = std::collections::HashMap::new();
+    let empty_cells = std::collections::HashSet::new();
+    {
+        let mut em = Emitter {
+            pool,
+            locals: &empty_locals,
+            table,
+            types,
+            calls: &mut calls,
+            fn_ret: None,
+            cursor_local: 2,
+            tmp_i32_local: 3,
+            scr_i32_local: 4,
+            scr_i64_local: 5,
+            in_main: false,
+            work,
+            globals: &empty_globals,
+            deferred_ranges: &empty_ranges,
+            metered: false,
+            cells: &empty_cells,
+            region_repair: None,
+            loop_ctl: None,
+            in_tail: false,
+            cur_module: None,
+            hold_i32_base: 7,
+            hold_i32_depth: 0,
+            hold_i64_base: 7 + HOLD_I32_POOL,
+            hold_i64_depth: 0,
+            hold_f64_base: 7 + HOLD_I32_POOL + HOLD_I64_POOL,
+            hold_f64_depth: 0,
+            scr_f64_local: 6,
+            f: &mut f,
+        };
+        em.f.instructions().local_get(0).local_get(1);
+        let mut path = vec![ti];
+        em.emit_named_eq(ti, &mut path)?;
+    }
+    f.instructions().end();
+    Ok((f, calls))
 }
 
 /// One `(block, cursor) -> cursor` display body, Emitter-built with the
