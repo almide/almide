@@ -148,6 +148,11 @@ fn link_self_host(
                     {
                         out.insert("float.to_string_compound".to_string());
                     }
+                    // Codec splices call their registry helpers by BARE
+                    // dunder name — the demand key IS the name.
+                    almide::ir::CallTarget::Named { name } if name.as_str().starts_with("__") => {
+                        out.insert(name.as_str().to_string());
+                    }
                     _ => {}
                 }
             }

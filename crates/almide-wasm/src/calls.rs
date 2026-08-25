@@ -66,6 +66,23 @@ impl Emitter<'_> {
                 self.lower_print(&args[0], F_EPRINTLN_IMPORT, F_EPRINTLN_BLOCK)?;
                 Ok(None)
             }
+            // codec_decode's ONE layout-reading helper gets a NATIVE
+            // twin: the incumbent's __is_null reads its tag at h+4 (the
+            // len-as-tag convention); OUR tag lives at PAYLOAD+SUM_TAG —
+            // linking the body verbatim would read our LEN field and
+            // silently never see a null.
+            CallTarget::Named { name }
+                if name.as_str() == "__is_null"
+                    && self.cur_module == Some("codec_decode")
+                    && args.len() == 1 =>
+            {
+                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.f
+                    .instructions()
+                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                    .i32_eqz();
+                Ok(Some(BOOL))
+            }
             CallTarget::Named { name } => {
                 let name = name.as_str();
                 // Variant constructor? Concrete ctors resolve by the global
@@ -119,6 +136,9 @@ impl Emitter<'_> {
                     .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
                     .or_else(|| self.table.by_name.get(name))
                     .copied();
+                // Codec splices resolve by BARE name through the same
+                // registry/whitelist path module calls use.
+                let resolved = resolved.or_else(|| self.resolve_qualified(name));
                 let Some(i) = resolved else {
                     return unsup(&format!("call:{name}"));
                 };
@@ -240,6 +260,7 @@ impl Emitter<'_> {
                 && !crate::whitelist::SCALAR_TEXT_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::MATH_VERIFIED.contains(&impl_fn)
+                && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
             {
                 return None;
             }
@@ -272,6 +293,7 @@ impl Emitter<'_> {
             if !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
+                && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
                 && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
             {
                 return None;

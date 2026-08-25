@@ -77,13 +77,32 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni",
-    "base64_encode", "base64_decode", "datetime_to_iso", "datetime_from_parts",
+    "base64_encode", "base64_decode", "base64_encode_url", "base64_decode_url", "datetime_to_iso", "datetime_from_parts",
     "string_is_whitespace",
 ];
 
 /// Same audit, Option-returning (constructor-built sums).
 pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] =
     &["string_index_of", "string_last_index_of"];
+
+/// The Codec-derive encode splices: their bodies carry ZERO prims —
+/// every Value is built through the public value.* surface, which THIS
+/// emitter lowers natively, so the bodies are layout-AGNOSTIC (the
+/// coupled-type proxy over-approximates for them and they sit in the
+/// exempt tier). The decode module stays walled: its __is_null reads
+/// the incumbent's tag position raw (`load32(h+4)`).
+pub(crate) const CODEC_ENCODE_VERIFIED: &[&str] = &[
+    "__encode_list_int", "__encode_list_float", "__encode_list_bool", "__encode_list_string",
+    "__encode_option_int", "__encode_option_float", "__encode_option_bool",
+    "__encode_option_string",
+    // decode: prim-free EXCEPT __is_null, which the emitter replaces
+    // with a native twin (see calls.rs) — the rest builds through the
+    // public value/result surfaces.
+    "__decode_list_int", "__decode_list_float", "__decode_list_bool", "__decode_list_string",
+    "__decode_option_int", "__decode_option_float", "__decode_option_bool",
+    "__decode_option_string", "__decode_default_int", "__decode_default_float",
+    "__decode_default_bool", "__decode_default_string",
+];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL
 /// transcription of libm 0.2.16 with constants via prim.ffrombits —
