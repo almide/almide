@@ -268,6 +268,7 @@ evidence  = [
   { path = "spec/wasm_cross/compound_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/deep_eq_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_record_literal_equality.almd", class = "fixture" },
 ]
 
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────

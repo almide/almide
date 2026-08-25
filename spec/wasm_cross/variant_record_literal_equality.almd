@@ -1,0 +1,27 @@
+// @contract: C-015
+// Graduated from proofs/wall-corpus/variant_record_equality.almd (the grain
+// enums.re enum_inline_record_1 shape): structural equality of a
+// record-variant VALUE against a record-ctor LITERAL. The wall was never in
+// the Eq machinery — the record-SPELLED ctor literal on the comparison's RHS
+// had no owned-heap-field route, so the operand deferred and the enclosing
+// effect-armed `if` refused the linearization. #1579's flat slice gave the
+// named-field spelling the positional spelling's route, and the shape
+// lowers whole: hit, miss (field delta), and permuted-field literals all
+// compare structurally on both targets.
+type E = | ERec { x: Int, y: Int } | ENone
+
+effect fn main() -> Unit = {
+  let r = ERec { x: 1, y: 2 }
+  let e1 = if r == ERec { x: 1, y: 2 } then "eq" else "ne"
+  println(e1)
+  // eq
+  let e2 = if r == ERec { x: 1, y: 3 } then "eq" else "ne"
+  println(e2)
+  // ne
+  let e3 = if r == ERec { y: 2, x: 1 } then "eq" else "ne"
+  println(e3)
+  // eq — literal field order is not identity
+  let e4 = if r == ENone then "eq" else "ne"
+  // ne — a different case never equals
+  println(e4)
+}
