@@ -96,7 +96,7 @@ _o_deriving: COLON TYPENAME (COMMA TYPENAME)*
 
 // ── protocol ─────────────────────────────────────────────────────
 protocol_decl: PROTOCOL TYPENAME _o_generics "{" _nl (protocol_method _nl)* "}"
-protocol_method: _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr
+protocol_method: _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr _o_bang
 
 // ── top-level let / var ──────────────────────────────────────────
 top_let: _o_top_vis _let_or_var name_tok _o_ty_ann EQ _nl expr
