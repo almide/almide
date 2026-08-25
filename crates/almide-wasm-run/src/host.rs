@@ -35,6 +35,8 @@ struct Host {
     /// The stdin stream (op 31 drains it — the guest caps counts on its
     /// side); tests run with a fixed buffer, the runner reads lazily.
     stdin: Arc<Mutex<StdinSource>>,
+    /// Linear-memory budget (heap-budget gates); unlimited by default.
+    limits: wasmtime::StoreLimits,
 }
 
 /// Where op 31 gets its bytes: a fixed buffer (tests, piped runs), or
@@ -375,16 +377,28 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
 
 /// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()))
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None)
+}
+
+/// Run under a hard linear-memory budget (bytes). Growth past the cap
+/// fails, which the emitted allocator turns into the DEFINED
+/// "Error: out of memory" + exit 1 (C-197) — the heap-budget
+/// acceptance-gate observable (W-8; the RC arc's floor).
+pub fn run_wasm_capped(bytes: &[u8], max_memory_bytes: usize) -> anyhow::Result<RunResult> {
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes))
 }
 
 /// Run with the process's real stdin, read lazily on first guest read
 /// (the product runner — never blocks for programs that skip stdin).
 pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce)
+    run_wasm_src(bytes, StdinSource::RealOnce, None)
 }
 
-fn run_wasm_src(bytes: &[u8], stdin: StdinSource) -> anyhow::Result<RunResult> {
+fn run_wasm_src(
+    bytes: &[u8],
+    stdin: StdinSource,
+    max_memory_bytes: Option<usize>,
+) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
     // Epoch deadline: a fixture (or a MUTANT under the gate) that
     // diverges must FAIL the run, never hang the suite. 30s of real time
@@ -398,6 +412,10 @@ fn run_wasm_src(bytes: &[u8], stdin: StdinSource) -> anyhow::Result<RunResult> {
     let exit = Arc::new(Mutex::new(None));
     let fs_buf = Arc::new(Mutex::new(Vec::new()));
     let stdin_buf = Arc::new(Mutex::new(stdin));
+    let limits = match max_memory_bytes {
+        Some(cap) => wasmtime::StoreLimitsBuilder::new().memory_size(cap).build(),
+        None => wasmtime::StoreLimits::default(),
+    };
     let mut store = wasmtime::Store::new(
         &engine,
         Host {
@@ -406,8 +424,10 @@ fn run_wasm_src(bytes: &[u8], stdin: StdinSource) -> anyhow::Result<RunResult> {
             exit: exit.clone(),
             fs_buf: fs_buf.clone(),
             stdin: stdin_buf.clone(),
+            limits,
         },
     );
+    store.limiter(|h| &mut h.limits);
     let mut linker = wasmtime::Linker::new(&engine);
     linker.func_wrap(
         "almide",
