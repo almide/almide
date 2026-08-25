@@ -213,7 +213,9 @@ call:value.str
 call:value.stringify
 expr:BinOp
 expr:Block
+expr:Break
 expr:Call
+expr:Continue
 expr:EmptyMap
 expr:Fan
 expr:ForIn

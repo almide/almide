@@ -48,6 +48,12 @@ pub(crate) struct Emitter<'a> {
     /// return would otherwise skip (guarded by depth > depth-at-entry,
     /// so a post-exit cut never double-books).
     pub(crate) region_repair: Option<(u32, u32)>,
+    /// Some((extra, break_delta)) inside a loop body: `extra` counts the
+    /// statement-walker labels opened since the loop's continue target,
+    /// so `continue` = br(extra) and `break` = br(extra + break_delta).
+    /// Suspended (None) under structures whose labels the walker does
+    /// not track (match arms) — a Continue there walls honestly.
+    pub(crate) loop_ctl: Option<(u32, u32)>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits

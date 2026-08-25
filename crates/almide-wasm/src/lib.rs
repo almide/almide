@@ -87,6 +87,7 @@ mod list_edit;
 mod list_fuse;
 mod list_mut;
 mod list_order;
+mod string_scan;
 mod stmts;
 mod string_ext;
 pub(crate) mod work;

@@ -211,6 +211,7 @@ pub(crate) fn lower_fn(
             hold_f64_base,
             hold_f64_depth: 0,
             scr_f64_local,
+            loop_ctl: None,
             in_tail: false,
             cur_module,
             in_main,

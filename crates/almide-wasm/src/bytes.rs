@@ -166,11 +166,85 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// The C-229 scalar read/set matrix — every width, both
+    /// endiannesses, TOTAL: an out-of-room read is the type's default,
+    /// an out-of-room set is a no-op (negative and top-of-i64 positions
+    /// included). Err(..) inside; Ok(None) = not a matrix surface.
+    fn lower_bytes_rw(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+        let width_of = |f: &str| {
+            if f.contains("16") {
+                2
+            } else if f.contains("32") {
+                4
+            } else {
+                8
+            }
+        };
+        match (func, args) {
+            ("read_u8" | "read_bool", [b, i]) => {
+                self.lower_bytes_read_bits(b, i, 1, false, false)?;
+                if func == "read_bool" {
+                    self.f.instructions().i64_const(0).i64_ne();
+                    return Ok(Some(Some(BOOL)));
+                }
+                Ok(Some(Some(INT)))
+            }
+            ("read_u16_le" | "read_u16_be" | "read_i16_le" | "read_i16_be" | "read_u32_le"
+            | "read_u32_be" | "read_i32_le" | "read_i32_be" | "read_i64_le" | "read_i64_be", [b, i]) => {
+                self.lower_bytes_read_bits(
+                    b,
+                    i,
+                    width_of(func),
+                    func.starts_with("read_i"),
+                    func.ends_with("_be"),
+                )?;
+                Ok(Some(Some(INT)))
+            }
+            ("set_at" | "set_u8", [b, i, v]) => {
+                self.lower_bytes_set(b, i, v, 1, false, false)?;
+                Ok(Some(None))
+            }
+            ("set_u16_le" | "set_u16_be" | "set_i16_le" | "set_i16_be" | "set_u32_le"
+            | "set_u32_be" | "set_i32_le" | "set_i32_be" | "set_i64_le" | "set_i64_be", [b, i, v]) => {
+                self.lower_bytes_set(b, i, v, width_of(func), func.ends_with("_be"), false)?;
+                Ok(Some(None))
+            }
+            ("set_f32_le" | "set_f32_be" | "set_f64_le" | "set_f64_be", [b, i, v]) => {
+                self.lower_bytes_set(b, i, v, width_of(func), func.ends_with("_be"), true)?;
+                Ok(Some(None))
+            }
+            ("read_f32_le" | "read_f32_be" | "read_f64_le" | "read_f64_be", [b, i]) => {
+                let width = width_of(func);
+                self.lower_bytes_read_bits(b, i, width, false, func.ends_with("_be"))?;
+                if width == 4 {
+                    self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
+                } else {
+                    self.f.instructions().f64_reinterpret_i64();
+                }
+                Ok(Some(Some(FLOAT)))
+            }
+            // f16 bits through the same total window; 0 bits = 0.0.
+            ("read_f16_le", [b, i]) => {
+                self.lower_bytes_read_bits(b, i, 2, false, false)?;
+                self.f.instructions().i32_wrap_i64().call(F_F16_TO_F64);
+                Ok(Some(Some(FLOAT)))
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn lower_bytes_call(
         &mut self,
         func: &str,
         args: &[IrExpr],
     ) -> Result<Option<SliceTy>, EmitError> {
+        if let Some(out) = self.lower_bytes_rw(func, args)? {
+            return Ok(out);
+        }
         match (func, args) {
             ("new", [n]) => {
                 self.lower(n, Some(INT))?;
@@ -263,73 +337,6 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i32();
                 Ok(Some(INT))
-            }
-            // ── C-229: the scalar read/set matrix — every width, both
-            // endiannesses, TOTAL: an out-of-room read is the type's
-            // default, an out-of-room set is a no-op (negative and
-            // top-of-i64 positions included).
-            ("read_u8" | "read_bool", [b, i]) => {
-                self.lower_bytes_read_bits(b, i, 1, false, false)?;
-                if func == "read_bool" {
-                    self.f.instructions().i64_const(0).i64_ne();
-                    return Ok(Some(BOOL));
-                }
-                Ok(Some(INT))
-            }
-            ("read_u16_le" | "read_u16_be" | "read_i16_le" | "read_i16_be" | "read_u32_le"
-            | "read_u32_be" | "read_i32_le" | "read_i32_be" | "read_i64_le" | "read_i64_be", [b, i]) => {
-                let width = if func.contains("16") {
-                    2
-                } else if func.contains("32") {
-                    4
-                } else {
-                    8
-                };
-                self.lower_bytes_read_bits(
-                    b,
-                    i,
-                    width,
-                    func.starts_with("read_i"),
-                    func.ends_with("_be"),
-                )?;
-                Ok(Some(INT))
-            }
-            ("set_at" | "set_u8", [b, i, v]) => {
-                self.lower_bytes_set(b, i, v, 1, false, false)?;
-                Ok(None)
-            }
-            ("set_u16_le" | "set_u16_be" | "set_i16_le" | "set_i16_be" | "set_u32_le"
-            | "set_u32_be" | "set_i32_le" | "set_i32_be" | "set_i64_le" | "set_i64_be", [b, i, v]) => {
-                let width = if func.contains("16") {
-                    2
-                } else if func.contains("32") {
-                    4
-                } else {
-                    8
-                };
-                self.lower_bytes_set(b, i, v, width, func.ends_with("_be"), false)?;
-                Ok(None)
-            }
-            ("set_f32_le" | "set_f32_be" | "set_f64_le" | "set_f64_be", [b, i, v]) => {
-                let width = if func.contains("32") { 4 } else { 8 };
-                self.lower_bytes_set(b, i, v, width, func.ends_with("_be"), true)?;
-                Ok(None)
-            }
-            ("read_f32_le" | "read_f32_be" | "read_f64_le" | "read_f64_be", [b, i]) => {
-                let width = if func.contains("32") { 4 } else { 8 };
-                self.lower_bytes_read_bits(b, i, width, false, func.ends_with("_be"))?;
-                if width == 4 {
-                    self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
-                } else {
-                    self.f.instructions().f64_reinterpret_i64();
-                }
-                Ok(Some(FLOAT))
-            }
-            // f16 bits through the same total window; 0 bits = 0.0.
-            ("read_f16_le", [b, i]) => {
-                self.lower_bytes_read_bits(b, i, 2, false, false)?;
-                self.f.instructions().i32_wrap_i64().call(F_F16_TO_F64);
-                Ok(Some(FLOAT))
             }
             _ => unsup(&format!("call:bytes.{func}")),
         }

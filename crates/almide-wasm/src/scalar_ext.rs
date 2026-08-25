@@ -17,68 +17,8 @@ impl Emitter<'_> {
             return Ok(None);
         };
         let out = match (module.as_str(), func.as_str(), args) {
-            // T6: an inverted range (float: NaN bounds too, via !(lo<=hi))
-            // dies with the one-line clamp message; the clamp itself is
-            // Rust's COMPARISON chain, not wasm min/max — f64::clamp
-            // keeps -0.0 when lo is +0.0 (compares, never sign-joins).
             ("int" | "float", "clamp", [n, lo, hi]) => {
-                let is_int = module.as_str() == "int";
-                let want = if is_int { INT } else { FLOAT };
-                self.lower(n, Some(want))?;
-                let hn = if is_int { self.hold_i64()? } else { self.hold_f64()? };
-                self.f.instructions().local_set(hn);
-                self.lower(lo, Some(want))?;
-                let hlo = if is_int { self.hold_i64()? } else { self.hold_f64()? };
-                self.f.instructions().local_set(hlo);
-                self.lower(hi, Some(want))?;
-                let hhi = if is_int { self.hold_i64()? } else { self.hold_f64()? };
-                let msg = self.pool.intern("Error: clamp requires min <= max");
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(hhi);
-                    i.local_get(hlo).local_get(hhi);
-                    if is_int {
-                        i.i64_le_s();
-                    } else {
-                        i.f64_le();
-                    }
-                    i.i32_eqz().if_(BlockType::Empty);
-                    i.i32_const(msg as i32).call(F_EPRINTLN_BLOCK).unreachable();
-                    i.end();
-                    // if n < lo { lo } else if n > hi { hi } else { n }
-                    let vt = if is_int { ValType::I64 } else { ValType::F64 };
-                    i.local_get(hn).local_get(hlo);
-                    if is_int {
-                        i.i64_lt_s();
-                    } else {
-                        i.f64_lt();
-                    }
-                    i.if_(BlockType::Result(vt));
-                    i.local_get(hlo);
-                    i.else_();
-                    i.local_get(hn).local_get(hhi);
-                    if is_int {
-                        i.i64_gt_s();
-                    } else {
-                        i.f64_gt();
-                    }
-                    i.if_(BlockType::Result(vt));
-                    i.local_get(hhi);
-                    i.else_();
-                    i.local_get(hn);
-                    i.end();
-                    i.end();
-                }
-                if is_int {
-                    self.release_i64();
-                    self.release_i64();
-                    self.release_i64();
-                } else {
-                    self.release_f64();
-                    self.release_f64();
-                    self.release_f64();
-                }
-                Some(want)
+                Some(self.lower_scalar_clamp(module.as_str() == "int", n, lo, hi)?)
             }
             // f64::signum: ±1 by SIGN BIT (so sign(-0) = -1, sign(+0) = 1),
             // NaN stays NaN.
@@ -134,42 +74,8 @@ impl Emitter<'_> {
                 self.f.instructions().f64_sqrt();
                 Some(FLOAT)
             }
-            // NaN-IGNORING min/max (native chain verbatim; C-306 side):
-            // one NaN yields the OTHER operand, equal operands yield `a` —
-            // so f64.min/max (NaN-propagating, -0-sign-joining) is wrong
-            // on both counts and a comparison+select is used instead.
             ("float", "max" | "min", [a, b]) => {
-                let is_max = func.as_str() == "max";
-                self.lower(a, Some(FLOAT))?;
-                let ha = self.hold_f64()?;
-                self.f.instructions().local_set(ha);
-                self.lower(b, Some(FLOAT))?;
-                let hb = self.hold_f64()?;
-                let mut i = self.f.instructions();
-                i.local_set(hb);
-                i.local_get(ha).local_get(ha).f64_ne();
-                i.if_(BlockType::Result(ValType::F64));
-                i.local_get(hb);
-                i.else_();
-                i.local_get(hb).local_get(hb).f64_ne();
-                i.if_(BlockType::Result(ValType::F64));
-                i.local_get(ha);
-                i.else_();
-                // select(v1, v2, cond) = cond ? v1 : v2 — push v1 first
-                i.local_get(hb).local_get(ha);
-                i.local_get(ha).local_get(hb);
-                if is_max {
-                    i.f64_lt();
-                } else {
-                    i.f64_gt();
-                }
-                i.select();
-                i.end();
-                i.end();
-                let _ = i;
-                self.release_f64();
-                self.release_f64();
-                Some(FLOAT)
+                Some(self.lower_float_min_max(func.as_str() == "max", a, b)?)
             }
             // Same square-and-multiply (wrapping) + negative-exponent
             // abort as the `**` operator — one definition, two spellings.
@@ -191,5 +97,114 @@ impl Emitter<'_> {
             _ => return Ok(None),
         };
         Ok(Some(out))
+    }
+
+    /// T6: an inverted range (float: NaN bounds too, via !(lo<=hi))
+    /// dies with the one-line clamp message; the clamp itself is
+    /// Rust's COMPARISON chain, not wasm min/max — f64::clamp
+    /// keeps -0.0 when lo is +0.0 (compares, never sign-joins).
+    fn lower_scalar_clamp(
+        &mut self,
+        is_int: bool,
+        n: &IrExpr,
+        lo: &IrExpr,
+        hi: &IrExpr,
+    ) -> Result<SliceTy, EmitError> {
+        let want = if is_int { INT } else { FLOAT };
+        self.lower(n, Some(want))?;
+        let hn = if is_int { self.hold_i64()? } else { self.hold_f64()? };
+        self.f.instructions().local_set(hn);
+        self.lower(lo, Some(want))?;
+        let hlo = if is_int { self.hold_i64()? } else { self.hold_f64()? };
+        self.f.instructions().local_set(hlo);
+        self.lower(hi, Some(want))?;
+        let hhi = if is_int { self.hold_i64()? } else { self.hold_f64()? };
+        let msg = self.pool.intern("Error: clamp requires min <= max");
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hhi);
+            i.local_get(hlo).local_get(hhi);
+            if is_int {
+                i.i64_le_s();
+            } else {
+                i.f64_le();
+            }
+            i.i32_eqz().if_(BlockType::Empty);
+            i.i32_const(msg as i32).call(F_EPRINTLN_BLOCK).unreachable();
+            i.end();
+            // if n < lo { lo } else if n > hi { hi } else { n }
+            let vt = if is_int { ValType::I64 } else { ValType::F64 };
+            i.local_get(hn).local_get(hlo);
+            if is_int {
+                i.i64_lt_s();
+            } else {
+                i.f64_lt();
+            }
+            i.if_(BlockType::Result(vt));
+            i.local_get(hlo);
+            i.else_();
+            i.local_get(hn).local_get(hhi);
+            if is_int {
+                i.i64_gt_s();
+            } else {
+                i.f64_gt();
+            }
+            i.if_(BlockType::Result(vt));
+            i.local_get(hhi);
+            i.else_();
+            i.local_get(hn);
+            i.end();
+            i.end();
+        }
+        for _ in 0..3 {
+            if is_int {
+                self.release_i64();
+            } else {
+                self.release_f64();
+            }
+        }
+        Ok(want)
+    }
+
+    /// NaN-IGNORING min/max (native chain verbatim; C-306 side): one NaN
+    /// yields the OTHER operand, equal operands yield `a` — so
+    /// f64.min/max (NaN-propagating, -0-sign-joining) is wrong on both
+    /// counts and a comparison+select is used instead.
+    fn lower_float_min_max(
+        &mut self,
+        is_max: bool,
+        a: &IrExpr,
+        b: &IrExpr,
+    ) -> Result<SliceTy, EmitError> {
+        self.lower(a, Some(FLOAT))?;
+        let ha = self.hold_f64()?;
+        self.f.instructions().local_set(ha);
+        self.lower(b, Some(FLOAT))?;
+        let hb = self.hold_f64()?;
+        let mut i = self.f.instructions();
+        i.local_set(hb);
+        i.local_get(ha).local_get(ha).f64_ne();
+        i.if_(BlockType::Result(ValType::F64));
+        i.local_get(hb);
+        i.else_();
+        i.local_get(hb).local_get(hb).f64_ne();
+        i.if_(BlockType::Result(ValType::F64));
+        i.local_get(ha);
+        i.else_();
+        // select(v1, v2, cond) = cond ? v1 : v2 — push v1 first
+        i.local_get(hb).local_get(ha);
+        i.local_get(ha).local_get(hb);
+        if is_max {
+            i.f64_lt();
+        } else {
+            i.f64_gt();
+        }
+        i.select();
+        i.end();
+        i.end();
+        let _ = i;
+        self.release_f64();
+        self.release_f64();
+        Ok(FLOAT)
     }
 }

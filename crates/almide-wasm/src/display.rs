@@ -417,6 +417,7 @@ fn build_one_display_helper(
             metered: false,
             cells: &empty_cells,
             region_repair: None,
+            loop_ctl: None,
             in_tail: false,
             cur_module: None,
             hold_i32_base: 7,

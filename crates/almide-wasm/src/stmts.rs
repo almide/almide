@@ -30,33 +30,47 @@ impl Emitter<'_> {
                 }
                 Ok(())
             }
-            // Unit-position `if`: both arms are statement bodies.
+            // Unit-position `if`: both arms are statement bodies. The
+            // if_ label shifts break/continue targets one deeper.
             IrExprKind::If { cond, then, else_ } => {
                 self.lower(cond, Some(BOOL))?;
                 self.f.instructions().if_(BlockType::Empty);
+                if let Some((extra, _)) = self.loop_ctl.as_mut() {
+                    *extra += 1;
+                }
                 self.lower_stmt_expr(then)?;
                 self.f.instructions().else_();
                 self.lower_stmt_expr(else_)?;
                 self.f.instructions().end();
-                Ok(())
-            }
-            // `while`: block { loop { !cond → br out; body; br loop } }.
-            // Break/Continue would need label-depth tracking — they surface
-            // as their own honest reasons until that lands.
-            IrExprKind::While { cond, body } => {
-                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-                // Deterministic meter: one loop-head charge per condition
-                // CHECK (n iterations = n+1 checks), ALS-DT2.
-                self.emit_det_charge_const(1);
-                self.lower(cond, Some(BOOL))?;
-                self.f.instructions().i32_eqz().br_if(1);
-                for s in body {
-                    self.lower_stmt(s)?;
+                if let Some((extra, _)) = self.loop_ctl.as_mut() {
+                    *extra -= 1;
                 }
-                self.f.instructions().br(0).end().end();
                 Ok(())
             }
-            IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
+            IrExprKind::While { cond, body } => self.lower_while(cond, body),
+            // Match opens labels the walker does not track — suspend the
+            // loop context so a Continue inside an arm walls honestly
+            // instead of branching to the wrong depth.
+            IrExprKind::Match { subject, arms } => {
+                let saved = self.loop_ctl.take();
+                let r = self.lower_match(subject, arms, None).map(|_| ());
+                self.loop_ctl = saved;
+                r
+            }
+            IrExprKind::Continue => match self.loop_ctl {
+                Some((extra, _)) => {
+                    self.f.instructions().br(extra);
+                    Ok(())
+                }
+                None => unsup("expr:Continue"),
+            },
+            IrExprKind::Break => match self.loop_ctl {
+                Some((extra, delta)) => {
+                    self.f.instructions().br(extra + delta);
+                    Ok(())
+                }
+                None => unsup("expr:Break"),
+            },
             // for x in <list> / for i in a..b — extracted for complexity.
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 self.lower_forin(*var, var_tuple.as_deref(), iterable, body)
@@ -75,57 +89,96 @@ impl Emitter<'_> {
         }
     }
 
+    /// `while`: block { loop { !cond → br out; body; br loop } }.
+    /// `continue` brs to the loop head (the next cond CHECK, which
+    /// charges — the interp's per-check meter), `break` to the block.
+    fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        // Deterministic meter: one loop-head charge per condition
+        // CHECK (n iterations = n+1 checks), ALS-DT2.
+        self.emit_det_charge_const(1);
+        self.lower(cond, Some(BOOL))?;
+        self.f.instructions().i32_eqz().br_if(1);
+        self.lower_loop_body(body, false)?;
+        self.f.instructions().br(0).end().end();
+        Ok(())
+    }
+
+    /// A loop body with break/continue wired. For-in bodies sit in an
+    /// extra block so `continue` still reaches the STEP code after it;
+    /// a while `continue` brs straight to the loop head (the next cond
+    /// check). break_delta = labels from the continue target up to the
+    /// exit block (while: 1; for-in: 2 — the inner block adds one).
+    fn lower_loop_body(&mut self, body: &[IrStmt], for_in: bool) -> Result<(), EmitError> {
+        let saved = self.loop_ctl.take();
+        if for_in {
+            self.f.instructions().block(BlockType::Empty);
+            self.loop_ctl = Some((0, 2));
+        } else {
+            self.loop_ctl = Some((0, 1));
+        }
+        for st in body {
+            self.lower_stmt(st)?;
+        }
+        if for_in {
+            self.f.instructions().end();
+        }
+        self.loop_ctl = saved;
+        Ok(())
+    }
+
+    /// let/var bind: deferred ranges write their pair locals; container
+    /// values deep-copy (bind-owns-its-block); C-319 cells allocate.
+    fn lower_stmt_bind(&mut self, var: &VarId, value: &IrExpr) -> Result<(), EmitError> {
+        // Deferred head-only range (C-238): evaluate the bounds
+        // ONCE, in source order, into the pair locals — no block.
+        if let Some(&(sl, el, _)) = self.deferred_ranges.get(var) {
+            let IrExprKind::Range { start, end, .. } = &value.kind else {
+                return unsup("bind:deferred-non-range");
+            };
+            self.lower(start, Some(INT))?;
+            self.f.instructions().local_set(sl);
+            self.lower(end, Some(INT))?;
+            self.f.instructions().local_set(el);
+            return Ok(());
+        }
+        let Some(&(idx, declared)) = self.locals.get(var) else {
+            return unsup("bind:unmapped");
+        };
+        self.lower(value, Some(declared))?;
+        // Container value semantics: every bind owns a fresh
+        // block, so in-place mutation (push growth, bytes.set_*)
+        // can never be observed through aliases. Bytes joined
+        // when the snapshot fixture showed `let snap = arena`
+        // observing later set_at writes.
+        if matches!(
+            declared,
+            SliceTy::List(_) | SliceTy::Map(..) | SliceTy::Set(_) | SliceTy::Scalar(Scalar::Bytes)
+        ) {
+            self.f.instructions().call(F_BLOCK_COPY);
+        }
+        if self.cells.contains(var) {
+            // C-319: the bind allocates the shared cell; the
+            // local holds its ADDRESS from here on.
+            let hv = self.hold_val(declared)?;
+            self.f.instructions().local_set(hv);
+            self.f
+                .instructions()
+                .i32_const(declared.slot_size() as i32)
+                .call(F_ALLOC)
+                .local_tee(idx)
+                .local_get(hv);
+            self.store_ty_slot(declared, 0);
+            self.release_val(declared);
+        } else {
+            self.f.instructions().local_set(idx);
+        }
+        Ok(())
+    }
+
     pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
         match &s.kind {
-            IrStmtKind::Bind { var, value, .. } => {
-                // Deferred head-only range (C-238): evaluate the bounds
-                // ONCE, in source order, into the pair locals — no block.
-                if let Some(&(sl, el, _)) = self.deferred_ranges.get(var) {
-                    let IrExprKind::Range { start, end, .. } = &value.kind else {
-                        return unsup("bind:deferred-non-range");
-                    };
-                    self.lower(start, Some(INT))?;
-                    self.f.instructions().local_set(sl);
-                    self.lower(end, Some(INT))?;
-                    self.f.instructions().local_set(el);
-                    return Ok(());
-                }
-                let Some(&(idx, declared)) = self.locals.get(var) else {
-                    return unsup("bind:unmapped");
-                };
-                self.lower(value, Some(declared))?;
-                // Container value semantics: every bind owns a fresh
-                // block, so in-place mutation (push growth, bytes.set_*)
-                // can never be observed through aliases. Bytes joined
-                // when the snapshot fixture showed `let snap = arena`
-                // observing later set_at writes.
-                if matches!(
-                    declared,
-                    SliceTy::List(_)
-                        | SliceTy::Map(..)
-                        | SliceTy::Set(_)
-                        | SliceTy::Scalar(Scalar::Bytes)
-                ) {
-                    self.f.instructions().call(F_BLOCK_COPY);
-                }
-                if self.cells.contains(var) {
-                    // C-319: the bind allocates the shared cell; the
-                    // local holds its ADDRESS from here on.
-                    let hv = self.hold_val(declared)?;
-                    self.f.instructions().local_set(hv);
-                    self.f
-                        .instructions()
-                        .i32_const(declared.slot_size() as i32)
-                        .call(F_ALLOC)
-                        .local_tee(idx)
-                        .local_get(hv);
-                    self.store_ty_slot(declared, 0);
-                    self.release_val(declared);
-                } else {
-                    self.f.instructions().local_set(idx);
-                }
-                Ok(())
-            }
+            IrStmtKind::Bind { var, value, .. } => self.lower_stmt_bind(var, value),
             // `p.field = v` on a record var: copy-on-write write-back —
             // fresh block, one slot replaced, rebound. In-place mutation
             // stays unobservable (the alias_cow fixtures pin exactly
@@ -264,9 +317,7 @@ impl Emitter<'_> {
                         self.f.instructions().i64_ge_s();
                     }
                     self.f.instructions().br_if(1);
-                    for st in body {
-                        self.lower_stmt(st)?;
-                    }
+                    self.lower_loop_body(body, true)?;
                     self.f
                         .instructions()
                         .local_get(var_idx)
@@ -298,9 +349,7 @@ impl Emitter<'_> {
                             self.f.instructions().i64_ge_s();
                         }
                         self.f.instructions().br_if(1);
-                        for st in body {
-                            self.lower_stmt(st)?;
-                        }
+                        self.lower_loop_body(body, true)?;
                         self.f
                             .instructions()
                             .local_get(var_idx)
@@ -365,9 +414,7 @@ impl Emitter<'_> {
                         self.f.instructions().local_set(tidx);
                     }
                 }
-                for st in body {
-                    self.lower_stmt(st)?;
-                }
+                self.lower_loop_body(body, true)?;
                 self.f
                     .instructions()
                     .local_get(cur)
