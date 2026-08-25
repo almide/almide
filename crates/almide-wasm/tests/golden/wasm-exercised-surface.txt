@@ -19,6 +19,7 @@ binop:PowInt
 binop:SubFloat
 binop:SubInt
 call:args.flag
+call:args.option
 call:args.option_or
 call:args.positional
 call:args.raw
@@ -112,6 +113,7 @@ call:list.__fallible_map__Int_String_String
 call:list.__fallible_map__String_Int_String
 call:list.chunk
 call:list.clear
+call:list.contains
 call:list.drop
 call:list.drop_end
 call:list.enumerate
@@ -120,10 +122,12 @@ call:list.filter_map
 call:list.find
 call:list.first
 call:list.flat_map
+call:list.flatten
 call:list.fold
 call:list.get
 call:list.get_or
 call:list.insert
+call:list.intersperse
 call:list.is_empty
 call:list.join
 call:list.len
@@ -132,9 +136,11 @@ call:list.max
 call:list.min
 call:list.pop
 call:list.push
+call:list.reduce
 call:list.remove_at
 call:list.repeat
 call:list.reverse
+call:list.scan
 call:list.set
 call:list.slice
 call:list.sort
@@ -147,6 +153,8 @@ call:list.take_end
 call:list.update
 call:list.windows
 call:list.with_capacity
+call:list.zip
+call:list.zip_with
 call:map.contains
 call:map.entries
 call:map.filter
@@ -183,6 +191,11 @@ call:option.to_result__Int_LoadError
 call:option.to_result__Result_Int_String_String
 call:option.unwrap_or
 call:option.unwrap_or_else
+call:path.basename
+call:path.dirname
+call:path.extension
+call:path.is_absolute
+call:path.join
 call:println
 call:process.exit
 call:result.flat_map

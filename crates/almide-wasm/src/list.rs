@@ -262,6 +262,24 @@ impl Emitter<'_> {
             ("swap", [xs, ia, ib]) => self.lower_list_swap(xs, ia, ib),
             ("update", [xs, idx, cb]) => self.lower_list_update(xs, idx, cb),
             ("index_of", [xs, x]) => self.lower_list_index_of(xs, x),
+            // contains = index_of with a Bool verdict.
+            ("contains", [xs, x]) => {
+                let got = self.lower_list_index_of(xs, x)?;
+                let _ = got;
+                self.f.instructions().i32_const(0).i32_ne();
+                Ok(Some(BOOL))
+            }
+            ("last", [xs]) => self.lower_list_last(xs),
+            ("product", [xs]) => self.lower_list_product(xs),
+            ("flatten", [xs]) => self.lower_list_flatten(xs),
+            ("all", [xs, cb]) => self.lower_list_all(xs, cb),
+            ("take_while", [xs, cb]) => self.lower_list_take_while(xs, cb),
+            ("reduce", [xs, cb]) => self.lower_list_reduce(xs, cb),
+            ("scan", [xs, init, cb]) => self.lower_list_scan(xs, init, cb),
+            ("zip", [a, b]) => self.lower_list_zip(a, b, None),
+            ("zip_with", [a, b, cb]) => self.lower_list_zip(a, b, Some(cb)),
+            ("unique", [xs]) => self.lower_list_unique(xs),
+            ("intersperse", [xs, sep]) => self.lower_list_intersperse(xs, sep),
             // List-returning map: each callback list concatenates onto
             // the accumulator (native flat_map order).
             ("flat_map", [xs, cb]) => {
