@@ -470,7 +470,26 @@ fn registry_impl_names() -> &'static std::collections::HashSet<&'static str> {
 // ── entry ───────────────────────────────────────────────────────────────
 
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
+/// Two passes: the first loads the WHOLE linked registry graph (so
+/// resolution and the refusal BFS see everything) and reports which
+/// program fns main actually reaches; when dead fns exist, a second
+/// pass re-emits with ONLY the reachable set in the table — real
+/// dead-code elimination (the type/decl/stub bookkeeping of a dead
+/// registry graph once quadrupled a small module).
 pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
+    let (bytes, visited, total) = emit_program_pass(ir, None)?;
+    if visited.len() >= total {
+        return Ok(bytes);
+    }
+    let (bytes, _, _) = emit_program_pass(ir, Some(&visited))?;
+    Ok(bytes)
+}
+
+#[allow(clippy::type_complexity)]
+fn emit_program_pass(
+    ir: &IrProgram,
+    keep: Option<&HashSet<usize>>,
+) -> Result<(Vec<u8>, HashSet<usize>, usize), EmitError> {
     let Some(main) = ir.functions.iter().find(|f| f.name.as_str() == "main") else {
         return unsup("no main function");
     };
@@ -479,6 +498,17 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     // is exactly the `CallTarget::Module` lookup key. A module carrying
     // top-level lets is excluded whole (its init order is a later slice).
     let program_fns = collect_program_fns(ir);
+    // Pass 2: only the fns pass 1 reached (positions are stable —
+    // collect_program_fns is deterministic over the same IR).
+    let program_fns: Vec<_> = match keep {
+        Some(k) => program_fns
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| k.contains(i))
+            .map(|(_, f)| f)
+            .collect(),
+        None => program_fns,
+    };
     let types = TypeTable::build(ir);
     // Deterministic-meter plan (ALS-DT2): who charges, whose entry is exempt.
     let meter = fuel::meter_plan(ir, registry_impl_names());
@@ -664,12 +694,14 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
     let (extra_fns, entry_fn_indices) = resolve_extras(&table, &work, &lifted_fns);
 
     let oom_msg = pool.intern("Error: out of memory");
-    assemble_module(AssembleIn {
+    let total = lowered.len();
+    let bytes = assemble_module(AssembleIn {
         table: &table,
         work: &work,
         pool: &pool,
         oom_msg,
         lowered: &lowered,
+        reachable: &visited,
         main_fn: &main_fn,
         entry_fn_indices: &entry_fn_indices,
         extra_fns: &extra_fns,
@@ -677,7 +709,8 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
         main_index,
         true_base,
         false_base,
-    })
+    })?;
+    Ok((bytes, visited, total))
 }
 
 

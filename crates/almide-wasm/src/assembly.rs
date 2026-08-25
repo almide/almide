@@ -18,6 +18,11 @@ pub(crate) struct AssembleIn<'a> {
     pub(crate) work: &'a FnWork,
     pub(crate) pool: &'a Pool,
     pub(crate) lowered: &'a [Result<(Function, std::collections::HashSet<usize>), String>],
+    /// Program-fn indices REACHABLE from main (the emit_program BFS) —
+    /// an unreached body ships as a 3-byte `unreachable` stub, which is
+    /// what keeps a small program's module small while the linked
+    /// registry graph stays fully loaded for resolution.
+    pub(crate) reachable: &'a std::collections::HashSet<usize>,
     pub(crate) main_fn: &'a Function,
     pub(crate) entry_fn_indices: &'a [u32],
     pub(crate) extra_fns: &'a [(u32, Function)],
@@ -35,6 +40,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         pool,
         oom_msg,
         lowered,
+        reachable,
         main_fn,
         entry_fn_indices,
         extra_fns,
@@ -246,13 +252,16 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_str_cmp());
     code.function(&emit_str_replace());
     code.function(&emit_copy());
-    for l in lowered {
+    for (i, l) in lowered.iter().enumerate() {
         match l {
-            Ok((f, _)) => {
+            // A lowered body ships only when the main BFS reaches it —
+            // dead registry bodies become the same loud stub the refused
+            // ones use (stack-polymorphic `unreachable` satisfies any
+            // declared signature).
+            Ok((f, _)) if reachable.contains(&i) => {
                 code.function(f);
             }
-            Err(_) => {
-                // Unreachable-from-main stub (the BFS above guarantees it).
+            _ => {
                 let mut stub = Function::new([]);
                 stub.instructions().unreachable().end();
                 code.function(&stub);
