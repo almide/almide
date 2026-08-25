@@ -2626,3 +2626,15 @@ record the closure.
   gets to answer once, deliberately; s1/s2/c7/c8 are the old front
   snapshot rejecting where develop now accepts — the reject side is
   safe, and the fixes come with the planned front resync.
+
+## Stage 96 (2026-08-26): the gauntlet becomes a gate
+
+- spec/gauntlet/ (moved from the untracked drop): 34 cells + the two
+  layered packages, gated by crates/almide-wasm/tests/gauntlet.rs
+  against golden/gauntlet-manifest.txt — run rows byte-pinned by stdout
+  hash + exit, walls pinned by reason, front rejects by first line.
+  Drift in EITHER direction is red until ratified
+  (ALMIDE_UPDATE_GAUNTLET=1); RUN_FLOOR=18 grow-only. Negative check
+  performed: a one-char manifest edit goes red with the ratification
+  message. This is the burn-up's missing second axis (README §1):
+  program-shaped acceptance, not tracker harvest.
