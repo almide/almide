@@ -168,6 +168,21 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 return self.lower_named_call_heap_field(expr, name.as_str(), args);
             }
+            // A RECORD-SPELLED variant ctor element (`Down { d: n + 1 }` in an
+            // `(A, W)` tuple — #1579): the SAME registered constructor the
+            // positional spelling (`Down(n + 1)`) reaches through the
+            // Named-call arm above, and `try_lower_variant_ctor` already
+            // resolves both spellings through one case-ordered path — only
+            // this router keyed on the Call kind, so the named-field spelling
+            // fell through to the plain-record decline and the enclosing
+            // tuple walled. Same materialization, same tracking, same drop
+            // story as the positional twin by construction.
+            IrExprKind::Record { name: Some(ctor), .. }
+                if self.variant_layouts.ctor_to_type.contains_key(ctor.as_str()) =>
+            {
+                let obj = self.try_lower_variant_ctor(expr)?;
+                self.track_owned_field(obj)
+            }
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
                 let obj = self
                     .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)

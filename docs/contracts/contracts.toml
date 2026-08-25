@@ -2036,6 +2036,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/ctor_scalar_call_payload.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_tuple_value_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_tuple_variant_payload.almd", class = "fixture" },
 ]
 
 [[contract]]

@@ -1,0 +1,82 @@
+// @contract: C-158
+// #1579: a Result tuple whose element is a variant spelled with a RECORD
+// case payload (`Down { d: Int }` — named fields) returns the real pair,
+// exactly as the positional spelling (`Down(Int)`) and the unit case always
+// did. The two spellings reach ONE registered constructor
+// (`try_lower_variant_ctor` resolves both through the same case-ordered
+// path); only the owned-heap-field router keyed on the Call kind, so the
+// named-field spelling fell through to the plain-record decline and the
+// enclosing tuple walled — plain value tail (heap-result ResultOk) and
+// err-arm (heap-result `if`) spellings both. The PLAIN (carrier-less)
+// tuple return with a RICH record payload (String + Int fields) rides the
+// same routing and is pinned here too — its 2000-iteration churn is
+// leak-free under a 256 KB heap cap (measured while landing). The rich
+// payload INSIDE the `!` carrier is the remaining #1579 residual and keeps
+// the honest wall.
+type A = { x: Int }
+
+type V = | Won { n: Int } | Lost
+
+type W = | Up | Down { d: Int }
+
+type R = | Quiet | Note { s: String, d: Int }
+
+fn rec_var(n: Int) -> (A, W)! = {
+  (A { x: n }, Down { d: n + 1 })
+}
+
+fn var_var(n: Int) -> (V, W)! = {
+  (Won { n: n }, Down { d: n + 1 })
+}
+
+fn guarded(n: Int) -> (A, W)! = {
+  guard n > 0 else err("neg")
+  (A { x: n }, Down { d: n + 1 })
+}
+
+fn guarded_x(n: Int) -> Int! = {
+  let s = guarded(n)!
+  s.0.x
+}
+
+fn rich_plain(n: Int) -> (Int, R) = {
+  (n, Note { s: "p-" + int.to_string(n), d: n + 1 })
+}
+
+effect fn main() -> Unit = {
+  let p = rec_var(41)!
+  println("${p.0.x}")
+  // 41
+  let pw = p.1
+  match pw {
+    Up => println("up"),
+    Down { d } => println("${d}"),
+  }
+  // 42
+  let q = var_var(41)!
+  let qv = q.0
+  match qv {
+    Won { n } => println("${n}"),
+    Lost => println("lost"),
+  }
+  // 41
+  let qw = q.1
+  match qw {
+    Up => println("up"),
+    Down { d } => println("${d}"),
+  }
+  // 42
+  let ok_x = guarded_x(41) ?? -1
+  println("${ok_x}")
+  // 41
+  let err_x = guarded_x(-1) ?? -1
+  println("${err_x}")
+  // -1 — the err path takes the fallback
+  let r = rich_plain(41)
+  let rn = r.1
+  // p-41-42
+  match rn {
+    Quiet => println("quiet"),
+    Note { s, d } => println("${s}-${d}"),
+  }
+}
