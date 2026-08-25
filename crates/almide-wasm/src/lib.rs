@@ -72,6 +72,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod runtime_str;
+mod scalar_ext;
 mod data;
 mod assembly;
 pub(crate) use assembly::*;

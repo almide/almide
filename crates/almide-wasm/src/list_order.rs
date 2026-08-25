@@ -32,9 +32,15 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_set(hn);
                 // bytes = n < 0 ? len : min(n*stride, len)
+                // select(v1, v2, cond) = cond ? v1 : v2 — the min form
+                // pushes LEN as v1 under cond (n*stride > len). The
+                // original operand order computed MAX and returned the
+                // whole list; no claimed fixture observed take's VALUE
+                // (fourth select inversion — the class now carries its
+                // own fixture, els PR pending).
                 i.local_get(hb).i32_load(len_memarg());
-                i.local_get(hn).i64_const(stride as i64).i64_mul();
                 i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.local_get(hn).i64_const(stride as i64).i64_mul();
                 i.local_get(hn).i64_const(stride as i64).i64_mul();
                 i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
                 i.i64_gt_s().select().i32_wrap_i64();
@@ -77,6 +83,127 @@ impl Emitter<'_> {
                 self.lower_list_chunk_windows(func, xs, n_arg).map(Some)
             }
             ("sort_by", [xs, cb]) => self.lower_list_sort_by(xs, cb).map(Some),
+            // skip(n as usize): a NEGATIVE n reinterprets huge — EMPTY
+            // (take's mirror keeps the WHOLE list; the asymmetry is v0's).
+            ("drop", [xs, n]) => {
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
+                    other => return unsup(&format!("list-drop-of:{other:?}")),
+                };
+                let stride = self.types.el(h).slot_size() as i32;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let hc = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                // keep_bytes = n < 0 || n*stride >= len ? 0 : len - n*stride
+                i.i32_const(0);
+                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.local_get(hn).i64_const(stride as i64).i64_mul().i64_sub().i32_wrap_i64();
+                i.local_get(hn).i64_const(0).i64_lt_s();
+                i.local_get(hn)
+                    .i64_const(stride as i64)
+                    .i64_mul()
+                    .local_get(hb)
+                    .i32_load(len_memarg())
+                    .i64_extend_i32_u()
+                    .i64_ge_s();
+                i.i32_or();
+                i.select().local_set(hc);
+                i.local_get(hc).call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hb)
+                    .i32_load(len_memarg())
+                    .i32_add()
+                    .local_get(hc)
+                    .i32_sub();
+                i.local_get(hc);
+                i.call(F_COPY);
+                i.local_get(ho);
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(Some(SliceTy::List(h))))
+            }
+            // insert at min(i as usize, len): a NEGATIVE index appends
+            // at the END (the huge-usize reinterpretation, v0 verbatim).
+            ("insert", [xs, idx, v]) => {
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
+                    other => return unsup(&format!("list-insert-of:{other:?}")),
+                };
+                let elem = self.types.el(h);
+                let stride = elem.slot_size() as i32;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(idx, Some(INT))?;
+                let hn = self.hold_i64()?;
+                self.f.instructions().local_set(hn);
+                self.lower(v, Some(elem))?;
+                let hv = self.hold_val(elem)?;
+                let hoff = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hv);
+                // off_bytes = min(i, len_elems)*stride; negative → len
+                i.local_get(hb).i32_load(len_memarg());
+                i.local_get(hn).i64_const(stride as i64).i64_mul().i32_wrap_i64();
+                i.local_get(hn)
+                    .i64_const(0)
+                    .i64_lt_s()
+                    .local_get(hn)
+                    .i64_const(stride as i64)
+                    .i64_mul()
+                    .local_get(hb)
+                    .i32_load(len_memarg())
+                    .i64_extend_i32_u()
+                    .i64_gt_s()
+                    .i32_or();
+                i.select().local_set(hoff);
+                i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_add().call(F_ALLOC).local_set(ho);
+                // prefix
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hoff);
+                i.call(F_COPY);
+                // the element
+                i.local_get(ho).local_get(hoff).i32_add();
+                i.local_get(hv);
+                let _ = i;
+                self.store_ty_slot(elem, 0);
+                let mut i = self.f.instructions();
+                // suffix
+                i.local_get(ho)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hoff)
+                    .i32_add()
+                    .i32_const(stride)
+                    .i32_add();
+                i.local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hoff)
+                    .i32_add();
+                i.local_get(hb).i32_load(len_memarg()).local_get(hoff).i32_sub();
+                i.call(F_COPY);
+                i.local_get(ho);
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_val(elem);
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(Some(SliceTy::List(h))))
+            }
             _ => Ok(None),
         }
     }

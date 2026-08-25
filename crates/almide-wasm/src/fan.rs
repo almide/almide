@@ -25,8 +25,8 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<SliceTy>>, EmitError> {
         let out = match (func, args) {
-            ("map" | "any", [xs, cb]) => {
-                let first_ok_wins = func == "any";
+            ("map" | "any" | "any_map", [xs, cb]) => {
+                let first_ok_wins = func != "map";
                 let (params, body) = self.hof_lambda(cb, 1)?;
                 let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
                 // The callback body VALUE is a Result block.

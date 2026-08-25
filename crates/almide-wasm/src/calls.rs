@@ -339,6 +339,9 @@ impl Emitter<'_> {
         if let Some(out) = self.lower_string_ext(target, args)? {
             return Ok(out);
         }
+        if let Some(out) = self.lower_scalar_ext(target, args)? {
+            return Ok(out);
+        }
         match target {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "process" && func.as_str() == "exit" =>

@@ -190,6 +190,36 @@ impl Emitter<'_> {
                 self.release_i32();
                 Ok(None)
             }
+            // OOB (or a negative pos) is DEFINED 0.0 for the f32 reader
+            // (native: checked_add + len test), unlike f16's trap form.
+            ("read_f32_le", [b, i]) => {
+                self.lower(b, Some(BYTES))?;
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(i, Some(INT))?;
+                let ih = self.hold_i64()?;
+                let mut ins = self.f.instructions();
+                ins.local_set(ih);
+                ins.local_get(ih).i64_const(0).i64_lt_s();
+                ins.local_get(ih).i64_const(4).i64_add();
+                ins.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
+                ins.i64_gt_s().i32_or();
+                ins.if_(BlockType::Result(ValType::F64));
+                ins.f64_const(0.0.into());
+                ins.else_();
+                ins.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
+                ins.f32_load(MemArg {
+                    offset: u64::from(almide_layout::PAYLOAD),
+                    align: 0,
+                    memory_index: 0,
+                });
+                ins.f64_promote_f32();
+                ins.end();
+                let _ = ins;
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(FLOAT))
+            }
             ("read_f16_le", [b, i]) => {
                 self.lower(b, Some(BYTES))?;
                 let bh = self.hold_i32()?;

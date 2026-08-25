@@ -2140,3 +2140,22 @@ Org note, owner-adjudicated: 0.59.x stabilizes the incumbent
 architecture; 0.60.x onward IS this compiler — the greenfield burn is
 the successor line, with the als canonical ledger and the Stage B
 cutover aligned to that frame.
+
+---
+
+## Unit 6 — stage 63: the fourth select inversion, and the sweep it paid for (2026-08-25)
+
+The cheap-cell sweep (clamp family with the T6 die and Rust's
+comparison-chain zero semantics, float.sign by copysign with NaN
+passthrough, env.args as the harness's empty-argv boundary, list.drop
+and list.insert with their v0 negative-reinterpretation shapes,
+fan.any_map as the existing arm's alias, bytes.read_f32_le with its
+DEFINED-0.0 OOB form) opened heap_result_if_bind's chain — and the
+newly-armed fixture immediately exposed a REAL miscompile latent since
+stage 45: list.take's min-select had its operands inverted (computed
+MAX, returned the whole list). The fourth select-operand inversion of
+the burn; it survived because no claimed fixture observed take's
+VALUE. Closure is structural this time: take/drop/insert join the
+fuzz generator's list expressions (negative counts included), and the
+mutant below pins the exact inversion. Burn-up: 388 → 398 / 591,
+floor 398, zero divergence.

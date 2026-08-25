@@ -23,12 +23,18 @@ call:bytes.get_or
 call:bytes.len
 call:bytes.new
 call:bytes.read_f16_le
+call:bytes.read_f32_le
 call:bytes.read_u8
 call:bytes.set_at
+call:bytes.set_f32_le
+call:bytes.set_u8
 call:computed-or-method
+call:env.args
 call:eprintln
 call:fan.any
+call:fan.any_map
 call:fan.map
+call:float.clamp
 call:float.parse
 call:float.to_fixed
 call:float.to_string
@@ -40,6 +46,7 @@ call:fs.read_text
 call:fs.read_text_if_exists
 call:fs.remove_all
 call:fs.write
+call:int.clamp
 call:int.from_hex
 call:int.max
 call:int.parse
@@ -49,6 +56,7 @@ call:json.parse
 call:json.stringify
 call:list.chunk
 call:list.clear
+call:list.drop
 call:list.enumerate
 call:list.filter
 call:list.find
@@ -56,6 +64,7 @@ call:list.first
 call:list.fold
 call:list.get
 call:list.get_or
+call:list.insert
 call:list.is_empty
 call:list.join
 call:list.len
@@ -68,6 +77,7 @@ call:list.repeat
 call:list.slice
 call:list.sort
 call:list.sort_by
+call:list.take
 call:list.windows
 call:list.with_capacity
 call:map.contains
