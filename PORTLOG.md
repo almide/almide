@@ -2480,3 +2480,28 @@ mut-param fns, and singles.
 518/599 (86.5%). Divergence zero. CI full greens: 83e194ea9,
 9bb954dd6, 6fdad9ad0, 9325d4c91 (the queue processes the rest; the one
 red — e72310049 — is the pre-hook B commit, repaired next-commit).
+
+## Stage 76 — 518 → 535: the tail keeps converting
+
+- json getters to the exempt tier (Option rets, ctor-built), sha256 +
+  hex admitted, bytes get/set/push/pad pair/copy_from hand-emitted
+  (the min-select order caught at desk — the select doctrine again),
+  prim.alloc_bytes, list any/sum/dedup/drop_while/length, Float64/
+  to_float64 aliases, is_upper/is_lower.
+- **The bytes mut convention**: the linked append/write family is
+  FUNCTIONAL in the self-host but `&mut` on the native surface — a
+  statement call on a var must WRITE BACK the fresh result (the
+  list.push convention). Found by two divergences (an appended u32
+  silently discarded); the wrapper covers the whole family.
+- **The __is_null twin never fired**: its cur_module == "codec_decode"
+  guard compared against a name the loaded module doesn't carry — four
+  codec fixtures walled on the twin's own fallback. The guard now
+  matches by NAME + Value-typed argument; all four claimed at once.
+- 535/599 (89.3%), divergence zero, 28 slices landed this arc.
+
+Remaining 64: the matrix kernel arc (~9 — the self-hosts are
+row-pointer/len-as-count coupled, hand-emission on the flat layout),
+regex (~2), fs/io/env/random/process host (~10), mut-param multi-value
+(3), and ~40 singles (set map/remove/symdiff, group_by/unique_by/
+binary_search/window, json path/pretty, value.pick, rawptr, eq-Map,
+recursive-type eq depth, fn-value HOF callbacks, globals write-back).
