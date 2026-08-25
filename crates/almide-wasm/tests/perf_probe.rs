@@ -28,7 +28,7 @@ fn bench() {
         base = base.min(t.elapsed().as_millis());
     }
     println!("BENCH baseline_ms={base}");
-    for b in ["int_loop", "float_math", "str_build", "list_sort", "recursion", "list_pipeline"] {
+    for b in ["int_loop", "float_math", "str_build", "list_sort", "sort_by", "recursion", "list_pipeline"] {
         let src = std::fs::read_to_string(format!("{dir}/{b}.almd")).expect("bench file");
         let t0 = Instant::now();
         let ir = almide_spine::s5::lower_to_ir("b.almd", &src).expect("front");
