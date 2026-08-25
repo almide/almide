@@ -2678,3 +2678,26 @@ record the closure.
   locally (783a8cb59). The gauntlet manifest re-ratified (one row).
 - The lesson joins the doctrine: a gate that pins REFUSAL REASONS is a
   nondeterminism detector for free — the flake WAS the finding.
+
+## Stage 99 (2026-08-26): #1585 + #1586 — the measured becomes the gated
+
+- Perf RATCHET (perf_ratchet.rs, release-only): machine-stable
+  relations, never milliseconds — t(4n)/t(n) ≤ 8 on BOTH sorts
+  (measured 3.97 / 4.25; O(n²) predicts ~16 — the survey-C2 class is
+  now unrepresentable), lockstep sort_by/sort ≤ 4 (measured 1.18),
+  anti-vacuous 5ms floor.
+- Size RATCHET (size_ratchet.rs): all 599 module sizes pinned in
+  golden/size-baseline.txt — per-fixture ×1.25+512B cap, aggregate
+  ×1.05, roc-style broken-measurement guards both ways (sub-100B
+  module and half-baseline collapse read as instrumentation failure).
+- Section-dump goldens (section_dump.rs): leb_consts + fn_values
+  micro-fixtures pin every decoded operator/immediate — the zig ULEB
+  wrong-value class caught by construction.
+- Allocation LEDGER (alloc_ledger.rs): G_HEAP exports as `__heap`, the
+  host reads the watermark, and all 599 fixtures pin their allocation
+  totals EXACTLY (self-calibration found zero nondeterministic rows).
+  Beyond roc's per-test counts: corpus-wide, exact.
+- Composition observed live: the export grew every module a few bytes;
+  the size ratchet tolerated it within cap and the baseline was
+  re-ratified deliberately. Negative checks performed on all four
+  gates. #1585 and #1586 closed with evidence.
