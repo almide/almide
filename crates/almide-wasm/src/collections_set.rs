@@ -209,7 +209,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 Ok(Some(SliceTy::Set(self.types.intern(e))))
             }
-            _ => unsup(&format!("call:set.{func}")),
+            _ => self.lower_linked_call("set", func, args, false),
         }
     }
 

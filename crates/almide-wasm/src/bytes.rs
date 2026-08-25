@@ -346,7 +346,8 @@ impl Emitter<'_> {
                 self.release_i32();
                 Ok(Some(INT))
             }
-            _ => unsup(&format!("call:bytes.{func}")),
+            // Not a native arm: the audited linked path before the wall.
+            _ => self.lower_linked_call("bytes", func, args, false),
         }
     }
 }

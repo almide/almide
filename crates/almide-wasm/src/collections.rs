@@ -607,7 +607,7 @@ impl Emitter<'_> {
                 self.release_i32(); // bh
                 Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
             }
-            _ => unsup(&format!("call:map.{func}")),
+            _ => self.lower_linked_call("map", func, args, false),
         }
     }
 
