@@ -65,6 +65,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod bytes;
 mod calls;
+mod cells;
 mod collect;
 mod collections;
 mod emitter;
@@ -419,7 +420,7 @@ pub(crate) struct LiftedLambda {
     /// Captured outer locals: (var, type, closure-block payload offset).
     /// The lifted fn's prelude loads each from the env param (raw param
     /// slot 0) into a fresh local — by-value snapshot semantics.
-    pub(crate) captures: Vec<(VarId, SliceTy, u32)>,
+    pub(crate) captures: Vec<(VarId, SliceTy, u32, bool)>,
 }
 
 /// A call_indirect signature at the wasm value-type level.

@@ -108,7 +108,22 @@ impl Emitter<'_> {
                 ) {
                     self.f.instructions().call(F_BLOCK_COPY);
                 }
-                self.f.instructions().local_set(idx);
+                if self.cells.contains(var) {
+                    // C-319: the bind allocates the shared cell; the
+                    // local holds its ADDRESS from here on.
+                    let hv = self.hold_val(declared)?;
+                    self.f.instructions().local_set(hv);
+                    self.f
+                        .instructions()
+                        .i32_const(declared.slot_size() as i32)
+                        .call(F_ALLOC)
+                        .local_tee(idx)
+                        .local_get(hv);
+                    self.store_ty_slot(declared, 0);
+                    self.release_val(declared);
+                } else {
+                    self.f.instructions().local_set(idx);
+                }
                 Ok(())
             }
             // `p.field = v` on a record var: copy-on-write write-back —
@@ -191,9 +206,7 @@ impl Emitter<'_> {
                     self.f.instructions().call(F_BLOCK_COPY);
                 }
                 match local {
-                    Some(idx) => {
-                        self.f.instructions().local_set(idx);
-                    }
+                    Some(idx) => self.emit_store_var(*var, idx, declared)?,
                     None => {
                         let gidx = self.globals[var].0;
                         self.f.instructions().global_set(gidx);

@@ -77,6 +77,10 @@ jobs:
           key: host-oracle-a877d2138-v1
       - name: build the host oracle
         run: cargo build --release --manifest-path /tmp/oracle-src/Cargo.toml --bin almide
+      - name: install wasmtime (the oracle's wasm leg runs on it)
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
       - name: wasm nets in release shape (third oracle armed)
         run: |
           export ALMIDE_FUZZ_HOST_ORACLE=/tmp/oracle-src/target/release/almide

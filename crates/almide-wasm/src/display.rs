@@ -388,6 +388,7 @@ fn build_one_display_helper(
     let empty_locals = std::collections::HashMap::new();
     let empty_globals = std::collections::HashMap::new();
     let empty_ranges = std::collections::HashMap::new();
+    let empty_cells = std::collections::HashSet::new();
     {
         let mut em = Emitter {
             pool,
@@ -405,6 +406,7 @@ fn build_one_display_helper(
             globals: &empty_globals,
             deferred_ranges: &empty_ranges,
             metered: false,
+            cells: &empty_cells,
             region_repair: None,
             in_tail: false,
             cur_module: None,

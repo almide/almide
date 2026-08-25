@@ -40,6 +40,9 @@ pub(crate) struct Emitter<'a> {
     /// USER code: loop heads / entries / dyn ops charge the deterministic
     /// meter (ALS-DT2). Pool bodies and synthesized helpers never charge.
     pub(crate) metered: bool,
+    /// C-319 shared-cell vars: the local holds a one-slot heap cell's
+    /// ADDRESS; reads load through it, writes store through it.
+    pub(crate) cells: &'a std::collections::HashSet<VarId>,
     /// C-320: Some((saved_local, depth_entry_local)) when this fn is a
     /// region ARM — a cut here runs the exit bookkeeping its early
     /// return would otherwise skip (guarded by depth > depth-at-entry,
@@ -162,6 +165,26 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hb);
         self.release_i32();
         self.release_val(raw);
+        Ok(())
+    }
+
+    /// Store the value on the stack into `var`'s storage: a plain local
+    /// set, or a store through the C-319 cell address.
+    pub(crate) fn emit_store_var(
+        &mut self,
+        id: VarId,
+        idx: u32,
+        ty: SliceTy,
+    ) -> Result<(), EmitError> {
+        if self.cells.contains(&id) {
+            let hv = self.hold_val(ty)?;
+            self.f.instructions().local_set(hv);
+            self.f.instructions().local_get(idx).local_get(hv);
+            self.store_ty_slot(ty, 0);
+            self.release_val(ty);
+        } else {
+            self.f.instructions().local_set(idx);
+        }
         Ok(())
     }
 
@@ -326,6 +349,9 @@ impl Emitter<'_> {
             IrExprKind::Var { id } => {
                 if let Some(&(idx, ty)) = self.locals.get(id) {
                     self.f.instructions().local_get(idx);
+                    if self.cells.contains(id) {
+                        self.load_ty_slot(ty, 0);
+                    }
                     ty
                 } else if let Some(&(gidx, ty)) = self.globals.get(id) {
                     self.f.instructions().global_get(gidx);
@@ -726,14 +752,17 @@ impl Emitter<'_> {
                     None
                 };
                 // Closure block layout: [slot:i32][captures packed...].
+                // A C-319 cell travels as its 4-byte ADDRESS.
                 let widths: Vec<u32> = std::iter::once(4)
-                    .chain(captured.iter().map(|(_, t)| t.slot_size()))
+                    .chain(captured.iter().map(|(v, t)| {
+                        if self.cells.contains(v) { 4 } else { t.slot_size() }
+                    }))
                     .collect();
                 let (offsets, size) = almide_layout::pack_fields(&widths);
-                let captures: Vec<(VarId, SliceTy, u32)> = captured
+                let captures: Vec<(VarId, SliceTy, u32, bool)> = captured
                     .iter()
                     .zip(offsets.iter().skip(1))
-                    .map(|(&(v, t), &off)| (v, t, off))
+                    .map(|(&(v, t), &off)| (v, t, off, self.cells.contains(&v)))
                     .collect();
                 let j = self.work.register_lambda(LiftedLambda {
                     params: ps,
@@ -755,10 +784,15 @@ impl Emitter<'_> {
                         .local_tee(hb)
                         .i32_const(slot as i32)
                         .i32_store(slot_memarg(0));
-                    for (v, t, off) in &captures {
+                    for (v, t, off, is_cell) in &captures {
                         let (idx, _) = self.locals[v];
                         self.f.instructions().local_get(hb).local_get(idx);
-                        self.store_ty_slot(*t, *off);
+                        if *is_cell {
+                            // the local already holds the cell address
+                            self.f.instructions().i32_store(slot_memarg(*off));
+                        } else {
+                            self.store_ty_slot(*t, *off);
+                        }
                     }
                     self.f.instructions().local_get(hb);
                     self.release_i32();

@@ -405,6 +405,7 @@ impl Gen {
             14 => self.stmt_fuse_pipeline(depth),
             15 => self.stmt_div_edges(),
             16 => self.stmt_fuel_region(),
+            17 => self.stmt_cell_capture(),
             18 => self.stmt_fs_roundtrip(),
             _ => self.stmt_push(depth),
         }
@@ -676,7 +677,31 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
         // path (CI downloads the pinned release; locally the installed
         // almide). Without it the program stays an honest abstention.
         if let Ok(oracle) = std::env::var("ALMIDE_FUZZ_HOST_ORACLE") {
-            let (native_stdout, native_exit) = host_oracle::native_run(&oracle, seed, &src)?;
+            // JURISDICTION: the pinned oracle referees only constructs
+            // it is demonstrably sound on. Outside it: fuel regions
+            // (pre-C-320 — stale ok(0), its #1572) and anon records
+            // (its wasm leg misplaces by-name shuffled fields — the
+            // class our mutant 015 pins). Both stay interp-refereed in
+            // the normal mode; the host leg's unique value is the fs
+            // boundary, which neither marker touches.
+            if src.contains("fan.bounded") || src.contains("ax:") {
+                tally.oracle_abstained += 1;
+                return Ok(());
+            }
+            let (native_stdout, native_stderr, native_exit) =
+                host_oracle::native_run(&oracle, seed, &src)?;
+            // A native REFUSAL (wall / compiler diagnostic: nonzero exit,
+            // EMPTY stdout, non-"Error:" stderr) is the oracle declining
+            // to referee — the a877 native walls fan.bounded outside its
+            // v1 subset — never a divergence. A genuine runtime abort
+            // announces itself as "Error: ..." and stays compared.
+            if native_exit != 0
+                && native_stdout.is_empty()
+                && !native_stderr.contains("Error: ")
+            {
+                tally.oracle_abstained += 1;
+                return Ok(());
+            }
             let run = run_wasm(&bytes).map_err(|e| {
                 format!("seed {seed}: wasm leg failed to run (host-oracle path): {e}\n--- src ---\n{src}")
             })?;

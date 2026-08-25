@@ -239,4 +239,36 @@ impl Gen {
                 _ => self.leaf(Ty::ListInt),
             }
     }
+
+    /// C-319 shared-cell captures: a mutated var reaches through a
+    /// closure in BOTH directions — closure-side writes observed
+    /// outside, outside rebinds observed by later closure calls.
+    fn stmt_cell_capture(&mut self) {
+        // E011: closure-side mutation demands an effect fn.
+        self.needs_effect = true;
+        let (v, f, x) = (self.fresh(), self.fresh(), self.fresh());
+        let (a1, a2, a3) = (self.rng.below(9), self.rng.below(7), self.rng.below(7));
+        let (b1, b2, b3) = (self.rng.below(5), self.rng.below(9), self.rng.below(9));
+        let coin = self.rng.chance(50);
+        let int_coin = self.rng.chance(50);
+        if int_coin {
+            self.line(&format!("var {v} = {a1}"));
+            self.line(&format!("let {f} = ({x}: Int) => {{\n    {v} = {v} + {x}\n  }}"));
+            self.line(&format!("{f}({a2})"));
+            if coin {
+                self.line(&format!("{v} = {v} * 2"));
+            }
+            self.line(&format!("{f}({a3})"));
+            self.line(&format!("println(\"cell=${{{v}}}\")"));
+            self.vars.push(Var { name: v, ty: Ty::Int, mutable: true });
+        } else {
+            self.line(&format!("var {v}: List[Int] = [{b1}]"));
+            self.line(&format!("let {f} = ({x}: Int) => {{\n    {v} = {v} + [{x}]\n  }}"));
+            self.line(&format!("{f}({b2})"));
+            self.line(&format!("{v} = {v} + [{b3}]"));
+            self.line(&format!("{f}({b2})"));
+            self.line(&format!("println(\"cell=${{{v}}} n=${{list.len({v})}}\")"));
+            self.vars.push(Var { name: v, ty: Ty::ListInt, mutable: true });
+        }
+    }
 }

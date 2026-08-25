@@ -82,7 +82,7 @@ pub(crate) struct FnPlan {
     pub(crate) in_main: bool,
     /// Lifted lambda: raw wasm param 0 is the closure ENV block; the
     /// prelude loads each capture into a fresh local (value snapshot).
-    pub(crate) env_captures: Option<Vec<(VarId, SliceTy, u32)>>,
+    pub(crate) env_captures: Option<Vec<(VarId, SliceTy, u32, bool)>>,
 }
 
 pub(crate) fn lower_fn(
@@ -103,9 +103,15 @@ pub(crate) fn lower_fn(
         seen.insert(*var);
     }
 
+    // C-319: shared-cell vars (captured ∩ mutated) — their locals hold
+    // the CELL ADDRESS (i32); env-captured cells arrive pre-flagged.
+    let mut cell_vars = crate::cells::cell_vars_of(body);
     let mut binds: Vec<(VarId, SliceTy)> = Vec::new();
     if let Some(caps) = &env_captures {
-        for (var, ty, _) in caps {
+        for (var, ty, _, is_cell) in caps {
+            if *is_cell {
+                cell_vars.insert(*var);
+            }
             if seen.insert(*var) {
                 binds.push((*var, *ty));
             }
@@ -137,7 +143,11 @@ pub(crate) fn lower_fn(
     let mut local_decls: Vec<(u32, ValType)> = Vec::new();
     for (i, (var, ty)) in binds.iter().enumerate() {
         locals.insert(*var, (env_shift + (params.len() + i) as u32, *ty));
-        local_decls.push((1, ty.val_type()));
+        // A cell var's local holds the cell ADDRESS.
+        local_decls.push((
+            1,
+            if cell_vars.contains(var) { ValType::I32 } else { ty.val_type() },
+        ));
     }
     let base = env_shift + (params.len() + binds.len()) as u32;
     let (cursor_local, tmp_i32_local, scr_i32_local, scr_i64_local, scr_f64_local) =
@@ -208,6 +218,7 @@ pub(crate) fn lower_fn(
             globals: ctx.globals,
             deferred_ranges: &deferred_ranges,
             metered,
+            cells: &cell_vars,
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;
                 Some((saved, region_depth_entry.expect("allocated with the var")))
@@ -218,11 +229,16 @@ pub(crate) fn lower_fn(
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
         }
         if let Some(caps) = &env_captures {
-            // env (raw param 0) → capture locals, by-value snapshot.
-            for (var, ty, off) in caps {
+            // env (raw param 0) → capture locals: by-value snapshot,
+            // except C-319 cells, whose 4-byte ADDRESS is what travels.
+            for (var, ty, off, is_cell) in caps {
                 let (idx, _) = em.locals[var];
                 em.f.instructions().local_get(0);
-                em.load_ty_slot(*ty, *off);
+                if *is_cell {
+                    em.f.instructions().i32_load(slot_memarg(*off));
+                } else {
+                    em.load_ty_slot(*ty, *off);
+                }
                 em.f.instructions().local_set(idx);
             }
         }

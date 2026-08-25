@@ -31,7 +31,14 @@ impl Emitter<'_> {
                 let hnew = self.hold_i32()?;
                 {
                     let mut i = self.f.instructions();
-                    i.local_get(var_idx).local_set(hb);
+                    i.local_get(var_idx);
+                }
+                if self.cells.contains(id) {
+                    self.load_ty_slot(var_ty, 0);
+                }
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hb);
                     i.local_get(hb).i32_load(len_memarg()).local_set(hlen);
                     i.local_get(hlen).i32_eqz().if_(BlockType::Empty);
                     i.i32_const(0).local_set(hres);
@@ -51,7 +58,11 @@ impl Emitter<'_> {
                     i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                     i.local_get(hlen).i32_const(stride).i32_sub();
                     i.memory_copy(0, 0);
-                    i.local_get(hnew).local_set(var_idx);
+                    i.local_get(hnew);
+                }
+                self.emit_store_var(*id, var_idx, var_ty)?;
+                {
+                    let mut i = self.f.instructions();
                     i.end();
                     i.local_get(hres);
                 }
@@ -82,7 +93,8 @@ impl Emitter<'_> {
                 let SliceTy::List(_) = var_ty else {
                     return unsup(&format!("list-clear-of:{var_ty:?}"));
                 };
-                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(var_idx);
+                self.f.instructions().i32_const(0).call(F_ALLOC);
+                self.emit_store_var(*id, var_idx, var_ty)?;
                 Ok(None)
             }
             // `list.push` MUTATES through its `mut` param on the oracle
@@ -100,6 +112,9 @@ impl Emitter<'_> {
                 };
                 let elem = self.types.el(h);
                 self.f.instructions().local_get(var_idx);
+                if self.cells.contains(id) {
+                    self.load_ty_slot(var_ty, 0);
+                }
                 self.lower(v, Some(elem))?;
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
@@ -111,7 +126,8 @@ impl Emitter<'_> {
                     8 => F_LIST_PUSH_8,
                     _ => F_LIST_PUSH_4,
                 };
-                self.f.instructions().call(helper).local_set(var_idx);
+                self.f.instructions().call(helper);
+                self.emit_store_var(*id, var_idx, var_ty)?;
                 Ok(None)
             }
             // ONE allocation, zero copies: the linked self-host impl binds

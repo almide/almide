@@ -2231,3 +2231,34 @@ catches up.
 
 **Burn-up: 398/591 → 401/599**, floor 401, zero divergence, workspace
 0 failures.
+
+---
+
+## Unit 6 — stage 68: C-319 shared cells, and the oracle learns its jurisdiction (2026-08-25)
+
+The pin-advance gap closes: a var that is BOTH captured by a lambda AND
+mutated lives in a one-slot heap CELL — the local (and every capturing
+closure's env slot) holds the cell's address, reads load through it,
+writes store through it, so mutation is visible in both directions.
+The classification (cells.rs) over-approximates capture (every Var id
+inside a lambda subtree) — never unsound, at worst a slower var — and
+excludes for-in loop vars (the interp BINDS them fresh per iteration).
+The C-319 fixture now matches the interp on every line. One honest
+process catch en route: the bind-side cell allocation had silently
+failed to apply in a batch edit (the assert fired but the batch's
+success line printed from the second script) — reads dereferenced a
+cell that writes never created, and the fault address was the string
+"init" read as a pointer. Every batched edit now gets its own verdict.
+
+The fuzz gains the mutation-through-closure arm (E011 taught it that
+closure mutation demands effect fn), and the HOST-ORACLE leg learns
+JURISDICTION: the pinned oracle referees only what it is demonstrably
+sound on. Measured out of its competence, with receipts: fuel regions
+(pre-C-320 stale verdicts), side-effectful HOF pipelines (its NATIVE
+leg double-evaluates map callbacks — its own wasm leg disagrees with
+it, m1 f4 m1 m1 m2 f7 m2 vs m1 m2 f4 f7, a live incumbent cross-target
+divergence), and anon records (its wasm leg misplaces shuffled by-name
+fields — mutant 015's origin class). The referee is now the oracle's
+WASM leg (the manifest's own reference definition), wasmtime installed
+in CI for it. Both fuzz modes green; the C-319 exclusion note now
+records the gap as CLOSED.
