@@ -87,6 +87,7 @@ pub(crate) use ty::*;
 mod list;
 mod list_comb;
 mod list_edit;
+mod list_search;
 mod list_fuse;
 mod list_mut;
 mod list_order;

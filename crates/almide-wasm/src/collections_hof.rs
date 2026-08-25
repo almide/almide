@@ -462,6 +462,97 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
     }
 
+    /// `list.group_by(xs, f) -> Map[B, List[A]]` — first-seen key order,
+    /// grouped lists in traversal order. The map block is grown by a
+    /// local realloc-append (we own it; nothing else observes the moves),
+    /// and the per-key list slot is patched in place through the fresh
+    /// scan address each round.
+    pub(crate) fn lower_list_group_by(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let kt = self.infer(body)?;
+        let SliceTy::Scalar(_) = kt else { return unsup("list-group-by-key-nonscalar") };
+        let scan = self.map_scan_fn(kt)?;
+        let inner = SliceTy::List(self.types.intern(elem));
+        let (koff, voff, esz) = entry_layout(kt, inner);
+        let push = match elem.slot_size() {
+            8 => F_LIST_PUSH_8,
+            _ => F_LIST_PUSH_4,
+        };
+        let hm = self.hold_i32()?;
+        let he = self.hold_i32()?;
+        let hkey = self.hold_for(kt)?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(0).call(F_ALLOC).local_set(hm);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+        }
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.lower(body, Some(kt))?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hkey);
+            i.local_get(hm).i32_const(esz as i32).i32_const(koff as i32).local_get(hkey);
+            i.call(scan).local_tee(he).if_(BlockType::Empty);
+            // present: push into the entry's list, patch the slot back
+            i.local_get(he);
+            i.local_get(he).i32_load(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
+            i.local_get(params[0]);
+        }
+        if elem.val_type() == wasm_encoder::ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
+        }
+        {
+            let mut i = self.f.instructions();
+            i.call(push);
+            i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
+            i.else_();
+            // absent: grow-append the (key, [x]) entry
+            i.local_get(hm).i32_load(len_memarg()).i32_const(esz as i32).i32_add();
+            i.call(F_ALLOC).local_set(he);
+            i.local_get(he).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hm).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hm).i32_load(len_memarg());
+            i.memory_copy(0, 0);
+            i.local_get(he).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hm).i32_load(len_memarg()).i32_add().local_set(he);
+            i.local_get(he).i32_const(koff as i32).i32_add();
+            i.local_get(hkey);
+        }
+        self.store_ty_slot_at(kt);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(he);
+            i.i32_const(0).call(F_ALLOC);
+            i.local_get(params[0]);
+        }
+        if elem.val_type() == wasm_encoder::ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
+        }
+        {
+            let mut i = self.f.instructions();
+            i.call(push);
+            i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
+            // the grown block replaces the old handle
+            i.local_get(he);
+            i.local_get(hm).i32_load(len_memarg()).i32_sub();
+            i.i32_const(almide_layout::PAYLOAD as i32).i32_sub();
+            i.local_set(hm);
+            i.end();
+        }
+        self.hof_step(ih);
+        self.f.instructions().local_get(hm);
+        self.release_for(kt);
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::Map(self.types.intern(kt), self.types.intern(inner))))
+    }
+
     /// The scan helper for this key class (shared with the map ops).
     fn map_scan_fn(&mut self, k: SliceTy) -> Result<u32, EmitError> {
         match k {

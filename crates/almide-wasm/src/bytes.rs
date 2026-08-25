@@ -18,6 +18,115 @@ fn byte_at() -> MemArg {
 }
 
 /// Payload-relative byte address: byte k of the current window.
+impl Emitter<'_> {
+    /// Append `k` big-endian bytes of the value (LSB-only when k = 1 —
+    /// `val as u8`); `float` reinterprets an f64 to its bit pattern
+    /// first (write_f64_be).
+    fn lower_bytes_write_be(
+        &mut self,
+        b: &IrExpr,
+        v: &IrExpr,
+        k: i32,
+        float: bool,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        self.lower(b, Some(BYTES))?;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(v, Some(if float { FLOAT } else { INT }))?;
+        let hv = self.hold_i64()?;
+        let ho = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        if float {
+            i.i64_reinterpret_f64();
+        }
+        i.local_set(hv);
+        i.local_get(hb).i32_load(len_memarg()).i32_const(k).i32_add().call(F_ALLOC);
+        i.local_set(ho);
+        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb).i32_load(len_memarg());
+        i.memory_copy(0, 0);
+        for j in 0..k {
+            // byte_k already carries the PAYLOAD offset — the base here
+            // is handle + byte index only (the double-add once landed
+            // every cursor byte in the next block's zero header).
+            i.local_get(ho).local_get(hb).i32_load(len_memarg()).i32_add();
+            i.local_get(hv).i64_const(i64::from((k - 1 - j) * 8)).i64_shr_u().i32_wrap_i64();
+            i.i32_store8(byte_k(j as u8));
+        }
+        i.local_get(ho);
+        let _ = i;
+        self.release_i32();
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(BYTES))
+    }
+
+    /// chunks: `b.chunks(size)` — size <= 0 yields the empty list; a
+    /// size past the buffer is one whole chunk (the i64 clamp precedes
+    /// every i32 narrowing).
+    fn lower_bytes_chunks(&mut self, b: &IrExpr, size: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        self.lower(b, Some(BYTES))?;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(size, Some(INT))?;
+        let hs64 = self.hold_i64()?;
+        let hs = self.hold_i32()?;
+        let ho = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hoff = self.hold_i32()?;
+        let hn = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hs64);
+        i.local_get(hb).i32_load(len_memarg()).local_set(hn);
+        i.local_get(hs64).i64_const(0).i64_le_s().if_(BlockType::Result(ValType::I32));
+        i.i32_const(0).call(F_ALLOC);
+        i.else_();
+        // s = min(size, max(n, 1)) — an i32-safe stride that still means
+        // "one chunk" for any size >= n
+        i.local_get(hs64);
+        i.local_get(hn).i32_const(1).local_get(hn).i32_const(0).i32_gt_u().select();
+        i.i64_extend_i32_u();
+        i.local_get(hs64);
+        i.local_get(hn).i32_const(1).local_get(hn).i32_const(0).i32_gt_u().select();
+        i.i64_extend_i32_u();
+        i.i64_lt_s().select();
+        i.i32_wrap_i64().local_set(hs);
+        // count = ceil(n / s); out = List[Bytes] (4-byte handles)
+        i.local_get(hn).local_get(hs).i32_add().i32_const(1).i32_sub();
+        i.local_get(hs).i32_div_u();
+        i.i32_const(4).i32_mul().call(F_ALLOC).local_set(ho);
+        i.i32_const(0).local_set(hw);
+        i.i32_const(0).local_set(hoff);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hoff).local_get(hn).i32_ge_u().br_if(1);
+        // c = min(s, n - off)
+        i.local_get(hs);
+        i.local_get(hn).local_get(hoff).i32_sub();
+        i.local_get(hs).local_get(hn).local_get(hoff).i32_sub().i32_lt_u();
+        i.select().local_set(hc);
+        i.local_get(hc).call(F_ALLOC);
+        i.local_tee(hc); // reuse: chunk handle (byte count now spent)
+        i.i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_get(hoff).i32_add();
+        i.local_get(hc).i32_load(len_memarg());
+        i.memory_copy(0, 0);
+        i.local_get(ho).local_get(hw).i32_add().local_get(hc).i32_store(slot_memarg(0));
+        i.local_get(hw).i32_const(4).i32_add().local_set(hw);
+        i.local_get(hoff).local_get(hc).i32_load(len_memarg()).i32_add().local_set(hoff);
+        i.br(0).end().end();
+        i.local_get(ho);
+        i.end();
+        let _ = i;
+        for _ in 0..7 {
+            self.release_i32();
+        }
+        self.release_i64();
+        Ok(Some(SliceTy::List(self.types.intern(BYTES))))
+    }
+}
+
 fn byte_k(k: u8) -> MemArg {
     MemArg {
         offset: u64::from(almide_layout::PAYLOAD) + u64::from(k),
@@ -491,6 +600,199 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 Ok(None)
+            }
+            // slice: native usize-min clamps — a NEGATIVE bound casts
+            // huge and saturates to len (s >= e is the empty buffer).
+            ("slice", [b, s, e]) => {
+                self.lower(b, Some(BYTES))?;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(s, Some(INT))?;
+                let hs = self.hold_i64()?;
+                self.f.instructions().local_set(hs);
+                self.lower(e, Some(INT))?;
+                let he = self.hold_i64()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(he);
+                for h in [hs, he] {
+                    i.local_get(h);
+                    i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                    i.local_get(h)
+                        .local_get(hb)
+                        .i32_load(len_memarg())
+                        .i64_extend_i32_u()
+                        .i64_lt_u();
+                    i.select().local_set(h);
+                }
+                i.local_get(hs).local_get(he).i64_ge_u().if_(BlockType::Result(ValType::I32));
+                i.i32_const(0).call(F_ALLOC);
+                i.else_();
+                i.local_get(he).local_get(hs).i64_sub().i32_wrap_i64().call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hs)
+                    .i32_wrap_i64()
+                    .i32_add();
+                i.local_get(he).local_get(hs).i64_sub().i32_wrap_i64();
+                i.memory_copy(0, 0);
+                i.local_get(ho);
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(BYTES))
+            }
+            // The BE serialization cursor (#1099 intrinsics): append k
+            // big-endian bytes of the value, mut on the native surface —
+            // the push convention (var write-back, no value).
+            (
+                "write_u8" | "write_u16_be" | "write_u32_be" | "write_i64_be" | "write_f64_be",
+                [b, v],
+            ) => {
+                let IrExprKind::Var { id } = &b.kind else {
+                    return unsup("bytes-write-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                let (k, float) = match func {
+                    "write_u8" => (1, false),
+                    "write_u16_be" => (2, false),
+                    "write_u32_be" => (4, false),
+                    "write_i64_be" => (8, false),
+                    _ => (8, true),
+                };
+                self.lower_bytes_write_be(b, v, k, float)?;
+                self.emit_store_var(*id, var_idx, var_ty)?;
+                Ok(None)
+            }
+            // copy_within: memmove inside the buffer, NO-OP when the
+            // range is empty or the destination does not fit (native
+            // guard verbatim — the adds wrap in i64 exactly like the
+            // release-mode usize arithmetic they mirror).
+            ("copy_within", [b, s, e, d]) => {
+                let IrExprKind::Var { id } = &b.kind else {
+                    return unsup("bytes-copy-within-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                self.lower(b, Some(BYTES))?;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(s, Some(INT))?;
+                let hs = self.hold_i64()?;
+                self.f.instructions().local_set(hs);
+                self.lower(e, Some(INT))?;
+                let he = self.hold_i64()?;
+                self.f.instructions().local_set(he);
+                self.lower(d, Some(INT))?;
+                let hd = self.hold_i64()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hd);
+                i.local_get(hb).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb).i32_load(len_memarg());
+                i.memory_copy(0, 0);
+                // e = min_u(e, len)
+                i.local_get(he);
+                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.local_get(he)
+                    .local_get(hb)
+                    .i32_load(len_memarg())
+                    .i64_extend_i32_u()
+                    .i64_lt_u();
+                i.select().local_set(he);
+                // s < e  &&  d + (e - s) <= len
+                i.local_get(hs).local_get(he).i64_lt_u();
+                i.local_get(hd).local_get(he).i64_add().local_get(hs).i64_sub();
+                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.i64_le_u();
+                i.i32_and().if_(BlockType::Empty);
+                i.local_get(ho)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hd)
+                    .i32_wrap_i64()
+                    .i32_add();
+                i.local_get(ho)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hs)
+                    .i32_wrap_i64()
+                    .i32_add();
+                i.local_get(he).local_get(hs).i64_sub().i32_wrap_i64();
+                i.memory_copy(0, 0);
+                i.end();
+                i.local_get(ho);
+                let _ = i;
+                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.release_i32();
+                self.release_i64();
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                Ok(None)
+            }
+            // fill: every byte becomes `val as u8` — mut on the native
+            // surface (same convention).
+            ("fill", [b, v]) => {
+                let IrExprKind::Var { id } = &b.kind else {
+                    return unsup("bytes-fill-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                self.lower(b, Some(BYTES))?;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(v, Some(INT))?;
+                let hv = self.hold_i64()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hv);
+                i.local_get(hb).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hv).i32_wrap_i64();
+                i.local_get(hb).i32_load(len_memarg());
+                i.memory_fill(0);
+                i.local_get(ho);
+                let _ = i;
+                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(None)
+            }
+            // Concatenation: blocks share the string layout (len = bytes),
+            // so the string concat helper applies verbatim.
+            ("concat", [a, b]) => {
+                self.lower(a, Some(BYTES))?;
+                self.lower(b, Some(BYTES))?;
+                self.f.instructions().call(F_CONCAT);
+                Ok(Some(BYTES))
+            }
+            // chunks: size <= 0 is the empty list; the last chunk may be
+            // short. size clamps through i64 BEFORE any i32 narrowing so
+            // a huge size is ONE chunk, never a wrapped count.
+            ("chunks", [b, size]) => self.lower_bytes_chunks(b, size),
+            // to_string: std::str::from_utf8 verbatim — ok shares the
+            // block; err carries the Utf8Error Display line.
+            ("to_string", [b]) => {
+                let inv_pre = self.pool.intern("invalid UTF-8: invalid utf-8 sequence of ");
+                let inv_mid = self.pool.intern(" bytes from index ");
+                let inc_pre = self.pool.intern("invalid UTF-8: incomplete utf-8 byte sequence from index ");
+                let h = self.work.helper(Helper::BytesToString { inv_pre, inv_mid, inc_pre });
+                self.lower(b, Some(BYTES))?;
+                self.f.instructions().call(h);
+                Ok(Some(SliceTy::Result(self.types.intern(STR), self.types.intern(STR))))
             }
             // One i64 slot per byte (native to_list).
             ("to_list", [b]) => {

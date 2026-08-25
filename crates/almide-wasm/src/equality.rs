@@ -182,6 +182,112 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
             }
+            // Order-INSENSITIVE map equality (native AlmideMap PartialEq):
+            // same entry count, then every a-entry's key scans in b with
+            // an equal value (recursive through emit_val_eq).
+            SliceTy::Map(kh, vh) => {
+                let (kt, vt) = (self.types.el(kh), self.types.el(vh));
+                let scan = self.scan_helper(kt)?;
+                let (koff, voff, esz) = crate::collections::entry_layout(kt, vt);
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                let verdict = self.hold_i32()?;
+                let cur = self.hold_i32()?;
+                let end = self.hold_i32()?;
+                let he = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hb).local_set(ha);
+                    i.local_get(ha).i32_load(len_memarg());
+                    i.local_get(hb).i32_load(len_memarg());
+                    i.i32_ne().if_(BlockType::Result(ValType::I32));
+                    i.i32_const(0);
+                    i.else_();
+                    i.i32_const(1).local_set(verdict);
+                    i.local_get(ha)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_set(cur);
+                    i.local_get(cur).local_get(ha).i32_load(len_memarg()).i32_add().local_set(end);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+                    i.local_get(hb).i32_const(esz as i32).i32_const(koff as i32);
+                    i.local_get(cur).i32_const(koff as i32).i32_add();
+                }
+                self.load_ty_slot_at(kt);
+                {
+                    let mut i = self.f.instructions();
+                    i.call(scan).local_tee(he).i32_eqz().if_(BlockType::Empty);
+                    i.i32_const(0).local_set(verdict);
+                    i.br(2);
+                    i.end();
+                    i.local_get(cur).i32_const(voff as i32).i32_add();
+                }
+                self.load_ty_slot_at(vt);
+                self.f.instructions().local_get(he).i32_const(voff as i32).i32_add();
+                self.load_ty_slot_at(vt);
+                self.emit_val_eq(vt)?;
+                {
+                    let mut i = self.f.instructions();
+                    i.i32_eqz().if_(BlockType::Empty);
+                    i.i32_const(0).local_set(verdict);
+                    i.br(2);
+                    i.end();
+                    i.local_get(cur).i32_const(esz as i32).i32_add().local_set(cur);
+                    i.br(0).end().end();
+                    i.local_get(verdict);
+                    i.end();
+                }
+                for _ in 0..6 {
+                    self.release_i32();
+                }
+            }
+            // Order-insensitive set equality: same count (dedup makes the
+            // count the cardinality), then every a-member scans in b.
+            SliceTy::Set(h) => {
+                let et = self.types.el(h);
+                let scan = self.scan_helper(et)?;
+                let stride = et.slot_size() as i32;
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                let verdict = self.hold_i32()?;
+                let cur = self.hold_i32()?;
+                let end = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hb).local_set(ha);
+                    i.local_get(ha).i32_load(len_memarg());
+                    i.local_get(hb).i32_load(len_memarg());
+                    i.i32_ne().if_(BlockType::Result(ValType::I32));
+                    i.i32_const(0);
+                    i.else_();
+                    i.i32_const(1).local_set(verdict);
+                    i.local_get(ha)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_set(cur);
+                    i.local_get(cur).local_get(ha).i32_load(len_memarg()).i32_add().local_set(end);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+                    i.local_get(hb).i32_const(stride).i32_const(0);
+                    i.local_get(cur);
+                }
+                self.load_ty_slot_at(et);
+                {
+                    let mut i = self.f.instructions();
+                    i.call(scan).i32_eqz().if_(BlockType::Empty);
+                    i.i32_const(0).local_set(verdict);
+                    i.br(2);
+                    i.end();
+                    i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
+                    i.br(0).end().end();
+                    i.local_get(verdict);
+                    i.end();
+                }
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+            }
             other => return unsup(&format!("binop:eq-{other:?}")),
         }
         Ok(())

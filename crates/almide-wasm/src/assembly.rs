@@ -284,7 +284,9 @@ pub(crate) fn resolve_extras(
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match h {
-            Helper::ValueKeys | Helper::Utf8Lossy => vec![ValType::I32],
+            Helper::ValueKeys | Helper::Utf8Lossy | Helper::BytesToString { .. } => {
+                vec![ValType::I32]
+            }
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             _ => vec![ValType::I32, ValType::I32],
         };
@@ -310,6 +312,9 @@ pub(crate) fn resolve_extras(
             Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
             Helper::StringSplit => value_helpers::emit_string_split_helper(),
             Helper::ScanF64 => runtime::emit_scan_f64(),
+            Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
+                value_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
+            }
             Helper::DisplayNamed { ti } => {
                 match work.display_bodies.borrow_mut().remove(ti) {
                     Some(work::DisplayBuild::Built(f)) => f,

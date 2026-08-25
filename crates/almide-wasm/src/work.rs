@@ -38,6 +38,10 @@ pub(crate) enum Helper {
     /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
     /// subpart (the WHATWG replacement walk).
     Utf8Lossy,
+    /// `$bytes_to_string(bytes) -> i32` — std::str::from_utf8 verbatim:
+    /// ok(shared block) or err(the Utf8Error Display line, "invalid
+    /// UTF-8: " prefixed — the native wrapper's format).
+    BytesToString { inv_pre: u32, inv_mid: u32, inc_pre: u32 },
     /// `$scan_f64(block, stride, off, needle) -> i32` — the float lane of
     /// the scan family (native PartialEq: -0.0 == 0.0, NaN never matches;
     /// a Helper, not a fixed function, because its f64 param breaks the

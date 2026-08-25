@@ -125,6 +125,19 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     "bytes_read_i32_be_array", "bytes_read_i32_le_array", "bytes_read_i64_be_array",
     "bytes_read_i64_le_array", "bytes_read_string_be", "bytes_read_u16_be_array",
     "bytes_read_u16_le_array", "bytes_read_u32_be_array", "bytes_read_u32_le_array",
+    // bytes_typed.almd (Endian-argument wrappers, #1098): audited 2026-08-25 —
+    // prim.alloc_bytes + load8/store8 on Bytes payloads only (len=bytes on
+    // both legs), payload offset 12 = OUR PAYLOAD; the Endian ctors build a
+    // 1-byte block only this module reads; reads/sets cross-call the C-229
+    // native matrix; write_* return the fresh grown block (v1 rebind form).
+    "bytes_endian_le", "bytes_endian_be", "bytes_read_uint16", "bytes_read_uint32",
+    "bytes_read_int32", "bytes_read_float32", "bytes_write_uint16", "bytes_write_uint32",
+    "bytes_write_int32", "bytes_write_float32", "bytes_set_uint16", "bytes_set_uint32",
+    "bytes_set_int32", "bytes_set_float32",
+    // bytes_append_multi.almd cursor tail (#1099): the __bam grow-append
+    // shape — prim.load32(handle+4) is the Bytes LEN header (len = bytes
+    // on both legs); same audit as the append_* family above.
+    "bytes_write_bool", "bytes_write_string_be",
 ];
 
 /// The exempt-tier members of the same audit (tuple/Option returners
