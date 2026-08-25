@@ -102,6 +102,24 @@ impl LowerCtx {
         {
             let ty = tail.ty.clone();
             if let Some(dst) = self.lower_heap_result_arm(tail, &ty) {
+                // The arm sub-paths end with `Op::Consume { dst }` — the
+                // per-arm "moved into the merge" marker. In TAIL position
+                // there is no merge: the move-out is the function return's
+                // own `m`, and keeping the arm's marker double-moves the
+                // carrier on the witness (`imm` — the kernel-proven checker
+                // rejects it as an unowned dec; caught by the corpus-wall
+                // PCC gate, Trust Spine red on 8c94f66c8). Remove that one
+                // trailing marker — `Consume` is codegen-neutral, so the
+                // rendered code is byte-identical; only the witness changes.
+                // An arm path that never Consumed (the val-move-only style)
+                // has nothing to remove and already balances via the ret `m`.
+                if let Some(pos) = self
+                    .ops
+                    .iter()
+                    .rposition(|op| matches!(op, Op::Consume { v } if *v == dst))
+                {
+                    self.ops.remove(pos);
+                }
                 return Ok(Some(dst));
             }
         }
