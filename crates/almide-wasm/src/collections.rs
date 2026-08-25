@@ -28,6 +28,10 @@ impl Emitter<'_> {
             BOOL => Ok(F_SCAN_W32),
             STR => Ok(F_SCAN_STR),
             FLOAT => Ok(self.work.helper(Helper::ScanF64)),
+            SliceTy::Tuple(_) | SliceTy::Named(_) => {
+                let key = self.types.intern(k);
+                Ok(self.work.helper(Helper::ScanDeep { key }))
+            }
             other => unsup(&format!("map-key:{other:?}")),
         }
     }
@@ -494,7 +498,9 @@ impl Emitter<'_> {
                     },
                     other => return unsup(&format!("map-from-of:{other:?}")),
                 };
-                let SliceTy::Scalar(_) = k else { return unsup("map-key-nonscalar") };
+                if !matches!(k, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+                    return unsup("map-key-nonscalar");
+                }
                 let pair_def = self.types.tuple_def(pair_ti);
                 let (koff_p, voff_p) = (pair_def.fields[0].1, pair_def.fields[1].1);
                 let lay = entry_layout(k, v);

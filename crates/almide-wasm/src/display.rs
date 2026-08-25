@@ -455,7 +455,17 @@ pub(crate) fn build_display_helpers(
                 .collect();
             (d, e)
         };
-        if todo.is_empty() && todo_eq.is_empty() {
+        let todo_scan: Vec<crate::ETy> = {
+            let hs = work.helpers.borrow();
+            let scan_bodies = work.scan_bodies.borrow();
+            hs.iter()
+                .filter_map(|h| match h {
+                    Helper::ScanDeep { key } if !scan_bodies.contains_key(key) => Some(*key),
+                    _ => None,
+                })
+                .collect()
+        };
+        if todo.is_empty() && todo_eq.is_empty() && todo_scan.is_empty() {
             return Ok(all_calls);
         }
         for ti in todo {
@@ -484,7 +494,111 @@ pub(crate) fn build_display_helpers(
                 }
             }
         }
+        for key in todo_scan {
+            match build_one_scan_helper(table, types, work, pool, key) {
+                Ok((f, calls)) => {
+                    all_calls.extend(calls.iter().copied());
+                    work.scan_bodies.borrow_mut().insert(key, crate::work::DisplayBuild::Built(f));
+                }
+                Err(e) => {
+                    work.scan_bodies.borrow_mut().insert(key, crate::work::DisplayBuild::Failed);
+                    return Err(e);
+                }
+            }
+        }
     }
+}
+
+/// One `(block, stride, off, needle) -> address|0` DEEP scan body: walk
+/// the entries comparing the key slot by the type-directed `==`.
+fn build_one_scan_helper(
+    table: &FnTable,
+    types: &TypeTable,
+    work: &FnWork,
+    pool: &mut Pool,
+    key: crate::ETy,
+) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
+    use crate::emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
+    use wasm_encoder::{BlockType, ValType};
+    // params 0-3, then FIVE i32s (4=p, 5=end, 6=tmp, 7=scr_i32, 8=spare),
+    // one i64 (9 = scr_i64), one f64 (10 = scr_f64), pools from 11 — the
+    // 4-param shift once left hold_i32_base on an f64 slot (validator).
+    let local_decls = [
+        (5, ValType::I32),
+        (1, ValType::I64),
+        (1, ValType::F64),
+        (HOLD_I32_POOL, ValType::I32),
+        (HOLD_I64_POOL, ValType::I64),
+        (HOLD_F64_POOL, ValType::F64),
+    ];
+    let mut f = wasm_encoder::Function::new(local_decls);
+    let mut calls = std::collections::HashSet::new();
+    let empty_locals = std::collections::HashMap::new();
+    let empty_globals = std::collections::HashMap::new();
+    let empty_ranges = std::collections::HashMap::new();
+    let empty_cells = std::collections::HashSet::new();
+    {
+        let mut em = Emitter {
+            pool,
+            locals: &empty_locals,
+            table,
+            types,
+            calls: &mut calls,
+            fn_ret: None,
+            cursor_local: 8,
+            tmp_i32_local: 6,
+            scr_i32_local: 7,
+            scr_i64_local: 9,
+            in_main: false,
+            work,
+            globals: &empty_globals,
+            deferred_ranges: &empty_ranges,
+            metered: false,
+            cells: &empty_cells,
+            region_repair: None,
+            loop_ctl: None,
+            in_tail: false,
+            cur_module: None,
+            hold_i32_base: 11,
+            hold_i32_depth: 0,
+            hold_i64_base: 11 + HOLD_I32_POOL,
+            hold_i64_depth: 0,
+            hold_f64_base: 11 + HOLD_I32_POOL + HOLD_I64_POOL,
+            hold_f64_depth: 0,
+            scr_f64_local: 10,
+            f: &mut f,
+        };
+        // params: 0=block, 1=stride, 2=off, 3=needle; locals 4=p, 5=end
+        let (blk, stride, off, needle, p_, end_) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
+        let kt = em.types.el(key);
+        {
+            let mut i = em.f.instructions();
+            i.local_get(blk)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .local_tee(p_);
+            i.local_get(blk).i32_load(len_memarg()).i32_add().local_set(end_);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(p_).local_get(end_).i32_ge_u().br_if(1);
+            i.local_get(p_)
+                .local_get(off)
+                .i32_add()
+                .i32_load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 });
+            i.local_get(needle);
+        }
+        em.emit_val_eq(kt)?;
+        {
+            let mut i = em.f.instructions();
+            i.if_(BlockType::Empty);
+            i.local_get(p_).return_();
+            i.end();
+            i.local_get(p_).local_get(stride).i32_add().local_set(p_);
+            i.br(0).end().end();
+            i.i32_const(almide_layout::NULL_ADDR as i32);
+        }
+    }
+    f.instructions().end();
+    Ok((f, calls))
 }
 
 /// One `(a, b) -> i32` deep-equality body for a RECURSIVE Named type —

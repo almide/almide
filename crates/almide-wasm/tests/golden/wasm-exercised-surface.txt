@@ -352,6 +352,7 @@ call:matrix.zeros
 call:option.filter
 call:option.flat_map
 call:option.flatten
+call:option.is_some
 call:option.map
 call:option.or_else
 call:option.to_list

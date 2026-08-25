@@ -559,7 +559,7 @@ impl Emitter<'_> {
             INT => Ok(F_SCAN_W64),
             BOOL => Ok(F_SCAN_W32),
             STR => Ok(F_SCAN_STR),
-            other => unsup(&format!("map-key:{other:?}")),
+            _ => self.scan_helper(k),
         }
     }
 }

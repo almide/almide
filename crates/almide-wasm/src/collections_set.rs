@@ -152,7 +152,12 @@ impl Emitter<'_> {
                     SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("set-from-of:{other:?}")),
                 };
-                let SliceTy::Scalar(_) = e else { return unsup("set-elem-nonscalar") };
+                if !matches!(
+                    e,
+                    SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)
+                ) {
+                    return unsup("set-elem-nonscalar");
+                }
                 let stride = e.slot_size();
                 let scan = self.scan_helper(e)?;
                 let bh = self.hold_i32()?;

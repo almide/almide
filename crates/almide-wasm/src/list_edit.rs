@@ -283,7 +283,16 @@ impl Emitter<'_> {
             other => return unsup(&format!("list-index-of-of:{other:?}")),
         };
         let elem = self.types.el(h);
-        if !matches!(elem, INT | FLOAT | STR | BOOL) {
+        if !matches!(
+            elem,
+            INT | FLOAT
+                | STR
+                | BOOL
+                | SliceTy::Tuple(_)
+                | SliceTy::Named(_)
+                | SliceTy::List(_)
+                | SliceTy::Option(_)
+        ) {
             return unsup(&format!("list-index-of-elem:{elem:?}"));
         }
         let stride = elem.slot_size() as i32;
@@ -316,8 +325,14 @@ impl Emitter<'_> {
             STR => {
                 i.call(F_STR_EQ);
             }
-            _ => {
+            BOOL => {
                 i.i32_eq();
+            }
+            // Compound handles: the type-directed deep `==`.
+            _ => {
+                let _ = i;
+                self.emit_val_eq(elem)?;
+                i = self.f.instructions();
             }
         }
         i.if_(BlockType::Empty);

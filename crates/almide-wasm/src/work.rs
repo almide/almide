@@ -43,6 +43,10 @@ pub(crate) enum Helper {
     /// `$named_eq_<ti>(a, b) -> i32` — runtime-recursive deep equality
     /// of a RECURSIVE Named type (the DisplayNamed doctrine for `==`).
     NamedEq { ti: u32 },
+    /// `$scan_deep_<key>(block, stride, off, needle) -> i32` — the scan
+    /// family's DEEP lane: compound keys (tuples, records) compare by
+    /// the type-directed `==` instead of a word/byte class.
+    ScanDeep { key: crate::ETy },
     /// `$q10_val(data, off, k) -> f64` — one Q1_0 weight (global-k).
     Q10Val,
     /// `$gelu(f64) -> f64` — tanh-approximation gelu over `$fast_exp`.
@@ -109,6 +113,7 @@ pub(crate) struct FnWork {
     /// promised index with `unreachable`).
     pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
     pub(crate) eq_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
+    pub(crate) scan_bodies: std::cell::RefCell<HashMap<crate::ETy, DisplayBuild>>,
 }
 
 pub(crate) enum DisplayBuild {

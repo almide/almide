@@ -53,14 +53,19 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         }
         Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
             let k = slice_ty_of(&args[0], types)?;
-            // Keys need defined equality — scalars only.
-            let SliceTy::Scalar(_) = k else { return None };
+            // Keys need defined equality: scalars via the word/byte
+            // scans, tuples/records via the deep-scan lane.
+            if !matches!(k, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+                return None;
+            }
             let v = slice_ty_of(&args[1], types)?;
             Some(SliceTy::Map(types.intern(k), types.intern(v)))
         }
         Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => {
             let e = slice_ty_of(&args[0], types)?;
-            let SliceTy::Scalar(_) = e else { return None };
+            if !matches!(e, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+                return None;
+            }
             Some(SliceTy::Set(types.intern(e)))
         }
         Ty::Tuple(args) => {

@@ -320,6 +320,14 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
             f
         }
     },
+    Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
+        Some(work::DisplayBuild::Built(f)) => f,
+        _ => {
+            let mut f = Function::new([]);
+            f.instructions().unreachable().end();
+            f
+        }
+    },
     }
 }
 
@@ -341,6 +349,9 @@ pub(crate) fn resolve_extras(
                 vec![ValType::I32]
             }
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
+            Helper::ScanDeep { .. } => {
+                vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
+            }
             Helper::FastExp | Helper::GeluScalar { .. } => vec![ValType::F64],
             Helper::Q10Val => vec![ValType::I32, ValType::I64, ValType::I64],
             _ => vec![ValType::I32, ValType::I32],
