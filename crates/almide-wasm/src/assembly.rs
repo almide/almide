@@ -300,7 +300,7 @@ pub(crate) fn resolve_extras(
             ),
             Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
             Helper::ValueField => value_helpers::emit_value_field_helper(),
-            Helper::Utf8Lossy => value_helpers::emit_utf8_lossy_helper(),
+            Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
             Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
                 work.helper_base.get() + hpos as u32,
                 *key_off,
@@ -313,7 +313,7 @@ pub(crate) fn resolve_extras(
             Helper::StringSplit => value_helpers::emit_string_split_helper(),
             Helper::ScanF64 => runtime::emit_scan_f64(),
             Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
-                value_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
+                utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
             }
             Helper::DisplayNamed { ti } => {
                 match work.display_bodies.borrow_mut().remove(ti) {
