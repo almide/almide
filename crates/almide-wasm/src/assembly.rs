@@ -289,24 +289,24 @@ pub(crate) fn resolve_extras(
         };
         let ti = work.itype(params, Some(ValType::I32));
         let f = match h {
-            Helper::JsonValue { float_to_string, frags } => value::emit_json_value_helper(
+            Helper::JsonValue { float_to_string, frags } => value_helpers::emit_json_value_helper(
                 work.helper_base.get(),
                 &helper_snapshot,
                 *float_to_string,
                 *frags,
             ),
-            Helper::JsonQuote { frags } => value::emit_json_quote_helper(*frags),
-            Helper::ValueField => value::emit_value_field_helper(),
-            Helper::ValueEq { key_off, val_off } => value::emit_value_eq_helper(
+            Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
+            Helper::ValueField => value_helpers::emit_value_field_helper(),
+            Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
                 work.helper_base.get() + hpos as u32,
                 *key_off,
                 *val_off,
             ),
             Helper::ValueMerge { key_off, val_off } => {
-                value::emit_value_merge_helper(*key_off, *val_off)
+                value_helpers::emit_value_merge_helper(*key_off, *val_off)
             }
-            Helper::ValueKeys => value::emit_value_keys_helper(),
-            Helper::StringSplit => value::emit_string_split_helper(),
+            Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
+            Helper::StringSplit => value_helpers::emit_string_split_helper(),
             Helper::DisplayNamed { ti } => {
                 match work.display_bodies.borrow_mut().remove(ti) {
                     Some(work::DisplayBuild::Built(f)) => f,

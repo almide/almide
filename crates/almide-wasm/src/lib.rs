@@ -103,6 +103,7 @@ mod sums;
 mod tco;
 mod types_table;
 mod value;
+mod value_helpers;
 
 use collect::collect_binds;
 use emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
