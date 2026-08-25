@@ -2701,3 +2701,16 @@ record the closure.
   the size ratchet tolerated it within cap and the baseline was
   re-ratified deliberately. Negative checks performed on all four
   gates. #1585 and #1586 closed with evidence.
+
+## Stage 100 (2026-08-26): #1587 RC arc opens — the floor before the mechanism
+
+- run_wasm_capped (StoreLimits memory budget) + rc_budget.rs: the W-8
+  heap-budget acceptance gate, pinned to TODAY's bump-only truth —
+  churn OOMs under 16 MiB (defined C-197 surface, never a raw trap),
+  completes under 256 MiB, 128 KiB anti-vacuous twin always OOMs. The
+  16 MiB flip to completion is the arc's ACCEPTANCE EVENT, executable.
+- Staged charter on #1587: RC-2 free-list reuse → RC-3 drop glue +
+  scope-exit drops → RC-4 callee-owned inc/dec + last-use cancellation
+  → RC-5 COW elision. Value semantics never forks (binds keep deep-
+  copying until RC-5), so the corpus stays byte-green through the
+  middle stages and the alloc ledger prices each one.
