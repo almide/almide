@@ -123,3 +123,25 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         _ => None,
     }
 }
+
+// Reason-string name helpers (moved from lib.rs for the file budget).
+pub(crate) fn expr_kind_name(k: &IrExprKind) -> String {
+    let dbg = format!("{k:?}");
+    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
+}
+
+pub(crate) fn stmt_kind_name(k: &IrStmtKind) -> String {
+    let dbg = format!("{k:?}");
+    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
+}
+
+pub(crate) fn pattern_name(p: &IrPattern) -> String {
+    let dbg = format!("{p:?}");
+    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
+}
+
+pub(crate) fn ty_name(t: &Ty) -> String {
+    let dbg = format!("{t:?}");
+    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
+}
+

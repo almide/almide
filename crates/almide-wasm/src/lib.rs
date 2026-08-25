@@ -687,26 +687,6 @@ fn pattern_irrefutable(p: &IrPattern) -> bool {
     }
 }
 
-fn expr_kind_name(k: &IrExprKind) -> String {
-    let dbg = format!("{k:?}");
-    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
-}
-
-fn stmt_kind_name(k: &IrStmtKind) -> String {
-    let dbg = format!("{k:?}");
-    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
-}
-
-fn pattern_name(p: &IrPattern) -> String {
-    let dbg = format!("{p:?}");
-    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
-}
-
-fn ty_name(t: &Ty) -> String {
-    let dbg = format!("{t:?}");
-    dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
-}
-
 /// Top-lets (root + module) as wasm globals + the dependency init order
 /// (split from emit_program for the complexity budget).
 #[allow(clippy::type_complexity)]
