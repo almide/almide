@@ -2350,3 +2350,39 @@ whole way:
   extraction at every slice (the push gate caught one B(89) mid-stage
   and it was repaired BEFORE pushing).
 - CI: 83e194ea9 full green (all five jobs). 453/599, divergence zero.
+
+## Stage 72 — the sized-integer arc lands: 459 → 467
+
+The design turned out LIGHT because the interp had already ratified the
+doctrine (one i64 slot everywhere; sized-ness lives on the checker
+types): the wasm leg now mirrors it exactly.
+
+- **scalar_of**: Int8..UInt64 → the ONE Int slot. That alone opened
+  every bind/collection/closure/capture path — no new layout existed to
+  get wrong.
+- **C-180 wrap**: +/-/*/** re-wrap to the operands' declared narrow
+  width (i64.extend8/16/32_s for signed; mask for unsigned), keyed on
+  the operand types, emitted post-op.
+- **C-179 UInt64 lane**: div/rem/ordering read the slot as a u64 bit
+  pattern (i64.div_u/rem_u, lt_u/gt_u/le_u/ge_u); the signed
+  magic-division strength-reduction EXCLUDES this lane (the magic
+  sequence is signed).
+- **C-002 width trap**: the div/rem overflow guard compares the TRUE
+  declared MIN (-128 for Int8, where i64 division would happily return
+  128), aborting "Error: integer overflow" exactly like native.
+- **The 233-cell conversion whitelist** (whitelist.rs): the whole
+  int/uint/float sized-conversion family admitted as ONE audited class —
+  the prim scan shows pure scalar ops only (band/bor/bshl/f2i/i2f),
+  no loads/stores/handles, so no layout coupling can exist. Checked
+  cells sit in the SUM tier (constructor-built options). Float32 cells
+  stay excluded (their own arc); an over-collected first draft (base64/
+  datetime/hash rows from a bad block cut) was caught by a
+  family-pattern audit before it could admit anything unaudited.
+- float.sqrt joins math.sqrt (one f64.sqrt, correctly rounded on both).
+- **Mutation finding**: refreshing 008 revealed that a
+  zero-guard-ONLY removal SURVIVES the incremental nets — no claimed
+  fixture observes the plain division-by-zero abort in isolation (the
+  MIN/-1 observers are what kill the full mutant). Candidate als
+  fixture at the next pin advance.
+
+467/599, divergence zero, A(90), 51 suites green.
