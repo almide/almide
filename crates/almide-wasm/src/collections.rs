@@ -261,6 +261,52 @@ impl Emitter<'_> {
             // fold over entries in insertion order: (acc, k, v) => acc'.
             // Insertion-ordered (K, V) pairs — memory order IS the
             // map's insertion order, so a straight walk is exact.
+            // keys/values: ONE side of every entry, insertion order.
+            ("keys" | "values", [m]) => {
+                let keys = func == "keys";
+                let (k, v) = match self.lower(m, None)? {
+                    SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
+                    other => return unsup(&format!("map-{func}-of:{other:?}")),
+                };
+                let (koff, voff, esz) = entry_layout(k, v);
+                let (side, soff) = if keys { (k, koff) } else { (v, voff) };
+                let stride = side.slot_size() as i32;
+                let hm = self.hold_i32()?;
+                let hcur = self.hold_i32()?;
+                let hend = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let hw = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hm);
+                i.local_get(hm).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hcur);
+                i.local_get(hcur).local_get(hm).i32_load(len_memarg()).i32_add().local_set(hend);
+                i.local_get(hm)
+                    .i32_load(len_memarg())
+                    .i32_const(esz as i32)
+                    .i32_div_u()
+                    .i32_const(stride)
+                    .i32_mul()
+                    .call(F_ALLOC)
+                    .local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hw);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
+                i.local_get(hw);
+                i.local_get(hcur).i32_const(soff as i32).i32_add();
+                let _ = i;
+                self.load_ty_slot_at(side);
+                self.store_ty_slot_at(side);
+                let mut i = self.f.instructions();
+                i.local_get(hw).i32_const(stride).i32_add().local_set(hw);
+                i.local_get(hcur).i32_const(esz as i32).i32_add().local_set(hcur);
+                i.br(0).end().end();
+                i.local_get(ho);
+                let _ = i;
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+                Ok(Some(SliceTy::List(self.types.intern(side))))
+            }
             ("entries", [m]) => {
                 let (kh, vh) = match self.lower(m, None)? {
                     SliceTy::Map(kh, vh) => (kh, vh),
@@ -515,6 +561,16 @@ impl Emitter<'_> {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_load(m),
             wasm_encoder::ValType::F64 => self.f.instructions().f64_load(m),
             _ => self.f.instructions().i32_load(m),
+        };
+    }
+
+    /// `[addr, value]` -> store at addr (absolute, offset 0).
+    pub(crate) fn store_ty_slot_at(&mut self, t: SliceTy) {
+        let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
+        match t.val_type() {
+            wasm_encoder::ValType::I64 => self.f.instructions().i64_store(m),
+            wasm_encoder::ValType::F64 => self.f.instructions().f64_store(m),
+            _ => self.f.instructions().i32_store(m),
         };
     }
 
