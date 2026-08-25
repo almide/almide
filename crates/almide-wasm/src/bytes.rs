@@ -251,6 +251,14 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
                 Ok(Some(BYTES))
             }
+            // Native from_utf8_lossy (the WHATWG helper) — the self-host
+            // impl is a raw copy and must not shadow this.
+            ("to_string_lossy", [b]) => {
+                self.lower(b, Some(BYTES))?;
+                let lossy = self.work.helper(Helper::Utf8Lossy);
+                self.f.instructions().call(lossy);
+                Ok(Some(STR))
+            }
             ("from_string", [s]) => {
                 self.lower(s, Some(STR))?;
                 self.f.instructions().call(F_BLOCK_COPY);

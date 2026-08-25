@@ -284,7 +284,7 @@ pub(crate) fn resolve_extras(
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match h {
-            Helper::ValueKeys => vec![ValType::I32],
+            Helper::ValueKeys | Helper::Utf8Lossy => vec![ValType::I32],
             _ => vec![ValType::I32, ValType::I32],
         };
         let ti = work.itype(params, Some(ValType::I32));
@@ -297,6 +297,7 @@ pub(crate) fn resolve_extras(
             ),
             Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
             Helper::ValueField => value_helpers::emit_value_field_helper(),
+            Helper::Utf8Lossy => value_helpers::emit_utf8_lossy_helper(),
             Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
                 work.helper_base.get() + hpos as u32,
                 *key_off,

@@ -26,6 +26,7 @@ impl Emitter<'_> {
             ("handle", [x]) => {
                 match self.lower(x, None)? {
                     SliceTy::Scalar(Scalar::Str)
+                    | SliceTy::Scalar(Scalar::Bytes)
                     | SliceTy::List(_)
                     | SliceTy::Map(..)
                     | SliceTy::Set(_)

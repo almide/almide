@@ -121,7 +121,7 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     "bytes_read_i32_be_array", "bytes_read_i32_le_array", "bytes_read_i64_be_array",
     "bytes_read_i64_le_array", "bytes_read_string_be", "bytes_read_u16_be_array",
     "bytes_read_u16_le_array", "bytes_read_u32_be_array", "bytes_read_u32_le_array",
-    "bytes_to_string_lossy", "json_get_array", "json_get_bool", "json_get_float",
+    "json_get_array", "json_get_bool", "json_get_float",
     "json_get_int", "json_get_string",
 ];
 

@@ -26,25 +26,18 @@ impl Emitter<'_> {
         match (func.as_str(), args) {
             // mut append (native s.push_str): var write-back of concat.
             ("push", [v, x]) => self.lower_string_push(v, x),
-            // from_bytes = from_list ∘ the LINKED lossy decoder — the
-            // native from_utf8_lossy IS bytes.to_string_lossy's WHATWG
-            // walk; the self-host string_from_bytes stays unlinkable
-            // (it reads the list len header raw).
+            // from_bytes = from_list ∘ the NATIVE WHATWG lossy helper
+            // (String::from_utf8_lossy verbatim). The self-host
+            // string_from_bytes reads the list len header raw and the
+            // self-host bytes_to_string_lossy is a RAW COPY (not lossy)
+            // — both unlinkable; the helper is the one true decoder.
             ("from_bytes", [xs]) => {
-                let Some(fi) = self.resolve_qualified("bytes.to_string_lossy") else {
-                    return unsup("from-bytes-lossy-unlinked");
-                };
-                let info = &self.table.infos[fi];
-                if info.refuse.is_some() || info.ret != Some(STR) {
-                    return unsup("from-bytes-lossy-impl");
-                }
-                let idx = info.wasm_index;
-                self.calls.insert(fi);
                 match self.lower_bytes_call("from_list", std::slice::from_ref(xs))? {
                     Some(SliceTy::Scalar(Scalar::Bytes)) => {}
                     other => return unsup(&format!("from-bytes-of:{other:?}")),
                 }
-                self.f.instructions().call(idx);
+                let lossy = self.work.helper(Helper::Utf8Lossy);
+                self.f.instructions().call(lossy);
                 Ok(Some(STR))
             }
             ("is_empty", [s]) => {

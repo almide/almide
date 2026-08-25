@@ -34,6 +34,10 @@ pub(crate) enum Helper {
     /// (B's value wins on a shared key), then B's new keys in B order;
     /// any non-Object operand yields b (the oracle's value_merge).
     ValueMerge { key_off: u32, val_off: u32 },
+    /// `$utf8_lossy(bytes) -> str` — String::from_utf8_lossy verbatim:
+    /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
+    /// subpart (the WHATWG replacement walk).
+    Utf8Lossy,
     /// `$split(str, sep) -> i32` — Rust split semantics: byte-level
     /// full-separator match, non-overlapping left-to-right, empty pieces
     /// kept, count = separators + 1. Empty separator traps (Rust's

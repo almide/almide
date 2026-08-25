@@ -245,10 +245,12 @@ call:string.count
 call:string.drop
 call:string.drop_end
 call:string.ends_with
+call:string.from_bytes
 call:string.from_codepoint
 call:string.get
 call:string.index_of
 call:string.is_alphanumeric
+call:string.is_digit
 call:string.is_empty
 call:string.is_whitespace
 call:string.join
@@ -265,6 +267,8 @@ call:string.run_length_encode
 call:string.slice
 call:string.split
 call:string.starts_with
+call:string.strip_prefix
+call:string.strip_suffix
 call:string.take
 call:string.take_end
 call:string.to_bytes
