@@ -22,6 +22,25 @@ fn raw32() -> MemArg {
 }
 
 impl Emitter<'_> {
+    /// Four-arg loader/selector family, split by name.
+    pub(crate) fn lower_matrix_loader(
+        &mut self,
+        func: &str,
+        a: &IrExpr,
+        b: &IrExpr,
+        c: &IrExpr,
+        d: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match func {
+            "from_bytes_f32_le" => self.lower_matrix_from_bytes(false, a, b, c, d),
+            "from_bytes_f16_le" => self.lower_matrix_from_bytes(true, a, b, c, d),
+            "select_rows_f32" => self.lower_matrix_select_f32(a, b, c, d),
+            "from_q1_0_bytes" => self.lower_matrix_q1_0(false, a, b, c, d),
+            "select_rows_q1_0" => self.lower_matrix_q1_0(true, a, b, c, d),
+            _ => self.lower_matrix_q8_select(a, b, c, d),
+        }
+    }
+
     /// Clamp an i64 hold to `max(v, 0)` in place.
     fn clamp0(&mut self, h: u32) {
         let mut i = self.f.instructions();

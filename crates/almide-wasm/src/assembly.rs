@@ -270,6 +270,51 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     Ok(module.finish())
 }
 
+/// One emitted-helper BODY (split from resolve_extras for the
+/// complexity budget).
+fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
+    match h {
+    Helper::JsonValue { float_to_string, frags } => value_helpers::emit_json_value_helper(
+        work.helper_base.get(),
+        &helper_snapshot,
+        *float_to_string,
+        *frags,
+    ),
+    Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
+    Helper::ValueField => value_helpers::emit_value_field_helper(),
+    Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
+    Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
+        work.helper_base.get() + hpos as u32,
+        *key_off,
+        *val_off,
+    ),
+    Helper::ValueMerge { key_off, val_off } => {
+        value_helpers::emit_value_merge_helper(*key_off, *val_off)
+    }
+    Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
+    Helper::StringSplit => value_helpers::emit_string_split_helper(),
+    Helper::ScanF64 => runtime::emit_scan_f64(),
+    Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
+        utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
+    }
+    Helper::FastExp => matrix_scalars::emit_fast_exp(),
+    Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
+    Helper::Q10Val => matrix_scalars::emit_q10_val(F_F16_TO_F64),
+    Helper::DisplayNamed { ti } => {
+        match work.display_bodies.borrow_mut().remove(ti) {
+            Some(work::DisplayBuild::Built(f)) => f,
+            // Failed (all callers refused) — keep the promised
+            // index aligned with a loud stub.
+            _ => {
+                let mut f = Function::new([]);
+                f.instructions().unreachable().end();
+                f
+            }
+        }
+    }
+    }
+}
+
 /// Emitted helpers + table-entry extras (shims, adapters, lifted
 /// lambdas) — split from emit_program for the complexity budget.
 pub(crate) fn resolve_extras(
@@ -297,46 +342,7 @@ pub(crate) fn resolve_extras(
             _ => ValType::I32,
         };
         let ti = work.itype(params, Some(ret));
-        let f = match h {
-            Helper::JsonValue { float_to_string, frags } => value_helpers::emit_json_value_helper(
-                work.helper_base.get(),
-                &helper_snapshot,
-                *float_to_string,
-                *frags,
-            ),
-            Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
-            Helper::ValueField => value_helpers::emit_value_field_helper(),
-            Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
-            Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
-                work.helper_base.get() + hpos as u32,
-                *key_off,
-                *val_off,
-            ),
-            Helper::ValueMerge { key_off, val_off } => {
-                value_helpers::emit_value_merge_helper(*key_off, *val_off)
-            }
-            Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
-            Helper::StringSplit => value_helpers::emit_string_split_helper(),
-            Helper::ScanF64 => runtime::emit_scan_f64(),
-            Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
-                utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
-            }
-            Helper::FastExp => matrix_scalars::emit_fast_exp(),
-            Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
-            Helper::Q10Val => matrix_scalars::emit_q10_val(F_F16_TO_F64),
-            Helper::DisplayNamed { ti } => {
-                match work.display_bodies.borrow_mut().remove(ti) {
-                    Some(work::DisplayBuild::Built(f)) => f,
-                    // Failed (all callers refused) — keep the promised
-                    // index aligned with a loud stub.
-                    _ => {
-                        let mut f = Function::new([]);
-                        f.instructions().unreachable().end();
-                        f
-                    }
-                }
-            }
-        };
+        let f = helper_body(h, work, helper_snapshot.as_slice(), hpos);
         extra_fns.push((ti, f));
     }
     let mut entry_fn_indices: Vec<u32> = Vec::new();
