@@ -69,7 +69,7 @@ impl Emitter<'_> {
             }
             // IEEE-754 requires sqrt correctly rounded: wasm f64.sqrt and
             // Rust's `f64::sqrt` are the SAME function, bit for bit.
-            ("math", "sqrt", [x]) => {
+            ("math" | "float", "sqrt", [x]) => {
                 self.lower(x, Some(FLOAT))?;
                 self.f.instructions().f64_sqrt();
                 Some(FLOAT)

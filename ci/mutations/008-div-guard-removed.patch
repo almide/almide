@@ -1,19 +1,26 @@
 diff --git a/crates/almide-wasm/src/binop.rs b/crates/almide-wasm/src/binop.rs
-index 872019151..9decb9e8b 100644
+index 30f0a19c7..7f50746a7 100644
 --- a/crates/almide-wasm/src/binop.rs
 +++ b/crates/almide-wasm/src/binop.rs
-@@ -56,12 +56,8 @@ impl Emitter<'_> {
+@@ -124,8 +124,7 @@ impl Emitter<'_> {
                  let l = self.hold_i64()?;
                  let mut i = self.f.instructions();
                  i.local_set(r).local_set(l);
 -                i.local_get(r).i64_eqz().if_(BlockType::Empty);
 -                i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
--                i.local_get(l).i64_const(i64::MIN).i64_eq();
--                i.local_get(r).i64_const(-1).i64_eq();
--                i.i32_and().if_(BlockType::Empty);
--                i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
 +                let _ = div0; // [MUTANT: div guards removed]
-+                let _ = ovf;
-                 i.local_get(l).local_get(r);
-                 match op {
-                     DivInt => i.i64_div_s(),
+                 if unsigned {
+                     // C-179: no overflow case exists in the unsigned lane.
+                     i.local_get(l).local_get(r);
+@@ -143,10 +142,7 @@ impl Emitter<'_> {
+                         Some((bits, true)) => -(1i64 << (bits - 1)),
+                         _ => i64::MIN,
+                     };
+-                    i.local_get(l).i64_const(min).i64_eq();
+-                    i.local_get(r).i64_const(-1).i64_eq();
+-                    i.i32_and().if_(BlockType::Empty);
+-                    i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
++                    let _ = (min, ovf); // [MUTANT]
+                     i.local_get(l).local_get(r);
+                     match op {
+                         DivInt => i.i64_div_s(),

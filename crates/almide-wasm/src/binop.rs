@@ -2,12 +2,52 @@
 //! complexity budget.
 
 use almide_ir::{BinOp, IrExpr, IrExprKind};
+use almide_types::types::Ty;
 use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
 use crate::*;
 
+/// (bits, signed) of a NARROW declared integer type — the C-180 wrap
+/// set. The i64 slot carries every integer; the declared width re-wraps
+/// +/-/*/** results (the interp's narrow_wrap_flow, mirrored).
+pub(crate) fn narrow_width(t: &Ty) -> Option<(u32, bool)> {
+    match t {
+        Ty::Int8 => Some((8, true)),
+        Ty::Int16 => Some((16, true)),
+        Ty::Int32 => Some((32, true)),
+        Ty::UInt8 => Some((8, false)),
+        Ty::UInt16 => Some((16, false)),
+        Ty::UInt32 => Some((32, false)),
+        _ => None,
+    }
+}
+
+/// C-179: a UInt64 operand's i64 slot is a u64 BIT PATTERN — division,
+/// remainder and ordering read it unsigned.
+pub(crate) fn is_uint64(t: &Ty) -> bool {
+    matches!(t, Ty::UInt64)
+}
+
 impl Emitter<'_> {
+    /// Re-wrap the i64 on the stack to the operands' declared narrow
+    /// width (no-op when neither operand is narrow).
+    fn emit_narrow_wrap(&mut self, lt: &Ty, rt: &Ty) {
+        let Some((bits, signed)) = narrow_width(lt).or_else(|| narrow_width(rt)) else {
+            return;
+        };
+        let mut i = self.f.instructions();
+        if signed {
+            match bits {
+                8 => i.i64_extend8_s(),
+                16 => i.i64_extend16_s(),
+                _ => i.i64_extend32_s(),
+            };
+        } else {
+            i.i64_const(((1u64 << bits) - 1) as i64).i64_and();
+        }
+    }
+
     pub(crate) fn lower_binop(
         &mut self,
         op: BinOp,
@@ -38,6 +78,8 @@ impl Emitter<'_> {
                     SubInt => i.i64_sub(),
                     _ => i.i64_mul(),
                 };
+                let _ = i;
+                self.emit_narrow_wrap(&left.ty, &right.ty);
                 Ok(INT)
             }
             // C-002: wasm's own div/rem semantics DIFFER from the native
@@ -48,11 +90,19 @@ impl Emitter<'_> {
             // ("Error: division by zero" / "Error: integer overflow" +
             // exit 1) before the op, so the op itself can never trap.
             DivInt | ModInt => {
+                let unsigned = is_uint64(&left.ty) || is_uint64(&right.ty);
                 // LITERAL divisor: strength-reduce (multiply-shift, no
                 // guards — the abortable divisors are excluded here).
                 // c in {0, -1, MIN} keeps the guarded runtime path; /1
                 // is the operand, %1 is zero (operand still evaluated).
-                if let IrExprKind::LitInt { value: c } = &right.kind {
+                // The magic sequence is SIGNED — a UInt64 lane keeps the
+                // runtime path (C-179), as does a narrow signed operand
+                // (its own MIN/-1 trap, C-002).
+                if !unsigned
+                    && narrow_width(&left.ty).is_none()
+                    && narrow_width(&right.ty).is_none()
+                    && let IrExprKind::LitInt { value: c } = &right.kind
+                {
                     let c = *c;
                     if !matches!(c, 0 | -1 | i64::MIN) {
                         self.lower(left, Some(INT))?;
@@ -76,20 +126,42 @@ impl Emitter<'_> {
                 i.local_set(r).local_set(l);
                 i.local_get(r).i64_eqz().if_(BlockType::Empty);
                 i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                i.local_get(l).i64_const(i64::MIN).i64_eq();
-                i.local_get(r).i64_const(-1).i64_eq();
-                i.i32_and().if_(BlockType::Empty);
-                i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
-                i.local_get(l).local_get(r);
-                match op {
-                    DivInt => i.i64_div_s(),
-                    _ => i.i64_rem_s(),
-                };
+                if unsigned {
+                    // C-179: no overflow case exists in the unsigned lane.
+                    i.local_get(l).local_get(r);
+                    match op {
+                        DivInt => i.i64_div_u(),
+                        _ => i.i64_rem_u(),
+                    };
+                } else {
+                    // C-002: the overflow trap compares the TRUE declared
+                    // MIN — i64::MIN, or the narrow width's own (-128 for
+                    // Int8, where i64 division would happily return 128).
+                    let min = match narrow_width(&left.ty)
+                        .or_else(|| narrow_width(&right.ty))
+                    {
+                        Some((bits, true)) => -(1i64 << (bits - 1)),
+                        _ => i64::MIN,
+                    };
+                    i.local_get(l).i64_const(min).i64_eq();
+                    i.local_get(r).i64_const(-1).i64_eq();
+                    i.i32_and().if_(BlockType::Empty);
+                    i.i32_const(ovf as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+                    i.local_get(l).local_get(r);
+                    match op {
+                        DivInt => i.i64_div_s(),
+                        _ => i.i64_rem_s(),
+                    };
+                }
                 self.release_i64();
                 self.release_i64();
                 Ok(INT)
             }
-            PowInt => self.lower_pow_int(left, right),
+            PowInt => {
+                let t = self.lower_pow_int(left, right)?;
+                self.emit_narrow_wrap(&left.ty, &right.ty);
+                Ok(t)
+            }
             Lt | Gt | Lte | Gte | Eq | Neq => self.lower_cmp(op, left, right),
             // SHORT-CIRCUIT: the right operand must not evaluate (and
             // possibly trap) when the left already decides — an `if`

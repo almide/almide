@@ -8,7 +8,20 @@ use crate::*;
 
 pub(crate) fn scalar_of(ty: &Ty) -> Option<Scalar> {
     match ty {
-        Ty::Int | Ty::Int64 => Some(Scalar::Int),
+        // Sized integers share the ONE i64 slot (the interp's doctrine):
+        // the declared width lives on the expression types and re-wraps
+        // arithmetic (C-180), reads division/ordering unsigned for
+        // UInt64 (C-179), and traps the narrow MIN/-1 (C-002) — all in
+        // the binop lowering, none in the layout.
+        Ty::Int
+        | Ty::Int64
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32
+        | Ty::UInt64 => Some(Scalar::Int),
         Ty::Float => Some(Scalar::Float),
         Ty::Bool => Some(Scalar::Bool),
         Ty::String => Some(Scalar::Str),

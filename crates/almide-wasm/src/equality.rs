@@ -20,10 +20,17 @@ impl Emitter<'_> {
     ) -> Result<SliceTy, EmitError> {
         use BinOp::*;
         if matches!(op, Lt | Gt | Lte | Gte) {
+            // C-179: a UInt64 operand's slot is a u64 bit pattern —
+            // ordering reads it UNSIGNED.
+            let unsigned = crate::binop::is_uint64(&left.ty) || crate::binop::is_uint64(&right.ty);
             let lt = self.lower(left, None)?;
             self.lower(right, Some(lt))?;
             let mut i = self.f.instructions();
             match (lt, op) {
+                (INT, Lt) if unsigned => i.i64_lt_u(),
+                (INT, Gt) if unsigned => i.i64_gt_u(),
+                (INT, Lte) if unsigned => i.i64_le_u(),
+                (INT, Gte) if unsigned => i.i64_ge_u(),
                 (INT, Lt) => i.i64_lt_s(),
                 (INT, Gt) => i.i64_gt_s(),
                 (INT, Lte) => i.i64_le_s(),
