@@ -24,15 +24,23 @@
 //!   fn push9(v, x) -> (Int, List[Int]) = { let __mp_ret = <body>; (__mp_ret, v) }
 //!   let __mp_tmp = push9(data, 7); data = __mp_tmp.1; let i = __mp_tmp.0
 //!
-//! Effect fns with a non-Unit return are SKIPPED (their return is later
-//! Result-wrapped; tuple-inside-Result plumbing is a separate brick) — they
-//! keep the semantics they had. A rewritten fn's `mutated_params` is CLEARED:
+//! Effect fns with a non-Unit return that CAN ERR are SKIPPED (their return
+//! is later Result-wrapped, and the err arm carries no buffer channel — what
+//! the caller's `mut` argument holds after an err is #1576's unratified
+//! design question). A NEVER-ERR effect fn has no err arm to answer for, so
+//! it takes the same tuple rewrite as a plain value fn (#1575: the effect
+//! marker changes the return channel, not the parameter convention);
+//! never-err is judged by a conservative syntactic scan — any propagation
+//! node, err construction, lambda, or call that cannot be proven to land on
+//! a non-effect fn keeps the exclusion. A rewritten fn's `mutated_params` is
+//! CLEARED:
 //! the convention is now explicit in the tree (the v1 C-132 wall keys on it,
 //! and LICM's conservatism is subsumed by the call-site Assign).
 //!
 //! Callers: the v0 wasm nanopass (`MutParamLoweringPass`) and the v1 MIR
 //! pipeline's pre-lowering (both `source_to_ir` twins — desugar-before-both).
 
+use crate::visit::{walk_expr, IrVisitor};
 use crate::visit_mut::{walk_expr_mut, IrMutVisitor};
 use crate::*;
 use almide_base::intern::sym;
@@ -89,7 +97,7 @@ fn fold_tail_writebacks(program: &mut IrProgram, mut_fns: &MutFns) {
 fn fold_one_fn_tail_writebacks(func: &mut IrFunction, scope: &str, mut_fns: &MutFns) {
     // Only a rewritten was-Unit mut fn (phase 1 cleared `mutated_params`; the
     // scope-keyed entry survives).
-    let Some(&(idx, ref mut_ty, was_unit)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
+    let Some(&(idx, ref mut_ty, was_unit, _)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
     if !was_unit {
         return;
     }
@@ -234,17 +242,18 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
             *name_count.entry(scope_key(m.name.as_str(), func.name.as_str())).or_insert(0) += 1;
         }
     }
+    let pure_names = collect_provably_pure_names(program);
     let mut mut_fns: MutFns = std::collections::HashMap::new();
     // Program-level functions first, then module ones — the original
     // collection order, which a duplicate name would otherwise decide.
     for func in program.functions.iter() {
-        if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key("", func.name.as_str())).copied().unwrap_or(0)) {
+        if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key("", func.name.as_str())).copied().unwrap_or(0), &pure_names) {
             mut_fns.insert(scope_key("", func.name.as_str()), entry);
         }
     }
     for m in &program.modules {
         for func in &m.functions {
-            if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key(m.name.as_str(), func.name.as_str())).copied().unwrap_or(0)) {
+            if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key(m.name.as_str(), func.name.as_str())).copied().unwrap_or(0), &pure_names) {
                 // A MODULE fn's call sites spell THREE names: bare from inside
                 // the module, MODULE-QUALIFIED (`convmut.Box.bump`) pre-resolution,
                 // and the MANGLED runtime symbol (`almide_rt_convmut_Box_bump`)
@@ -280,7 +289,8 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
 fn mut_fn_entry(
     func: &IrFunction,
     same_scope_count: usize,
-) -> Option<(usize, Ty, bool)> {
+    pure_names: &std::collections::HashSet<String>,
+) -> Option<(usize, Ty, bool, Ty)> {
     if func.mutated_params.len() != 1 {
         return None;
     }
@@ -290,10 +300,95 @@ fn mut_fn_entry(
     let idx = func.mutated_params[0];
     let p = func.params.get(idx)?;
     let was_unit = matches!(func.ret_ty, Ty::Unit);
-    if !was_unit && func.is_effect {
+    if !was_unit && func.is_effect && !fn_cannot_err(func, pure_names) {
+        // The err arm carries no buffer channel — #1576's unratified design
+        // question. A NEVER-ERR effect fn has no err arm, so it rides the
+        // value-fn tuple rewrite (#1575).
         return None;
     }
-    Some((idx, p.ty.clone(), was_unit))
+    Some((idx, p.ty.clone(), was_unit, func.ret_ty.clone()))
+}
+
+/// Every callee name (bare, dotted, mangled) whose EVERY program definition
+/// is a non-effect fn — the allow-list [`fn_cannot_err`] resolves Named calls
+/// against. A name that any scope defines as an effect fn, or that resolves
+/// to nothing in the program (a stdlib/runtime spelling), is NOT in the set:
+/// the never-err scan must under-approximate, never over-approximate.
+fn collect_provably_pure_names(program: &IrProgram) -> std::collections::HashSet<String> {
+    let mut pure: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut effectful: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut note = |name: String, is_effect: bool| {
+        if is_effect {
+            effectful.insert(name);
+        } else {
+            pure.insert(name);
+        }
+    };
+    for func in &program.functions {
+        note(func.name.to_string(), func.is_effect);
+    }
+    for m in &program.modules {
+        for func in &m.functions {
+            note(func.name.to_string(), func.is_effect);
+            note(format!("{}.{}", m.name, func.name), func.is_effect);
+            note(
+                format!(
+                    "almide_rt_{}_{}",
+                    m.name.as_str().replace('.', "_"),
+                    func.name.as_str().replace('.', "_")
+                ),
+                func.is_effect,
+            );
+        }
+    }
+    pure.retain(|n| !effectful.contains(n));
+    pure
+}
+
+/// Conservative syntactic never-err verdict for an effect fn's body: no
+/// propagation node (`Try`/`Unwrap`/`UnwrapOr`), no err construction, no
+/// lambda (its deferred body is opaque to this scan), and every call lands on
+/// a name [`collect_provably_pure_names`] admits — module/method/computed/
+/// runtime calls all fail the scan. Anything unrecognized keeps the #1576
+/// exclusion, so a wrong answer here can only DECLINE a rewrite, never admit
+/// an err path.
+fn fn_cannot_err(func: &IrFunction, pure_names: &std::collections::HashSet<String>) -> bool {
+    struct Scan<'a> {
+        pure_names: &'a std::collections::HashSet<String>,
+        err_source: bool,
+    }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if self.err_source {
+                return;
+            }
+            match &expr.kind {
+                IrExprKind::Try { .. }
+                | IrExprKind::Unwrap { .. }
+                | IrExprKind::UnwrapOr { .. }
+                | IrExprKind::ResultErr { .. }
+                | IrExprKind::Lambda { .. }
+                | IrExprKind::Fan { .. }
+                | IrExprKind::RuntimeCall { .. } => {
+                    self.err_source = true;
+                    return;
+                }
+                IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => {
+                    let named_pure = matches!(target, CallTarget::Named { name }
+                        if self.pure_names.contains(name.as_str()));
+                    if !named_pure {
+                        self.err_source = true;
+                        return;
+                    }
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut scan = Scan { pure_names, err_source: false };
+    scan.visit_expr(&func.body);
+    !scan.err_source
 }
 
 /// Phase 1: rewrite function bodies. Unit-returning fns return the
@@ -316,7 +411,7 @@ fn rewrite_signatures(program: &mut IrProgram, mut_fns: &MutFns) {
 
 /// Give one eligible function the move-mode signature and body.
 fn rewrite_one_signature(func: &mut IrFunction, scope: &str, vt: &mut VarTable, mut_fns: &MutFns) {
-    let Some(&(entry_idx, _, was_unit)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
+    let Some(&(entry_idx, _, was_unit, _)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
     // Name-keyed entry — confirm THIS func is the one that was
     // collected (unique-name invariant above makes this a plain
     // assertion, but stay defensive).
@@ -430,7 +525,12 @@ fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns) {
     }
 }
 
-type MutFns = std::collections::HashMap<String, (usize, Ty, bool)>;
+/// name → (mut param index, its type, was-Unit, the callee's ORIGINAL raw
+/// return type). The ret rides along because a `!`-wrapped effect call's Call
+/// NODE carries the lifted `Result[T, String]` carrier, not T — the caller's
+/// destructure element must be typed by the callee's declaration, never by
+/// the call expression (#1575; the same lifted-carrier trap as #1573).
+type MutFns = std::collections::HashMap<String, (usize, Ty, bool, Ty)>;
 
 /// The caller-side slot the mutated buffer writes back into.
 enum ArgPlace {
@@ -487,7 +587,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
             return;
         };
-        let Some((idx, mut_ty, was_unit)) = self
+        let Some((idx, mut_ty, was_unit, callee_ret)) = self
             .mut_fns
             .get(name.as_str())
             .or_else(|| self.mut_fns.get(&scope_key(&self.scope, name.as_str())))
@@ -499,7 +599,11 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         let place = mut_arg_place(arg);
         let span = expr.span;
 
-        let orig_ty = expr.ty.clone();
+        // The callee's declared raw return, NOT expr.ty: a `!`-wrapped effect
+        // call's Call node is typed with the lifted carrier, and typing the
+        // destructure element with it makes the tuple's scalar half read as a
+        // heap handle downstream (#1575).
+        let orig_ty = callee_ret;
         let mut call = std::mem::replace(
             expr,
             IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
@@ -583,38 +687,63 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
 
 impl CallSiteRewriter<'_> {
     /// Is `expr` Unwrap/Try over a JUST-REWRITTEN move-mode Block whose first stmt
-    /// binds a was-Unit mut-fn call (the `h(a)!` shape, #1207)? Structurally
+    /// binds a mut-fn call (the `h(a)!` shape, #1207)? Structurally
     /// unambiguous: after the bottom-up walk, a USER-written `Bind` of a mut-fn
     /// call has its Call already replaced by a Block, so a bare `Bind{value: Call}`
-    /// to a collected name can only be the rewriter's own bind.
+    /// to a collected name can only be the rewriter's own bind. Two shapes:
+    /// the was-Unit `Bind` + Unit tail (#1207), and the value-returning
+    /// `BindDestructure((res, buf))` + `res` tail — a never-err effect fn's
+    /// tuple form (#1575) arrives under the same wrapper.
     fn wrapper_rotation_applies(&self, expr: &IrExpr) -> bool {
         let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) = &expr.kind
         else {
             return false;
         };
         let IrExprKind::Block { stmts, expr: tail } = &inner.kind else { return false };
-        let Some(IrStmt { kind: IrStmtKind::Bind { value, .. }, .. }) = stmts.first() else {
-            return false;
-        };
-        let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &value.kind else {
-            return false;
-        };
-        matches!(
-            self.mut_fns
-                .get(name.as_str())
-                .or_else(|| self.mut_fns.get(&scope_key(&self.scope, name.as_str()))),
-            Some(&(_, _, true))
-        ) && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Unit))
+        match stmts.first() {
+            Some(IrStmt { kind: IrStmtKind::Bind { value, .. }, .. }) => {
+                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &value.kind
+                else {
+                    return false;
+                };
+                matches!(self.lookup_mut_fn(name.as_str()), Some(&(_, _, true, _)))
+                    && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Unit))
+            }
+            Some(IrStmt { kind: IrStmtKind::BindDestructure { value, .. }, .. }) => {
+                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &value.kind
+                else {
+                    return false;
+                };
+                matches!(self.lookup_mut_fn(name.as_str()), Some(&(_, _, false, _)))
+                    && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Var { .. }))
+            }
+            _ => false,
+        }
+    }
+
+    fn lookup_mut_fn(&self, name: &str) -> Option<&(usize, Ty, bool, Ty)> {
+        self.mut_fns.get(name).or_else(|| self.mut_fns.get(&scope_key(&self.scope, name)))
     }
 
     /// Perform the rotation [`Self::wrapper_rotation_applies`] admitted. The
-    /// wrapper's err-propagation moves INTO the bind (`let __mp_buf = call!`),
-    /// so on the err path the writeback never runs — matching the native
-    /// by-reference semantics (a failed callee's caller-visible buffer is
-    /// whatever the callee left in it; here the callee never returns a buffer
-    /// on err, and the caller's binding keeps its pre-call value).
+    /// wrapper's err-propagation moves INTO the bind (`let __mp_buf = call!` /
+    /// `let (__mp_res, __mp_buf) = call!`), so on the err path the writeback
+    /// never runs — matching the native by-reference semantics (a failed
+    /// callee's caller-visible buffer is whatever the callee left in it; here
+    /// the callee never returns a buffer on err, and the caller's binding
+    /// keeps its pre-call value). The value shape only ever arrives for a
+    /// NEVER-ERR callee (the mut_fn_entry admission), so its err path is
+    /// unreachable to begin with.
     fn rotate_wrapper_into_block(expr: &mut IrExpr) {
         let span = expr.span;
+        let block_ty = {
+            let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) =
+                &expr.kind
+            else {
+                unreachable!("wrapper_rotation_applies checked the wrapper kind");
+            };
+            inner.ty.clone()
+        };
         let is_unwrap = matches!(expr.kind, IrExprKind::Unwrap { .. });
         let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) =
             std::mem::replace(&mut expr.kind, IrExprKind::Unit)
@@ -626,8 +755,13 @@ impl CallSiteRewriter<'_> {
             unreachable!("wrapper_rotation_applies checked the block");
         };
         {
-            let IrStmtKind::Bind { value, ty, .. } = &mut stmts[0].kind else {
-                unreachable!("wrapper_rotation_applies checked the bind");
+            let (value, wrapped_ty) = match &mut stmts[0].kind {
+                IrStmtKind::Bind { value, ty, .. } => (value, ty.clone()),
+                IrStmtKind::BindDestructure { value, .. } => {
+                    let ty = value.ty.clone();
+                    (value, ty)
+                }
+                _ => unreachable!("wrapper_rotation_applies checked the bind"),
             };
             let call = std::mem::replace(
                 value,
@@ -638,9 +772,9 @@ impl CallSiteRewriter<'_> {
             } else {
                 IrExprKind::Try { expr: Box::new(call) }
             };
-            *value = IrExpr { kind: wrapped_kind, ty: ty.clone(), span, def_id: None };
+            *value = IrExpr { kind: wrapped_kind, ty: wrapped_ty, span, def_id: None };
         }
         expr.kind = IrExprKind::Block { stmts, expr: tail };
-        expr.ty = Ty::Unit;
+        expr.ty = block_ty;
     }
 }
