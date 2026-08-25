@@ -150,6 +150,13 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
     "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
     "json_get_string",
+    // bytes_rawptr.almd / bytes_skip.almd / bytes_core heap pair
+    // (audited 2026-08-25): raw-address bridge over load8/store8 on
+    // Bytes data regions (len = bytes both legs), handle+12 = OUR
+    // PAYLOAD; the empty-buffer NULL guard is the 2026-08-10 fuzz
+    // doctrine; heap_save/restore are the v1 trivial pair (0 / no-op).
+    "bytes_as_ptr", "bytes_as_mut_ptr", "bytes_from_raw_ptr", "bytes_copy_to_ptr",
+    "bytes_skip_length_prefixed_le", "bytes_heap_save", "bytes_heap_restore",
     // http_response.almd (audited 2026-08-25): PURE Almide over the
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header

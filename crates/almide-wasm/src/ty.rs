@@ -22,6 +22,9 @@ pub(crate) fn scalar_of(ty: &Ty) -> Option<Scalar> {
         | Ty::UInt16
         | Ty::UInt32
         | Ty::UInt64 => Some(Scalar::Int),
+        // RawPtr is an ADDRESS scalar (an i64-carried linear-memory
+        // offset; the identity prim casts move it to/from Int).
+        Ty::RawPtr => Some(Scalar::Int),
         // Float32 rides the WIDENED f64 carrier (the interp's doctrine):
         // literals narrow at birth; the slot always holds an
         // f32-representable f64.

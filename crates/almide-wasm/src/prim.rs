@@ -75,6 +75,11 @@ impl Emitter<'_> {
                 self.f.instructions().i64_store(raw(()));
                 Ok(None)
             }
+            // RawPtr <-> Int identity casts (both are the i64 address).
+            ("int_to_ptr" | "ptr_to_int", [x]) => {
+                self.lower(x, Some(INT))?;
+                Ok(Some(INT))
+            }
             // Host entropy (C-112): n bytes written at address p via the
             // fs_call boundary (op 32) + host_read; returns 0.
             ("random_get", [p, n]) => {

@@ -30,7 +30,15 @@ impl Emitter<'_> {
 
     fn lower_bytes_new(&mut self, n: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
         self.lower(n, Some(INT))?;
-        self.f.instructions().i32_wrap_i64().call(F_ALLOC);
+        // native `len.max(0)` — a NEGATIVE size is the empty buffer,
+        // never a wrapped 4 GiB ask.
+        let h = self.hold_i64()?;
+        let mut i = self.f.instructions();
+        i.local_set(h);
+        i.i64_const(0).local_get(h).local_get(h).i64_const(0).i64_lt_s().select();
+        i.i32_wrap_i64().call(F_ALLOC);
+        let _ = i;
+        self.release_i64();
         Ok(Some(BYTES))
     }
 
