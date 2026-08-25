@@ -94,10 +94,8 @@ fn fs_dispatch_w(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // write_bytes: b is the guest List[Int] payload — i64 LE slots,
         // low byte each (native `x as u8`).
         3 => {
-            let data: Vec<u8> = b
-                .chunks_exact(8)
-                .map(|c| i64::from_le_bytes(c.try_into().expect("chunk")) as u8)
-                .collect();
+            let (slots, _) = b.as_chunks::<8>();
+            let data: Vec<u8> = slots.iter().map(|c| i64::from_le_bytes(*c) as u8).collect();
             unit(std::fs::write(a, &data).map_err(io_err))
         }
         7 => unit(std::fs::create_dir_all(a).map_err(io_err)),
