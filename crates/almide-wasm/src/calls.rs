@@ -73,8 +73,11 @@ impl Emitter<'_> {
             // silently never see a null.
             CallTarget::Named { name }
                 if name.as_str() == "__is_null"
-                    && self.cur_module == Some("codec_decode")
-                    && args.len() == 1 =>
+                    && args.len() == 1
+                    && matches!(
+                        slice_ty_of(&args[0].ty, self.types),
+                        Some(SliceTy::Value)
+                    ) =>
             {
                 self.lower(&args[0], Some(SliceTy::Value))?;
                 self.f
