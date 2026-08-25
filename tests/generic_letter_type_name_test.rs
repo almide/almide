@@ -25,12 +25,11 @@ fn almide_bin() -> String {
 
 /// The issue's repro, verbatim shape: protocol in ONE module, a bare-`self`
 /// convention method on a type named `T` in ANOTHER, satisfaction consumed
-/// through a generic bound in main — plus the user-generic variant (a type
-/// named `Q` while main's own fn uses generic letters), which joined the
-/// reserved set the same way. The consuming bound is spelled `S` so the type
-/// name never equals the consumer's OWN generic letter — that local collision
-/// (`go[Q]` applied AT a type named `Q`) is a separate mono-level bug, filed
-/// on its own; this pin covers the cross-module reserved-set class.
+/// through a generic bound in main — plus the collision variant (#1577): the
+/// type is named `Q`, the SAME letter as the consuming fn's own generic
+/// bound, which additionally required the resolve-side shadowing rule (a
+/// TypeVar-bound name is never canonicalized to a module's nominal type) so
+/// the instance monomorphizes.
 #[test]
 fn generic_letter_type_names_are_ordinary_names() {
     let dir = std::env::temp_dir().join(format!("almd_genletter_{}", std::process::id()));
@@ -59,7 +58,7 @@ fn generic_letter_type_names_are_ordinary_names() {
             dir.join("src/main.almd"),
             format!(
                 "import self.ports\nimport self.infra\nimport io\n\n\
-                 fn go[S: Proto](c: S) -> Int = c.read()\n\n\
+                 fn go[Q: Proto](c: Q) -> Int = c.read()\n\n\
                  effect fn main() -> Unit = {{ io.print(int.to_string(go(infra.{tn} {{ n: 7 }}))) }}\n",
                 tn = type_name
             ),

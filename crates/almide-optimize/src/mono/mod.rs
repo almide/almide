@@ -792,6 +792,17 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
     let mut result = HashMap::new();
     for func in functions {
         let bounded = find_bounded_params_for_fn(func, type_decls);
+        if std::env::var_os("ALMIDE_MONO_DEBUG").is_some()
+            && func.generics.as_ref().is_some_and(|g| !g.is_empty())
+        {
+            eprintln!(
+                "[mono-debug] bounded_fn {} generics={:?} params={:?} bounded={:?}",
+                func.name,
+                func.generics.as_ref().map(|gs| gs.iter().map(|g| g.name.to_string()).collect::<Vec<_>>()),
+                func.params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>(),
+                bounded.iter().map(|b| (b.param_idx, b.type_var.clone())).collect::<Vec<_>>(),
+            );
+        }
         // Include all generic functions, even those with no param-based TypeVars
         // (e.g., stack_new[T]() — no params, but has generics and type_args at call site)
         if !bounded.is_empty() || func.generics.as_ref().map_or(false, |g| !g.is_empty()) {

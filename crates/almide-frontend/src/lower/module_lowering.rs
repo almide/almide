@@ -395,7 +395,17 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
     register_generic_protocol_bounds(ctx, generics);
 
     let mut ir_params = lower_const_param_ir_params(ctx, generics, span);
-    ir_params.extend(lower_fn_value_params(ctx, name, params, module_prefix, span));
+    // #1577: the fn's own generic letters shadow same-named TYPE bindings
+    // while its signature resolves. Without the overlay, `fn go[Q](c: Q)`
+    // with a visible type named `Q` (an imported module's — post-#1574 the
+    // bare alias survives registration) resolved the param to the NOMINAL
+    // type; mono then saw no type-var in any param, never specialized the
+    // fn, and the call site dangled on both targets. Const-param letters
+    // are VALUE names, not type vars, so they stay out of the overlay.
+    let env_ref = ctx.env;
+    let generic_overlay = generic_typevar_overlay(env_ref, generics);
+    let sig_types = generic_overlay.as_ref().unwrap_or(&env_ref.types);
+    ir_params.extend(lower_fn_value_params(ctx, name, params, module_prefix, span, sig_types));
 
     let ret_ty = resolve_fn_ret_ty(ctx, name, module_prefix, body);
 
@@ -425,6 +435,34 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
         def_id: ctx.def_map.get(&sym(name)).copied(),
         mutated_params, module_origin: None,
     }
+}
+
+/// The signature-resolution type map for a GENERIC fn: `env.types` copied
+/// with each non-const generic letter mapped to `Ty::TypeVar` — the letter
+/// SHADOWS a same-named visible type for the declaration, exactly as the
+/// checker's enter_generics scopes it (#1577; the lowering twin of #1574's
+/// registration rule). `None` for a fn with no type-var generics — the
+/// caller then resolves against `env.types` directly, clone-free.
+fn generic_typevar_overlay(env: &TypeEnv, generics: &Option<Vec<ast::GenericParam>>) -> Option<HashMap<Sym, Ty>> {
+    let gs = generics.as_ref()?;
+    let letters: Vec<Sym> = gs
+        .iter()
+        .filter(|g| {
+            !g.bounds.as_ref().is_some_and(|bs| {
+                bs.len() == 1
+                    && crate::canonicalize::registration::SCALAR_TYPE_NAMES.contains(&bs[0].as_str())
+            })
+        })
+        .map(|g| sym(&g.name))
+        .collect();
+    if letters.is_empty() {
+        return None;
+    }
+    let mut overlay = env.types.clone();
+    for l in letters {
+        overlay.insert(l, Ty::TypeVar(l));
+    }
+    Some(overlay)
 }
 
 // Set up protocol bounds for this function's generics (non-const-param
@@ -476,7 +514,10 @@ fn lower_const_param_ir_params(ctx: &mut LowerCtx, generics: &Option<Vec<ast::Ge
 // placeholder inside a `protocol { ... }` declaration; on a real
 // convention method it must lower to the enclosing type, or codegen
 // emits the literal (nonexistent) Rust type `Self`.
-fn lower_fn_value_params(ctx: &mut LowerCtx, name: &str, params: &[ast::Param], module_prefix: Option<&str>, span: &Option<ast::Span>) -> Vec<IrParam> {
+/// `sig_types` is the type map signature resolution runs against — the plain
+/// `env.types` for a non-generic fn, or [`generic_typevar_overlay`]'s copy
+/// with the fn's own generic letters mapped to `TypeVar` (#1577).
+fn lower_fn_value_params(ctx: &mut LowerCtx, name: &str, params: &[ast::Param], module_prefix: Option<&str>, span: &Option<ast::Span>, sig_types: &HashMap<Sym, Ty>) -> Vec<IrParam> {
     let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
     let mut ir_params = Vec::new();
     for (i, p) in params.iter().enumerate() {
@@ -484,9 +525,9 @@ fn lower_fn_value_params(ctx: &mut LowerCtx, name: &str, params: &[ast::Param], 
             && matches!(&p.ty, ast::TypeExpr::Simple { name: tn } if tn.as_str() == "Self")
         {
             receiver_ty.clone().unwrap_or_else(||
-                crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(&ctx.env.types), module_prefix))
+                crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(sig_types), module_prefix))
         } else {
-            crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(&ctx.env.types), module_prefix)
+            crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(sig_types), module_prefix)
         };
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
