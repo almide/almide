@@ -1,0 +1,29 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 0f6b6ff42..f54a4bdd6 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -108,22 +108,8 @@ impl Emitter<'_> {
+                 ) {
+                     self.f.instructions().call(F_BLOCK_COPY);
+                 }
+-                if self.cells.contains(var) {
+-                    // C-319: the bind allocates the shared cell; the
+-                    // local holds its ADDRESS from here on.
+-                    let hv = self.hold_val(declared)?;
+-                    self.f.instructions().local_set(hv);
+-                    self.f
+-                        .instructions()
+-                        .i32_const(declared.slot_size() as i32)
+-                        .call(F_ALLOC)
+-                        .local_tee(idx)
+-                        .local_get(hv);
+-                    self.store_ty_slot(declared, 0);
+-                    self.release_val(declared);
+-                } else {
+-                    self.f.instructions().local_set(idx);
+-                }
++                // [MUTANT: bind cell allocation dropped]
++                self.f.instructions().local_set(idx);
+                 Ok(())
+             }
+             // `p.field = v` on a record var: copy-on-write write-back —

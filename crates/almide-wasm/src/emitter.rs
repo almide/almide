@@ -111,35 +111,6 @@ impl Emitter<'_> {
         self.hold_f64_depth -= 1;
     }
 
-    /// The lambda body's captured OUTER locals (VarIds are unique within
-    /// a function context, so any Var resolving through the enclosing
-    /// locals map that is not a lambda param is a capture).
-    pub(crate) fn captured_vars(
-        &self,
-        params: &std::collections::HashSet<VarId>,
-        body: &IrExpr,
-    ) -> Vec<(VarId, SliceTy)> {
-        struct Scan<'x> {
-            locals: &'x HashMap<VarId, (u32, SliceTy)>,
-            params: &'x std::collections::HashSet<VarId>,
-            out: Vec<(VarId, SliceTy)>,
-        }
-        impl almide_ir::visit::IrVisitor for Scan<'_> {
-            fn visit_expr(&mut self, e: &IrExpr) {
-                if let IrExprKind::Var { id } = &e.kind
-                    && !self.params.contains(id)
-                    && let Some(&(_, ty)) = self.locals.get(id)
-                    && !self.out.iter().any(|(v, _)| v == id)
-                {
-                    self.out.push((*id, ty));
-                }
-                almide_ir::visit::walk_expr(self, e);
-            }
-        }
-        let mut sc = Scan { locals: self.locals, params, out: Vec::new() };
-        almide_ir::visit::IrVisitor::visit_expr(&mut sc, body);
-        sc.out
-    }
 
     /// `[raw value]` -> `[ok(..) Result block]` (the effect-fn return wrap).
     pub(crate) fn wrap_ok(&mut self, raw: SliceTy, ret: SliceTy) -> Result<(), EmitError> {

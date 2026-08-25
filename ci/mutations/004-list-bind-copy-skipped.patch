@@ -1,8 +1,8 @@
 diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index 4c1adcfae..263e22a64 100644
+index 0f6b6ff42..8870211db 100644
 --- a/crates/almide-wasm/src/stmts.rs
 +++ b/crates/almide-wasm/src/stmts.rs
-@@ -84,15 +84,7 @@ impl Emitter<'_> {
+@@ -99,15 +99,7 @@ impl Emitter<'_> {
                  // can never be observed through aliases. Bytes joined
                  // when the snapshot fixture showed `let snap = arena`
                  // observing later set_at writes.
@@ -16,6 +16,6 @@ index 4c1adcfae..263e22a64 100644
 -                    self.f.instructions().call(F_BLOCK_COPY);
 -                }
 +                // [MUTANT: container bind copy disabled]
-                 self.f.instructions().local_set(idx);
-                 Ok(())
-             }
+                 if self.cells.contains(var) {
+                     // C-319: the bind allocates the shared cell; the
+                     // local holds its ADDRESS from here on.

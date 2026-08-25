@@ -1,13 +1,19 @@
 diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
-index af3909b8a..8e1ce1ab0 100644
+index 41727db1f..8a87dc404 100644
 --- a/crates/almide-wasm/src/emitter.rs
 +++ b/crates/almide-wasm/src/emitter.rs
-@@ -573,7 +573,7 @@ impl Emitter<'_> {
-                         .local_tee(hb)
-                         .i32_const(slot as i32)
+@@ -757,13 +757,7 @@ impl Emitter<'_> {
                          .i32_store(slot_memarg(0));
--                    for (v, t, off) in &captures {
-+                    for (v, t, off) in captures.iter().take(0) {
+                     for (v, t, off, is_cell) in &captures {
                          let (idx, _) = self.locals[v];
-                         self.f.instructions().local_get(hb).local_get(idx);
-                         self.store_ty_slot(*t, *off);
+-                        self.f.instructions().local_get(hb).local_get(idx);
+-                        if *is_cell {
+-                            // the local already holds the cell address
+-                            self.f.instructions().i32_store(slot_memarg(*off));
+-                        } else {
+-                            self.store_ty_slot(*t, *off);
+-                        }
++                        let _ = (idx, t, off, is_cell); // [MUTANT: captures not stored]
+                     }
+                     self.f.instructions().local_get(hb);
+                     self.release_i32();
