@@ -298,6 +298,125 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// Lockstep ping-pong bottom-up merge sort behind `list.sort_by`:
+    /// keys (the precomputed scalar sort keys, #560) and values move
+    /// together, take-from-left on `key[i] <= key[j]` keeps it stable.
+    /// Leaves the sorted VALUES block on the stack.
+    pub(crate) fn emit_merge_sort_by(
+        &mut self,
+        k: SliceTy,
+        elem: SliceTy,
+        hka: u32,
+        hva: u32,
+        hn: u32,
+    ) -> Result<(), EmitError> {
+        let (kstride, vstride) = (k.slot_size() as i32, elem.slot_size() as i32);
+        let hkb = self.hold_i32()?;
+        let hvb = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hlo = self.hold_i32()?;
+        let hmid = self.hold_i32()?;
+        let hhi = self.hold_i32()?;
+        let hi_ = self.hold_i32()?;
+        let hj = self.hold_i32()?;
+        let hk_ = self.hold_i32()?;
+        let hsrc = self.scr_i32_local;
+        let htmp = self.tmp_i32_local;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hn).i32_const(kstride).i32_mul().call(F_ALLOC).local_set(hkb);
+            i.local_get(hn).i32_const(vstride).i32_mul().call(F_ALLOC).local_set(hvb);
+            i.i32_const(1).local_set(hw);
+            // while w < n
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hw).local_get(hn).i32_ge_u().br_if(1);
+            i.i32_const(0).local_set(hlo);
+            // for lo in steps of 2w
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hlo).local_get(hn).i32_ge_u().br_if(1);
+            // mid = min(lo + w, n); hi = min(lo + 2w, n)
+            i.local_get(hlo).local_get(hw).i32_add().local_set(hmid);
+            i.local_get(hn)
+                .local_get(hmid)
+                .local_get(hmid)
+                .local_get(hn)
+                .i32_gt_u()
+                .select()
+                .local_set(hmid);
+            i.local_get(hlo).local_get(hw).i32_const(1).i32_shl().i32_add().local_set(hhi);
+            i.local_get(hn)
+                .local_get(hhi)
+                .local_get(hhi)
+                .local_get(hn)
+                .i32_gt_u()
+                .select()
+                .local_set(hhi);
+            i.local_get(hlo).local_set(hi_);
+            i.local_get(hmid).local_set(hj);
+            i.local_get(hlo).local_set(hk_);
+            // merge keys[lo,mid) + keys[mid,hi), vals in lockstep
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hk_).local_get(hhi).i32_ge_u().br_if(1);
+            // take_left = j >= hi || (i < mid && ka[i] <= ka[j])
+            i.local_get(hj).local_get(hhi).i32_ge_u();
+            i.if_(BlockType::Result(ValType::I32));
+            i.i32_const(1);
+            i.else_();
+            i.local_get(hi_).local_get(hmid).i32_ge_u();
+            i.if_(BlockType::Result(ValType::I32));
+            i.i32_const(0);
+            i.else_();
+        }
+        self.emit_le_flag(k, hka, hi_, hj)?;
+        {
+            let mut i = self.f.instructions();
+            i.end();
+            i.end();
+            // src = take_left ? i++ : j++
+            i.if_(BlockType::Result(ValType::I32));
+            i.local_get(hi_);
+            i.local_get(hi_).i32_const(1).i32_add().local_set(hi_);
+            i.else_();
+            i.local_get(hj);
+            i.local_get(hj).i32_const(1).i32_add().local_set(hj);
+            i.end();
+            i.local_set(hsrc);
+            // Bk[k] = Ak[src]; Bv[k] = Av[src]
+            for (dst, src, stride) in [(hkb, hka, kstride), (hvb, hva, vstride)] {
+                i.local_get(dst).local_get(hk_).i32_const(stride).i32_mul().i32_add();
+                i.local_get(src).local_get(hsrc).i32_const(stride).i32_mul().i32_add();
+                if stride == 8 {
+                    i.i64_load(slot_memarg(0)).i64_store(slot_memarg(0));
+                } else {
+                    i.i32_load(slot_memarg(0)).i32_store(slot_memarg(0));
+                }
+            }
+            i.local_get(hk_).i32_const(1).i32_add().local_set(hk_);
+            i.br(0);
+            i.end();
+            i.end();
+            i.local_get(hlo).local_get(hw).i32_const(1).i32_shl().i32_add().local_set(hlo);
+            i.br(0);
+            i.end();
+            i.end();
+            // swap both A <-> B pairs; w *= 2
+            for (a, b) in [(hka, hkb), (hva, hvb)] {
+                i.local_get(a).local_set(htmp);
+                i.local_get(b).local_set(a);
+                i.local_get(htmp).local_set(b);
+            }
+            i.local_get(hw).i32_const(1).i32_shl().local_set(hw);
+            i.br(0);
+            i.end();
+            i.end();
+            i.local_get(hva);
+        }
+        for _ in 0..9 {
+            self.release_i32();
+        }
+        Ok(())
+    }
+
     /// Push `A[i] <= A[j]` as an i32 flag.
     pub(crate) fn emit_le_flag(&mut self, elem: SliceTy, ha: u32, hi_: u32, hj: u32) -> Result<(), EmitError> {
         let stride = elem.slot_size() as i32;

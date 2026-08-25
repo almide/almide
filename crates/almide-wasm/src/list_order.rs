@@ -220,11 +220,6 @@ impl Emitter<'_> {
         }
     }
 
-    /// Keys precomputed ONCE per element into a parallel array (#560 —
-    /// per-comparison evaluation was an observable divergence for
-    /// side-effectful keys), then the list.sort insertion sort moves
-    /// keys and values in lockstep. Stable; key orders are the scalar
-    /// three (Int/Str Ord, Float totalOrder).
     fn lower_list_min_max(
         &mut self,
         func: &str,
@@ -481,6 +476,11 @@ impl Emitter<'_> {
                 Ok(Some(SliceTy::List(self.types.intern(SliceTy::List(h)))))
     }
 
+    /// Keys precomputed ONCE per element into a parallel array (#560 —
+    /// per-comparison evaluation was an observable divergence for
+    /// side-effectful keys), then the lockstep merge sort moves keys
+    /// and values together. Stable; key orders are the scalar three
+    /// (Int/Str Ord, Float totalOrder).
     fn lower_list_sort_by(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let Some(k) = slice_ty_of(&body.ty, self.types) else {
@@ -500,8 +500,6 @@ impl Emitter<'_> {
         let hn = self.hold_i32()?;
         let hkeys = self.hold_i32()?;
         let hi = self.hold_i32()?;
-        let hj = self.hold_i32()?;
-        let ht = self.hold_i64()?;
         {
             let mut i = self.f.instructions();
             i.local_tee(hb);
@@ -527,106 +525,12 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_get(hi).i32_const(1).i32_add().local_set(hi);
             i.br(0).end().end();
-            // lockstep insertion sort on (keys, vals)
-            let kaddr = |i: &mut wasm_encoder::InstructionSink<'_>, back: i32| {
-                i.local_get(hkeys)
-                    .local_get(hj)
-                    .i32_const(back)
-                    .i32_sub()
-                    .i32_const(kstride)
-                    .i32_mul()
-                    .i32_add();
-            };
-            let vaddr = |i: &mut wasm_encoder::InstructionSink<'_>, back: i32| {
-                i.local_get(hb)
-                    .local_get(hj)
-                    .i32_const(back)
-                    .i32_sub()
-                    .i32_const(vstride)
-                    .i32_mul()
-                    .i32_add();
-            };
-            i.i32_const(1).local_set(hi);
-            i.block(BlockType::Empty).loop_(BlockType::Empty);
-            i.local_get(hi).local_get(hn).i32_ge_u().br_if(1);
-            i.local_get(hi).local_set(hj);
-            i.block(BlockType::Empty).loop_(BlockType::Empty);
-            i.local_get(hj).i32_eqz().br_if(1);
-            match k {
-                INT | FLOAT => {
-                    let key = |i: &mut wasm_encoder::InstructionSink<'_>, t: u32, float: bool| {
-                        if float {
-                            i.local_set(t);
-                            i.local_get(t);
-                            i.local_get(t).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
-                            i.i64_xor();
-                        }
-                    };
-                    let float = k == FLOAT;
-                    kaddr(&mut i, 1);
-                    i.i64_load(slot_memarg(0));
-                    key(&mut i, ht, float);
-                    kaddr(&mut i, 0);
-                    i.i64_load(slot_memarg(0));
-                    key(&mut i, ht, float);
-                    i.i64_le_s().br_if(1);
-                }
-                BOOL => {
-                    kaddr(&mut i, 1);
-                    i.i32_load(slot_memarg(0));
-                    kaddr(&mut i, 0);
-                    i.i32_load(slot_memarg(0));
-                    i.i32_le_u().br_if(1);
-                }
-                _ => {
-                    kaddr(&mut i, 1);
-                    i.i32_load(slot_memarg(0));
-                    kaddr(&mut i, 0);
-                    i.i32_load(slot_memarg(0));
-                    i.call(F_STR_CMP).i32_const(0).i32_le_s().br_if(1);
-                }
-            }
-            // swap keys then vals, both through the i64 bits scratch
-            for (wide, addr) in [
-                (kstride == 8, &kaddr as &dyn Fn(&mut wasm_encoder::InstructionSink<'_>, i32)),
-                (vstride == 8, &vaddr),
-            ] {
-                addr(&mut i, 0);
-                if wide {
-                    i.i64_load(slot_memarg(0)).local_set(ht);
-                } else {
-                    i.i32_load(slot_memarg(0)).i64_extend_i32_u().local_set(ht);
-                }
-                addr(&mut i, 0);
-                addr(&mut i, 1);
-                if wide {
-                    i.i64_load(slot_memarg(0)).i64_store(slot_memarg(0));
-                } else {
-                    i.i32_load(slot_memarg(0)).i32_store(slot_memarg(0));
-                }
-                addr(&mut i, 1);
-                if wide {
-                    i.local_get(ht).i64_store(slot_memarg(0));
-                } else {
-                    i.local_get(ht).i32_wrap_i64().i32_store(slot_memarg(0));
-                }
-            }
-            i.local_get(hj).i32_const(1).i32_sub().local_set(hj);
-            i.br(0).end().end();
-            i.local_get(hi).i32_const(1).i32_add().local_set(hi);
-            i.br(0).end().end();
-            i.local_get(hb);
         }
-        self.release_i64();
-        self.release_i32();
+        self.emit_merge_sort_by(k, elem, hkeys, hb, hn)?;
         self.release_i32();
         self.release_i32();
         self.release_i32();
         self.release_i32();
         Ok(Some(SliceTy::List(h)))
     }
-}
-
-impl Emitter<'_> {
-
 }

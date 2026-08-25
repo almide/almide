@@ -44,8 +44,7 @@ impl Emitter<'_> {
             // sort_by: the key fn runs ONCE PER ELEMENT (native
             // sort_by_cached_key, #560 — per-comparison was an observable
             // divergence for side-effectful keys), then the same stable
-            // insertion sort as list.sort moves keys and values in
-            // lockstep.
+            // merge sort as list.sort moves keys and values in lockstep.
             // contains = index_of with a Bool verdict.
             // length is len with the long spelling
             // List-returning map: each callback list concatenates onto
