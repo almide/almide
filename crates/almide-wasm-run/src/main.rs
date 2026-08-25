@@ -42,11 +42,11 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if let Some(out) = emit_to {
-        if let Err(e) = std::fs::write(&out, &bytes) {
-            eprintln!("error: {out}: {e}");
-            return ExitCode::from(2);
-        }
+    if let Some(out) = emit_to
+        && let Err(e) = std::fs::write(&out, &bytes)
+    {
+        eprintln!("error: {out}: {e}");
+        return ExitCode::from(2);
     }
     let mut stdin = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut stdin);
