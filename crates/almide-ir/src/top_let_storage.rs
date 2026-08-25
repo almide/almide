@@ -530,7 +530,7 @@ mod tests {
             is_effect: false, is_test: false,
             generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
             visibility: IrVisibility::Public, doc: None, blank_lines_before: 0, def_id: None,
-            mutated_params: vec![], module_origin: Some(module.to_string()),
+            mutated_params: vec![], module_origin: Some(module.to_string()), // fresh-fn: test fixture
         }
     }
     fn empty_module(name: &str) -> IrModule {

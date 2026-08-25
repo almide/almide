@@ -1055,7 +1055,7 @@ fn outline_ir_as_fn(
         blank_lines_before: 0,
         def_id: None,
         module_origin: None,
-        mutated_params: Vec::new(),
+        mutated_params: Vec::new(), // fresh-fn: lifted lambda, lambda params cannot be mut
     });
     ctx.mk(IrExprKind::Call {
         target: CallTarget::Named { name: sym(&fn_name) },
@@ -1219,7 +1219,7 @@ fn outline_metered_arm_ir(
         blank_lines_before: 0,
         def_id: None,
         module_origin: None,
-        mutated_params: Vec::new(),
+        mutated_params: Vec::new(), // fresh-fn: lifted lambda, lambda params cannot be mut
     });
 
     let mut call_args = vec![budget_ir];

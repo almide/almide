@@ -202,7 +202,7 @@ impl IrMutVisitor for ChainDesugarer<'_> {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: lifted helper owns fresh non-mut params
             module_origin: None,
         });
 
