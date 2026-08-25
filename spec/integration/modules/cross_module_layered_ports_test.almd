@@ -1,0 +1,24 @@
+// #1557 leg 2: the layered ports/adapters package — a generic use case over a
+// protocol bound whose impls live in a SIBLING module (one lifted-effect
+// scalar method, one declared-Option effect method). Two historical failure
+// modes, both pinned here BY OUTPUT because the second was silent-empty
+// (exit 0, zero bytes — a run-only pin can never catch it):
+//   1. mono mints the sibling convention calls AFTER round-1 resolution, so
+//      they stayed unmangled and the render walled them unlinked;
+//   2. the declared-Option strip ran with main-only registries, so a
+//      cross-module `s.get(..)!` kept its `!` and lowered against the
+//      callee's raw-Option ABI as if a carrier existed.
+import layports
+
+test "layered ports: generic use case over a sibling adapter (#1557 leg 2)" {
+  let s = layports.MemStore { rows: [
+    layports.Row { id: "a" },
+    layports.Row { id: "b" }
+  ] }
+  assert_eq(layports.report(s) ?? "ERR", "n=2 hit=a")
+}
+
+test "direct cross-module declared-Option effect method (the silent-empty pin)" {
+  assert_eq(layports.probe_hit("b") ?? "ERR", "hit=b n=1")
+  assert_eq(layports.probe_hit("zz") ?? "ERR", "hit=- n=1")
+}

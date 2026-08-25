@@ -146,11 +146,28 @@ fn dependency_package_of(name: &str, is_self: bool) -> Option<&str> {
 }
 
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
+    resolve_user_module_calls_impl(ir, false)
+}
+
+/// The post-link ROUND 2 (#1557 leg 2): mono (inside link_ir) mints bare
+/// Named calls to sibling convention impls that round 1 could not see —
+/// mangle them so the link set carries them. Scoped to STRICTLY-USER modules:
+/// after link_ir the bundled stdlib self-hosts sit in `ir.modules` too, and
+/// an unrestricted second pass rewrote `list.*`-style Module calls into
+/// mangled Named ones, bypassing the name-table routing (`tracked_calls`) —
+/// the rc-placement snapshot caught the changed link set
+/// (`list.drop_hshare` newly pulled in on a single-file fixture).
+fn resolve_user_module_calls_round2(ir: &mut almide_ir::IrProgram) {
+    resolve_user_module_calls_impl(ir, true)
+}
+
+fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool) {
     use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
     use almide_lang::intern::sym;
     let user_mods: std::collections::HashMap<String, std::collections::HashSet<String>> = ir
         .modules
         .iter()
+        .filter(|m| !user_only || !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
         .map(|m| (m.name.as_str().to_string(), linkable_module_fns(m)))
         .filter(|(_, fns)| !fns.is_empty())
         .collect();
@@ -444,6 +461,10 @@ fn source_to_ir_with(
     resolve_user_module_calls(&mut ir);
 
     almide_driver::link_ir(&mut ir);
+    // #1557 leg 2, round 2: mono (inside link_ir) mints bare Named calls to
+    // sibling convention impls the round-1 pass could not see; mangle them so
+    // the link set carries them (user modules only — see the impl doc).
+    resolve_user_module_calls_round2(&mut ir);
     // Transparent-newtype erasure LAST (post-link, pre-lowering): `mod type X = String`
     // ctor calls/patterns/Ty tags become the inner type (see newtype_erase.rs).
     crate::lower::erase_transparent_newtypes(&mut ir);

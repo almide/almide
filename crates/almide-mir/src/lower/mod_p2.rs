@@ -267,15 +267,33 @@ pub fn compute_can_err(fns: &[IrFunction]) -> std::collections::HashSet<String> 
 /// the #1125 silent-wrong class. The type gate (`expr.ty` is the Option) keeps a
 /// genuine Option-payload unwrap (ty = the payload) out of the strip.
 pub fn strip_declared_option_trys(body: &mut IrExpr) {
+    strip_declared_option_trys_impl(body, false)
+}
+
+/// The program-wide fixpoint's variant (#1557 leg 2): strip ONLY calls to
+/// MANGLED (cross-module) declared-Option callees. The pre-pass already ran
+/// the unrestricted strip over main with its own-module registry; re-running
+/// it unrestricted inside the fixpoint let the evolving can_err sets strip
+/// main-region nodes the pre-pass deliberately left (the
+/// option_to_result_generic wasm-leg regression). The mangled names are
+/// exactly the set the pre-pass could not see by construction.
+pub fn strip_declared_option_trys_mangled(body: &mut IrExpr) {
+    strip_declared_option_trys_impl(body, true)
+}
+
+fn strip_declared_option_trys_impl(body: &mut IrExpr, mangled_only: bool) {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
-    struct S;
+    struct S {
+        mangled_only: bool,
+    }
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
             let declared_option_call = |inner: &IrExpr| {
                 matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str())))
+                    if (!self.mangled_only || name.as_str().starts_with("almide_rt_"))
+                        && DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str())))
             };
             let strip = match &expr.kind {
                 IrExprKind::Try { expr: inner } => declared_option_call(inner),
@@ -295,7 +313,7 @@ pub fn strip_declared_option_trys(body: &mut IrExpr) {
             }
         }
     }
-    S.visit_expr_mut(body);
+    S { mangled_only }.visit_expr_mut(body);
 }
 
 pub fn strip_never_err_unwraps(

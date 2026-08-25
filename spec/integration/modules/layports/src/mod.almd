@@ -1,0 +1,41 @@
+// #1557 leg 2: the layered ports/adapters shape — a protocol port, an
+// adapter with cross-module convention impls (one lifted-effect scalar
+// method, one declared-Option effect method), and a generic use case over
+// the bound. The consumer test file asserts OUTPUT, because this shape's
+// failure mode was silent-empty (exit 0, zero bytes), which a run-only
+// fixture can never catch.
+type Row: Eq, Repr = { id: String }
+
+protocol RowStore {
+  effect fn get(self, id: String) -> Row?
+  effect fn count(self) -> Int
+}
+
+type MemStore: RowStore = { rows: List[Row] }
+
+effect fn MemStore.get(self, id: String) -> Row? = self.rows |> list.find((r) => r.id == id)
+
+effect fn MemStore.count(self) -> Int = list.len(self.rows)
+
+effect fn report[S: RowStore](s: S) -> String = {
+  let n = s.count()!
+  let hit = s.get("a")!
+  let label = match hit {
+    some(r) => r.id,
+    none => "-",
+  }
+  "n=${n} hit=${label}"
+}
+
+effect fn probe_hit(id: String) -> String = {
+  let s = MemStore { rows: [
+    Row { id: "b" }
+  ] }
+  let n = s.count()!
+  let hit = s.get(id)!
+  let label = match hit {
+    some(r) => r.id,
+    none => "-",
+  }
+  "hit=${label} n=${n}"
+}
