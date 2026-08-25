@@ -550,6 +550,14 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:fs.{func}"))
             }
+            CallTarget::Module { module, func, .. }
+                if matches!(module.as_str(), "env" | "io" | "process") =>
+            {
+                if let Some(out) = self.lower_host_call(module.as_str(), func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:{module}.{func}"))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);

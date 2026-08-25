@@ -150,6 +150,10 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
     "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
     "json_get_string",
+    // random_int.almd (audited 2026-08-25): prim.alloc_bytes scratch +
+    // prim.random_get (the op-32 entropy boundary) + pure span math —
+    // the VALUE is nondeterministic by contract (C-112 pins the range).
+    "random_int",
     // json_path.almd, READ side only (audited 2026-08-25): the path rep
     // is a plain List[String]; get walks value.field / value.as_array /
     // list.get — all native arms here, no raw layout reads. set/remove

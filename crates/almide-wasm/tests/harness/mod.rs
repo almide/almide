@@ -161,6 +161,127 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
     }
 }
 
+/// The metadata / host-environment ops (17+) — split for the
+/// complexity budget. Bodies verbatim from the native runtime.
+fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    use std::path::Path;
+    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    let ok_i64 = |v: i64| (pack(0, 8), v.to_le_bytes().to_vec());
+    let unit = |r: Result<(), String>| match r {
+        Ok(()) => (pack(0, 0), Vec::new()),
+        Err(m) => err_s(m),
+    };
+    match op {
+        17 => match std::fs::metadata(a) {
+            Ok(m) => ok_i64(m.len() as i64),
+            Err(e) => err_s(io_err(e)),
+        },
+        18 => match std::fs::metadata(a).map_err(io_err).and_then(|m| m.modified().map_err(io_err))
+        {
+            Ok(t) => ok_i64(
+                t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64,
+            ),
+            Err(m) => err_s(m),
+        },
+        19 => unit(
+            std::fs::copy(a, String::from_utf8_lossy(b).as_ref()).map(|_| ()).map_err(io_err),
+        ),
+        20 => unit(std::fs::rename(a, String::from_utf8_lossy(b).as_ref()).map_err(io_err)),
+        21 => {
+            let dir = std::env::temp_dir();
+            let name = format!(
+                "{}{}",
+                a,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            let path = dir.join(&name);
+            match std::fs::write(&path, "").map_err(io_err) {
+                Ok(()) => ok_text(path.to_string_lossy().replace('\\', "/")),
+                Err(m) => err_s(m),
+            }
+        }
+        22 => (pack(0, usize::from(Path::new(a).is_symlink())), Vec::new()),
+        23 => {
+            fn walk(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
+                for entry in std::fs::read_dir(dir).map_err(io_err)? {
+                    let entry = entry.map_err(io_err)?;
+                    let path = entry.path();
+                    out.push(path.to_string_lossy().replace('\\', "/"));
+                    if path.is_dir() {
+                        walk(&path, out)?;
+                    }
+                }
+                Ok(())
+            }
+            let mut results = Vec::new();
+            match walk(Path::new(a), &mut results) {
+                Ok(()) => {
+                    results.sort();
+                    let buf = frames(&results);
+                    (pack(0, buf.len()), buf)
+                }
+                Err(m) => err_s(m),
+            }
+        }
+        24 => match std::fs::read_to_string(a) {
+            Ok(t) => {
+                let lines: Vec<String> = t.lines().map(str::to_string).collect();
+                let buf = frames(&lines);
+                (pack(0, buf.len()), buf)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
+            Err(e) => err_s(io_err(e)),
+        },
+        25 => match std::fs::read(a) {
+            Ok(bytes) => (pack(0, bytes.len()), bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
+            Err(e) => err_s(io_err(e)),
+        },
+        26 => match std::env::var(a) {
+            Ok(v) => ok_text(v),
+            Err(_) => (pack(2, 0), Vec::new()),
+        },
+        27 => ok_text(std::env::consts::OS.to_string()),
+        28 => ok_text(std::env::temp_dir().to_string_lossy().replace('\\', "/")),
+        // args: [argv0] — a non-empty program path on both legs; the
+        // fixtures only observe len + non-emptiness.
+        29 => {
+            let buf = frames(&["wasm-harness".to_string()]);
+            (pack(0, buf.len()), buf)
+        }
+        // stdin read (up to n = a bytes) — the harness has no stdin.
+        31 => (pack(0, 0), Vec::new()),
+        // cwd — the same std::env the native runtime reads.
+        33 => match std::env::current_dir() {
+            Ok(p) => ok_text(p.to_string_lossy().replace('\\', "/")),
+            Err(e) => err_s(io_err(e)),
+        },
+        // host entropy: n = b_len bytes from a seeded-by-time xorshift
+        // (the range property is the only observable, C-112).
+        32 => {
+            let n = b.len();
+            let mut seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64
+                | 1;
+            let mut out = Vec::with_capacity(n);
+            for _ in 0..n {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                out.push(seed as u8);
+            }
+            (pack(0, out.len()), out)
+        }
+        _ => err_s(format!("unknown fs op {op}")),
+    }
+}
+
 fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use std::path::Path;
     if matches!(op, 2 | 3 | 7..=9 | 15 | 16) {
@@ -168,6 +289,9 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     }
     if matches!(op, 10..=14) {
         return fs_dispatch_r2(op, a);
+    }
+    if op >= 17 {
+        return fs_dispatch_meta(op, a, b);
     }
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
@@ -263,6 +387,14 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
             let mut b = vec![0u8; b_len as u32 as usize];
             mem.read(&caller, b_ptr as u32 as usize, &mut b)?;
             let a = String::from_utf8_lossy(&a).to_string();
+            // op 30 = raw stdout append (io.write / io.write_bytes):
+            // PROGRAM order with println is the C-contract, so it goes
+            // straight into the same sink, no trailing newline.
+            if op == 30 {
+                let mut o = caller.data().out.lock().expect("test harness invariant");
+                o.push_str(&String::from_utf8_lossy(&b));
+                return Ok(0);
+            }
             let (ret, buf) = fs_dispatch(op, &a, &b);
             *caller.data().fs_buf.lock().expect("fs buf") = buf;
             Ok(ret)

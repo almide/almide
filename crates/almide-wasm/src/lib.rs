@@ -108,6 +108,8 @@ mod matrix_scalars;
 mod binop;
 mod fan;
 mod fs;
+mod fs_meta;
+mod host_env;
 mod fuel;
 mod ranges;
 mod sums;

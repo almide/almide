@@ -244,7 +244,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 SliceTy::Result(self.types.intern(SliceTy::Unit), self.types.intern(STR))
             }
-            _ => return Ok(None),
+            _ => return self.lower_fs_meta_call(func, args),
         };
         Ok(Some(Some(out)))
     }
@@ -310,7 +310,7 @@ impl Emitter<'_> {
     }
 
     /// path → fs_call(op, path, 0, 0): the i64 ret is on the stack.
-    fn fs_call_1(&mut self, p: &IrExpr, op: i32) -> Result<(), EmitError> {
+    pub(crate) fn fs_call_1(&mut self, p: &IrExpr, op: i32) -> Result<(), EmitError> {
         self.lower(p, Some(STR))?;
         let hp = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -326,7 +326,7 @@ impl Emitter<'_> {
     }
 
     /// (path, content) both strings → fs_call(op, path, content).
-    fn fs_call_str2(&mut self, p: &IrExpr, c: &IrExpr, op: i32) -> Result<(), EmitError> {
+    pub(crate) fn fs_call_str2(&mut self, p: &IrExpr, c: &IrExpr, op: i32) -> Result<(), EmitError> {
         self.lower(p, Some(STR))?;
         let hp = self.hold_i32()?;
         self.f.instructions().local_set(hp);
@@ -347,7 +347,7 @@ impl Emitter<'_> {
     }
 
     /// ret on stack → Result[String, String] block on stack.
-    fn fs_result_string(&mut self) -> Result<SliceTy, EmitError> {
+    pub(crate) fn fs_result_string(&mut self) -> Result<SliceTy, EmitError> {
         let hret = self.hold_i64()?;
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -370,7 +370,7 @@ impl Emitter<'_> {
     }
 
     /// ret on stack → Result[Unit, String] block on stack.
-    fn fs_result_unit(&mut self) -> Result<SliceTy, EmitError> {
+    pub(crate) fn fs_result_unit(&mut self) -> Result<SliceTy, EmitError> {
         let hret = self.hold_i64()?;
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -399,7 +399,7 @@ impl Emitter<'_> {
     }
 
     /// ret on stack → Result[List[String], String] from the frames buffer.
-    fn fs_result_string_list(&mut self) -> Result<SliceTy, EmitError> {
+    pub(crate) fn fs_result_string_list(&mut self) -> Result<SliceTy, EmitError> {
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
         let hlist = self.hold_i32()?;
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
@@ -434,7 +434,7 @@ impl Emitter<'_> {
     /// is err, build the err Result into a hold and set the flag hold;
     /// leaves THREE holds live (raw, rawlen, err-result) for the frame
     /// walker + result assembly. Returns the err-result hold (0 = ok).
-    fn fs_frames_or_err(&mut self) -> Result<(u32, u32, u32), EmitError> {
+    pub(crate) fn fs_frames_or_err(&mut self) -> Result<(u32, u32, u32), EmitError> {
         let hret = self.hold_i64()?;
         let hraw = self.hold_i32()?;
         let hlen = self.hold_i32()?;
@@ -462,7 +462,7 @@ impl Emitter<'_> {
     /// Walk the u32-LE length-prefixed frames in the raw block (the
     /// three holds from fs_frames_or_err are live: raw, len, err), the
     /// per-frame STRING block on the stack for `body`.
-    fn fs_frames_foreach(
+    pub(crate) fn fs_frames_foreach(
         &mut self,
         hraw: u32,
         hlen: u32,

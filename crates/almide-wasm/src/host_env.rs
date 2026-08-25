@@ -1,0 +1,208 @@
+//! env / io / process host surfaces over the fs_call boundary — the
+//! ops live in fs_meta.rs; this file is the guest-side dispatch.
+//! `io.write`/`write_bytes` append RAW to the same stdout sink println
+//! uses (PROGRAM order is the contract); `io.read_n_bytes` reads up to
+//! n stdin bytes (n <= 0 is the empty list, no allocation).
+
+use almide_ir::IrExpr;
+use wasm_encoder::BlockType;
+
+use crate::emitter::Emitter;
+use crate::fs_meta::{
+    OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_STDIN_READ, OP_STDOUT_RAW, OP_TEMP_DIR,
+};
+use crate::*;
+
+impl Emitter<'_> {
+    /// env./io./process. calls. Ok(None) = not handled here.
+    pub(crate) fn lower_host_call(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+        let out = match (module, func, args) {
+            // Option[String]: status 2 = unset → none.
+            ("env", "get", [name]) => {
+                self.fs_call_1(name, OP_ENV_GET)?;
+                let hret = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hret);
+                i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(2).i32_eq();
+                i.if_(BlockType::Result(wasm_encoder::ValType::I32));
+                i.i32_const(almide_layout::NULL_ADDR as i32);
+                i.else_();
+                let _ = i;
+                let hb = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_get(hret)
+                    .i64_const(0xFFFF_FFFF)
+                    .i64_and()
+                    .i32_wrap_i64()
+                    .call(F_ALLOC)
+                    .local_set(hb);
+                i.local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .call(F_HOST_READ);
+                // some(str): a 4-byte option cell holding the handle
+                let hs = self.tmp_i32_local;
+                i.i32_const(4).call(F_ALLOC).local_set(hs);
+                i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+                i.local_get(hs);
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i64();
+                Some(SliceTy::Option(self.types.intern(STR)))
+            }
+            ("env", "os", []) => {
+                self.fs_call_0(OP_ENV_OS)?;
+                self.fs_take_text()?;
+                Some(STR)
+            }
+            // Result[String, String] — the surface is fallible (matched
+            // with ok/err), unlike the never-err os/temp_dir texts.
+            ("env", "cwd", []) => {
+                self.fs_call_0(OP_CWD)?;
+                Some(self.fs_result_string()?)
+            }
+            ("env", "temp_dir", []) => {
+                self.fs_call_0(OP_TEMP_DIR)?;
+                self.fs_take_text()?;
+                Some(STR)
+            }
+            ("env" | "process", "args", []) => {
+                self.fs_call_0(OP_ARGS)?;
+                let (hraw, hlen, _herr) = self.fs_frames_or_err()?;
+                let hlist = self.hold_i32()?;
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
+                self.fs_frames_foreach(hraw, hlen, |em| {
+                    let hline = em.tmp_i32_local;
+                    em.f.instructions().local_set(hline);
+                    em.f
+                        .instructions()
+                        .local_get(hlist)
+                        .local_get(hline)
+                        .call(F_LIST_PUSH_4)
+                        .local_set(hlist);
+                    Ok(())
+                })?;
+                self.f.instructions().local_get(hlist);
+                for _ in 0..4 {
+                    self.release_i32();
+                }
+                Some(SliceTy::List(self.types.intern(STR)))
+            }
+            ("io", "write", [b]) => {
+                self.lower(b, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+                self.io_stdout_raw()?;
+                None
+            }
+            // List[Int] → low bytes, then the same raw sink.
+            ("io", "write_bytes", [xs]) => {
+                match self.lower(xs, None)? {
+                    SliceTy::List(h) if self.types.el(h) == INT => {}
+                    other => return unsup(&format!("io-write-bytes-of:{other:?}")),
+                }
+                let hl = self.hold_i32()?;
+                let hb = self.hold_i32()?;
+                let hk = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hl);
+                i.local_get(hl).i32_load(len_memarg()).i32_const(3).i32_shr_u().local_set(hn);
+                i.local_get(hn).call(F_ALLOC).local_set(hb);
+                i.i32_const(0).local_set(hk);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
+                i.local_get(hb).local_get(hk).i32_add();
+                i.local_get(hl).local_get(hk).i32_const(3).i32_shl().i32_add();
+                i.i64_load(slot_memarg(0)).i32_wrap_i64();
+                i.i32_store8(crate::bytes::byte_k(0));
+                i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+                i.br(0).end().end();
+                i.local_get(hb);
+                let _ = i;
+                for _ in 0..4 {
+                    self.release_i32();
+                }
+                self.io_stdout_raw()?;
+                None
+            }
+            // n <= 0 → []; else read up to n stdin bytes (harness: none)
+            // and decode one i64 slot per byte.
+            ("io", "read_n_bytes", [n]) => {
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                i.local_get(hn).i64_const(0).i64_le_s();
+                i.if_(BlockType::Result(wasm_encoder::ValType::I32));
+                i.i32_const(0).call(F_ALLOC);
+                i.else_();
+                // n does NOT cross the boundary: a len slot makes the
+                // host read guest memory (i64::MAX once pulled 4 GiB out
+                // of a 17-page instance) and even a 0-len read validates
+                // the pointer. The harness has no stdin, so the host
+                // answers the WHOLE stream and the count cap would be
+                // applied guest-side when a real host arrives.
+                i.i32_const(OP_STDIN_READ);
+                i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+                i.call(F_FS_CALL);
+                let _ = i;
+                // decode: n bytes → n i64 slots (never errs)
+                let hret = self.hold_i64()?;
+                let hraw = self.hold_i32()?;
+                let hlen = self.hold_i32()?;
+                let hout = self.hold_i32()?;
+                let hk = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hret);
+                i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i32_wrap_i64().local_set(hlen);
+                i.local_get(hlen).call(F_ALLOC).local_set(hraw);
+                i.local_get(hraw)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .call(F_HOST_READ);
+                i.local_get(hlen).i32_const(3).i32_shl().call(F_ALLOC).local_set(hout);
+                i.i32_const(0).local_set(hk);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hk).local_get(hlen).i32_ge_u().br_if(1);
+                i.local_get(hout).local_get(hk).i32_const(3).i32_shl().i32_add();
+                i.local_get(hraw).local_get(hk).i32_add();
+                i.i64_load8_u(crate::bytes::byte_k(0));
+                i.i64_store(slot_memarg(0));
+                i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+                i.br(0).end().end();
+                i.local_get(hout);
+                i.end();
+                let _ = i;
+                for _ in 0..4 {
+                    self.release_i32();
+                }
+                self.release_i64();
+                self.release_i64();
+                Some(SliceTy::List(self.types.intern(INT)))
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(out))
+    }
+
+    /// Bytes handle on the stack → op 30 (raw stdout append).
+    fn io_stdout_raw(&mut self) -> Result<(), EmitError> {
+        let hb = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hb);
+        i.i32_const(OP_STDOUT_RAW);
+        i.i32_const(0).i32_const(0);
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb).i32_load(len_memarg());
+        i.call(F_FS_CALL);
+        i.drop();
+        let _ = i;
+        self.release_i32();
+        Ok(())
+    }
+}

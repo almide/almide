@@ -75,6 +75,27 @@ impl Emitter<'_> {
                 self.f.instructions().i64_store(raw(()));
                 Ok(None)
             }
+            // Host entropy (C-112): n bytes written at address p via the
+            // fs_call boundary (op 32) + host_read; returns 0.
+            ("random_get", [p, n]) => {
+                self.lower(p, Some(INT))?;
+                let hp = self.hold_i64()?;
+                self.f.instructions().local_set(hp);
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                i.i32_const(crate::fs_meta::OP_RANDOM_GET);
+                i.i32_const(0).i32_const(0).i32_const(0);
+                i.local_get(hn).i32_wrap_i64();
+                i.call(F_FS_CALL).drop();
+                i.local_get(hp).i32_wrap_i64().call(F_HOST_READ);
+                i.i64_const(0);
+                let _ = i;
+                self.release_i64();
+                self.release_i64();
+                Ok(Some(INT))
+            }
             ("alloc_bytes", [n]) => {
                 self.lower(n, Some(INT))?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
