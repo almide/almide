@@ -178,6 +178,14 @@ call:hash.sha256
 call:hash.sha256_hex
 call:hex.encode
 call:hex.encode_upper
+call:http.body
+call:http.get_header
+call:http.json
+call:http.redirect
+call:http.response
+call:http.set_header
+call:http.status
+call:http.with_headers
 call:int.abs
 call:int.band
 call:int.bits_to_float

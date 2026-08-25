@@ -150,6 +150,12 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
     "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
     "json_get_string",
+    // http_response.almd (audited 2026-08-25): PURE Almide over the
+    // published List[String] rep — list/string surfaces only, the RFC
+    // 9110 ASCII fold spelled with chars/index_of/slice. get_header
+    // (Option ret) sits in the SUM tier below.
+    "http_response", "http_json", "http_redirect", "http_with_headers",
+    "http_status", "http_body", "http_set_header",
     // random_int.almd (audited 2026-08-25): prim.alloc_bytes scratch +
     // prim.random_get (the op-32 entropy boundary) + pure span math —
     // the VALUE is nondeterministic by contract (C-112 pins the range).
@@ -160,6 +166,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // are REJECTED: their pair walks read the incumbent's inline-pairs
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
     "json_path_root", "json_path_field", "json_path_index", "json_path_get",
+    "http_get_header",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL

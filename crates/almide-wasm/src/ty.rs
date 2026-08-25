@@ -108,9 +108,17 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         }
         Ty::Named(name, args) if args.is_empty() => {
             // A user declaration wins; the builtin dynamic Value is the
-            // fallback for the undeclared opaque name.
+            // fallback for the undeclared opaque name; the PUBLISHED
+            // newtype erasures (self-host-owned reps) come last.
             types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i)).or_else(|| {
                 (name.as_str() == "Value").then_some(SliceTy::Value)
+            }).or_else(|| match name.as_str() {
+                // stdlib/http_response.almd / json_path.almd own these
+                // reps; the eraser publishes them as List[String].
+                "HttpResponse" | "JsonPath" => {
+                    Some(SliceTy::List(types.intern(SliceTy::Scalar(Scalar::Str))))
+                }
+                _ => None,
             })
         }
         Ty::Named(name, args) => types.instance(name.as_str(), args).map(SliceTy::Named),
@@ -125,6 +133,10 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
                 types.instance(name.as_str(), args).map(SliceTy::Named)
             }
         }
+        // A TypeVar/Unknown SURVIVING inference is unconstrained — the
+        // checker's #1428 doctrine defaults it to Unit (native spells
+        // the same resolution as a `::<(), _>` turbofish).
+        Ty::TypeVar(_) | Ty::Unknown => Some(SliceTy::Unit),
         _ => None,
     }
 }
