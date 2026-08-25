@@ -25,235 +25,14 @@ impl Emitter<'_> {
                 other => Ok(other),
             },
             // is_subset: every member of a found in b; is_disjoint: none.
-            ("is_subset" | "is_disjoint", [a, b]) => {
-                let want_found = i32::from(func == "is_subset");
-                let e = match self.lower(a, None)? {
-                    SliceTy::Set(h) => self.types.el(h),
-                    other => return unsup(&format!("set-op-of:{other:?}")),
-                };
-                let ah = self.hold_i32()?;
-                self.f.instructions().local_set(ah);
-                match self.lower(b, None)? {
-                    SliceTy::Set(h) if self.types.el(h) == e => {}
-                    other => return unsup(&format!("set-rel-of:{other:?}")),
-                }
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                let scan = self.scan_helper(e)?;
-                let stride = e.slot_size() as i32;
-                let hcur = self.hold_i32()?;
-                let hend = self.hold_i32()?;
-                let hres = self.hold_i32()?;
-                let hx = self.hold_for(e)?;
-                let mut i = self.f.instructions();
-                i.i32_const(1).local_set(hres);
-                i.local_get(ah)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_set(hcur);
-                i.local_get(hcur).local_get(ah).i32_load(len_memarg()).i32_add().local_set(hend);
-                i.block(BlockType::Empty).loop_(BlockType::Empty);
-                i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
-                i.local_get(hcur);
-                let _ = i;
-                self.load_ty_slot_at(e);
-                let mut i = self.f.instructions();
-                i.local_set(hx);
-                i.local_get(bh).i32_const(stride).i32_const(0).local_get(hx);
-                i.call(scan).i32_const(0).i32_ne();
-                i.i32_const(want_found).i32_ne().if_(BlockType::Empty);
-                i.i32_const(0).local_set(hres);
-                i.br(2);
-                i.end();
-                i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
-                i.br(0).end().end();
-                i.local_get(hres);
-                let _ = i;
-                self.release_for(e);
-                for _ in 0..5 {
-                    self.release_i32();
-                }
-                Ok(Some(BOOL))
-            }
+            ("is_subset" | "is_disjoint", [a, b]) => self.lower_set_relation(func, a, b),
             // remove: the set minus one member (a plain copy when absent).
-            ("remove", [s, x]) => {
-                let (sh, _xh, eh, e) = self.set_scan(s, x)?;
-                let stride = e.slot_size() as i32;
-                let ho = self.hold_i32()?;
-                let hp = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_get(eh).i32_eqz().if_(BlockType::Empty);
-                i.local_get(sh).call(F_BLOCK_COPY).local_set(ho);
-                i.else_();
-                i.local_get(eh)
-                    .local_get(sh)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .i32_sub()
-                    .local_set(hp);
-                i.local_get(sh).i32_load(len_memarg()).i32_const(stride).i32_sub();
-                i.call(F_ALLOC).local_set(ho);
-                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(sh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hp);
-                i.memory_copy(0, 0);
-                i.local_get(ho)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(hp)
-                    .i32_add();
-                i.local_get(eh).i32_const(stride).i32_add();
-                i.local_get(sh)
-                    .i32_load(len_memarg())
-                    .local_get(hp)
-                    .i32_sub()
-                    .i32_const(stride)
-                    .i32_sub();
-                i.memory_copy(0, 0);
-                i.end();
-                i.local_get(ho);
-                let _ = i;
-                self.release_i32();
-                self.release_i32();
-                self.release_i32(); // eh
-                self.release_for(e);
-                self.release_i32(); // sh
-                Ok(Some(SliceTy::Set(self.types.intern(e))))
-            }
+            ("remove", [s, x]) => self.lower_set_remove(s, x),
             // (a − b) ++ (b − a): the two filters are DISJOINT, so the
             // concatenation is already deduped.
-            ("symmetric_difference", [a, b]) => {
-                let e = match self.lower(a, None)? {
-                    SliceTy::Set(h) => self.types.el(h),
-                    other => return unsup(&format!("set-op-of:{other:?}")),
-                };
-                let ah = self.hold_i32()?;
-                self.f.instructions().local_set(ah);
-                match self.lower(b, None)? {
-                    SliceTy::Set(h) if self.types.el(h) == e => {}
-                    other => return unsup(&format!("set-symdiff-of:{other:?}")),
-                }
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                let scan = self.scan_helper(e)?;
-                let stride = e.slot_size() as i32;
-                let ho = self.hold_i32()?;
-                let hw = self.hold_i32()?;
-                let hcur = self.hold_i32()?;
-                let hend = self.hold_i32()?;
-                let hx = self.hold_for(e)?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(ah)
-                        .i32_load(len_memarg())
-                        .local_get(bh)
-                        .i32_load(len_memarg())
-                        .i32_add()
-                        .call(F_ALLOC)
-                        .local_set(ho);
-                    i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hw);
-                }
-                for (src, other) in [(ah, bh), (bh, ah)] {
-                    let mut i = self.f.instructions();
-                    i.local_get(src)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .local_set(hcur);
-                    i.local_get(hcur).local_get(src).i32_load(len_memarg()).i32_add().local_set(hend);
-                    i.block(BlockType::Empty).loop_(BlockType::Empty);
-                    i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
-                    i.local_get(hcur);
-                    let _ = i;
-                    self.load_ty_slot_at(e);
-                    let mut i = self.f.instructions();
-                    i.local_set(hx);
-                    i.local_get(other).i32_const(stride).i32_const(0).local_get(hx);
-                    i.call(scan).i32_eqz().if_(BlockType::Empty);
-                    i.local_get(hw).local_get(hcur).i32_const(stride);
-                    i.memory_copy(0, 0);
-                    i.local_get(hw).i32_const(stride).i32_add().local_set(hw);
-                    i.end();
-                    i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
-                    i.br(0).end().end();
-                }
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(ho);
-                    i.local_get(hw)
-                        .local_get(ho)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .i32_sub();
-                    i.i32_store(len_memarg());
-                    i.local_get(ho);
-                }
-                self.release_for(e);
-                for _ in 0..6 {
-                    self.release_i32();
-                }
-                Ok(Some(SliceTy::Set(self.types.intern(e))))
-            }
+            ("symmetric_difference", [a, b]) => self.lower_set_symdiff(a, b),
             // Transform + first-seen dedup (a set stays a set).
-            ("map", [s, cb]) => {
-                let (params, body) = self.hof_lambda(cb, 1)?;
-                let e = match self.lower(s, None)? {
-                    SliceTy::Set(h) => self.types.el(h),
-                    other => return unsup(&format!("set-map-of:{other:?}")),
-                };
-                let b_ty = self.infer(body)?;
-                let SliceTy::Scalar(_) = b_ty else { return unsup("set-map-elem-nonscalar") };
-                let scan = self.scan_helper(b_ty)?;
-                let stride = e.slot_size() as i32;
-                let bstride = b_ty.slot_size() as i32;
-                let sh = self.hold_i32()?;
-                self.f.instructions().local_set(sh);
-                let hcur = self.hold_i32()?;
-                let hend = self.hold_i32()?;
-                let hacc = self.hold_i32()?;
-                let hv = self.hold_for(b_ty)?;
-                {
-                    let mut i = self.f.instructions();
-                    i.i32_const(0).call(F_ALLOC).local_set(hacc);
-                    i.local_get(sh)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .local_set(hcur);
-                    i.local_get(hcur).local_get(sh).i32_load(len_memarg()).i32_add().local_set(hend);
-                    i.block(BlockType::Empty).loop_(BlockType::Empty);
-                    i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
-                    i.local_get(hcur);
-                }
-                self.load_ty_slot_at(e);
-                self.f.instructions().local_set(params[0]);
-                self.lower(body, Some(b_ty))?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(hv);
-                    i.local_get(hacc).i32_const(bstride).i32_const(0).local_get(hv);
-                    i.call(scan).i32_eqz().if_(BlockType::Empty);
-                    i.local_get(hacc).local_get(hv);
-                    if b_ty.val_type() == wasm_encoder::ValType::F64 {
-                        i.i64_reinterpret_f64();
-                    }
-                }
-                let push = match b_ty.slot_size() {
-                    8 => F_LIST_PUSH_8,
-                    _ => F_LIST_PUSH_4,
-                };
-                {
-                    let mut i = self.f.instructions();
-                    i.call(push).local_set(hacc);
-                    i.end();
-                    i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
-                    i.br(0).end().end();
-                    i.local_get(hacc);
-                }
-                self.release_for(b_ty);
-                for _ in 0..4 {
-                    self.release_i32();
-                }
-                Ok(Some(SliceTy::Set(self.types.intern(b_ty))))
-            }
+            ("map", [s, cb]) => self.lower_set_hof_map(s, cb),
             ("new", []) => {
                 let Some(ty @ SliceTy::Set(_)) = ret_hint else {
                     return unsup("set-new-needs-context");
@@ -571,6 +350,240 @@ impl Emitter<'_> {
             self.release_i32();
         }
         Ok(Some(SliceTy::Set(self.types.intern(e))))
+    }
+
+    /// is_subset: every member of a found in b; is_disjoint: none.
+    fn lower_set_relation(&mut self, func: &str, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let want_found = i32::from(func == "is_subset");
+        let e = match self.lower(a, None)? {
+            SliceTy::Set(h) => self.types.el(h),
+            other => return unsup(&format!("set-op-of:{other:?}")),
+        };
+        let ah = self.hold_i32()?;
+        self.f.instructions().local_set(ah);
+        match self.lower(b, None)? {
+            SliceTy::Set(h) if self.types.el(h) == e => {}
+            other => return unsup(&format!("set-rel-of:{other:?}")),
+        }
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        let scan = self.scan_helper(e)?;
+        let stride = e.slot_size() as i32;
+        let hcur = self.hold_i32()?;
+        let hend = self.hold_i32()?;
+        let hres = self.hold_i32()?;
+        let hx = self.hold_for(e)?;
+        let mut i = self.f.instructions();
+        i.i32_const(1).local_set(hres);
+        i.local_get(ah)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_set(hcur);
+        i.local_get(hcur).local_get(ah).i32_load(len_memarg()).i32_add().local_set(hend);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
+        i.local_get(hcur);
+        let _ = i;
+        self.load_ty_slot_at(e);
+        let mut i = self.f.instructions();
+        i.local_set(hx);
+        i.local_get(bh).i32_const(stride).i32_const(0).local_get(hx);
+        i.call(scan).i32_const(0).i32_ne();
+        i.i32_const(want_found).i32_ne().if_(BlockType::Empty);
+        i.i32_const(0).local_set(hres);
+        i.br(2);
+        i.end();
+        i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
+        i.br(0).end().end();
+        i.local_get(hres);
+        let _ = i;
+        self.release_for(e);
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        Ok(Some(BOOL))
+    }
+
+    /// remove: the set minus one member (a plain copy when absent).
+    fn lower_set_remove(&mut self, s: &IrExpr, x: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let (sh, _xh, eh, e) = self.set_scan(s, x)?;
+        let stride = e.slot_size() as i32;
+        let ho = self.hold_i32()?;
+        let hp = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(eh).i32_eqz().if_(BlockType::Empty);
+        i.local_get(sh).call(F_BLOCK_COPY).local_set(ho);
+        i.else_();
+        i.local_get(eh)
+            .local_get(sh)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .i32_sub()
+            .local_set(hp);
+        i.local_get(sh).i32_load(len_memarg()).i32_const(stride).i32_sub();
+        i.call(F_ALLOC).local_set(ho);
+        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(sh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hp);
+        i.memory_copy(0, 0);
+        i.local_get(ho)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(hp)
+            .i32_add();
+        i.local_get(eh).i32_const(stride).i32_add();
+        i.local_get(sh)
+            .i32_load(len_memarg())
+            .local_get(hp)
+            .i32_sub()
+            .i32_const(stride)
+            .i32_sub();
+        i.memory_copy(0, 0);
+        i.end();
+        i.local_get(ho);
+        let _ = i;
+        self.release_i32();
+        self.release_i32();
+        self.release_i32(); // eh
+        self.release_for(e);
+        self.release_i32(); // sh
+        Ok(Some(SliceTy::Set(self.types.intern(e))))
+    }
+
+    /// (a - b) ++ (b - a): the two filters are DISJOINT, so the
+    /// concatenation is already deduped.
+    fn lower_set_symdiff(&mut self, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let e = match self.lower(a, None)? {
+            SliceTy::Set(h) => self.types.el(h),
+            other => return unsup(&format!("set-op-of:{other:?}")),
+        };
+        let ah = self.hold_i32()?;
+        self.f.instructions().local_set(ah);
+        match self.lower(b, None)? {
+            SliceTy::Set(h) if self.types.el(h) == e => {}
+            other => return unsup(&format!("set-symdiff-of:{other:?}")),
+        }
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        let scan = self.scan_helper(e)?;
+        let stride = e.slot_size() as i32;
+        let ho = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hcur = self.hold_i32()?;
+        let hend = self.hold_i32()?;
+        let hx = self.hold_for(e)?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ah)
+                .i32_load(len_memarg())
+                .local_get(bh)
+                .i32_load(len_memarg())
+                .i32_add()
+                .call(F_ALLOC)
+                .local_set(ho);
+            i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hw);
+        }
+        for (src, other) in [(ah, bh), (bh, ah)] {
+            let mut i = self.f.instructions();
+            i.local_get(src)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .local_set(hcur);
+            i.local_get(hcur).local_get(src).i32_load(len_memarg()).i32_add().local_set(hend);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
+            i.local_get(hcur);
+            let _ = i;
+            self.load_ty_slot_at(e);
+            let mut i = self.f.instructions();
+            i.local_set(hx);
+            i.local_get(other).i32_const(stride).i32_const(0).local_get(hx);
+            i.call(scan).i32_eqz().if_(BlockType::Empty);
+            i.local_get(hw).local_get(hcur).i32_const(stride);
+            i.memory_copy(0, 0);
+            i.local_get(hw).i32_const(stride).i32_add().local_set(hw);
+            i.end();
+            i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
+            i.br(0).end().end();
+        }
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ho);
+            i.local_get(hw)
+                .local_get(ho)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .i32_sub();
+            i.i32_store(len_memarg());
+            i.local_get(ho);
+        }
+        self.release_for(e);
+        for _ in 0..6 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::Set(self.types.intern(e))))
+    }
+
+    /// Transform + first-seen dedup (a set stays a set).
+    fn lower_set_hof_map(&mut self, s: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let e = match self.lower(s, None)? {
+            SliceTy::Set(h) => self.types.el(h),
+            other => return unsup(&format!("set-map-of:{other:?}")),
+        };
+        let b_ty = self.infer(body)?;
+        let SliceTy::Scalar(_) = b_ty else { return unsup("set-map-elem-nonscalar") };
+        let scan = self.scan_helper(b_ty)?;
+        let stride = e.slot_size() as i32;
+        let bstride = b_ty.slot_size() as i32;
+        let sh = self.hold_i32()?;
+        self.f.instructions().local_set(sh);
+        let hcur = self.hold_i32()?;
+        let hend = self.hold_i32()?;
+        let hacc = self.hold_i32()?;
+        let hv = self.hold_for(b_ty)?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(0).call(F_ALLOC).local_set(hacc);
+            i.local_get(sh)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .local_set(hcur);
+            i.local_get(hcur).local_get(sh).i32_load(len_memarg()).i32_add().local_set(hend);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
+            i.local_get(hcur);
+        }
+        self.load_ty_slot_at(e);
+        self.f.instructions().local_set(params[0]);
+        self.lower(body, Some(b_ty))?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hv);
+            i.local_get(hacc).i32_const(bstride).i32_const(0).local_get(hv);
+            i.call(scan).i32_eqz().if_(BlockType::Empty);
+            i.local_get(hacc).local_get(hv);
+            if b_ty.val_type() == wasm_encoder::ValType::F64 {
+                i.i64_reinterpret_f64();
+            }
+        }
+        let push = match b_ty.slot_size() {
+            8 => F_LIST_PUSH_8,
+            _ => F_LIST_PUSH_4,
+        };
+        {
+            let mut i = self.f.instructions();
+            i.call(push).local_set(hacc);
+            i.end();
+            i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
+            i.br(0).end().end();
+            i.local_get(hacc);
+        }
+        self.release_for(b_ty);
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::Set(self.types.intern(b_ty))))
     }
 
     fn set_scan(&mut self, s: &IrExpr, x: &IrExpr) -> Result<(u32, u32, u32, SliceTy), EmitError> {
