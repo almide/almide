@@ -2417,3 +2417,30 @@ libm (exp/sin/atan/log_gamma/fmax/PowFloat), regex (~2), from_bytes
 bytes cursor/array/rawptr tail, fs/io/env host surfaces, display of
 Map/Value interp-parts, group_by/unique_by/binary_search/window,
 mut-param fns, and singles.
+
+## Stage 74 — 494 → 501: the libm flagship, codec splices, Map/Value display
+
+- **The vendored libm LINKS** (C-305): math_exp/trig/atan/lgamma/fpow —
+  faithful libm-0.2.16 transcriptions, constants via ffrombits — admit
+  as pure-scalar bodies, and `math_transcendental_bits` claims
+  BIT-EXACTLY through the new emitter. `**` on floats routes to the
+  same linked fpow (the interp's PowFloat table). One vendored libm,
+  bit parity on every target — the flagship comparative claim now held
+  by the greenfield engine.
+- **Codec splices**: encode is prim-free (layout-AGNOSTIC — builds
+  through the public value.* surface our emitter lowers natively);
+  decode links behind a NATIVE TWIN for its one layout-reading helper
+  (`__is_null` reads the incumbent's tag at h+4 — the len-as-tag
+  exclusion made executable as a targeted override). The dunder-name
+  demand joins the splice scan; bare-Named calls resolve through the
+  same registry/whitelist path.
+- **Map display** (`["k": v, …]` / `[:]`) and **Value display** (the
+  compact-JSON serializer, appended IN PLACE at the display cursor —
+  the capture path scratches from G_LINE_CURSOR and clobbered the
+  interpolation, caught by value_repr's divergence before landing).
+- The pre-push hook gained the LOCAL codopsy-A step after a B(89)
+  slipped into one pushed commit (repaired within minutes by
+  extraction; the twice-failed→mechanize doctrine applied to its
+  author again).
+
+501/599 — the 500 line crossed. Divergence zero throughout.
