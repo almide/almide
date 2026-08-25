@@ -76,6 +76,7 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "float_abs", "float_floor", "float_round", "float_is_nan", "float_from_float64",
     "float_from_float32", "float_to_float32",
     "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
+    "hash_sha256", "hash_sha256_hex", "hex_encode", "hex_encode_upper", "hex_decode",
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni",
     "base64_encode", "base64_encode_url", "hash_fnv1a32_bytes",
@@ -123,8 +124,6 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     "bytes_read_i32_be_array", "bytes_read_i32_le_array", "bytes_read_i64_be_array",
     "bytes_read_i64_le_array", "bytes_read_string_be", "bytes_read_u16_be_array",
     "bytes_read_u16_le_array", "bytes_read_u32_be_array", "bytes_read_u32_le_array",
-    "json_get_array", "json_get_bool", "json_get_float",
-    "json_get_int", "json_get_string",
 ];
 
 /// The exempt-tier members of the same audit (tuple/Option returners
@@ -135,7 +134,8 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_i32_be_at", "bytes_read_i32_le_at", "bytes_read_i64_be_at", "bytes_read_i64_le_at",
     "bytes_read_string_at", "bytes_read_string_be_at", "bytes_read_u16_be_at",
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
-    "bytes_take_at",
+    "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
+    "json_get_string",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL

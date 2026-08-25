@@ -25,9 +25,11 @@ call:args.option_or
 call:args.positional
 call:args.raw
 call:bytes.from_list
+call:bytes.get
 call:bytes.get_or
 call:bytes.len
 call:bytes.new
+call:bytes.push
 call:bytes.read_f16_le
 call:bytes.read_f16_le_array
 call:bytes.read_f32_be
@@ -138,6 +140,9 @@ call:int32.to_string
 call:int64.to_int8_checked
 call:int8.to_int64
 call:int8.to_string
+call:json.get_array
+call:json.get_int
+call:json.get_string
 call:json.parse
 call:json.stringify
 call:list.__fallible_flat_map__Int_String_String

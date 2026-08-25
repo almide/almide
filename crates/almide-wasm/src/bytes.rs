@@ -251,6 +251,247 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
                 Ok(Some(BYTES))
             }
+            // some(byte) / none (native b.get — usize-wrap: negative i
+            // is huge and misses). Its default is NONE, not 0, so it
+            // takes its own guard instead of the bits path.
+            ("get", [b, idx]) => {
+                self.lower(b, Some(BYTES))?;
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(idx, Some(INT))?;
+                let ih = self.hold_i64()?;
+                let hr = self.hold_i32()?;
+                self.f.instructions().local_set(ih);
+                self.bytes_room(bh, ih, 1);
+                let mut i = self.f.instructions();
+                i.if_(BlockType::Result(ValType::I32));
+                i.i32_const(8).call(F_ALLOC).local_tee(hr);
+                i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
+                i.i64_load8_u(byte_k(0));
+                i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
+                i.local_get(hr);
+                i.else_();
+                i.i32_const(0);
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(SliceTy::Option(self.types.intern(INT))))
+            }
+            // Functional set: a fresh copy, one in-range byte replaced
+            // (native clone + guarded store).
+            ("set", [b, idx, v]) => {
+                self.lower(b, Some(BYTES))?;
+                self.f.instructions().call(F_BLOCK_COPY);
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(idx, Some(INT))?;
+                let ih = self.hold_i64()?;
+                self.f.instructions().local_set(ih);
+                self.lower(v, Some(INT))?;
+                let hv = self.hold_i64()?;
+                self.f.instructions().local_set(hv);
+                self.bytes_room(bh, ih, 1);
+                let mut i = self.f.instructions();
+                i.if_(BlockType::Empty);
+                i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
+                i.local_get(hv).i64_store8(byte_k(0));
+                i.end();
+                i.local_get(bh);
+                let _ = i;
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(BYTES))
+            }
+            // MUT push (native b.push): copy-grow 1, store, write back.
+            ("push", [b, v]) | ("append_u8", [b, v]) => {
+                let IrExprKind::Var { id } = &b.kind else {
+                    return unsup("bytes-push-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                self.f.instructions().local_get(var_idx);
+                if self.cells.contains(id) {
+                    self.load_ty_slot(var_ty, 0);
+                }
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(v, Some(INT))?;
+                let hv = self.hold_i64()?;
+                self.f.instructions().local_set(hv);
+                let (len_h, rh) = self.emit_copy_grow(bh, 1)?;
+                self.f
+                    .instructions()
+                    .local_get(rh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h)
+                    .i32_add()
+                    .local_get(hv)
+                    .i64_store8(MemArg { offset: 0, align: 0, memory_index: 0 });
+                self.f.instructions().local_get(rh);
+                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(None)
+            }
+            // pad to target with `val` on the chosen side; target <= len
+            // (negative INCLUDED — the signed read, both legs) is a copy.
+            ("pad_left" | "pad_right", [b, target, v]) => {
+                let left = func == "pad_left";
+                self.lower(b, Some(BYTES))?;
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(target, Some(INT))?;
+                let ht = self.hold_i64()?;
+                self.f.instructions().local_set(ht);
+                self.lower(v, Some(INT))?;
+                let hv = self.hold_i64()?;
+                let ho = self.hold_i32()?;
+                let hp = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hv);
+                i.local_get(ht);
+                i.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
+                i.i64_le_s().if_(BlockType::Result(ValType::I32));
+                i.local_get(bh).call(F_BLOCK_COPY);
+                i.else_();
+                i.local_get(ht).i32_wrap_i64().call(F_ALLOC).local_set(ho);
+                // pad = target - len bytes of val
+                i.local_get(ht)
+                    .i32_wrap_i64()
+                    .local_get(bh)
+                    .i32_load(len_memarg())
+                    .i32_sub()
+                    .local_set(hp);
+                // fill zone start: left → payload; right → payload + len
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                if !left {
+                    i.local_get(bh).i32_load(len_memarg()).i32_add();
+                }
+                i.local_get(hv).i32_wrap_i64();
+                i.local_get(hp);
+                i.memory_fill(0);
+                // the source bytes: left → after the pad; right → front
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                if left {
+                    i.local_get(hp).i32_add();
+                }
+                i.local_get(bh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(bh).i32_load(len_memarg());
+                i.memory_copy(0, 0);
+                i.local_get(ho);
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(BYTES))
+            }
+            // MUT window copy (native copy_from): either offset past its
+            // buffer is a no-op; len clamps to both remainders.
+            ("copy_from", [dst, src, doff, soff, n]) => {
+                let IrExprKind::Var { id } = &dst.kind else {
+                    return unsup("bytes-copy-from-nonvar");
+                };
+                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                    return unsup("var:unmapped");
+                };
+                self.f.instructions().local_get(var_idx);
+                if self.cells.contains(id) {
+                    self.load_ty_slot(var_ty, 0);
+                }
+                self.f.instructions().call(F_BLOCK_COPY);
+                let dh = self.hold_i32()?;
+                self.f.instructions().local_set(dh);
+                self.lower(src, Some(BYTES))?;
+                let sh = self.hold_i32()?;
+                self.f.instructions().local_set(sh);
+                self.lower(doff, Some(INT))?;
+                let hdo = self.hold_i64()?;
+                self.f.instructions().local_set(hdo);
+                self.lower(soff, Some(INT))?;
+                let hso = self.hold_i64()?;
+                self.f.instructions().local_set(hso);
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let hl = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                // in-range offsets? (usize-wrap: negative = huge = miss)
+                i.local_get(hdo).i64_const(0).i64_ge_s();
+                i.local_get(hdo);
+                i.local_get(dh).i32_load(len_memarg()).i64_extend_i32_u();
+                i.i64_lt_s().i32_and();
+                i.local_get(hso).i64_const(0).i64_ge_s().i32_and();
+                i.local_get(hso);
+                i.local_get(sh).i32_load(len_memarg()).i64_extend_i32_u();
+                i.i64_lt_s().i32_and();
+                i.local_get(hn).i64_const(0).i64_ge_s().i32_and();
+                i.if_(BlockType::Empty);
+                // len = min(n, dst_rem, src_rem) — select(v1,v2,cond) =
+                // cond ? v1 : v2, so the REMAINDER is v1 under n > rem.
+                i.local_get(dh)
+                    .i32_load(len_memarg())
+                    .local_get(hdo)
+                    .i32_wrap_i64()
+                    .i32_sub();
+                i.local_get(hn).i32_wrap_i64();
+                i.local_get(hn).i32_wrap_i64();
+                i.local_get(dh)
+                    .i32_load(len_memarg())
+                    .local_get(hdo)
+                    .i32_wrap_i64()
+                    .i32_sub();
+                i.i32_gt_u().select();
+                i.local_set(hl);
+                i.local_get(sh)
+                    .i32_load(len_memarg())
+                    .local_get(hso)
+                    .i32_wrap_i64()
+                    .i32_sub();
+                i.local_get(hl);
+                i.local_get(hl);
+                i.local_get(sh)
+                    .i32_load(len_memarg())
+                    .local_get(hso)
+                    .i32_wrap_i64()
+                    .i32_sub();
+                i.i32_gt_u().select();
+                i.local_set(hl);
+                i.local_get(dh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hdo)
+                    .i32_wrap_i64()
+                    .i32_add();
+                i.local_get(sh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hso)
+                    .i32_wrap_i64()
+                    .i32_add();
+                i.local_get(hl);
+                i.memory_copy(0, 0);
+                i.end();
+                i.local_get(dh);
+                let _ = i;
+                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.release_i32();
+                self.release_i64();
+                self.release_i64();
+                self.release_i64();
+                self.release_i32();
+                self.release_i32();
+                Ok(None)
+            }
             // Native from_utf8_lossy (the WHATWG helper) — the self-host
             // impl is a raw copy and must not shadow this.
             ("to_string_lossy", [b]) => {
