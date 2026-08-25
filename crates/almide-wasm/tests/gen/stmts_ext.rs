@@ -181,4 +181,57 @@ impl Gen {
             "println(\"gone=\" + (if fs.exists({d}) then \"n\" else \"y\"))"
         ));
     }
+
+    fn expr_list(&mut self, depth: usize) -> String {
+            match self.rng.below(8) {
+                6 => {
+                    // take/drop with counts spanning 0 / in-range /
+                    // past-len / NEGATIVE (take: whole list, drop: empty —
+                    // the v0 asymmetry; the stage-63 take inversion hid
+                    // because no generated program observed take's value).
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    let f = ["take", "drop"][self.rng.below(2)];
+                    let n = [0i64, 1, 2, 9, -1][self.rng.below(5)];
+                    format!("list.{f}({src}, {n})")
+                }
+                7 => {
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    let i = [0i64, 1, 5, -1][self.rng.below(4)];
+                    format!("list.insert({src}, {i}, {})", self.expr(Ty::Int, depth - 1))
+                }
+                5 => {
+                    // Slice — start is OFTEN 0 (the everyday form): mutant
+                    // 010's survival exposed that no exercised program
+                    // sliced from zero.
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    let a = self.rng.below(2);
+                    let b = a + self.rng.below(4);
+                    format!("list.slice({src}, {a}, {b})")
+                }
+                0 => {
+                    let n = self.rng.below(4);
+                    let items: Vec<String> = (0..n).map(|_| self.expr(Ty::Int, depth - 1)).collect();
+                    format!("[{}]", items.join(", "))
+                }
+                1 => format!("({} + {})", self.expr(Ty::ListInt, depth - 1), self.expr(Ty::ListInt, depth - 1)),
+                // HOF callbacks — inlined lambdas over the new machinery.
+                2 => {
+                    let p = self.fresh();
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    self.vars.push(Var { name: p.clone(), ty: Ty::Int, mutable: false });
+                    let body = self.expr(Ty::Int, depth - 1);
+                    self.vars.pop();
+                    format!("list.map({src}, ({p}) => {body})")
+                }
+                3 => {
+                    let p = self.fresh();
+                    let src = self.expr(Ty::ListInt, depth - 1);
+                    self.vars.push(Var { name: p.clone(), ty: Ty::Int, mutable: false });
+                    let cond = self.expr(Ty::Bool, depth - 1);
+                    self.vars.pop();
+                    format!("list.filter({src}, ({p}) => {cond})")
+                }
+                _ => self.leaf(Ty::ListInt),
+            }
+    }
 }
