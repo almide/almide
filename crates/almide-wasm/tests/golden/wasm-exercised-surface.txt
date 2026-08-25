@@ -89,8 +89,10 @@ call:list.clear
 call:list.drop
 call:list.enumerate
 call:list.filter
+call:list.filter_map
 call:list.find
 call:list.first
+call:list.flat_map
 call:list.fold
 call:list.get
 call:list.get_or
@@ -106,9 +108,11 @@ call:list.push
 call:list.remove_at
 call:list.repeat
 call:list.reverse
+call:list.set
 call:list.slice
 call:list.sort
 call:list.sort_by
+call:list.swap
 call:list.take
 call:list.windows
 call:list.with_capacity
@@ -141,6 +145,7 @@ call:option.to_list
 call:option.to_result__Int_LoadError
 call:option.to_result__Result_Int_String_String
 call:option.unwrap_or
+call:option.unwrap_or_else
 call:println
 call:process.exit
 call:result.flat_map
@@ -167,6 +172,7 @@ call:string.repeat
 call:string.replace
 call:string.slice
 call:string.split
+call:string.starts_with
 call:string.take
 call:string.to_upper
 call:string.trim
@@ -213,6 +219,7 @@ expr:ResultOk
 expr:RuntimeCall
 expr:SpreadRecord
 expr:StringInterp
+expr:ToOption
 expr:Try
 expr:Tuple
 expr:TupleIndex

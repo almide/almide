@@ -3,7 +3,13 @@
 //! module calls (Ok(None) falls through to the chain).
 
 use almide_ir::{CallTarget, IrExpr, IrExprKind};
-use wasm_encoder::{BlockType, ValType};
+use wasm_encoder::{BlockType, MemArg, ValType};
+
+/// Payload-relative byte address (align 0 — a byte load may not carry
+/// the 4-byte hint slot_memarg advertises).
+fn str_byte() -> MemArg {
+    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+}
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -85,6 +91,48 @@ impl Emitter<'_> {
                     .i32_const(i32::from(first))
                     .call(F_STR_REPLACE);
                 Ok(Some(STR))
+            }
+            // Byte-prefix compare (native str::starts_with): for valid
+            // UTF-8 the byte test IS the char test.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "string"
+                    && func.as_str() == "starts_with"
+                    && args.len() == 2 =>
+            {
+                self.lower(&args[0], Some(STR))?;
+                let hs = self.hold_i32()?;
+                self.f.instructions().local_set(hs);
+                self.lower(&args[1], Some(STR))?;
+                let hp = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                let hk = self.hold_i32()?;
+                let hr = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hp);
+                i.local_get(hp).i32_load(len_memarg()).local_set(hn);
+                i.local_get(hn).local_get(hs).i32_load(len_memarg()).i32_gt_u();
+                i.if_(BlockType::Result(ValType::I32));
+                i.i32_const(0);
+                i.else_();
+                i.i32_const(1).local_set(hr);
+                i.i32_const(0).local_set(hk);
+                i.block(BlockType::Empty).loop_(BlockType::Empty);
+                i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
+                i.local_get(hs).local_get(hk).i32_add().i32_load8_u(str_byte());
+                i.local_get(hp).local_get(hk).i32_add().i32_load8_u(str_byte());
+                i.i32_ne().if_(BlockType::Empty);
+                i.i32_const(0).local_set(hr);
+                i.br(2);
+                i.end();
+                i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+                i.br(0).end().end();
+                i.local_get(hr);
+                i.end();
+                let _ = i;
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+                Ok(Some(BOOL))
             }
             // string.join(xs, sep) is list.join with the module spelled
             // the other way — same F_LIST_JOIN, same List[String] demand.

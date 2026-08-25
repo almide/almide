@@ -2,7 +2,7 @@
 //! for the complexity budget; list_order's dispatcher forwards here.
 
 use almide_ir::IrExpr;
-use wasm_encoder::BlockType;
+use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -111,6 +111,125 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
+        Ok(Some(SliceTy::List(h)))
+    }
+
+    /// Native `if let Some(s) = r.get_mut(i) { *s = x }` over a fresh
+    /// copy: OOB — negative wraps huge — leaves the copy untouched. The
+    /// value ALWAYS evaluates (native argument order).
+    pub(crate) fn lower_list_set(
+        &mut self,
+        xs: &IrExpr,
+        idx: &IrExpr,
+        v: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-set-of:{other:?}")),
+        };
+        let et = self.types.el(h);
+        let stride = et.slot_size() as i32;
+        self.f.instructions().call(F_BLOCK_COPY);
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(idx, Some(INT))?;
+        let hn = self.hold_i64()?;
+        self.f.instructions().local_set(hn);
+        self.lower(v, Some(et))?;
+        enum Hv {
+            I64(u32),
+            F64(u32),
+            I32(u32),
+        }
+        let hv = match et.val_type() {
+            ValType::I64 => Hv::I64(self.hold_i64()?),
+            ValType::F64 => Hv::F64(self.hold_f64()?),
+            _ => Hv::I32(self.hold_i32()?),
+        };
+        let (Hv::I64(hvi) | Hv::F64(hvi) | Hv::I32(hvi)) = hv;
+        self.f.instructions().local_set(hvi);
+        let mut i = self.f.instructions();
+        i.local_get(hn).i64_const(0).i64_ge_s();
+        i.local_get(hn);
+        i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().i64_extend_i32_u();
+        i.i64_lt_s().i32_and().if_(BlockType::Empty);
+        i.local_get(hb)
+            .local_get(hn)
+            .i32_wrap_i64()
+            .i32_const(stride)
+            .i32_mul()
+            .i32_add()
+            .local_get(hvi);
+        let _ = i;
+        self.store_ty_slot(et, 0);
+        self.f.instructions().end().local_get(hb);
+        match hv {
+            Hv::I64(_) => self.release_i64(),
+            Hv::F64(_) => self.release_f64(),
+            Hv::I32(_) => self.release_i32(),
+        }
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(SliceTy::List(h)))
+    }
+
+    /// Native `if a < len && b < len { r.swap(a, b) }` over a fresh copy:
+    /// EITHER index out of range (negative wraps huge) is a whole no-op.
+    pub(crate) fn lower_list_swap(
+        &mut self,
+        xs: &IrExpr,
+        ia: &IrExpr,
+        ib: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let h = match self.lower(xs, None)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-swap-of:{other:?}")),
+        };
+        let stride = self.types.el(h).slot_size() as i32;
+        self.f.instructions().call(F_BLOCK_COPY);
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower(ia, Some(INT))?;
+        let hi = self.hold_i64()?;
+        self.f.instructions().local_set(hi);
+        self.lower(ib, Some(INT))?;
+        let hj = self.hold_i64()?;
+        let hc = self.hold_i32()?;
+        let hp = self.hold_i32()?;
+        let hq = self.hold_i32()?;
+        let ht = self.hold_i64()?;
+        let mut i = self.f.instructions();
+        i.local_set(hj);
+        i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().local_set(hc);
+        i.local_get(hi).i64_const(0).i64_ge_s();
+        i.local_get(hi).local_get(hc).i64_extend_i32_u().i64_lt_s().i32_and();
+        i.local_get(hj).i64_const(0).i64_ge_s().i32_and();
+        i.local_get(hj).local_get(hc).i64_extend_i32_u().i64_lt_s().i32_and();
+        i.if_(BlockType::Empty);
+        i.local_get(hb).local_get(hi).i32_wrap_i64().i32_const(stride).i32_mul().i32_add();
+        i.local_set(hp);
+        i.local_get(hb).local_get(hj).i32_wrap_i64().i32_const(stride).i32_mul().i32_add();
+        i.local_set(hq);
+        // tmp = *p; *p = *q; *q = tmp — raw slot-width moves
+        if stride == 8 {
+            i.local_get(hp).i64_load(slot_memarg(0)).local_set(ht);
+            i.local_get(hp).local_get(hq).i64_load(slot_memarg(0)).i64_store(slot_memarg(0));
+            i.local_get(hq).local_get(ht).i64_store(slot_memarg(0));
+        } else {
+            i.local_get(hp).i32_load(slot_memarg(0)).i64_extend_i32_u().local_set(ht);
+            i.local_get(hp).local_get(hq).i32_load(slot_memarg(0)).i32_store(slot_memarg(0));
+            i.local_get(hq).local_get(ht).i32_wrap_i64().i32_store(slot_memarg(0));
+        }
+        i.end();
+        i.local_get(hb);
+        let _ = i;
+        self.release_i64();
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        self.release_i64();
+        self.release_i64();
+        self.release_i32();
         Ok(Some(SliceTy::List(h)))
     }
 }

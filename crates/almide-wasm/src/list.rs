@@ -253,6 +253,32 @@ impl Emitter<'_> {
             // insertion sort as list.sort moves keys and values in
             // lockstep.
             ("filter", [xs, cb]) => self.lower_list_filter(xs, cb),
+            ("set", [xs, idx, v]) => self.lower_list_set(xs, idx, v),
+            ("swap", [xs, ia, ib]) => self.lower_list_swap(xs, ia, ib),
+            // List-returning map: each callback list concatenates onto
+            // the accumulator (native flat_map order).
+            ("flat_map", [xs, cb]) => {
+                let (params, body) = self.hof_lambda(cb, 1)?;
+                let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+                let hs = self.hold_i32()?;
+                let hacc = self.hold_i32()?;
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.hof_elem_into(elem, bh, ch, ih, params[0]);
+                let got = self.lower(body, None)?;
+                let SliceTy::List(bi) = got else {
+                    return unsup(&format!("flat-map-body:{got:?}"));
+                };
+                self.f.instructions().local_set(hs);
+                self.f.instructions().local_get(hacc).local_get(hs).call(F_CONCAT);
+                self.f.instructions().local_set(hacc);
+                self.hof_step(ih);
+                self.f.instructions().local_get(hacc);
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+                Ok(Some(SliceTy::List(bi)))
+            }
             // Option-returning map: none (null handle) skips, some's
             // payload collects in order — fan.map's collect idiom minus
             // the short-circuit.

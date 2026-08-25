@@ -174,6 +174,20 @@ impl Emitter<'_> {
             // Same square-and-multiply (wrapping) + negative-exponent
             // abort as the `**` operator — one definition, two spellings.
             ("math", "pow", [b, e]) => Some(self.lower_pow_int(b, e)?),
+            // Branchless (x ^ (x>>63)) - (x>>63): i64::MIN stays i64::MIN,
+            // the release-build native wrap.
+            ("int", "abs", [n]) => {
+                self.lower(n, Some(INT))?;
+                let h = self.hold_i64()?;
+                let hm = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_tee(h).i64_const(63).i64_shr_s().local_set(hm);
+                i.local_get(h).local_get(hm).i64_xor().local_get(hm).i64_sub();
+                let _ = i;
+                self.release_i64();
+                self.release_i64();
+                Some(INT)
+            }
             _ => return Ok(None),
         };
         Ok(Some(out))

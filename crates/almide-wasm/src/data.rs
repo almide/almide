@@ -111,6 +111,37 @@ impl Emitter<'_> {
                 }
                 other => return unsup(&format!("unwrap-or-of:{other:?}")),
             },
+            // `?` — Result→Option (identity on Option, the interp's
+            // eval order): Ok(x) → a fresh some cell, Err → none (null).
+            IrExprKind::ToOption { expr } => match self.lower(expr, None)? {
+                SliceTy::Result(o, _) => {
+                    let et = self.types.el(o);
+                    let hr = self.hold_i32()?;
+                    let hc = self.hold_i32()?;
+                    self.f
+                        .instructions()
+                        .local_set(hr)
+                        .local_get(hr)
+                        .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                        .i32_const(0)
+                        .i32_ne()
+                        .if_(BlockType::Result(ValType::I32))
+                        .i32_const(0)
+                        .else_()
+                        .i32_const(et.slot_size() as i32)
+                        .call(F_ALLOC)
+                        .local_tee(hc)
+                        .local_get(hr);
+                    self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                    self.store_ty_slot(et, almide_layout::OPTION_FIELD);
+                    self.f.instructions().local_get(hc).end();
+                    self.release_i32();
+                    self.release_i32();
+                    SliceTy::Option(o)
+                }
+                got @ SliceTy::Option(_) => got,
+                other => return unsup(&format!("to-option-of:{other:?}")),
+            },
             other => return unsup(&format!("expr:{}", expr_kind_name(other))),
         };
         Ok(got)

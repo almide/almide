@@ -634,6 +634,7 @@ fn is_sum_shape(k: &IrExprKind) -> bool {
             | IrExprKind::Try { .. }
             | IrExprKind::Unwrap { .. }
             | IrExprKind::UnwrapOr { .. }
+            | IrExprKind::ToOption { .. }
     )
 }
 
