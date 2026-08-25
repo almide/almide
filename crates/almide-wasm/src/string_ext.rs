@@ -26,20 +26,7 @@ impl Emitter<'_> {
         match (func.as_str(), args) {
             // mut append (native s.push_str): var write-back of concat.
             ("push", [v, x]) => self.lower_string_push(v, x),
-            // from_bytes = from_list ∘ the NATIVE WHATWG lossy helper
-            // (String::from_utf8_lossy verbatim). The self-host
-            // string_from_bytes reads the list len header raw and the
-            // self-host bytes_to_string_lossy is a RAW COPY (not lossy)
-            // — both unlinkable; the helper is the one true decoder.
-            ("from_bytes", [xs]) => {
-                match self.lower_bytes_call("from_list", std::slice::from_ref(xs))? {
-                    Some(SliceTy::Scalar(Scalar::Bytes)) => {}
-                    other => return unsup(&format!("from-bytes-of:{other:?}")),
-                }
-                let lossy = self.work.helper(Helper::Utf8Lossy);
-                self.f.instructions().call(lossy);
-                Ok(Some(STR))
-            }
+            ("from_bytes", [xs]) => self.lower_string_from_bytes(xs),
             ("is_empty", [s]) => {
                 self.lower(s, Some(STR))?;
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
@@ -345,5 +332,20 @@ impl Emitter<'_> {
             self.release_i32();
         }
         Ok(Some(BOOL))
+    }
+
+    /// from_bytes = from_list ∘ the NATIVE WHATWG lossy helper
+    /// (String::from_utf8_lossy verbatim). The self-host
+    /// string_from_bytes reads the list len header raw and the
+    /// self-host bytes_to_string_lossy is a RAW COPY (not lossy) —
+    /// both unlinkable; the helper is the one true decoder.
+    fn lower_string_from_bytes(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+        match self.lower_bytes_call("from_list", std::slice::from_ref(xs))? {
+            Some(SliceTy::Scalar(Scalar::Bytes)) => {}
+            other => return unsup(&format!("from-bytes-of:{other:?}")),
+        }
+        let lossy = self.work.helper(Helper::Utf8Lossy);
+        self.f.instructions().call(lossy);
+        Ok(Some(STR))
     }
 }

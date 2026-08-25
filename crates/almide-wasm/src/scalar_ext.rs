@@ -87,46 +87,8 @@ impl Emitter<'_> {
                 self.f.instructions().f64_convert_i64_s();
                 Some(FLOAT)
             }
-            // The int bit family: plain i64 ops (wasm shifts are mod-64,
-            // exactly the release-native wrap).
-            ("int", "band" | "bor" | "bxor" | "bshl" | "bshr", [a, b]) => {
-                self.lower(a, Some(INT))?;
-                self.lower(b, Some(INT))?;
-                let mut i = self.f.instructions();
-                match func.as_str() {
-                    "band" => i.i64_and(),
-                    "bor" => i.i64_or(),
-                    "bxor" => i.i64_xor(),
-                    "bshl" => i.i64_shl(),
-                    _ => i.i64_shr_s(),
-                };
-                Some(INT)
-            }
-            // wrap_add/wrap_mul(a, b, bits): unsigned wrap + mask
-            // (bits >= 64 keeps everything).
-            ("int", "wrap_add" | "wrap_mul", [a, b, bits]) => {
-                let mul = func.as_str() == "wrap_mul";
-                self.lower(a, Some(INT))?;
-                self.lower(b, Some(INT))?;
-                let mut i = self.f.instructions();
-                if mul {
-                    i.i64_mul();
-                } else {
-                    i.i64_add();
-                }
-                let _ = i;
-                self.lower(bits, Some(INT))?;
-                let hb = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(hb);
-                // mask = bits >= 64 ? -1 : (1<<bits)-1  (select: v1 first)
-                i.i64_const(-1);
-                i.i64_const(1).local_get(hb).i64_shl().i64_const(1).i64_sub();
-                i.local_get(hb).i64_const(64).i64_ge_s();
-                i.select().i64_and();
-                let _ = i;
-                self.release_i64();
-                Some(INT)
+            ("int", "band" | "bor" | "bxor" | "bshl" | "bshr" | "wrap_add" | "wrap_mul", _) => {
+                return self.lower_int_bitops(func.as_str(), args).map(Some);
             }
             // f64.ceil is IEEE-exact on both targets.
             ("float", "ceil", [x]) => {
@@ -267,5 +229,52 @@ impl Emitter<'_> {
         self.release_f64();
         self.release_f64();
         Ok(FLOAT)
+    }
+
+    /// The int bit family + the width-wrap pair — split from
+    /// lower_scalar_ext for the complexity budget.
+    fn lower_int_bitops(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
+            ("band" | "bor" | "bxor" | "bshl" | "bshr", [a, b]) => {
+                self.lower(a, Some(INT))?;
+                self.lower(b, Some(INT))?;
+                let mut i = self.f.instructions();
+                match func {
+                    "band" => i.i64_and(),
+                    "bor" => i.i64_or(),
+                    "bxor" => i.i64_xor(),
+                    "bshl" => i.i64_shl(),
+                    _ => i.i64_shr_s(),
+                };
+                Ok(Some(INT))
+            }
+            ("wrap_add" | "wrap_mul", [a, b, bits]) => {
+                let mul = func == "wrap_mul";
+                self.lower(a, Some(INT))?;
+                self.lower(b, Some(INT))?;
+                if mul {
+                    self.f.instructions().i64_mul();
+                } else {
+                    self.f.instructions().i64_add();
+                }
+                self.lower(bits, Some(INT))?;
+                let hb = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.local_set(hb);
+                // mask = bits >= 64 ? -1 : (1<<bits)-1  (select: v1 first)
+                i.i64_const(-1);
+                i.i64_const(1).local_get(hb).i64_shl().i64_const(1).i64_sub();
+                i.local_get(hb).i64_const(64).i64_ge_s();
+                i.select().i64_and();
+                let _ = i;
+                self.release_i64();
+                Ok(Some(INT))
+            }
+            _ => unsup(&format!("call:int.{func}")),
+        }
     }
 }

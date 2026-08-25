@@ -42,62 +42,7 @@ pub(crate) fn collect_binds(
             Ok(())
         }
         IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            // The loop variable is a local; its type comes from the
-            // iterable's checker annotation (Range iterates Int).
-            let var_ty = if matches!(iterable.kind, IrExprKind::Range { .. }) {
-                Some(INT)
-            } else {
-                match slice_ty_of(&iterable.ty, types) {
-                    Some(SliceTy::List(h)) => Some(types.el(h)),
-                    // `for (k, v) in map`: the destructured locals carry
-                    // the key/value types; the loop var itself is never
-                    // materialized (the entry walk loads directly).
-                    Some(SliceTy::Map(kh, vh)) => {
-                        let Some(&[tk, tv]) = var_tuple.as_deref() else {
-                            return unsup("forin-map-nontuple");
-                        };
-                        // the loop var itself: a (K, V) tuple slot the
-                        // entry walk never materializes, mapped so the
-                        // emitter's var lookup holds
-                        let (kt, vt) = (types.el(kh), types.el(vh));
-                        if seen.insert(*var) {
-                            let ti = types.tuple(vec![kt, vt]);
-                            out.push((*var, SliceTy::Tuple(ti)));
-                        }
-                        if seen.insert(tk) {
-                            out.push((tk, kt));
-                        }
-                        if seen.insert(tv) {
-                            out.push((tv, vt));
-                        }
-                        collect_binds(iterable, out, seen, types)?;
-                        for s in body {
-                            collect_binds_stmt(s, out, seen, types)?;
-                        }
-                        return Ok(());
-                    }
-                    _ => None,
-                }
-            };
-            let Some(var_ty) = var_ty else {
-                return unsup(&format!("forin-iter-ty:{}", ty_name(&iterable.ty)));
-            };
-            if seen.insert(*var) {
-                out.push((*var, var_ty));
-            }
-            if let (Some(tvars), SliceTy::Tuple(ti)) = (var_tuple, var_ty) {
-                let def = types.tuple_def(ti);
-                for (tv, (fty, _)) in tvars.iter().zip(def.fields) {
-                    if seen.insert(*tv) {
-                        out.push((*tv, fty));
-                    }
-                }
-            }
-            collect_binds(iterable, out, seen, types)?;
-            for s in body {
-                collect_binds_stmt(s, out, seen, types)?;
-            }
-            Ok(())
+            collect_forin(var, var_tuple.as_deref(), iterable, body, out, seen, types)
         }
         IrExprKind::Match { subject, arms } => {
             collect_binds(subject, out, seen, types)?;
@@ -263,4 +208,74 @@ pub(crate) fn collect_pattern_binds(
         }
         _ => Ok(()), // lowering unsups unsupported pattern shapes first
     }
+}
+
+/// The for-in bind collection (loop var + tuple destructure + the map
+/// entry-walk locals) — split from collect_binds for the complexity
+/// budget.
+fn collect_forin(
+    var: &VarId,
+    var_tuple: Option<&[VarId]>,
+    iterable: &IrExpr,
+    body: &[IrStmt],
+    out: &mut Vec<(VarId, SliceTy)>,
+    seen: &mut HashSet<VarId>,
+    types: &TypeTable,
+) -> Result<(), EmitError> {
+            // The loop variable is a local; its type comes from the
+            // iterable's checker annotation (Range iterates Int).
+            let var_ty = if matches!(iterable.kind, IrExprKind::Range { .. }) {
+                Some(INT)
+            } else {
+                match slice_ty_of(&iterable.ty, types) {
+                    Some(SliceTy::List(h)) => Some(types.el(h)),
+                    // `for (k, v) in map`: the destructured locals carry
+                    // the key/value types; the loop var itself is never
+                    // materialized (the entry walk loads directly).
+                    Some(SliceTy::Map(kh, vh)) => {
+                        let Some(&[tk, tv]) = var_tuple else {
+                            return unsup("forin-map-nontuple");
+                        };
+                        // the loop var itself: a (K, V) tuple slot the
+                        // entry walk never materializes, mapped so the
+                        // emitter's var lookup holds
+                        let (kt, vt) = (types.el(kh), types.el(vh));
+                        if seen.insert(*var) {
+                            let ti = types.tuple(vec![kt, vt]);
+                            out.push((*var, SliceTy::Tuple(ti)));
+                        }
+                        if seen.insert(tk) {
+                            out.push((tk, kt));
+                        }
+                        if seen.insert(tv) {
+                            out.push((tv, vt));
+                        }
+                        collect_binds(iterable, out, seen, types)?;
+                        for s in body {
+                            collect_binds_stmt(s, out, seen, types)?;
+                        }
+                        return Ok(());
+                    }
+                    _ => None,
+                }
+            };
+            let Some(var_ty) = var_ty else {
+                return unsup(&format!("forin-iter-ty:{}", ty_name(&iterable.ty)));
+            };
+            if seen.insert(*var) {
+                out.push((*var, var_ty));
+            }
+            if let (Some(tvars), SliceTy::Tuple(ti)) = (var_tuple, var_ty) {
+                let def = types.tuple_def(ti);
+                for (tv, (fty, _)) in tvars.iter().zip(def.fields) {
+                    if seen.insert(*tv) {
+                        out.push((*tv, fty));
+                    }
+                }
+            }
+            collect_binds(iterable, out, seen, types)?;
+            for s in body {
+                collect_binds_stmt(s, out, seen, types)?;
+            }
+            Ok(())
 }
