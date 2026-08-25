@@ -276,10 +276,17 @@ fn unresolved_import_wall(
         };
         let Some(root) = path.first() else { continue };
         let wanted = if root.as_str() == "self" {
-            match path.get(1) {
-                Some(sibling) => sibling.as_str(),
-                None => continue,
+            if path.len() < 2 {
+                // `import self as pkg` — the file's own package, no module.
+                continue;
             }
+            // The BINDING segment — the LAST path element. A flat sibling
+            // (`import self.money`) and a nested one
+            // (`import self.application.place_order`) both register in
+            // `modules` under that final name (#1557 leg 3: the first-segment
+            // match walled every nested package path while the resolver had
+            // already delivered the module as `place_order`).
+            path.last().map(|s| s.as_str()).unwrap_or_default()
         } else {
             // Hardcoded AND bundled stdlib both type from stdlib info /
             // bundled sigs — `import prim` (bundled-only) must not wall.
@@ -304,11 +311,14 @@ fn unresolved_import_wall(
             } else {
                 "dependency module"
             };
+            let have: Vec<&str> = modules.iter().map(|(n, _, _)| n.as_str()).collect();
             return Some(LowerError::at(
                 *span,
                 format!(
                     "import {spelled} — {kind} not resolved by this render's front-end \
-                     (feature wall, not a type error; cf. #943 for the linking-stage wall)"
+                     (feature wall, not a type error; cf. #943 for the linking-stage wall; \
+                     resolved modules: [{}])",
+                    have.join(", ")
                 ),
             ));
         }
