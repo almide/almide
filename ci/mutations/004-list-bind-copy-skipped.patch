@@ -1,21 +1,18 @@
 diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index 0f6b6ff42..8870211db 100644
+index 9c9c23cf4..c6738d73b 100644
 --- a/crates/almide-wasm/src/stmts.rs
 +++ b/crates/almide-wasm/src/stmts.rs
-@@ -99,15 +99,7 @@ impl Emitter<'_> {
-                 // can never be observed through aliases. Bytes joined
-                 // when the snapshot fixture showed `let snap = arena`
-                 // observing later set_at writes.
--                if matches!(
--                    declared,
--                    SliceTy::List(_)
--                        | SliceTy::Map(..)
--                        | SliceTy::Set(_)
--                        | SliceTy::Scalar(Scalar::Bytes)
--                ) {
--                    self.f.instructions().call(F_BLOCK_COPY);
--                }
-+                // [MUTANT: container bind copy disabled]
-                 if self.cells.contains(var) {
-                     // C-319: the bind allocates the shared cell; the
-                     // local holds its ADDRESS from here on.
+@@ -151,12 +151,7 @@ impl Emitter<'_> {
+         // can never be observed through aliases. Bytes joined
+         // when the snapshot fixture showed `let snap = arena`
+         // observing later set_at writes.
+-        if matches!(
+-            declared,
+-            SliceTy::List(_) | SliceTy::Map(..) | SliceTy::Set(_) | SliceTy::Scalar(Scalar::Bytes)
+-        ) {
+-            self.f.instructions().call(F_BLOCK_COPY);
+-        }
++        // [MUTANT: bind deep-copy skipped]
+         if self.cells.contains(var) {
+             // C-319: the bind allocates the shared cell; the
+             // local holds its ADDRESS from here on.
