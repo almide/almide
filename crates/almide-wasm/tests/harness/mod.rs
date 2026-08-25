@@ -241,6 +241,16 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
             Err(e) => err_s(io_err(e)),
         },
+        _ => fs_dispatch_host(op, a, b),
+    }
+}
+
+/// The host-environment ops (26+): env/args/entropy — split from
+/// fs_dispatch_meta for the complexity budget.
+fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    match op {
         26 => match std::env::var(a) {
             Ok(v) => ok_text(v),
             Err(_) => (pack(2, 0), Vec::new()),

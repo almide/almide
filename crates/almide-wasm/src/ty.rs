@@ -40,37 +40,12 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
     if let Some(s) = scalar_of(ty) {
         return Some(SliceTy::Scalar(s));
     }
+    if let Ty::Applied(ctor, args) = ty
+        && !matches!(ctor, TypeConstructorId::UserDefined(_))
+    {
+        return applied_builtin_of(ctor, args, types);
+    }
     match ty {
-        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
-            let e = slice_ty_of(&args[0], types)?;
-            Some(SliceTy::Option(types.intern(e)))
-        }
-        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
-            let o = slice_ty_of(&args[0], types)?;
-            let e = slice_ty_of(&args[1], types)?;
-            Some(SliceTy::Result(types.intern(o), types.intern(e)))
-        }
-        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-            let e = slice_ty_of(&args[0], types)?;
-            Some(SliceTy::List(types.intern(e)))
-        }
-        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
-            let k = slice_ty_of(&args[0], types)?;
-            // Keys need defined equality: scalars via the word/byte
-            // scans, tuples/records via the deep-scan lane.
-            if !matches!(k, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
-                return None;
-            }
-            let v = slice_ty_of(&args[1], types)?;
-            Some(SliceTy::Map(types.intern(k), types.intern(v)))
-        }
-        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => {
-            let e = slice_ty_of(&args[0], types)?;
-            if !matches!(e, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
-                return None;
-            }
-            Some(SliceTy::Set(types.intern(e)))
-        }
         Ty::Tuple(args) => {
             let mut elems = Vec::new();
             for a in args {
@@ -140,6 +115,49 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         // checker's #1428 doctrine defaults it to Unit (native spells
         // the same resolution as a `::<(), _>` turbofish).
         Ty::TypeVar(_) | Ty::Unknown => Some(SliceTy::Unit),
+        _ => None,
+    }
+}
+
+
+/// The builtin container constructors (Option/Result/List/Map/Set) —
+/// split from slice_ty_of for the complexity budget.
+fn applied_builtin_of(
+    ctor: &TypeConstructorId,
+    args: &[Ty],
+    types: &TypeTable,
+) -> Option<SliceTy> {
+    match (ctor, args) {
+        (TypeConstructorId::Option, [a]) => {
+            let e = slice_ty_of(a, types)?;
+            Some(SliceTy::Option(types.intern(e)))
+        }
+        (TypeConstructorId::Result, [a, b]) => {
+            let o = slice_ty_of(a, types)?;
+            let e = slice_ty_of(b, types)?;
+            Some(SliceTy::Result(types.intern(o), types.intern(e)))
+        }
+        (TypeConstructorId::List, [a]) => {
+            let e = slice_ty_of(a, types)?;
+            Some(SliceTy::List(types.intern(e)))
+        }
+        (TypeConstructorId::Map, [a, b]) => {
+            let k = slice_ty_of(a, types)?;
+            // Keys need defined equality: scalars via the word/byte
+            // scans, tuples/records via the deep-scan lane.
+            if !matches!(k, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+                return None;
+            }
+            let v = slice_ty_of(b, types)?;
+            Some(SliceTy::Map(types.intern(k), types.intern(v)))
+        }
+        (TypeConstructorId::Set, [a]) => {
+            let e = slice_ty_of(a, types)?;
+            if !matches!(e, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+                return None;
+            }
+            Some(SliceTy::Set(types.intern(e)))
+        }
         _ => None,
     }
 }
