@@ -2505,3 +2505,32 @@ regex (~2), fs/io/env/random/process host (~10), mut-param multi-value
 (3), and ~40 singles (set map/remove/symdiff, group_by/unique_by/
 binary_search/window, json path/pretty, value.pick, rawptr, eq-Map,
 recursive-type eq depth, fn-value HOF callbacks, globals write-back).
+
+## Stage 77-82 (2026-08-25): 535 → 568, matrix arc complete
+
+- Singles batch (set filter/relations/remove/symdiff/map, map.upsert,
+  result.partition, value.pick/omit, string.reverse/first/last,
+  list.count, bytes.to_list/repeat, ScanF64 helper): 535→543.
+- Bytes matrix close-out (slice/chunks/concat/to_string via the
+  from_utf8 validator helper, BE cursor writes — the byte_k DOUBLE
+  PAYLOAD offset bug, fill/copy_within, bytes_typed + cursor-tail
+  whitelist families) + list search four (binary_search transcribes
+  std's BRANCHLESS loop — probed the duplicate-index schedule against
+  the native binary first, window, unique_by, group_by) + Map/Set
+  order-insensitive `==`: 543→552.
+- Matrix kernel arc COMPLETE (all 12): flat-layout hand-emissions with
+  the #1197 fast-exp/gelu as shared helpers, vendored-libm rope trig,
+  Q1_0 global-k schedule with the #1532 per-element bound, Q8_0 with
+  per-element dq_zero, MHA with the causal −1e9 mask and bad-sum
+  uniform fallback. Two lessons: Almide `and` SHORT-CIRCUITS — an
+  eagerly-emitted `MAX/rows` divided by zero (trap) where the oracle
+  never ran it; hold-imbalance accounting caught three leaks at the
+  fixture boundary before any silent corruption.
+- Generic ADT instances: the checker spells user generics as
+  Ty::Applied(UserDefined(name), args) — slice_ty_of now routes both
+  spellings through types.instance; ctor calls fall back to the
+  SURROUNDING want when their own type is unresolved (FNil in argument
+  position).
+- Codopsy doctrine measured: match ARMS each count cyclomatic +1 but
+  or-patterns count once — dispatchers are now shape-grouped
+  (list/bytes/matrix), with per-shape name subs.
