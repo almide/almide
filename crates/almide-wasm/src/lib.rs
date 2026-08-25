@@ -68,6 +68,7 @@ mod calls;
 mod cells;
 mod collect;
 mod collections;
+mod collections_hof;
 mod collections_set;
 mod emitter;
 mod patterns;

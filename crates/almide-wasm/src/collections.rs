@@ -261,6 +261,63 @@ impl Emitter<'_> {
             // fold over entries in insertion order: (acc, k, v) => acc'.
             // Insertion-ordered (K, V) pairs — memory order IS the
             // map's insertion order, so a straight walk is exact.
+            ("find", [m, cb]) => self.lower_map_find(m, cb),
+            ("update", [m, key, cb]) => self.lower_map_update(m, key, cb),
+            ("filter", [m, cb]) => self.lower_map_filter(m, cb),
+            ("map", [m, cb]) => self.lower_map_map(m, cb),
+            ("merge", [a, b]) => self.lower_map_merge(a, b),
+            // Functional remove: the map minus the entry (a plain copy
+            // when the key is absent), insertion order preserved.
+            ("remove", [m, key]) => {
+                let (mh, _kh, eh, k, v, lay) = self.map_scan(m, key)?;
+                let esz = lay.2 as i32;
+                let ho = self.hold_i32()?;
+                let hp = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_get(eh).i32_eqz().if_(BlockType::Empty);
+                // absent: whole copy
+                i.local_get(mh).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(mh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(mh).i32_load(len_memarg());
+                i.memory_copy(0, 0);
+                i.else_();
+                // pre = eh - (mh + PAYLOAD)
+                i.local_get(eh)
+                    .local_get(mh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .i32_sub()
+                    .local_set(hp);
+                i.local_get(mh).i32_load(len_memarg()).i32_const(esz).i32_sub();
+                i.call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(mh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hp);
+                i.memory_copy(0, 0);
+                i.local_get(ho)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hp)
+                    .i32_add();
+                i.local_get(eh).i32_const(esz).i32_add();
+                i.local_get(mh)
+                    .i32_load(len_memarg())
+                    .local_get(hp)
+                    .i32_sub()
+                    .i32_const(esz)
+                    .i32_sub();
+                i.memory_copy(0, 0);
+                i.end();
+                i.local_get(ho);
+                let _ = i;
+                self.release_i32(); // hp
+                self.release_i32(); // ho
+                self.release_i32(); // eh
+                self.release_for(k);
+                self.release_i32(); // mh
+                Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+            }
             // keys/values: ONE side of every entry, insertion order.
             ("keys" | "values", [m]) => {
                 let keys = func == "keys";

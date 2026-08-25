@@ -133,6 +133,7 @@ call:list.windows
 call:list.with_capacity
 call:map.contains
 call:map.entries
+call:map.filter
 call:map.fold
 call:map.from_list
 call:map.get
