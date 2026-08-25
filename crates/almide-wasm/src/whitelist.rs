@@ -150,6 +150,14 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
     "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
     "json_get_string",
+    // regex_engine.almd (audited 2026-08-25): the backtracking engine —
+    // byte walks on the digest-shared String layout (load32(h+4) = len
+    // in BYTES both legs, handle+12 = OUR payload), prim-MEDIATED
+    // alloc_list/alloc_str scratch (the hash_impl precedent: 8-byte Int
+    // slots are layout-identical), save/caps stores land in its own
+    // scratch blocks only.
+    "regex_is_match", "regex_full_match", "regex_find_all", "regex_replace",
+    "regex_replace_first", "regex_split",
     // bytes_rawptr.almd / bytes_skip.almd / bytes_core heap pair
     // (audited 2026-08-25): raw-address bridge over load8/store8 on
     // Bytes data regions (len = bytes both legs), handle+12 = OUR
@@ -174,6 +182,8 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
     "json_path_root", "json_path_field", "json_path_index", "json_path_get",
     "http_get_header",
+    // regex_engine.almd Option returners (same audit).
+    "regex_find", "regex_captures",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL

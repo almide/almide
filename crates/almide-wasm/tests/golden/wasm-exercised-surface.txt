@@ -387,6 +387,14 @@ call:println
 call:process.args
 call:process.exit
 call:random.int
+call:regex.captures
+call:regex.find
+call:regex.find_all
+call:regex.full_match
+call:regex.is_match
+call:regex.replace
+call:regex.replace_first
+call:regex.split
 call:result.flat_map
 call:result.flatten__Float_String
 call:result.flatten__Int_String
