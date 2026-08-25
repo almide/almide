@@ -2655,3 +2655,26 @@ record the closure.
   manifest/exclusions") — registered as excluded rows with the reason
   pointing at the gauntlet's own gate. The partition rule did its job:
   a new corpus citizen cannot exist unjudged.
+
+## Stage 98 (2026-08-26): the flaky gate catches a real nondeterminism
+
+- The stage-97 CI red (wasm-coverage, a bare `exit code 101` with zero
+  output) unwound into three findings, each fixed:
+  1. The coverage script discarded cargo's stderr — failures died
+     silently. Now captured and printed on failure (febf4f438).
+  2. With stderr visible, the gauntlet gate was FLAKY: functional_port
+     refused with three different reasons across twelve runs.
+  3. Root cause (probe chain: IR fn-order dump ×4 identical → full IR
+     Debug diff → only HashMap Debug order differed → the emit
+     reachability walk): per-fn call sets are HashSets, and the walk
+     returned the FIRST error in process-seeded traversal order.
+     Emitted BYTES were never affected (visited is a set; success-path
+     probes: 599 corpus + 10-12-process hash checks on multi-module,
+     diamond, multi-specialization, record, protocol programs — all
+     single-hash). The refusal REPORT was the only nondeterminism.
+- Fix: complete the walk, report the reachable failure with the
+  smallest function index (program order) — 15/15 and 8/8 single-reason
+  on the two packages, gauntlet 10/10 green, coverage gate 94.8% ≥ 92
+  locally (783a8cb59). The gauntlet manifest re-ratified (one row).
+- The lesson joins the doctrine: a gate that pins REFUSAL REASONS is a
+  nondeterminism detector for free — the flake WAS the finding.
