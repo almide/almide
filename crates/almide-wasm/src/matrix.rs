@@ -499,6 +499,50 @@ impl Emitter<'_> {
                 self.release_i32();
                 Some(FLOAT)
             }
+            ("gelu", [m]) => return self.lower_matrix_elementwise("gelu", m, None).map(Some),
+            ("pow", [m, e]) => {
+                return self.lower_matrix_elementwise("pow", m, Some(e)).map(Some)
+            }
+            ("softmax_rows", [m]) => return self.lower_matrix_softmax(m).map(Some),
+            ("rms_norm_rows", [m, g, eps]) => {
+                return self.lower_matrix_rms_norm(m, g, eps).map(Some)
+            }
+            ("from_bytes_f32_le", [d, o, r, c]) => {
+                return self.lower_matrix_from_bytes(false, d, o, r, c).map(Some)
+            }
+            ("from_bytes_f16_le", [d, o, r, c]) => {
+                return self.lower_matrix_from_bytes(true, d, o, r, c).map(Some)
+            }
+            ("select_rows_f32", [d, o, c, ids]) => {
+                return self.lower_matrix_select_f32(d, o, c, ids).map(Some)
+            }
+            ("select_rows", [m, ids]) => {
+                return self.lower_matrix_select_rows(m, ids).map(Some)
+            }
+            ("from_q1_0_bytes", [d, o, r, c]) => {
+                return self.lower_matrix_q1_0(false, d, o, r, c).map(Some)
+            }
+            ("select_rows_q1_0", [d, o, c, ids]) => {
+                return self.lower_matrix_q1_0(true, d, o, c, ids).map(Some)
+            }
+            ("select_rows_q8_0_dq", [d, o, c, ids]) => {
+                return self.lower_matrix_q8_select(d, o, c, ids).map(Some)
+            }
+            ("rope_rotate", [x, nh, hd, th]) => {
+                return self.lower_matrix_rope(false, x, nh, hd, th, None).map(Some)
+            }
+            ("rope_rotate_at", [x, nh, hd, th, sp]) => {
+                return self.lower_matrix_rope(false, x, nh, hd, th, Some(sp)).map(Some)
+            }
+            ("rope_rotate_neox_at", [x, nh, hd, th, sp]) => {
+                return self.lower_matrix_rope(true, x, nh, hd, th, Some(sp)).map(Some)
+            }
+            ("multi_head_attention", [q, k, v, nh]) => {
+                return self.lower_matrix_mha(false, q, k, v, nh).map(Some)
+            }
+            ("masked_multi_head_attention", [q, k, v, nh]) => {
+                return self.lower_matrix_mha(true, q, k, v, nh).map(Some)
+            }
             _ => return Ok(None),
         };
         Ok(Some(out))

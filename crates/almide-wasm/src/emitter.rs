@@ -75,9 +75,9 @@ pub(crate) struct Emitter<'a> {
 /// Hold-pool sizes: nesting deeper than this is refused, never corrupted.
 /// (16: the string scanners — lines/chars/pad — hold up to 7 at once and
 /// sit inside expression contexts already holding several.)
-pub(crate) const HOLD_I32_POOL: u32 = 16;
-pub(crate) const HOLD_I64_POOL: u32 = 8;
-pub(crate) const HOLD_F64_POOL: u32 = 4;
+pub(crate) const HOLD_I32_POOL: u32 = 24;
+pub(crate) const HOLD_I64_POOL: u32 = 16;
+pub(crate) const HOLD_F64_POOL: u32 = 8;
 
 impl Emitter<'_> {
     pub(crate) fn hold_i32(&mut self) -> Result<u32, EmitError> {

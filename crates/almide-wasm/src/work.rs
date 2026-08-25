@@ -38,6 +38,12 @@ pub(crate) enum Helper {
     /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
     /// subpart (the WHATWG replacement walk).
     Utf8Lossy,
+    /// `$fast_exp(f64) -> f64` — the canonical unfused fast-exp (#1197).
+    FastExp,
+    /// `$q10_val(data, off, k) -> f64` — one Q1_0 weight (global-k).
+    Q10Val,
+    /// `$gelu(f64) -> f64` — tanh-approximation gelu over `$fast_exp`.
+    GeluScalar { fast_exp: u32 },
     /// `$bytes_to_string(bytes) -> i32` — std::str::from_utf8 verbatim:
     /// ok(shared block) or err(the Utf8Error Display line, "invalid
     /// UTF-8: " prefixed — the native wrapper's format).

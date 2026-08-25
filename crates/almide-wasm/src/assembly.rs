@@ -288,9 +288,15 @@ pub(crate) fn resolve_extras(
                 vec![ValType::I32]
             }
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
+            Helper::FastExp | Helper::GeluScalar { .. } => vec![ValType::F64],
+            Helper::Q10Val => vec![ValType::I32, ValType::I64, ValType::I64],
             _ => vec![ValType::I32, ValType::I32],
         };
-        let ti = work.itype(params, Some(ValType::I32));
+        let ret = match h {
+            Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => ValType::F64,
+            _ => ValType::I32,
+        };
+        let ti = work.itype(params, Some(ret));
         let f = match h {
             Helper::JsonValue { float_to_string, frags } => value_helpers::emit_json_value_helper(
                 work.helper_base.get(),
@@ -315,6 +321,9 @@ pub(crate) fn resolve_extras(
             Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
                 utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
             }
+            Helper::FastExp => matrix_scalars::emit_fast_exp(),
+            Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
+            Helper::Q10Val => matrix_scalars::emit_q10_val(F_F16_TO_F64),
             Helper::DisplayNamed { ti } => {
                 match work.display_bodies.borrow_mut().remove(ti) {
                     Some(work::DisplayBuild::Built(f)) => f,
