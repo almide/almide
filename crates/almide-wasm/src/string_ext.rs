@@ -213,15 +213,16 @@ impl Emitter<'_> {
         let IrExprKind::Var { id } = &v.kind else {
             return unsup("string-push-nonvar");
         };
-        let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+        let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
             return unsup("var:unmapped");
         };
         if var_ty != STR {
             return unsup(&format!("string-push-of:{var_ty:?}"));
         }
-        self.f.instructions().local_get(var_idx);
+        self.emit_read_mut_var(id, var_idx, var_ty, vglob);
         self.lower(x, Some(STR))?;
-        self.f.instructions().call(F_CONCAT).local_set(var_idx);
+        self.f.instructions().call(F_CONCAT);
+        self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
         Ok(None)
     }
 

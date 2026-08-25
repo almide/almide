@@ -109,6 +109,17 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
             })
         }
         Ty::Named(name, args) => types.instance(name.as_str(), args).map(SliceTy::Named),
+        // Generic user types arrive from the checker as Applied(UserDefined)
+        // — the same instance machinery the Named spelling routes through.
+        Ty::Applied(TypeConstructorId::UserDefined(name), args) => {
+            if args.is_empty() {
+                types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i)).or_else(|| {
+                    (name.as_str() == "Value").then_some(SliceTy::Value)
+                })
+            } else {
+                types.instance(name.as_str(), args).map(SliceTy::Named)
+            }
+        }
         _ => None,
     }
 }

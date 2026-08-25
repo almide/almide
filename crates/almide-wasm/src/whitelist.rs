@@ -150,6 +150,12 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
     "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
     "json_get_string",
+    // json_path.almd, READ side only (audited 2026-08-25): the path rep
+    // is a plain List[String]; get walks value.field / value.as_array /
+    // list.get — all native arms here, no raw layout reads. set/remove
+    // are REJECTED: their pair walks read the incumbent's inline-pairs
+    // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
+    "json_path_root", "json_path_field", "json_path_index", "json_path_get",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL

@@ -101,13 +101,10 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &b.kind else {
                     return unsup("bytes-push-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
-                self.f.instructions().local_get(var_idx);
-                if self.cells.contains(id) {
-                    self.load_ty_slot(var_ty, 0);
-                }
+                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
                 let bh = self.hold_i32()?;
                 self.f.instructions().local_set(bh);
                 self.lower(v, Some(INT))?;
@@ -124,7 +121,7 @@ impl Emitter<'_> {
                     .local_get(hv)
                     .i64_store8(MemArg { offset: 0, align: 0, memory_index: 0 });
                 self.f.instructions().local_get(rh);
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();
@@ -192,13 +189,10 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &dst.kind else {
                     return unsup("bytes-copy-from-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
-                self.f.instructions().local_get(var_idx);
-                if self.cells.contains(id) {
-                    self.load_ty_slot(var_ty, 0);
-                }
+                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
                 self.f.instructions().call(F_BLOCK_COPY);
                 let dh = self.hold_i32()?;
                 self.f.instructions().local_set(dh);
@@ -274,7 +268,7 @@ impl Emitter<'_> {
                 i.end();
                 i.local_get(dh);
                 let _ = i;
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 self.release_i32();
                 self.release_i64();
                 self.release_i64();
@@ -339,7 +333,7 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &b.kind else {
                     return unsup("bytes-write-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
                 let (k, float) = match func {
@@ -350,7 +344,7 @@ impl Emitter<'_> {
                     _ => (8, true),
                 };
                 self.lower_bytes_write_be(b, v, k, float)?;
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 Ok(None)
             }
             // copy_within: memmove inside the buffer, NO-OP when the
@@ -361,7 +355,7 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &b.kind else {
                     return unsup("bytes-copy-within-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
                 self.lower(b, Some(BYTES))?;
@@ -415,7 +409,7 @@ impl Emitter<'_> {
                 i.end();
                 i.local_get(ho);
                 let _ = i;
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 self.release_i32();
                 self.release_i64();
                 self.release_i64();
@@ -429,7 +423,7 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &b.kind else {
                     return unsup("bytes-fill-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
                 self.lower(b, Some(BYTES))?;
@@ -447,7 +441,7 @@ impl Emitter<'_> {
                 i.memory_fill(0);
                 i.local_get(ho);
                 let _ = i;
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 self.release_i32();
                 self.release_i64();
                 self.release_i32();
@@ -650,14 +644,14 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &b.kind else {
                     return unsup("bytes-append-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
                 match self.lower_linked_call("bytes", func, args, false)? {
                     Some(SliceTy::Scalar(Scalar::Bytes)) => {}
                     other => return unsup(&format!("bytes-append-ret:{other:?}")),
                 }
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 Ok(None)
             }
             // Not a native arm: the audited linked path before the wall.

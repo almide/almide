@@ -17,7 +17,7 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &xs.kind else {
                     return unsup("list-pop-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
                 let SliceTy::List(h) = var_ty else {
@@ -60,7 +60,7 @@ impl Emitter<'_> {
                     i.memory_copy(0, 0);
                     i.local_get(hnew);
                 }
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 {
                     let mut i = self.f.instructions();
                     i.end();
@@ -87,14 +87,14 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &xs.kind else {
                     return unsup("list-clear-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
                 let SliceTy::List(_) = var_ty else {
                     return unsup(&format!("list-clear-of:{var_ty:?}"));
                 };
                 self.f.instructions().i32_const(0).call(F_ALLOC);
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 Ok(None)
             }
             // `list.push` MUTATES through its `mut` param on the oracle
@@ -104,17 +104,14 @@ impl Emitter<'_> {
                 let IrExprKind::Var { id } = &xs.kind else {
                     return unsup("list-push-nonvar");
                 };
-                let Some(&(var_idx, var_ty)) = self.locals.get(id) else {
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
                 let SliceTy::List(h) = var_ty else {
                     return unsup(&format!("list-push-of:{var_ty:?}"));
                 };
                 let elem = self.types.el(h);
-                self.f.instructions().local_get(var_idx);
-                if self.cells.contains(id) {
-                    self.load_ty_slot(var_ty, 0);
-                }
+                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
                 self.lower(v, Some(elem))?;
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
@@ -127,7 +124,7 @@ impl Emitter<'_> {
                     _ => F_LIST_PUSH_4,
                 };
                 self.f.instructions().call(helper);
-                self.emit_store_var(*id, var_idx, var_ty)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 Ok(None)
             }
             // ONE allocation, zero copies: the linked self-host impl binds

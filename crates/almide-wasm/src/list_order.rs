@@ -76,7 +76,15 @@ impl Emitter<'_> {
                     other => return unsup(&format!("list-sort-of:{other:?}")),
                 };
                 let elem = self.types.el(h);
-                if !matches!(elem, INT | FLOAT | STR | BOOL) {
+                if !matches!(
+                    elem,
+                    INT | FLOAT
+                        | STR
+                        | BOOL
+                        | SliceTy::Tuple(_)
+                        | SliceTy::List(_)
+                        | SliceTy::Option(_)
+                ) {
                     return unsup(&format!("list-sort-elem:{elem:?}"));
                 }
                 self.f.instructions().call(F_BLOCK_COPY);
@@ -225,7 +233,15 @@ impl Emitter<'_> {
 
                 let is_min = func == "min";
                 let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-                if !matches!(elem, INT | FLOAT | STR | BOOL) {
+                if !matches!(
+                    elem,
+                    INT | FLOAT
+                        | STR
+                        | BOOL
+                        | SliceTy::Tuple(_)
+                        | SliceTy::List(_)
+                        | SliceTy::Option(_)
+                ) {
                     return unsup(&format!("list-{func}-elem:{elem:?}"));
                 }
                 let wide = elem.slot_size() == 8;
@@ -281,10 +297,25 @@ impl Emitter<'_> {
                             i.i64_gt_u();
                         }
                     }
-                    _ => {
+                    STR => {
                         i.local_get(hcur).i32_wrap_i64();
                         i.local_get(hbest).i32_wrap_i64();
                         i.call(F_STR_CMP).i32_const(0);
+                        if is_min {
+                            i.i32_lt_s();
+                        } else {
+                            i.i32_gt_s();
+                        }
+                    }
+                    // Compound (Tuple / List / Option handles): the
+                    // recursive type-directed total order.
+                    _ => {
+                        i.local_get(hcur).i32_wrap_i64();
+                        i.local_get(hbest).i32_wrap_i64();
+                        let _ = i;
+                        self.emit_val_cmp(elem)?;
+                        i = self.f.instructions();
+                        i.i32_const(0);
                         if is_min {
                             i.i32_lt_s();
                         } else {
@@ -325,6 +356,186 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 Ok(Some(SliceTy::Option(self.types.intern(elem))))
+    }
+
+    /// Type-directed total-order compare: consumes (a, b) of `t`'s wasm
+    /// type, leaves an i32 whose SIGN is the verdict (only <0 / 0 / >0
+    /// is promised). Tuples chain fields, lists are lexicographic with
+    /// the shorter-first prefix tiebreak, none < some; floats order by
+    /// the sign-flipped bit key (the total order the scalar path uses).
+    pub(crate) fn emit_val_cmp(&mut self, t: SliceTy) -> Result<(), EmitError> {
+        match t {
+            INT | FLOAT => {
+                let hb = self.hold_i64()?;
+                let ha = self.hold_i64()?;
+                {
+                    let mut i = self.f.instructions();
+                    if t == FLOAT {
+                        i.i64_reinterpret_f64().local_set(hb);
+                        i.i64_reinterpret_f64().local_set(ha);
+                        for l in [ha, hb] {
+                            i.local_get(l);
+                            i.local_get(l).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
+                            i.i64_xor().local_set(l);
+                        }
+                    } else {
+                        i.local_set(hb).local_set(ha);
+                    }
+                    i.local_get(ha).local_get(hb).i64_lt_s().if_(BlockType::Result(ValType::I32));
+                    i.i32_const(-1);
+                    i.else_();
+                    i.local_get(ha).local_get(hb).i64_gt_s();
+                    i.end();
+                }
+                self.release_i64();
+                self.release_i64();
+            }
+            BOOL => {
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hb).local_set(ha);
+                i.local_get(ha).local_get(hb).i32_lt_u().if_(BlockType::Result(ValType::I32));
+                i.i32_const(-1);
+                i.else_();
+                i.local_get(ha).local_get(hb).i32_gt_u();
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+            }
+            STR => {
+                self.f.instructions().call(F_STR_CMP);
+            }
+            SliceTy::Tuple(ti) => {
+                let fields = self.types.tuple_def(ti).fields;
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                let hc = self.hold_i32()?;
+                self.f.instructions().local_set(hb).local_set(ha);
+                // nested chain: cmp f_k, 0 → next field, else the verdict
+                for (n, (fty, off)) in fields.iter().enumerate() {
+                    self.f.instructions().local_get(ha);
+                    self.load_ty_slot(*fty, *off);
+                    self.f.instructions().local_get(hb);
+                    self.load_ty_slot(*fty, *off);
+                    self.emit_val_cmp(*fty)?;
+                    let mut i = self.f.instructions();
+                    i.local_tee(hc);
+                    if n + 1 < fields.len() {
+                        i.i32_eqz().if_(BlockType::Result(ValType::I32));
+                    }
+                }
+                let mut i = self.f.instructions();
+                for _ in 0..fields.len().saturating_sub(1) {
+                    i.else_();
+                    i.local_get(hc);
+                    i.end();
+                }
+                if fields.is_empty() {
+                    i.i32_const(0);
+                }
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+            }
+            SliceTy::List(h) => {
+                let el = self.types.el(h);
+                let stride = el.slot_size() as i32;
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                let hc = self.hold_i32()?;
+                let hk = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hb).local_set(ha);
+                    i.i32_const(0).local_set(hc);
+                    // n = min(len_a, len_b) in BYTES (same stride)
+                    i.local_get(ha).i32_load(len_memarg());
+                    i.local_get(hb).i32_load(len_memarg());
+                    i.local_get(ha)
+                        .i32_load(len_memarg())
+                        .local_get(hb)
+                        .i32_load(len_memarg())
+                        .i32_lt_u();
+                    i.select().local_set(hn);
+                    i.i32_const(0).local_set(hk);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
+                    i.local_get(ha)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_get(hk)
+                        .i32_add();
+                }
+                self.load_ty_slot_at(el);
+                self.f
+                    .instructions()
+                    .local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(hk)
+                    .i32_add();
+                self.load_ty_slot_at(el);
+                self.emit_val_cmp(el)?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_tee(hc).i32_const(0).i32_ne().br_if(1);
+                    i.local_get(hk).i32_const(stride).i32_add().local_set(hk);
+                    i.br(0).end().end();
+                    // prefix equal → shorter first
+                    i.local_get(hc).i32_eqz().if_(BlockType::Result(ValType::I32));
+                    i.local_get(ha)
+                        .i32_load(len_memarg())
+                        .local_get(hb)
+                        .i32_load(len_memarg())
+                        .i32_lt_u()
+                        .if_(BlockType::Result(ValType::I32));
+                    i.i32_const(-1);
+                    i.else_();
+                    i.local_get(ha)
+                        .i32_load(len_memarg())
+                        .local_get(hb)
+                        .i32_load(len_memarg())
+                        .i32_gt_u();
+                    i.end();
+                    i.else_();
+                    i.local_get(hc);
+                    i.end();
+                }
+                for _ in 0..5 {
+                    self.release_i32();
+                }
+            }
+            SliceTy::Option(h) => {
+                let et = self.types.el(h);
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hb).local_set(ha);
+                    i.local_get(ha).i32_eqz().if_(BlockType::Result(ValType::I32));
+                    // none vs (none | some)
+                    i.i32_const(0).i32_const(-1).local_get(hb).i32_eqz().select();
+                    i.else_();
+                    i.local_get(hb).i32_eqz().if_(BlockType::Result(ValType::I32));
+                    i.i32_const(1);
+                    i.else_();
+                    i.local_get(ha);
+                }
+                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.f.instructions().local_get(hb);
+                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.emit_val_cmp(et)?;
+                self.f.instructions().end().end();
+                self.release_i32();
+                self.release_i32();
+            }
+            other => return unsup(&format!("list-cmp-elem:{other:?}")),
+        }
+        Ok(())
     }
 
     fn lower_list_chunk_windows(
@@ -454,7 +665,7 @@ impl Emitter<'_> {
         let Some(k) = slice_ty_of(&body.ty, self.types) else {
             return unsup(&format!("list-sort-by-key:{}", ty_name(&body.ty)));
         };
-        if !matches!(k, INT | FLOAT | STR) {
+        if !matches!(k, INT | FLOAT | STR | BOOL) {
             return unsup(&format!("list-sort-by-key:{k:?}"));
         }
         let h = match self.lower(xs, None)? {
@@ -538,6 +749,13 @@ impl Emitter<'_> {
                     i.i64_load(slot_memarg(0));
                     key(&mut i, ht, float);
                     i.i64_le_s().br_if(1);
+                }
+                BOOL => {
+                    kaddr(&mut i, 1);
+                    i.i32_load(slot_memarg(0));
+                    kaddr(&mut i, 0);
+                    i.i32_load(slot_memarg(0));
+                    i.i32_le_u().br_if(1);
                 }
                 _ => {
                     kaddr(&mut i, 1);
@@ -732,12 +950,22 @@ impl Emitter<'_> {
                 i.i32_load(slot_memarg(0));
                 i.i32_le_u();
             }
-            _ => {
+            STR => {
                 addr(&mut i, hi_);
                 i.i32_load(slot_memarg(0));
                 addr(&mut i, hj);
                 i.i32_load(slot_memarg(0));
                 i.call(F_STR_CMP).i32_const(0).i32_le_s();
+            }
+            // Compound handles: the recursive type-directed total order.
+            _ => {
+                addr(&mut i, hi_);
+                i.i32_load(slot_memarg(0));
+                addr(&mut i, hj);
+                i.i32_load(slot_memarg(0));
+                let _ = i;
+                self.emit_val_cmp(elem)?;
+                self.f.instructions().i32_const(0).i32_le_s();
             }
         }
         Ok(())

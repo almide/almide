@@ -167,6 +167,44 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// A MUTABLE var slot: a local first, else a top-let global —
+    /// (index, ty, is_global). The mut-convention arms (bytes.push,
+    /// set_*, list.push, string.push …) write back through this.
+    pub(crate) fn mut_var(&self, id: &VarId) -> Option<(u32, SliceTy, bool)> {
+        self.locals
+            .get(id)
+            .map(|&(i, t)| (i, t, false))
+            .or_else(|| self.globals.get(id).map(|&(i, t)| (i, t, true)))
+    }
+
+    /// Push the mut var's current VALUE (cells deref for locals).
+    pub(crate) fn emit_read_mut_var(&mut self, id: &VarId, idx: u32, ty: SliceTy, global: bool) {
+        if global {
+            self.f.instructions().global_get(idx);
+        } else {
+            self.f.instructions().local_get(idx);
+            if self.cells.contains(id) {
+                self.load_ty_slot(ty, 0);
+            }
+        }
+    }
+
+    /// Store the value on the stack back into the mut var's slot.
+    pub(crate) fn emit_store_mut_var(
+        &mut self,
+        id: VarId,
+        idx: u32,
+        ty: SliceTy,
+        global: bool,
+    ) -> Result<(), EmitError> {
+        if global {
+            self.f.instructions().global_set(idx);
+            Ok(())
+        } else {
+            self.emit_store_var(id, idx, ty)
+        }
+    }
+
     /// The main-level / pure-fn abort frame for a failed `!`: the exact
     /// native contract — `Error: {msg}` on stderr, exit 1. The message
     /// block address is on the stack.
@@ -389,7 +427,11 @@ impl Emitter<'_> {
                 }
             }
             IrExprKind::Call { target, args, .. } => {
-                let hint = slice_ty_of(&e.ty, self.types);
+                // The expr's own checker type first; the SURROUNDING
+                // expectation as fallback — a generic ctor in argument
+                // position (FNil inside FCons) has an unresolved own
+                // type but a fully-instanced want.
+                let hint = slice_ty_of(&e.ty, self.types).or(want);
                 match self.lower_call_at(target, args, tail, hint)? {
                     Some(ty) => ty,
                     // A void call in value position under a Unit want:
