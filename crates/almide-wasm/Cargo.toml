@@ -18,6 +18,7 @@ wasmparser = "0.256"
 almide-corpus = { path = "../almide-corpus" }
 anyhow = "1"
 almide-spine = { path = "../almide-spine" }
+almide-wasm-run = { path = "../almide-wasm-run" }
 almide = { path = "../almide" }
 wasmparser = "0.256"
 wasmtime = "47"

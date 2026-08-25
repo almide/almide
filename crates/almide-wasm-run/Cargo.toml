@@ -1,0 +1,17 @@
+[package]
+name = "almide-wasm-run"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The greenfield wasm HOST: the almide.* import surface (print/exit/fs_call/host_read) over wasmtime, as a library and a CLI runner"
+
+[dependencies]
+almide-wasm = { path = "../almide-wasm" }
+almide-spine = { path = "../almide-spine" }
+anyhow = "1"
+wasmparser = "0.256"
+wasmtime = "47"
+
+[lints]
+workspace = true

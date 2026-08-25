@@ -179,9 +179,21 @@ dependencies = [
  "almide-layout",
  "almide-spine",
  "almide-types",
+ "almide-wasm-run",
  "anyhow",
  "sha2",
  "wasm-encoder 0.256.0",
+ "wasmparser 0.256.0",
+ "wasmtime",
+]
+
+[[package]]
+name = "almide-wasm-run"
+version = "0.0.1"
+dependencies = [
+ "almide-spine",
+ "almide-wasm",
+ "anyhow",
  "wasmparser 0.256.0",
  "wasmtime",
 ]
