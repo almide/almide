@@ -2386,3 +2386,34 @@ types): the wasm leg now mirrors it exactly.
   fixture at the next pin advance.
 
 467/599, divergence zero, A(90), 51 suites green.
+
+## Stage 73 — 467 → 481: the tail admission + the list combinator batch
+
+- **Scalar/text admission** (SCALAR_TEXT_VERIFIED): float core,
+  int hex/rotate, string search/class/trim, base64, datetime, hash —
+  each audited (read-only loads on the digest-shared string layout,
+  own-buffer builds, prim-mediated allocs), each claim byte-verified
+  by the burn-up before it counts.
+- **The hold-balance invariant scored its first field kill**: within
+  hours of landing, BUG:hold-imbalance:i32=1 pinned lower_map_merge
+  holding 7 and releasing 6 — the exact masquerade class it was built
+  for, caught as a BUG label instead of three fake walls.
+- **List combinators, hand-emitted** (list_comb.rs): last/contains/
+  product/flatten/all/take_while/reduce/scan/zip/zip_with/unique/
+  intersperse — the incumbent's list self-hosts stay UNLINKABLE
+  wholesale (their `load32(h+4)` reads the len header as a COUNT where
+  ours holds BYTES — the from_bytes lesson generalized), so the HOF
+  machinery does the work natively.
+- Set algebra trio (union/intersection/difference), float.from_int,
+  map for-in + keys/values/remove/update/find/filter/map/merge.
+
+481/599 — 80% of the corpus, divergence zero since the first slice.
+Two full-green CI verdicts anchor the arc (83e194ea9, 9bb954dd6);
+the runner queue is processing the rest.
+
+Remaining front (~118): the matrix arc (~9), Float32 (~4), vendored
+libm (exp/sin/atan/log_gamma/fmax/PowFloat), regex (~2), from_bytes
+(the WHATWG state machine), codec splice helpers (__decode/__encode),
+bytes cursor/array/rawptr tail, fs/io/env host surfaces, display of
+Map/Value interp-parts, group_by/unique_by/binary_search/window,
+mut-param fns, and singles.
