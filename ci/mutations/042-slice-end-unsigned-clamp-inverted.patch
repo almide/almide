@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/list.rs b/crates/almide-wasm/src/list.rs
-index 04a73063c..08dcdc68d 100644
+index 9d99d0150..c4c3510c2 100644
 --- a/crates/almide-wasm/src/list.rs
 +++ b/crates/almide-wasm/src/list.rs
-@@ -183,7 +183,7 @@ impl Emitter<'_> {
-                 // UNSIGNED, so a negative end is huge and saturates to
-                 // count (C-054; slice 0..-1 is the WHOLE list)
-                 ins.i64_lt_s();
--                ins.local_get(eh).i64_const(0).i64_ge_s().i32_and();
-+                ins.local_get(eh).i64_const(0).i64_lt_s().i32_and(); // [MUTANT]
-                 ins.select().local_set(eh);
-                 // empty when a < 0 (usize-wrap semantics) or a >= e
-                 ins.local_get(ah).i64_const(0).i64_lt_s();
+@@ -221,7 +221,7 @@ impl Emitter<'_> {
+         // UNSIGNED, so a negative end is huge and saturates to
+         // count (C-054; slice 0..-1 is the WHOLE list)
+         ins.i64_lt_s();
+-        ins.local_get(eh).i64_const(0).i64_ge_s().i32_and();
++        ins.local_get(eh).i64_const(0).i64_lt_s().i32_and(); // [MUTANT]
+         ins.select().local_set(eh);
+         // empty when a < 0 (usize-wrap semantics) or a >= e
+         ins.local_get(ah).i64_const(0).i64_lt_s();
