@@ -326,7 +326,9 @@ impl Emitter<'_> {
                 }
                 self.lower_list_fold(xs, init, cb)
             }
-            _ => unsup(&format!("call:list.{func}")),
+            // Not a native arm: the linked/whitelisted self-host path
+            // (list.range and kin) before the honest wall.
+            _ => self.lower_linked_call("list", func, args, false),
         }
     }
 

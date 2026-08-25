@@ -90,6 +90,10 @@ call:int.to_float
 call:int.to_string
 call:json.parse
 call:json.stringify
+call:list.__fallible_flat_map__Int_String_String
+call:list.__fallible_map__Int_Int_String
+call:list.__fallible_map__Int_String_String
+call:list.__fallible_map__String_Int_String
 call:list.chunk
 call:list.clear
 call:list.drop
@@ -120,6 +124,8 @@ call:list.slice
 call:list.sort
 call:list.sort_by
 call:list.swap
+call:list.tail__Pt
+call:list.tail__Tup2_Float_Bool
 call:list.take
 call:list.take_end
 call:list.update
@@ -181,6 +187,7 @@ call:string.chars
 call:string.codepoint
 call:string.drop
 call:string.drop_end
+call:string.ends_with
 call:string.from_codepoint
 call:string.get
 call:string.is_empty

@@ -398,6 +398,60 @@ impl Emitter<'_> {
                 }
                 let elem = match self.lower(iterable, None)? {
                     SliceTy::List(h) => self.types.el(h),
+                    // `for (k, v) in map` — walk the insertion-ordered
+                    // entry blocks (the same layout map.fold walks).
+                    SliceTy::Map(kh, vh) => {
+                        let (k, v) = (self.types.el(kh), self.types.el(vh));
+                        let Some(&[tk, tv]) = var_tuple else {
+                            return unsup("forin-map-nontuple");
+                        };
+                        let (Some(&(ki, _)), Some(&(vi, _))) =
+                            (self.locals.get(&tk), self.locals.get(&tv))
+                        else {
+                            return unsup("bind:unmapped");
+                        };
+                        let (koff, voff, esz) = crate::collections::entry_layout(k, v);
+                        let bh = self.hold_i32()?;
+                        let cur = self.hold_i32()?;
+                        let end = self.hold_i32()?;
+                        {
+                            let mut i = self.f.instructions();
+                            i.local_set(bh);
+                            i.local_get(bh)
+                                .i32_const(almide_layout::PAYLOAD as i32)
+                                .i32_add()
+                                .local_set(cur);
+                            i.local_get(cur)
+                                .local_get(bh)
+                                .i32_load(len_memarg())
+                                .i32_add()
+                                .local_set(end);
+                            i.block(BlockType::Empty).loop_(BlockType::Empty);
+                            self.emit_det_charge_const(1);
+                            let mut i = self.f.instructions();
+                            i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+                            i.local_get(cur).i32_const(koff as i32).i32_add();
+                        }
+                        self.load_ty_slot_at(k);
+                        self.f.instructions().local_set(ki);
+                        self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
+                        self.load_ty_slot_at(v);
+                        self.f.instructions().local_set(vi);
+                        self.lower_loop_body(body, true)?;
+                        self.f
+                            .instructions()
+                            .local_get(cur)
+                            .i32_const(esz as i32)
+                            .i32_add()
+                            .local_set(cur)
+                            .br(0)
+                            .end()
+                            .end();
+                        self.release_i32();
+                        self.release_i32();
+                        self.release_i32();
+                        return Ok(());
+                    }
                     other => return unsup(&format!("forin-iter:{other:?}")),
                 };
                 if var_ty != elem {

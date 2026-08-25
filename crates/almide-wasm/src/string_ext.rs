@@ -43,6 +43,13 @@ impl Emitter<'_> {
             ("drop", [s, n]) => self.lower_string_drop(s, n),
             ("take", [s, n]) => self.lower_string_take(s, n),
             ("starts_with", [s, p]) => self.lower_string_starts_with(s, p),
+            // ends_with = the strip_suffix compare with a Bool verdict.
+            ("ends_with", [s, p]) => {
+                let got = self.lower_string_strip(s, p, false)?;
+                let _ = got;
+                self.f.instructions().i32_const(0).i32_ne();
+                Ok(Some(BOOL))
+            }
             ("strip_prefix" | "strip_suffix", [s, p]) => {
                 self.lower_string_strip(s, p, func.as_str() == "strip_prefix")
             }

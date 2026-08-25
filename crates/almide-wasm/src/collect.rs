@@ -49,6 +49,33 @@ pub(crate) fn collect_binds(
             } else {
                 match slice_ty_of(&iterable.ty, types) {
                     Some(SliceTy::List(h)) => Some(types.el(h)),
+                    // `for (k, v) in map`: the destructured locals carry
+                    // the key/value types; the loop var itself is never
+                    // materialized (the entry walk loads directly).
+                    Some(SliceTy::Map(kh, vh)) => {
+                        let Some(&[tk, tv]) = var_tuple.as_deref() else {
+                            return unsup("forin-map-nontuple");
+                        };
+                        // the loop var itself: a (K, V) tuple slot the
+                        // entry walk never materializes, mapped so the
+                        // emitter's var lookup holds
+                        let (kt, vt) = (types.el(kh), types.el(vh));
+                        if seen.insert(*var) {
+                            let ti = types.tuple(vec![kt, vt]);
+                            out.push((*var, SliceTy::Tuple(ti)));
+                        }
+                        if seen.insert(tk) {
+                            out.push((tk, kt));
+                        }
+                        if seen.insert(tv) {
+                            out.push((tv, vt));
+                        }
+                        collect_binds(iterable, out, seen, types)?;
+                        for s in body {
+                            collect_binds_stmt(s, out, seen, types)?;
+                        }
+                        return Ok(());
+                    }
                     _ => None,
                 }
             };

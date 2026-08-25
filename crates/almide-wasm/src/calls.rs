@@ -189,6 +189,9 @@ impl Emitter<'_> {
                 // slots — the one list class both layouts share. Carries
                 // its own C-169 ceiling die.
                 "list_repeat",
+                // Same construction class as list_repeat (prim-mediated
+                // alloc_list + store64 into its OWN buffer, same die).
+                "list_range",
                 // String->String: byte-level string building; its tuple
                 // helpers are module fns lowered by THIS emitter.
                 "string_to_upper",
@@ -600,37 +603,45 @@ impl Emitter<'_> {
                 {
                     return Ok(out);
                 }
-                // Linked module functions live in the table under their
-                // qualified name. A stdlib SURFACE call additionally
-                // resolves through the self-host registry to its loaded
-                // implementation (same registry the interp's bridge uses —
-                // one IR, two sound resolutions). Anything else is an
-                // honest wall.
-                let key = format!("{}.{}", module.as_str(), func.as_str());
-                let Some(i) = self.resolve_qualified(&key) else {
-                    return unsup(&format!("call:{key}"));
-                };
-                let info = &self.table.infos[i];
-                if let Some(r) = &info.refuse {
-                    return unsup(&format!("call-fn:{key}:{r}"));
-                }
-                if args.len() != info.params.len() {
-                    return unsup(&format!("call-arity:{key}"));
-                }
-                let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
-                for (a, want) in args.iter().zip(params) {
-                    self.lower(a, Some(want))?;
-                }
-                self.calls.insert(i);
-                if tail && ret.is_some() && ret == self.fn_ret {
-                    self.f.instructions().return_call(index);
-                } else {
-                    self.f.instructions().call(index);
-                }
-                Ok(ret)
+                self.lower_linked_call(module.as_str(), func.as_str(), args, tail)
             }
             _ => unreachable!("module dispatch"),
         }
     }
 
+    /// Linked module functions live in the table under their qualified
+    /// name. A stdlib SURFACE call additionally resolves through the
+    /// self-host registry to its loaded implementation (same registry
+    /// the interp's bridge uses — one IR, two sound resolutions).
+    /// Anything else is an honest wall.
+    pub(crate) fn lower_linked_call(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        tail: bool,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let key = format!("{module}.{func}");
+        let Some(i) = self.resolve_qualified(&key) else {
+            return unsup(&format!("call:{key}"));
+        };
+        let info = &self.table.infos[i];
+        if let Some(r) = &info.refuse {
+            return unsup(&format!("call-fn:{key}:{r}"));
+        }
+        if args.len() != info.params.len() {
+            return unsup(&format!("call-arity:{key}"));
+        }
+        let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
+        for (a, want) in args.iter().zip(params) {
+            self.lower(a, Some(want))?;
+        }
+        self.calls.insert(i);
+        if tail && ret.is_some() && ret == self.fn_ret {
+            self.f.instructions().return_call(index);
+        } else {
+            self.f.instructions().call(index);
+        }
+        Ok(ret)
+    }
 }

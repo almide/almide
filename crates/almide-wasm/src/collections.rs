@@ -15,7 +15,7 @@ use crate::emitter::Emitter;
 use crate::*;
 
 /// Entry layout of a Map[K, V]: (key offset, value offset, stride).
-fn entry_layout(k: SliceTy, v: SliceTy) -> (u32, u32, u32) {
+pub(crate) fn entry_layout(k: SliceTy, v: SliceTy) -> (u32, u32, u32) {
     let (offs, size) = almide_layout::pack_fields(&[k.slot_size(), v.slot_size()]);
     (offs[0], offs[1], size)
 }
