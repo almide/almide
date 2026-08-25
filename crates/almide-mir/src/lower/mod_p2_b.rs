@@ -218,6 +218,18 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .map(|f| f.name.as_str().to_string())
             .collect();
     });
+    DECLARED_OPTION_EFFECT_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| {
+                f.is_effect
+                    && matches!(&f.ret_ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+                    && !can_err.contains(f.name.as_str())
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+    });
 }
 
 pub fn inline_mutual_tail_recursion(

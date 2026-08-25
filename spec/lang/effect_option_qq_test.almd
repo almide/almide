@@ -1,0 +1,30 @@
+// #1573: `?? fallback` over a NEVER-ERR declared-Option effect method. The
+// call site carries the lifted carrier (Result[Option[T], String]) while the
+// never-err def returns the raw Option — the un-stripped `??` read the raw
+// block as a carrier and the program silent-emptied (exit 0, zero output).
+// The effect-`??` identity now strips to the call retyped raw, keyed on the
+// EFFECT declared-Option registry (a PURE fn's `??` types as Option-unwrap
+// and is untouched — `?? none` there is a checker error, which is the proof
+// the effect axis is the discriminator).
+type Row: Eq, Repr = { id: String }
+
+type MemStore = { rows: List[Row] }
+
+effect fn MemStore.get(self, id: String) -> Row? = self.rows |> list.find((r) => r.id == id)
+
+effect fn probe(id: String) -> String = {
+  let s = MemStore { rows: [
+    Row { id: "a" },
+    Row { id: "b" }
+  ] }
+  let hit = s.get(id) ?? none
+  match hit {
+    some(r) => r.id,
+    none => "-",
+  }
+}
+
+test "effect-?? over a never-err declared-Option method runs its arms" {
+  assert_eq(probe("a") ?? "ERR", "a")
+  assert_eq(probe("zz") ?? "ERR", "-")
+}
