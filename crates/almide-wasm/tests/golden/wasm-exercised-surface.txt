@@ -95,6 +95,7 @@ call:int.from_int8
 call:int.from_uint32
 call:int.max
 call:int.parse
+call:int.rotate_right
 call:int.to_float
 call:int.to_int16
 call:int.to_int8
@@ -209,11 +210,14 @@ call:set.union
 call:string.capitalize
 call:string.chars
 call:string.codepoint
+call:string.contains
 call:string.drop
 call:string.drop_end
 call:string.ends_with
 call:string.from_codepoint
 call:string.get
+call:string.index_of
+call:string.is_alphanumeric
 call:string.is_empty
 call:string.join
 call:string.len

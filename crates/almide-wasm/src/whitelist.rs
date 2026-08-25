@@ -63,6 +63,26 @@ pub(crate) const SIZED_CONVERT_VERIFIED: &[&str] = &[
     "uint8_to_uint64",
 ];
 
+/// Scalar/text self-host impls admitted by the stage-72 tail audit:
+/// float_core/float_extra (pure float prims), int_hex + int_rotate
+/// (bit ops + own alloc_str builds), string_search/string_class/
+/// string_trim (READ-ONLY loads on the digest-shared string layout +
+/// own-buffer builds), base64_encode (byte-domain own builds),
+/// datetime family (pure arithmetic + own alloc_str), hash_impl
+/// (prim-MEDIATED alloc_list state — the list_repeat precedent; its
+/// slot stores are the 8-byte Int class both layouts share). Every
+/// claim is byte-verified by the burn-up before it counts.
+pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
+    "float_abs", "float_floor", "float_round", "float_is_nan", "float_from_float64",
+    "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
+    "string_contains", "string_count", "string_trim_start", "string_trim_end",
+    "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni",
+    "base64_encode", "base64_decode", "datetime_to_iso", "datetime_from_parts",
+];
+
+/// Same audit, Option-returning (constructor-built sums).
+pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] = &["string_index_of"];
+
 /// Option-returning members (the checked trio cells).
 pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
     "float_to_int16_checked", "float_to_int32_checked", "float_to_int64_checked",

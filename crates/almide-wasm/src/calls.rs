@@ -237,6 +237,8 @@ impl Emitter<'_> {
                 && !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::SIZED_CONVERT_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
+                && !crate::whitelist::SCALAR_TEXT_VERIFIED.contains(&impl_fn)
+                && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
             {
                 return None;
             }
@@ -268,6 +270,7 @@ impl Emitter<'_> {
             };
             if !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
+                && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
                 && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
             {
                 return None;
