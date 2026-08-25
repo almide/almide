@@ -305,11 +305,15 @@ pub(crate) fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<Sli
     if f.generics.is_some() {
         return Err("generic".into());
     }
+    // The C-132 move-mode pass rewrote eligible mut-param fns (their
+    // `mutated_params` is CLEARED, the write-back is explicit in the
+    // tree); a REMAINING entry marks the excluded shapes — the same key
+    // the incumbent's v1 wall uses.
+    if !f.mutated_params.is_empty() {
+        return Err("mut-param".into());
+    }
     let mut params = Vec::new();
     for p in &f.params {
-        if p.is_mut {
-            return Err("mut-param".into());
-        }
         let Some(sty) = slice_ty_of(&p.ty, types) else {
             return Err(format!("param-ty:{}", ty_name(&p.ty)));
         };

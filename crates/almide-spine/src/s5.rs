@@ -82,6 +82,11 @@ pub fn lower_to_ir(path: &str, source_text: &str) -> Result<almide::ir::IrProgra
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
+    // C-132 move-mode write-back: `mut` param fns return their mutated
+    // buffer and call sites assign it back — the SAME shared-IR rewrite
+    // the incumbent pipeline runs post-link (almide-mir/pipeline.rs).
+    // Excluded shapes keep `mutated_params` and keep walling honestly.
+    almide::ir::mut_param::lower_mut_params_move_mode(&mut ir);
     Ok(ir)
 }
 
