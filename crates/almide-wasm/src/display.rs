@@ -238,6 +238,90 @@ impl Emitter<'_> {
                     path.pop();
                 }
             }
+            // `["k": v, …]` in insertion order; empty is the literal
+            // `[:]` (the oracle's map repr).
+            SliceTy::Map(kh, vh) => {
+                let (k, v) = (self.types.el(kh), self.types.el(vh));
+                let (koff, voff, esz) = crate::collections::entry_layout(k, v);
+                let hb = self.hold_i32()?;
+                let end = self.hold_i32()?;
+                let cur = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.f.instructions().local_get(hb).i32_load(len_memarg()).i32_eqz();
+                self.f.instructions().if_(BlockType::Empty);
+                self.append_lit("[:]");
+                self.f.instructions().else_();
+                self.append_lit("[");
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(hb)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_set(cur);
+                    i.local_get(cur)
+                        .local_get(hb)
+                        .i32_load(len_memarg())
+                        .i32_add()
+                        .local_set(end);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
+                    i.local_get(cur)
+                        .local_get(hb)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .i32_ne()
+                        .if_(BlockType::Empty);
+                }
+                self.append_lit(", ");
+                self.f.instructions().end();
+                self.f.instructions().local_get(cur).i32_const(koff as i32).i32_add();
+                self.load_ty_slot_at(k);
+                self.emit_display_at(k, true, path)?;
+                self.append_lit(": ");
+                self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
+                self.load_ty_slot_at(v);
+                self.emit_display_at(v, true, path)?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(cur).i32_const(esz as i32).i32_add().local_set(cur);
+                    i.br(0);
+                    i.end();
+                    i.end();
+                }
+                self.append_lit("]");
+                self.f.instructions().end();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+            }
+            // A Value displays as its compact JSON — the SAME serializer
+            // json.stringify uses (one repr, two spellings). The $vjson
+            // helper appends AT THE DISPLAY CURSOR in place — the
+            // stringify capture path scratches from G_LINE_CURSOR and
+            // would clobber the interpolation already in the buffer.
+            SliceTy::Value => {
+                let Some(fi) = self.resolve_qualified("float.to_string") else {
+                    return unsup("interp-part:Value-float-unlinked");
+                };
+                let info = &self.table.infos[fi];
+                if info.refuse.is_some() || info.ret != Some(STR) {
+                    return unsup("interp-part:Value-float-impl");
+                }
+                let float_idx = info.wasm_index;
+                self.calls.insert(fi);
+                let frags = self.json_frags();
+                let _ = self.work.helper(Helper::JsonQuote { frags });
+                let vj = self.work.helper(Helper::JsonValue { float_to_string: float_idx, frags });
+                let hv = self.hold_i32()?;
+                self.f.instructions().local_set(hv);
+                self.f
+                    .instructions()
+                    .local_get(self.cursor_local)
+                    .local_get(hv)
+                    .call(vj)
+                    .local_set(self.cursor_local);
+                self.release_i32();
+            }
             other => return unsup(&format!("interp-part:{other:?}")),
         }
         Ok(())
