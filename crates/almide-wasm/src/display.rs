@@ -238,6 +238,14 @@ impl Emitter<'_> {
                     path.pop();
                 }
             }
+            // A set displays as its constructor call over the element
+            // list (`set.from_list([3, 1, 2])`) — the set block IS the
+            // element array, so the list walk does the middle.
+            SliceTy::Set(h) => {
+                self.append_lit("set.from_list(");
+                self.emit_display_at(SliceTy::List(h), nested, path)?;
+                self.append_lit(")");
+            }
             // `["k": v, …]` in insertion order; empty is the literal
             // `[:]` (the oracle's map repr).
             SliceTy::Map(kh, vh) => {
