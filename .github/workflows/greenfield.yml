@@ -29,10 +29,16 @@ jobs:
       # module rebuilt as new structure moves into the strict tier with it.
       - name: clippy (zero warnings, greenfield-authored tier)
         run: cargo clippy -p almide-spine -p almide-diag -p almide-base -p almide-layout -p almide-wasm -p almide-corpus --all-targets --locked -- -D warnings
+      # Two separate claims, both enforced: the COMPILER holds the
+      # workspace 1.89 promise; almide-wasm-run embeds wasmtime and
+      # declares the engine's own floor (1.94) on the crate. Neither
+      # claim is allowed to drift silently.
       - name: MSRV honesty
         run: |
           rustup toolchain install 1.89 --profile minimal
-          cargo +1.89 check --workspace --locked
+          cargo +1.89 check --workspace --exclude almide-wasm-run --locked
+          rustup toolchain install 1.94 --profile minimal
+          cargo +1.94 check -p almide-wasm-run --locked
 
   # Flight-gap A-2: structural coverage of the wasm backend's emitter under
   # its full net (591-fixture parity + 200-seed differential fuzz + first
