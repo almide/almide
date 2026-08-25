@@ -295,19 +295,28 @@ impl Emitter<'_> {
                             .i32_eq()
                             .if_(BlockType::Empty);
                     }
+                    // Tuple cases carry synthetic "0","1",… field names;
+                    // a real name means a RECORD-shaped case, which the
+                    // oracle displays in the record form (C-008:
+                    // `Rect { w: 3, h: 4 }`, not `Rect(3, 4)`).
+                    let record_case =
+                        c.fields.first().is_some_and(|f| f.name.parse::<usize>().is_err());
                     if c.fields.is_empty() {
                         self.append_lit(&c.name);
                     } else {
-                        self.append_lit(&format!("{}(", c.name));
+                        self.append_lit(&format!("{}{}", c.name, if record_case { " { " } else { "(" }));
                         for (j, f) in c.fields.iter().enumerate() {
                             if j > 0 {
                                 self.append_lit(", ");
+                            }
+                            if record_case {
+                                self.append_lit(&format!("{}: ", f.name));
                             }
                             self.f.instructions().local_get(hb);
                             self.load_ty_slot(f.ty, f.offset);
                             self.emit_display_at(f.ty, true, path)?;
                         }
-                        self.append_lit(")");
+                        self.append_lit(if record_case { " }" } else { ")" });
                     }
                     if !last {
                         self.f.instructions().else_();

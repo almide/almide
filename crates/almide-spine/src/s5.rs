@@ -110,43 +110,55 @@ fn link_self_host(
         }
     }
 
+    /// A display of any type that could REACH a Float formats through
+    /// the linked compound form at emission. Only the exactly-known
+    /// float-free scalars (and their Applied closures) are exempt —
+    /// Named/record types are opaque here, so they demand conservatively
+    /// (an unused splice is reachability-pruned; a missed one was the
+    /// ×4 "interp-part:Float-unlinked" wall: `${b}` over `Float?`).
+    fn ty_float_free(t: &almide::types::Ty) -> bool {
+        use almide::types::Ty;
+        match t {
+            Ty::Int | Ty::Bool | Ty::String | Ty::Unit => true,
+            Ty::Applied(_, args) => args.iter().all(ty_float_free),
+            _ => false,
+        }
+    }
+
     fn scan_expr(e: &almide::ir::IrExpr, out: &mut HashSet<String>) {
         match &e.kind {
-            almide::ir::IrExprKind::Call { target, .. }
-            | almide::ir::IrExprKind::TailCall { target, .. } => {
-                if let almide::ir::CallTarget::Module { module, func, .. } = target {
-                    // The native JSON serializer formats floats through
-                    // the linked float.to_string.
-                    if (module.as_str() == "json" || module.as_str() == "value")
-                        && func.as_str() == "stringify"
-                    {
-                        out.insert("float.to_string".to_string());
+            almide::ir::IrExprKind::Call { target, args, .. }
+            | almide::ir::IrExprKind::TailCall { target, args, .. } => {
+                match target {
+                    almide::ir::CallTarget::Module { module, func, .. } => {
+                        // The native JSON serializer formats floats through
+                        // the linked float.to_string.
+                        if (module.as_str() == "json" || module.as_str() == "value")
+                            && func.as_str() == "stringify"
+                        {
+                            out.insert("float.to_string".to_string());
+                        }
+                        out.insert(format!("{}.{}", module.as_str(), func.as_str()));
                     }
-                    out.insert(format!("{}.{}", module.as_str(), func.as_str()));
+                    // Bare println/print display their argument — the
+                    // same implicit float demand as interpolation.
+                    almide::ir::CallTarget::Named { name }
+                        if matches!(name.as_str(), "println" | "print" | "eprintln")
+                            && args.iter().any(|a| !ty_float_free(&a.ty)) =>
+                    {
+                        out.insert("float.to_string_compound".to_string());
+                    }
+                    _ => {}
                 }
             }
-            // A Float interpolation part formats through float.to_string
-            // at emission — the demand is implicit in the IR.
+            // A Float-reaching interpolation part formats through
+            // float.to_string at emission — the demand is implicit.
             almide::ir::IrExprKind::StringInterp { parts } => {
                 for p in parts {
-                    if let almide::ir::IrStringPart::Expr { expr } = p {
-                        use almide::types::{constructor::TypeConstructorId, Ty};
-                        match &expr.ty {
-                            Ty::Float => {
-                                out.insert("float.to_string_compound".to_string());
-                            }
-                            // List parts display through the linked list
-                            // formatters — same implicit-demand rule.
-                            // `${List[Float]}` elements format through
-                            // the same compound form as `${Float}` (the
-                            // list shell builds natively in the emitter).
-                            Ty::Applied(TypeConstructorId::List, args)
-                                if args.len() == 1 && matches!(args[0], Ty::Float) =>
-                            {
-                                out.insert("float.to_string_compound".to_string());
-                            }
-                            _ => {}
-                        }
+                    if let almide::ir::IrStringPart::Expr { expr } = p
+                        && !ty_float_free(&expr.ty)
+                    {
+                        out.insert("float.to_string_compound".to_string());
                     }
                 }
             }

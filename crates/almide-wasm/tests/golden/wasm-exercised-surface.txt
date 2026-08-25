@@ -76,6 +76,7 @@ call:fs.read_text
 call:fs.read_text_if_exists
 call:fs.remove_all
 call:fs.write
+call:int.abs
 call:int.bits_to_float
 call:int.clamp
 call:int.from_hex
@@ -153,6 +154,7 @@ call:option.unwrap_or_else
 call:println
 call:process.exit
 call:result.flat_map
+call:result.flatten__Float_String
 call:result.flatten__Int_String
 call:result.is_err
 call:result.is_ok
