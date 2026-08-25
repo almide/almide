@@ -192,6 +192,23 @@ impl Emitter<'_> {
                 // String->String: byte-level string building; its tuple
                 // helpers are module fns lowered by THIS emitter.
                 "string_to_upper",
+                // to_upper's mirror: same table-driven walker, same
+                // own-buffer stores (the store32 writes ITS buffer's len
+                // header — LEN offset 4 is digest-shared).
+                "string_to_lower",
+                // (String, Int) -> String: read-only loads on the source,
+                // stores into a fresh alloc_str buffer only.
+                "string_take_end",
+                "string_drop_end",
+                // string_from_bytes is NOT here: its `prim.load32(h+4)`
+                // reads the LIST len header as an ELEMENT COUNT — the
+                // incumbent's unit — where ours holds BYTES (8× the
+                // count). Slot agreement is not enough: a RAW HEADER READ
+                // couples an impl to the incumbent layout even when every
+                // slot matches (found by result_match_rewrap_modcall:
+                // "hi" decoded as 16 slots of garbage). Prim-mediated
+                // alloc (list_repeat's alloc_list(count)) stays safe —
+                // the prim writes OUR header.
                 // (Int) -> String: UTF-8 byte encoding into its own fresh
                 // string buffer — layout-shared writes only.
                 "string_from_codepoint",

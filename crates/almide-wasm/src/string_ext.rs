@@ -325,7 +325,7 @@ impl Emitter<'_> {
                 i.end();
                 i.end();
                 let _ = i;
-                for _ in 0..4 {
+                for _ in 0..3 {
                     self.release_i32();
                 }
                 self.release_i64();

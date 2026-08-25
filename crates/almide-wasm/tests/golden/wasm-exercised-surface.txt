@@ -173,6 +173,8 @@ call:set.new
 call:string.chars
 call:string.codepoint
 call:string.drop
+call:string.drop_end
+call:string.from_codepoint
 call:string.get
 call:string.is_empty
 call:string.join
@@ -187,6 +189,8 @@ call:string.slice
 call:string.split
 call:string.starts_with
 call:string.take
+call:string.take_end
+call:string.to_lower
 call:string.to_upper
 call:string.trim
 call:user-fn

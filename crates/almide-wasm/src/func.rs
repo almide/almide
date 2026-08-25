@@ -284,6 +284,17 @@ pub(crate) fn lower_fn(
                 em.wrap_ok(raw, want)?;
             }
         }
+        // Hold-balance invariant: every arm releases exactly what it
+        // held. An over-release WRAPS the u32 depth and poisons every
+        // later hold as a fake depth failure (string.get held 4, released
+        // 5, and three unrelated fixtures walled on "hold-depth-i32") —
+        // the BUG: prefix keeps this out of the honest-wall histogram.
+        if em.hold_i32_depth != 0 || em.hold_i64_depth != 0 || em.hold_f64_depth != 0 {
+            return unsup(&format!(
+                "BUG:hold-imbalance:i32={},i64={},f64={}",
+                em.hold_i32_depth, em.hold_i64_depth, em.hold_f64_depth
+            ));
+        }
     }
     f.instructions().end();
     Ok((f, calls))
