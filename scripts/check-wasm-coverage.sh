@@ -26,7 +26,17 @@ if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
   exit 2
 fi
 
-SUMMARY=$(cargo llvm-cov --package almide-wasm --json --summary-only 2>/dev/null)
+# stderr is CAPTURED, not discarded: an instrumented test failure must
+# name itself in the CI log, never die silently (stage-97 lesson — an
+# 8-minute run ended in a bare `exit code 101` with zero output).
+COV_ERR=$(mktemp)
+if ! SUMMARY=$(cargo llvm-cov --package almide-wasm --json --summary-only 2>"$COV_ERR"); then
+  status=$?
+  echo "FAIL: cargo llvm-cov exited $status — instrumented run output follows" >&2
+  tail -n 120 "$COV_ERR" >&2
+  exit "$status"
+fi
+rm -f "$COV_ERR"
 LINE_PCT=$(printf '%s' "$SUMMARY" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
