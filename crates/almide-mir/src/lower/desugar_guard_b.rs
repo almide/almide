@@ -513,6 +513,43 @@ mod hoist_impl {
     /// the literal. The Unwrap/Try node carries the PAYLOAD type (the call
     /// under it carries the carrier), so the hoisted bind is the proven C-222
     /// bind-position unwrap verbatim.
+    fn trivially_pure(e: &IrExpr) -> bool {
+        matches!(
+            e.kind,
+            IrExprKind::Var { .. }
+                | IrExprKind::LitInt { .. }
+                | IrExprKind::LitFloat { .. }
+                | IrExprKind::LitStr { .. }
+                | IrExprKind::LitBool { .. }
+                | IrExprKind::Unit
+        )
+    }
+
+    /// The Record-arm rule shared by the direct and tuple-slot positions:
+    /// hoist every non-trivially-pure field up to `upto` (inclusive).
+    fn hoist_record_fields_upto(
+        fields: &mut [(almide_lang::intern::Sym, IrExpr)],
+        upto: usize,
+        vt: &mut VarTable,
+        hoists: &mut Vec<IrStmt>,
+    ) {
+        for (idx, (_, fe)) in fields.iter_mut().enumerate() {
+            if idx > upto {
+                break;
+            }
+            if !trivially_pure(fe) {
+                hoists.push(hoist_to_bind(fe, vt, "__rec_fld"));
+            }
+        }
+    }
+
+    fn record_last_bang(e: &IrExpr) -> Option<usize> {
+        let IrExprKind::Record { fields, .. } = &e.kind else { return None };
+        fields
+            .iter()
+            .rposition(|(_, fe)| matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
+    }
+
     fn hoist_bang_record_fields(
         value: &mut IrExpr,
         vt: &mut VarTable,
@@ -524,29 +561,58 @@ mod hoist_impl {
             | IrExprKind::OptionSome { expr } => &mut **expr,
             _ => value,
         };
-        let IrExprKind::Record { fields, .. } = &mut rec.kind else { return };
-        let Some(last_bang) = fields.iter().rposition(|(_, fe)| {
-            matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
-        }) else {
-            return;
-        };
-        for (idx, (_, fe)) in fields.iter_mut().enumerate() {
-            if idx > last_bang {
-                break;
+        match &mut rec.kind {
+            IrExprKind::Record { fields, .. } => {
+                let Some(last_bang) = fields.iter().rposition(|(_, fe)| {
+                    matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+                }) else {
+                    return;
+                };
+                hoist_record_fields_upto(fields, last_bang, vt, hoists);
             }
-            let trivially_pure = matches!(
-                fe.kind,
-                IrExprKind::Var { .. }
-                    | IrExprKind::LitInt { .. }
-                    | IrExprKind::LitFloat { .. }
-                    | IrExprKind::LitStr { .. }
-                    | IrExprKind::LitBool { .. }
-                    | IrExprKind::Unit
-            );
-            if !trivially_pure {
-                hoists.push(hoist_to_bind(fe, vt, "__rec_fld"));
+            // #1581 residual: the record literal sits in a TUPLE SLOT of the
+            // carrier's Ok payload (`fn f(r) -> (Row, Out)! = (r, Out { a:
+            // label(r)! })` — the functional-port `(state, dto)` pair). Hoist
+            // through the tuple layer: every non-trivially-pure slot (or, for
+            // a record slot, its non-trivially-pure fields) up to and
+            // including the LAST bang-bearing record slot, in evaluation
+            // order — earlier effectful slots hoist too, so nothing reorders
+            // across the `!`'s early return.
+            IrExprKind::Tuple { elements } => {
+                let Some(last_slot) =
+                    elements.iter().rposition(|e| record_last_bang(e).is_some())
+                else {
+                    return;
+                };
+                for (idx, slot) in elements.iter_mut().enumerate() {
+                    if idx > last_slot {
+                        break;
+                    }
+                    if let IrExprKind::Record { fields, .. } = &mut slot.kind {
+                        let upto = if idx == last_slot {
+                            match record_last_bang_fields(fields) {
+                                Some(b) => b,
+                                None => fields.len().saturating_sub(1),
+                            }
+                        } else {
+                            fields.len().saturating_sub(1)
+                        };
+                        hoist_record_fields_upto(fields, upto, vt, hoists);
+                    } else if !trivially_pure(slot) {
+                        hoists.push(hoist_to_bind(slot, vt, "__tup_slot"));
+                    }
+                }
             }
+            _ => {}
         }
+    }
+
+    fn record_last_bang_fields(
+        fields: &[(almide_lang::intern::Sym, IrExpr)],
+    ) -> Option<usize> {
+        fields
+            .iter()
+            .rposition(|(_, fe)| matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
     }
 
     fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {

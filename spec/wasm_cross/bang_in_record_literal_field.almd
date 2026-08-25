@@ -41,6 +41,13 @@ fn f5x(r: Row) -> Int! = {
   string.len(o.a)
 }
 
+fn f6(r: Row) -> (Row, Out)! = (r, Out { a: label(r)! })
+
+fn f6_len(r: Row) -> Int! = {
+  let p = f6(r)!
+  string.len(p.0.id) + string.len(p.1.a)
+}
+
 effect fn main() -> Unit = {
   let r = Row { id: "x" }
   let o1 = f1(r)!
@@ -63,4 +70,13 @@ effect fn main() -> Unit = {
   let er5 = f5x(Row { id: "" }) ?? -1
   // -1 — the guard's err path takes the fallback
   println("${er5}")
+  let p6 = f6(r)!
+  println(p6.0.id)
+  // x
+  println(p6.1.a)
+  // x
+  let n6 = f6_len(r) ?? -1
+  // 2 — the literal in a TUPLE SLOT of the carrier (the #1581 reopen
+  // cell: the functional-port (state, dto) pair)
+  println("${n6}")
 }
