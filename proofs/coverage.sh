@@ -10,11 +10,21 @@
 #   bash proofs/coverage.sh --check    # same, explicit (what CI passes)
 #   bash proofs/coverage.sh --update   # additionally RAISE the baseline on gain
 #
-# Scope note: this instruments `cargo test -p almide-mir` (unit + gate tests) AND
-# a render_program sweep over spec/wasm_cross (the parity workload). The v0
-# compiler crates (almide-codegen etc.) are the production path — measured
-# separately once this rung is stable (they need the wasm/native e2e harness
-# under instrumentation, a heavier build).
+# Scope: instruments the almide-mir AND almide-codegen test suites, the
+# render_program sweep over all runnable spec (v1 path), and `almide test
+# spec/` through the CLI (frontend→codegen production path). The ratcheted
+# TOTAL spans every workspace crate linked into those binaries (the report
+# rows below are filtered for readability; the TOTAL is not). Two floors:
+# the TOTAL ratchet (proofs/coverage-baseline.txt) and per-file floors for
+# the #566 SAFETY SET (proofs/coverage-safety-baseline.txt) — the safety
+# files may not rot while the TOTAL holds.
+#
+# ALMIDE_COVERAGE_CONDITION=1 adds `-Z coverage-options=condition` (per-
+# condition branch records incl. the RHS of lazy operators — the measured
+# backstop of the MC/DC decision ledger, proofs/mcdc-ledger.sh). Needs a
+# toolchain whose rustc accepts the -Z flag (the coverage-condition CI job
+# pins a dated nightly; rustc's own MC/DC mode was removed upstream,
+# rust-lang/rust#144999).
 set -euo pipefail
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -66,7 +76,12 @@ rm -rf "$COVDIR"; mkdir -p "$COVDIR/build"
 # merge glob `$COVDIR/*.profraw` below does not pick it up. Build-script
 # coverage is not data we want in the report (llvm-cov is scoped by -object
 # anyway); we just want it to land somewhere harmless.
-export RUSTFLAGS="-C instrument-coverage"
+if [ "${ALMIDE_COVERAGE_CONDITION:-}" = "1" ]; then
+    export RUSTFLAGS="-C instrument-coverage -Z coverage-options=condition"
+    echo "coverage: CONDITION mode (per-condition branch records)"
+else
+    export RUSTFLAGS="-C instrument-coverage"
+fi
 
 # Anything that still escapes (a child process that resets the variable) is
 # swept on the way out, on every exit path. Scoped to llvm's own default
@@ -159,4 +174,41 @@ if [ -f "$BASELINE_FILE" ]; then
 else
     echo "$total_c" > "$BASELINE_FILE"
     echo "coverage ratchet SEEDED at ${total_line_pct}%"
+fi
+
+# ── SAFETY-SET per-file floors (#566 rung 2): the safety files may not rot ──
+# proofs/coverage-safety-baseline.txt: `<path> <int100>` per line. A file
+# below its floor fails; a file missing from the report fails (renamed =
+# stale); `--update` raises floors to the measured value (never lowers).
+SAFETY_FILE="$ROOT/proofs/coverage-safety-baseline.txt"
+if [ -f "$SAFETY_FILE" ]; then
+    FULL_REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS -instr-profile="$COVDIR/all.profdata" 2>/dev/null)"
+    fail=0
+    updated=""
+    while read -r sf floor; do
+        [ -n "$sf" ] || continue
+        case "$sf" in \#*) continue ;; esac
+        pct="$(printf '%s\n' "$FULL_REPORT" | awk -v f="$sf" 'index($0, f) { n=0; for (i=1;i<=NF;i++) if ($i ~ /%$/) { n++; if (n==3) { gsub(/%/,"",$i); print $i; exit } } }')"
+        if [ -z "$pct" ]; then
+            echo "SAFETY COVERAGE FAIL: $sf not found in the report (renamed or dropped from the instrumented set)"
+            fail=1; continue
+        fi
+        pc="$(printf '%s' "$pct" | awk '{ printf "%d", $1 * 100 }')"
+        if [ "$pc" -lt "$floor" ]; then
+            echo "SAFETY COVERAGE FAIL: $sf line ${pct}% < floor $(awk -v x="$floor" 'BEGIN{printf "%.2f", x/100}')%"
+            fail=1
+        elif [ "$MODE" = "--update" ] && [ "$pc" -gt "$floor" ]; then
+            updated="$updated $sf:$pc"
+            floor="$pc"
+        fi
+        printf '%s %s\n' "$sf" "$floor" >> "$SAFETY_FILE.new"
+    done < "$SAFETY_FILE"
+    if [ "$MODE" = "--update" ] && [ -f "$SAFETY_FILE.new" ]; then
+        mv "$SAFETY_FILE.new" "$SAFETY_FILE"
+        [ -n "$updated" ] && echo "safety floors RAISED:$updated"
+    else
+        rm -f "$SAFETY_FILE.new"
+    fi
+    [ "$fail" -eq 0 ] || exit 1
+    echo "safety floors OK ($(grep -vc '^#' "$SAFETY_FILE" | tr -d ' ') file(s))"
 fi

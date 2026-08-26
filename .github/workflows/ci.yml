@@ -836,6 +836,63 @@ jobs:
   # Checks
   # ═══════════════════════════════════════════════
 
+  coverage-ratchet:
+    # #566 gap B: the nightly ratchet surfaced a regression up to 24h late,
+    # inviting baseline conflicts. This runs the SAME gate at push/PR time —
+    # ~14 min measured — but only when something it measures changed.
+    name: Coverage ratchet at push time (#566)
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Relevance — skip when nothing measured changed
+        id: rel
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1 2>/dev/null || true)";; esac
+          if [ -n "$BASE" ] && git cat-file -e "$BASE" 2>/dev/null; then
+            CHANGED="$(git diff --name-only "$BASE"..HEAD)"
+          else
+            CHANGED="unknown-base"
+          fi
+          if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qE '^(crates/|src/|runtime/|spec/|stdlib/|proofs/coverage|proofs/mcdc|Cargo)'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "nothing coverage-relevant changed ($(printf '%s\n' "$CHANGED" | wc -l) file(s))"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.rel.outputs.skip != 'true'
+        with:
+          toolchain: "1.89.0"
+      - uses: actions/cache@v6
+        if: steps.rel.outputs.skip != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Install llvm-tools
+        if: steps.rel.outputs.skip != 'true'
+        run: rustup component add llvm-tools-preview
+      - name: Build almide (stamp expects an installed binary)
+        if: steps.rel.outputs.skip != 'true'
+        run: |
+          cargo build --release
+          mkdir -p ~/.local/bin && cp target/release/almide ~/.local/bin/
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Measure coverage and enforce the ratchet + safety floors
+        if: steps.rel.outputs.skip != 'true'
+        run: bash proofs/coverage.sh --check
+
   checks:
     name: Emit & Format
     needs: build
