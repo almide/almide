@@ -1,0 +1,17 @@
+# SAFETY-SET per-file line-coverage floors (#566 rung 2) — enforced by
+# proofs/coverage.sh after the TOTAL ratchet. Floor = int(percent*100).
+# Seeded 2026-08-26 from a full local run (rustc 1.96.1, macOS) MINUS a
+# 5-point cross-platform margin (the CI leg on 1.89.0/linux measures a few
+# points off: translation_validation 70.09 local vs 68.18 CI that night).
+# Raise with `bash proofs/coverage.sh --update` from the CI environment; a
+# lowering needs its own justified commit.
+crates/almide-codegen/src/perceus_verified.rs 5016
+crates/almide-codegen/src/pass_effect_inference.rs 7632
+crates/almide-frontend/src/check/calls.rs 6457
+crates/almide-frontend/src/check/infer_calls_closures.rs 6827
+crates/almide-mir/src/certificate.rs 7229
+crates/almide-mir/src/certificate_b.rs 7510
+crates/almide-mir/src/certificate_b_tail.rs 6630
+crates/almide-mir/src/certificate_c.rs 9209
+crates/almide-mir/src/certificate_p2.rs 9449
+crates/almide-mir/src/translation_validation.rs 6509
