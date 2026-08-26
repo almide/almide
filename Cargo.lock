@@ -125,6 +125,7 @@ dependencies = [
  "almide-frontend",
  "almide-ir",
  "almide-lang",
+ "almide-layout",
  "almide-optimize",
 ]
 
