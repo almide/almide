@@ -96,9 +96,13 @@ sweep_stray_profraw() {
 }
 trap sweep_stray_profraw EXIT
 
-echo "== 1/4 instrumented build (almide-mir + almide-codegen tests, render_program, the almide CLI) =="
+echo "== 1/4 instrumented build (almide-mir + almide-codegen + almide-wasm tests, render_program, the almide CLI) =="
+# almide-wasm joined the instrumented set at the Stage 2 commissioning: the
+# default `--target wasm` leg (and `almide test`'s wasm phase workload) runs
+# the structural emitter, so a spine-crate-only measurement halves the TOTAL
+# while the system's actual hot path goes unmeasured.
 LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
-  cargo test -p almide-mir -p almide-codegen --release --no-run --target-dir "$COVDIR/t" 2>&1 | tail -1
+  cargo test -p almide-mir -p almide-codegen -p almide-wasm --release --no-run --target-dir "$COVDIR/t" 2>&1 | tail -1
 LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
   cargo build --release -p almide-mir --example render_program --target-dir "$COVDIR/t" 2>&1 | tail -1
 LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
@@ -109,7 +113,7 @@ echo "== 2/4 run the test suites =="
 # (macOS) rejects it outright — the second call has no `|| true`, so under
 # `set -e` this whole gate died at step 2/4 with "illegal mode string" on every
 # non-GNU host, never reaching the ratchet it exists to enforce (#1244 round 5).
-TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|almide_codegen|integration|lower|render)[^/]*$' || true)"
+TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|almide_codegen|almide_wasm|backend_parity|section_dump|fuzz_differential|alias_semantics|tail_calls|integration|lower|render)[^/]*$' || true)"
 [ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib')"
 # No vacuous measurement: zero test binaries would still produce profraw from
 # the step-3 workloads, so the run would report a NUMBER for a suite that never
@@ -145,8 +149,8 @@ OBJS="-object $RP -object $CLI"
 for tb in $TESTBINS; do OBJS="$OBJS -object $tb"; done
 REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS \
     -instr-profile="$COVDIR/all.profdata" \
-    -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/)' 2>/dev/null \
-  | awk 'NR<=2 || /almide-(mir|codegen|frontend)\// || /^TOTAL/' | grep -vE 'tests?_part')"
+    -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/|/release/build/)' 2>/dev/null \
+  | awk 'NR<=2 || /almide-(mir|codegen|frontend|wasm)\// || /^TOTAL/' | grep -vE 'tests?_part')"
 printf '%s\n' "$REPORT" | tail -40
 
 # ── RATCHET (#566): TOTAL line coverage may only go UP ─────────────────────
