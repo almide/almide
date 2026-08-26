@@ -67,6 +67,7 @@ mod bytes;
 mod bytes_rw;
 mod calls;
 mod cells;
+mod unroll;
 mod collect;
 mod collections;
 mod collections_hof;
