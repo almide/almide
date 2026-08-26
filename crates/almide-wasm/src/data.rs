@@ -27,30 +27,7 @@ impl Emitter<'_> {
                 }
                 other => return unsup(&format!("ty-mismatch:none-vs-{other:?}")),
             },
-            IrExprKind::OptionSome { expr } => {
-                let (hty, s) = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::Option(h) => (SliceTy::Option(h), self.types.el(h)),
-                    other => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
-                };
-                // The base lives in a HOLD local (stack-disciplined),
-                // never the shared tmp: the inner expression can contain
-                // its own `some(...)`/`ok(...)` as a SUBEXPRESSION even
-                // when the types forbid nested sums — the differential
-                // fuzzer falsified the old shared-tmp argument on day one
-                // (seed 79: the outer `some` returned the inner block).
-                let hold = self.hold_i32()?;
-                self.f
-                    .instructions()
-                    .i32_const(s.slot_size() as i32)
-                    .call(F_ALLOC)
-                    .local_tee(hold);
-                self.lower(expr, Some(s))?;
-                self.rc_share_guard(expr, s);
-                self.store_ty_slot(s, almide_layout::OPTION_FIELD);
-                self.f.instructions().local_get(hold);
-                self.release_i32();
-                hty
-            }
+            IrExprKind::OptionSome { expr } => self.lower_option_some(e, expr, want)?,
             IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
                 let is_ok = matches!(&e.kind, IrExprKind::ResultOk { .. });
                 let (hty, o, er) = match want.map_or_else(|| self.infer(e), Ok)? {
@@ -564,5 +541,41 @@ impl Emitter<'_> {
                 self.release_i32();
                 ty
         })
+    }
+}
+
+impl Emitter<'_> {
+    /// `some(v)` — split from `lower_sum` for the complexity budget. The
+    /// base lives in a HOLD local (stack-disciplined), never the shared
+    /// tmp: the inner expression can contain its own `some(...)`/`ok(...)`
+    /// as a SUBEXPRESSION (differential-fuzz seed 79).
+    fn lower_option_some(
+        &mut self,
+        e: &IrExpr,
+        expr: &IrExpr,
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+                let (hty, s) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::Option(h) => (SliceTy::Option(h), self.types.el(h)),
+                    other => return unsup(&format!("ty-mismatch:some-vs-{other:?}")),
+                };
+                // The base lives in a HOLD local (stack-disciplined),
+                // never the shared tmp: the inner expression can contain
+                // its own `some(...)`/`ok(...)` as a SUBEXPRESSION even
+                // when the types forbid nested sums — the differential
+                // fuzzer falsified the old shared-tmp argument on day one
+                // (seed 79: the outer `some` returned the inner block).
+                let hold = self.hold_i32()?;
+                self.f
+                    .instructions()
+                    .i32_const(s.slot_size() as i32)
+                    .call(F_ALLOC)
+                    .local_tee(hold);
+                self.lower(expr, Some(s))?;
+                self.rc_share_guard(expr, s);
+                self.store_ty_slot(s, almide_layout::OPTION_FIELD);
+                self.f.instructions().local_get(hold);
+                self.release_i32();
+        Ok(hty)
     }
 }

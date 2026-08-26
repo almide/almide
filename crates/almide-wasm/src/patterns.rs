@@ -326,46 +326,7 @@ impl Emitter<'_> {
                 Ok(())
             }
             IrPattern::RecordPattern { name, fields, .. } => {
-                let SliceTy::Named(ti) = subj_ty else {
-                    return unsup("pattern:record-on-non-named");
-                };
-                let finfo: Vec<(String, SliceTy, u32)> = match &self.types.def(ti) {
-                    NamedDef::Variant(v) => {
-                        let Some(c) = v.cases.iter().find(|c| c.name == name.as_str()) else {
-                            return unsup(&format!("pattern:case-unknown:{name}"));
-                        };
-                        c.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()
-                    }
-                    NamedDef::Record(r) => {
-                        r.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()
-                    }
-                    NamedDef::Excluded => return unsup("pattern:record-excluded"),
-                };
-                for fp in fields {
-                    let Some((_, fty, off)) = finfo
-                        .iter()
-                        .find(|(n, ..)| *n == fp.name)
-                        .map(|(_, t, o)| ((), *t, *o))
-                    else {
-                        return unsup("pattern:record-unknown-field");
-                    };
-                    match &fp.pattern {
-                        None => return unsup("pattern:record-shorthand"),
-                        Some(IrPattern::Wildcard) | Some(IrPattern::Literal { .. }) => {}
-                        Some(IrPattern::Bind { var, .. }) => {
-                            let Some(&(idx, _)) = self.locals.get(var) else {
-                                return unsup("bind:unmapped");
-                            };
-                            self.f.instructions().local_get(scr);
-                            self.load_ty_slot(fty, off);
-                            self.f.instructions().local_set(idx);
-                        }
-                        Some(other) => {
-                            return unsup(&format!("pattern:record-{}", pattern_name(other)))
-                        }
-                    }
-                }
-                Ok(())
+                self.emit_record_pattern_binds(name, fields, subj_ty, scr)
             }
             IrPattern::Constructor { name, args } => {
                 self.bind_ctor_fields(name, args, subj_ty, scr)
@@ -469,6 +430,59 @@ impl Emitter<'_> {
                             self.f.instructions().local_get(scr);
                             self.load_ty_slot(fty, off);
                             self.bind_nested(nested, fty)?;
+                        }
+                    }
+                }
+                Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// Record/variant-case pattern binds — split from `emit_pattern_binds`
+    /// for the complexity budget.
+    fn emit_record_pattern_binds(
+        &mut self,
+        name: &str,
+        fields: &[almide_ir::IrFieldPattern],
+        subj_ty: SliceTy,
+        scr: u32,
+    ) -> Result<(), EmitError> {
+                let SliceTy::Named(ti) = subj_ty else {
+                    return unsup("pattern:record-on-non-named");
+                };
+                let finfo: Vec<(String, SliceTy, u32)> = match &self.types.def(ti) {
+                    NamedDef::Variant(v) => {
+                        let Some(c) = v.cases.iter().find(|c| c.name == name) else {
+                            return unsup(&format!("pattern:case-unknown:{name}"));
+                        };
+                        c.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()
+                    }
+                    NamedDef::Record(r) => {
+                        r.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()
+                    }
+                    NamedDef::Excluded => return unsup("pattern:record-excluded"),
+                };
+                for fp in fields {
+                    let Some((_, fty, off)) = finfo
+                        .iter()
+                        .find(|(n, ..)| *n == fp.name)
+                        .map(|(_, t, o)| ((), *t, *o))
+                    else {
+                        return unsup("pattern:record-unknown-field");
+                    };
+                    match &fp.pattern {
+                        None => return unsup("pattern:record-shorthand"),
+                        Some(IrPattern::Wildcard) | Some(IrPattern::Literal { .. }) => {}
+                        Some(IrPattern::Bind { var, .. }) => {
+                            let Some(&(idx, _)) = self.locals.get(var) else {
+                                return unsup("bind:unmapped");
+                            };
+                            self.f.instructions().local_get(scr);
+                            self.load_ty_slot(fty, off);
+                            self.f.instructions().local_set(idx);
+                        }
+                        Some(other) => {
+                            return unsup(&format!("pattern:record-{}", pattern_name(other)))
                         }
                     }
                 }

@@ -56,32 +56,8 @@ impl Emitter<'_> {
     ) -> Result<SliceTy, EmitError> {
         use BinOp::*;
         match op {
-            AddFloat | SubFloat | MulFloat | DivFloat => {
-                self.lower(left, Some(FLOAT))?;
-                self.lower(right, Some(FLOAT))?;
-                let mut i = self.f.instructions();
-                match op {
-                    AddFloat => i.f64_add(),
-                    SubFloat => i.f64_sub(),
-                    MulFloat => i.f64_mul(),
-                    DivFloat => i.f64_div(),
-                    _ => unreachable!(),
-                };
-                Ok(FLOAT)
-            }
-            AddInt | SubInt | MulInt => {
-                self.lower(left, Some(INT))?;
-                self.lower(right, Some(INT))?;
-                let mut i = self.f.instructions();
-                match op {
-                    AddInt => i.i64_add(),
-                    SubInt => i.i64_sub(),
-                    _ => i.i64_mul(),
-                };
-                let _ = i;
-                self.emit_narrow_wrap(&left.ty, &right.ty);
-                Ok(INT)
-            }
+            AddFloat | SubFloat | MulFloat | DivFloat => self.lower_float_arith(op, left, right),
+            AddInt | SubInt | MulInt => self.lower_int_arith(op, left, right),
             // C-002: wasm's own div/rem semantics DIFFER from the native
             // abort contract — `i64.rem_s` defines `MIN % -1 = 0` (no
             // trap: the silent-divergence case the abort-parity gate
@@ -322,5 +298,40 @@ impl Emitter<'_> {
                 self.lower(right, Some(FLOAT))?;
                 self.f.instructions().call(idx);
                 Ok(FLOAT)
+    }
+}
+
+impl Emitter<'_> {
+    /// The four f64 arithmetic ops — split from `lower_binop` for the
+    /// complexity budget.
+    fn lower_float_arith(&mut self, op: BinOp, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
+        use BinOp::*;
+        self.lower(left, Some(FLOAT))?;
+        self.lower(right, Some(FLOAT))?;
+        let mut i = self.f.instructions();
+        match op {
+            AddFloat => i.f64_add(),
+            SubFloat => i.f64_sub(),
+            MulFloat => i.f64_mul(),
+            _ => i.f64_div(),
+        };
+        Ok(FLOAT)
+    }
+
+    /// Non-trapping i64 arithmetic (+ the sized-int narrow wrap) — split
+    /// from `lower_binop` for the complexity budget.
+    fn lower_int_arith(&mut self, op: BinOp, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
+        use BinOp::*;
+        self.lower(left, Some(INT))?;
+        self.lower(right, Some(INT))?;
+        let mut i = self.f.instructions();
+        match op {
+            AddInt => i.i64_add(),
+            SubInt => i.i64_sub(),
+            _ => i.i64_mul(),
+        };
+        let _ = i;
+        self.emit_narrow_wrap(&left.ty, &right.ty);
+        Ok(INT)
     }
 }

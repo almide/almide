@@ -421,37 +421,7 @@ impl Emitter<'_> {
             // Functional set: a fresh copy, one in-range byte replaced
             // (native clone + guarded store).
             // MUT push (native b.push): copy-grow 1, store, write back.
-            ("push", [b, v]) | ("append_u8", [b, v]) => {
-                let IrExprKind::Var { id } = &b.kind else {
-                    return unsup("bytes-push-nonvar");
-                };
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
-                };
-                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
-                let bh = self.hold_i32()?;
-                self.f.instructions().local_set(bh);
-                self.lower(v, Some(INT))?;
-                let hv = self.hold_i64()?;
-                self.f.instructions().local_set(hv);
-                let (len_h, rh) = self.emit_copy_grow(bh, 1)?;
-                self.f
-                    .instructions()
-                    .local_get(rh)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(len_h)
-                    .i32_add()
-                    .local_get(hv)
-                    .i64_store8(MemArg { offset: 0, align: 0, memory_index: 0 });
-                self.f.instructions().local_get(rh);
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
-                self.release_i32();
-                self.release_i32();
-                self.release_i64();
-                self.release_i32();
-                Ok(None)
-            }
+            ("push", [b, v]) | ("append_u8", [b, v]) => self.lower_bytes_push(b, v),
             // pad to target with `val` on the chosen side; target <= len
             // (negative INCLUDED — the signed read, both legs) is a copy.
             ("pad_left" | "pad_right", [b, target, v]) => {
@@ -732,5 +702,41 @@ impl Emitter<'_> {
             // Not a native arm: the audited linked path before the wall.
             _ => self.lower_linked_call("bytes", func, args, false),
         }
+    }
+}
+
+impl Emitter<'_> {
+    /// MUT push (native b.push): copy-grow 1, store, write back — split
+    /// from `lower_bytes_call` for the complexity budget.
+    fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+                let IrExprKind::Var { id } = &b.kind else {
+                    return unsup("bytes-push-nonvar");
+                };
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
+                    return unsup("var:unmapped");
+                };
+                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
+                let bh = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower(v, Some(INT))?;
+                let hv = self.hold_i64()?;
+                self.f.instructions().local_set(hv);
+                let (len_h, rh) = self.emit_copy_grow(bh, 1)?;
+                self.f
+                    .instructions()
+                    .local_get(rh)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .local_get(len_h)
+                    .i32_add()
+                    .local_get(hv)
+                    .i64_store8(MemArg { offset: 0, align: 0, memory_index: 0 });
+                self.f.instructions().local_get(rh);
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(None)
     }
 }

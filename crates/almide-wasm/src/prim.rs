@@ -229,6 +229,56 @@ impl Emitter<'_> {
                 };
                 Ok(Some(FLOAT))
             }
+            _ => self.lower_prim_float_b(func, args),
+        }
+    }
+
+    /// The f32 lane over the widened carrier — split from
+    /// lower_prim_float for the complexity budget.
+    fn lower_prim_f32(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
+            ("f2f32", [a]) => {
+                self.lower(a, Some(FLOAT))?;
+                self.f.instructions().f32_demote_f64().f64_promote_f32();
+                Ok(Some(FLOAT))
+            }
+            ("f32_2f", [a]) => {
+                self.lower(a, Some(FLOAT))?;
+                Ok(Some(FLOAT))
+            }
+            ("i2f32", [a]) => {
+                self.lower(a, Some(INT))?;
+                self.f.instructions().f64_convert_i64_s().f32_demote_f64().f64_promote_f32();
+                Ok(Some(FLOAT))
+            }
+            ("f32bits", [a]) => {
+                self.lower(a, Some(FLOAT))?;
+                self.f.instructions().f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
+                Ok(Some(INT))
+            }
+            ("bits_to_f32", [a]) => {
+                self.lower(a, Some(INT))?;
+                self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
+                Ok(Some(FLOAT))
+            }
+            _ => unsup(&format!("call:prim.{func}")),
+        }
+    }
+}
+
+impl Emitter<'_> {
+    /// The unary-rounding / sign / compare half of the prim float ops —
+    /// split from `lower_prim_float` for the complexity budget.
+    fn lower_prim_float_b(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
             ("fceil", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f64_ceil();
@@ -276,42 +326,6 @@ impl Emitter<'_> {
                     _ => i.f64_ge(),
                 };
                 Ok(Some(BOOL))
-            }
-            _ => unsup(&format!("call:prim.{func}")),
-        }
-    }
-
-    /// The f32 lane over the widened carrier — split from
-    /// lower_prim_float for the complexity budget.
-    fn lower_prim_f32(
-        &mut self,
-        func: &str,
-        args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
-        match (func, args) {
-            ("f2f32", [a]) => {
-                self.lower(a, Some(FLOAT))?;
-                self.f.instructions().f32_demote_f64().f64_promote_f32();
-                Ok(Some(FLOAT))
-            }
-            ("f32_2f", [a]) => {
-                self.lower(a, Some(FLOAT))?;
-                Ok(Some(FLOAT))
-            }
-            ("i2f32", [a]) => {
-                self.lower(a, Some(INT))?;
-                self.f.instructions().f64_convert_i64_s().f32_demote_f64().f64_promote_f32();
-                Ok(Some(FLOAT))
-            }
-            ("f32bits", [a]) => {
-                self.lower(a, Some(FLOAT))?;
-                self.f.instructions().f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
-                Ok(Some(INT))
-            }
-            ("bits_to_f32", [a]) => {
-                self.lower(a, Some(INT))?;
-                self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
-                Ok(Some(FLOAT))
             }
             _ => unsup(&format!("call:prim.{func}")),
         }

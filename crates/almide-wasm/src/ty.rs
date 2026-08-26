@@ -36,6 +36,30 @@ pub(crate) fn scalar_of(ty: &Ty) -> Option<Scalar> {
     }
 }
 
+
+/// A bare (unqualified, arg-free) Named type — split from `slice_ty_of`
+/// for the complexity budget. A user declaration wins; the builtin
+/// dynamic Value is the fallback for the undeclared opaque name; the
+/// PUBLISHED newtype erasures (self-host-owned reps) come next; a BARE
+/// spelling of a module-declared type resolves by unique suffix last
+/// (ambiguity stays None — the unique-or-wall doctrine).
+fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
+    types
+        .by_name
+        .get(name)
+        .map(|&i| SliceTy::Named(i))
+        .or_else(|| (name == "Value").then_some(SliceTy::Value))
+        .or_else(|| match name {
+            // stdlib/http_response.almd / json_path.almd own these reps;
+            // the eraser publishes them as List[String].
+            "HttpResponse" | "JsonPath" => {
+                Some(SliceTy::List(types.intern(SliceTy::Scalar(Scalar::Str))))
+            }
+            _ => None,
+        })
+        .or_else(|| named_suffix_unique(types, name))
+}
+
 pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
     if let Some(s) = scalar_of(ty) {
         return Some(SliceTy::Scalar(s));
@@ -84,28 +108,7 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
                 effect: *is_effect,
             })))
         }
-        Ty::Named(name, args) if args.is_empty() => {
-            // A user declaration wins; the builtin dynamic Value is the
-            // fallback for the undeclared opaque name; the PUBLISHED
-            // newtype erasures (self-host-owned reps) come last.
-            types.by_name.get(name.as_str()).map(|&i| SliceTy::Named(i)).or_else(|| {
-                (name.as_str() == "Value").then_some(SliceTy::Value)
-            }).or_else(|| match name.as_str() {
-                // stdlib/http_response.almd / json_path.almd own these
-                // reps; the eraser publishes them as List[String].
-                "HttpResponse" | "JsonPath" => {
-                    Some(SliceTy::List(types.intern(SliceTy::Scalar(Scalar::Str))))
-                }
-                _ => None,
-            }).or_else(|| {
-                // A BARE spelling of a module-declared type (the front
-                // qualifies the decl `m.Box` but a convention method's
-                // receiver says `Box`): unique-suffix match, ambiguity
-                // stays None — the same unique-or-wall doctrine as the
-                // cross-module method resolver.
-                named_suffix_unique(types, name.as_str())
-            })
-        }
+        Ty::Named(name, args) if args.is_empty() => bare_named_of(name.as_str(), types),
         Ty::Named(name, args) => types.instance(name.as_str(), args).map(SliceTy::Named),
         // Generic user types arrive from the checker as Applied(UserDefined)
         // — the same instance machinery the Named spelling routes through.
