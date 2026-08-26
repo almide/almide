@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/sums.rs b/crates/almide-wasm/src/sums.rs
+index 28aed6c06..46fe89a86 100644
+--- a/crates/almide-wasm/src/sums.rs
++++ b/crates/almide-wasm/src/sums.rs
+@@ -164,7 +164,7 @@ impl Emitter<'_> {
+                     i.local_set(hs);
+                     i.local_get(hs).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                     if want_ok {
+-                        i.i32_const(0).i32_ne();
++                        i.i32_eqz(); // [MUTANT: to_option side inverted]
+                     } else {
+                         i.i32_eqz();
+                     }

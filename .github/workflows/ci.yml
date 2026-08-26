@@ -1190,3 +1190,54 @@ jobs:
             -H "Authorization: token ${{ secrets.PLAYGROUND_DISPATCH_TOKEN }}" \
             https://api.github.com/repos/almide/playground/dispatches \
             -d '{"event_type":"compiler-updated"}'
+
+  # ── Commissioned wasm leg (Stage 2, 2026-08-26) ─────────────────────────
+  # The structural emitter and its greenfield gate fleet, in release shape
+  # (V-1: assertions live in the shipped-shape build). Debug shards skip
+  # these suites (cfg_attr debug ignore), so this job is their ONLY runner.
+  commissioned-wasm-gates:
+    name: Commissioned wasm gates (structural leg, release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - name: Carried gates in release shape
+        run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+
+  # Aviation discipline as CI (adopted from the greenfield burn, where
+  # codopsy slipped to B twice and only a human check-in caught it):
+  # the commissioned crates hold A (>= 90) forever, and the 800-line file
+  # discipline is the cheap proxy for the measured primary slippage driver.
+  commissioned-aviation-quality:
+    name: Commissioned aviation quality (codopsy A + file discipline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: build codopsy
+        run: git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy && cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
+      - name: score must be A (>= 90)
+        run: |
+          cp .codopsyrc.json crates/almide-wasm/ 2>/dev/null || true
+          /tmp/codopsy/target/release/codopsy analyze crates/almide-wasm 2>&1 | tee /tmp/codopsy.out
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
+      - name: file discipline (800-line cap over the commissioned backend)
+        run: bash scripts/check-file-discipline.sh
+
+  # V-6: verification of the verifier as a STANDING gate. Every pre-authored
+  # mutant in ci/mutations/ must be CAUGHT by the release-shape net; a
+  # surviving mutant or a no-longer-applying patch is red (refresh, never
+  # retire).
+  commissioned-mutation-gate:
+    name: Commissioned mutation gate (the net keeps its teeth)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: mutants must be caught
+        run: bash scripts/check-mutation-gate.sh

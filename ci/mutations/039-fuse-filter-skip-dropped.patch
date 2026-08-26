@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/list_fuse.rs b/crates/almide-wasm/src/list_fuse.rs
+index 491250434..fd2e38a07 100644
+--- a/crates/almide-wasm/src/list_fuse.rs
++++ b/crates/almide-wasm/src/list_fuse.rs
+@@ -156,7 +156,7 @@ impl Emitter<'_> {
+                     self.f.instructions().local_set(p[0]);
+                     self.lower(body, Some(BOOL))?;
+                     // false → skip this element
+-                    self.f.instructions().i32_eqz().br_if(0);
++                    self.f.instructions().i32_eqz().drop(); // [MUTANT: filter skip dropped]
+                     self.f.instructions().local_get(p[0]);
+                 }
+             }

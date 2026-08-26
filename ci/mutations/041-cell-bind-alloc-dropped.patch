@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index ce2696629..60af7656c 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -193,7 +193,7 @@ impl Emitter<'_> {
+         {
+             self.rc_inc_top();
+         }
+-        if self.cells.contains(var) {
++        if false && self.cells.contains(var) { // [MUTANT]
+             // C-319: the bind allocates the shared cell; the
+             // local holds its ADDRESS from here on.
+             let hv = self.hold_val(declared)?;

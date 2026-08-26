@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
+index 47ecc8167..eabd46c9e 100644
+--- a/crates/almide-wasm/src/list_order.rs
++++ b/crates/almide-wasm/src/list_order.rs
+@@ -358,9 +358,9 @@ impl Emitter<'_> {
+                         i.local_get(hn).local_set(hcs);
+                     } else {
+                         // cs = n > remaining ? remaining : n
++                        i.local_get(hn); // [MUTANT: select operands swapped]
+                         i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                         i.local_get(hn);
+-                        i.local_get(hn);
+                         i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                         i.i64_gt_s().select().local_set(hcs);
+                     }

@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/fs.rs b/crates/almide-wasm/src/fs.rs
+index 6e1d5feef..3e94b5414 100644
+--- a/crates/almide-wasm/src/fs.rs
++++ b/crates/almide-wasm/src/fs.rs
+@@ -368,7 +368,7 @@ impl Emitter<'_> {
+         let hb = self.hold_i32()?;
+         let mut i = self.f.instructions();
+         i.local_set(hret);
+-        i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(1).i32_eq();
++        i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(1).i32_ne(); // [MUTANT: status inverted]
+         i.if_(BlockType::Result(ValType::I32));
+         // err(msg)
+         i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i32_wrap_i64().call(F_ALLOC).local_set(hb);

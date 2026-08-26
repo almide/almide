@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/emitter_vars.rs b/crates/almide-wasm/src/emitter_vars.rs
+index f87957dc7..b7b0d4c86 100644
+--- a/crates/almide-wasm/src/emitter_vars.rs
++++ b/crates/almide-wasm/src/emitter_vars.rs
+@@ -68,7 +68,7 @@ impl Emitter<'_> {
+             && (global || idx >= self.rc_param_ceiling)
+         {
+             let scr = self.scr_i32_local;
+-            self.f.instructions().call(F_COW).local_set(scr);
++            self.f.instructions().local_set(scr); // [MUTANT: cow skipped]
+             self.f.instructions().local_get(scr);
+             self.emit_store_mut_var(*id, idx, ty, global)?;
+             self.f.instructions().local_get(scr);
