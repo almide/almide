@@ -869,10 +869,13 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+      # RUST_TOOLCHAIN (1.94), not the historical 1.89 per-crate floor: the
+      # commissioned workspace lock carries deps (thiserror 2.0.20) whose MSRV
+      # is above 1.89, so a 1.89 build of the WORKSPACE no longer resolves.
       - uses: dtolnay/rust-toolchain@stable
         if: steps.rel.outputs.skip != 'true'
         with:
-          toolchain: "1.89.0"
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: actions/cache@v6
         if: steps.rel.outputs.skip != 'true'
         with:
