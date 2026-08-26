@@ -451,7 +451,10 @@ jobs:
       # kind of unpinned input the coverage ratchet should not depend on.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.89.0"
+          # Follows the workspace MSRV: the wasmtime-47 embed (21b9ede16)
+          # requires rustc >= 1.94 — the old 1.89.0 hardcode would fail the
+          # instrumented build at dependency resolution.
+          toolchain: "1.94.0"
       - uses: actions/cache@v6
         with:
           path: |

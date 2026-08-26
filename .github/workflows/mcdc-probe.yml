@@ -16,6 +16,10 @@ on:
         description: "pre-removal dated nightly"
         required: false
         default: "nightly-2025-06-01"
+      ref:
+        description: "tree to measure — must predate the wasmtime-47 embed (21b9ede16 raised the workspace MSRV to 1.94, past the last MC/DC rustc)"
+        required: false
+        default: "7877b03a6b3767f033527c76f6ed927e25e11c67"
 jobs:
   mcdc-probe:
     name: MC/DC one-shot on ${{ inputs.toolchain || 'nightly-2025-06-01' }}
@@ -23,6 +27,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || '7877b03a6b3767f033527c76f6ed927e25e11c67' }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ inputs.toolchain || 'nightly-2025-06-01' }}
