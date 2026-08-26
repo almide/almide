@@ -262,7 +262,7 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
         doc: None,
         blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![],
+        mutated_params: vec![], // fresh-fn: synthesized test-runner main, zero params
         module_origin: None,
     });
     Ok(())

@@ -101,7 +101,7 @@ fn synthesize_global_init(
             blank_lines_before: 0,
             def_id: None,
             module_origin: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: synthesized zero-param runner
         };
         if let Ok(mir) = crate::lower::lower_function(&init_fn, &layouts.globals) {
             functions.push(mir);

@@ -273,7 +273,7 @@ mod hard_gate_tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: synthesized zero-param wrapper
             module_origin: None,
         }
     }

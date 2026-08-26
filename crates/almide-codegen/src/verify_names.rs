@@ -686,7 +686,7 @@ mod tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: test fixture, zero params
             module_origin: Some("m".to_string()),
         });
         assert_eq!(collect_unresolvable_names(&program).len(), 1,
@@ -794,7 +794,7 @@ mod tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: test fixture, zero params
             module_origin: Some("m".to_string()),
         });
         program.modules.push(m);

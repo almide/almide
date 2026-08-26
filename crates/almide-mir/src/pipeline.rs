@@ -717,7 +717,7 @@ fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
         blank_lines_before: 0,
         def_id: None,
         module_origin: None,
-        mutated_params: vec![],
+        mutated_params: vec![], // fresh-fn: synthesized empty library main, zero params
     });
 }
 

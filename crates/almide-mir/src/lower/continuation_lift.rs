@@ -295,7 +295,7 @@ fn cl_lift_top_block(
         doc: None,
         blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![],
+        mutated_params: vec![], // fresh-fn: continuation over live-var captures; the caller never reads them after the call
         module_origin: None,
     }]
 }
