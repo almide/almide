@@ -56,6 +56,28 @@ fn corpus_allocation_watermarks_hold() {
     for line in manifest.lines() {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
+        // Host-boundary fixtures allocate HOST-SHAPED strings (cwd and
+        // temp-dir lengths, directory listings) — their watermarks vary
+        // per machine, which same-machine double-run calibration cannot
+        // see (11 fs_/env_ rows drifted on the ubuntu runner). Excluded
+        // by principle, not by list.
+        let host_variant = text
+            .lines()
+            .any(|l| matches!(l.trim(), "import fs" | "import env" | "import process"));
+        if host_variant {
+            if update {
+                rows.push_str(&format!("~\t{rel}\n"));
+            } else {
+                match baseline.remove(rel) {
+                    Some(None) => {}
+                    Some(Some(_)) => offences.push(format!(
+                        "{rel}: host-variant fixture carries a pinned watermark — regenerate"
+                    )),
+                    None => offences.push(format!("{rel}: not in the ledger — regenerate to ratify")),
+                }
+            }
+            continue;
+        }
         let ir = almide_spine::s5::lower_to_ir(rel, &text).expect("front");
         let bytes = almide_wasm::emit_program(&ir).expect("emit");
         let w = watermark(&bytes);
