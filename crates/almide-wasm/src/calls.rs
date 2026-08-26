@@ -122,6 +122,10 @@ impl Emitter<'_> {
                     for (a, (fty, off)) in args.iter().zip(fields) {
                         self.f.instructions().local_get(hold);
                         self.lower(a, Some(fty))?;
+                        // RC-3: a variant payload retaining a borrowed
+                        // droppable (koka_reuse1's Pair2(acc1, acc2) —
+                        // params stored, then epilogue-released) co-owns.
+                        self.rc_share_guard(a, fty);
                         self.store_ty_slot(fty, off);
                     }
                     self.f.instructions().local_get(hold);
@@ -155,6 +159,11 @@ impl Emitter<'_> {
                 let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
                 for (a, want) in args.iter().zip(params) {
                     self.lower(a, Some(want))?;
+                    // RC-3 callee-owned args: a borrowed droppable
+                    // argument gets +1 here, the callee's epilogue decs
+                    // its params — the pair keeps a mut-param callee's
+                    // realloc-free honest (rc reflects both holders).
+                    self.rc_arg_guard(a, want);
                 }
                 self.calls.insert(i);
                 // Tail position with a matching return type → return_call:
@@ -722,6 +731,7 @@ impl Emitter<'_> {
         let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
         for (a, want) in args.iter().zip(params) {
             self.lower(a, Some(want))?;
+            self.rc_arg_guard(a, want);
         }
         self.calls.insert(i);
         if tail && ret.is_some() && ret == self.fn_ret {

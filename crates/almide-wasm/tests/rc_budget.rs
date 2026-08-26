@@ -19,7 +19,7 @@ mod harness;
 use almide_wasm_run::run_wasm_capped;
 
 /// Today's memory model: bump, no reclamation. The RC arc flips this.
-const BUMP_ONLY: bool = true;
+const BUMP_ONLY: bool = false;
 
 const CHURN: &str = r#"fn main() -> Unit = {
   var round = 0

@@ -541,6 +541,7 @@ fn build_one_scan_helper(
         let mut em = Emitter {
             pool,
             locals: &empty_locals,
+            rc_owned: std::collections::BTreeSet::new(),
             table,
             types,
             calls: &mut calls,
@@ -631,6 +632,7 @@ fn build_one_eq_helper(
         let mut em = Emitter {
             pool,
             locals: &empty_locals,
+            rc_owned: std::collections::BTreeSet::new(),
             table,
             types,
             calls: &mut calls,
@@ -695,6 +697,7 @@ fn build_one_display_helper(
         let mut em = Emitter {
             pool,
             locals: &empty_locals,
+            rc_owned: std::collections::BTreeSet::new(),
             table,
             types,
             calls: &mut calls,

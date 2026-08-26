@@ -196,6 +196,7 @@ pub(crate) fn lower_fn(
         let mut em = Emitter {
             pool,
             locals: &locals,
+            rc_owned: std::collections::BTreeSet::new(),
             table: ctx.table,
             types: ctx.types,
             calls: &mut calls,
@@ -266,6 +267,13 @@ pub(crate) fn lower_fn(
             (None, _) => em.lower_stmt_expr(body)?,
             (Some(want), None) => {
                 em.lower_tail(body, Some(want))?;
+                // RC-3: a droppable result that may BORROW a local
+                // takes +1 before the epilogue releases the owners.
+                if em.rc_droppable(want)
+                    && !crate::emitter::rc_certainly_fresh(&crate::emitter::rc_tail(body).kind)
+                {
+                    em.rc_inc_top();
+                }
             }
             (Some(want), Some(raw)) => {
                 // Tail marker ON: a RAW-typed tail call still cannot
@@ -281,8 +289,30 @@ pub(crate) fn lower_fn(
                     em.f.instructions().i32_const(0);
                 } else {
                     em.lower_tail(body, Some(raw))?;
+                    // RC-3: the raw payload rides inside the ok carrier
+                    // past the epilogue — same borrow rule as the pure
+                    // arm, and the +1 must precede the wrap.
+                    if em.rc_droppable(raw)
+                        && !crate::emitter::rc_certainly_fresh(&crate::emitter::rc_tail(body).kind)
+                    {
+                        em.rc_inc_top();
+                    }
                 }
                 em.wrap_ok(raw, want)?;
+            }
+        }
+        // RC-3 epilogue: the fall-through exit releases every local the
+        // Bind/Assign routes made an owner, then the droppable PARAMS —
+        // the callee-owned half of the argument convention (call sites
+        // inc borrowed args; fresh temporaries are consumed here).
+        // Early returns and tail calls skip this — a leak, never a
+        // dangle. BTreeSet order keeps the release deterministic.
+        for idx in std::mem::take(&mut em.rc_owned) {
+            em.f.instructions().local_get(idx).call(F_DEC_FLAT);
+        }
+        for (k, &(_, pty)) in params.iter().enumerate() {
+            if em.rc_droppable(pty) {
+                em.f.instructions().local_get(k as u32).call(F_DEC_FLAT);
             }
         }
         // Hold-balance invariant: every arm releases exactly what it

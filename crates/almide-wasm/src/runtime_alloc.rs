@@ -43,11 +43,30 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
     i.local_get(head).i32_load(word(almide_layout::PAYLOAD)).i32_store(word(0));
     i.local_get(head).i32_const(1).i32_store(word(almide_layout::RC.offset));
     i.local_get(head).local_get(len).i32_store(word(almide_layout::LEN.offset));
-    i.local_get(head).local_get(len).i32_store(word(almide_layout::CAP.offset));
+    // cap = the class's PHYSICAL payload capacity (16<<class − header):
+    // free re-derives the class from cap, so filing always lands where
+    // the next taker looks.
+    i.local_get(head);
+    i.i32_const(16)
+        .local_get(next)
+        .i32_const(FREELIST_BASE as i32)
+        .i32_sub()
+        .i32_const(2)
+        .i32_shr_u()
+        .i32_shl()
+        .i32_const(almide_layout::PAYLOAD as i32)
+        .i32_sub()
+        .i32_store(word(almide_layout::CAP.offset));
     i.local_get(head).return_();
     i.end();
+    // Freelist miss: round the bump request UP to the class size —
+    // file-by-class == take-by-class is what makes reuse actually fire
+    // (a 44-byte block filed by floor could never serve a 44-byte
+    // request taken by ceil; the churn gate measured 123 MB of misses).
+    i.i32_const(28).local_get(want).i32_const(1).i32_sub().i32_clz().i32_sub().local_set(next);
+    i.i32_const(16).local_get(next).i32_shl().local_set(want);
     i.end();
-    // base = G_HEAP; next = (base + PAYLOAD + len + 3) & !3
+    // base = G_HEAP; next = base + want (class-rounded; huge stays exact)
     i.global_get(G_HEAP).local_set(base);
     i.local_get(base)
         .i32_const(almide_layout::PAYLOAD as i32)
@@ -59,6 +78,10 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
         .i32_const(-4)
         .i32_and()
         .local_set(next);
+    // class-rounded requests advance by the full class capacity
+    i.local_get(want).i32_const(16 << (FREELIST_CLASSES - 1)).i32_le_u().if_(BlockType::Empty);
+    i.local_get(base).local_get(want).i32_add().local_set(next);
+    i.end();
     // if next > memory.size * 64Ki: grow GEOMETRICALLY — max(needed,
     // current) pages, i.e. at least doubling. Grow-just-enough produced
     // thousands of one-page grows on allocation-heavy kernels (~53ms of
@@ -104,7 +127,11 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
     // header: rc = 1, len, cap = len; advance the bump head
     i.local_get(base).i32_const(1).i32_store(word(almide_layout::RC.offset));
     i.local_get(base).local_get(len).i32_store(word(almide_layout::LEN.offset));
-    i.local_get(base).local_get(len).i32_store(word(almide_layout::CAP.offset));
+    i.local_get(base)
+        .local_get(want)
+        .i32_const(almide_layout::PAYLOAD as i32)
+        .i32_sub()
+        .i32_store(word(almide_layout::CAP.offset));
     i.local_get(next).global_set(G_HEAP);
     i.local_get(base);
     i.end();
@@ -126,7 +153,7 @@ pub(crate) fn emit_free() -> Function {
     let mut i = f.instructions();
     // total = (len + PAYLOAD + 3) & !3; too small to hold the next ptr → abandon
     i.local_get(block)
-        .i32_load(word(almide_layout::LEN.offset))
+        .i32_load(word(almide_layout::CAP.offset))
         .i32_const(almide_layout::PAYLOAD as i32 + 3)
         .i32_add()
         .i32_const(-4)
@@ -135,8 +162,9 @@ pub(crate) fn emit_free() -> Function {
     i.local_get(total).i32_const(16).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
-    // class = floor_log2(total) - 4; huge → abandon
-    i.i32_const(27).local_get(total).i32_clz().i32_sub().local_set(class);
+    // class = CEIL class of the block's want — the class alloc rounded
+    // it to, so filing lands exactly where the next taker looks.
+    i.i32_const(28).local_get(total).i32_const(1).i32_sub().i32_clz().i32_sub().local_set(class);
     i.local_get(class).i32_const(FREELIST_CLASSES as i32).i32_ge_u().if_(BlockType::Empty);
     i.return_();
     i.end();
@@ -151,6 +179,47 @@ pub(crate) fn emit_free() -> Function {
     i.local_get(class).i32_load(word(0));
     i.i32_store(word(almide_layout::PAYLOAD));
     i.local_get(class).local_get(block).i32_store(word(0));
+    i.end();
+    f
+}
+
+/// `$inc(block)`: rc += 1 for a HEAP block; addresses below the heap
+/// floor (pool statics, null, scalars-in-disguise) no-op — the compiler
+/// blind-emits on the grain doctrine and the guard keeps statics
+/// untouchable.
+pub(crate) fn emit_inc() -> Function {
+    let block = 0u32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block);
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_add();
+    i.i32_store(word(almide_layout::RC.offset));
+    i.end();
+    f
+}
+
+/// `$dec_flat(block)`: rc -= 1; at zero, file the block into the free
+/// lists. FLAT blocks only (Str/Bytes/List-of-scalar — no heap
+/// interiors), the v1 droppable set; the same heap-floor guard no-ops
+/// statics and null.
+pub(crate) fn emit_dec_flat() -> Function {
+    // params: 0=block; locals: 1=rc
+    let (block, rc) = (0u32, 1u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    i.local_get(block).call(F_FREE);
+    i.end();
     i.end();
     f
 }

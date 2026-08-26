@@ -107,6 +107,7 @@ impl Emitter<'_> {
                 let elem = self.types.el(h);
                 self.emit_read_mut_var(id, var_idx, var_ty, vglob);
                 self.lower(v, Some(elem))?;
+                self.rc_share_guard(v, elem);
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
                 // bytes — the consumer reloads the slot as f64).

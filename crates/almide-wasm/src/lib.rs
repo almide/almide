@@ -197,8 +197,13 @@ const F_COPY: u32 = 32;
 /// (RC-2). Callers must OWN the block outright; the only emitters today
 /// are the sort machinery's private scratch buffers.
 const F_FREE: u32 = 33;
+/// `$inc(block)` / `$dec_flat(block)` — the RC-3 ownership pair: inc on
+/// borrow-shares, dec at binding death; both no-op below the heap floor
+/// so pool statics are untouchable. dec frees FLAT blocks at rc zero.
+const F_INC: u32 = 34;
+const F_DEC_FLAT: u32 = 35;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 34;
+const F_FN_BASE: u32 = 36;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),

@@ -45,6 +45,7 @@ impl Emitter<'_> {
                     .call(F_ALLOC)
                     .local_tee(hold);
                 self.lower(expr, Some(s))?;
+                self.rc_share_guard(expr, s);
                 self.store_ty_slot(s, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -69,6 +70,7 @@ impl Emitter<'_> {
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
                 self.f.instructions().local_get(hold);
                 self.lower(expr, Some(side))?;
+                self.rc_share_guard(expr, side);
                 self.store_ty_slot(side, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -203,6 +205,7 @@ impl Emitter<'_> {
                 for (el, (fty, off)) in elements.iter().zip(def.fields) {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(fty))?;
+                    self.rc_share_guard(el, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -249,6 +252,7 @@ impl Emitter<'_> {
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
+                    self.rc_share_guard(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -441,6 +445,7 @@ impl Emitter<'_> {
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
+                    self.rc_share_guard(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -533,6 +538,7 @@ impl Emitter<'_> {
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
+                    self.rc_share_guard(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 for (fty, off, d) in defaults {

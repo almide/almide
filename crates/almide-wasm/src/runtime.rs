@@ -5,7 +5,7 @@ use wasm_encoder::{BlockType, Function, MemArg, ValType};
 
 use crate::*;
 
-pub(crate) use crate::runtime_alloc::{emit_alloc, emit_free};
+pub(crate) use crate::runtime_alloc::{emit_alloc, emit_dec_flat, emit_free, emit_inc};
 
 // ── emitted runtime helpers ─────────────────────────────────────────────
 
@@ -605,6 +605,13 @@ pub(crate) fn emit_list_push(s: Scalar) -> Function {
     };
     // live len = old len + stride (cap field keeps newcap from $alloc)
     i.local_get(base).local_get(la).i32_const(stride as i32).i32_add().i32_store(word(almide_layout::LEN.offset));
+    // RC-3: the outgrown block is garbage IFF this list is uniquely
+    // owned (push targets are bind-copied mut vars — but builders and
+    // shared handles exist, so the rc==1 check is the judge, not the
+    // caller). The growth CHAIN was the churn gate's whole leak.
+    i.local_get(list).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.local_get(list).call(F_FREE);
+    i.end();
     i.local_get(base);
     i.end();
     f

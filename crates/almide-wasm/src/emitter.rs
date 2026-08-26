@@ -12,6 +12,11 @@ use crate::*;
 pub(crate) struct Emitter<'a> {
     pub(crate) pool: &'a mut Pool,
     pub(crate) locals: &'a HashMap<VarId, (u32, SliceTy)>,
+    /// Locals the Bind/Assign routes made OWNERS of a droppable block
+    /// (RC-3): exactly these get the fall-through epilogue dec. Pattern
+    /// and loop binds never enter — they borrow their subject's
+    /// interior. BTreeSet: the dec order must be deterministic.
+    pub(crate) rc_owned: std::collections::BTreeSet<u32>,
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
     pub(crate) calls: &'a mut HashSet<usize>,
@@ -461,6 +466,7 @@ impl Emitter<'_> {
                 for (i, el) in elements.iter().enumerate() {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(elem))?;
+                    self.rc_share_guard(el, elem);
                     self.store_ty_slot(elem, i as u32 * stride);
                 }
                 self.f.instructions().local_get(hold);
@@ -743,5 +749,122 @@ impl Emitter<'_> {
                     self.release_i32();
                 }
         Ok(ty)
+    }
+}
+
+// ── RC-3 ownership helpers ──────────────────────────────────────────────
+
+/// Expressions that certainly PRODUCE a fresh (or pool-static) block —
+/// binding one transfers ownership, no inc. Everything else may borrow
+/// (var reads, element/field reads, calls into native arms, if/match
+/// funnels) and takes the +1; over-inc on a fresh value is a leak,
+/// never a dangle.
+pub(crate) fn rc_certainly_fresh(k: &almide_ir::IrExprKind) -> bool {
+    use almide_ir::IrExprKind as K;
+    matches!(
+        k,
+        K::LitStr { .. }
+            | K::StringInterp { .. }
+            | K::BinOp { .. }
+            | K::List { .. }
+            | K::MapLiteral { .. }
+            | K::EmptyMap
+            | K::Record { .. }
+            | K::SpreadRecord { .. }
+            | K::Tuple { .. }
+            | K::Range { .. }
+            | K::ResultOk { .. }
+            | K::ResultErr { .. }
+            | K::OptionSome { .. }
+    )
+}
+
+/// The tail expression a fn body RETURNS (through block tails).
+pub(crate) fn rc_tail(e: &almide_ir::IrExpr) -> &almide_ir::IrExpr {
+    match &e.kind {
+        almide_ir::IrExprKind::Block { expr: Some(t), .. } => rc_tail(t),
+        _ => e,
+    }
+}
+
+impl Emitter<'_> {
+    /// The v1 droppable set: blocks with NO heap interiors (Str, Bytes,
+    /// List of non-handle scalars). Everything else stays on the bump
+    /// graveyard until its drop glue exists.
+    pub(crate) fn rc_droppable(&self, t: SliceTy) -> bool {
+        match t {
+            SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => true,
+            SliceTy::List(h) => matches!(
+                self.types.el(h),
+                SliceTy::Scalar(s) if !matches!(s, Scalar::Str | Scalar::Bytes)
+            ),
+            _ => false,
+        }
+    }
+
+    /// +1 the i32 block handle on top of the stack, leaving it there.
+    pub(crate) fn rc_inc_top(&mut self) {
+        let scr = self.scr_i32_local;
+        let mut i = self.f.instructions();
+        i.local_set(scr);
+        i.local_get(scr).call(F_INC);
+        i.local_get(scr);
+    }
+}
+
+impl Emitter<'_> {
+    /// RC-3 share guard for handle STORES into blocks: when the stored
+    /// expression reads a droppable-owned LOCAL, the container becomes a
+    /// co-owner (+1) — otherwise the local's release would free a block
+    /// the container still holds. Fresh values and non-droppable
+    /// sources pass through untouched (their owner never decs).
+    pub(crate) fn rc_share_guard(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
+        if ty.val_type() != ValType::I32 {
+            return;
+        }
+        let almide_ir::IrExprKind::Var { id } = &e.kind else { return };
+        if self.cells.contains(id) {
+            return;
+        }
+        let Some(&(_, vt)) = self.locals.get(id) else { return };
+        if self.rc_droppable(vt) {
+            self.rc_inc_top();
+        }
+    }
+}
+
+/// Does the expression read `var` anywhere? (The Assign dec-old
+/// suppressor: a self-referential rhs means ownership moved through it.)
+pub(crate) fn rc_mentions_var(e: &IrExpr, var: VarId) -> bool {
+    struct Finder {
+        var: VarId,
+        found: bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind
+                && *id == self.var
+            {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+    }
+    let mut f = Finder { var, found: false };
+    almide_ir::visit::IrVisitor::visit_expr(&mut f, e);
+    f.found
+}
+
+impl Emitter<'_> {
+    /// RC-3 callee-owned argument guard: droppable args that are not
+    /// certainly fresh get +1 at the call site (the callee's epilogue
+    /// releases its params). Fresh temporaries transfer as-is — the
+    /// callee's release is their consumption.
+    pub(crate) fn rc_arg_guard(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
+        if self.rc_droppable(ty) && !rc_certainly_fresh(&e.kind) {
+            self.rc_inc_top();
+        }
     }
 }

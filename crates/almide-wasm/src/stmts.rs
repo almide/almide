@@ -204,6 +204,18 @@ impl Emitter<'_> {
             self.store_ty_slot(declared, 0);
             self.release_val(declared);
         } else {
+            // RC-3 ownership: a Str bind takes no copy, so a borrowed
+            // rhs (var/element/field read, call into a native arm) gets
+            // +1; copied containers arrive fresh. The previous occupant
+            // (loop rebinds; zero on the first pass) is released, and
+            // the local joins the epilogue's owner set.
+            if self.rc_droppable(declared) {
+                if declared == STR && !crate::emitter::rc_certainly_fresh(&value.kind) {
+                    self.rc_inc_top();
+                }
+                self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+                self.rc_owned.insert(idx);
+            }
             self.f.instructions().local_set(idx);
         }
         Ok(())
@@ -244,6 +256,7 @@ impl Emitter<'_> {
                 };
                 self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
                 self.lower(value, Some(fty))?;
+                self.rc_share_guard(value, fty);
                 self.store_ty_slot(fty, off);
                 self.f.instructions().local_get(hb);
                 match slot {
@@ -290,6 +303,25 @@ impl Emitter<'_> {
                         | SliceTy::Scalar(Scalar::Bytes)
                 ) {
                     self.f.instructions().call(F_BLOCK_COPY);
+                }
+                // RC-3: same ownership settlement as Bind — locals only
+                // (globals are main-lifetime), never through a cell, and
+                // NEVER when the rhs mentions the assigned var: a
+                // self-referential assign (the C-132 write-back
+                // `xs = f(xs)`, `xs = $push(xs, v)`) transfers ownership
+                // through the call — the callee already released what it
+                // outgrew, and a dec here double-frees (mut_heap_param
+                // exit-1'd on exactly this).
+                if let Some(idx) = local
+                    && !self.cells.contains(var)
+                    && self.rc_droppable(declared)
+                    && !crate::emitter::rc_mentions_var(value, *var)
+                {
+                    if declared == STR && !crate::emitter::rc_certainly_fresh(&value.kind) {
+                        self.rc_inc_top();
+                    }
+                    self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+                    self.rc_owned.insert(idx);
                 }
                 match local {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,
