@@ -270,49 +270,7 @@ impl Emitter<'_> {
             // insertion-ordered upsert `map.from_list` runs (last write
             // wins on duplicate keys, the interp's insert-per-entry
             // semantics) by synthesizing the pairs list.
-            IrExprKind::MapLiteral { entries } => {
-                let ty = want.map_or_else(|| self.infer(e), Ok)?;
-                let SliceTy::Map(kh, vh) = ty else {
-                    return unsup(&format!("ty-mismatch:map-literal-vs-{ty:?}"));
-                };
-                let (kt, vt) = (self.types.el(kh), self.types.el(vh));
-                let _ = (kt, vt);
-                let (k_ty, v_ty) = match &e.ty {
-                    Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 =>
-                    {
-                        (a[0].clone(), a[1].clone())
-                    }
-                    other => return unsup(&format!("map-literal-ty:{}", ty_name(other))),
-                };
-                let pair_ty = Ty::Tuple(vec![k_ty, v_ty]);
-                let list_ty = Ty::Applied(
-                    TypeConstructorId::List,
-                    vec![pair_ty.clone()],
-                );
-                let pairs = IrExpr {
-                    kind: IrExprKind::List {
-                        elements: entries
-                            .iter()
-                            .map(|(k, v)| IrExpr {
-                                kind: IrExprKind::Tuple {
-                                    elements: vec![k.clone(), v.clone()],
-                                },
-                                ty: pair_ty.clone(),
-                                span: e.span,
-                                def_id: None,
-                            })
-                            .collect(),
-                    },
-                    ty: list_ty,
-                    span: e.span,
-                    def_id: None,
-                };
-                match self.lower_map_call("from_list", &[pairs], Some(ty))? {
-                    Some(t) => t,
-                    None => return unsup("map-literal-unit"),
-                }
-            }
+            IrExprKind::MapLiteral { entries } => self.lower_map_literal(e, entries, want)?,
             IrExprKind::EmptyMap => {
                 let ty = want.map_or_else(|| self.infer(e), Ok)?;
                 let SliceTy::Map(..) = ty else {
@@ -778,5 +736,59 @@ impl Emitter<'_> {
                     self.release_i32();
                 }
         Ok(ty)
+    }
+}
+
+impl Emitter<'_> {
+    /// `["k": v, …]` — the map literal, split from `lower` for the
+    /// complexity budget. Desugars to the SAME insertion-ordered upsert
+    /// `map.from_list` runs (last write wins on duplicate keys).
+    fn lower_map_literal(
+        &mut self,
+        e: &IrExpr,
+        entries: &[(IrExpr, IrExpr)],
+        want: Option<SliceTy>,
+    ) -> Result<SliceTy, EmitError> {
+                let ty = want.map_or_else(|| self.infer(e), Ok)?;
+                let SliceTy::Map(kh, vh) = ty else {
+                    return unsup(&format!("ty-mismatch:map-literal-vs-{ty:?}"));
+                };
+                let (kt, vt) = (self.types.el(kh), self.types.el(vh));
+                let _ = (kt, vt);
+                let (k_ty, v_ty) = match &e.ty {
+                    Ty::Applied(TypeConstructorId::Map, a)
+                        if a.len() == 2 =>
+                    {
+                        (a[0].clone(), a[1].clone())
+                    }
+                    other => return unsup(&format!("map-literal-ty:{}", ty_name(other))),
+                };
+                let pair_ty = Ty::Tuple(vec![k_ty, v_ty]);
+                let list_ty = Ty::Applied(
+                    TypeConstructorId::List,
+                    vec![pair_ty.clone()],
+                );
+                let pairs = IrExpr {
+                    kind: IrExprKind::List {
+                        elements: entries
+                            .iter()
+                            .map(|(k, v)| IrExpr {
+                                kind: IrExprKind::Tuple {
+                                    elements: vec![k.clone(), v.clone()],
+                                },
+                                ty: pair_ty.clone(),
+                                span: e.span,
+                                def_id: None,
+                            })
+                            .collect(),
+                    },
+                    ty: list_ty,
+                    span: e.span,
+                    def_id: None,
+                };
+                match self.lower_map_call("from_list", &[pairs], Some(ty))? {
+                    Some(t) => Ok(t),
+                    None => unsup("map-literal-unit"),
+                }
     }
 }

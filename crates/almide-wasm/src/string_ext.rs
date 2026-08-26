@@ -45,40 +45,7 @@ impl Emitter<'_> {
             ("get", [s, i]) => self.lower_string_get(s, i),
             ("drop", [s, n]) => self.lower_string_drop(s, n),
             ("take", [s, n]) => self.lower_string_take(s, n),
-            ("starts_with", [s, p]) => self.lower_string_starts_with(s, p),
-            // ends_with = the strip_suffix compare with a Bool verdict.
-            ("ends_with", [s, p]) => {
-                let got = self.lower_string_strip(s, p, false)?;
-                let _ = got;
-                self.f.instructions().i32_const(0).i32_ne();
-                Ok(Some(BOOL))
-            }
-            ("strip_prefix" | "strip_suffix", [s, p]) => {
-                self.lower_string_strip(s, p, func.as_str() == "strip_prefix")
-            }
-            // Rust str::replace / replace_first byte-for-byte via the
-            // shared helper (the `first` flag selects the form). The
-            // empty-pattern char-boundary rule (C-100) lives in the helper.
-            ("replace" | "replace_first", [s, from, to]) => {
-                let first = func.as_str() == "replace_first";
-                self.lower(s, Some(STR))?;
-                self.lower(from, Some(STR))?;
-                self.lower(to, Some(STR))?;
-                self.f.instructions().i32_const(i32::from(first)).call(F_STR_REPLACE);
-                Ok(Some(STR))
-            }
-            // string.join(xs, sep) is list.join with the module spelled
-            // the other way — same F_LIST_JOIN, same List[String] demand.
-            ("join", [xs, sep]) => {
-                match self.lower(xs, None)? {
-                    SliceTy::List(h) if self.types.el(h) == STR => {}
-                    other => return unsup(&format!("string-join-of:{other:?}")),
-                }
-                self.lower(sep, Some(STR))?;
-                self.f.instructions().call(F_LIST_JOIN);
-                Ok(Some(STR))
-            }
-            _ => return Ok(None),
+            _ => return self.lower_string_ext_b(func.as_str(), args),
         }
         .map(Some)
     }
@@ -350,5 +317,54 @@ impl Emitter<'_> {
         let lossy = self.work.helper(Helper::Utf8Lossy);
         self.f.instructions().call(lossy);
         Ok(Some(STR))
+    }
+}
+
+impl Emitter<'_> {
+    /// The second half of the `string.*` dispatch — split from
+    /// `lower_string_ext` for the complexity budget (the module-call
+    /// twin pattern, same as lower_module_call_b).
+    fn lower_string_ext_b(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+        match (func, args) {
+            ("starts_with", [s, p]) => self.lower_string_starts_with(s, p),
+            // ends_with = the strip_suffix compare with a Bool verdict.
+            ("ends_with", [s, p]) => {
+                let got = self.lower_string_strip(s, p, false)?;
+                let _ = got;
+                self.f.instructions().i32_const(0).i32_ne();
+                Ok(Some(BOOL))
+            }
+            ("strip_prefix" | "strip_suffix", [s, p]) => {
+                self.lower_string_strip(s, p, func == "strip_prefix")
+            }
+            // Rust str::replace / replace_first byte-for-byte via the
+            // shared helper (the `first` flag selects the form). The
+            // empty-pattern char-boundary rule (C-100) lives in the helper.
+            ("replace" | "replace_first", [s, from, to]) => {
+                let first = func == "replace_first";
+                self.lower(s, Some(STR))?;
+                self.lower(from, Some(STR))?;
+                self.lower(to, Some(STR))?;
+                self.f.instructions().i32_const(i32::from(first)).call(F_STR_REPLACE);
+                Ok(Some(STR))
+            }
+            // string.join(xs, sep) is list.join with the module spelled
+            // the other way — same F_LIST_JOIN, same List[String] demand.
+            ("join", [xs, sep]) => {
+                match self.lower(xs, None)? {
+                    SliceTy::List(h) if self.types.el(h) == STR => {}
+                    other => return unsup(&format!("string-join-of:{other:?}")),
+                }
+                self.lower(sep, Some(STR))?;
+                self.f.instructions().call(F_LIST_JOIN);
+                Ok(Some(STR))
+            }
+            _ => return Ok(None),
+        }
+        .map(Some)
     }
 }
