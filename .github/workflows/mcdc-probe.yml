@@ -1,0 +1,73 @@
+# ONE-SHOT MC/DC measurement on a PRE-REMOVAL nightly (als #51, almide #566).
+# rustc's MC/DC instrumentation was removed upstream in Aug 2025
+# (rust-lang/rust#144999); nightlies before that still carry
+# `-Z coverage-options=mcdc`, and their llvm-cov reports MC/DC columns. This
+# workflow is workflow_dispatch-only and gates NOTHING: it exists to
+# CALIBRATE the per-decision vector ledger (proofs/mcdc-ledger.toml) against
+# a real MC/DC measurement — a `vectors` site the old instrumentation calls
+# uncovered is a ledger bug — and to seed the acceptance test for the
+# GNATcoverage / GNATPro-for-Rust evaluation (als #51). Not evidence to pin:
+# the flag is dead upstream and its implementation was called incomplete.
+name: mcdc-probe
+on:
+  workflow_dispatch:
+    inputs:
+      toolchain:
+        description: "pre-removal dated nightly"
+        required: false
+        default: "nightly-2025-06-01"
+jobs:
+  mcdc-probe:
+    name: MC/DC one-shot on ${{ inputs.toolchain || 'nightly-2025-06-01' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain || 'nightly-2025-06-01' }}
+          components: llvm-tools-preview
+      - name: Probe — this pin accepts -Z coverage-options=mcdc
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d)"
+          printf 'fn d(a: bool, b: bool, c: bool) -> bool { (a && b) || c }\nfn main() { let v: Vec<bool> = std::env::args().skip(1).map(|s| s == "1").collect(); println!("{}", d(*v.get(0).unwrap_or(&false), *v.get(1).unwrap_or(&false), *v.get(2).unwrap_or(&false))); }\n' > "$d/m.rs"
+          rustc -C instrument-coverage -Z coverage-options=mcdc "$d/m.rs" -o "$d/m"
+          LLVM_PROFILE_FILE="$d/a.profraw" "$d/m" 1 1 0 > /dev/null
+          LLVM_PROFILE_FILE="$d/b.profraw" "$d/m" 0 1 0 > /dev/null
+          LB="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+          "$LB/llvm-profdata" merge -sparse "$d"/*.profraw -o "$d/all.profdata"
+          "$LB/llvm-cov" report "$d/m" -instr-profile="$d/all.profdata" --show-mcdc-summary
+          echo "mcdc instrumentation OK on $(rustc --version)"
+      - name: Instrumented build and test run (almide-mir + almide-codegen)
+        run: |
+          set -euo pipefail
+          export RUSTFLAGS="-C instrument-coverage -Z coverage-options=mcdc"
+          COV="$PWD/target/mcdc"
+          mkdir -p "$COV/build"
+          LLVM_PROFILE_FILE="$COV/build/b-%m-%p.profraw" cargo test -p almide-mir -p almide-codegen --release --no-run --target-dir "$COV/t" 2>&1 | tail -2
+          TESTBINS="$(find "$COV/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.so' | grep -E '/(almide_mir|almide_codegen|integration|lower|render|mcdc)[^/]*$')"
+          i=0
+          for tb in $TESTBINS; do i=$((i+1)); LLVM_PROFILE_FILE="$COV/run-$i-%m.profraw" "$tb" >/dev/null 2>&1 || true; done
+          echo "test binaries run: $i"
+      - name: MC/DC report for the safety set
+        run: |
+          set -euo pipefail
+          COV="$PWD/target/mcdc"
+          LB="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+          "$LB/llvm-profdata" merge -sparse "$COV"/run-*.profraw -o "$COV/all.profdata"
+          OBJS=""
+          for tb in $(find "$COV/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.so' | grep -E '/(almide_mir|almide_codegen|integration|lower|render|mcdc)[^/]*$'); do OBJS="$OBJS -object $tb"; done
+          "$LB/llvm-cov" report $OBJS -instr-profile="$COV/all.profdata" --show-mcdc-summary \
+            -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/)' > mcdc-report.txt
+          echo "== safety-set rows (…, MC/DC columns at the tail) =="
+          { head -2 mcdc-report.txt; grep -E 'perceus_verified|mir/src/certificate|translation_validation|check/calls\.rs|infer_calls_closures|pass_effect_inference|^TOTAL' mcdc-report.txt; } | tee mcdc-safety.txt
+          "$LB/llvm-cov" show $OBJS -instr-profile="$COV/all.profdata" --show-mcdc \
+            crates/almide-codegen/src/perceus_verified.rs > mcdc-perceus-detail.txt || true
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mcdc-probe-report
+          path: |
+            mcdc-report.txt
+            mcdc-safety.txt
+            mcdc-perceus-detail.txt
