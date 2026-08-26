@@ -349,43 +349,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
-    Helper::FastExp => matrix_scalars::emit_fast_exp(),
-    Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
-    Helper::Q10Val => matrix_scalars::emit_q10_val(F_F16_TO_F64),
-    Helper::DisplayNamed { ti } => {
-        match work.display_bodies.borrow_mut().remove(ti) {
-            Some(work::DisplayBuild::Built(f)) => f,
-            // Failed (all callers refused) — keep the promised
-            // index aligned with a loud stub.
-            _ => {
-                let mut f = Function::new([]);
-                f.instructions().unreachable().end();
-                f
-            }
-        }
-    }
-    Helper::NamedEq { ti } => match work.eq_bodies.borrow_mut().remove(ti) {
-        Some(work::DisplayBuild::Built(f)) => f,
-        _ => {
-            let mut f = Function::new([]);
-            f.instructions().unreachable().end();
-            f
-        }
-    },
-    Helper::JsonPathSet => {
-        json_path_helpers::emit_json_path_set_helper(work.helper_base.get(), helper_snapshot)
-    }
-    Helper::JsonPathRemove => {
-        json_path_helpers::emit_json_path_remove_helper(work.helper_base.get(), helper_snapshot)
-    }
-    Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
-        Some(work::DisplayBuild::Built(f)) => f,
-        _ => {
-            let mut f = Function::new([]);
-            f.instructions().unreachable().end();
-            f
-        }
-    },
+    _ => helper_body_b(h, work, helper_snapshot, hpos),
     }
 }
 
@@ -468,4 +432,48 @@ pub(crate) fn resolve_extras(
         }
     }
     (extra_fns, entry_fn_indices)
+}
+/// The scalar-kernel / named-type / json-path half of the helper table —
+/// split from `helper_body` for the complexity budget.
+fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
+    match h {
+    Helper::FastExp => matrix_scalars::emit_fast_exp(),
+    Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
+    Helper::Q10Val => matrix_scalars::emit_q10_val(F_F16_TO_F64),
+    Helper::DisplayNamed { ti } => {
+        match work.display_bodies.borrow_mut().remove(ti) {
+            Some(work::DisplayBuild::Built(f)) => f,
+            // Failed (all callers refused) — keep the promised
+            // index aligned with a loud stub.
+            _ => {
+                let mut f = Function::new([]);
+                f.instructions().unreachable().end();
+                f
+            }
+        }
+    }
+    Helper::NamedEq { ti } => match work.eq_bodies.borrow_mut().remove(ti) {
+        Some(work::DisplayBuild::Built(f)) => f,
+        _ => {
+            let mut f = Function::new([]);
+            f.instructions().unreachable().end();
+            f
+        }
+    },
+    Helper::JsonPathSet => {
+        json_path_helpers::emit_json_path_set_helper(work.helper_base.get(), helper_snapshot)
+    }
+    Helper::JsonPathRemove => {
+        json_path_helpers::emit_json_path_remove_helper(work.helper_base.get(), helper_snapshot)
+    }
+    Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
+        Some(work::DisplayBuild::Built(f)) => f,
+        _ => {
+            let mut f = Function::new([]);
+            f.instructions().unreachable().end();
+            f
+        }
+    },
+    _ => unreachable!("helper routed to the wrong half"),
+    }
 }

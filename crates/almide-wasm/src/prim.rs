@@ -82,6 +82,18 @@ impl Emitter<'_> {
             }
             // Host entropy (C-112): n bytes written at address p via the
             // fs_call boundary (op 32) + host_read; returns 0.
+            _ => self.lower_prim_call_b(func, args),
+        }
+    }
+
+    /// The alloc / bitop / float-delegate half of the prim dispatch —
+    /// split from `lower_prim_call` for the complexity budget.
+    fn lower_prim_call_b(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match (func, args) {
             ("random_get", [p, n]) => {
                 self.lower(p, Some(INT))?;
                 let hp = self.hold_i64()?;

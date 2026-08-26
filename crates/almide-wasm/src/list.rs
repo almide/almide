@@ -416,15 +416,7 @@ impl Emitter<'_> {
             "any" => self.lower_list_any(a, b),
             "all" => self.lower_list_all(a, b),
             "count" => self.lower_list_count(a, b),
-            "take_while" => self.lower_list_take_while(a, b),
-            "drop_while" => self.lower_list_drop_while(a, b),
-            "reduce" => self.lower_list_reduce(a, b),
-            "flat_map" => self.lower_list_flat_map(a, b),
-            "binary_search" => self.lower_list_binary_search(a, b),
-            "window" => self.lower_list_window(a, b),
-            "unique_by" => self.lower_list_unique_by(a, b),
-            "group_by" => self.lower_list_group_by(a, b),
-            _ => self.lower_list_filter_map(a, b),
+            _ => self.lower_list_pair_named_b(func, a, b),
         }
     }
 
@@ -676,5 +668,28 @@ impl Emitter<'_> {
         self.load_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().end();
         Ok(Some(elem))
+    }
+}
+
+impl Emitter<'_> {
+    /// The second half of the two-arg list-call router — split from
+    /// `lower_list_pair_named` for the complexity budget.
+    fn lower_list_pair_named_b(
+        &mut self,
+        func: &str,
+        a: &IrExpr,
+        b: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        match func {
+            "take_while" => self.lower_list_take_while(a, b),
+            "drop_while" => self.lower_list_drop_while(a, b),
+            "reduce" => self.lower_list_reduce(a, b),
+            "flat_map" => self.lower_list_flat_map(a, b),
+            "binary_search" => self.lower_list_binary_search(a, b),
+            "window" => self.lower_list_window(a, b),
+            "unique_by" => self.lower_list_unique_by(a, b),
+            "group_by" => self.lower_list_group_by(a, b),
+            _ => self.lower_list_filter_map(a, b),
+        }
     }
 }

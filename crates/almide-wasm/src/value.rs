@@ -109,89 +109,7 @@ impl Emitter<'_> {
                 self.emit_value_box(VT_ARRAY, Some(STR))?; // addr slot (i32 class)
                 Some(SliceTy::Value)
             }
-            ("as_int", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                self.emit_value_unbox(VT_INT, INT, "expected Int")?;
-                Some(SliceTy::Result(self.types.intern(INT), self.types.intern(STR)))
-            }
-            ("as_bool", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                self.emit_value_unbox(VT_BOOL, BOOL, "expected Bool")?;
-                Some(SliceTy::Result(self.types.intern(BOOL), self.types.intern(STR)))
-            }
-            ("as_string", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                self.emit_value_unbox(VT_STR, STR, "expected Str")?;
-                Some(SliceTy::Result(self.types.intern(STR), self.types.intern(STR)))
-            }
-            ("as_array", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                let lv = SliceTy::List(self.types.intern(SliceTy::Value));
-                self.emit_value_unbox(VT_ARRAY, lv, "expected Array")?;
-                Some(SliceTy::Result(self.types.intern(lv), self.types.intern(STR)))
-            }
-            // #658: a JSON number has no int/float split — an Int Value
-            // widens to a valid Float.
-            ("as_float", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                self.emit_value_as_float()?;
-                Some(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR)))
-            }
-            // The Codec-derive field accessor: tag check, first-match
-            // scan, the incumbent's exact err lines.
-            ("field", [v, key]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                let hv = self.hold_i32()?;
-                self.f.instructions().local_set(hv);
-                self.lower(key, Some(STR))?;
-                let hk = self.hold_i32()?;
-                self.f.instructions().local_set(hk);
-                let vf = self.work.helper(Helper::ValueField);
-                let hr = self.hold_i32()?;
-                self.f.instructions().i32_const(16).call(F_ALLOC).local_set(hr);
-                let m_tag = slot_memarg(almide_layout::SUM_TAG);
-                let m_pay = slot_memarg(almide_layout::SUM_FIELD);
-                let not_obj = self.pool.intern("expected Object");
-                let miss_pre = self.pool.intern("missing field '");
-                let miss_post = self.pool.intern("'");
-                let mut i = self.f.instructions();
-                i.local_get(hv).local_get(hk).call(vf).local_set(hv);
-                i.local_get(hv).i32_eqz().if_(BlockType::Empty);
-                i.local_get(hr).i32_const(1).i32_store(m_tag);
-                i.local_get(hr).i32_const(not_obj as i32).i32_store(m_pay);
-                i.else_();
-                i.local_get(hv).i32_const(1).i32_eq().if_(BlockType::Empty);
-                i.local_get(hr).i32_const(1).i32_store(m_tag);
-                i.local_get(hr);
-                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT);
-                i.i32_const(miss_post as i32).call(F_CONCAT);
-                i.i32_store(m_pay);
-                i.else_();
-                i.local_get(hr).i32_const(0).i32_store(m_tag);
-                i.local_get(hr).local_get(hv).i32_store(m_pay);
-                i.end();
-                i.end();
-                i.local_get(hr);
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                Some(SliceTy::Result(
-                    self.types.intern(SliceTy::Value),
-                    self.types.intern(STR),
-                ))
-            }
-            ("keys", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                let vk = self.work.helper(Helper::ValueKeys);
-                self.f.instructions().call(vk);
-                Some(SliceTy::List(self.types.intern(STR)))
-            }
-            ("stringify", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
-                self.emit_value_stringify()?;
-                Some(STR)
-            }
-            _ => return Ok(None),
+            _ => return self.lower_value_call_b(func, args),
         };
         Ok(Some(out))
     }
@@ -462,5 +380,102 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// The `value.as_*` / remaining half of the value dispatch — split
+    /// from `lower_value_call` for the complexity budget.
+    fn lower_value_call_b(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+        let out = match (func, args) {
+            ("as_int", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                self.emit_value_unbox(VT_INT, INT, "expected Int")?;
+                Some(SliceTy::Result(self.types.intern(INT), self.types.intern(STR)))
+            }
+            ("as_bool", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                self.emit_value_unbox(VT_BOOL, BOOL, "expected Bool")?;
+                Some(SliceTy::Result(self.types.intern(BOOL), self.types.intern(STR)))
+            }
+            ("as_string", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                self.emit_value_unbox(VT_STR, STR, "expected Str")?;
+                Some(SliceTy::Result(self.types.intern(STR), self.types.intern(STR)))
+            }
+            ("as_array", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                let lv = SliceTy::List(self.types.intern(SliceTy::Value));
+                self.emit_value_unbox(VT_ARRAY, lv, "expected Array")?;
+                Some(SliceTy::Result(self.types.intern(lv), self.types.intern(STR)))
+            }
+            // #658: a JSON number has no int/float split — an Int Value
+            // widens to a valid Float.
+            ("as_float", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                self.emit_value_as_float()?;
+                Some(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR)))
+            }
+            // The Codec-derive field accessor: tag check, first-match
+            // scan, the incumbent's exact err lines.
+            ("field", [v, key]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                let hv = self.hold_i32()?;
+                self.f.instructions().local_set(hv);
+                self.lower(key, Some(STR))?;
+                let hk = self.hold_i32()?;
+                self.f.instructions().local_set(hk);
+                let vf = self.work.helper(Helper::ValueField);
+                let hr = self.hold_i32()?;
+                self.f.instructions().i32_const(16).call(F_ALLOC).local_set(hr);
+                let m_tag = slot_memarg(almide_layout::SUM_TAG);
+                let m_pay = slot_memarg(almide_layout::SUM_FIELD);
+                let not_obj = self.pool.intern("expected Object");
+                let miss_pre = self.pool.intern("missing field '");
+                let miss_post = self.pool.intern("'");
+                let mut i = self.f.instructions();
+                i.local_get(hv).local_get(hk).call(vf).local_set(hv);
+                i.local_get(hv).i32_eqz().if_(BlockType::Empty);
+                i.local_get(hr).i32_const(1).i32_store(m_tag);
+                i.local_get(hr).i32_const(not_obj as i32).i32_store(m_pay);
+                i.else_();
+                i.local_get(hv).i32_const(1).i32_eq().if_(BlockType::Empty);
+                i.local_get(hr).i32_const(1).i32_store(m_tag);
+                i.local_get(hr);
+                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT);
+                i.i32_const(miss_post as i32).call(F_CONCAT);
+                i.i32_store(m_pay);
+                i.else_();
+                i.local_get(hr).i32_const(0).i32_store(m_tag);
+                i.local_get(hr).local_get(hv).i32_store(m_pay);
+                i.end();
+                i.end();
+                i.local_get(hr);
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                Some(SliceTy::Result(
+                    self.types.intern(SliceTy::Value),
+                    self.types.intern(STR),
+                ))
+            }
+            ("keys", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                let vk = self.work.helper(Helper::ValueKeys);
+                self.f.instructions().call(vk);
+                Some(SliceTy::List(self.types.intern(STR)))
+            }
+            ("stringify", [v]) => {
+                self.lower(v, Some(SliceTy::Value))?;
+                self.emit_value_stringify()?;
+                Some(STR)
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(out))
     }
 }
