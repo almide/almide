@@ -37,7 +37,16 @@ cd "$(git rev-parse --show-toplevel)"
 
 BASELINE_FILE="scripts/perf-ratio-baseline.txt"
 BUDGET_PCT="${PERF_RATIO_BUDGET_PCT:-40}"
-RUNS="${PERF_RATIO_RUNS:-3}"
+# 9 runs, not 3. Shared x86 runners are BIMODAL for the allocation-heavy
+# listbuild rows: one interleaved probe measured a single binary at
+# [498, 753, 737, 718, 753, 747, 615, 740, 646] ms — a 1.5x within-process
+# swing (probe/idiom-x86, 2026-08-26, rustc 1.98). With 3 runs the min can
+# miss a row's fast mode entirely, and the idiom relation then reads 1.29x
+# where 9 interleaved rounds measure 0.975x. Three earlier reds (1.20-1.37x
+# on rustc 1.94 AND 1.98) were this, misdiagnosed as a toolchain optimizer
+# regression. Nine rounds give every row enough draws to find its fast mode;
+# the ceiling stays where it is.
+RUNS="${PERF_RATIO_RUNS:-9}"
 # Gated pairs: bench -> same-shape rust-ref variant.
 #
 # The three `listbuild` rows are deliberately NOT here. Their almide/rust ratio
