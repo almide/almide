@@ -238,47 +238,7 @@ impl Emitter<'_> {
             // this: an alias captured before the assign keeps the old
             // value).
             IrStmtKind::FieldAssign { target, field, value } => {
-                // C-319 residual: only the Assign form writes THROUGH a
-                // shared cell — a field write against a cell var would land
-                // in the raw local and silently diverge. Refuse honestly.
-                if self.cells.contains(target) {
-                    return unsup("cell-write:field-assign");
-                }
-                let (slot, declared) = match self.locals.get(target) {
-                    Some(&(idx, d)) => (Ok(idx), d),
-                    None => match self.globals.get(target) {
-                        Some(&(gidx, d)) => (Err(gidx), d),
-                        None => return unsup("field-assign:unmapped"),
-                    },
-                };
-                let SliceTy::Named(ti) = declared else {
-                    return unsup(&format!("field-assign-of:{declared:?}"));
-                };
-                let (fty, off) = {
-                    let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
-                        return unsup("field-assign-nonrecord");
-                    };
-                    let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
-                        return unsup(&format!("field-assign-unknown:{field}"));
-                    };
-                    (fi.ty, fi.offset)
-                };
-                let hb = self.hold_i32()?;
-                match slot {
-                    Ok(idx) => self.f.instructions().local_get(idx),
-                    Err(gidx) => self.f.instructions().global_get(gidx),
-                };
-                self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
-                self.lower(value, Some(fty))?;
-                self.rc_share_guard(value, fty);
-                self.store_ty_slot(fty, off);
-                self.f.instructions().local_get(hb);
-                match slot {
-                    Ok(idx) => self.f.instructions().local_set(idx),
-                    Err(gidx) => self.f.instructions().global_set(gidx),
-                };
-                self.release_i32();
-                Ok(())
+                self.lower_field_assign(target, field, value)
             }
             // `m[k] = v` on a map var — the same write-back the
             // `map.insert` mut form runs (functional `set`, rebind).
@@ -692,6 +652,60 @@ impl Emitter<'_> {
                         self.f.instructions().global_set(gidx);
                     }
                 }
+                Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// `p.field = v` on a record var: copy-on-write write-back — fresh
+    /// block, one slot replaced, rebound. Split from `lower_stmt` for the
+    /// complexity budget.
+    fn lower_field_assign(
+        &mut self,
+        target: &almide_ir::VarId,
+        field: &almide_base::intern::Sym,
+        value: &IrExpr,
+    ) -> Result<(), EmitError> {
+                // C-319 residual: only the Assign form writes THROUGH a
+                // shared cell — a field write against a cell var would land
+                // in the raw local and silently diverge. Refuse honestly.
+                if self.cells.contains(target) {
+                    return unsup("cell-write:field-assign");
+                }
+                let (slot, declared) = match self.locals.get(target) {
+                    Some(&(idx, d)) => (Ok(idx), d),
+                    None => match self.globals.get(target) {
+                        Some(&(gidx, d)) => (Err(gidx), d),
+                        None => return unsup("field-assign:unmapped"),
+                    },
+                };
+                let SliceTy::Named(ti) = declared else {
+                    return unsup(&format!("field-assign-of:{declared:?}"));
+                };
+                let (fty, off) = {
+                    let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
+                        return unsup("field-assign-nonrecord");
+                    };
+                    let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
+                        return unsup(&format!("field-assign-unknown:{field}"));
+                    };
+                    (fi.ty, fi.offset)
+                };
+                let hb = self.hold_i32()?;
+                match slot {
+                    Ok(idx) => self.f.instructions().local_get(idx),
+                    Err(gidx) => self.f.instructions().global_get(gidx),
+                };
+                self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
+                self.lower(value, Some(fty))?;
+                self.rc_share_guard(value, fty);
+                self.store_ty_slot(fty, off);
+                self.f.instructions().local_get(hb);
+                match slot {
+                    Ok(idx) => self.f.instructions().local_set(idx),
+                    Err(gidx) => self.f.instructions().global_set(gidx),
+                };
+                self.release_i32();
                 Ok(())
     }
 }

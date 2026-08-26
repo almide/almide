@@ -117,31 +117,7 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_STR_EQ);
             }
             SliceTy::List(h) => self.emit_list_eq(h, path)?,
-            SliceTy::Option(h) => {
-                // Null-ness must agree; both-null is equal; both-some
-                // compares the payload (recursive).
-                let et = self.types.el(h);
-                let hb = self.hold_i32()?;
-                let ha = self.hold_i32()?;
-                self.f.instructions().local_set(hb).local_set(ha);
-                self.f.instructions().local_get(ha).i32_eqz();
-                self.f.instructions().local_get(hb).i32_eqz();
-                self.f.instructions().i32_ne().if_(BlockType::Result(ValType::I32));
-                self.f.instructions().i32_const(0);
-                self.f.instructions().else_();
-                self.f.instructions().local_get(ha).i32_eqz();
-                self.f.instructions().if_(BlockType::Result(ValType::I32));
-                self.f.instructions().i32_const(1);
-                self.f.instructions().else_();
-                self.f.instructions().local_get(ha);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.f.instructions().local_get(hb);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_val_eq_at(et, path)?;
-                self.f.instructions().end().end();
-                self.release_i32();
-                self.release_i32();
-            }
+            SliceTy::Option(h) => self.emit_option_eq(h, path)?,
             SliceTy::Result(o, er) => {
                 // Tags must agree; the ACTIVE side's payload compares
                 // (recursive) — ok vs ok through el(o), err vs err
@@ -469,6 +445,38 @@ impl Emitter<'_> {
                         self.release_i32();
                     }
                 }
+        Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// Option equality — split from `emit_val_eq_at` for the complexity
+    /// budget. Null-ness must agree; both-null is equal; both-some
+    /// compares the payload (recursive).
+    fn emit_option_eq(&mut self, h: ETy, path: &mut Vec<u32>) -> Result<(), EmitError> {
+                // Null-ness must agree; both-null is equal; both-some
+                // compares the payload (recursive).
+                let et = self.types.el(h);
+                let hb = self.hold_i32()?;
+                let ha = self.hold_i32()?;
+                self.f.instructions().local_set(hb).local_set(ha);
+                self.f.instructions().local_get(ha).i32_eqz();
+                self.f.instructions().local_get(hb).i32_eqz();
+                self.f.instructions().i32_ne().if_(BlockType::Result(ValType::I32));
+                self.f.instructions().i32_const(0);
+                self.f.instructions().else_();
+                self.f.instructions().local_get(ha).i32_eqz();
+                self.f.instructions().if_(BlockType::Result(ValType::I32));
+                self.f.instructions().i32_const(1);
+                self.f.instructions().else_();
+                self.f.instructions().local_get(ha);
+                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.f.instructions().local_get(hb);
+                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.emit_val_eq_at(et, path)?;
+                self.f.instructions().end().end();
+                self.release_i32();
+                self.release_i32();
         Ok(())
     }
 }

@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "2"
+# unverified_ceiling = "0"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -126,7 +126,8 @@ evidence = "#1234 landing PR: forged a workflow with a duplicate `if:` key (the 
 
 [[gate]]
 path = "scripts/check-browser-determinism.sh"
-class = "UNVERIFIED"
+class = "EXERCISED"
+evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — the gate FAILED correctly when the graduated wall corpus entered spec/wasm_cross (16 fixtures the incumbent renderer walls reported 'native errored', run 32946512713), and passed after gaining the wall-vs-error discipline (tracked skips, ceiling 16, asymmetric render-vs-wall still FAILS). The completeness check counts n + walled against the corpus, so a blind scan cannot pass."
 
 [[gate]]
 path = "scripts/check-embedded-size.sh"
@@ -145,7 +146,8 @@ evidence = "#1244 round 3: corpus-floor direction (1 fixture => FAIL, the #976 v
 
 [[gate]]
 path = "scripts/check-host-determinism.sh"
-class = "UNVERIFIED"
+class = "EXERCISED"
+evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — MAX_WALLED=0 FAILED correctly when the graduated wall corpus added 16 incumbent walls (run 32946512713), and passed after the conscious ceiling bump to the locally re-measured 16. The n + walled == corpus completeness check and the one-host-walls asymmetry FAIL were already in the script; the ceiling firing proved the counting path live."
 
 [[gate]]
 path = "scripts/check-libm-determinism.sh"
