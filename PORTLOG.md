@@ -2763,3 +2763,18 @@ record the closure.
   sort_by_str_key_heap's RC-2 win regressed to baseline — RECORDED as
   the open footprint anomaly for the tuning stage. Mutant 033 refreshed
   (kill re-verified), emitter split (rc_ownership.rs).
+
+## Stage 103 (2026-08-26): the mutation sweep catches the net loosening
+
+- CI's full 42-mutant sweep found 015 (anon-layout-reversed) SURVIVING:
+  its original kill came from reversed offsets corrupting the NEXT bump
+  block, and RC-3's class-rounded padding silenced exactly that
+  corruption — a soundness improvement quietly disarmed a tripwire.
+- The replacement judges the invariant DIRECTLY: a lib unit referee
+  pins anon-record offsets to pack_fields' output order
+  (types_table.rs layout_tests; A/B: mutant applied → red naming the
+  offsets). The mutation net gains --lib so the referee counts.
+- Doctrine: when a mutant's kill relied on an ACCIDENTAL observable
+  (heap adjacency), hardening the runtime can silence it — the refresh
+  is to judge the invariant where it lives, not to find another
+  accident.
