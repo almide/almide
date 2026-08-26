@@ -349,7 +349,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
-    _ => helper_body_b(h, work, helper_snapshot, hpos),
+    _ => helper_body_b(h, work, helper_snapshot),
     }
 }
 
@@ -435,7 +435,7 @@ pub(crate) fn resolve_extras(
 }
 /// The scalar-kernel / named-type / json-path half of the helper table —
 /// split from `helper_body` for the complexity budget.
-fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
+fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Function {
     match h {
     Helper::FastExp => matrix_scalars::emit_fast_exp(),
     Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
