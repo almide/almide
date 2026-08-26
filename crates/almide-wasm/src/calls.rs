@@ -99,38 +99,7 @@ impl Emitter<'_> {
                     Some((ti, ci as u32))
                 });
                 if let Some((ti, ci)) = ctor {
-                    let (size, tag, fields) = {
-                        let NamedDef::Variant(v) = &self.types.def(ti) else {
-                            return unsup("ctor-of-record");
-                        };
-                        let c = &v.cases[ci as usize];
-                        let fs: Vec<(SliceTy, u32)> =
-                            c.fields.iter().map(|f| (f.ty, f.offset)).collect();
-                        (c.size, c.tag, fs)
-                    };
-                    if args.len() != fields.len() {
-                        return unsup(&format!("ctor-arity:{name}"));
-                    }
-                    let hold = self.hold_i32()?;
-                    self.f
-                        .instructions()
-                        .i32_const(size as i32)
-                        .call(F_ALLOC)
-                        .local_tee(hold)
-                        .i32_const(tag as i32)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    for (a, (fty, off)) in args.iter().zip(fields) {
-                        self.f.instructions().local_get(hold);
-                        self.lower(a, Some(fty))?;
-                        // RC-3: a variant payload retaining a borrowed
-                        // droppable (koka_reuse1's Pair2(acc1, acc2) —
-                        // params stored, then epilogue-released) co-owns.
-                        self.rc_share_guard(a, fty);
-                        self.store_ty_slot(fty, off);
-                    }
-                    self.f.instructions().local_get(hold);
-                    self.release_i32();
-                    return Ok(Some(SliceTy::Named(ti)));
+                    return self.lower_variant_ctor(name, ti, ci, args);
                 }
                 // Entry fns resolve by name; a miss falls back to the
                 // module-fn simple-name index (intra-module calls arrive
@@ -190,6 +159,48 @@ impl Emitter<'_> {
 
 
 
+
+    /// Build a variant constructor's tagged block — split from
+    /// lower_call_at for the complexity budget.
+    fn lower_variant_ctor(
+        &mut self,
+        name: &str,
+        ti: u32,
+        ci: u32,
+        args: &[IrExpr],
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (size, tag, fields) = {
+            let NamedDef::Variant(v) = &self.types.def(ti) else {
+                return unsup("ctor-of-record");
+            };
+            let c = &v.cases[ci as usize];
+            let fs: Vec<(SliceTy, u32)> = c.fields.iter().map(|f| (f.ty, f.offset)).collect();
+            (c.size, c.tag, fs)
+        };
+        if args.len() != fields.len() {
+            return unsup(&format!("ctor-arity:{name}"));
+        }
+        let hold = self.hold_i32()?;
+        self.f
+            .instructions()
+            .i32_const(size as i32)
+            .call(F_ALLOC)
+            .local_tee(hold)
+            .i32_const(tag as i32)
+            .i32_store(slot_memarg(almide_layout::SUM_TAG));
+        for (a, (fty, off)) in args.iter().zip(fields) {
+            self.f.instructions().local_get(hold);
+            self.lower(a, Some(fty))?;
+            // RC-3: a variant payload retaining a borrowed droppable
+            // (koka_reuse1's Pair2(acc1, acc2) — params stored, then
+            // epilogue-released) co-owns.
+            self.rc_share_guard(a, fty);
+            self.store_ty_slot(fty, off);
+        }
+        self.f.instructions().local_get(hold);
+        self.release_i32();
+        Ok(Some(SliceTy::Named(ti)))
+    }
 
     /// Resolve a qualified stdlib call ("float.to_string") to a table
     /// index: linked module fns first, then the self-host registry's

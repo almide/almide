@@ -92,6 +92,8 @@ fn corpus_reproduces_on_stock_wasmtime() {
         failures.len(),
         failures.join("\n")
     );
-    println!("WASI gate: {swept} fixtures byte-identical on stock wasmtime ({skipped} host-variant outside)");
-    assert!(swept >= 500, "sweep looks broken: only {swept} fixtures ran");
+    assert!(
+        swept >= 500,
+        "sweep looks broken: only {swept} fixtures ran ({skipped} host-variant outside)"
+    );
 }
