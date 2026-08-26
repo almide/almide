@@ -106,44 +106,7 @@ pub(crate) fn collect_binds_data(
         IrExprKind::TupleIndex { object, .. } => collect_binds(object, out, seen, types),
         // Lambda params become locals (used when the lambda is inlined as
         // a direct HOF callback; harmless extras otherwise).
-        IrExprKind::Lambda { params, body, .. } => {
-            for (var, ty) in params {
-                let Some(sty) = slice_ty_of(ty, types) else {
-                    return unsup(&format!("bind-ty:{}", ty_name(ty)));
-                };
-                if seen.insert(*var) {
-                    out.push((*var, sty));
-                }
-            }
-            collect_binds(body, out, seen, types)
-        }
-        IrExprKind::Call { args, .. } => {
-            for a in args {
-                collect_binds(a, out, seen, types)?;
-            }
-            Ok(())
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            collect_binds(left, out, seen, types)?;
-            collect_binds(right, out, seen, types)
-        }
-        IrExprKind::UnOp { operand, .. } => collect_binds(operand, out, seen, types),
-        IrExprKind::OptionSome { expr }
-        | IrExprKind::ResultOk { expr }
-        | IrExprKind::ResultErr { expr }
-        | IrExprKind::Unwrap { expr } => collect_binds(expr, out, seen, types),
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            collect_binds(expr, out, seen, types)?;
-            collect_binds(fallback, out, seen, types)
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p {
-                    collect_binds(expr, out, seen, types)?;
-                }
-            }
-            Ok(())
-        }        _ => Ok(()), // leaves with no binds beneath them
+        other => collect_binds_data_b(other, e, out, seen, types),
     }
 }
 
@@ -278,4 +241,56 @@ fn collect_forin(
                 collect_binds_stmt(s, out, seen, types)?;
             }
             Ok(())
+}
+
+/// The second half of the data-expression bind collector — split from
+/// `collect_binds_data` for the complexity budget.
+fn collect_binds_data_b(
+    kind: &IrExprKind,
+    e: &IrExpr,
+    out: &mut Vec<(VarId, SliceTy)>,
+    seen: &mut HashSet<VarId>,
+    types: &TypeTable,
+) -> Result<(), EmitError> {
+    match kind {
+        IrExprKind::Lambda { params, body, .. } => {
+            for (var, ty) in params {
+                let Some(sty) = slice_ty_of(ty, types) else {
+                    return unsup(&format!("bind-ty:{}", ty_name(ty)));
+                };
+                if seen.insert(*var) {
+                    out.push((*var, sty));
+                }
+            }
+            collect_binds(body, out, seen, types)
+        }
+        IrExprKind::Call { args, .. } => {
+            for a in args {
+                collect_binds(a, out, seen, types)?;
+            }
+            Ok(())
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            collect_binds(left, out, seen, types)?;
+            collect_binds(right, out, seen, types)
+        }
+        IrExprKind::UnOp { operand, .. } => collect_binds(operand, out, seen, types),
+        IrExprKind::OptionSome { expr }
+        | IrExprKind::ResultOk { expr }
+        | IrExprKind::ResultErr { expr }
+        | IrExprKind::Unwrap { expr } => collect_binds(expr, out, seen, types),
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            collect_binds(expr, out, seen, types)?;
+            collect_binds(fallback, out, seen, types)
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts {
+                if let IrStringPart::Expr { expr } = p {
+                    collect_binds(expr, out, seen, types)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()), // leaves with no binds beneath them
+    }
 }
