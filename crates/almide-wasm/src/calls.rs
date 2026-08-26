@@ -50,6 +50,11 @@ impl Emitter<'_> {
                 let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
                 // Encoder argument order is (table, type).
                 if tail && def.ret.is_some() && def.ret == self.fn_ret {
+                    // A tail call REPLACES the frame — the epilogue's param
+                    // release never runs, so it runs HERE (args are already
+                    // +1'd by rc_arg_guard, so a pass-through param
+                    // survives its own dec).
+                    self.emit_tail_param_release();
                     self.f.instructions().return_call_indirect(0, ti);
                 } else {
                     self.f.instructions().call_indirect(0, ti);
@@ -145,6 +150,8 @@ impl Emitter<'_> {
                 // constant stack for arbitrarily deep (incl. mutual)
                 // recursion, the C-292 contract.
                 if tail && ret.is_some() && ret == self.fn_ret {
+                    // Same frame-replacement release as the indirect site.
+                    self.emit_tail_param_release();
                     self.f.instructions().return_call(index);
                 } else {
                     self.f.instructions().call(index);
@@ -774,5 +781,17 @@ impl Emitter<'_> {
             self.f.instructions().call(index);
         }
         Ok(ret)
+    }
+}
+
+impl Emitter<'_> {
+    /// Release this fn's droppable params before a `return_call` — the
+    /// tail call replaces the frame and the epilogue never runs. The
+    /// pending args on the wasm stack are unaffected ($dec_flat is
+    /// stack-neutral), and rc_arg_guard has already +1'd borrowed args.
+    pub(crate) fn emit_tail_param_release(&mut self) {
+        for idx in self.rc_droppable_params.clone() {
+            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+        }
     }
 }

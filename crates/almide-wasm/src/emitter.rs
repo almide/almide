@@ -17,6 +17,14 @@ pub(crate) struct Emitter<'a> {
     /// through a plain Bytes param are the caller-visibility contract
     /// (bytes_param_writeback), exactly the pre-share behavior.
     pub(crate) rc_param_ceiling: u32,
+    /// Local indices of the DROPPABLE params (env_shift applied) — the
+    /// epilogue's release set, ALSO released at return_call sites: a tail
+    /// call REPLACES the frame, so the epilogue never runs there and a
+    /// droppable param (a Str accumulator in TCO) leaked every hop
+    /// (spec/churn/string_accumulator_churn's grow_tco half OOM'd at the
+    /// commissioning). Args are +1'd by rc_arg_guard BEFORE this release,
+    /// so a pass-through param survives its own dec.
+    pub(crate) rc_droppable_params: Vec<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
     /// (RC-3): exactly these get the fall-through epilogue dec. Pattern
     /// and loop binds never enter — they borrow their subject's

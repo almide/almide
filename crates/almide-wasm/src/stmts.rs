@@ -300,54 +300,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(var_idx);
                 Ok(())
             }
-            IrStmtKind::Assign { var, value } => {
-                let (local, declared) = match self.locals.get(var) {
-                    Some(&(idx, d)) => (Some(idx), d),
-                    None => match self.globals.get(var) {
-                        Some(&(gidx, d)) => (None, {
-                            let _ = gidx;
-                            d
-                        }),
-                        None => return unsup("assign:unmapped"),
-                    },
-                };
-                self.lower(value, Some(declared))?;
-                // RC-5: same share discipline as Bind.
-                if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
-                    self.f.instructions().call(F_BLOCK_COPY);
-                }
-                if matches!(
-                    declared,
-                    SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
-                ) && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
-                {
-                    self.rc_inc_top();
-                }
-                // RC-3: same ownership settlement as Bind — locals only
-                // (globals are main-lifetime), never through a cell, and
-                // NEVER when the rhs mentions the assigned var: a
-                // self-referential assign (the C-132 write-back
-                // `xs = f(xs)`, `xs = $push(xs, v)`) transfers ownership
-                // through the call — the callee already released what it
-                // outgrew, and a dec here double-frees (mut_heap_param
-                // exit-1'd on exactly this).
-                if let Some(idx) = local
-                    && !self.cells.contains(var)
-                    && self.rc_droppable(declared)
-                    && !crate::rc_ownership::rc_mentions_var(value, *var)
-                {
-                    self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                    self.rc_owned.insert(idx);
-                }
-                match local {
-                    Some(idx) => self.emit_store_var(*var, idx, declared)?,
-                    None => {
-                        let gidx = self.globals[var].0;
-                        self.f.instructions().global_set(gidx);
-                    }
-                }
-                Ok(())
-            }
+            IrStmtKind::Assign { var, value } => self.lower_assign(var, value),
             IrStmtKind::IndexAssign { target, index, value } => {
                 if self.cells.contains(target) {
                     return unsup("cell-write:index-assign");
@@ -647,6 +600,98 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_val(el);
                 self.release_i64();
+                Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// The growing-accumulator window (`acc = acc + s`, Str): route
+    /// through $str_append — in place under rc == 1 with class slack,
+    /// else concat + release of the outgrown block. Without this the
+    /// Assign dec-skip (rhs mentions the var) plus F_CONCAT's borrow
+    /// semantics leaked every outgrown accumulator
+    /// (spec/churn/string_accumulator_churn OOM'd at the commissioning).
+    /// UNMETERED only — the metered ConcatStr path carries the T3-5
+    /// dynamic charge and region programs keep that exact cost model.
+    fn try_str_append_assign(
+        &mut self,
+        var: &almide_ir::VarId,
+        value: &IrExpr,
+    ) -> Result<bool, EmitError> {
+        if self.metered || self.cells.contains(var) {
+            return Ok(false);
+        }
+        let Some(&(idx, SliceTy::Scalar(Scalar::Str))) = self.locals.get(var) else {
+            return Ok(false);
+        };
+        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } = &value.kind
+        else {
+            return Ok(false);
+        };
+        if !matches!(&left.kind, IrExprKind::Var { id } if id == var) {
+            return Ok(false);
+        }
+        self.f.instructions().local_get(idx);
+        self.lower(right, Some(STR))?;
+        self.f.instructions().call(F_STR_APPEND).local_set(idx);
+        self.rc_owned.insert(idx);
+        Ok(true)
+    }
+}
+
+impl Emitter<'_> {
+    /// `Assign` lowering — the share/dec discipline (RC-3/RC-5) plus the
+    /// growing-accumulator window, split from `lower_stmt` for the
+    /// complexity budget.
+    fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
+                if self.try_str_append_assign(var, value)? {
+                    return Ok(());
+                }
+                let (local, declared) = match self.locals.get(var) {
+                    Some(&(idx, d)) => (Some(idx), d),
+                    None => match self.globals.get(var) {
+                        Some(&(gidx, d)) => (None, {
+                            let _ = gidx;
+                            d
+                        }),
+                        None => return unsup("assign:unmapped"),
+                    },
+                };
+                self.lower(value, Some(declared))?;
+                // RC-5: same share discipline as Bind.
+                if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
+                    self.f.instructions().call(F_BLOCK_COPY);
+                }
+                if matches!(
+                    declared,
+                    SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
+                ) && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
+                {
+                    self.rc_inc_top();
+                }
+                // RC-3: same ownership settlement as Bind — locals only
+                // (globals are main-lifetime), never through a cell, and
+                // NEVER when the rhs mentions the assigned var: a
+                // self-referential assign (the C-132 write-back
+                // `xs = f(xs)`, `xs = $push(xs, v)`) transfers ownership
+                // through the call — the callee already released what it
+                // outgrew, and a dec here double-frees (mut_heap_param
+                // exit-1'd on exactly this).
+                if let Some(idx) = local
+                    && !self.cells.contains(var)
+                    && self.rc_droppable(declared)
+                    && !crate::rc_ownership::rc_mentions_var(value, *var)
+                {
+                    self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+                    self.rc_owned.insert(idx);
+                }
+                match local {
+                    Some(idx) => self.emit_store_var(*var, idx, declared)?,
+                    None => {
+                        let gidx = self.globals[var].0;
+                        self.f.instructions().global_set(gidx);
+                    }
+                }
                 Ok(())
     }
 }
