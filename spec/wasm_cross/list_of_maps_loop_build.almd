@@ -1,4 +1,7 @@
-// @wall: heap reassignment inside a control-flow frame
+// @contract: C-101
+// Graduated from proofs/wall-corpus/list_of_maps_loop_build.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (heap reassignment inside a control-flow frame), byte-verified on both targets.
 // `List[Map[String, Int]]` grown in a loop: a fresh Map var per iteration,
 // written through `map.set` and then pushed. The map's set is a REASSIGNING
 // write (the COW slot store) inside the loop frame, which the brick refuses

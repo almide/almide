@@ -1,4 +1,7 @@
-// @wall: list.enumerate_x
+// @contract: C-101
+// Graduated from proofs/wall-corpus/enumerate_unnameable_element.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (list.enumerate_x), byte-verified on both targets.
 // list.enumerate over an element class the drop generator cannot NAME (a
 // nested heap list — no generated $__drop_list_int_<V> exists for it): the
 // router must keep refusing via the unregistered _x name. Admitting it with
@@ -8,4 +11,7 @@ type Node = | Leaf(Int) | Chain(List[Node])
 
 fn f(xs: List[List[Int]]) -> List[(Int, List[Int])] = list.enumerate(xs)
 
-effect fn main() -> Unit = println(int.to_string(list.len(f([[1], [2, 3]]))))
+effect fn main() -> Unit = println(int.to_string(list.len(f([
+  [1],
+  [2, 3]
+]))))

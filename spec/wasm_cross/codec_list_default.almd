@@ -1,4 +1,7 @@
-// @wall: record argument cannot be faithfully materialized
+// @contract: C-298
+// Graduated from proofs/wall-corpus/codec_list_default.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (record argument cannot be faithfully materialized), byte-verified on both targets.
 // A Codec record with a LIST default field: the native leg round-trips
 // (#1520's helpers), but the record materialization with a defaulted List
 // field sits outside the wasm value subset — the honest wall the issue

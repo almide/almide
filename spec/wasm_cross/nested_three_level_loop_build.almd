@@ -1,4 +1,7 @@
-// @wall: heap reassignment inside a control-flow frame
+// @contract: C-101
+// Graduated from proofs/wall-corpus/nested_three_level_loop_build.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (heap reassignment inside a control-flow frame), byte-verified on both targets.
 // The loop-built spelling of the three-level tower: TWO fresh heap vars per
 // iteration (`mid`, `leaf`) pushed into each other and then the outer var.
 // The single-fresh-var two-level build lowers and votes (t_freshheap shape,

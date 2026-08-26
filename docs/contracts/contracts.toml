@@ -243,6 +243,8 @@ evidence  = [
   { path = "spec/wasm_cross/map_fold.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_index_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_core_trio.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_fold_heap_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_of_maps_value.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -271,6 +273,8 @@ evidence  = [
   { path = "spec/wasm_cross/map_set_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/variant_record_literal_equality.almd", class = "fixture" },
   { path = "spec/wasm_cross/unique_non_flat_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_of_tuples_equality.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_rich_variant_key.almd", class = "fixture" },
 ]
 
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────
@@ -983,6 +987,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_ctor_pattern.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_variant_tag_box.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_payload_guard.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_tuple_pattern.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1313,6 +1319,7 @@ evidence  = [
   { path = "spec/wasm_cross/option_heap_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_result_if_eq_cond.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_equality_call_operands.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1349,6 +1356,10 @@ evidence  = [
   { path = "spec/wasm_cross/closure_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_object_leak_loop.almd", class = "fixture" },
   { path = "spec/wasm_cross/pop_heap_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/enumerate_unnameable_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_of_maps_loop_build.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_three_level_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_three_level_loop_build.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -3842,6 +3853,8 @@ evidence  = [
   { path = "spec/wasm_cross/codec_string_escapes.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_variant_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_list_default.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_triple_list.almd", class = "fixture" },
 ]
 
 [[contract]]

@@ -1,4 +1,7 @@
-// @wall: map.fold_hacc
+// @contract: C-013
+// Graduated from proofs/wall-corpus/map_fold_heap_accumulator.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (map.fold_hacc), byte-verified on both targets.
 // `map.fold` with a HEAP accumulator (here a `List[String]` grown per
 // entry): the fold generic is registered for scalar accumulators only —
 // the heap-acc variant routes to the unregistered `_hacc` name, because
@@ -10,6 +13,8 @@
 fn main() -> Unit = {
   var m: Map[String, List[Int]] = map.new()
   map.set(m, "a", [1, 2])
-  let lines = map.fold(m, [], (acc, k, v) => acc + ["${k}:${int.to_string(list.len(v))}"])
+  let lines = map.fold(m, [], (acc, k, v) => acc + [
+    "${k}:${int.to_string(list.len(v))}"
+  ])
   println(list.join(lines, " "))
 }

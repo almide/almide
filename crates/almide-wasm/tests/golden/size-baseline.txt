@@ -27,6 +27,7 @@
 6890	spec/wasm_cross/bundled_pure_modules.almd
 4873	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 4062	spec/wasm_cross/bytes_array_count_domain.almd
+3691	spec/wasm_cross/bytes_equality_call_operands.almd
 10667	spec/wasm_cross/bytes_f16.almd
 25825	spec/wasm_cross/bytes_f16_offset_overflow.almd
 3775	spec/wasm_cross/bytes_from_list_param.almd
@@ -58,12 +59,14 @@
 24645	spec/wasm_cross/codec_extra_keys.almd
 25129	spec/wasm_cross/codec_float_int.almd
 25814	spec/wasm_cross/codec_int_float_boundaries.almd
+27187	spec/wasm_cross/codec_list_default.almd
 27244	spec/wasm_cross/codec_list_default_field.almd
 26026	spec/wasm_cross/codec_list_list_field.almd
 27384	spec/wasm_cross/codec_nested_records.almd
 34335	spec/wasm_cross/codec_none_omission.almd
 26072	spec/wasm_cross/codec_option_numeric.almd
 24771	spec/wasm_cross/codec_string_escapes.almd
+26267	spec/wasm_cross/codec_triple_list.almd
 28989	spec/wasm_cross/codec_variant_roundtrip.almd
 25324	spec/wasm_cross/codec_whitespace_tolerance.almd
 4907	spec/wasm_cross/collection_literals.almd
@@ -105,6 +108,7 @@
 9644	spec/wasm_cross/empty_collection_fold.almd
 4138	spec/wasm_cross/empty_from_list_mono.almd
 6909	spec/wasm_cross/encoding_base64.almd
+3685	spec/wasm_cross/enumerate_unnameable_element.almd
 3612	spec/wasm_cross/env_args.almd
 4161	spec/wasm_cross/env_get.almd
 4146	spec/wasm_cross/env_platform_reporting.almd
@@ -288,6 +292,8 @@
 4521	spec/wasm_cross/list_iter_tco.almd
 4478	spec/wasm_cross/list_minmax_str.almd
 12708	spec/wasm_cross/list_modify_heap.almd
+3857	spec/wasm_cross/list_of_maps_loop_build.almd
+3786	spec/wasm_cross/list_of_tuples_equality.almd
 4166	spec/wasm_cross/list_product_overflow.almd
 3761	spec/wasm_cross/list_remove_at_oob.almd
 4189	spec/wasm_cross/list_repeat_size_ceiling.almd
@@ -316,9 +322,12 @@
 10191	spec/wasm_cross/map_fold.almd
 8932	spec/wasm_cross/map_fold_heap_acc.almd
 4679	spec/wasm_cross/map_fold_heap_acc_skv.almd
+3930	spec/wasm_cross/map_fold_heap_accumulator.almd
 6757	spec/wasm_cross/map_index_order.almd
 11639	spec/wasm_cross/map_insertion_order.almd
 17860	spec/wasm_cross/map_interp_string_value.almd
+3953	spec/wasm_cross/map_of_maps_value.almd
+3883	spec/wasm_cross/map_rich_variant_key.almd
 7624	spec/wasm_cross/map_set_eq.almd
 5786	spec/wasm_cross/map_set_ops.almd
 13659	spec/wasm_cross/map_set_typechange.almd
@@ -371,8 +380,12 @@
 4847	spec/wasm_cross/nested_list_option_result.almd
 4603	spec/wasm_cross/nested_map_list_values.almd
 7287	spec/wasm_cross/nested_match_heap_arm.almd
+3713	spec/wasm_cross/nested_payload_guard.almd
 3885	spec/wasm_cross/nested_scalar_record_append.almd
+3820	spec/wasm_cross/nested_three_level_literal.almd
+3653	spec/wasm_cross/nested_three_level_loop_build.almd
 4376	spec/wasm_cross/nested_tuple_destructure.almd
+3620	spec/wasm_cross/nested_tuple_pattern.almd
 4486	spec/wasm_cross/nested_tuples.almd
 11871	spec/wasm_cross/nested_unwrap_or_share.almd
 6959	spec/wasm_cross/nested_unwrap_propagation.almd

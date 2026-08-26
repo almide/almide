@@ -1,4 +1,7 @@
-// @wall: non-empty List[heap] literal with nested-ownership elements
+// @contract: C-101
+// Graduated from proofs/wall-corpus/nested_three_level_literal.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (non-empty List[heap] literal with nested-ownership elements), byte-verified on both targets.
 // A THREE-level list literal (`List[List[List[Int]]]`): each outer element
 // is itself a list-of-lists — nested ownership the literal builder cannot
 // materialize faithfully (storing the inner towers needs per-level Dup/drop
@@ -6,8 +9,15 @@
 // (spec/wasm_cross/nested_list_list_int.almd); the third level is where the
 // brick ends today. Admitting it would emit an empty or leaking tower.
 fn main() -> Unit = {
-  let tower: List[List[List[Int]]] = [[[1, 2], [3]], [[4]]]
-  let flat = list.fold(tower, 0, (a, mid) =>
-    a + list.fold(mid, 0, (b, leaf) => b + list.fold(leaf, 0, (c, x) => c + x)))
+  let tower: List[List[List[Int]]] = [
+    [
+      [1, 2],
+      [3]
+    ],
+    [
+      [4]
+    ]
+  ]
+  let flat = list.fold(tower, 0, (a, mid) => a + list.fold(mid, 0, (b, leaf) => b + list.fold(leaf, 0, (c, x) => c + x)))
   println(int.to_string(flat))
 }

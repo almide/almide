@@ -40,9 +40,9 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-011 | Bare-float interpolation Display drops .0; float.to_string keeps it | 0.24.0 | active | fixture | 5 |
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
-| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 5 |
+| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 7 |
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 2 |
-| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 5 |
+| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 7 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 1 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
@@ -97,7 +97,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 4 |
 | C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
-| C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 2 |
+| C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 4 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
 | C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 1 |
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
@@ -126,9 +126,9 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-096 | process.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
 | C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
-| C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 9 |
+| C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 10 |
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
-| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 12 |
+| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 16 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 3 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 5 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
@@ -325,7 +325,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-295 | A checker-exhaustive match of guard-lowered box patterns still builds on native | 0.57.2 | active | fixture | 1 |
 | C-296 | The generated type x operation matrix runs byte-identical across targets | 0.57.2 | active | fixture | 70 |
 | C-297 | flat_map whose closure returns an aliased list field is drop-balanced on both targets | 0.57.2 | active | fixture | 1 |
-| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 13 |
+| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 15 |
 | C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 2 |
 | C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |

@@ -1,4 +1,7 @@
-// @wall: Eq over Applied(List, [Tuple([Int, String])])
+// @contract: C-015
+// Graduated from proofs/wall-corpus/list_of_tuples_equality.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (Eq over Applied(List, [Tuple([Int, String])])), byte-verified on both targets.
 // Structural equality of `List[(Int, String)]` against a literal: the Eq
 // over a list of MIXED-ownership tuples has no lowering (comparing needs a
 // per-element tuple walk with a heap compare in the second slot), and the

@@ -1,4 +1,7 @@
-// @wall: map.set_hval_wall
+// @contract: C-013
+// Graduated from proofs/wall-corpus/map_of_maps_value.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (map.set_hval_wall), byte-verified on both targets.
 // A Map whose VALUES are Maps (`Map[String, Map[String, Int]]`): the
 // heap-valued map ctor/set generics route to the `_hval_wall` refusal names
 // — linking the scalar-value generic would store a raw handle without its

@@ -1,4 +1,7 @@
-// @wall: Record heap bind cannot be faithfully materialized
+// @contract: C-298
+// Graduated from proofs/wall-corpus/codec_triple_list.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (Record heap bind cannot be faithfully materialized), byte-verified on both targets.
 // A Codec record whose field is a THREE-level list: the codec surface
 // handles it (native round-trips), but binding the record with a
 // triple-nested heap field sits outside the wasm value subset — the same
@@ -11,7 +14,15 @@ import json
 type T: Codec = { ll: List[List[List[Int]]] }
 
 effect fn main() -> Unit = {
-  let x = T { ll: [[[1, 2], []], [[3]]] }
+  let x = T { ll: [
+    [
+      [1, 2],
+      []
+    ],
+    [
+      [3]
+    ]
+  ] }
   let enc = json.stringify(T.encode(x))
   println(enc)
   let d = T.decode(json.parse(enc)!)!
