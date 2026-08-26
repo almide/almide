@@ -3,5 +3,6 @@
 //! import set; `RunResult` carries the cross-target observables.
 
 mod host;
+pub mod wasi;
 
 pub use host::{run_wasm, run_wasm_capped, run_wasm_real_stdin, run_wasm_with, RunResult};
