@@ -1,0 +1,7 @@
+import self.application.svc
+import self.domain.model
+import io
+
+effect fn main() -> Unit = {
+  io.print(svc.describe(model.Row { id: "a" }))
+}

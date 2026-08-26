@@ -1,0 +1,10 @@
+import io
+
+type Rec: Eq, Repr = { s: String }
+
+fn f(n: Int) -> (Int, Rec)! = (n, Rec { s: "a" })
+
+effect fn main() -> Unit = {
+  let (a, r) = f(1)!
+  io.print("${a}${r.s}")
+}

@@ -1,0 +1,15 @@
+// ALS-T23 — the sum of opposite-signed zeros is +0 under round-to-nearest,
+// also when the +0 operand is a LITERAL: `x + 0.0 -> x` and `0.0 + x -> x` are
+// not valid identities for x = -0.0 (C-306). Found 2026-08-21 by this family:
+// the 0.58.0 native backend folds the literal form and prints -0.0 where wasm
+// prints 0.0 — a cross-target divergence (als #34). Kept in its own file so
+// the red names exactly this.
+fn neg_zero() -> Float = (0.0 - float.abs(-1.0)) * 0.0
+
+test "T23: -0.0 + 0.0 is +0.0 with a literal +0 operand, in either order" {
+  let mz = neg_zero()
+  assert_eq(float.to_string(mz + 0.0), "0.0")
+  assert_eq(float.to_string(0.0 + mz), "0.0")
+  assert_eq(float.to_string(mz + (0.0 - 0.0)), "0.0")
+  assert_eq(float.to_string(mz - 0.0), "-0.0")
+}

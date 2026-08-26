@@ -15,6 +15,6 @@ fn main() -> Unit = {
   // 2
   println("${float.to_bits(min_sub / 2.0)}")
   // 0 (rounds to +0 — ties-to-even, ALS-T20)
-  println("${half * 2.0 == smallest_normal}")
   // true
+  println("${half * 2.0 == smallest_normal}")
 }

@@ -1,0 +1,5 @@
+protocol HasValue {
+  fn value(self) -> Int
+}
+
+fn doubled[T: HasValue](x: T) -> Int = x.value() * 2

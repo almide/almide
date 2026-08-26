@@ -1,0 +1,3 @@
+import self.domain.model
+
+fn describe(r: model.Row) -> String = "row:" + model.label(r)

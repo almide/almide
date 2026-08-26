@@ -1,0 +1,6 @@
+// #1570
+type P = { a: Int, b: Int }
+
+fn t() -> (Int, Int) = (1, 2)
+
+fn u() -> (P, P) = (P { a: 1, b: 2 }, P { a: 3, b: 4 })

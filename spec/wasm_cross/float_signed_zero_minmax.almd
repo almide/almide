@@ -47,6 +47,6 @@ fn main() -> Unit = {
   // 1
   println(float.to_string(float.sign(math.fmax(mz, pz))))
   // 1
-  println(float.to_string(float.sign(math.fmax(pz, mz))))
   // 1
+  println(float.to_string(float.sign(math.fmax(pz, mz))))
 }

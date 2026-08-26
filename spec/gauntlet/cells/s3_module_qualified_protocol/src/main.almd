@@ -1,0 +1,10 @@
+import self.ports
+import io
+
+type Mem: ports.Store = { n: Int }
+
+fn Mem.read(self) -> Int = self.n
+
+fn go[S: ports.Store](s: S) -> Int = s.read()
+
+effect fn main() -> Unit = { io.print(int.to_string(go(Mem { n: 7 }))) }

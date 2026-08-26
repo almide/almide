@@ -15,6 +15,6 @@ fn main() -> Unit = {
   let c = float.parse("0.1") ?? 0.0
   println(float.to_string(c + 0.2))
   // 0.30000000000000004 (one rounding per operation)
-  println("${float.to_bits(c + 0.2)}")
   // 4599075939470750516
+  println("${float.to_bits(c + 0.2)}")
 }

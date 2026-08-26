@@ -101,22 +101,10 @@ pub(crate) fn infer_module_capturing(
     sources: &std::collections::HashMap<String, (String, String)>,
     out: &mut Vec<(String, String, Vec<diagnostic::Diagnostic>)>,
 ) {
-    let Some((path, text)) = sources.get(name) else {
-        // Bundled stdlib: compiled in and CI-gated, no user file to blame.
-        checker.infer_module(mod_prog, name);
-        return;
-    };
-    let saved_file = checker.source_file.clone();
-    let saved_text = checker.source_text.clone();
-    let before = checker.diagnostics.len();
-    checker.set_source(path, text);
-    checker.infer_module(mod_prog, name);
-    let produced: Vec<diagnostic::Diagnostic> = checker.diagnostics[before..].to_vec();
-    checker.source_file = saved_file;
-    checker.source_text = saved_text;
-    if !produced.is_empty() {
-        out.push((path.clone(), text.clone(), produced));
-    }
+    // The single copy lives in the lib (almide::wasm_leg) since the
+    // commissioning: the structural-wasm driver, this driver, and
+    // almide-spine's s3 all share it.
+    almide::wasm_leg::infer_module_capturing(checker, name, mod_prog, sources, out)
 }
 
 /// Register each resolved module's versioned name (dependency modules get a

@@ -1,0 +1,5 @@
+import self.domain.ports
+
+type FixedClock: Clock = { stamp: String }
+
+fn FixedClock.now_iso(self) -> String = self.stamp

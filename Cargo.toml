@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-spine"]
 resolver = "3"
 exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
 
@@ -37,6 +37,11 @@ almide-dialect = { path = "crates/almide-dialect" }
 # falls back to v0 codegen source on a wall). Acyclic:
 # almide-mir keeps `almide` only as a DEV-dependency, so this edge does not cycle.
 almide-mir = { path = "crates/almide-mir" }
+# The commissioned structural-wasm leg (Stage 2): typed IR -> wasm bytes, and
+# the embedded almide.* host + the WASI transform for stock-runtime artifacts.
+almide-types = { path = "crates/almide-types" }
+almide-wasm = { path = "crates/almide-wasm" }
+almide-wasm-run = { path = "crates/almide-wasm-run" }
 # WAT (text) → wasm bytes: the v1 renderer emits WAT; the CLI assembles it to a module.
 wat = "1"
 # Structural validation of the assembled v1 module: `wat` assembles without full stack-shape
