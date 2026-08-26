@@ -223,3 +223,30 @@ pub(crate) fn emit_dec_flat() -> Function {
     i.end();
     f
 }
+
+/// `$cow(block) -> block`: the copy-on-write judge at every in-place
+/// mutation entry (RC-5). A uniquely-held block passes through; a
+/// SHARED one (rc > 1 — binds now share instead of copying) is copied,
+/// the original releases one ref, and the mutation proceeds on the
+/// unique copy — value semantics moved from bind time to mutation
+/// time, unobservably.
+pub(crate) fn emit_cow() -> Function {
+    // params: 0=block; locals: 1=copy
+    let (block, copy) = (0u32, 1u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.local_get(block).return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_le_u().if_(BlockType::Empty);
+    i.local_get(block).return_();
+    i.end();
+    i.local_get(block).call(F_BLOCK_COPY).local_set(copy);
+    i.local_get(block);
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub();
+    i.i32_store(word(almide_layout::RC.offset));
+    i.local_get(copy);
+    i.end();
+    f
+}

@@ -305,7 +305,19 @@ impl Emitter<'_> {
         be: bool,
         float: bool,
     ) -> Result<(), EmitError> {
-        self.lower(b, Some(BYTES))?;
+        // RC-5: this family mutates IN PLACE through the receiver with
+        // no write-back — under share-at-bind the receiver may be held
+        // by a snapshot, so a Var receiver reads through the COW gate
+        // (which also repoints the var at the unique copy). Non-var
+        // receivers keep today's in-place semantics.
+        if let almide_ir::IrExprKind::Var { id } = &b.kind
+            && let Some((var_idx, var_ty, vglob)) = self.mut_var(id)
+            && var_ty == BYTES
+        {
+            self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
+        } else {
+            self.lower(b, Some(BYTES))?;
+        }
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
         self.lower(pos, Some(INT))?;

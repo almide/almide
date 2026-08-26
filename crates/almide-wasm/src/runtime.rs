@@ -5,7 +5,7 @@ use wasm_encoder::{BlockType, Function, MemArg, ValType};
 
 use crate::*;
 
-pub(crate) use crate::runtime_alloc::{emit_alloc, emit_dec_flat, emit_free, emit_inc};
+pub(crate) use crate::runtime_alloc::{emit_alloc, emit_cow, emit_dec_flat, emit_free, emit_inc};
 
 // ── emitted runtime helpers ─────────────────────────────────────────────
 

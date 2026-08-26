@@ -33,10 +33,20 @@ impl Emitter<'_> {
         // native `len.max(0)` — a NEGATIVE size is the empty buffer,
         // never a wrapped 4 GiB ask.
         let h = self.hold_i64()?;
+        let oom = self.pool.intern("Error: out of memory");
         let mut i = self.f.instructions();
         i.local_set(h);
-        i.i64_const(0).local_get(h).local_get(h).i64_const(0).i64_lt_s().select();
-        i.i32_wrap_i64().call(F_ALLOC);
+        i.i64_const(0).local_get(h).local_get(h).i64_const(0).i64_lt_s().select().local_set(h);
+        // Judged in i64 BEFORE the i32 wrap (the bytes_repeat bound):
+        // past the structural limit is the C-197 die. The old die was
+        // ACCIDENTAL — the bind's deep copy re-read the wrapped length
+        // and ITS alloc failed; RC-5's share-at-bind removed that copy
+        // and exposed the naked wrap (len -1, 4294967295 printed).
+        i.local_get(h).i64_const(0x7FFF_0000).i64_gt_s().if_(BlockType::Empty);
+        i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
+        i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+        i.end();
+        i.local_get(h).i32_wrap_i64().call(F_ALLOC);
         let _ = i;
         self.release_i64();
         Ok(Some(BYTES))
@@ -418,7 +428,7 @@ impl Emitter<'_> {
                 let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
-                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
+                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
                 let bh = self.hold_i32()?;
                 self.f.instructions().local_set(bh);
                 self.lower(v, Some(INT))?;
@@ -506,7 +516,7 @@ impl Emitter<'_> {
                 let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
-                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
+                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
                 self.f.instructions().call(F_BLOCK_COPY);
                 let dh = self.hold_i32()?;
                 self.f.instructions().local_set(dh);

@@ -179,16 +179,19 @@ impl Emitter<'_> {
             return unsup("bind:unmapped");
         };
         self.lower(value, Some(declared))?;
-        // Container value semantics: every bind owns a fresh
-        // block, so in-place mutation (push growth, bytes.set_*)
-        // can never be observed through aliases. Bytes joined
-        // when the snapshot fixture showed `let snap = arena`
-        // observing later set_at writes.
-        if matches!(
-            declared,
-            SliceTy::List(_) | SliceTy::Map(..) | SliceTy::Set(_) | SliceTy::Scalar(Scalar::Bytes)
-        ) {
+        // RC-5: Lists and Bytes SHARE at bind — the COW judge at every
+        // in-place mutation entry moved the value-semantics copy from
+        // bind time to mutation time (rc counts the holders it judges
+        // by, so a borrowed rhs takes +1 — cells included). Maps and
+        // Sets keep the bind copy: their mutations are functional
+        // rebinds that never pass a COW gate.
+        if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
             self.f.instructions().call(F_BLOCK_COPY);
+        }
+        if matches!(declared, SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes))
+            && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
+        {
+            self.rc_inc_top();
         }
         if self.cells.contains(var) {
             // C-319: the bind allocates the shared cell; the
@@ -210,9 +213,6 @@ impl Emitter<'_> {
             // (loop rebinds; zero on the first pass) is released, and
             // the local joins the epilogue's owner set.
             if self.rc_droppable(declared) {
-                if declared == STR && !crate::rc_ownership::rc_certainly_fresh(&value.kind) {
-                    self.rc_inc_top();
-                }
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                 self.rc_owned.insert(idx);
             }
@@ -295,14 +295,16 @@ impl Emitter<'_> {
                     },
                 };
                 self.lower(value, Some(declared))?;
+                // RC-5: same share discipline as Bind.
+                if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
+                    self.f.instructions().call(F_BLOCK_COPY);
+                }
                 if matches!(
                     declared,
-                    SliceTy::List(_)
-                        | SliceTy::Map(..)
-                        | SliceTy::Set(_)
-                        | SliceTy::Scalar(Scalar::Bytes)
-                ) {
-                    self.f.instructions().call(F_BLOCK_COPY);
+                    SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
+                ) && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
+                {
+                    self.rc_inc_top();
                 }
                 // RC-3: same ownership settlement as Bind — locals only
                 // (globals are main-lifetime), never through a cell, and
@@ -317,9 +319,6 @@ impl Emitter<'_> {
                     && self.rc_droppable(declared)
                     && !crate::rc_ownership::rc_mentions_var(value, *var)
                 {
-                    if declared == STR && !crate::rc_ownership::rc_certainly_fresh(&value.kind) {
-                        self.rc_inc_top();
-                    }
                     self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                     self.rc_owned.insert(idx);
                 }

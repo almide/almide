@@ -12,6 +12,11 @@ use crate::*;
 pub(crate) struct Emitter<'a> {
     pub(crate) pool: &'a mut Pool,
     pub(crate) locals: &'a HashMap<VarId, (u32, SliceTy)>,
+    /// Locals below this index are PARAMS (borrowed views of the
+    /// caller's blocks): the COW gate exempts them — in-place writes
+    /// through a plain Bytes param are the caller-visibility contract
+    /// (bytes_param_writeback), exactly the pre-share behavior.
+    pub(crate) rc_param_ceiling: u32,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
     /// (RC-3): exactly these get the fall-through epilogue dec. Pattern
     /// and loop binds never enter — they borrow their subject's

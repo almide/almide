@@ -196,6 +196,7 @@ pub(crate) fn lower_fn(
         let mut em = Emitter {
             pool,
             locals: &locals,
+            rc_param_ceiling: env_shift + params.len() as u32,
             rc_owned: std::collections::BTreeSet::new(),
             table: ctx.table,
             types: ctx.types,

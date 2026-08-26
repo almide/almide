@@ -203,8 +203,11 @@ const F_FREE: u32 = 33;
 /// so pool statics are untouchable. dec frees FLAT blocks at rc zero.
 const F_INC: u32 = 34;
 const F_DEC_FLAT: u32 = 35;
+/// `$cow(block)` — the copy-on-write judge at in-place mutation entries
+/// (RC-5): shared blocks copy, unique ones pass through.
+const F_COW: u32 = 36;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 36;
+const F_FN_BASE: u32 = 37;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),

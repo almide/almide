@@ -71,15 +71,27 @@ fn churn_under_large_budget_completes() {
     assert_eq!(r.stdout, "9990000\n");
 }
 
-/// Anti-vacuous twin (W-8: "小さい予算では OOM する対のケース"): under a
-/// budget smaller than even the fixed runtime preamble + one round's
-/// live set, the defined OOM fires REGARDLESS of reclamation — if this
-/// ever passes, the budget knob itself stopped working.
+/// Anti-vacuous twin (W-8: "小さい予算では OOM する対のケース"): a program
+/// whose LIVE set exceeds the budget must take the defined OOM
+/// regardless of how good reclamation gets — nothing dead exists to
+/// reclaim. (The original 128 KiB churn twin died of success: RC-5's
+/// share-at-bind + class reuse fit the whole churn inside 128 KiB.)
 #[cfg_attr(debug_assertions, ignore = "budget sweep is release-only (CI: release-shape job)")]
 #[test]
-fn tiny_budget_always_ooms() {
-    let bytes = emit();
-    let r = run_wasm_capped(&bytes, 128 * 1024).expect("engine");
-    assert_eq!(r.exit, 1, "128 KiB can never hold the churn; got exit {}", r.exit);
+fn live_set_over_budget_always_ooms() {
+    const LIVE: &str = r#"fn main() -> Unit = {
+  var keep: List[Int] = []
+  var i = 0
+  while i < 4000000 {
+    list.push(keep, i)
+    i = i + 1
+  }
+  println(int.to_string(keep[0]))
+}
+"#;
+    let ir = almide_spine::s5::lower_to_ir("rc_live.almd", LIVE).expect("front");
+    let bytes = almide_wasm::emit_program(&ir).expect("emit");
+    let r = run_wasm_capped(&bytes, 16 * 1024 * 1024).expect("engine");
+    assert_eq!(r.exit, 1, "a 32 MB live list can never fit 16 MiB; got exit {}", r.exit);
     assert!(r.stderr.contains("Error: out of memory"), "got: {}", r.stderr);
 }

@@ -29,7 +29,7 @@ impl Emitter<'_> {
                 let hlen = self.hold_i32()?;
                 let hres = self.hold_i32()?;
                 let hnew = self.hold_i32()?;
-                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
+                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hb);
@@ -105,7 +105,7 @@ impl Emitter<'_> {
                     return unsup(&format!("list-push-of:{var_ty:?}"));
                 };
                 let elem = self.types.el(h);
-                self.emit_read_mut_var(id, var_idx, var_ty, vglob);
+                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
                 self.lower(v, Some(elem))?;
                 self.rc_share_guard(v, elem);
                 // The 8-byte helper's value param is i64; an f64 element

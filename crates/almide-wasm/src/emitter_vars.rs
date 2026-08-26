@@ -49,6 +49,33 @@ impl Emitter<'_> {
         }
     }
 
+    /// The COW form of the mut-var read (RC-5): every in-place mutation
+    /// route reads through here — a shared block copies first and the
+    /// var (or cell) is repointed at the unique copy before the route
+    /// touches it. Lists and Bytes only; strings and maps mutate
+    /// functionally.
+    pub(crate) fn emit_read_mut_var_cow(
+        &mut self,
+        id: &VarId,
+        idx: u32,
+        ty: SliceTy,
+        global: bool,
+    ) -> Result<(), EmitError> {
+        self.emit_read_mut_var(id, idx, ty, global);
+        // Params are exempt: they are borrowed views of the caller's
+        // block, and writes through them must stay caller-visible.
+        if matches!(ty, SliceTy::List(_) | SliceTy::Scalar(Scalar::Bytes))
+            && (global || idx >= self.rc_param_ceiling)
+        {
+            let scr = self.scr_i32_local;
+            self.f.instructions().call(F_COW).local_set(scr);
+            self.f.instructions().local_get(scr);
+            self.emit_store_mut_var(*id, idx, ty, global)?;
+            self.f.instructions().local_get(scr);
+        }
+        Ok(())
+    }
+
     /// Store the value on the stack back into the mut var's slot.
     pub(crate) fn emit_store_mut_var(
         &mut self,
