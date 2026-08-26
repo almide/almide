@@ -2803,3 +2803,30 @@ record the closure.
 - Mutants 004/041 refreshed (004 recast as the COW-skip — the modern
   spelling of a skipped bind copy); perf relations hold (3.88/4.36,
   lockstep 1.16); 599/599, alias, gauntlet, fuzz, workspace all green.
+
+## Stage 105 (2026-08-26): #1588 — the artifact leaves home
+
+- `to_wasi` (almide-wasm-run/src/wasi.rs): a POST-transform, the
+  emitter and its verified envelope untouched. The 5 almide.* imports
+  swap for 5 WASI p1 imports (same count — every other function index
+  preserved verbatim); 5 appended shims carry the almide host contract
+  (fd_write two-call newline form — the 2-entry iovec silently dropped
+  the second entry under the wasmtime CLI; proc_exit; random_get;
+  clock_time_get; fd_read read-to-end with the defined over-span
+  refusal). Unsupported host ops take the DEFINED refusal: named
+  stderr message + exit 1, never a silent answer (#1423 doctrine).
+- Two structural lessons paid for on the way: the park page CANNOT sit
+  past memory end (the bump heap grows there) — it takes over the
+  ORIGINAL heap base and `__heap`'s init moves up one span; and raw
+  `unreachable` traps ARE the host contract's exit-1 (W-7's
+  semantic-abort mapping), so the transform injects proc_exit(1)
+  before every one — stock wasmtime otherwise surfaces 128+SIGABRT.
+- **wasi_gate.rs: 578 non-host-variant fixtures byte-identical on the
+  STOCK wasmtime CLI** — the burn-up's judgment reproduced with no
+  bespoke host anywhere in the loop: the aviation O7
+  tool-independence witness, gated in release-shape (which already
+  installs the CLI). Runner grows `--emit-wasi out.wasm`.
+- codopsy dipped to B(89) mid-arc — the A/B against the green commit
+  pinned it to ONE new info (a println! in the new gate test); folded
+  into the assert, A(90) restored. The gate defended the new goal's
+  A-clause twice in one day.
