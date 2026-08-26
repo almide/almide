@@ -1,10 +1,10 @@
 diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index 9c9c23cf4..447aed0df 100644
+index ce2696629..60af7656c 100644
 --- a/crates/almide-wasm/src/stmts.rs
 +++ b/crates/almide-wasm/src/stmts.rs
-@@ -157,7 +157,7 @@ impl Emitter<'_> {
-         ) {
-             self.f.instructions().call(F_BLOCK_COPY);
+@@ -193,7 +193,7 @@ impl Emitter<'_> {
+         {
+             self.rc_inc_top();
          }
 -        if self.cells.contains(var) {
 +        if false && self.cells.contains(var) { // [MUTANT]

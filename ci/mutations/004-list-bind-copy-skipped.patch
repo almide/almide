@@ -1,18 +1,13 @@
-diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index 9c9c23cf4..c6738d73b 100644
---- a/crates/almide-wasm/src/stmts.rs
-+++ b/crates/almide-wasm/src/stmts.rs
-@@ -151,12 +151,7 @@ impl Emitter<'_> {
-         // can never be observed through aliases. Bytes joined
-         // when the snapshot fixture showed `let snap = arena`
-         // observing later set_at writes.
--        if matches!(
--            declared,
--            SliceTy::List(_) | SliceTy::Map(..) | SliceTy::Set(_) | SliceTy::Scalar(Scalar::Bytes)
--        ) {
--            self.f.instructions().call(F_BLOCK_COPY);
--        }
-+        // [MUTANT: bind deep-copy skipped]
-         if self.cells.contains(var) {
-             // C-319: the bind allocates the shared cell; the
-             // local holds its ADDRESS from here on.
+diff --git a/crates/almide-wasm/src/emitter_vars.rs b/crates/almide-wasm/src/emitter_vars.rs
+index f87957dc7..b7b0d4c86 100644
+--- a/crates/almide-wasm/src/emitter_vars.rs
++++ b/crates/almide-wasm/src/emitter_vars.rs
+@@ -68,7 +68,7 @@ impl Emitter<'_> {
+             && (global || idx >= self.rc_param_ceiling)
+         {
+             let scr = self.scr_i32_local;
+-            self.f.instructions().call(F_COW).local_set(scr);
++            self.f.instructions().local_set(scr); // [MUTANT: cow skipped]
+             self.f.instructions().local_get(scr);
+             self.emit_store_mut_var(*id, idx, ty, global)?;
+             self.f.instructions().local_get(scr);
