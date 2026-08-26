@@ -20,39 +20,7 @@ impl Emitter<'_> {
     ) -> Result<SliceTy, EmitError> {
         use BinOp::*;
         if matches!(op, Lt | Gt | Lte | Gte) {
-            // C-179: a UInt64 operand's slot is a u64 bit pattern —
-            // ordering reads it UNSIGNED.
-            let unsigned = crate::binop::is_uint64(&left.ty) || crate::binop::is_uint64(&right.ty);
-            let lt = self.lower(left, None)?;
-            self.lower(right, Some(lt))?;
-            let mut i = self.f.instructions();
-            match (lt, op) {
-                (INT, Lt) if unsigned => i.i64_lt_u(),
-                (INT, Gt) if unsigned => i.i64_gt_u(),
-                (INT, Lte) if unsigned => i.i64_le_u(),
-                (INT, Gte) if unsigned => i.i64_ge_u(),
-                (INT, Lt) => i.i64_lt_s(),
-                (INT, Gt) => i.i64_gt_s(),
-                (INT, Lte) => i.i64_le_s(),
-                (INT, Gte) => i.i64_ge_s(),
-                // Bool: false < true (Rust Ord), i32 unsigned compares.
-                (BOOL, Lt) => i.i32_lt_u(),
-                (BOOL, Gt) => i.i32_gt_u(),
-                (BOOL, Lte) => i.i32_le_u(),
-                (BOOL, Gte) => i.i32_ge_u(),
-                (FLOAT, Lt) => i.f64_lt(),
-                (FLOAT, Gt) => i.f64_gt(),
-                (FLOAT, Lte) => i.f64_le(),
-                (FLOAT, Gte) => i.f64_ge(),
-                // String order = byte-lexicographic with length tiebreak
-                // (String: Ord) via the shared $str_cmp.
-                (STR, Lt) => i.call(F_STR_CMP).i32_const(0).i32_lt_s(),
-                (STR, Gt) => i.call(F_STR_CMP).i32_const(0).i32_gt_s(),
-                (STR, Lte) => i.call(F_STR_CMP).i32_const(0).i32_le_s(),
-                (STR, Gte) => i.call(F_STR_CMP).i32_const(0).i32_ge_s(),
-                (other, _) => return unsup(&format!("binop:cmp-{other:?}")),
-            };
-            return Ok(BOOL);
+            return self.lower_order_cmp(op, left, right);
         }
         let lt = self.lower(left, None)?;
         self.lower(right, Some(lt))?;
@@ -478,5 +446,67 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
         Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// The four ordering operators — split from `lower_cmp` for the
+    /// complexity budget. C-179: a UInt64 operand's slot is a u64 bit
+    /// pattern, so ordering reads it UNSIGNED.
+    fn lower_order_cmp(&mut self, op: BinOp, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
+        // C-179: a UInt64 operand's slot is a u64 bit pattern —
+        // ordering reads it UNSIGNED.
+        let unsigned = crate::binop::is_uint64(&left.ty) || crate::binop::is_uint64(&right.ty);
+        let lt = self.lower(left, None)?;
+        self.lower(right, Some(lt))?;
+        match lt {
+            INT | BOOL => self.emit_order_int_bool(lt, op, unsigned),
+            FLOAT | STR => self.emit_order_float_str(lt, op),
+            other => return unsup(&format!("binop:cmp-{other:?}")),
+        }
+        Ok(BOOL)
+    }
+
+    /// Int (signed/unsigned by C-179) and Bool (false < true) ordering.
+    fn emit_order_int_bool(&mut self, lt: SliceTy, op: BinOp, unsigned: bool) {
+        use BinOp::*;
+        let mut i = self.f.instructions();
+        match (lt, op, unsigned) {
+            (INT, Lt, true) => i.i64_lt_u(),
+            (INT, Gt, true) => i.i64_gt_u(),
+            (INT, Lte, true) => i.i64_le_u(),
+            (INT, Gte, true) => i.i64_ge_u(),
+            (INT, Lt, _) => i.i64_lt_s(),
+            (INT, Gt, _) => i.i64_gt_s(),
+            (INT, Lte, _) => i.i64_le_s(),
+            (INT, Gte, _) => i.i64_ge_s(),
+            (_, Lt, _) => i.i32_lt_u(),
+            (_, Gt, _) => i.i32_gt_u(),
+            (_, Lte, _) => i.i32_le_u(),
+            (_, _, _) => i.i32_ge_u(),
+        };
+    }
+
+    /// Float (IEEE compares) and String (byte-lexicographic with length
+    /// tiebreak via the shared $str_cmp) ordering.
+    fn emit_order_float_str(&mut self, lt: SliceTy, op: BinOp) {
+        use BinOp::*;
+        let mut i = self.f.instructions();
+        if lt == STR {
+            i.call(F_STR_CMP).i32_const(0);
+            match op {
+                Lt => i.i32_lt_s(),
+                Gt => i.i32_gt_s(),
+                Lte => i.i32_le_s(),
+                _ => i.i32_ge_s(),
+            };
+            return;
+        }
+        match op {
+            Lt => i.f64_lt(),
+            Gt => i.f64_gt(),
+            Lte => i.f64_le(),
+            _ => i.f64_ge(),
+        };
     }
 }

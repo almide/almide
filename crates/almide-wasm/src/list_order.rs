@@ -17,48 +17,7 @@ impl Emitter<'_> {
         match (func, args) {
             // First n elements (native `take(n as usize)`): a NEGATIVE
             // n reinterprets huge and takes the WHOLE list.
-            ("take", [xs, n]) => {
-                let h = match self.lower(xs, None)? {
-                    SliceTy::List(h) => h,
-                    other => return unsup(&format!("list-take-of:{other:?}")),
-                };
-                let stride = self.types.el(h).slot_size() as i32;
-                let hb = self.hold_i32()?;
-                self.f.instructions().local_set(hb);
-                self.lower(n, Some(INT))?;
-                let hn = self.hold_i64()?;
-                let hc = self.hold_i32()?;
-                let ho = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_set(hn);
-                // bytes = n < 0 ? len : min(n*stride, len)
-                // select(v1, v2, cond) = cond ? v1 : v2 — the min form
-                // pushes LEN as v1 under cond (n*stride > len). The
-                // original operand order computed MAX and returned the
-                // whole list; no claimed fixture observed take's VALUE
-                // (fourth select inversion — the class now carries its
-                // own fixture, els PR pending).
-                i.local_get(hb).i32_load(len_memarg());
-                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
-                i.local_get(hn).i64_const(stride as i64).i64_mul();
-                i.local_get(hn).i64_const(stride as i64).i64_mul();
-                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
-                i.i64_gt_s().select().i32_wrap_i64();
-                i.local_get(hn).i64_const(0).i64_lt_s();
-                i.select().local_set(hc);
-                i.local_get(hc).call(F_ALLOC).local_set(ho);
-                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hc);
-                i.memory_copy(0, 0);
-                i.local_get(ho);
-                let _ = i;
-                self.release_i32();
-                self.release_i32();
-                self.release_i64();
-                self.release_i32();
-                Ok(Some(Some(SliceTy::List(h))))
-            }
+            ("take", [xs, n]) => self.lower_list_take(xs, n),
             ("min" | "max", [xs]) => self.lower_list_min_max(func, xs).map(Some),
             ("remove_at", [xs, idx]) => self.lower_list_remove_at(xs, idx).map(Some),
             ("reverse", [xs]) => self.lower_list_reverse(xs).map(Some),
@@ -532,5 +491,53 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         Ok(Some(SliceTy::List(h)))
+    }
+}
+
+impl Emitter<'_> {
+    /// First n elements (native `take(n as usize)`; a NEGATIVE n
+    /// reinterprets huge and takes the whole list) — split from
+    /// `lower_list_order_call` for the complexity budget.
+    fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<SliceTy>>, EmitError> {
+                let h = match self.lower(xs, None)? {
+                    SliceTy::List(h) => h,
+                    other => return unsup(&format!("list-take-of:{other:?}")),
+                };
+                let stride = self.types.el(h).slot_size() as i32;
+                let hb = self.hold_i32()?;
+                self.f.instructions().local_set(hb);
+                self.lower(n, Some(INT))?;
+                let hn = self.hold_i64()?;
+                let hc = self.hold_i32()?;
+                let ho = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hn);
+                // bytes = n < 0 ? len : min(n*stride, len)
+                // select(v1, v2, cond) = cond ? v1 : v2 — the min form
+                // pushes LEN as v1 under cond (n*stride > len). The
+                // original operand order computed MAX and returned the
+                // whole list; no claimed fixture observed take's VALUE
+                // (fourth select inversion — the class now carries its
+                // own fixture, els PR pending).
+                i.local_get(hb).i32_load(len_memarg());
+                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.local_get(hn).i64_const(stride as i64).i64_mul();
+                i.local_get(hn).i64_const(stride as i64).i64_mul();
+                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                i.i64_gt_s().select().i32_wrap_i64();
+                i.local_get(hn).i64_const(0).i64_lt_s();
+                i.select().local_set(hc);
+                i.local_get(hc).call(F_ALLOC).local_set(ho);
+                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                i.local_get(hc);
+                i.memory_copy(0, 0);
+                i.local_get(ho);
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i64();
+                self.release_i32();
+                Ok(Some(Some(SliceTy::List(h))))
     }
 }
