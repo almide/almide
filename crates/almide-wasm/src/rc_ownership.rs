@@ -78,13 +78,31 @@ impl Emitter<'_> {
         if ty.val_type() != ValType::I32 {
             return;
         }
-        let almide_ir::IrExprKind::Var { id } = &e.kind else { return };
-        if self.cells.contains(id) {
-            return;
-        }
-        let Some(&(_, vt)) = self.locals.get(id) else { return };
-        if self.rc_droppable(vt) {
-            self.rc_inc_top();
+        match &e.kind {
+            almide_ir::IrExprKind::Var { id } => {
+                if self.cells.contains(id) {
+                    return;
+                }
+                let Some(&(_, vt)) = self.locals.get(id) else { return };
+                if self.rc_droppable(vt) {
+                    self.rc_inc_top();
+                }
+            }
+            // A control funnel can RETURN a var borrow through its arm
+            // tails (`push(out, if c then a else b)`) — the O3 gap.
+            // Conservative +1 when the stored type itself is droppable:
+            // an over-inc on a fresh arm is a leak, never a dangle.
+            almide_ir::IrExprKind::If { .. }
+            | almide_ir::IrExprKind::Match { .. }
+            | almide_ir::IrExprKind::Block { .. }
+            | almide_ir::IrExprKind::Unwrap { .. }
+            | almide_ir::IrExprKind::UnwrapOr { .. }
+            | almide_ir::IrExprKind::Try { .. }
+                if self.rc_droppable(ty) =>
+            {
+                self.rc_inc_top();
+            }
+            _ => {}
         }
     }
 }
