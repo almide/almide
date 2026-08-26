@@ -1,0 +1,72 @@
+// The url module's family matrix (STDLIB-EXCELLENCE SD1-SD3): every public
+// fn, both directions of each pair (parse ⇄ to_string, encode ⇄ decode,
+// query_pairs ⇄ build_query), and the documented limits as REJECTIONS.
+import url
+
+test "encode_component percent-encodes outside the unreserved set" {
+  assert_eq(url.encode_component("a b"), "a%20b")
+  assert_eq(url.encode_component("A-z_.~09"), "A-z_.~09")
+  assert_eq(url.encode_component("日本語"), "%E6%97%A5%E6%9C%AC%E8%AA%9E")
+}
+
+test "decode_component inverts encode and rejects broken escapes" {
+  assert_eq(url.decode_component("a%20b") ?? "?", "a b")
+  assert_eq(url.decode_component(url.encode_component("日本語 ok~")) ?? "?", "日本語 ok~")
+  let bad = match url.decode_component("%zz") {
+    ok(_) => "accepted",
+    err(_) => "rejected",
+  }
+  assert_eq(bad, "rejected")
+  // `+` is NOT form-decoded to space (RFC 3986, not form-encoding).
+  assert_eq(url.decode_component("a+b") ?? "?", "a+b")
+}
+
+test "parse fills every field and round-trips through to_string" {
+  match url.parse("https://example.com:8080/a/b?x=1&y=2#top") {
+    ok(u) => {
+      assert_eq(u.scheme, "https")
+      assert_eq(u.host, "example.com")
+      assert_eq(u.port ?? -1, 8080)
+      assert_eq(u.path, "/a/b")
+      assert_eq(u.query, "x=1&y=2")
+      assert_eq(u.fragment, "top")
+      assert_eq(url.to_string(u), "https://example.com:8080/a/b?x=1&y=2#top")
+    },
+    err(m) => assert_eq("parse failed: " + m, ""),
+  }
+}
+
+test "parse absent parts stay absent and round-trip separator-free" {
+  match url.parse("http://x") {
+    ok(u) => {
+      assert_eq(u.host, "x")
+      assert_eq(u.path, "")
+      assert_eq(u.port ?? -1, -1)
+      assert_eq(u.query, "")
+      assert_eq(u.fragment, "")
+      assert_eq(url.to_string(u), "http://x")
+    },
+    err(m) => assert_eq("parse failed: " + m, ""),
+  }
+}
+
+test "parse rejects non-urls and out-of-range ports with reasons" {
+  let plain = match url.parse("not a url") {
+    ok(_) => "accepted",
+    err(_) => "rejected",
+  }
+  assert_eq(plain, "rejected")
+  let big_port = match url.parse("http://h:99999") {
+    ok(_) => "accepted",
+    err(_) => "rejected",
+  }
+  assert_eq(big_port, "rejected")
+}
+
+test "query_pairs and build_query are a family pair" {
+  assert_eq(url.build_query(url.query_pairs("a=1&b=two")), "a=1&b=two")
+  assert_eq(url.query_pairs(""), [])
+  assert_eq(url.query_pairs("flag&x=1"), [("flag", ""), ("x", "1")])
+  assert_eq(url.build_query([("q", "a b"), ("lang", "ja")]), "q=a%20b&lang=ja")
+  assert_eq(url.build_query([]), "")
+}

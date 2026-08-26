@@ -288,7 +288,7 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 
 ### Imports
 - Stdlib modules (`string`, `int`, `float`, `list`, `value`, `map`, `set`, `math`, `datetime`, `error`, `bytes`, sized ints, etc.) are auto-imported — do NOT write `import string`. Authoritative lists: `import_table.rs` seed + `AUTO_IMPORT_BUNDLED` in `stdlib_info.rs`
-- `json`, `fs`, `http`, `env`, `io`, `random`, `regex`, `process`, `testing` require explicit `import`
+- `json`, `fs`, `http`, `env`, `io`, `random`, `regex`, `process`, `testing`, `url` require explicit `import`
 - External packages require `import pkg_name`
 - Package self-reference: `import self as pkg_name`
 
