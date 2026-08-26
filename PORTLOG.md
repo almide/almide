@@ -2714,3 +2714,21 @@ record the closure.
   → RC-5 COW elision. Value semantics never forks (binds keep deep-
   copying until RC-5), so the corpus stays byte-green through the
   middle stages and the alloc ledger prices each one.
+
+## Stage 101 (2026-08-26): RC-2 — the first reclamation
+
+- Size-class free lists live behind `$alloc`: 16 classes at [48,112)
+  (filed by floor, taken by ceil — no bump rounding, cap semantics
+  untouched), `$free` (F_FREE=33) files owned-dead blocks; empty and
+  huge blocks abandon to the bump graveyard exactly as before.
+- First customer: the sort machinery's provably-private scratch — the
+  merge loser buffer (sort), plus both key buffers and the loser vals
+  (sort_by). MEASURED by the alloc ledger: sort_by_str_key_heap
+  (20000 create+sort+drop rounds) watermark 3.91 MB → 3.27 MB
+  (−640 KB, −16.4%); every sort fixture drops; non-sort fixtures shift
+  exactly +64 (the POOL base moving for the free-list table).
+- 599/599, alias semantics, perf relations (4.34/4.27, lockstep 1.29)
+  all green through the change; ledger/size/dump goldens re-ratified;
+  runtime.rs split (allocator family → runtime_alloc.rs) for the file
+  budget. rc_budget's BUMP_ONLY stays true — the churn program doesn't
+  sort, so the acceptance event still awaits RC-3's scope-exit drops.
