@@ -34,6 +34,18 @@ almide-tools          Formatter, module interface (.almdi). NOT the LSP — that
                       lives in src/cli/lsp*.rs at the workspace root, and
                       lsp-types is a root Cargo.toml dependency, so a
                       crates/-scoped survey will not find it
+almide-layout         THE single source for heap block layout — every consumer
+                      (almide-wasm, almide-interp's arena) derives from it
+almide-wasm           Commissioned structural wasm emitter: typed IR → wasm
+                      bytes via wasm-encoder (no WAT text). The default
+                      `--target wasm` leg (routing: src/cli/build.rs)
+almide-wasm-run       The embedded almide.* host (wasmtime) + the `to_wasi`
+                      transform that makes build artifacts stock-runtime
+almide-spine          Salsa-cached front queries + the parity gates; its s5
+                      driver re-exports `almide::wasm_leg` (root lib), so the
+                      product leg and the gates judge ONE implementation
+almide-corpus         Corpus path resolution (in-tree, or the als/ judge mount
+                      in the greenfield form)
 ```
 
 `almide-interp` is a *sibling consumer* of the linked IR, not part of the
