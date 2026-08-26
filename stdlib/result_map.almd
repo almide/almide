@@ -255,6 +255,29 @@ fn result_unwrap_or_else_h(r: Result[String, String], f: fn(String) -> String) -
   }
 }
 
+// result.filter_h: ok(x) kept iff pred(x) (else err(err_val)); err(e) → err(e
+// shared). Payload-type-INDEPENDENT like to_option_h — the Ok payload is only
+// BORROWED into pred and shared back, never read as a typed value — so ANY
+// heap-Ok instantiation rides this one routine. The E side stays String-pinned
+// by the err_val argument (the #1431 rule: filter's E is argument-pinned, and
+// the router's E guard runs before the heap-Ok arm).
+fn __rmh_filter_ok(x: String, pred: fn(String) -> Bool, err_val: String) -> Result[String, String] = {
+  let keep = pred(x)
+  if keep then ok(x) else err(err_val)
+}
+
+fn result_filter_h(r: Result[String, String], pred: fn(String) -> Bool, err_val: String) -> Result[String, String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag == 0 then {
+    let x: String = prim.load_handle(h + 12)
+    __rmh_filter_ok(x, pred, err_val)
+  } else {
+    let e: String = prim.load_handle(h + 12)
+    __rmh_err_share(e)
+  }
+}
+
 // result.to_option_h: ok(x) → some(x shared), err(_) → none
 fn result_to_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)
@@ -290,4 +313,57 @@ fn result_map_s2h(r: Result[Int, String], f: fn(Int) -> Value) -> Result[Value, 
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
   if len == 0 then __res_map_s2h_ok(x, f) else err(__rcopy_at(x))
+}
+
+// ── the MIXED-tag zip instantiation (#1154 / the #1527 frontier row) ──
+// `result.zip(Result[Float, String], Result[String, String])` — side a is a
+// SCALAR-Ok Result (len-as-tag, f64 bits @12), side b a HEAP-Ok one
+// (cap-as-tag @16, payload handle @12). Each side's tag is read by ITS OWN
+// rule; the FIRST err wins (a, then b); every String crossing into the result
+// is deep-copied so the result owns its message/payload outright.
+fn __rzfs_err_scalar(rh: Int) -> Result[(Float, String), String] = {
+  let s = prim.load_str(rh + 12)
+  let copy = string.repeat(s, 1)
+  err(copy)
+}
+
+fn __rzfs_err_heap(b: Result[String, String]) -> Result[(Float, String), String] = {
+  let e: String = prim.load_handle(prim.handle(b) + 12)
+  let copy = string.repeat(e, 1)
+  err(copy)
+}
+
+fn __rzfs_ok(av: Float, b: Result[String, String]) -> Result[(Float, String), String] = {
+  let s: String = prim.load_handle(prim.handle(b) + 12)
+  let copy = string.repeat(s, 1)
+  let t = (av, copy)
+  ok(t)
+}
+
+fn result_zip_fs(a: Result[Float, String], b: Result[String, String]) -> Result[(Float, String), String] = {
+  let ah = prim.handle(a)
+  if prim.load32(ah + 4) >= 1 then __rzfs_err_scalar(ah)
+  else {
+    let bh = prim.handle(b)
+    if prim.load32(bh + 16) >= 1 then __rzfs_err_heap(b)
+    else __rzfs_ok(prim.ffrombits(prim.load64(ah + 12)), b)
+  }
+}
+
+// `result.unwrap_or_else` over the zip_fs result — the consuming half of the
+// same frontier row (`result.unwrap_or_else(result.zip(y, t), (e) => (f, s))`).
+// Ok shares the pair back out; Err feeds the deep-copied message to the
+// fallback closure, whose (Float, String) result is the value.
+fn __ruoefs_err(e: String, f: fn(String) -> (Float, String)) -> (Float, String) = f(e)
+
+fn result_unwrap_or_else_fs(r: Result[(Float, String), String], f: fn(String) -> (Float, String)) -> (Float, String) = {
+  let h = prim.handle(r)
+  if prim.load32(h + 16) >= 1 then {
+    let e: String = prim.load_handle(h + 12)
+    let copy = string.repeat(e, 1)
+    __ruoefs_err(copy, f)
+  } else {
+    let t: (Float, String) = prim.load_handle(h + 12)
+    t
+  }
 }

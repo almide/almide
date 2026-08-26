@@ -480,15 +480,24 @@ impl Emitter<'_> {
                     let Some(c) = v.cases.iter().find(|c| c.name == cname.as_str()) else {
                         return unsup("record-case-unknown");
                     };
-                    if c.fields.len() != fields.len() {
-                        return unsup("record-case-defaults");
-                    }
                     let mut slots = Vec::new();
                     for (fname, _) in fields {
                         match c.fields.iter().find(|fi| fi.name == fname.as_str()) {
                             Some(fi) => slots.push((fi.ty, fi.offset)),
                             None => return unsup("record-case-unknown-field"),
                         }
+                    }
+                    // Omitted case fields lower their DECL DEFAULTS —
+                    // the record path's exact discipline, variant-shaped.
+                    let mut defaults = Vec::new();
+                    for fi in c.fields.iter() {
+                        if fields.iter().any(|(fname, _)| fi.name == fname.as_str()) {
+                            continue;
+                        }
+                        let Some(d) = &fi.default else {
+                            return unsup("record-case-missing-field");
+                        };
+                        defaults.push((fi.ty, fi.offset, d.clone()));
                     }
                     let (size, tag) = (c.size, c.tag);
                     let hold = self.hold_i32()?;
@@ -499,6 +508,11 @@ impl Emitter<'_> {
                         .local_tee(hold)
                         .i32_const(tag as i32)
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    for (fty, off, d) in defaults {
+                        self.f.instructions().local_get(hold);
+                        self.lower(&d, Some(fty))?;
+                        self.store_ty_slot(fty, off);
+                    }
                     for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                         self.f.instructions().local_get(hold);
                         self.lower(fexpr, Some(fty))?;

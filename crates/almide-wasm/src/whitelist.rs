@@ -106,6 +106,11 @@ pub(crate) const CODEC_ENCODE_VERIFIED: &[&str] = &[
     "__decode_option_int", "__decode_option_float", "__decode_option_bool",
     "__decode_option_string", "__decode_default_int", "__decode_default_float",
     "__decode_default_bool", "__decode_default_string",
+    // The list-default quartet (develop's DDD-arc addition, synced with
+    // the front pin): pure composition of already-admitted fns —
+    // value.field + the native-twinned __is_null + __decode_list_T.
+    "__decode_default_list_int", "__decode_default_list_float",
+    "__decode_default_list_bool", "__decode_default_list_string",
 ];
 
 /// The bytes append/array/cursor/string family (stage-74 audit):

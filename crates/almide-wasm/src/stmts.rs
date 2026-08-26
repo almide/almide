@@ -147,16 +147,24 @@ impl Emitter<'_> {
         if self.region_repair.is_some() {
             return unsup("guard-in-region-arm");
         }
-        if self.in_main {
-            return unsup("guard-in-main");
-        }
-        let Some(want) = self.fn_ret else {
-            return unsup("guard-in-unit-fn");
-        };
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
-        self.lower(else_, Some(want))?;
-        self.f.instructions().return_().end();
+        match self.fn_ret {
+            Some(want) => {
+                self.lower(else_, Some(want))?;
+                self.f.instructions().return_();
+            }
+            // main / Unit fn: the else IS the return — evaluate it in
+            // statement position (a `process.exit` else never returns;
+            // a value else discards into the early Unit return). The
+            // early return skips the RC epilogue: a leak, never a
+            // dangle.
+            None => {
+                self.lower_stmt_expr(else_)?;
+                self.f.instructions().return_();
+            }
+        }
+        self.f.instructions().end();
         Ok(())
     }
 

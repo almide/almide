@@ -238,36 +238,42 @@ fn build_case(
     tag: u32,
     env: Option<&HashMap<Sym, &Ty>>,
 ) -> Option<CaseDef> {
-    let named: Vec<(String, Ty)> = match &c.kind {
+    let named: Vec<(String, Ty, Option<std::rc::Rc<almide_ir::IrExpr>>)> = match &c.kind {
         IrVariantKind::Unit => Vec::new(),
         IrVariantKind::Tuple { fields } => fields
             .iter()
             .enumerate()
-            .map(|(i, t)| (format!("{i}"), t.clone()))
+            .map(|(i, t)| (format!("{i}"), t.clone(), None))
             .collect(),
         IrVariantKind::Record { fields } => fields
             .iter()
-            .map(|f| (f.name.as_str().to_string(), f.ty.clone()))
+            .map(|f| {
+                (
+                    f.name.as_str().to_string(),
+                    f.ty.clone(),
+                    f.default.clone().map(std::rc::Rc::new),
+                )
+            })
             .collect(),
     };
-    let mut tys: Vec<(String, SliceTy)> = Vec::new();
-    for (fname, t) in &named {
+    let mut tys: Vec<(String, SliceTy, Option<std::rc::Rc<almide_ir::IrExpr>>)> = Vec::new();
+    for (fname, t, d) in &named {
         let resolved = match env {
             Some(env) => slice_ty_of(&subst(t, env), table)?,
             None => slice_ty_of(t, table)?,
         };
-        tys.push((fname.clone(), resolved));
+        tys.push((fname.clone(), resolved, d.clone()));
     }
-    let widths: Vec<u32> = tys.iter().map(|(_, t)| t.slot_size()).collect();
+    let widths: Vec<u32> = tys.iter().map(|(_, t, _)| t.slot_size()).collect();
     let (offsets, fsize) = almide_layout::pack_fields(&widths);
     let fields = tys
         .into_iter()
         .zip(offsets)
-        .map(|((name, ty), off)| FieldInfo {
+        .map(|((name, ty, default), off)| FieldInfo {
             name,
             ty,
             offset: almide_layout::SUM_FIELD + off,
-            default: None,
+            default,
         })
         .collect();
     Some(CaseDef {
