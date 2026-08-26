@@ -107,7 +107,6 @@ net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
 net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
 net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared capability not in this brick
-option.to_result :: COMPILER_FRONTIER :: emitted wasm fails validation (i32/i64 type mismatch) with a var-bound generic err arg — the #1431 bare-err class; check accepts, native builds
 process.env :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.env needs a declared capability not in this brick
 process.exec :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec needs a declared capability not in this brick
 process.exec_in :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_in needs a declared capability not in this brick
@@ -121,7 +120,6 @@ process.pid :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scala
 process.sleep :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.sleep needs a declared capability not in this brick
 process.spawn :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.spawn needs a declared capability not in this brick
 process.stdin_lines :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.stdin_lines needs a declared capability not in this brick
-result.filter :: COMPILER_FRONTIER :: emitted wasm fails validation (i32/i64 type mismatch) — the #1431 bare-err class; check accepts, native builds
 result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
 result.flatten :: UNPROBEABLE :: no candidate shape builds natively
 result.is_err :: UNPROBEABLE :: no candidate shape builds natively
