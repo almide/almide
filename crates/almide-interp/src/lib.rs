@@ -115,6 +115,32 @@ pub struct Interpreter<'a> {
     /// threads, and a shared arena would let one fixture observe another's
     /// blocks.
     pub(crate) heap: heap::Heap,
+    /// Names that resolved to POOL bodies (stdlib self-host, not shadowed by
+    /// a program fn). The pool tier is address-uniform (#1226 slice 2): a
+    /// heap value inside it IS its block address, and only the boundary back
+    /// into fixture-tier code rebuilds addresses into `Value`s —
+    /// `pool_depth` tracks that boundary. Syncing pool-INTERNAL calls was a
+    /// proven wrong vote in both directions: an eager rebuild snapshots a
+    /// fresh-alloc-still-to-be-filled (`set_union`'s `__set_alloc` came back
+    /// as eight zeros), and no rebuild at all leaks addresses into native
+    /// ops (`regex_split`'s pieces printed as integers).
+    pub(crate) pool_fns: HashSet<Sym>,
+    pub(crate) pool_depth: u32,
+    /// The STATIC type of `prim.handle`'s argument at the current call site,
+    /// stashed by `eval_module_call` and consumed by `heap_prim_handle`. This
+    /// is what disambiguates a byte block from a slot block: the VALUE
+    /// `[1,2,3]` is one interp `List` whether the source typed it `Bytes` or
+    /// `List[Int]`, but the two spell different memory — 3 payload bytes vs
+    /// 3 i64 slots — and a body's `load64` on the wrong one reads garbage
+    /// (list_chunk_windows printed 2^56 for 3).
+    pub(crate) handle_arg_ty: Option<Ty>,
+    /// Field-declaration lists (decl order + default exprs) for record types
+    /// and record-variant ctors, keyed by type/ctor name — the interp-side
+    /// twin of codegen's `default_fields` pass: a record literal that OMITS a
+    /// defaulted field (`maybe: Bool? = none`) must still construct it, or
+    /// every later `.maybe` access aborts where both backends read the
+    /// default (codec_empty_and_bool, surfaced by #1226 slice 2).
+    pub(crate) record_decls: HashMap<Sym, &'a [almide_ir::IrFieldDecl]>,
     /// Named record types keyed by their SORTED field-name set, mapping to
     /// `(type name, declaration-order field names)`. Lets the repr recover the
     /// nominal name + declaration order for a record LITERAL whose inferred type
@@ -153,6 +179,9 @@ pub struct Interpreter<'a> {
     /// backends) — and the renderers' budget arithmetic (min-cap entry, lazy
     /// verdict, streaming exit). Counts DOWN from i64::MAX like both legs.
     pub(crate) det_fuel: Cell<i64>,
+    /// Entry units of the OPEN region, -1 when none is open — the C-320 reap
+    /// sentinel: a cut leaves it armed, and the exhausted read performs the
+    /// missed exit bookkeeping before answering (see `budget_prim_rt`).
     pub(crate) det_entry: Cell<i64>,
     pub(crate) det_verdict: Cell<i64>,
     pub(crate) det_spend: Cell<i64>,
@@ -166,7 +195,9 @@ pub struct Interpreter<'a> {
     pub(crate) det_region_depth: Cell<u32>,
     /// C-320: saved-fuel stack, pushed by budget_enter, popped by
     /// budget_exit — the repair pops what a skipped exit left behind.
-    pub(crate) det_saved_stack: std::cell::RefCell<Vec<i64>>,
+    /// The open region's saved outer fuel — the reap's restore source (the
+    /// exit prim's `saved` operand dies with the cut frame).
+    pub(crate) det_saved: Cell<i64>,
     /// The user program's own fn names — captured BEFORE the stdlib pool is
     /// layered into `fns`, so the meter can tell the two apart at call time.
     pub(crate) user_fn_names: HashSet<Sym>,
@@ -331,8 +362,12 @@ impl<'a> Interpreter<'a> {
         // fn can never be shadowed by a pool body; the pool's own intra-source
         // helper calls (`__sext`) resolve through this same table, and `__`
         // names cannot collide with user code (#868 rejects the prefix).
+        let mut pool_fns: HashSet<Sym> = HashSet::new();
         for f in stdlib_pool::pool().fns.values() {
-            fns.entry(f.name).or_insert(f);
+            if let std::collections::hash_map::Entry::Vacant(e) = fns.entry(f.name) {
+                e.insert(f);
+                pool_fns.insert(f.name);
+            }
         }
         let mut module_fns = HashMap::new();
         for m in &program.modules {
@@ -366,6 +401,26 @@ impl<'a> Interpreter<'a> {
         }
         let named_records = index_named_records(program);
         let variant_ctors = index_variant_ctors(program);
+        let mut record_decls: HashMap<Sym, &'a [almide_ir::IrFieldDecl]> = HashMap::new();
+        for td in program
+            .type_decls
+            .iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        {
+            match &td.kind {
+                almide_ir::IrTypeDeclKind::Record { fields } => {
+                    record_decls.entry(td.name).or_insert(fields);
+                }
+                almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                    for c in cases {
+                        if let almide_ir::IrVariantKind::Record { fields } = &c.kind {
+                            record_decls.entry(c.name).or_insert(fields);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         Interpreter {
             program,
@@ -374,6 +429,10 @@ impl<'a> Interpreter<'a> {
             heap: heap::Heap::new(),
             fns,
             module_fns,
+            pool_fns,
+            pool_depth: 0,
+            handle_arg_ty: None,
+            record_decls,
             named_records,
             variant_ctors,
             globals: env::Scope::root(),
@@ -383,12 +442,12 @@ impl<'a> Interpreter<'a> {
             fuel: Cell::new(DEFAULT_FUEL),
             depth: Cell::new(0),
             det_fuel: Cell::new(i64::MAX),
-            det_entry: Cell::new(0),
+            det_entry: Cell::new(-1),
             det_verdict: Cell::new(0),
             det_spend: Cell::new(0),
             det_in_user: Cell::new(false),
             det_region_depth: Cell::new(0),
-            det_saved_stack: std::cell::RefCell::new(Vec::new()),
+            det_saved: Cell::new(0),
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
             t_deadline: Cell::new(i64::MAX),
@@ -836,7 +895,6 @@ impl<'a> Interpreter<'a> {
         // C-320: the meter's region depth at call entry — if the callee
         // leaves it HIGHER, a det cut skipped a region's budget_exit and
         // the exit bookkeeping runs here (exhausted ⇒ Err, never stale).
-        let region_depth_was = self.det_region_depth.get();
 
 
         // First hop's frame — what mut-param copy-out reads. Meaningful only
@@ -854,11 +912,25 @@ impl<'a> Interpreter<'a> {
             if first_frame.is_none() {
                 first_frame = Some(frame.clone());
             }
+            // #1226: a TAIL TRANSFER into a POOL body must carry the
+            // address-uniform tier with it — without this, a pool callee
+            // reached through the trampoline ran at the caller's depth, its
+            // internal module calls were boundary-synced mid-flight (the
+            // set_union eager-snapshot class), and its own return skipped
+            // the read-back entirely (codec decode handed fixture code a raw
+            // block address; `list.len on non-list`).
+            let hop_pool = matches!(&callee, TailCallee::Fn(f) if self.pool_fns.contains(&f.name));
+            if hop_pool {
+                self.pool_depth += 1;
+            }
             let outcome = match (&fn_body, &clo_body) {
                 (Some(b), _) => self.eval_body_spine(b, &frame),
                 (_, Some(c)) => self.eval_body_spine(&c.body, &frame),
                 _ => unreachable!("one body source is always set"),
             };
+            if hop_pool {
+                self.pool_depth -= 1;
+            }
             match outcome {
                 SpineOutcome::Done(flow) => break 'tramp flow,
                 SpineOutcome::Transfer { next, next_args, try_marker } => {
@@ -874,17 +946,30 @@ impl<'a> Interpreter<'a> {
             }
         };
 
+        // #1226 read-back for the FINAL callee when the spine ended inside a
+        // pool fn at the tier boundary (tail transfers bypass the dispatch
+        // tails where the sync normally lives). Idempotent with the outer
+        // dispatch sync: a rebuilt value is no longer a block address.
+        let result = match &callee {
+            TailCallee::Fn(f)
+                if self.pool_depth == 0 && self.pool_fns.contains(&f.name) =>
+            {
+                // A body ending in an early exit hands back `Flow::Return` —
+                // sync the carried value the same way and keep the flow kind
+                // (the fold below is what resolves Return at the boundary).
+                match result {
+                    Flow::Value(_) => self.sync_block_return(f, result),
+                    Flow::Return(v) => match self.sync_block_return(f, Flow::Value(v)) {
+                        Flow::Value(v2) => Flow::Return(v2),
+                        other => other,
+                    },
+                    other => other,
+                }
+            }
+            _ => result,
+        };
+        let result = normalize_option_fn_return(&callee, result);
         let result = self.fold_pending_try(result, &pending);
-        while self.det_region_depth.get() > region_depth_was {
-            // budget_exit verbatim (C-320 repair): a det cut's early
-            // return skipped the region's own exit inside this frame.
-            let saved = self.det_saved_stack.borrow_mut().pop().unwrap_or(i64::MAX);
-            self.det_verdict.set(i64::from(self.det_fuel.get() < 0));
-            let consumed = self.det_entry.get() - self.det_fuel.get();
-            self.det_spend.set(consumed);
-            self.det_fuel.set(saved - consumed);
-            self.det_region_depth.set(self.det_region_depth.get() - 1);
-        }
         self.det_in_user.set(det_was_user);
         self.depth.set(self.depth.get() - 1);
         (result, first_frame.unwrap_or_else(|| base.child()))
@@ -948,7 +1033,19 @@ impl<'a> Interpreter<'a> {
     /// O(1) evaluator depth per chain, matching the backends' `return_call`.
     pub(crate) fn apply_closure(&mut self, clo: &Rc<Closure>, args: Vec<Value>) -> Flow {
         let root = self.root_scope();
-        self.run_callable(TailCallee::Clo(Rc::clone(clo)), args, &root).0
+        let flow = self.run_callable(TailCallee::Clo(Rc::clone(clo)), args, &root).0;
+        // #1226 return sync at the CLOSURE boundary too: an FnRef of a pool
+        // fn (`result.map(r, value.as_array)`) forwards through a closure,
+        // and without the read-back its block address rode into native list
+        // ops as a raw Int (codec decode aborted `list.len on non-list`).
+        // Same depth gate as every other boundary: pool-internal closures
+        // stay address-uniform.
+        if self.pool_depth == 0 {
+            if let Some(ty) = &clo.ret_ty {
+                return self.sync_flow_typed(flow, &ty.clone());
+            }
+        }
+        flow
     }
 }
 
@@ -990,6 +1087,30 @@ fn bind_hop_frame<'a>(
 pub(crate) enum TailCallee<'a> {
     Fn(&'a IrFunction),
     Clo(Rc<Closure>),
+}
+
+/// C-211 (#1067): `!` on a None inside a PURE Option-returning fn propagates
+/// as `none`, not as the Result-fn `err("none")`. `try_unwrap_value` cannot
+/// see the enclosing fn, so it always manufactures the Result-fn shape and
+/// this boundary — where the declared return type IS known — translates it.
+/// Exact by construction: in a pure Option fn the checker rejects `err(..)`,
+/// so a returned `Result(Err("none"))` has no other source. Effect fns keep
+/// the Err (their fail channel IS the effect Result, C-216), and closures are
+/// left as-is (an effect lambda is indistinguishable from a pure one here).
+fn normalize_option_fn_return(callee: &TailCallee<'_>, flow: Flow) -> Flow {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    let TailCallee::Fn(f) = callee else { return flow };
+    if f.is_effect || !matches!(&f.ret_ty, Ty::Applied(C::Option, a) if a.len() == 1) {
+        return flow;
+    }
+    match flow {
+        Flow::Return(Value::Result(Err(e)))
+            if matches!(&*e, Value::Str(s) if s.as_str() == "none") =>
+        {
+            Flow::Return(Value::Option(None))
+        }
+        other => other,
+    }
 }
 
 /// One hop's verdict from the tail-spine walker.

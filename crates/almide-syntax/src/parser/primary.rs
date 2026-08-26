@@ -266,11 +266,17 @@ impl Parser {
         }
         let open = self.current().clone();
         self.advance();
+        // A parenthesized/tuple literal may span lines (#1570) — the same
+        // delimited-context rule every other bracketed literal (list, record,
+        // map) already follows: newlines are insignificant between `(` and
+        // `)`, around elements and after commas.
+        self.skip_newlines();
         if self.check(TokenType::RParen) {
             self.advance();
             return Ok(Expr::new(self.next_id(), span, ExprKind::Unit));
         }
         let first = self.parse_expr()?;
+        self.skip_newlines();
         // Type ascription inside parens: `(expr: Type)` — e.g. `([]: List[String])`.
         // The bare call-arg form `[]: T` is accepted as a call argument, but a
         // record-field value (`{ tags: ([]: List[String]) }`) or a `let`
@@ -294,8 +300,10 @@ impl Parser {
             let mut elements = vec![first];
             while self.check(TokenType::Comma) {
                 self.advance();
+                self.skip_newlines();
                 if self.check(TokenType::RParen) { break; }
                 elements.push(self.parse_expr()?);
+                self.skip_newlines();
             }
             self.expect_closing(TokenType::RParen, open.line, open.col, "tuple")?;
             return Ok(Expr::new(self.next_id(), span, ExprKind::Tuple { elements }));

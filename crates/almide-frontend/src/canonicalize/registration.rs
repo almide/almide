@@ -288,13 +288,20 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let sb = collect_structural_bounds(env, generics);
     let pb = collect_protocol_bounds(generics);
     let const_params = collect_const_params(generics);
-    for gn in &gnames {
-        if let Some(scalar_ty) = const_params.get(gn) {
-            env.types.insert(*gn, Ty::ConstParam { name: *gn, ty: Box::new(scalar_ty.clone()) });
+    // A generic letter SHADOWS an existing type binding for the duration of
+    // this one signature — it must never destroy it. The remove-without-
+    // restore form deleted a user type's bare binding whenever any later-
+    // registered fn (a stdlib module's, another user module's) used that
+    // letter as a generic, making the stdlib's generic letters an invisible
+    // reserved set (#1574).
+    let shadowed: Vec<(Sym, Option<Ty>)> = gnames.iter().map(|gn| {
+        let prev = if let Some(scalar_ty) = const_params.get(gn) {
+            env.types.insert(*gn, Ty::ConstParam { name: *gn, ty: Box::new(scalar_ty.clone()) })
         } else {
-            env.types.insert(*gn, Ty::TypeVar(*gn));
-        }
-    }
+            env.types.insert(*gn, Ty::TypeVar(*gn))
+        };
+        (*gn, prev)
+    }).collect();
     // A bare `self` first parameter is sugar for `self: Self` (the parser always types it `TypeExpr::Simple { name: "Self" }`). Inside a `protocol { ... }` declaration `Self` is a legitimate unresolved placeholder, but on a real convention method (`fn Type.method(self, ...)`) it must resolve to the enclosing type, the same way `Self` in a protocol's own signature gets substituted when checked against one.
     let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
     let tcm = type_cur_mod(env, prefix);
@@ -313,7 +320,12 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         .map(|(i, _)| i)
         .collect();
     let ret = resolve_in(env, return_type, tcm);
-    for gn in &gnames { env.types.remove(gn); }
+    for (gn, prev) in shadowed.into_iter().rev() {
+        match prev {
+            Some(t) => { env.types.insert(gn, t); }
+            None => { env.types.remove(&gn); }
+        }
+    }
     let is_effect = effect.unwrap_or(false);
     let key = prefixed_key(prefix, name);
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
@@ -413,10 +425,14 @@ pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<V
         .map(|gs| gs.iter().map(|g| sym(&g.name)).collect())
         .unwrap_or_default();
 
-    // Temporarily register `Self` as a TypeVar so resolve_type_expr handles it
-    env.types.insert(sym("Self"), Ty::TypeVar(sym("Self")));
+    // Temporarily register `Self` as a TypeVar so resolve_type_expr handles
+    // it. Shadow-and-restore, not insert-and-remove: a protocol's generic
+    // letter must not destroy a coexisting type binding of the same name
+    // (#1574 — same rule as register_fn_sig).
+    let mut shadowed: Vec<(Sym, Option<Ty>)> = Vec::new();
+    shadowed.push((sym("Self"), env.types.insert(sym("Self"), Ty::TypeVar(sym("Self")))));
     for gn in &gnames {
-        env.types.insert(*gn, Ty::TypeVar(*gn));
+        shadowed.push((*gn, env.types.insert(*gn, Ty::TypeVar(*gn))));
     }
 
     let method_sigs: Vec<ProtocolMethodSig> = methods.iter().map(|m| {
@@ -432,9 +448,11 @@ pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<V
         }
     }).collect();
 
-    env.types.remove(&sym("Self"));
-    for gn in &gnames {
-        env.types.remove(gn);
+    for (gn, prev) in shadowed.into_iter().rev() {
+        match prev {
+            Some(t) => { env.types.insert(gn, t); }
+            None => { env.types.remove(&gn); }
+        }
     }
 
     env.protocols.insert(sym(name), ProtocolDef {
@@ -460,9 +478,17 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         validate_protocols(env, diagnostics, derives, name);
     }
     let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
-    for gn in &gnames { env.types.insert(*gn, Ty::TypeVar(*gn)); }
+    // Shadow-and-restore (#1574): this type's generic letters must not
+    // destroy same-named type bindings that already exist.
+    let shadowed: Vec<(Sym, Option<Ty>)> =
+        gnames.iter().map(|gn| (*gn, env.types.insert(*gn, Ty::TypeVar(*gn)))).collect();
     let mut resolved = resolve(env, ty);
-    for gn in &gnames { env.types.remove(gn); }
+    for (gn, prev) in shadowed.into_iter().rev() {
+        match prev {
+            Some(t) => { env.types.insert(gn, t); }
+            None => { env.types.remove(&gn); }
+        }
+    }
 
     resolved = register_type_decl_opaque_alias(env, name, resolved, &gnames, prefix, visibility);
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);

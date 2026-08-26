@@ -1,9 +1,9 @@
 run	exit=0 sha256=ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d	cells/c2_mut_param_whole_assign.almd
 run	exit=0 sha256=5966ca504e458633ac38eef7aca635703e8eaa38f24aff34024e0d2929f460c4	cells/c3_mut_param_protocol_bound.almd
-wall	call:Kind.repr	cells/c4_derived_variant_repr.almd
+run	exit=0 sha256=0ec53894d03240772964851c34600883ca3ffe327ed1c5d5593ff5940bde37c1	cells/c4_derived_variant_repr.almd
 run	exit=0 sha256=449ac7ff4aa9c07565d08954ab3179c64336f21efde858070ed40794d77337fe	cells/c6_borrowed_param_field_store.almd
-reject	parse errors: 2	cells/s1_protocol_fallible_return.almd
-reject	parse errors: 2	cells/s2_multiline_tuple.almd
+wall	no main function	cells/s1_protocol_fallible_return.almd
+wall	no main function	cells/s2_multiline_tuple.almd
 reject	parse errors: 1	cells/s4_bare_mut_self.almd
 reject	parse errors: 1	cells/s5_match_self.almd
 reject	parse errors: 2	cells/s6_generic_protocol.almd
@@ -22,11 +22,11 @@ run	exit=0 sha256=2481bbebd4ee54d5015271042fb417d9208ca760bd8c35a12760ed8290e08a
 run	exit=0 sha256=140bedbf9c3f6d56a9846d2ba7088798683f4da0c248231336e6a05679e4fdfe	cells/x11_unwrap_or_option_payload.almd
 run	exit=0 sha256=594e519ae499312b29433b7dd8a97ff068defcba9755b6d5d00e84c524d67b06	cells/x12_bang_is_the_field.almd
 run	exit=0 sha256=cb494f97fd55024f601c3308e3c314b74b927917a72eece40b86f7f1ad785503	cells/x13_bang_nested_in_field.almd
-wall	call-fn:go__Tally:mut-param	cells/x16_effect_mut_generic.almd
+run	exit=0 sha256=6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b	cells/x16_effect_mut_generic.almd
 wall	call:Box.twice	cells/c1_cross_module_method
-wall	call:app.doubled	cells/c5_generic_to_generic
-reject	type errors: 23	cells/c7_generic_letter_type_name
-reject	type errors: 1	cells/c8_generic_applied_at_letter
+run	exit=0 sha256=73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049	cells/c5_generic_to_generic
+wall	call:T.read	cells/c7_generic_letter_type_name
+wall	call:Q.read	cells/c8_generic_applied_at_letter
 reject	parse errors: 2	cells/s3_module_qualified_protocol
 wall	call:MemStore.count	cells/x14_layered_ports
 run	exit=0 sha256=21033a6a6014440d5c1fb029758d979be090b0a0c3935fd399899dccf73be9a4	cells/x15_directory_namespace

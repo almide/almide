@@ -875,6 +875,31 @@ impl Checker {
                 }
             }
         }
+        // A top-level `let` bound to a LAMBDA is rejected with the fn spelling
+        // as the fix (#1540): codegen placed the closure in a non-Sync
+        // `Rc<dyn Fn>` static (rustc E0277) AND the binding was uncallable
+        // (call position resolved E002) — accepted-but-unusable in every
+        // spelling, so the honest answer is a check-time diagnostic. Inside a
+        // fn/test body both uses work and stay untouched.
+        for decl in &program.decls {
+            if let ast::Decl::TopLet { name, value, span, .. } = decl {
+                if matches!(&value.kind, ast::ExprKind::Lambda { .. }) {
+                    let mut d = err(
+                        format!("top-level 'let {}' cannot be bound to a function value", name),
+                        format!(
+                            "a module-level closure has no home in the compiled output and the                              binding is not callable — declare it as a function instead:                              `fn {}(…) = …` (a `let`-bound lambda works inside a fn or test body)",
+                            name
+                        ),
+                        format!("let {} = (…) => …", name),
+                    ).with_code("E061");
+                    if let Some(sp) = span {
+                        d.line = Some(sp.line);
+                        d.col = Some(sp.col);
+                    }
+                    self.diagnostics.push(d);
+                }
+            }
+        }
         // ADR-0006 D1 (#1108): record every fn DECLARED `-> T!` before
         // resolution erases the marker, so a named callback argument's
         // fallibility bit is known at HOF call sites.

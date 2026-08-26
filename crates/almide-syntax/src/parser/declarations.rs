@@ -496,8 +496,12 @@ impl Parser {
         self.expect(TokenType::LParen)?;
         let params = self.parse_param_list()?;
         self.expect_closing(TokenType::RParen, open_tm.line, open_tm.col, "protocol method parameters")?;
-        self.expect(TokenType::Arrow)?;
-        let return_type = self.parse_type_expr()?;
+        // The SAME return-type parse as a free fn (#1569): a protocol method
+        // is a fn declaration, so `-> R!` / `-> R!E` carry the fallibility
+        // marker exactly as they do outside a protocol (the checker already
+        // accepts a declaration/impl spelling mismatch, so only the parse was
+        // missing).
+        let return_type = self.parse_fn_return_type()?;
         Ok(ProtocolMethod { name, params, return_type, effect })
     }
 

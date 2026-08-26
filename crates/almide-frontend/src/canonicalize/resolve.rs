@@ -32,6 +32,16 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
 ///   also falls through to bare).
 /// - Stdlib / local / unknown names → None (stay bare).
 pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<Sym> {
+    // A name the CURRENT resolution scope binds as a type variable (a
+    // generic letter shadowed in by an overlay or registration scope) is a
+    // bound variable, never a reference to a module's nominal type —
+    // `fn go[Q](c: Q)` must not resolve `Q` to an imported `infra.Q`
+    // (#1577). Without this the qualified canonicalization outranked the
+    // TypeVar binding, mono saw a nominal param with no type var anywhere,
+    // and the call site dangled unspecialized on both targets.
+    if matches!(types.get(&sym(name)), Some(Ty::TypeVar(_) | Ty::ConstParam { .. })) {
+        return None;
+    }
     canonical_user_type_sym_own_module(name, types, cur_mod)
         .or_else(|| canonical_user_type_sym_qualified(name, types))
         .or_else(|| canonical_user_type_sym_sibling(name, types, cur_mod))
@@ -142,12 +152,19 @@ pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym
         },
         ast::TypeExpr::Generic { name, args } => {
             // ADR-0002 Phase 1 (#1103): the pseudo-generic `!` is the
-            // pure-fallible return marker — `-> T!` ≡ `-> Result[T, String]`
-            // (E is String by decision D2; custom E keeps the explicit
-            // Result[T, E] spelling).
+            // pure-fallible return marker — `-> T!` ≡ `-> Result[T, String]`.
             if name.as_str() == "!" && args.len() == 1 {
                 let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
                 return Ty::result(inner, Ty::String);
+            }
+            // ADR-0012 D2 (#1193): the 2-arg marker carries a TYPED error —
+            // `T!E` ≡ `Result[T, E]`. The 1-arg default above is untouched,
+            // so `T!` keeps meaning `T!String` and every existing program is
+            // unaffected.
+            if name.as_str() == "!" && args.len() == 2 {
+                let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
+                let err = resolve_type_expr_in(&args[1], known_types, cur_mod);
+                return Ty::result(inner, err);
             }
             // ADR-0010: the pseudo-generic `?` is the Option marker —
             // `T?` ≡ `Option[T]` in EVERY type position (unlike `!`, which

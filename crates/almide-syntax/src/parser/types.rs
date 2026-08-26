@@ -68,13 +68,59 @@ impl Parser {
     /// fallibility marker — `(A) -> B!` ≡ `(A) -> Result[B, String]`. Same
     /// pseudo-generic carrier as the declaration-position marker; `?` binds
     /// first (`-> B?!` = Result[Option[B], String]), matching the decl rule.
-    fn wrap_fallible_ret_suffix(&mut self, ret: TypeExpr) -> TypeExpr {
+    ///
+    /// ADR-0012 D2 (#1193): the marker may carry a TYPED error — `-> B!E` ≡
+    /// `Result[B, E]`, spelled as the 2-arg pseudo-generic. Bare `!` stays
+    /// the 1-arg form (the resolver's `!String` default), so every existing
+    /// spelling keeps its meaning. Same-line only, one token of lookahead.
+    fn wrap_fallible_ret_suffix(&mut self, ret: TypeExpr) -> Result<TypeExpr, String> {
         if self.check(TokenType::Bang) && !self.newline_before_current() {
             self.advance();
-            TypeExpr::Generic { name: sym("!"), args: vec![ret] }
+            if self.marker_error_follows() {
+                let e = self.parse_marker_error_type()?;
+                return Ok(TypeExpr::Generic { name: sym("!"), args: vec![ret, e] });
+            }
+            Ok(TypeExpr::Generic { name: sym("!"), args: vec![ret] })
         } else {
-            ret
+            Ok(ret)
         }
+    }
+
+    /// Whether a `T!E` typed-error atom starts at the CURRENT token (just
+    /// past the consumed `!`): a type name, or a module-qualified one, on
+    /// the SAME line. Everything that legally followed a bare `!` before
+    /// ADR-0012 (`=`, `{`, `,`, `)`, newline) fails this test, which is what
+    /// keeps the grammar unambiguous with one token of lookahead.
+    pub(crate) fn marker_error_follows(&self) -> bool {
+        !self.newline_before_current()
+            && (self.check(TokenType::TypeName)
+                || (self.check(TokenType::Ident) && self.peek_dot_type_name()))
+    }
+
+    /// ADR-0012 D2 (#1193): the E of a `-> T!E` marker — a (possibly
+    /// module-qualified) NAMED type with optional generic args, nothing
+    /// else. Deliberately narrower than [`Self::parse_type_expr`]: no `?`/`!`
+    /// suffix on E (the ADR's grammar rule), no inline variants, no
+    /// fn/tuple/record forms — an error domain is a named type.
+    pub(crate) fn parse_marker_error_type(&mut self) -> Result<TypeExpr, String> {
+        let name = if self.check(TokenType::Ident) && self.peek_dot_type_name() {
+            let mut path = self.advance_and_get_sym().to_string();
+            self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
+            while self.check(TokenType::Ident) {
+                path.push('.');
+                path.push_str(&self.advance_and_get_sym());
+                self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
+            }
+            let type_name = self.expect_type_name()?;
+            sym(&format!("{}.{}", path, type_name))
+        } else {
+            self.expect_type_name()?
+        };
+        if self.check(TokenType::LBracket) {
+            let args = self.parse_type_args()?;
+            return Ok(TypeExpr::Generic { name, args });
+        }
+        Ok(TypeExpr::Simple { name })
     }
 
     /// ADR-0010: `T?` marks Option — `?` binds to the just-parsed type ATOM
@@ -131,7 +177,7 @@ impl Parser {
             if self.check(TokenType::Arrow) {
                 self.advance();
                 let ret = self.parse_type_expr()?;
-                let ret = self.wrap_fallible_ret_suffix(ret);
+                let ret = self.wrap_fallible_ret_suffix(ret)?;
                 return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret), is_effect: false });
             }
             return Ok(TypeExpr::Simple { name: sym("Unit") });
@@ -143,7 +189,7 @@ impl Parser {
             if self.check(TokenType::Arrow) {
                 self.advance();
                 let ret = self.parse_type_expr()?;
-                let ret = self.wrap_fallible_ret_suffix(ret);
+                let ret = self.wrap_fallible_ret_suffix(ret)?;
                 return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret), is_effect: false });
             }
             // ADR-0010: a parenthesized type is an atom, so `?` may follow —
@@ -161,7 +207,7 @@ impl Parser {
         if self.check(TokenType::Arrow) {
             self.advance();
             let ret = self.parse_type_expr()?;
-            let ret = self.wrap_fallible_ret_suffix(ret);
+            let ret = self.wrap_fallible_ret_suffix(ret)?;
             return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret), is_effect: false });
         }
         // ADR-0010: a tuple is a parenthesized atom — `(String, Int)?`.
@@ -360,7 +406,7 @@ impl Parser {
         self.expect(TokenType::RParen)?;
         self.expect(TokenType::Arrow)?;
         let ret = self.parse_type_expr()?;
-        let ret = self.wrap_fallible_ret_suffix(ret);
+        let ret = self.wrap_fallible_ret_suffix(ret)?;
         Ok(TypeExpr::Fn { params, ret: Box::new(ret), is_effect: false })
     }
     pub(crate) fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, String> {

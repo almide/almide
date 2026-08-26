@@ -85,6 +85,13 @@ pub(super) fn specialize_function(
         doc: None,
         blank_lines_before: 0,
         def_id: None,
+        // The `mut` param set travels with the specialization — params are
+        // positional and the instance keeps the generic's order, so the
+        // indices stay valid. Dropping it detached the instance from the
+        // C-132 move-mode rewrite: `bump_twice__Tally(t)`'s call site was
+        // never given the write-back, so the caller's binding silently kept
+        // its pre-call value on the v1 leg (native's walker has its own
+        // mut-param handling and masked it — the #1551 wasm follow-through).
         mutated_params: orig.mutated_params.clone(), module_origin: None,
     }
 }

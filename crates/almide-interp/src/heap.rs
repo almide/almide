@@ -40,10 +40,20 @@
 //! [rc: i32 @0][len: i32 @4][cap: i32 @8][bytes @12 ..]
 //! ```
 //!
-//! Only that one shape is modeled here. `prim.alloc_value` / `alloc_map` /
-//! `alloc_list*` / `alloc_set` carry TAGGED sub-structure rather than a flat
-//! payload; they are a different problem and deliberately still abstain, so
-//! this slice stays a closed family the voting gate can arbitrate.
+//! Slice 2 (#1226) adds the SLOT block the whole `alloc_list*` / `alloc_set*`
+//! / `alloc_map*` / `alloc_value` family shares physically:
+//!
+//! ```text
+//! [rc: i32 @0][len: i32 @4][cap: i32 @8][slots @12 .. : 8 bytes each]
+//! ```
+//!
+//! `cap` counts SLOTS (the physical payload is `8 * cap` bytes); what `len`
+//! MEANS varies by use (element count, entry count, or `alloc_value`'s
+//! variant tag, patched in via `store32`) and is decided by the DECLARED type
+//! at the return sync, never guessed from the block itself. A slot holds a
+//! raw i64: a scalar, f64 bits, or a CHILD block's address — the MIR is
+//! i64-uniform, so inside the pool tier a heap value IS its address and only
+//! the typed return boundary rebuilds it into a `Value`.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -54,16 +64,23 @@ use std::rc::Rc;
 // is henceforth a compile error, not a stale comment.
 pub(crate) const PAYLOAD: u32 = almide_layout::PAYLOAD;
 /// Offset of the `len` field.
-const LEN_OFF: u32 = almide_layout::LEN.offset;
+// develop widened the visibility (its new readers live in sibling
+// modules); the VALUE stays layout-DSL single-sourced.
+pub(crate) const LEN_OFF: u32 = almide_layout::LEN.offset;
 /// Offset of the `cap` field.
 const CAP_OFF: u32 = almide_layout::CAP.offset;
 
-/// What a block's payload bytes mean, so the return sync can rebuild the right
-/// `Value`. Only the flat-payload kinds are modeled (see the module note).
+/// What a block's payload bytes mean, so a read-back cannot misinterpret one
+/// family's bytes as another's. `Slots` covers the whole i64-slot family
+/// (`alloc_list*`, `alloc_set*`, `alloc_map*`, `alloc_value`): their physical
+/// shape is identical and the DECLARED type at the sync point decides how the
+/// slots are read, so a finer split here would claim knowledge the block does
+/// not carry.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum BlockKind {
     Str,
     Bytes,
+    Slots,
 }
 
 #[derive(Default)]
@@ -127,6 +144,78 @@ impl Heap {
     /// cannot be recycled by a later allocation.
     pub(crate) fn keep<T: std::any::Any>(&mut self, rc: Rc<T>) {
         self.keepalive.push(rc);
+    }
+
+    /// Allocate a zeroed SLOT block with `n` i64 slots (`len` = `cap` = `n`,
+    /// payload `8 * n` bytes), returning its base. The `alloc_list*` /
+    /// `alloc_set*` / `alloc_map*` / `alloc_value` floor — builders patch the
+    /// `len` field afterwards via `store32` exactly as they do on the backends.
+    pub(crate) fn alloc_slots(&mut self, n: u32) -> u32 {
+        let base = self.mem.len() as u32;
+        self.mem.resize(self.mem.len() + PAYLOAD as usize + 8 * n as usize, 0);
+        self.put_u32(base, 1); // rc
+        self.put_u32(base + LEN_OFF, n);
+        self.put_u32(base + CAP_OFF, n);
+        self.kinds.insert(base, BlockKind::Slots);
+        base
+    }
+
+    /// Copy `slots` into a fresh slot block with an explicit `len` field
+    /// (SLOT count, ENTRY count, or tag — the caller's layout decides) and
+    /// bind it to `key`, so the same container answers the same handle.
+    pub(crate) fn bind_slots(&mut self, key: usize, slots: &[i64], len_field: u32) -> u32 {
+        if let Some(&a) = self.bound.get(&key) {
+            return a;
+        }
+        let base = self.alloc_slots(slots.len() as u32);
+        self.put_u32(base + LEN_OFF, len_field);
+        for (i, s) in slots.iter().enumerate() {
+            let a = (base + PAYLOAD) as usize + 8 * i;
+            self.mem[a..a + 8].copy_from_slice(&s.to_le_bytes());
+        }
+        self.bound.insert(key, base);
+        base
+    }
+
+    /// The kind of the block at `addr` — `None` when `addr` is not a base this
+    /// heap handed out.
+    pub(crate) fn kind(&self, addr: u32) -> Option<BlockKind> {
+        self.kinds.get(&addr).copied()
+    }
+
+    /// Bind an EXISTING block to `key` without copying — the aliasing side of
+    /// `load_str`/`load_handle`: the `Value` rebuilt from a child block is a
+    /// borrow, so a later `prim.handle` on it must answer the child's OWN
+    /// address, not a fresh copy.
+    pub(crate) fn adopt(&mut self, key: usize, addr: u32) {
+        self.bound.entry(key).or_insert(addr);
+    }
+
+    /// The `cap` field of the block at `addr` — for a dynamic-`Value` block
+    /// this is where value_core keeps the ELEMENT count (tag 5) / SLOT count
+    /// (tag 6), with the tag itself in the `len` field.
+    pub(crate) fn cap_field(&self, addr: u32) -> Option<u32> {
+        self.kinds.contains_key(&addr).then(|| self.get_u32(addr + CAP_OFF)).flatten()
+    }
+
+    /// The `len` field of the block at `addr`. What it MEANS (bytes, elements,
+    /// entries, or a tag) is the caller's to decide from the declared type.
+    pub(crate) fn block_len(&self, addr: u32) -> Option<u32> {
+        self.kinds.contains_key(&addr).then(|| self.get_u32(addr + LEN_OFF)).flatten()
+    }
+
+    /// Slot `i` of the slot block at `addr`, bounds-checked against the
+    /// block's physical `cap` — `None` (an abstain upstream) rather than a
+    /// guess for anything out of range or not a slot block.
+    pub(crate) fn slot(&self, addr: u32, i: u32) -> Option<i64> {
+        if self.kind(addr)? != BlockKind::Slots {
+            return None;
+        }
+        let cap = self.get_u32(addr + CAP_OFF)?;
+        if i >= cap {
+            return None;
+        }
+        self.load(addr + PAYLOAD + 8 * i, 8)
     }
 
     /// The block whose base is `addr`, as its payload bytes — `None` when
@@ -247,6 +336,45 @@ mod tests {
         h.store(base + PAYLOAD, 4, 0xDEAD_BEEFu32 as i64).expect("in range");
         assert_eq!(h.load(base + PAYLOAD, 4), Some(0xDEAD_BEEF));
         assert_eq!(h.load(base + PAYLOAD, 1), Some(0xEF));
+    }
+
+    #[test]
+    fn a_slot_block_reads_by_slot_and_patches_len() {
+        // The set_union shape: over-alloc, fill, patch the len field down.
+        let mut h = Heap::new();
+        let base = h.alloc_slots(4);
+        assert_eq!(h.block_len(base), Some(4));
+        h.store(base + PAYLOAD, 8, -7).expect("slot 0");
+        h.store(base + PAYLOAD + 8, 8, i64::MAX).expect("slot 1");
+        h.store(base + LEN_OFF, 4, 2).expect("len patch");
+        assert_eq!(h.block_len(base), Some(2));
+        assert_eq!(h.slot(base, 0), Some(-7));
+        assert_eq!(h.slot(base, 1), Some(i64::MAX));
+        // Bounds are the PHYSICAL cap, not the patched len (the skv value
+        // region lives above len) — but past cap abstains.
+        assert_eq!(h.slot(base, 3), Some(0));
+        assert_eq!(h.slot(base, 4), None);
+        assert_eq!(h.kind(base), Some(BlockKind::Slots));
+    }
+
+    #[test]
+    fn bind_slots_dedups_and_keeps_its_len_field() {
+        let mut h = Heap::new();
+        let a1 = h.bind_slots(0xfeed, &[1, 10, 2, 20], 2); // paired map, len = entries
+        let a2 = h.bind_slots(0xfeed, &[9, 9], 9);
+        assert_eq!(a1, a2, "same key answers the same block");
+        assert_eq!(h.block_len(a1), Some(2));
+        assert_eq!(h.slot(a1, 3), Some(20));
+    }
+
+    #[test]
+    fn adopt_aliases_without_copying() {
+        // The load_str shape: a Value rebuilt from a child block must answer
+        // the child's OWN address on a later bind, not a fresh copy.
+        let mut h = Heap::new();
+        let child = h.alloc(2, BlockKind::Str);
+        h.adopt(0xabc, child);
+        assert_eq!(h.bind(0xabc, b"ignored", BlockKind::Str), child);
     }
 
     #[test]

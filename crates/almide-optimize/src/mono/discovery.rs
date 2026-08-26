@@ -143,6 +143,9 @@ impl<'a> DiscoverVisitor<'a> {
             && !matches!(ty, Ty::TypeVar(_))
             && !ty.contains_typevar()
         );
+        if std::env::var_os("ALMIDE_MONO_DEBUG").is_some() {
+            eprintln!("[mono-debug] try_insert {name} bindings={bindings:?} concrete={all_concrete}");
+        }
         if all_concrete {
             let suffix = mangle_suffix(&bindings);
             self.instances.insert((name, suffix), bindings);
