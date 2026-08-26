@@ -34,7 +34,10 @@ if [ "$SCOPE" = "incremental" ]; then
   echo "$CHANGED" | sed 's/^/  /'
 fi
 
-SUITES=(--test backend_parity --test fuzz_differential --test alias_semantics --test tail_calls)
+# --lib carries the direct invariant referees (the layout-order judge
+# that replaced mutant 015's heap-adjacency kill after class-rounded
+# allocation padded that corruption into silence).
+SUITES=(--lib --test backend_parity --test fuzz_differential --test alias_semantics --test tail_calls)
 fail=0
 
 for patch in ci/mutations/*.patch; do
