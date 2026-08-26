@@ -1,10 +1,10 @@
 diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index 9c9c23cf4..abc993456 100644
+index 4a151155a..931abc82c 100644
 --- a/crates/almide-wasm/src/stmts.rs
 +++ b/crates/almide-wasm/src/stmts.rs
-@@ -94,9 +94,7 @@ impl Emitter<'_> {
-     /// charges — the interp's per-check meter), `break` to the block.
-     fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
+@@ -86,9 +86,7 @@ impl Emitter<'_> {
+         // below drains the remainder iterations.
+         let _ = self.try_unroll_while(cond, body)?;
          self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
 -        // Deterministic meter: one loop-head charge per condition
 -        // CHECK (n iterations = n+1 checks), ALS-DT2.
