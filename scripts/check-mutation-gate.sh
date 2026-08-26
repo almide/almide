@@ -14,6 +14,7 @@
 # Run from the repo root: bash scripts/check-mutation-gate.sh
 
 set -euo pipefail
+export LC_ALL=C
 cd "$(dirname "$0")/.."
 
 if ! git diff --quiet; then

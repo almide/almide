@@ -629,41 +629,32 @@ fn render_wasm_module_routed(
     if incumbent {
         return render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
     }
+    // A structural WALL routes to the incumbent renderer. This is NOT the
+    // retired v0 fallback (#782's sin was falling into UNVERIFIED codegen):
+    // both legs here are verified renderers, so the product never regresses
+    // on a shape only the incumbent lowers — and a program NEITHER leg can
+    // lower still fails hard with the incumbent's rich wall diagnostics.
+    // ALMIDE_VERIFIED_DEBUG=1 names the wall that rerouted.
+    let reroute = |why: &str| {
+        if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+            err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
+        }
+        render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false))
+    };
     let ir = match almide::wasm_leg::lower_to_ir(file, source_text) {
         Ok(ir) => ir,
-        Err(e) => {
-            // The v0 gates upstream already accepted this program, so a
-            // front error here is a driver divergence — surface it as such.
-            err(&format!("error: wasm-leg front: {e}"));
-            err("  hint: ALMIDE_WASM_INCUMBENT=1 routes the previous wasm renderer; please file this divergence: https://github.com/almide/almide/issues");
-            return Err(());
-        }
+        Err(e) => return reroute(&format!("front: {e}")),
     };
     match almide_wasm::emit_program(&ir) {
         Ok(bytes) => {
             // Same emit-time validation discipline as the incumbent leg:
             // never ship bytes wasmtime would refuse at load.
             if let Err(e) = wasmparser::validate(&bytes) {
-                err(&format!(
-                    "error: emitted wasm failed validation — this is an Almide bug: {} (offset {:#x})",
-                    e.message(),
-                    e.offset()
-                ));
-                err("  hint: please file this with the source that triggered it: https://github.com/almide/almide/issues");
-                return Err(());
+                return reroute(&format!("validation: {}", e.message()));
             }
             Ok((bytes, true))
         }
-        Err(almide_wasm::EmitError::Unsupported(reason)) => {
-            err(&format!("error: the wasm emitter cannot verify this shape: {reason}"));
-            err(
-                "  hint: a wall is an honest refusal, never a silent fallback. \
-                 ALMIDE_WASM_INCUMBENT=1 routes the previous renderer for one release; \
-                 if this names a missing capability, please file it: \
-                 https://github.com/almide/almide/issues",
-            );
-            Err(())
-        }
+        Err(almide_wasm::EmitError::Unsupported(reason)) => reroute(&reason),
     }
 }
 
@@ -816,6 +807,11 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // Routing inputs (see render_wasm_module_routed): project shape, decided
     // from what the v0 gates already computed — never from a failure.
     let has_main = ir_program.functions.iter().any(|f| f.name.as_str() == "main");
+    // `@export`-attributed fns must survive as wasm exports (the DCE-root
+    // contract, wasm_export_dce_root_test) — the structural leg has no
+    // export mode yet (#1598's sibling surface), so those modules stay on
+    // the incumbent leg.
+    let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
     let has_pkg_deps = resolved.modules.iter().any(|(_, _, pkg, _)| pkg.is_some());
     let host_variant = std::iter::once(&program)
         .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
@@ -824,6 +820,48 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
             matches!(d, almide::ast::Decl::Import { path, .. }
                 if path.first().is_some_and(|r| matches!(r.as_str(), "fs" | "env" | "process")))
         });
+    // Explicit `matrix.*` / `io.*` module calls stay on the incumbent leg:
+    // the structural leg links neither the matrix intrinsics (llama_block)
+    // nor the stdin-read io surface (io.read_all — stdin programs CANNOT
+    // live in the spec corpus, so the shape is unmeasured by construction).
+    // Module-granular on purpose: bare println/print are Named calls and
+    // stay structural; the gates keep judging the structural leg directly
+    // through emit_program, so verification coverage is unchanged (#1598).
+    let uses_incumbent_stdlib = {
+        fn expr_hits(e: &almide::ir::IrExpr, hit: &mut bool) {
+            if let almide::ir::IrExprKind::Call { target, .. }
+            | almide::ir::IrExprKind::TailCall { target, .. } = &e.kind
+            {
+                if let almide::ir::CallTarget::Module { module, .. } = target {
+                    if matches!(module.as_str(), "matrix" | "io") {
+                        *hit = true;
+                    }
+                }
+            }
+            if !*hit {
+                e.clone().map_children(&mut |c| {
+                    expr_hits(&c, hit);
+                    c
+                });
+            }
+        }
+        let mut hit = false;
+        for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+            expr_hits(&f.body, &mut hit);
+            if hit {
+                break;
+            }
+        }
+        if !hit {
+            for tl in ir_program.top_lets.iter().chain(ir_program.modules.iter().flat_map(|m| m.top_lets.iter())) {
+                expr_hits(&tl.value, &mut hit);
+                if hit {
+                    break;
+                }
+            }
+        }
+        hit
+    };
     // `import self as m` projects stay on the incumbent leg: the structural
     // driver misaligns self-package top-let storage (#1596 — the crossmod
     // matrix walls/panics there), and the shape sits outside the measured
@@ -843,7 +881,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         library_ok,
         has_main,
         has_pkg_deps,
-        has_self_import,
+        has_self_import || uses_incumbent_stdlib || has_exports,
         host_variant,
     )
 }

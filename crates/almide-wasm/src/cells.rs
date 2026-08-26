@@ -39,7 +39,15 @@ impl IrVisitor for Scan {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
                 let mutates = matches!(
                     (module.as_str(), func.as_str()),
-                    ("list", "push" | "pop" | "clear") | ("map", "insert") | ("string", "push")
+                    ("list", "push" | "pop" | "clear")
+                        | ("map", "insert")
+                        | ("string", "push")
+                        // bytes' in-place writers were MISSING here: a
+                        // captured Bytes var mutated through them was never
+                        // cell-classified, took the env value-copy path, and
+                        // printed a silently wrong value (the develop
+                        // wasm_runtime catch at the commissioning switchover).
+                        | ("bytes", "push" | "set_at" | "set_f32_le" | "set_f64_le" | "fill" | "clear")
                 );
                 if mutates
                     && let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind)

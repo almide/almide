@@ -53,8 +53,9 @@ and serves as the cross-target oracle / executable spec.
   trust-spine renderer (`almide-mir`) replaces it where it can lower (v0
   codegen source is the fallback on a wall); `rustc`/`cargo` produces the
   binary.
-- **`--target wasm`** — two legs, routed by PROJECT SHAPE (never by failure
-  fallback; `src/cli/build.rs::render_wasm_module_routed`):
+- **`--target wasm`** — two legs
+  (`src/cli/build.rs::render_wasm_module_routed`): cheap PROJECT-SHAPE
+  routes pick the leg up front, and a structural wall reroutes (below):
   - the **commissioned structural leg** (default): `almide::wasm_leg`
     (parse→check→lower→self-host link→`link_ir`) feeds
     `almide-wasm::emit_program`, which emits wasm bytes structurally
@@ -69,8 +70,11 @@ and serves as the cross-target oracle / executable spec.
     (#1596), host-variant BUILD artifacts, and `ALMIDE_FUEL_PROBE`
     instrumentation; `ALMIDE_WASM_INCUMBENT=1` forces it (the reversible
     switch, kept for one release).
-  Either leg: a wall is a hard, diagnosed error — there is no silent
-  fallback (the v0 emitter was retired in #782). `--wasm-opt` is opt-in and
+  A structural WALL reroutes to the incumbent renderer (both legs are
+  VERIFIED — this is not #782's sin, which was falling into unverified v0
+  codegen; `ALMIDE_VERIFIED_DEBUG=1` names the wall that rerouted). A shape
+  NEITHER leg lowers is a hard, diagnosed error with the incumbent's rich
+  wall rendering. `--wasm-opt` is opt-in and
   guarded by a differential parity gate against the verified module
   (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`).
 - **`--target wasm32` / `wasi`** — the generated Rust source compiled by bare

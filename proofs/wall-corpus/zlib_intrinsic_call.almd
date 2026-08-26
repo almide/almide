@@ -1,4 +1,4 @@
-// @wall: call:zlib.compress
+// @wall: Module call zlib.compress
 // zlib rides native Rust intrinsics (almide_rt_zlib_*) with no self-host
 // registry implementation, so the structural wasm leg refuses the call by
 // its unlinked name — the honest target-availability wall (#1423 doctrine),

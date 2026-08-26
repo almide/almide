@@ -1,4 +1,4 @@
-// @wall: call:net.tcp_connect
+// @wall: Module call net.tcp_connect
 // TCP sockets are a host capability with no WASI preview-1 surface in the
 // structural leg's import set: the call refuses by its unlinked name rather
 // than pretending a socket exists. Graduates with a sockets story (wasi p2

@@ -487,8 +487,11 @@ impl Emitter<'_> {
                     None => return unsup("map-access-void"),
                 }
             }
-            // xs[i]: bounds-checked element load. Out of bounds aborts on
-            // the oracle — the trap lands in the abort-parity bucket.
+            // xs[i]: bounds-checked element load. Out of bounds takes the
+            // exact native abort frame — `Error: index out of bounds` on
+            // stderr, exit 1 (a bare trap here left stderr EMPTY, the
+            // cross-target divergence develop's xtarget gate caught at the
+            // commissioning: stdout and exit matched, the message did not).
             IrExprKind::IndexAccess { object, index } => {
                 let elem = match self.lower(object, None)? {
                     SliceTy::List(h) => self.types.el(h),
@@ -500,13 +503,20 @@ impl Emitter<'_> {
                 self.lower(index, Some(INT))?;
                 let idx = self.hold_i64()?;
                 self.f.instructions().local_tee(idx);
-                // idx < 0 || idx >= count → trap
+                let msg = self.pool.intern("index out of bounds");
+                // idx < 0 || idx >= count → the message abort
+                {
+                    let mut i = self.f.instructions();
+                    i.i64_const(0).i64_lt_s();
+                    i.local_get(idx);
+                    i.local_get(hold).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
+                    i.i64_extend_i32_u().i64_ge_s();
+                    i.i32_or().if_(BlockType::Empty);
+                    i.i32_const(msg as i32);
+                }
+                self.emit_error_frame_abort();
                 let mut i = self.f.instructions();
-                i.i64_const(0).i64_lt_s();
-                i.local_get(idx);
-                i.local_get(hold).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
-                i.i64_extend_i32_u().i64_ge_s();
-                i.i32_or().if_(BlockType::Empty).unreachable().end();
+                i.end();
                 // element address: hold + idx*stride, slot at offset PAYLOAD
                 i.local_get(hold);
                 i.local_get(idx).i32_wrap_i64().i32_const(stride as i32).i32_mul().i32_add();

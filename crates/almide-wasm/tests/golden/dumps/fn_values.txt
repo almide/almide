@@ -78,6 +78,8 @@ global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const
 export memory Memory 0
 export main Func 39
 export __heap Global 1
+export add1 Func 37
+export add2 Func 38
 element funcs [40,41]
 code locals=[]
   LocalGet { local_index: 0 }

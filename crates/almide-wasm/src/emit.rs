@@ -239,6 +239,44 @@ fn emit_program_pass(
         return unsup(reason);
     }
 
+    // #457: exported pub fns are DCE ROOTS — the host calls them without
+    // main ever reaching them (render_frame, on_pointer_*, any host-called
+    // pub fn). An entry-program fn exports when its WHOLE call closure
+    // lowers; one that (transitively) hits an unlowered body is simply not
+    // exported — main-reachable strictness above is untouched.
+    let mut export_fns: Vec<(String, u32)> = Vec::new();
+    for (i, (f, qual)) in program_fns.iter().enumerate() {
+        let name = f.name.as_str();
+        if qual.is_some()
+            || name == "main"
+            || name.starts_with("__")
+            || f.is_test
+            || f.generics.as_ref().is_some_and(|g| !g.is_empty())
+            || !matches!(f.visibility, almide_ir::IrVisibility::Public)
+        {
+            continue;
+        }
+        let mut sub: HashSet<usize> = HashSet::new();
+        let mut q = vec![i];
+        let mut clean = true;
+        while let Some(j) = q.pop() {
+            if !sub.insert(j) {
+                continue;
+            }
+            match &lowered[j] {
+                Err(_) => {
+                    clean = false;
+                    break;
+                }
+                Ok((_, calls)) => q.extend(calls.iter().copied()),
+            }
+        }
+        if clean {
+            visited.extend(sub);
+            export_fns.push((name.to_string(), table.infos[i].wasm_index));
+        }
+    }
+
     // Extra functions (ok-wrap adapters + lifted lambdas) resolve BEFORE
     // the type section is built — their call_indirect/type interning must
     // land inside it. Indices start right after main.
@@ -257,6 +295,7 @@ fn emit_program_pass(
         entry_fn_indices: &entry_fn_indices,
         extra_fns: &extra_fns,
         global_decls: &global_decls,
+        export_fns: &export_fns,
         main_index,
         true_base,
         false_base,

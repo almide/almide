@@ -27,6 +27,7 @@ pub(crate) struct AssembleIn<'a> {
     pub(crate) entry_fn_indices: &'a [u32],
     pub(crate) extra_fns: &'a [(u32, Function)],
     pub(crate) global_decls: &'a [(almide_ir::VarId, SliceTy)],
+    pub(crate) export_fns: &'a [(String, u32)],
     pub(crate) main_index: u32,
     pub(crate) true_base: u32,
     pub(crate) false_base: u32,
@@ -45,6 +46,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         entry_fn_indices,
         extra_fns,
         global_decls,
+        export_fns,
         main_index,
         true_base,
         false_base,
@@ -231,6 +233,10 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // observable (#1586). Behavior-neutral: nothing in-module reads
     // exports.
     exports.export("__heap", ExportKind::Global, G_HEAP);
+    // #457: every clean-closure entry pub fn is host-callable.
+    for (name, idx) in export_fns {
+        exports.export(name, ExportKind::Func, *idx);
+    }
 
     let mut code = CodeSection::new();
     code.function(&emit_block_print(F_PRINTLN_IMPORT));

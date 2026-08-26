@@ -238,6 +238,12 @@ impl Emitter<'_> {
             // this: an alias captured before the assign keeps the old
             // value).
             IrStmtKind::FieldAssign { target, field, value } => {
+                // C-319 residual: only the Assign form writes THROUGH a
+                // shared cell — a field write against a cell var would land
+                // in the raw local and silently diverge. Refuse honestly.
+                if self.cells.contains(target) {
+                    return unsup("cell-write:field-assign");
+                }
                 let (slot, declared) = match self.locals.get(target) {
                     Some(&(idx, d)) => (Ok(idx), d),
                     None => match self.globals.get(target) {
@@ -277,6 +283,9 @@ impl Emitter<'_> {
             // `m[k] = v` on a map var — the same write-back the
             // `map.insert` mut form runs (functional `set`, rebind).
             IrStmtKind::MapInsert { target, key, value } => {
+                if self.cells.contains(target) {
+                    return unsup("cell-write:map-insert");
+                }
                 let Some(&(var_idx, _)) = self.locals.get(target) else {
                     return unsup("map-insert:unmapped");
                 };
@@ -340,6 +349,9 @@ impl Emitter<'_> {
                 Ok(())
             }
             IrStmtKind::IndexAssign { target, index, value } => {
+                if self.cells.contains(target) {
+                    return unsup("cell-write:index-assign");
+                }
                 self.lower_index_assign(target, index, value)
             }
             IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),
