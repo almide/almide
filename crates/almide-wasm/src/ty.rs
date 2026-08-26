@@ -36,6 +36,30 @@ pub(crate) fn scalar_of(ty: &Ty) -> Option<Scalar> {
     }
 }
 
+
+/// The `Ty::Fn` slot repr — split from `slice_ty_of` for the complexity
+/// budget. Effect returns wrap in the single-layer Result rule (probe-
+/// settled, same as effect fns); an effect-Unit slot has no repr yet.
+fn fn_slot_of(params: &[Ty], ret: &Ty, is_effect: bool, types: &TypeTable) -> Option<SliceTy> {
+    let mut ps = Vec::new();
+    for p in params {
+        ps.push(slice_ty_of(p, types)?);
+    }
+    let r = match (ret, is_effect) {
+        (Ty::Unit, false) => None,
+        (Ty::Unit, true) => return None,
+        (t, eff) => {
+            let sty = slice_ty_of(t, types)?;
+            Some(match (sty, eff) {
+                (rs @ SliceTy::Result(..), _) => rs,
+                (sty, true) => SliceTy::Result(types.intern(sty), types.intern(STR)),
+                (sty, false) => sty,
+            })
+        }
+    };
+    Some(SliceTy::Fn(types.fn_sig(crate::types_table::FnSig { params: ps, ret: r, effect: is_effect })))
+}
+
 pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
     if let Some(s) = scalar_of(ty) {
         return Some(SliceTy::Scalar(s));
@@ -56,34 +80,7 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
         Ty::Record { fields } => types.anon_record(fields).map(SliceTy::Named),
         Ty::Unit => Some(SliceTy::Unit),
         Ty::Matrix => Some(SliceTy::Matrix),
-        Ty::Fn { params, ret, is_effect } => {
-            let mut ps = Vec::new();
-            for p in params {
-                ps.push(slice_ty_of(p, types)?);
-            }
-            let r = match (&**ret, *is_effect) {
-                (Ty::Unit, false) => None,
-                // An effect-Unit slot needs a Unit repr — not yet.
-                (Ty::Unit, true) => return None,
-                (t, eff) => {
-                    let sty = slice_ty_of(t, types)?;
-                    Some(match (sty, eff) {
-                        // Declared-Result slots are single-layer (probe-
-                        // settled, same rule as effect fns).
-                        (rs @ SliceTy::Result(..), _) => rs,
-                        (sty, true) => {
-                            SliceTy::Result(types.intern(sty), types.intern(STR))
-                        }
-                        (sty, false) => sty,
-                    })
-                }
-            };
-            Some(SliceTy::Fn(types.fn_sig(crate::types_table::FnSig {
-                params: ps,
-                ret: r,
-                effect: *is_effect,
-            })))
-        }
+        Ty::Fn { params, ret, is_effect } => fn_slot_of(params, ret, *is_effect, types),
         Ty::Named(name, args) if args.is_empty() => {
             // A user declaration wins; the builtin dynamic Value is the
             // fallback for the undeclared opaque name; the PUBLISHED

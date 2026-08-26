@@ -82,6 +82,9 @@ impl Emitter<'_> {
     /// `continue` brs to the loop head (the next cond CHECK, which
     /// charges — the interp's per-check meter), `break` to the block.
     fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
+        // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
+        // below drains the remainder iterations.
+        let _ = self.try_unroll_while(cond, body)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         // Deterministic meter: one loop-head charge per condition
         // CHECK (n iterations = n+1 checks), ALS-DT2.
