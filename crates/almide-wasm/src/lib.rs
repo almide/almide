@@ -207,8 +207,14 @@ const F_DEC_FLAT: u32 = 35;
 /// `$cow(block)` — the copy-on-write judge at in-place mutation entries
 /// (RC-5): shared blocks copy, unique ones pass through.
 const F_COW: u32 = 36;
+/// `$str_append(dst, src) -> i32`: the growing-accumulator window —
+/// `acc = acc + s` appends IN PLACE when the accumulator is an owned heap
+/// block (rc == 1) with class-slack headroom, else concats and releases
+/// the outgrown block. Ownership transfers through the call (the C-132
+/// write-back shape the Assign dec-skip was built for).
+const F_STR_APPEND: u32 = 37;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 37;
+const F_FN_BASE: u32 = 38;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
