@@ -385,6 +385,40 @@ impl LowerCtx {
         Some(tup)
     }
 
+    /// The tuple-LEAF arm of [`Self::emit_opt_tuple_fold_body`] — split for the
+    /// complexity budget. Computes all three component values (they read the
+    /// OLD locals), then SetLocals the three loop-carried locals together.
+    fn emit_opt_tuple_fold_leaf(
+        &mut self,
+        elements: &[IrExpr],
+        found_var: VarId,
+        slots: OptFoldSlots,
+    ) -> Option<()> {
+        let OptFoldSlots { scalar: s0, tag: tloc, val: vloc } = slots;
+        let n0 = self.lower_scalar_value(&elements[0])?;
+        let (nt, nv) = match &elements[1].kind {
+            IrExprKind::OptionNone => {
+                let z0 = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z0, value: 0 });
+                let z1 = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z1, value: 0 });
+                (z0, z1)
+            }
+            IrExprKind::OptionSome { expr } => {
+                let one = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                let v = self.lower_scalar_value(expr)?;
+                (one, v)
+            }
+            IrExprKind::Var { id } if *id == found_var => (tloc, vloc),
+            _ => return None,
+        };
+        self.ops.push(Op::SetLocal { local: s0, src: n0 });
+        self.ops.push(Op::SetLocal { local: tloc, src: nt });
+        self.ops.push(Op::SetLocal { local: vloc, src: nv });
+        Some(())
+    }
+
     /// SINGLE-PASS body emitter for the (scalar, Option[scalar]) fold: walk the tail as
     /// a UNIT control tree — Block statements and `if` conditions lower exactly ONCE —
     /// and at each tuple LEAF compute all three component values (scalar, tag, payload)
@@ -399,7 +433,7 @@ impl LowerCtx {
         slots: OptFoldSlots,
     ) -> Option<()> {
         let OptFoldAcc { acc: acc_var, found: found_var, found_tag: _ft, found_val: fv } = acc;
-        let OptFoldSlots { scalar: s0, tag: tloc, val: vloc } = slots;
+        let OptFoldSlots { tag: tloc, .. } = slots;
         use almide_ir::IrPattern;
         match &e.kind {
             // The unchanged-accumulator leaf (`some(_) => state`): all three locals keep
@@ -408,28 +442,7 @@ impl LowerCtx {
             // A tuple LEAF `(e0, none | some(x) | found)` — compute all three component
             // values FIRST (they read the OLD locals), then SetLocal together.
             IrExprKind::Tuple { elements } if elements.len() == 2 => {
-                let n0 = self.lower_scalar_value(&elements[0])?;
-                let (nt, nv) = match &elements[1].kind {
-                    IrExprKind::OptionNone => {
-                        let z0 = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: z0, value: 0 });
-                        let z1 = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: z1, value: 0 });
-                        (z0, z1)
-                    }
-                    IrExprKind::OptionSome { expr } => {
-                        let one = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                        let v = self.lower_scalar_value(expr)?;
-                        (one, v)
-                    }
-                    IrExprKind::Var { id } if *id == found_var => (tloc, vloc),
-                    _ => return None,
-                };
-                self.ops.push(Op::SetLocal { local: s0, src: n0 });
-                self.ops.push(Op::SetLocal { local: tloc, src: nt });
-                self.ops.push(Op::SetLocal { local: vloc, src: nv });
-                Some(())
+                self.emit_opt_tuple_fold_leaf(elements, found_var, slots)
             }
             // A shared preamble Block: statements lower ONCE; per-iteration heap locals
             // (a `let id = bytes_to_string(…)` String) are freed within the frame.

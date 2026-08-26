@@ -435,6 +435,12 @@ pub(crate) fn kind_name(k: &IrExprKind) -> &'static str {
 
 /// Literals, variables and the container constructors/accessors.
 fn kind_name_leaf(k: &IrExprKind) -> Option<&'static str> {
+    kind_name_literal(k).or_else(|| kind_name_container(k))
+}
+
+/// The literal/variable half of the leaf table — split from
+/// `kind_name_leaf` for the complexity budget.
+fn kind_name_literal(k: &IrExprKind) -> Option<&'static str> {
     let name = match k {
         IrExprKind::LitInt { .. } => "LitInt",
         IrExprKind::LitFloat { .. } => "LitFloat",
@@ -443,6 +449,15 @@ fn kind_name_leaf(k: &IrExprKind) -> Option<&'static str> {
         IrExprKind::Unit => "Unit",
         IrExprKind::Var { .. } => "Var",
         IrExprKind::FnRef { .. } => "FnRef",
+        _ => return None,
+    };
+    Some(name)
+}
+
+/// The container constructor/accessor half of the leaf table — split from
+/// `kind_name_leaf` for the complexity budget.
+fn kind_name_container(k: &IrExprKind) -> Option<&'static str> {
+    let name = match k {
         IrExprKind::List { .. } => "List",
         IrExprKind::Record { .. } => "Record",
         IrExprKind::SpreadRecord { .. } => "SpreadRecord",
