@@ -1,0 +1,52 @@
+// @contract: C-306, C-302
+// @ref-allow: ALS-T23 (ADR-0016, ratified 2026-08-21) orders ±0 as -0 < +0 in
+//   min/max; release 0.58.0 still implements the retired first-argument rule
+//   (the chapter itself declares its suite files red until the pin advances).
+//   The reference follows the ratified text; this directive tracks the ±0 order lines
+//   and comes off when the implementation catches up.
+// ALS-T23: signed zero propagates per IEEE 754, compares equal to +0, displays
+// with its sign, and min/max/fmin/fmax order -0 below +0 (IEEE 754-2019
+// minimum/maximum, commutative) — retiring the first-operand tie rule.
+// Zeros built at run time; ±0 distinguished via float.sign (= signum).
+// Agreement-judged today; the reference leg (ADR-0015) pins the values.
+fn main() -> Unit = {
+  let one: Float = float.abs(-1.0)
+  let pz: Float = one * 0.0
+  let mz: Float = (0.0 - one) * 0.0
+  println(float.to_string(mz))
+  // -0.0
+  println("${mz == pz}")
+  // true
+  println(float.to_string(mz + pz))
+  // 0.0 (sum of opposite-signed zeros is +0 under nearest-even)
+  println(float.to_string(mz + 0.0))
+  // 0.0 — the SAME with a literal +0 operand: `x + 0.0 -> x` is not a valid
+  // identity for x = -0.0 (found 2026-08-21: the 0.58.0 native backend folds
+  // it and prints -0.0 while wasm prints 0.0 — almide/als#34, almide/almide#1542)
+  println(float.to_string(0.0 + mz))
+  // 0.0
+  println(float.to_string(mz - 0.0))
+  // -0.0 (x - 0.0 -> x IS a valid identity)
+  println(float.to_string(mz * one))
+  // -0.0
+  println(float.to_string(one / (0.0 - one / 0.0)))
+  // -0.0 (1 / -inf)
+  // min: -0 wins in either order
+  println(float.to_string(float.sign(float.min(mz, pz))))
+  // -1
+  println(float.to_string(float.sign(float.min(pz, mz))))
+  // -1
+  println(float.to_string(float.sign(math.fmin(mz, pz))))
+  // -1
+  println(float.to_string(float.sign(math.fmin(pz, mz))))
+  // -1
+  // max: +0 wins in either order
+  println(float.to_string(float.sign(float.max(mz, pz))))
+  // 1
+  println(float.to_string(float.sign(float.max(pz, mz))))
+  // 1
+  println(float.to_string(float.sign(math.fmax(mz, pz))))
+  // 1
+  println(float.to_string(float.sign(math.fmax(pz, mz))))
+  // 1
+}

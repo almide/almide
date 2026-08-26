@@ -1,0 +1,20 @@
+// @contract: C-304, C-302
+// ALS-T21: subnormals are values on every target — no flush-to-zero, no
+// denormals-are-zero. Values parsed at run time to defeat const folding.
+fn main() -> Unit = {
+  let smallest_normal = float.parse("2.2250738585072014e-308") ?? 0.0
+  let half = smallest_normal / 2.0
+  println("${float.to_bits(half)}")
+  // 2251799813685248 (= 2^51: the subnormal 2^-1023)
+  println("${half != 0.0}")
+  // true
+  let min_sub = float.parse("5e-324") ?? 0.0
+  println("${float.to_bits(min_sub)}")
+  // 1
+  println("${float.to_bits(min_sub * 2.0)}")
+  // 2
+  println("${float.to_bits(min_sub / 2.0)}")
+  // 0 (rounds to +0 — ties-to-even, ALS-T20)
+  println("${half * 2.0 == smallest_normal}")
+  // true
+}

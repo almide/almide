@@ -1,0 +1,31 @@
+// @contract: C-305, C-302
+// ALS-T22 / T10: one vendored libm on every target — the bit patterns below
+// agree byte-for-byte native == wasm. The accuracy bounds themselves (sqrt
+// correctly rounded, the others ≤ 1 ulp) are asserted against 70-digit
+// references in spec/stdlib/math_accuracy_test.almd; this fixture pins the
+// cross-target identity of the same sample points.
+fn show(name: String, x: Float) -> Unit = println("${name} ${float.to_bits(x)}")
+
+fn main() -> Unit = {
+  show("sqrt2", math.sqrt(2.0))
+  show("sqrt1e300", math.sqrt(1.0e300))
+  show("exp1", math.exp(1.0))
+  show("exp-1.5", math.exp(-1.5))
+  show("exp10", math.exp(10.0))
+  show("log2.0", math.log(2.0))
+  show("log0.5", math.log(0.5))
+  show("log1e10", math.log(1.0e10))
+  show("log2_3", math.log2(3.0))
+  show("log10_1000", math.log10(1000.0))
+  show("sin0.5", math.sin(0.5))
+  show("sin1", math.sin(1.0))
+  show("sin10", math.sin(10.0))
+  show("cos1", math.cos(1.0))
+  show("cos10", math.cos(10.0))
+  show("tan1", math.tan(1.0))
+  show("tan10", math.tan(10.0))
+  show("pow2_0.5", math.fpow(2.0, 0.5))
+  show("pow3_2.5", math.fpow(3.0, 2.5))
+  show("pow10_-3", math.fpow(10.0, -3.0))
+  show("lgamma4.5", math.log_gamma(4.5))
+}

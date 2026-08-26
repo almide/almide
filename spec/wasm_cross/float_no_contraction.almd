@@ -1,0 +1,20 @@
+// @contract: C-303, C-302
+// ALS-T20: every Float operation rounds once (nearest-even); a*b+c is two
+// roundings — never a fused multiply-add. a = 1+2^-52, b = 1-2^-53 parsed at
+// run time so nothing is const-folded: a*b rounds to exactly 1.0, so both
+// expressions below are 0.0; a contracting backend would print 1.1e-16.
+fn main() -> Unit = {
+  let a = float.parse("1.0000000000000002") ?? 0.0
+  let b = float.parse("0.9999999999999999") ?? 0.0
+  println(float.to_string(a * b - 1.0))
+  // 0.0
+  println(float.to_string(a * b + (0.0 - 1.0)))
+  // 0.0
+  println(float.to_string(a * b))
+  // 1.0
+  let c = float.parse("0.1") ?? 0.0
+  println(float.to_string(c + 0.2))
+  // 0.30000000000000004 (one rounding per operation)
+  println("${float.to_bits(c + 0.2)}")
+  // 4599075939470750516
+}
