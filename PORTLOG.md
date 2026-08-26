@@ -2860,3 +2860,29 @@ record the closure.
   walls on cross-module convention calls). RUN_FLOOR 18 → 21.
 - Full battery green: 599/599, fuzz 200-seed clean, workspace, alias,
   ledgers/ratchets untouched.
+
+## Stage 107 (2026-08-26): the develop corpus closes — 610/610
+
+- Stage 2's acceptance precondition: greenfield's leg judged against
+  develop's OWN spec/wasm_cross (610 fixtures — the als 599 plus the
+  DDD-arc's eleven). End state: 609 native-byte-matched + fan_race_
+  mapper (als-manifest-ruled; native is @xt-allow-declared out) =
+  **610/610 correct**.
+- The road there, each fix gate-pinned:
+  1. Cross-module convention methods + bare module-type spellings:
+     UNIQUE-SUFFIX resolution in both the call table and the type
+     table (ambiguity walls — the #1558/#1087 landmine doctrine).
+     FIVE gauntlet promotions (c1, c7, c8, x14, functional_port —
+     the layered DDD package RUNS), floor 21 → 24.
+  2. A real RC bug: the lambda epilogue's param release ignored
+     env_shift and freed the CLOSURE ENV after the first invoke
+     ("uninitialized element" on the second call_indirect — develop's
+     C-319 trio caught it; x17 pin cell added, floor 25).
+  3. guard in main/Unit fns: the else IS the early return.
+  4. Variant record-case defaults fill from decls (the record path's
+     discipline, variant-shaped; build_case carries defaults).
+  5. The stdlib pin catches up (the crates-only sync missed stdlib/ —
+     5 files), and the decode list-default quartet is ADMITTED as
+     pure composition of already-admitted fns.
+- mut_port stays the one wall SHARED with develop's wasm leg (#1576's
+  unratified err-path semantics — not a greenfield gap).
