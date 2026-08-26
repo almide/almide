@@ -25,7 +25,7 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
 >
 > **Stage 5 (auditability): 6 release seal(s); 61 verification gates classified
-> (2 UNVERIFIED under a shrink-only ceiling); TOR with 9 enforced rows;
+> (0 UNVERIFIED under a shrink-only ceiling); TOR with 9 enforced rows;
 > gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**
 <!-- stages:generated:end -->
 

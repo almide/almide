@@ -106,7 +106,7 @@ pub(crate) fn collect_binds_data(
         IrExprKind::TupleIndex { object, .. } => collect_binds(object, out, seen, types),
         // Lambda params become locals (used when the lambda is inlined as
         // a direct HOF callback; harmless extras otherwise).
-        other => collect_binds_data_b(other, e, out, seen, types),
+        other => collect_binds_data_b(other, out, seen, types),
     }
 }
 
@@ -247,7 +247,6 @@ fn collect_forin(
 /// `collect_binds_data` for the complexity budget.
 fn collect_binds_data_b(
     kind: &IrExprKind,
-    e: &IrExpr,
     out: &mut Vec<(VarId, SliceTy)>,
     seen: &mut HashSet<VarId>,
     types: &TypeTable,
