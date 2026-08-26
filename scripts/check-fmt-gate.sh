@@ -19,9 +19,11 @@ rejects=$(grep $'^reject\t' "$MANIFEST" | awk -F'\t' '{print $3}')
 
 # Every .almd under the gate's roots, minus the manifest's reject cells
 # (a dir cell's row names the cell dir; all of its files skip).
-list=$(mktemp)
-trap 'rm -f "$list"' EXIT
-find spec examples -name '*.almd' | sort > "$list.all"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+list="$work/files"
+find spec examples -name '*.almd' > "$work/all"
+sort "$work/all" -o "$work/all"
 : > "$list"
 while IFS= read -r f; do
   skip=0
@@ -31,8 +33,7 @@ while IFS= read -r f; do
     esac
   done
   [ "$skip" = 0 ] && echo "$f" >> "$list"
-done < "$list.all"
-rm -f "$list.all"
+done < "$work/all"
 
 # xargs batches keep the arg list within limits; any drift fails the gate.
 xargs "$BIN" fmt --check < "$list"
