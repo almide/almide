@@ -480,3 +480,33 @@ fn add_variant(
     }
     table.defs.borrow_mut()[idx as usize] = NamedDef::Variant(VariantDef { cases: defs });
                 }
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    /// Anon-record field offsets FOLLOW pack_fields' order — the direct
+    /// referee for the layout-reversal mutant class (015). The original
+    /// kill came from reversed offsets corrupting the NEXT bump block;
+    /// class-rounded allocation (RC-3) padded that corruption into
+    /// silence, so the invariant is pinned where it lives instead of
+    /// observed through heap adjacency.
+    #[test]
+    fn anon_record_offsets_follow_pack_order() {
+        let src = "fn main() -> Unit = {\n  let r = { a: 1, b: true, c: 1.5 }\n  println(\"${r.a}\")\n}\n";
+        let ir = almide_spine::s5::lower_to_ir("layout_referee.almd", src).expect("front");
+        let tt = TypeTable::build(&ir);
+        let fields: Vec<(almide_base::intern::Sym, Ty)> = vec![
+            (almide_base::intern::sym("a"), Ty::Int),
+            (almide_base::intern::sym("b"), Ty::Bool),
+            (almide_base::intern::sym("c"), Ty::Float),
+        ];
+        let ti = tt.anon_record(&fields).expect("anon record interns");
+        let NamedDef::Record(r) = tt.def(ti) else { panic!("record def") };
+        let widths: Vec<u32> = r.fields.iter().map(|f| f.ty.slot_size()).collect();
+        let (want_offsets, want_size) = almide_layout::pack_fields(&widths);
+        let got: Vec<u32> = r.fields.iter().map(|f| f.offset).collect();
+        assert_eq!(got, want_offsets, "field offsets must be pack_fields' output, in order");
+        assert_eq!(r.size, want_size);
+    }
+}
