@@ -138,6 +138,7 @@ set.new :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_err :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_ok :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_throws :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call testing.assert_throws needs a declared capability not in this brick
+url.to_string :: UNPROBEABLE :: parameter type outside the synthesizer
 value.array :: UNPROBEABLE :: no candidate shape builds natively
 value.as_array :: UNPROBEABLE :: no candidate shape builds natively
 value.as_bool :: UNPROBEABLE :: no candidate shape builds natively
