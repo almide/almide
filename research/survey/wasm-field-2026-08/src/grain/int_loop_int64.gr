@@ -1,0 +1,16 @@
+// TYPE-CHOICE REFERENCE (not part of the official matrix): the same int_loop
+// workload on Grain's explicit Int64 instead of the default Number type, to
+// separate "Grain's default-number cost" from "Grain's floor". The official
+// row uses Number per the survey's porting doctrine (see README).
+module IntLoop64
+
+from "int64" include Int64
+use Int64.{ (+), (*), (%), (<) }
+
+let mut i = 0L
+let mut acc = 0L
+while (i < 30000000L) {
+  acc = (acc + i * 7L) % 999983L
+  i = i + 1L
+}
+print(acc)

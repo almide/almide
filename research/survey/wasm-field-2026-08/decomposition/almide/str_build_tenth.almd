@@ -1,0 +1,13 @@
+// str_build RSS decomposition: 1/10th the iterations (300k). If peak RSS falls
+// ~10x, the 56MB figure is the bump-heap's linear-in-total-allocations profile
+// (the documented W-8 design decision), not a leak or a fixed cost.
+fn main() -> Unit = {
+  var i = 0
+  var n = 0
+  while i < 300000 {
+    let s = "ab" + int.to_string(i % 100)
+    n = n + string.len(s)
+    i = i + 1
+  }
+  println(int.to_string(n))
+}

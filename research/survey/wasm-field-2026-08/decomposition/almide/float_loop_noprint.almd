@@ -1,0 +1,12 @@
+// float_math decomposition variant A: identical 20M-iteration arithmetic loop,
+// but the result is consumed by a compare + constant print instead of
+// float.to_string — isolates loop codegen cost from number formatting cost.
+fn main() -> Unit = {
+  var i = 0
+  var x = 1.5
+  while i < 20000000 {
+    x = x * 1.0000001 + 0.0000003
+    i = i + 1
+  }
+  if x > 30.0 then println("gt") else println("le")
+}

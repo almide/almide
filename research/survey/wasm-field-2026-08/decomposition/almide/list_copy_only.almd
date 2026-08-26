@@ -1,0 +1,24 @@
+// list_sort decomposition variant B: the 300-round loop with the sort removed —
+// per round: element-wise copy (list.map identity) + the two index reads.
+// full kernel minus this variant = the sort itself.
+fn mk(n: Int) -> List[Int] = {
+  var out: List[Int] = []
+  var i = 0
+  while i < n {
+    list.push(out, (i * 7919) % 10007)
+    i = i + 1
+  }
+  out
+}
+
+fn main() -> Unit = {
+  let xs = mk(2000)
+  var acc = 0
+  var r = 0
+  while r < 300 {
+    let s = xs |> list.map((x) => x)
+    acc = acc + s[0] + s[1999]
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}

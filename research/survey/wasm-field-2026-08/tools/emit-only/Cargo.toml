@@ -1,0 +1,19 @@
+# Compile-time measurement driver for the Almide lane.
+# The product runner (almide-wasm-run) always EXECUTES the module after
+# emitting it, which would fold run time into a compile-time measurement.
+# This wrapper calls the exact same spine entry points (lower_to_ir ->
+# emit_program -> wasi::to_wasi) and stops after writing the .wasm.
+[package]
+name = "almide-emit-only"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+almide-spine = { path = "../../../../../crates/almide-spine" }
+almide-wasm = { path = "../../../../../crates/almide-wasm" }
+almide-wasm-run = { path = "../../../../../crates/almide-wasm-run" }
+
+[profile.release]
+opt-level = 3

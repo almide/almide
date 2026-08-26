@@ -1,0 +1,13 @@
+out/
+src/assemblyscript/node_modules/
+src/moonbit/_build/
+src/moonbit/.moon_db
+src/moonbit/.moon-lock
+src/kotlin/.gradle/
+src/kotlin/build/
+src/kotlin/*/build/
+src/kotlin/.kotlin/
+src/kotlin/kotlin-js-store/
+tools/emit-only/target/
+src/grain/*.gro
+src/grain/target/

@@ -1,0 +1,8 @@
+{
+  "name": "wasm-field-assemblyscript",
+  "private": true,
+  "dependencies": {
+    "assemblyscript": "^0.28.20",
+    "@assemblyscript/wasi-shim": "^0.1.0"
+  }
+}

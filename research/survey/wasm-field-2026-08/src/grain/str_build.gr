@@ -1,0 +1,12 @@
+module StrBuild
+
+from "string" include String
+
+let mut i = 0
+let mut n = 0
+while (i < 3000000) {
+  let s = "ab" ++ toString(i % 100)
+  n = n + String.length(s)
+  i = i + 1
+}
+print(n)

@@ -1,0 +1,15 @@
+module ListPipeline
+
+from "array" include Array
+
+let out = Array.init(2000, i => i)
+let mut acc = 0
+let mut r = 0
+while (r < 2000) {
+  let m = Array.map(x => x * 3 + 1, out)
+  let f = Array.filter(x => x % 2 == 0, m)
+  let v = Array.reduce((a, x) => (a + x) % 999983, 0, f)
+  acc = (acc + v) % 999983
+  r = r + 1
+}
+print(acc)

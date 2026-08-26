@@ -1,0 +1,17 @@
+module SortBy
+
+from "array" include Array
+
+let mk = n => Array.init(n, i => i * 7919 % 10007)
+
+let xs = mk(2000)
+let mut acc = 0
+let mut r = 0
+while (r < 300) {
+  let s = Array.copy(xs)
+  // comparator equivalent of sorting by key (0 - x): descending
+  Array.sort(compare=(a, b) => b - a, s)
+  acc = acc + s[0] + s[1999]
+  r = r + 1
+}
+print(acc)

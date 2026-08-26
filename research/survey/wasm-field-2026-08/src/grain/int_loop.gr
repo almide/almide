@@ -1,0 +1,9 @@
+module IntLoop
+
+let mut i = 0
+let mut acc = 0
+while (i < 30000000) {
+  acc = (acc + i * 7) % 999983
+  i = i + 1
+}
+print(acc)
