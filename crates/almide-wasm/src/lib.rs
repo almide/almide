@@ -134,9 +134,16 @@ use types_table::TypeTable;
 /// itoa scratch region: digits are written back-to-front ending here.
 /// 32 bytes ≥ the longest rendering, `-9223372036854775808` (20 bytes).
 const ITOA_END: u32 = 48;
-/// The pool starts right after the scratch: null guard `[0,PAYLOAD)`,
-/// padding to 16, scratch `[16,48)`.
-const POOL_START: u32 = ITOA_END;
+/// Free-list heads (RC-2): 16 size classes × 4B at `[48,112)`. Class c
+/// holds freed blocks whose TOTAL (header+payload, 4-aligned) is in
+/// `[16<<c, 32<<c)` — filed by floor, taken by ceil, so a taken block
+/// always fits the request without rounding the bump path.
+const FREELIST_BASE: u32 = ITOA_END;
+const FREELIST_CLASSES: u32 = 16;
+/// The pool starts right after the scratch + free-list table: null
+/// guard `[0,PAYLOAD)`, padding to 16, scratch `[16,48)`, free-list
+/// heads `[48,112)`.
+const POOL_START: u32 = FREELIST_BASE + FREELIST_CLASSES * 4;
 /// Minimum room the line buffer must have beyond the pool.
 const LINE_BUF_MIN: u64 = 65536;
 
@@ -185,8 +192,12 @@ const F_STR_REPLACE: u32 = 31;
 /// (wasmtime's memory.copy is an out-of-line libcall whose fixed cost
 /// dwarfs small moves), else one memory.copy.
 const F_COPY: u32 = 32;
+/// `$free(block)` — file a dead block into its size-class free list
+/// (RC-2). Callers must OWN the block outright; the only emitters today
+/// are the sort machinery's private scratch buffers.
+const F_FREE: u32 = 33;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 33;
+const F_FN_BASE: u32 = 34;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),

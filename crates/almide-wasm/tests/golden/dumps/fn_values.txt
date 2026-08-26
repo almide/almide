@@ -52,17 +52,18 @@ func 24 -> type 13
 func 25 -> type 5
 func 26 -> type 11
 func 27 -> type 17
-func 28 -> type 18
-func 29 -> type 19
-func 30 -> type 4
-func 31 -> type 20
+func 28 -> type 1
+func 29 -> type 18
+func 30 -> type 19
+func 31 -> type 4
 func 32 -> type 20
+func 33 -> type 20
 table TableType { element_type: funcref, table64: false, initial: 3, maximum: Some(3), shared: false }
 memory MemoryType { memory64: false, shared: false, initial: 2, maximum: None, page_size_log2: None }
-global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 160 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65696 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 160 } End
-global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 65696 } End
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 224 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65760 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 224 } End
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 65760 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 9223372036854775807 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
@@ -72,9 +73,9 @@ global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
 export memory Memory 0
-export main Func 35
+export main Func 36
 export __heap Global 1
-element funcs [36,37]
+element funcs [37,38]
 code locals=[]
   LocalGet { local_index: 0 }
   I32Const { value: 12 }
@@ -179,8 +180,8 @@ code locals=[1xI32]
   End
 code locals=[]
   LocalGet { local_index: 0 }
-  I32Const { value: 60 }
-  I32Const { value: 76 }
+  I32Const { value: 124 }
+  I32Const { value: 140 }
   LocalGet { local_index: 1 }
   Select
   I32Const { value: 4 }
@@ -189,7 +190,58 @@ code locals=[]
   Select
   Call { function_index: 7 }
   End
-code locals=[2xI32]
+code locals=[4xI32]
+  LocalGet { local_index: 0 }
+  I32Const { value: 15 }
+  I32Add
+  I32Const { value: -4 }
+  I32And
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  I32Const { value: 16 }
+  LocalSet { local_index: 3 }
+  End
+  I32Const { value: 28 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Sub
+  I32Clz
+  I32Sub
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  LocalGet { local_index: 2 }
+  I32Const { value: 2 }
+  I32Shl
+  I32Const { value: 48 }
+  I32Add
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalTee { local_index: 4 }
+  If { blockty: Empty }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 4 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 4 }
+  I32Const { value: 1 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 0 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 0 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  LocalGet { local_index: 4 }
+  Return
+  End
+  End
   GlobalGet { global_index: 1 }
   LocalSet { local_index: 1 }
   LocalGet { local_index: 1 }
@@ -234,7 +286,7 @@ code locals=[2xI32]
   I32Const { value: 0 }
   I32LtS
   If { blockty: Empty }
-  I32Const { value: 113 }
+  I32Const { value: 177 }
   Call { function_index: 6 }
   I32Const { value: 1 }
   Call { function_index: 2 }
@@ -1468,6 +1520,45 @@ code locals=[1xI32]
   MemoryCopy { dst_mem: 0, src_mem: 0 }
   End
   End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Const { value: 15 }
+  I32Add
+  I32Const { value: -4 }
+  I32And
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  Return
+  End
+  I32Const { value: 27 }
+  LocalGet { local_index: 1 }
+  I32Clz
+  I32Sub
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 16 }
+  I32GeU
+  If { blockty: Empty }
+  Return
+  End
+  LocalGet { local_index: 2 }
+  I32Const { value: 2 }
+  I32Shl
+  I32Const { value: 48 }
+  I32Add
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  End
 code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
   LocalGet { local_index: 0 }
   I64Const { value: 1 }
@@ -1485,9 +1576,9 @@ code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
   I64Const { value: 1 }
   I64Eq
   If { blockty: Type(I32) }
-  I32Const { value: 81 }
+  I32Const { value: 145 }
   Else
-  I32Const { value: 97 }
+  I32Const { value: 161 }
   End
   LocalSet { local_index: 1 }
   LocalGet { local_index: 1 }
@@ -1502,10 +1593,10 @@ code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
   End
 code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
   LocalGet { local_index: 1 }
-  ReturnCall { function_index: 33 }
+  ReturnCall { function_index: 34 }
   End
 code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
   LocalGet { local_index: 1 }
-  ReturnCall { function_index: 34 }
+  ReturnCall { function_index: 35 }
   End
-data len=145 head=000000000000000000000000000000000000000000000000
+data len=209 head=000000000000000000000000000000000000000000000000

@@ -129,6 +129,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     functions.function(5); // F_STR_CMP
     functions.function(11); // F_STR_REPLACE
     functions.function(17); // F_COPY
+    functions.function(1); // F_FREE ((i32) -> ())
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -257,6 +258,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     code.function(&emit_str_cmp());
     code.function(&emit_str_replace());
     code.function(&emit_copy());
+    code.function(&emit_free());
     for (i, l) in lowered.iter().enumerate() {
         match l {
             // A lowered body ships only when the main BFS reaches it —

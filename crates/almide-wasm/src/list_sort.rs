@@ -290,6 +290,9 @@ impl Emitter<'_> {
             i.br(0);
             i.end();
             i.end();
+            // The loser buffer is sort-private and provably dead — the
+            // first reclamation customer (RC-2).
+            i.local_get(hb2).call(F_FREE);
             i.local_get(ha);
         }
         for _ in 0..10 {
@@ -409,6 +412,11 @@ impl Emitter<'_> {
             i.br(0);
             i.end();
             i.end();
+            // Keys (both buffers) and the loser vals buffer are
+            // sort-private and dead past this point (RC-2).
+            i.local_get(hka).call(F_FREE);
+            i.local_get(hkb).call(F_FREE);
+            i.local_get(hvb).call(F_FREE);
             i.local_get(hva);
         }
         for _ in 0..9 {
