@@ -22,7 +22,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// Grow-only: the number of `run` rows may never drop below this.
-const RUN_FLOOR: usize = 21;
+const RUN_FLOOR: usize = 25;
 
 fn gauntlet_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/gauntlet").canonicalize().expect("spec/gauntlet exists")

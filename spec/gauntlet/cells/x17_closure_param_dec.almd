@@ -1,0 +1,14 @@
+// The env-shift pin: a lifted lambda with a DROPPABLE param must not
+// release its closure ENV block at the epilogue (raw param 0 is the
+// env; the params begin at env_shift). The second invoke is the
+// witness — a freed env turns call_indirect into "uninitialized
+// element" (found by the develop-corpus C-319 trio, 2026-08-26).
+effect fn main() -> Unit = {
+  var seen: List[String] = []
+  let note = (s: String) => {
+    seen = seen + [s]
+  }
+  note("a")
+  note("b")
+  println(int.to_string(list.len(seen)))
+}

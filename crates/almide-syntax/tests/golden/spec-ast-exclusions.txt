@@ -42,6 +42,7 @@ spec/gauntlet/cells/x15_directory_namespace/src/application/svc.almd	gauntlet ce
 spec/gauntlet/cells/x15_directory_namespace/src/domain/model.almd	gauntlet cell: verdict pinned by the almide-wasm gauntlet gate (its own manifest)
 spec/gauntlet/cells/x15_directory_namespace/src/main.almd	gauntlet cell: verdict pinned by the almide-wasm gauntlet gate (its own manifest)
 spec/gauntlet/cells/x16_effect_mut_generic.almd	gauntlet cell: verdict pinned by the almide-wasm gauntlet gate (its own manifest)
+spec/gauntlet/cells/x17_closure_param_dec.almd	gauntlet cell: verdict pinned by the almide-wasm gauntlet gate (its own manifest)
 spec/gauntlet/pkg/functional_port/src/application/place_order.almd	gauntlet cell: verdict pinned by the almide-wasm gauntlet gate (its own manifest)
 spec/gauntlet/pkg/functional_port/src/domain/money.almd	gauntlet cell: verdict pinned by the almide-wasm gauntlet gate (its own manifest)
 spec/gauntlet/pkg/functional_port/src/domain/order.almd	gauntlet cell: verdict pinned by the almide-wasm gauntlet gate (its own manifest)

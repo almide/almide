@@ -115,6 +115,12 @@ impl Emitter<'_> {
                 // Codec splices resolve by BARE name through the same
                 // registry/whitelist path module calls use.
                 let resolved = resolved.or_else(|| self.resolve_qualified(name));
+                // Cross-module convention method: `Type.method` defined
+                // beside its type in ANOTHER module — resolve by SUFFIX
+                // when exactly one module defines it (unique-or-wall:
+                // the #1558/#1087 bare-name landmine family demands the
+                // ambiguity case refuse, never guess).
+                let resolved = resolved.or_else(|| self.resolve_method_suffix(name));
                 let Some(i) = resolved else {
                     return unsup(&format!("call:{name}"));
                 };
@@ -200,6 +206,23 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hold);
         self.release_i32();
         Ok(Some(SliceTy::Named(ti)))
+    }
+
+    /// A `Type.method` spelling that missed both the current module and
+    /// the bare table: accept the module-qualified key ENDING in
+    /// `.Type.method` iff it is UNIQUE across modules — ambiguity walls
+    /// (order-independent: uniqueness needs no iteration order).
+    fn resolve_method_suffix(&self, name: &str) -> Option<usize> {
+        if !name.contains('.') {
+            return None;
+        }
+        let suffix = format!(".{name}");
+        let mut hits = self.table.by_name.iter().filter(|(k, _)| k.ends_with(&suffix));
+        let first = hits.next()?;
+        if hits.next().is_some() {
+            return None;
+        }
+        Some(*first.1)
     }
 
     /// Resolve a qualified stdlib call ("float.to_string") to a table

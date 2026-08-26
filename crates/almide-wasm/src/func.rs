@@ -313,7 +313,11 @@ pub(crate) fn lower_fn(
         }
         for (k, &(_, pty)) in params.iter().enumerate() {
             if em.rc_droppable(pty) {
-                em.f.instructions().local_get(k as u32).call(F_DEC_FLAT);
+                // env_shift: a lifted lambda's raw param 0 is the closure
+                // ENV block — dec'ing it freed the closure after its
+                // first invoke (call_indirect then read a freelist
+                // pointer: "uninitialized element", the C-319 trio).
+                em.f.instructions().local_get(env_shift + k as u32).call(F_DEC_FLAT);
             }
         }
         // Hold-balance invariant: every arm releases exactly what it

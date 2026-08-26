@@ -83,7 +83,7 @@
 65824	spec/wasm_cross/default_param_ref.almd
 66016	spec/wasm_cross/destructure_let_unwrap.almd
 68032	spec/wasm_cross/early_return_control_flow.almd
-66512	spec/wasm_cross/edge_closure_matrix.almd
+66544	spec/wasm_cross/edge_closure_matrix.almd
 133552	spec/wasm_cross/edge_float_formatting.almd
 68592	spec/wasm_cross/edge_int_boundaries.almd
 67504	spec/wasm_cross/edge_map_order.almd
@@ -267,7 +267,7 @@
 69712	spec/wasm_cross/list_comprehensive.almd
 81504	spec/wasm_cross/list_count_index_truncation.almd
 70224	spec/wasm_cross/list_cross_module_variant.almd
-66064	spec/wasm_cross/list_element_hof_chain.almd
+66096	spec/wasm_cross/list_element_hof_chain.almd
 66032	spec/wasm_cross/list_enumerate_find.almd
 66320	spec/wasm_cross/list_enumerate_rich.almd
 66128	spec/wasm_cross/list_eq.almd

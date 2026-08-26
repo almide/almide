@@ -97,6 +97,13 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
                     Some(SliceTy::List(types.intern(SliceTy::Scalar(Scalar::Str))))
                 }
                 _ => None,
+            }).or_else(|| {
+                // A BARE spelling of a module-declared type (the front
+                // qualifies the decl `m.Box` but a convention method's
+                // receiver says `Box`): unique-suffix match, ambiguity
+                // stays None — the same unique-or-wall doctrine as the
+                // cross-module method resolver.
+                named_suffix_unique(types, name.as_str())
             })
         }
         Ty::Named(name, args) => types.instance(name.as_str(), args).map(SliceTy::Named),
@@ -183,3 +190,18 @@ pub(crate) fn ty_name(t: &Ty) -> String {
     dbg.split(&[' ', '(', '{'][..]).next().unwrap_or("?").to_string()
 }
 
+
+/// The unique module-qualified type whose key ends `.{name}` — or None
+/// (missing OR ambiguous; both refuse downstream, never guess).
+fn named_suffix_unique(types: &TypeTable, name: &str) -> Option<SliceTy> {
+    if name.contains('.') {
+        return None;
+    }
+    let suffix = format!(".{name}");
+    let mut hits = types.by_name.iter().filter(|(k, _)| k.ends_with(&suffix));
+    let first = hits.next()?;
+    if hits.next().is_some() {
+        return None;
+    }
+    Some(SliceTy::Named(*first.1))
+}
