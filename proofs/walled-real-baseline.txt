@@ -126,6 +126,5 @@ spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
 spec/wasm_cross/bytes_equality_call_operands.almd :: main
 spec/wasm_cross/codec_list_default.almd :: main
 spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
-spec/wasm_cross/list_of_tuples_equality.almd :: main
 spec/wasm_cross/nested_payload_guard.almd :: pick_opt
 spec/wasm_cross/nested_three_level_literal.almd :: main
