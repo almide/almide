@@ -2732,3 +2732,34 @@ record the closure.
   runtime.rs split (allocator family → runtime_alloc.rs) for the file
   budget. rc_budget's BUMP_ONLY stays true — the churn program doesn't
   sort, so the acceptance event still awaits RC-3's scope-exit drops.
+
+## Stage 102 (2026-08-26): RC-3/4 — ownership lands, the acceptance flips
+
+- The ownership discipline, grain-canonical with one simplification per
+  layer: callee-owned droppable args (call sites +1 borrowed args,
+  epilogues release params — fresh temporaries are consumed by the
+  callee's release); borrow-share guards at every retain store (list
+  literal elements, push, record/spread fields, variant ctor payloads,
+  sum payloads, field-assign); Bind/Assign release the previous
+  occupant, self-referential assigns skip (the C-132 write-back
+  transfers through the call); fall-through epilogues release exactly
+  the Bind-route owners (BTreeSet — deterministic order).
+- The allocator became class-shaped: requests round to the size class,
+  CAP records the PHYSICAL class capacity, free files by CAP — the
+  file/take mismatch that kept reuse at zero (probe: 123 MB → 164 MB →
+  242 KB across the three designs) died with the third.
+- **THE ACCEPTANCE EVENT: rc_budget's 16 MiB churn FLIPS to completing
+  — 242 KB steady state, 510× under bump-only.** BUMP_ONLY=false; the
+  must-OOM twin keeps the gate honest.
+- Three dangle classes found and fixed by the gates during the burn:
+  mut-param realloc-free vs assign dec-old double-release
+  (mut_heap_param), ctor payloads retaining epilogue-released params
+  (koka_reuse1's Pair2), and the initial share-into-container class
+  (nested_list_list_int + 3 codec fixtures). 599/599, alias, gauntlet,
+  fuzz, perf relations (3.88/4.26, lockstep 1.17) all green at land.
+- Ledger re-ratified: churn-class programs drop MBs
+  (loop_push_trailing_increment −4.65 MB, loop_buffer_churn −3.4 MB),
+  one-shot programs pay a small class-rounding tax, and
+  sort_by_str_key_heap's RC-2 win regressed to baseline — RECORDED as
+  the open footprint anomaly for the tuning stage. Mutant 033 refreshed
+  (kill re-verified), emitter split (rc_ownership.rs).
