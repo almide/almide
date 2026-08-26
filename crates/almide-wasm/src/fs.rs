@@ -122,129 +122,7 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64();
                 BOOL
             }
-            ("list_dir", [p]) => {
-                self.fs_call_1(p, OP_LIST_DIR)?;
-                self.fs_result_string_list()?
-            }
-            ("read_lines", [p]) => {
-                self.fs_call_1(p, OP_READ_LINES)?;
-                self.fs_result_string_list()?
-            }
-            ("read_text_if_exists", [p]) => {
-                self.fs_call_1(p, OP_READ_TEXT_IF_EXISTS)?;
-                // status 2 = ok(none); else the string result some-wraps.
-                let hret = self.hold_i64()?;
-                let hb = self.hold_i32()?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(hret);
-                    i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(2).i32_eq();
-                    i.if_(BlockType::Result(ValType::I32));
-                    // ok(none)
-                    i.i32_const(16)
-                        .call(F_ALLOC)
-                        .local_tee(hb)
-                        .i32_const(0)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                    i.local_get(hb);
-                    i.else_();
-                    i.local_get(hret);
-                }
-                let _ = self.fs_result_string()?;
-                {
-                    // stack: Result[String, String] — rewrap the ok side
-                    // as some(payload).
-                    let mut i = self.f.instructions();
-                    i.local_set(hb);
-                    i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
-                    i.if_(BlockType::Empty);
-                    let hs = self.tmp_i32_local;
-                    i.i32_const(4).call(F_ALLOC).local_set(hs);
-                    i.local_get(hs);
-                    i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-                    i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
-                    i.local_get(hb).local_get(hs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                    i.end();
-                    i.local_get(hb);
-                    i.end();
-                }
-                self.release_i32();
-                self.release_i64();
-                let sh = self.types.intern(STR);
-                let oh = self.types.intern(SliceTy::Option(sh));
-                SliceTy::Result(oh, sh)
-            }
-            ("read_bytes", [p]) => self.lower_fs_read_bytes(p)?,
-            ("fold_lines", [p, init, cb]) => {
-                let (params, body) = self.hof_lambda(cb, 2)?;
-                let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
-                    return unsup(&format!("fs-fold-acc:{}", ty_name(&init.ty)));
-                };
-                self.lower(init, Some(acc_ty))?;
-                self.f.instructions().local_set(params[0]);
-                self.fs_call_1(p, OP_READ_LINES)?;
-                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                // walk the frames, folding
-                self.fs_frames_foreach(hraw, hlen, |em| {
-                    em.f.instructions().local_set(params[1]);
-                    em.lower(body, Some(acc_ty))?;
-                    em.f.instructions().local_set(params[0]);
-                    Ok(())
-                })?;
-                // ok(acc) / err passthrough
-                let hs = self.hold_i32()?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(herr).if_(BlockType::Result(ValType::I32));
-                    i.local_get(herr);
-                    i.else_();
-                    i.i32_const(16)
-                        .call(F_ALLOC)
-                        .local_tee(hs)
-                        .i32_const(0)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    i.local_get(hs).local_get(params[0]);
-                }
-                self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
-                self.f.instructions().local_get(hs).end();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                SliceTy::Result(self.types.intern(acc_ty), self.types.intern(STR))
-            }
-            ("for_each_line", [p, cb]) => {
-                let (params, body) = self.hof_lambda(cb, 1)?;
-                self.fs_call_1(p, OP_READ_LINES)?;
-                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                self.fs_frames_foreach(hraw, hlen, |em| {
-                    em.f.instructions().local_set(params[0]);
-                    em.lower_stmt_expr(body)?;
-                    Ok(())
-                })?;
-                let hs = self.hold_i32()?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(herr).if_(BlockType::Result(ValType::I32));
-                    i.local_get(herr);
-                    i.else_();
-                    i.i32_const(16)
-                        .call(F_ALLOC)
-                        .local_tee(hs)
-                        .i32_const(0)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                    i.local_get(hs);
-                    i.end();
-                }
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                SliceTy::Result(self.types.intern(SliceTy::Unit), self.types.intern(STR))
-            }
-            _ => return self.lower_fs_meta_call(func, args),
+            _ => return self.lower_fs_call_b(func, args),
         };
         Ok(Some(Some(out)))
     }
@@ -504,4 +382,141 @@ impl Emitter<'_> {
 
 fn byte_memarg() -> wasm_encoder::MemArg {
     wasm_encoder::MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+}
+
+impl Emitter<'_> {
+    /// The second half of the `fs.*` dispatch — split from `lower_fs_call`
+    /// for the complexity budget (the module-call twin pattern).
+    fn lower_fs_call_b(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+        let out = match (func, args) {
+            ("list_dir", [p]) => {
+                self.fs_call_1(p, OP_LIST_DIR)?;
+                self.fs_result_string_list()?
+            }
+            ("read_lines", [p]) => {
+                self.fs_call_1(p, OP_READ_LINES)?;
+                self.fs_result_string_list()?
+            }
+            ("read_text_if_exists", [p]) => {
+                self.fs_call_1(p, OP_READ_TEXT_IF_EXISTS)?;
+                // status 2 = ok(none); else the string result some-wraps.
+                let hret = self.hold_i64()?;
+                let hb = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hret);
+                    i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(2).i32_eq();
+                    i.if_(BlockType::Result(ValType::I32));
+                    // ok(none)
+                    i.i32_const(16)
+                        .call(F_ALLOC)
+                        .local_tee(hb)
+                        .i32_const(0)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    i.local_get(hb);
+                    i.else_();
+                    i.local_get(hret);
+                }
+                let _ = self.fs_result_string()?;
+                {
+                    // stack: Result[String, String] — rewrap the ok side
+                    // as some(payload).
+                    let mut i = self.f.instructions();
+                    i.local_set(hb);
+                    i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
+                    i.if_(BlockType::Empty);
+                    let hs = self.tmp_i32_local;
+                    i.i32_const(4).call(F_ALLOC).local_set(hs);
+                    i.local_get(hs);
+                    i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+                    i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+                    i.local_get(hb).local_get(hs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    i.end();
+                    i.local_get(hb);
+                    i.end();
+                }
+                self.release_i32();
+                self.release_i64();
+                let sh = self.types.intern(STR);
+                let oh = self.types.intern(SliceTy::Option(sh));
+                SliceTy::Result(oh, sh)
+            }
+            ("read_bytes", [p]) => self.lower_fs_read_bytes(p)?,
+            ("fold_lines", [p, init, cb]) => {
+                let (params, body) = self.hof_lambda(cb, 2)?;
+                let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
+                    return unsup(&format!("fs-fold-acc:{}", ty_name(&init.ty)));
+                };
+                self.lower(init, Some(acc_ty))?;
+                self.f.instructions().local_set(params[0]);
+                self.fs_call_1(p, OP_READ_LINES)?;
+                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+                // walk the frames, folding
+                self.fs_frames_foreach(hraw, hlen, |em| {
+                    em.f.instructions().local_set(params[1]);
+                    em.lower(body, Some(acc_ty))?;
+                    em.f.instructions().local_set(params[0]);
+                    Ok(())
+                })?;
+                // ok(acc) / err passthrough
+                let hs = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(herr).if_(BlockType::Result(ValType::I32));
+                    i.local_get(herr);
+                    i.else_();
+                    i.i32_const(16)
+                        .call(F_ALLOC)
+                        .local_tee(hs)
+                        .i32_const(0)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    i.local_get(hs).local_get(params[0]);
+                }
+                self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+                self.f.instructions().local_get(hs).end();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                SliceTy::Result(self.types.intern(acc_ty), self.types.intern(STR))
+            }
+            ("for_each_line", [p, cb]) => {
+                let (params, body) = self.hof_lambda(cb, 1)?;
+                self.fs_call_1(p, OP_READ_LINES)?;
+                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+                self.fs_frames_foreach(hraw, hlen, |em| {
+                    em.f.instructions().local_set(params[0]);
+                    em.lower_stmt_expr(body)?;
+                    Ok(())
+                })?;
+                let hs = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(herr).if_(BlockType::Result(ValType::I32));
+                    i.local_get(herr);
+                    i.else_();
+                    i.i32_const(16)
+                        .call(F_ALLOC)
+                        .local_tee(hs)
+                        .i32_const(0)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    i.local_get(hs);
+                    i.end();
+                }
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                SliceTy::Result(self.types.intern(SliceTy::Unit), self.types.intern(STR))
+            }
+            _ => return self.lower_fs_meta_call(func, args),
+        };
+        Ok(Some(Some(out)))
+    }
 }
