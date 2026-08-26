@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
-index cbf820e16..fa822bd24 100644
+index ba6c2366a..39cfcd9b2 100644
 --- a/crates/almide-wasm/src/calls.rs
 +++ b/crates/almide-wasm/src/calls.rs
-@@ -83,7 +83,7 @@ impl Emitter<'_> {
+@@ -149,7 +149,7 @@ impl Emitter<'_> {
                  // Tail position with a matching return type → return_call:
                  // constant stack for arbitrarily deep (incl. mutual)
                  // recursion, the C-292 contract.
 -                if tail && ret.is_some() && ret == self.fn_ret {
 +                if false && tail && ret.is_some() && ret == self.fn_ret { // [MUTANT: tail calls disabled]
+                     // Same frame-replacement release as the indirect site.
+                     self.emit_tail_param_release();
                      self.f.instructions().return_call(index);
-                 } else {
-                     self.f.instructions().call(index);
