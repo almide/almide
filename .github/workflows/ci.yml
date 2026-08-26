@@ -35,7 +35,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.89.0"
+  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV: the almide binary embeds wasmtime 47 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
