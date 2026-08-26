@@ -1,0 +1,55 @@
+// @contract: C-307, C-302
+// ALS-T24: float.to_int truncates toward zero, saturates at the i64 bounds,
+// maps NaN to 0; the checked family is some() only for exactly representable
+// values. Edges: ±inf, NaN, ±2^63, -0.0, fractions, 9.3e18.
+fn opt(o: Int64?) -> String = match o {
+  some(v) => "some ${v}",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  let inf = 1.0 / 0.0
+  let nan = 0.0 / 0.0
+  println("${float.to_int(2.7)} ${float.to_int(-2.7)} ${float.to_int(2.5)} ${float.to_int(-2.5)}")
+  // 2 -2 2 -2
+  println("${float.to_int(inf)} ${float.to_int(0.0 - inf)}")
+  // 9223372036854775807 -9223372036854775808
+  println("${float.to_int(nan)} ${float.to_int(-0.0)} ${float.to_int(9.3e18)}")
+  // 0 0 9223372036854775807
+  println("${float.to_int(9223372036854775807.0)} ${float.to_int(-9223372036854775808.0)}")
+  // 9223372036854775807 -9223372036854775808
+  println(opt(float.to_int64_checked(2.7)))
+  // none
+  println(opt(float.to_int64_checked(-0.0)))
+  // some 0
+  println(opt(float.to_int64_checked(nan)))
+  // none
+  println(opt(float.to_int64_checked(inf)))
+  // none
+  println(opt(float.to_int64_checked(9.3e18)))
+  // none
+  println(opt(float.to_int64_checked(-9223372036854775808.0)))
+  // some -9223372036854775808
+  println(opt(float.to_int64_checked(9223372036854775807.0)))
+  // none (the literal rounds to 2^63, out of range)
+  println(match float.to_int8_checked(200.0) {
+    some(v) => "some",
+    none => "none",
+  })
+  // none
+  println(match float.to_uint8_checked(255.0) {
+    some(v) => "some ${v}",
+    none => "none",
+  })
+  // some 255
+  println(match float.to_float32_checked(0.1) {
+    some(v) => "some",
+    none => "none",
+  })
+  // none (0.1 is not exactly representable in binary32)
+  // some
+  println(match float.to_float32_checked(0.5) {
+    some(v) => "some",
+    none => "none",
+  })
+}

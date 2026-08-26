@@ -112,3 +112,19 @@
 # the #1522 default-decode inline (value.field match + strict/null/default
 # arms) lowers where the old `__decode_default_*` helper shape walled. The
 # baseline is EMPTY again; ANY row is a regression.
+#
+# (2026-08-26, the commissioning switchover) The wall-corpus GRADUATION moved
+# sixteen shapes the incumbent refused into spec/wasm_cross — the commissioned
+# structural leg renders and byte-verifies all of them, so they are corpus
+# rows now, and the eight functions below are the subset the incumbent's MIR
+# lowering still walls (the rest lower at MIR and walled later, at
+# render). These are NOT lowering regressions: the corpus grew past the
+# incumbent's admitted profile by design. Each row prunes when the incumbent
+# learns the shape — or with the incumbent's retirement, whichever first.
+spec/gauntlet/cells/x09_tuple_list_of_record.almd :: f
+spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
+spec/wasm_cross/bytes_equality_call_operands.almd :: main
+spec/wasm_cross/codec_list_default.almd :: main
+spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
+spec/wasm_cross/nested_payload_guard.almd :: pick_opt
+spec/wasm_cross/nested_three_level_literal.almd :: main

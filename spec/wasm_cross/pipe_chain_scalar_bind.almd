@@ -1,0 +1,16 @@
+// @contract: C-115
+// Graduated from proofs/wall-corpus/pipe_chain_scalar_bind.almd at the
+// commissioning switchover: the structural emitter lowers the chained
+// pipe bound to a scalar that the incumbent's strict value mode refused.
+// A CHAINED pipe (two or more stages mixing named fns and lambdas) bound
+// to a scalar: `three() |> ((x) => x * 10) |> identity`. One-stage pipes
+// in every arrangement vote (gleam_pipe_shapes) — the chain is where the
+// STRICT value mode refuses rather than defer the stage to Const 0.
+fn identity(x: Int) -> Int = x
+
+fn three() -> Int = 3
+
+fn main() -> Unit = {
+  let p = three() |> ((x) => x * 10) |> identity
+  println(int.to_string(p))
+}

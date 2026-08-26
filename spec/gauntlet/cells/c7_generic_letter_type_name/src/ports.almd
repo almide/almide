@@ -1,0 +1,3 @@
+protocol Proto {
+  fn read(self) -> Int
+}

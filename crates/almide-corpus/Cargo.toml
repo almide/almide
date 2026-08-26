@@ -1,0 +1,10 @@
+[package]
+name = "almide-corpus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Where the judge lives: resolves corpus-relative fixture paths across the implementation tree and the almide/als submodule mount (ARCHITECTURE.md §4)"
+
+[lints]
+workspace = true

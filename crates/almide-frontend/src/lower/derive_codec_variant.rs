@@ -121,7 +121,7 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived codec worker, no params carry mut
     }
 }
 
@@ -375,7 +375,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived codec worker, no params carry mut
     }
 }
 
@@ -467,7 +467,7 @@ pub(super) fn derive_container_helpers(
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: derived codec worker, no params carry mut
             module_origin: None,
         }
     }

@@ -252,6 +252,28 @@ fn sweep_dead_window_material(out: &mut Vec<Op>, ret: Option<ValueId>) {
     }
 }
 
+/// The Alloc-init reads, exhaustive over Init for the same no-wildcard
+/// reason — split from `collect_reads` for the complexity budget.
+fn alloc_reads(init: &Init, used: &mut BTreeSet<ValueId>) {
+    match init {
+        Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
+            used.insert(*len);
+        }
+        Init::OptSome { payload } | Init::ResOkScalar { payload } => {
+            used.insert(*payload);
+        }
+        Init::ResErrStr { piece } => {
+            used.insert(*piece);
+        }
+        Init::Opaque
+        | Init::Empty
+        | Init::IntList(_)
+        | Init::Bytes(_)
+        | Init::Str(_)
+        | Init::OptNone => {}
+    }
+}
+
 /// EVERY ValueId an op reads — exhaustive over the Op grammar (a miss here
 /// could sweep a live ConstInt, so no wildcard arm for value-carrying ops).
 fn collect_reads(op: &Op, used: &mut BTreeSet<ValueId>) {
@@ -267,23 +289,7 @@ fn collect_reads(op: &Op, used: &mut BTreeSet<ValueId>) {
         }
     }
     match op {
-        Op::Alloc { init, .. } => match init {
-            Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
-                used.insert(*len);
-            }
-            Init::OptSome { payload } | Init::ResOkScalar { payload } => {
-                used.insert(*payload);
-            }
-            Init::ResErrStr { piece } => {
-                used.insert(*piece);
-            }
-            Init::Opaque
-            | Init::Empty
-            | Init::IntList(_)
-            | Init::Bytes(_)
-            | Init::Str(_)
-            | Init::OptNone => {}
-        },
+        Op::Alloc { init, .. } => alloc_reads(init, used),
         Op::Const { .. } | Op::ConstInt { .. } | Op::FuncRef { .. } => {}
         Op::Dup { src, .. } | Op::SetLocal { src, .. } => {
             used.insert(*src);

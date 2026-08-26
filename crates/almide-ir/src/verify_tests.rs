@@ -43,7 +43,7 @@ mod tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: test fixture
             module_origin: None,
         }
     }
@@ -356,7 +356,7 @@ mod tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: test fixture
             module_origin: None,
         };
         let prog = make_program(vec![f], vt);

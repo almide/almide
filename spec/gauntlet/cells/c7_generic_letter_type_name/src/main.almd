@@ -1,0 +1,9 @@
+import self.ports
+import self.infra
+import io
+
+fn go[Q: Proto](c: Q) -> Int = c.read()
+
+effect fn main() -> Unit = {
+  io.print(int.to_string(go(infra.T { n: 7 })))
+}

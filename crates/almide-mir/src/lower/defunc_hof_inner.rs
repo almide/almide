@@ -15,6 +15,9 @@ struct DefuncResultShape {
     /// A `(String, Value)` tuple element → `DropListStrValue` (str_value_elem_lists,
     /// the parse_records pair).
     str_value_tuple: bool,
+    /// A `(String, String)` tuple element → `DropListStrStr` (str_str_elems,
+    /// the url.query_pairs shape).
+    str_str_tuple: bool,
     /// A dynamic Value element → `DropListValue` (value_elem_lists, parse_records'
     /// outer `data |> list.map(row => value.object(…))`).
     value: bool,
@@ -223,6 +226,11 @@ impl LowerCtx {
         let str_value_tuple = matches!(&result_elem,
             Some(Ty::Tuple(tys)) if tys.len() == 2
                 && matches!(tys[0], Ty::String) && crate::lower::is_value_ty(&tys[1]));
+        // A `(String, String)` pair element (url.query_pairs) — the existing
+        // `DropListStrStr` route frees each tuple's two String slots.
+        let str_str_tuple = matches!(&result_elem,
+            Some(Ty::Tuple(tys)) if tys.len() == 2
+                && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String));
         let value = matches!(&result_elem, Some(t) if crate::lower::is_value_ty(t));
         // A `List[<record>]` result element with a generated recursive `$__drop_<R>` (`map`/`filter`
         // building/keeping records — porta load_porta_config's `env_keys |> list.map((k) => {key:k,
@@ -269,6 +277,7 @@ impl LowerCtx {
         if let Some(elem) = result_elem {
             if !matches!(elem, Ty::String)
                 && !str_value_tuple
+                && !str_str_tuple
                 && !value
                 && !scalar_list
                 && !matrix
@@ -281,7 +290,7 @@ impl LowerCtx {
                 return None;
             }
         }
-        Some(DefuncResultShape { fold_acc_ty, str_value_tuple, value, record_drop, matrix })
+        Some(DefuncResultShape { fold_acc_ty, str_value_tuple, str_str_tuple, value, record_drop, matrix })
     }
 
     /// zip+map FUSION: borrow the SECOND source and bound the loop by
@@ -426,6 +435,9 @@ impl LowerCtx {
         // body stores an OWNED handle into each slot (moved in, this list now owns it).
         if shape.str_value_tuple {
             self.str_value_elem_lists.insert(dst);
+        } else if shape.str_str_tuple {
+            // List[(String, String)] — per-tuple rc_dec of both String slots.
+            self.value_drops.entry(dst).or_default().str_str_elems = true;
         } else if shape.value {
             self.value_elem_lists.insert(dst);
         } else if shape.matrix {

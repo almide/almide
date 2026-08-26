@@ -1,0 +1,10 @@
+// #1569
+type E: Eq, Repr = | Bad(String)
+
+type R: Eq, Repr = { id: String }
+
+protocol P {
+  fn get(self, id: String) -> R!E
+  fn one(self) -> R!
+  effect fn put(self, r: R) -> Unit!E
+}

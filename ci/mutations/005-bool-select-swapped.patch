@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/runtime.rs b/crates/almide-wasm/src/runtime.rs
+index c6d5a987f..58133311e 100644
+--- a/crates/almide-wasm/src/runtime.rs
++++ b/crates/almide-wasm/src/runtime.rs
+@@ -195,8 +195,8 @@ pub(crate) fn emit_append_bool(true_base: u32, false_base: u32) -> Function {
+     let mut f = Function::new([]);
+     f.instructions()
+         .local_get(0)
+-        .i32_const(payload(true_base))
+         .i32_const(payload(false_base))
++        .i32_const(payload(true_base))
+         .local_get(1)
+         .select()
+         .i32_const("true".len() as i32)

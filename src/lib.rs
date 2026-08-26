@@ -50,6 +50,7 @@ pub mod types {
 
 // ── CLI-only modules (remain in main crate) ──
 pub mod project;
+pub mod wasm_leg;
 pub mod project_fetch;
 pub mod resolve;
 

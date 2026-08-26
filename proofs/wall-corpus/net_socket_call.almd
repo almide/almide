@@ -1,0 +1,12 @@
+// @wall: Module call net.tcp_connect
+// TCP sockets are a host capability with no WASI preview-1 surface in the
+// structural leg's import set: the call refuses by its unlinked name rather
+// than pretending a socket exists. Graduates with a sockets story (wasi p2
+// or a host op), never silently.
+import net
+
+effect fn main() -> Unit = {
+  let s = net.tcp_connect("127.0.0.1", 1)!
+  net.tcp_write(s, bytes.from_string("ping"))!
+  net.tcp_close(s)!
+}

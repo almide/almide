@@ -1,0 +1,12 @@
+import io
+
+type W = | Up | Down { d: Int }
+
+type A: Eq, Repr = { x: Int }
+
+fn f(n: Int) -> (A, W)! = (A { x: n }, Down { d: n + 1 })
+
+effect fn main() -> Unit = {
+  let (a, w) = f(1)!
+  io.print("${a.x}")
+}

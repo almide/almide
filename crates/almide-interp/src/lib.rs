@@ -185,9 +185,6 @@ pub struct Interpreter<'a> {
     pub(crate) det_entry: Cell<i64>,
     pub(crate) det_verdict: Cell<i64>,
     pub(crate) det_spend: Cell<i64>,
-    /// The open region's saved outer fuel — the reap's restore source (the
-    /// exit prim's `saved` operand dies with the cut frame).
-    pub(crate) det_saved: Cell<i64>,
     /// True while evaluating a USER fn body. Charges apply only there: the
     /// stdlib pool bodies are unmetered on every leg (both backends meter
     /// user functions only), so a pool fn's internal loops must not charge.
@@ -196,6 +193,11 @@ pub struct Interpreter<'a> {
     /// cut (T1-1) fires only inside a region — outside one, fuel below zero
     /// is impossible in budget mode and irrelevant in probe mode.
     pub(crate) det_region_depth: Cell<u32>,
+    /// C-320: saved-fuel stack, pushed by budget_enter, popped by
+    /// budget_exit — the repair pops what a skipped exit left behind.
+    /// The open region's saved outer fuel — the reap's restore source (the
+    /// exit prim's `saved` operand dies with the cut frame).
+    pub(crate) det_saved: Cell<i64>,
     /// The user program's own fn names — captured BEFORE the stdlib pool is
     /// layered into `fns`, so the meter can tell the two apart at call time.
     pub(crate) user_fn_names: HashSet<Sym>,
@@ -443,9 +445,9 @@ impl<'a> Interpreter<'a> {
             det_entry: Cell::new(-1),
             det_verdict: Cell::new(0),
             det_spend: Cell::new(0),
-            det_saved: Cell::new(0),
             det_in_user: Cell::new(false),
             det_region_depth: Cell::new(0),
+            det_saved: Cell::new(0),
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
             t_deadline: Cell::new(i64::MAX),
@@ -827,7 +829,30 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         base: &env::Scope,
     ) -> (Flow, env::Scope) {
-        self.run_callable(TailCallee::Fn(func), args, base)
+        let (flow, frame) = self.run_callable(TailCallee::Fn(func), args, base);
+        // GREENFIELD (#1226 unlock follow-up, adjudicated by the run-parity
+        // manifest): `!`-propagation always travels as Result(Err(..)) — the
+        // codegen lowers Option `!` to `ok_or("none")?` — but a fn DECLARED
+        // `-> T?` propagates `none` at its boundary on both backends
+        // (spec/wasm_cross/pure_bang_propagation.almd). Normalize the
+        // carrier here, ret-type-driven — but PURE fns only: a declared-Option
+        // EFFECT fn rides AUTO_WRAP and must propagate the Err with its
+        // message (spec/wasm_fail/int_parse_err_propagates.almd — the exact
+        // cell where the wasm leg once swallowed the error, #1410/#1411).
+        let flow = match flow {
+            Flow::Value(crate::value::Value::Result(Err(_)))
+                if func.ret_ty.is_option() && !func.is_effect =>
+            {
+                Flow::Value(crate::value::Value::Option(None))
+            }
+            Flow::Return(crate::value::Value::Result(Err(_)))
+                if func.ret_ty.is_option() && !func.is_effect =>
+            {
+                Flow::Return(crate::value::Value::Option(None))
+            }
+            other => other,
+        };
+        (flow, frame)
     }
 
     /// The tail-call trampoline: the shared engine under every function and
@@ -867,6 +892,10 @@ impl<'a> Interpreter<'a> {
         }
         self.depth.set(d + 1);
         let det_was_user = self.det_in_user.get();
+        // C-320: the meter's region depth at call entry — if the callee
+        // leaves it HIGHER, a det cut skipped a region's budget_exit and
+        // the exit bookkeeping runs here (exhausted ⇒ Err, never stale).
+
 
         // First hop's frame — what mut-param copy-out reads. Meaningful only
         // when no transfer happened, and a transfer implies no mut params.

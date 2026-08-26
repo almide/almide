@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index 4c1adcfae..ad13398cc 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -330,9 +330,7 @@ impl Emitter<'_> {
+                         .i64_const(stride)
+                         .i64_mul()
+                         .i64_add()
+-                        .i32_wrap_i64()
+-                        .i32_const(almide_layout::PAYLOAD as i32)
+-                        .i32_add();
++                        .i32_wrap_i64();
+                     i.local_get(hv);
+                 }
+                 self.store_ty_slot_raw(el);

@@ -1,0 +1,29 @@
+// UNFILED: a protocol is not a type — no heterogeneous collection
+import io
+
+protocol Policy {
+  fn allows(self, amount: Int) -> Bool
+  fn name(self) -> String
+}
+
+type MaxAmount: Policy = { cap: Int }
+
+fn MaxAmount.allows(self, amount: Int) -> Bool = amount <= self.cap
+
+fn MaxAmount.name(self) -> String = "max"
+
+type EvenOnly: Policy = { on: Bool }
+
+fn EvenOnly.allows(self, amount: Int) -> Bool = amount % 2 == 0
+
+fn EvenOnly.name(self) -> String = "even"
+
+fn check_all(ps: List[Policy], amount: Int) -> String = ps |> list.filter((p) => not p.allows(amount)) |> list.map((p) => p.name()) |> list.join(",")
+
+effect fn main() -> Unit = {
+  let ps: List[Policy] = [
+    MaxAmount { cap: 100 },
+    EvenOnly { on: true }
+  ]
+  io.print(check_all(ps, 101))
+}

@@ -1,0 +1,17 @@
+// @contract: C-008
+// Greenfield fuzz catch #3 (2026-08-20, seeds 1/7/9/36/53/58/…): a NESTED
+// interpolation captured in VALUE position (`${"${a}~${b}"}`) printed TWICE
+// when the enclosing line appended further parts after it. The inner build
+// writes its bytes into the line buffer past the outer cursor, captures them
+// into a fresh block, and must restore BOTH the global line cursor AND the
+// shared cursor local — the greenfield display engine restored only the
+// global, so the enclosing append landed past the inner bytes and the text
+// doubled. The three shapes below pin the capture discipline: nested interp
+// followed by a literal part, by another expression part, and standing alone.
+fn main() -> Unit = {
+  println("${"${2}~${"hello"}"}")
+  println("${"${42}~${"x"}"}|tail")
+  println("${"${-5}~${"🦀"}"}${[1, 2]}")
+  let s = "${9}~${"q"}"
+  println("${s} ${s}")
+}

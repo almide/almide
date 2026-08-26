@@ -1,0 +1,20 @@
+[package]
+name = "almide-wasm-run"
+version.workspace = true
+edition.workspace = true
+# The embedded engine's floor (wasmtime/cranelift), NOT the compiler's:
+# every other workspace crate holds the workspace 1.89 promise, and the
+# MSRV-honesty gate checks both claims separately.
+rust-version = "1.94"
+license.workspace = true
+description = "The greenfield wasm HOST: the almide.* import surface (print/exit/fs_call/host_read) over wasmtime, as a library and a CLI runner"
+
+[dependencies]
+almide-wasm = { path = "../almide-wasm" }
+anyhow = "1"
+wasmparser = "0.256"
+wasm-encoder = "0.256"
+wasmtime = "47"
+
+[lints]
+workspace = true

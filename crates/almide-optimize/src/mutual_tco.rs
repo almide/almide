@@ -410,7 +410,7 @@ fn rewrite_scc(
         doc: None,
         blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![],
+        mutated_params: vec![], // fresh-fn: merged dispatcher over frame slots; members keep their own flags
         module_origin: None,
     };
     retarget_members_to_dispatcher(functions, fis, &frame, disp_name, &ret_ty);

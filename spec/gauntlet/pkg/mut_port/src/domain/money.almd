@@ -1,0 +1,17 @@
+type Money: Eq, Repr = { cents: Int }
+
+fn money(cents: Int) -> Money! = {
+  guard cents >= 0 else err("Money must be non-negative: ${cents}")
+  Money { cents: cents }
+}
+
+fn zero() -> Money = Money { cents: 0 }
+
+fn add(a: Money, b: Money) -> Money = Money { cents: a.cents + b.cents }
+
+fn times(m: Money, n: Int) -> Money! = {
+  guard n >= 0 else err("quantity must be non-negative: ${n}")
+  Money { cents: m.cents * n }
+}
+
+fn display(m: Money) -> String = "$" + int.to_string(m.cents / 100) + "." + string.pad_start(int.to_string(m.cents % 100), 2, "0")

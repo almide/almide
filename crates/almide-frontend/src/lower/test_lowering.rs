@@ -202,6 +202,6 @@ fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where
         visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: synthesized test driver, zero params
     }
 }

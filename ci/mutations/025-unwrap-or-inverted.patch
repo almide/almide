@@ -1,0 +1,12 @@
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 9a7b0948a..09f903101 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -202,6 +202,7 @@ impl Emitter<'_> {
+                             .instructions()
+                             .local_tee(self.scr_i32_local)
+                             .i32_eqz()
++                            .i32_eqz()
+                             .if_(BlockType::Result(et.val_type()));
+                         self.lower(&args[1], Some(et))?;
+                         self.f.instructions().else_().local_get(self.scr_i32_local);

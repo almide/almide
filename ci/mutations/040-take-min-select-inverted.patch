@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
+index d9d2cac7b..e83dc1876 100644
+--- a/crates/almide-wasm/src/list_order.rs
++++ b/crates/almide-wasm/src/list_order.rs
+@@ -39,9 +39,9 @@ impl Emitter<'_> {
+                 // (fourth select inversion — the class now carries its
+                 // own fixture, els PR pending).
+                 i.local_get(hb).i32_load(len_memarg());
++                i.local_get(hn).i64_const(stride as i64).i64_mul(); // [MUTANT: min select inverted]
+                 i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                 i.local_get(hn).i64_const(stride as i64).i64_mul();
+-                i.local_get(hn).i64_const(stride as i64).i64_mul();
+                 i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
+                 i.i64_gt_s().select().i32_wrap_i64();
+                 i.local_get(hn).i64_const(0).i64_lt_s();

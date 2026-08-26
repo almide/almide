@@ -37,7 +37,16 @@ cd "$(git rev-parse --show-toplevel)"
 
 BASELINE_FILE="scripts/perf-ratio-baseline.txt"
 BUDGET_PCT="${PERF_RATIO_BUDGET_PCT:-40}"
-RUNS="${PERF_RATIO_RUNS:-3}"
+# 9 runs, not 3. Shared x86 runners are BIMODAL for the allocation-heavy
+# listbuild rows: one interleaved probe measured a single binary at
+# [498, 753, 737, 718, 753, 747, 615, 740, 646] ms — a 1.5x within-process
+# swing (probe/idiom-x86, 2026-08-26, rustc 1.98). With 3 runs the min can
+# miss a row's fast mode entirely, and the idiom relation then reads 1.29x
+# where 9 interleaved rounds measure 0.975x. Three earlier reds (1.20-1.37x
+# on rustc 1.94 AND 1.98) were this, misdiagnosed as a toolchain optimizer
+# regression. Nine rounds give every row enough draws to find its fast mode;
+# the ceiling stays where it is.
+RUNS="${PERF_RATIO_RUNS:-9}"
 # Gated pairs: bench -> same-shape rust-ref variant.
 #
 # The three `listbuild` rows are deliberately NOT here. Their almide/rust ratio
@@ -78,15 +87,19 @@ REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-com
 # all of it one heap allocation per element for `flat_map`'s intermediate
 # list. The ceiling below is what keeps that closed.
 #
-# Measured as (comb / its own rust ref) / (append / its own rust ref), on the
-# MIN of each variant's runs rather than the median. Both rows time the SAME
-# reference binary, so dividing each side by its own reference cancels
-# whatever load hit that row's window; the min is the least-contaminated
-# observation. Both corrections are needed: a run where an unrelated build
-# landed on the box during the comb row read 1.30x on raw medians and 1.07x
-# this way, against a clean-run 1.02x. The tighter-than-40% ceiling is
-# affordable BECAUSE of that normalization — this is a same-machine,
-# same-run, same-reference relation, not an absolute time.
+# ENFORCED ON INSTRUCTION COUNTS (callgrind Ir), not wall time. Wall time
+# for these allocation-heavy rows is machine-STATE bimodal on shared
+# runners: a binary's fast/slow mode persists across processes on one
+# machine, so neither min-of-N nor reference-normalization can cancel it
+# (two probes on the runner class, 2026-08-26: the same comb binary read
+# 0.975x append on one machine and 1.2-1.5x on others; one binary's nine
+# interleaved runs spanned 498-753 ms). Ir is exactly reproducible — the
+# probe measured comb/append = 1.0212 with a zero spread across repeated
+# callgrind runs — and the defect this gate exists to catch (a heap Vec
+# per element sneaking back into the flat_map lowering) is an instruction-
+# count explosion first. Wall time for the relation is still PRINTED for
+# the record; only Ir gates. Where valgrind does not exist (macOS dev
+# boxes), the relation is skipped loudly — CI always enforces it.
 IDIOM_CEILING=1.15
 # Medians under this many seconds are process-spawn noise, not measurement.
 MIN_SECONDS=0.08
@@ -181,28 +194,16 @@ for bench, ref_name in sorted(reported.items()):
     ref = v[f"{bench}/{ref_name}"]["median"]
     print(f"perf-ratio: {bench:16s} {nat / ref:.3f} (reported, not anchored — machine-dependent)")
 
-# The listbuild idiom relation (#1337): the RECOMMENDED combinator shape
-# against the `var` + `for` append loop it is documented to replace, from this
-# same run. This is the property the idiom docs assert, so it is checked
-# directly rather than inferred from two absolute ratios drifting apart. See
-# IDIOM_CEILING above for why it is min-of-runs and reference-normalized.
+# The listbuild idiom relation on WALL TIME — reported for the record only.
+# Enforcement moved to callgrind Ir in the shell step below (see the
+# IDIOM_CEILING comment for the bimodality evidence that forced the move).
 def own_ratio(bench):
     v = data[bench]["variants"]
     return v[f"{bench}/native"]["min"] / v[f"{bench}/rust:listbuild"]["min"]
 
 penalty = own_ratio("listbuild-comb") / own_ratio("listbuild-append")
-if penalty > idiom_ceiling:
-    failed = True
-    print(f"::error::perf-ratio: the RECOMMENDED list idiom costs {penalty:.3f}x the append "
-          f"loop it replaces (ceiling {idiom_ceiling:.2f}x). CLAUDE.md and docs/CHEATSHEET.md "
-          "tell authors to write `list.range |> list.flat_map` instead of `var` + `for`; that "
-          "guidance is only honest while this holds. The usual cause is the flat_map lambda "
-          "losing its array return (RustLoweringPass::lower_flat_map_arrays) and going back to "
-          "a heap Vec per element. Either restore the lowering or change the guidance — not "
-          "the ceiling.")
-else:
-    print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.3f}x the append loop "
-          f"(ceiling {idiom_ceiling:.2f}x) ok")
+print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.3f}x the append loop "
+      f"(wall time, reported — Ir gates the relation)")
 
 # ABLATION deltas (#1466): ablated/optimized per anchored bench, gated on
 # baseline rows keyed `ablation/<bench>`. Floor 0.90 is the honest direction
@@ -238,3 +239,39 @@ if failed:
     print("SAME change with the reasoning in the commit message.")
     sys.exit(1)
 PY
+
+# The idiom relation, ENFORCED on callgrind instruction counts (see the
+# IDIOM_CEILING comment). Size 2^20, not the timing rows' 2^23 — callgrind
+# is ~50x wall time and Ir is size-linear, so the smaller run measures the
+# same relation in seconds.
+if command -v valgrind >/dev/null 2>&1; then
+  ALMIDE="${ALMIDE_BIN:-almide}"
+  idiom_dir=$(mktemp -d -t perf-idiom.XXXXXX)
+  trap 'rm -f "$out" "$abl_out"; rm -rf "$idiom_dir"' EXIT
+  "$ALMIDE" build research/benchmark/perf/listbuild/listbuild_combinator.almd -o "$idiom_dir/comb" >/dev/null
+  "$ALMIDE" build research/benchmark/perf/listbuild/listbuild_append.almd -o "$idiom_dir/append" >/dev/null
+  ir_of() {
+    valgrind --tool=callgrind --callgrind-out-file="$idiom_dir/$1.cg" "$idiom_dir/$1" 20 >/dev/null 2>&1
+    grep -a '^summary:' "$idiom_dir/$1.cg" | awk '{print $2}'
+  }
+  ir_comb=$(ir_of comb)
+  ir_append=$(ir_of append)
+  python3 - "$ir_comb" "$ir_append" "$IDIOM_CEILING" <<'PY'
+import sys
+ir_comb, ir_append, ceiling = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
+penalty = ir_comb / ir_append
+if penalty > ceiling:
+    print(f"::error::perf-ratio: the RECOMMENDED list idiom costs {penalty:.4f}x the append "
+          f"loop's instructions (ceiling {ceiling:.2f}x, callgrind Ir {ir_comb} vs {ir_append}). "
+          "CLAUDE.md and docs/CHEATSHEET.md tell authors to write `list.range |> list.flat_map` "
+          "instead of `var` + `for`; that guidance is only honest while this holds. The usual "
+          "cause is the flat_map lambda losing its array return "
+          "(RustLoweringPass::lower_flat_map_arrays) and going back to a heap Vec per element. "
+          "Either restore the lowering or change the guidance — not the ceiling.")
+    sys.exit(1)
+print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.4f}x the append loop "
+      f"(callgrind Ir, ceiling {ceiling:.2f}x) ok")
+PY
+else
+  echo "perf-ratio: listbuild-idiom SKIPPED — valgrind unavailable on this box; CI enforces the Ir relation"
+fi

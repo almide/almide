@@ -1,0 +1,65 @@
+// ALS-T19..T24 — numeric determinism family, value assertions (C-303, C-304,
+// C-306 propagation/equality, C-307). The cross fixtures pin agreement; these
+// tests pin the VALUES. The min/max zero-ORDER rule (ahead of the 0.58.0
+// release) lives in float_minmax_zero_order_test.almd, and the literal-zero
+// sum (a 0.58.0 native fold bug) in float_signed_zero_sum_test.almd — each
+// red alone, for its own reason.
+fn neg_zero() -> Float = (0.0 - float.abs(-1.0)) * 0.0
+
+test "T19: a Float result is a function of the program alone" {
+  let x = float.parse("0.1") ?? 0.0
+  assert_eq(float.to_bits(x + 0.2), 4599075939470750516)
+  assert_eq(float.to_string(x + 0.2), "0.30000000000000004")
+}
+
+test "T20: a*b+c rounds twice — no fused multiply-add" {
+  let a = float.parse("1.0000000000000002") ?? 0.0
+  let b = float.parse("0.9999999999999999") ?? 0.0
+  assert_eq(a * b, 1.0)
+  assert_eq(a * b - 1.0, 0.0)
+  assert_eq(a * b + (0.0 - 1.0), 0.0)
+}
+
+test "T21: subnormals survive arithmetic and observation" {
+  let tiny = float.parse("2.2250738585072014e-308") ?? 0.0
+  assert_eq(float.to_bits(tiny / 2.0), 2251799813685248)
+  assert(tiny / 2.0 != 0.0)
+  assert_eq(float.to_bits(float.parse("5e-324") ?? 0.0), 1)
+  assert_eq(float.to_bits((float.parse("5e-324") ?? 0.0) * 2.0), 2)
+}
+
+test "T23: signed zero propagates and compares equal" {
+  let mz = neg_zero()
+  assert_eq(float.to_string(mz), "-0.0")
+  assert(mz == 0.0)
+  assert_eq(float.to_string(mz + float.abs(0.0)), "0.0")
+  assert_eq(float.to_string(mz * 1.0), "-0.0")
+  assert_eq(float.to_string(mz - 0.0), "-0.0")
+  assert_eq(float.to_string(1.0 / (0.0 - 1.0 / 0.0)), "-0.0")
+}
+
+test "T24: float.to_int truncates toward zero, saturates, NaN to 0" {
+  let inf = 1.0 / 0.0
+  assert_eq(float.to_int(2.7), 2)
+  assert_eq(float.to_int(-2.7), -2)
+  assert_eq(float.to_int(2.5), 2)
+  assert_eq(float.to_int(inf), 9223372036854775807)
+  assert_eq(float.to_int(0.0 - inf), -9223372036854775808)
+  assert_eq(float.to_int(9.3e18), 9223372036854775807)
+  assert_eq(float.to_int(0.0 / 0.0), 0)
+  assert_eq(float.to_int(-0.0), 0)
+}
+
+test "T24: the checked family is some only for exactly representable values" {
+  assert_eq(float.to_int64_checked(2.7), none)
+  assert_eq(float.to_int64_checked(-0.0), some(0))
+  assert_eq(float.to_int64_checked(0.0 / 0.0), none)
+  assert_eq(float.to_int64_checked(1.0 / 0.0), none)
+  assert_eq(float.to_int64_checked(9.3e18), none)
+  assert_eq(float.to_int8_checked(200.0), none)
+  assert_eq(match float.to_uint8_checked(255.0) {
+    some(v) => "some ${v}",
+    none => "none",
+  }, "some 255")
+  assert_eq(float.to_float32_checked(0.1), none)
+}

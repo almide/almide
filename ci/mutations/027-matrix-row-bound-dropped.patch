@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/matrix.rs b/crates/almide-wasm/src/matrix.rs
+index 14a412b5a..4953aeb21 100644
+--- a/crates/almide-wasm/src/matrix.rs
++++ b/crates/almide-wasm/src/matrix.rs
+@@ -50,7 +50,7 @@ impl Emitter<'_> {
+                 // r > MAX  ||  r*c > MAX (r,c are in [0, 2^63); the
+                 // r-bound check makes the product overflow-free:
+                 // past it we abort before multiplying)
+-                i.local_get(hr).i64_const(MAX_ELEMS).i64_gt_s();
++                i.local_get(hr).i64_const(MAX_ELEMS).i64_gt_s().i32_const(0).i32_and(); // [MUTANT]
+                 i.if_(BlockType::Empty);
+                 i.i32_const(msg as i32);
+             }

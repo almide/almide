@@ -1,0 +1,6 @@
+import self.m
+import io
+
+effect fn main() -> Unit = {
+  io.print(int.to_string(m.Box { n: 21 }.twice()))
+}

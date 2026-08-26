@@ -1,0 +1,43 @@
+// @contract: C-308, C-309
+// ALS-B1/B2: a kernel in the bounded profile — counted and nested loops with
+// literal bounds, records, Option, calls between @bounded functions — prints
+// exactly what its attribute-free twin (bounded_kernel_plain.almd) prints.
+// Today (0.58.0) the attribute is an unknown-attribute warning at build time;
+// build-time diagnostics are not observables, so the cross leg judges the run.
+type State = { pos: Int, vel: Int }
+
+@bounded
+fn step(s: State, accel: Int) -> State = State { pos: s.pos + s.vel, vel: s.vel + accel }
+
+@bounded
+fn simulate(accel: Int) -> State = {
+  var s = State { pos: 0, vel: 0 }
+  for i in 0..<10 {
+    s = step(s, accel)
+  }
+  s
+}
+
+@bounded
+fn grid_sum() -> Int = {
+  var acc = 0
+  for i in 0..<4 {
+    for j in 0..<3 {
+      acc = acc + i * j
+    }
+  }
+  acc
+}
+
+@bounded
+fn half(n: Int) -> Int? = if n % 2 == 0 then some(n / 2) else none
+
+fn main() -> Unit = {
+  let s = simulate(2)
+  println("${s.pos} ${s.vel}")
+  // 90 20
+  println("${grid_sum()}")
+  // 18
+  // 4 -1
+  println("${half(8) ?? -1} ${half(7) ?? -1}")
+}

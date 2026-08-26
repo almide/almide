@@ -1,0 +1,21 @@
+fn mk(n: Int) -> List[Int] = {
+  var out: List[Int] = []
+  var i = 0
+  while i < n {
+    list.push(out, (i * 7919) % 10007)
+    i = i + 1
+  }
+  out
+}
+
+fn main() -> Unit = {
+  let xs = mk(2000)
+  var acc = 0
+  var r = 0
+  while r < 300 {
+    let s = list.sort_by(xs, (x) => 0 - x)
+    acc = acc + s[0] + s[1999]
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}

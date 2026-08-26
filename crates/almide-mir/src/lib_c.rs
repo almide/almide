@@ -165,6 +165,18 @@ impl OwnershipScan {
     /// arm was reordered, no condition rewritten; the arms that merged into one
     /// (`Const`/`ConstInt`/`FuncRef`/`IntBinOp`/the loop markers) all had the SAME
     /// empty body, and each kept its own comment above its own pattern.
+    /// The `Add`-with-one-handle-operand address-alias rule (#1037) — split
+    /// from [`Self::step`] for the complexity budget: the result denotes an
+    /// address INTO the handle operand's object, so it inherits that object.
+    fn step_add_address_alias(&mut self, dst: ValueId, a: ValueId, b: ValueId) {
+        match (self.object_of.get(&a).copied(), self.object_of.get(&b).copied()) {
+            (Some(o), None) | (None, Some(o)) => {
+                self.object_of.insert(dst, o);
+            }
+            _ => {}
+        }
+    }
+
     fn step(&mut self, i: usize, op: &Op) {
         match op {
             // Probe charge: no ownership event (no alloc, no dup, no drop).
@@ -197,12 +209,7 @@ impl OwnershipScan {
             // The `PrimKind::Handle` rule, extended one hop; no `dead` entry is
             // created — an address is never itself live-checked, only traversed.
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
-                match (self.object_of.get(a).copied(), self.object_of.get(b).copied()) {
-                    (Some(o), None) | (None, Some(o)) => {
-                        self.object_of.insert(*dst, o);
-                    }
-                    _ => {}
-                }
+                self.step_add_address_alias(*dst, *a, *b)
             }
             // A scalar — no ownership accounting.
             Op::Const { dst: _ }

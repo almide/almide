@@ -8,6 +8,7 @@ use crate::intern::sym;
 pub struct TyVarId(pub u32);
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct Constraint {
     pub expected: Ty,
     pub actual: Ty,

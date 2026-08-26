@@ -1,0 +1,12 @@
+// @wall: Module call zlib.compress
+// zlib rides native Rust intrinsics (almide_rt_zlib_*) with no self-host
+// registry implementation, so the structural wasm leg refuses the call by
+// its unlinked name — the honest target-availability wall (#1423 doctrine),
+// never a stubbed wrong answer. Graduates when a pure-almide inflate/deflate
+// lands in the registry.
+import zlib
+
+effect fn main() -> Unit = {
+  let c = zlib.compress(bytes.from_string("hello hello hello"))!
+  println(int.to_string(bytes.len(c)))
+}

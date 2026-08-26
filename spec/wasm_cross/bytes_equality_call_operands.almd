@@ -1,0 +1,12 @@
+// @contract: C-099
+// Graduated from proofs/wall-corpus/bytes_equality_call_operands.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (Eq over Bytes), byte-verified on both targets.
+// Bytes equality where BOTH operands are call results (`bytes.from_list(…)
+// == bytes.from_list(…)` — gleam equality_test's bit-array rows re-based
+// onto Bytes): the Eq lowers as a BinOp whose operands are heap binds,
+// which the brick refuses to materialize. Scalar and List equality over
+// the same shapes vote (spec/wasm_cross/ gleam_equality_matrix).
+fn b(xs: List[Int]) -> Bytes = bytes.from_list(xs)
+
+fn main() -> Unit = println(if b([1, 2]) == b([1, 2]) then "eq" else "ne")

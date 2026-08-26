@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/emitter_vars.rs b/crates/almide-wasm/src/emitter_vars.rs
+index 94ae85d9d..ade905b7c 100644
+--- a/crates/almide-wasm/src/emitter_vars.rs
++++ b/crates/almide-wasm/src/emitter_vars.rs
+@@ -82,7 +82,7 @@ impl Emitter<'_> {
+             .i32_const(16)
+             .call(F_ALLOC)
+             .local_tee(hb)
+-            .i32_const(0)
++            .i32_const(1) // [MUTANT]
+             .i32_store(slot_memarg(almide_layout::SUM_TAG));
+         self.f.instructions().local_get(hb).local_get(hv);
+         self.store_ty_slot(raw, almide_layout::SUM_FIELD);

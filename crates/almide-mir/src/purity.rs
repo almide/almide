@@ -293,6 +293,7 @@ pub const PURE_MODULES: &[&str] = &[
     "uint64_convert",
     "uint8",
     "uint8_convert",
+    "url",
     "value",
     "value_core",
     "value_utils",

@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-303 contracts
+311 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -35,14 +35,14 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 4 |
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
 | C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 2 |
-| C-008 | [Compound interpolation renders the Almide-literal repr (containers)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
+| C-008 | [Compound interpolation renders the Almide-literal repr (containers)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 3 |
 | C-009 | [Record / variant / anonymous-record interpolation repr (field sorting)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-011 | Bare-float interpolation Display drops .0; float.to_string keeps it | 0.24.0 | active | fixture | 5 |
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
-| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 5 |
+| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 7 |
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 2 |
-| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 4 |
+| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 7 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 1 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
@@ -97,7 +97,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 4 |
 | C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
-| C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 2 |
+| C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 4 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
 | C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 1 |
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
@@ -126,9 +126,9 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-096 | process.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
 | C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
-| C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 9 |
+| C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 10 |
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
-| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 11 |
+| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 16 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 3 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 5 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
@@ -142,7 +142,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-112 | random.int draws stay in-range identically under the WASI entropy floor on v1 wasm | 0.27.6 | active | fixture | 1 |
 | C-113 | Let-bound ADT/Result variant matched by tag byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
 | C-114 | Matching an Option with a heap payload byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
-| C-115 | Pipe into a block-bodied lambda producing a value byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
+| C-115 | Pipe into a block-bodied lambda producing a value byte-matches native on v1 wasm | 0.27.6 | active | fixture | 2 |
 | C-116 | v1 scalar-value lowering edges byte-match native (tail Bool literal, float.parse inf/nan) | 0.27.7 | active | fixture | 2 |
 | C-117 | In-loop let-bound heap if/match is lifted to a tail helper and renders on v1 | 0.27.7 | active | fixture | 1 |
 | C-118 | env.args works on WASM and matches native (argv[0] skipped) | 0.27.8 | active | fixture | 1 |
@@ -325,10 +325,18 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-295 | A checker-exhaustive match of guard-lowered box patterns still builds on native | 0.57.2 | active | fixture | 1 |
 | C-296 | The generated type x operation matrix runs byte-identical across targets | 0.57.2 | active | fixture | 70 |
 | C-297 | flat_map whose closure returns an aliased list field is drop-balanced on both targets | 0.57.2 | active | fixture | 1 |
-| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 13 |
+| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 15 |
 | C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 2 |
 | C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |
+| C-302 | Numeric determinism family head: a Float result is a function of the program alone | 0.58.0 | active | fixture | 5 |
+| C-303 | Float operations round to nearest-even once each — no contraction, no FMA | 0.58.0 | active | fixture | 1 |
+| C-304 | Subnormal floats are preserved — no flush-to-zero on any target | 0.58.0 | active | fixture | 1 |
+| C-305 | Transcendental accuracy bounds: sqrt correctly rounded, exp/log/log2/log10/sin/cos/tan/fpow within 1 ulp | 0.58.0 | active | fixture | 1 |
+| C-306 | Signed zero: IEEE propagation, equality ignores the sign, min/max order -0 below +0 (IEEE 754-2019) | 0.60.0 | active | fixture | 1 |
+| C-307 | float.to_int truncates toward zero and saturates, NaN to 0; the checked family is exact-or-none | 0.58.0 | active | fixture | 1 |
+| C-308 | @bounded is a function attribute that changes nothing about types or values — a bounded function is an ordinary function | 0.60.0 | active | fixture | 1 |
+| C-309 | Subset, not dialect: a program's observable behaviour is identical with and without @bounded | 0.60.0 | active | fixture | 2 |
 | C-319 | A captured-and-mutated var List is shared storage through a closure | 0.59.0 | active | fixture | 2 |
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.59.2 | active | fixture | 1 |
 

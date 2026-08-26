@@ -1,0 +1,37 @@
+// @contract: C-309
+// ALS-B2: the attribute-free twin of bounded_kernel.almd — the same program
+// minus every @bounded line; it must print the same bytes (subset, not
+// dialect). Counted and nested loops with literal bounds, records, Option.
+type State = { pos: Int, vel: Int }
+
+fn step(s: State, accel: Int) -> State = State { pos: s.pos + s.vel, vel: s.vel + accel }
+
+fn simulate(accel: Int) -> State = {
+  var s = State { pos: 0, vel: 0 }
+  for i in 0..<10 {
+    s = step(s, accel)
+  }
+  s
+}
+
+fn grid_sum() -> Int = {
+  var acc = 0
+  for i in 0..<4 {
+    for j in 0..<3 {
+      acc = acc + i * j
+    }
+  }
+  acc
+}
+
+fn half(n: Int) -> Int? = if n % 2 == 0 then some(n / 2) else none
+
+fn main() -> Unit = {
+  let s = simulate(2)
+  println("${s.pos} ${s.vel}")
+  // 90 20
+  println("${grid_sum()}")
+  // 18
+  // 4 -1
+  println("${half(8) ?? -1} ${half(7) ?? -1}")
+}

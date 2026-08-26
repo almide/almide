@@ -1,0 +1,15 @@
+// @contract: C-015
+// Graduated from proofs/wall-corpus/map_rich_variant_key.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (_key_wall), byte-verified on both targets.
+// A Map keyed by a RICH variant (a payload-bearing case): linking the
+// scalar-key generic would produce INVALID wasm, not a wall — the in-code
+// note at mod_p4_e.rs's map_variant_other. The router refuses via the
+// unregistered _key_wall suffix; this fixture pins that refusal until the
+// keyed-container arc grows structural hash/eq for rich keys (#1492's
+// Map/Set brick, #1481).
+type K = | A(Int) | B(String)
+
+fn f() -> Map[K, Int] = map.set(([:]: Map[K, Int]), B("x"), 1)
+
+effect fn main() -> Unit = println(int.to_string(map.len(f())))

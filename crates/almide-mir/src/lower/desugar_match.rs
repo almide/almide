@@ -522,6 +522,52 @@ pub fn desugar_grouped_variant_match(
     v.changed.then_some(out)
 }
 
+/// A plain scalar leaf column (Bind / Literal / Wildcard) — hoisted from
+/// `group_option_result_arms` for the complexity budget.
+fn grouping_plain_col(p: &almide_ir::IrPattern) -> bool {
+    use almide_ir::IrPattern;
+    matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard)
+}
+
+/// A column pattern the sub-match can re-dispatch on: a scalar leaf (Bind /
+/// Literal / Wildcard) or a NESTED user-ctor pattern (`err(Overflow(msg))` —
+/// the Result-with-variant-payload class: the inner match over the bound
+/// payload var re-dispatches on the variant tag, which the custom-variant
+/// machinery lowers once the payload bind is seeded). Hoisted from
+/// `group_option_result_arms` for the complexity budget.
+fn grouping_scalar_col(p: &almide_ir::IrPattern) -> bool {
+    use almide_ir::IrPattern;
+    grouping_plain_col(p)
+        || matches!(p, IrPattern::Constructor { args, .. }
+            if args.iter().all(grouping_plain_col))
+        // A nested BUILTIN wrapper (`some(some(n))`, `some(ok(v))`, `some(none)` — the
+        // match_exhaustive nested-Option/Result class): the inner match over the bound
+        // payload re-dispatches on the wrapper's own len/cap tag, which the ordinary
+        // Option/Result machinery lowers once the payload bind is seeded.
+        || matches!(p, IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+            if grouping_plain_col(inner))
+        || matches!(p, IrPattern::None)
+        // A RECORD-variant pattern (`ok(Tag { name, c })` — the derived-Codec roundtrip
+        // class): the inner match re-dispatches the record-variant pattern over the bound
+        // payload var — the custom-variant machinery the `describe`-style direct matches
+        // already lower. Every named field must carry an explicit plain sub-pattern.
+        || matches!(p, IrPattern::RecordPattern { fields, .. }
+            if fields.iter().all(|f| matches!(&f.pattern, Some(fp) if grouping_plain_col(fp))))
+}
+
+/// Any constructor-shaped sub-pattern — hoisted from
+/// `group_option_result_arms` for the complexity budget.
+fn grouping_is_nested_ctor(p: &almide_ir::IrPattern) -> bool {
+    use almide_ir::IrPattern;
+    matches!(p,
+        IrPattern::Constructor { .. }
+            | IrPattern::RecordPattern { .. }
+            | IrPattern::Some { .. }
+            | IrPattern::None
+            | IrPattern::Ok { .. }
+            | IrPattern::Err { .. })
+}
+
 /// The grouping transform for [`desugar_grouped_variant_match`]. `None` when the subject is not an
 /// `Option`/`Result`, an arm is a top-level catch-all (`_`/binder — not a pure constructor dispatch),
 /// a payload pattern is nested (a later brick), or NO arm carries a guard/literal (the plain variant
@@ -546,40 +592,8 @@ fn group_option_result_arms(
         Err_,
         User(String),
     }
-    // A column pattern the sub-match can re-dispatch on: a scalar leaf (Bind /
-    // Literal / Wildcard) or a NESTED user-ctor pattern (`err(Overflow(msg))` —
-    // the Result-with-variant-payload class: the inner match over the bound
-    // payload var re-dispatches on the variant tag, which the custom-variant
-    // machinery lowers once the payload bind is seeded).
-    let plain_col =
-        |p: &IrPattern| matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard);
-    let scalar_col = |p: &IrPattern| {
-        plain_col(p)
-            || matches!(p, IrPattern::Constructor { args, .. }
-                if args.iter().all(plain_col))
-            // A nested BUILTIN wrapper (`some(some(n))`, `some(ok(v))`, `some(none)` — the
-            // match_exhaustive nested-Option/Result class): the inner match over the bound
-            // payload re-dispatches on the wrapper's own len/cap tag, which the ordinary
-            // Option/Result machinery lowers once the payload bind is seeded.
-            || matches!(p, IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
-                if plain_col(inner))
-            || matches!(p, IrPattern::None)
-            // A RECORD-variant pattern (`ok(Tag { name, c })` — the derived-Codec roundtrip
-            // class): the inner match re-dispatches the record-variant pattern over the bound
-            // payload var — the custom-variant machinery the `describe`-style direct matches
-            // already lower. Every named field must carry an explicit plain sub-pattern.
-            || matches!(p, IrPattern::RecordPattern { fields, .. }
-                if fields.iter().all(|f| matches!(&f.pattern, Some(fp) if plain_col(fp))))
-    };
-    let is_nested_ctor = |p: &IrPattern| {
-        matches!(p,
-            IrPattern::Constructor { .. }
-                | IrPattern::RecordPattern { .. }
-                | IrPattern::Some { .. }
-                | IrPattern::None
-                | IrPattern::Ok { .. }
-                | IrPattern::Err { .. })
-    };
+    let scalar_col = grouping_scalar_col;
+    let is_nested_ctor = grouping_is_nested_ctor;
     // A USER-ctor column of ARBITRARY ctor depth (`Node(Leaf(a), Node(Leaf(b), Leaf(c)))` — the
     // #610 nested-refinement class): the payload sub-match re-dispatches level by level — arity 1
     // re-enters THIS regroup on the next fixpoint pass; arity ≥2 becomes a tuple sub-match the

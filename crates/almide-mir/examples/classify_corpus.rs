@@ -118,6 +118,42 @@ fn count_eq_calls_depth(
     count_eq_calls_compound(ty, registry, variant_layouts, depth)
 }
 
+/// The record-element routes of [`count_eq_calls_list`] — split for the
+/// complexity budget. `List[<record>]`: the site's list-helper call + the list
+/// body's ONE record-helper call + the record helper body's static per-field
+/// calls (a nested List[record] field re-enters this exactly as the generator
+/// nests; a repeated element type over-credits — helpers dedup on the MIR
+/// side, landing only on the conservative ir > mir taint).
+/// `List[Option[<record>]]`: the same route through the option-element helper
+/// (+1 for the opt body's record-helper call). `None` = not a record shape.
+fn count_eq_calls_list_records(
+    es: &[almide_lang::types::Ty],
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+    depth: u32,
+) -> Option<usize> {
+    use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
+    if let [Ty::Named(n, args)] = &es[..] {
+        if args.is_empty()
+            && !variant_layouts.by_type.contains_key(n.as_str())
+            && registry.get(n.as_str()).is_some()
+        {
+            return Some(2 + count_eq_calls_depth(&es[0], registry, variant_layouts, depth + 1));
+        }
+    }
+    if let [Ty::Applied(TC::Option, oa)] = &es[..] {
+        if let [Ty::Named(n, args)] = &oa[..] {
+            if args.is_empty()
+                && !variant_layouts.by_type.contains_key(n.as_str())
+                && registry.get(n.as_str()).is_some()
+            {
+                return Some(3 + count_eq_calls_depth(&oa[0], registry, variant_layouts, depth + 1));
+            }
+        }
+    }
+    None
+}
+
 /// The `List[…]` element tier of [`count_eq_calls_depth`] — extracted verbatim
 /// (codopsy A-maintenance split): the variant/record/Option-record loop-helper
 /// routes, then the single-CallFn element shapes.
@@ -145,38 +181,8 @@ fn count_eq_calls_list(
                     return almide_mir::lower::eq_helper_call_count(variant_layouts, &es[0]);
                 }
             }
-            // List[<record>] — the synthesized record loop-helper route (the engine's
-            // container tier): the site's list-helper call + the list body's ONE
-            // record-helper call + the record helper body's static per-field calls
-            // (this recursion — a nested List[record] field re-enters this arm exactly
-            // as the generator nests). A repeated element type over-credits (helpers
-            // dedup on the MIR side), landing only on the conservative ir > mir taint.
-            if let [almide_lang::types::Ty::Named(n, args)] = &es[..] {
-                if args.is_empty()
-                    && !variant_layouts.by_type.contains_key(n.as_str())
-                    && registry.get(n.as_str()).is_some()
-                {
-                    return 2 + count_eq_calls_depth(&es[0], registry, variant_layouts, depth + 1);
-                }
-            }
-            // List[Option[<record>]] — the synthesized option-element route: the
-            // site's list-helper call + the list body's ONE opt-helper call + the
-            // opt body's ONE record-helper call + the record helper's per-field
-            // calls (the same over-credit-on-dedup conservatism as List[record]).
-            if let [Ty::Applied(TC::Option, oa)] = &es[..] {
-                if let [almide_lang::types::Ty::Named(n, args)] = &oa[..] {
-                    if args.is_empty()
-                        && !variant_layouts.by_type.contains_key(n.as_str())
-                        && registry.get(n.as_str()).is_some()
-                    {
-                        return 3 + count_eq_calls_depth(
-                            &oa[0],
-                            registry,
-                            variant_layouts,
-                            depth + 1,
-                        );
-                    }
-                }
+            if let Some(n) = count_eq_calls_list_records(es, registry, variant_layouts, depth) {
+                return n;
             }
         }
         let nested_list = matches!(&es[..],

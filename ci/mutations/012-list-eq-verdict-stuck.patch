@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/equality.rs b/crates/almide-wasm/src/equality.rs
+index d26000187..12036c122 100644
+--- a/crates/almide-wasm/src/equality.rs
++++ b/crates/almide-wasm/src/equality.rs
+@@ -164,7 +164,7 @@ impl Emitter<'_> {
+         {
+             let mut i = self.f.instructions();
+             i.i32_eqz().if_(BlockType::Empty);
+-            i.i32_const(0).local_set(verdict);
++            i.i32_const(1).local_set(verdict); // [MUTANT: stuck true]
+             i.br(2);
+             i.end();
+             i.local_get(cur).i32_const(stride).i32_add().local_set(cur);

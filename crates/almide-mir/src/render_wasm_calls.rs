@@ -302,6 +302,20 @@ fn int_binop_instr(op: IntOp) -> (&'static str, bool) {
         IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU => {
             unreachable!("inline-expanded in render_op_call_intbinop")
         }
+        IntOp::And => ("i64.and", false),
+        IntOp::Or => ("i64.or", false),
+        IntOp::Xor => ("i64.xor", false),
+        IntOp::Shl => ("i64.shl", false),
+        IntOp::Shr => ("i64.shr_s", false),
+        IntOp::ShrU => ("i64.shr_u", false),
+        other => int_cmp_instr(other),
+    }
+}
+
+/// The comparison half of the int-binop table — split from
+/// `int_binop_instr` for the complexity budget.
+fn int_cmp_instr(op: IntOp) -> (&'static str, bool) {
+    match op {
         IntOp::Lt => ("i64.lt_s", true),
         IntOp::LtU => ("i64.lt_u", true),
         IntOp::LeU => ("i64.le_u", true),
@@ -312,12 +326,7 @@ fn int_binop_instr(op: IntOp) -> (&'static str, bool) {
         IntOp::Ge => ("i64.ge_s", true),
         IntOp::Eq => ("i64.eq", true),
         IntOp::Ne => ("i64.ne", true),
-        IntOp::And => ("i64.and", false),
-        IntOp::Or => ("i64.or", false),
-        IntOp::Xor => ("i64.xor", false),
-        IntOp::Shl => ("i64.shl", false),
-        IntOp::Shr => ("i64.shr_s", false),
-        IntOp::ShrU => ("i64.shr_u", false),
+        _ => unreachable!("routed by int_binop_instr"),
     }
 }
 

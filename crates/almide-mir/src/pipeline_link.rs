@@ -99,7 +99,7 @@ fn synthesize_mutable_global_init(
             blank_lines_before: 0,
             def_id: None,
             module_origin: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: synthesized zero-param runner
         };
         match crate::lower::lower_function_all_with_globals(
             &init_fn,

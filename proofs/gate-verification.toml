@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "2"
+# unverified_ceiling = "0"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -131,7 +131,8 @@ evidence = "#1234 landing PR: forged a workflow with a duplicate `if:` key (the 
 
 [[gate]]
 path = "scripts/check-browser-determinism.sh"
-class = "UNVERIFIED"
+class = "EXERCISED"
+evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — the gate FAILED correctly when the graduated wall corpus entered spec/wasm_cross (16 fixtures the incumbent renderer walls reported 'native errored', run 32946512713), and passed after gaining the wall-vs-error discipline (tracked skips, ceiling 16, asymmetric render-vs-wall still FAILS). The completeness check counts n + walled against the corpus, so a blind scan cannot pass."
 
 [[gate]]
 path = "scripts/check-embedded-size.sh"
@@ -150,7 +151,8 @@ evidence = "#1244 round 3: corpus-floor direction (1 fixture => FAIL, the #976 v
 
 [[gate]]
 path = "scripts/check-host-determinism.sh"
-class = "UNVERIFIED"
+class = "EXERCISED"
+evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — MAX_WALLED=0 FAILED correctly when the graduated wall corpus added 16 incumbent walls (run 32946512713), and passed after the conscious ceiling bump to the locally re-measured 16. The n + walled == corpus completeness check and the one-host-walls asymmetry FAIL were already in the script; the ceiling firing proved the counting path live."
 
 [[gate]]
 path = "scripts/check-libm-determinism.sh"
@@ -314,3 +316,18 @@ evidence = "alloc-ceiling landing (2026-08-16): four forged trees, each demonstr
 path = "scripts/check-stability-closure.sh"
 class = "NEGATIVE_TESTED"
 evidence = "#1485 landing drill (2026-08-20): the gate is INFORMATIONAL by design (always exit 0 — its verdict is the per-criterion standing, its failure mode is MISREPORT). Report-follows-input demonstrated: a COMPILER_FRONTIER row forged out of proofs/wasm-fallback-baseline.txt moved the wasm-frontier standing 5→4 in the printed report; restored, it read 5 again. The blockers criterion was cross-checked against the live tracker (0 open I-severity issues, matching the printed PASS)."
+
+[[gate]]
+path = "scripts/check-file-discipline.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Commissioning PR (2026-08-26): an 801-line probe file under crates/almide-wasm/src => exit 1 naming the file; removed => exit 0. Adopted from the greenfield burn, where the 800-line cap was the measured primary driver of codopsy slippage (stages 39 and 51)."
+
+[[gate]]
+path = "scripts/check-mutation-gate.sh"
+class = "EXERCISED"
+evidence = "Greenfield CI mutation-gate job (2026-08-20..26, PORTLOG stages 74+): both verdict directions observed in real operation — 40-42 pre-authored mutants caught green on every push, and the no-longer-applies direction fired at the stage-39 split refresh (a drifted patch went red until refreshed, never retired). All 40 patches re-verified apply-clean against this tree at commissioning."
+
+[[gate]]
+path = "scripts/check-fmt-gate.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Commissioning PR (2026-08-26): a drift probe appended to spec/wasm_cross/while_loops.almd => exit 1; restored => exit 0. The wrapper exists because the gauntlet's deliberately-invalid REJECT cells cannot parse, and the bare `fmt --check spec/` exits 1 on parse-skips even at zero drift; the gauntlet manifest's reject rows are the single exclusion source (the fmt-corpus test applies the same ruling)."

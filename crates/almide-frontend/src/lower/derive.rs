@@ -171,7 +171,7 @@ fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived repr/eq worker, no params carry mut
     }
 }
 
@@ -193,7 +193,7 @@ fn auto_derive_variant_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty) ->
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived repr/eq worker, no params carry mut
     }
 }
 
@@ -225,7 +225,7 @@ fn auto_derive_variant_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> I
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived repr/eq worker, no params carry mut
     }
 }
 
@@ -263,6 +263,6 @@ fn auto_derive_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[Ir
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived repr/eq worker, no params carry mut
     }
 }

@@ -318,7 +318,11 @@ done <<< "$(grep -rhoE '(crates|runtime|stdlib|spec|tests|scripts|proofs)/[A-Za-
 # BOUNDARY.md: mount als, delete the copies). New ids in the copy must land in
 # als FIRST (two-PR order, als CONTRIBUTING; next free per #1544: C-321 —
 # C-320 landed als-first 2026-08-25, ported here for the #1572 cut fix).
-RESERVED_CANONICAL_LO=302
+# 2026-08-26: C-302..C-309 (ALS-T19..T24 numeric determinism, ALS-B1..B2
+# bounded head) ported from the canonical ledger together with their
+# fixtures and spec chapters — the hole narrows to C-310..C-318 (ALS-B3..B11,
+# whose E070-E079 checker evidence is not implemented here yet).
+RESERVED_CANONICAL_LO=310
 RESERVED_CANONICAL_HI=318
 sorted_ids="$(printf '%s\n' "$ALL_IDS" | sort -u)"
 n_contracts="$(printf '%s\n' "$sorted_ids" | grep -c . || true)"

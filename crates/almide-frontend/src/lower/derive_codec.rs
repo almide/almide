@@ -41,7 +41,7 @@ pub(super) fn auto_derive_encode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived codec worker, no params carry mut
     }
 }
 
@@ -259,7 +259,7 @@ fn mk_worker_fn(name: &str, params: Vec<(VarId, &str, Ty)>, ret_ty: Ty, body: Ir
         is_effect: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0, def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived codec worker, no params carry mut
     }
 }
 
@@ -835,7 +835,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], module_origin: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived codec worker, no params carry mut
     }
 }
 

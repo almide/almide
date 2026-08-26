@@ -53,12 +53,30 @@ and serves as the cross-target oracle / executable spec.
   trust-spine renderer (`almide-mir`) replaces it where it can lower (v0
   codegen source is the fallback on a wall); `rustc`/`cargo` produces the
   binary.
-- **`--target wasm`** — the v1 MIR trust-spine is the *only* path: `almide-mir`
-  renders WAT, the CLI assembles it with `wat`, strips local names (function
-  names are kept for debugging). The unverified v0 wasm emitter was retired
-  (#782): a wall is a hard, diagnosed error — there is no silent fallback.
-  `--wasm-opt` is opt-in and guarded by a differential parity gate against the
-  verified module (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`).
+- **`--target wasm`** — two legs
+  (`src/cli/build.rs::render_wasm_module_routed`): cheap PROJECT-SHAPE
+  routes pick the leg up front, and a structural wall reroutes (below):
+  - the **commissioned structural leg** (default): `almide::wasm_leg`
+    (parse→check→lower→self-host link→`link_ir`) feeds
+    `almide-wasm::emit_program`, which emits wasm bytes structurally
+    (wasm-encoder — no WAT text). Measured 610/610 byte-identical to native
+    on the full wasm_cross corpus. `almide run` executes on the embedded
+    `almide-wasm-run` host (fs/env/stdin included); `almide build` ships the
+    `to_wasi` form, which runs on STOCK runtimes (`wasmtime run mod.wasm` —
+    the 578-fixture stock-runtime gate is the witness).
+  - the **incumbent WAT trust-spine**: `almide-mir` renders WAT, the CLI
+    assembles it with `wat` and strips local names. Routed for main-less
+    library modules (#881), dependency-package and `import self` projects
+    (#1596), host-variant BUILD artifacts, and `ALMIDE_FUEL_PROBE`
+    instrumentation; `ALMIDE_WASM_INCUMBENT=1` forces it (the reversible
+    switch, kept for one release).
+  A structural WALL reroutes to the incumbent renderer (both legs are
+  VERIFIED — this is not #782's sin, which was falling into unverified v0
+  codegen; `ALMIDE_VERIFIED_DEBUG=1` names the wall that rerouted). A shape
+  NEITHER leg lowers is a hard, diagnosed error with the incumbent's rich
+  wall rendering. `--wasm-opt` is opt-in and
+  guarded by a differential parity gate against the verified module
+  (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`).
 - **`--target wasm32` / `wasi`** — the generated Rust source compiled by bare
   `rustc --target wasm32-wasip1` (SIMD128 enabled). A different beast from
   `--target wasm`.
@@ -66,7 +84,10 @@ and serves as the cross-target oracle / executable spec.
 
 `--verified` is the default (`--no-verified` is deprecated and warns).
 `almide run --target wasm` and `almide build --target wasm` share
-`compile_to_wasm_bytes`, so run and build are byte-identical.
+`compile_to_wasm_bytes`, so run and build observe one emission. On the
+structural leg the BUILD artifact additionally passes `to_wasi` (stock-runtime
+form) — same observable behavior, different bytes; on the incumbent leg the
+two stay byte-identical.
 
 ## Crate Structure
 

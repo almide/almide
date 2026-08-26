@@ -1,0 +1,10 @@
+[package]
+name = "almide-layout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "THE single source for heap block layout (ARCHITECTURE.md §6.6): every consumer derives from these definitions"
+
+[lints]
+workspace = true

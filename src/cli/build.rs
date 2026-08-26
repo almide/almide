@@ -337,9 +337,25 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, _produced_by_v1) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
+    let (bytes, structural) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
+    };
+    // The structural leg's module imports `almide.*` (the embedded host's
+    // surface). A BUILD artifact must run on stock runtimes, so it ships in
+    // the WASI form — same index space, shimmed imports, proc_exit on trap
+    // (the #1588 transform; the 578-fixture stock-wasmtime gate is its
+    // reproduction witness).
+    let bytes = if structural {
+        match almide_wasm_run::wasi::to_wasi(&bytes) {
+            Ok(w) => w,
+            Err(e) => {
+                err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
+            }
+        }
+    } else {
+        bytes
     };
 
     let pre_size = bytes.len();
@@ -568,12 +584,85 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
     Ok(())
 }
 
-/// `compile_to_wasm_bytes`'s v1 PCC-verified trust-spine render — the ONLY
-/// wasm path (#782: the v0 wasm emitter is retired). A v1 wall is an
-/// honest, diagnosed hard error, never a silent fallback into unverified
-/// codegen: a program that compiles is verified, a program the renderer
-/// cannot verify is refused with the wall reason (refusal over risk — the
-/// medical-grade bar). Extracted verbatim.
+/// The commissioned wasm leg (Stage 2 switchover): route between the
+/// structural emitter (`almide::wasm_leg` + `almide_wasm::emit_program`,
+/// the greenfield engine — measured 610/610 byte-identical to native on
+/// the full wasm_cross corpus) and the incumbent WAT trust-spine.
+///
+/// Routing is by PROJECT SHAPE, never by failure fallback (a wall stays an
+/// honest hard error on whichever leg owns the program):
+///   - `ALMIDE_WASM_INCUMBENT=1`     → incumbent (the reversible switch,
+///                                      kept for one release)
+///   - main-less library module      → incumbent (#881 export mode — the
+///                                      structural emitter has no library
+///                                      form yet)
+///   - external dependency packages  → incumbent (the structural driver
+///                                      resolves without a dep table)
+///   - host-variant program on the BUILD path → incumbent (its artifact
+///                                      speaks real WASI fs/env; the WASI
+///                                      transform's shims cover less)
+///   - everything else               → structural emitter
+///
+/// The second tuple field is true when the STRUCTURAL leg produced the
+/// bytes (they import `almide.*` and run on the embedded host; the build
+/// path converts them with `to_wasi` for stock runtimes).
+fn render_wasm_module_routed(
+    file: &str,
+    source_text: &str,
+    v1_self_modules: &[(String, almide_lang::ast::Program, bool)],
+    library_ok: bool,
+    has_main: bool,
+    has_pkg_deps: bool,
+    has_self_import: bool,
+    host_variant: bool,
+) -> Result<(Vec<u8>, bool), ()> {
+    //   - `ALMIDE_FUEL_PROBE` set         → incumbent (the charge-trace
+    //     probe line is that leg's Σ-probe instrumentation — contract
+    //     evidence keeps its measured meaning; the structural leg's C-320
+    //     conformance has its own gates in crates/almide-wasm)
+    let incumbent = std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
+        || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
+        || !has_main
+        || has_pkg_deps
+        || has_self_import
+        || (library_ok && host_variant);
+    if incumbent {
+        return render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+    }
+    // A structural WALL routes to the incumbent renderer. This is NOT the
+    // retired v0 fallback (#782's sin was falling into UNVERIFIED codegen):
+    // both legs here are verified renderers, so the product never regresses
+    // on a shape only the incumbent lowers — and a program NEITHER leg can
+    // lower still fails hard with the incumbent's rich wall diagnostics.
+    // ALMIDE_VERIFIED_DEBUG=1 names the wall that rerouted.
+    let reroute = |why: &str| {
+        if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+            err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
+        }
+        render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false))
+    };
+    let ir = match almide::wasm_leg::lower_to_ir(file, source_text) {
+        Ok(ir) => ir,
+        Err(e) => return reroute(&format!("front: {e}")),
+    };
+    match almide_wasm::emit_program(&ir) {
+        Ok(bytes) => {
+            // Same emit-time validation discipline as the incumbent leg:
+            // never ship bytes wasmtime would refuse at load.
+            if let Err(e) = wasmparser::validate(&bytes) {
+                return reroute(&format!("validation: {}", e.message()));
+            }
+            Ok((bytes, true))
+        }
+        Err(almide_wasm::EmitError::Unsupported(reason)) => reroute(&reason),
+    }
+}
+
+/// The incumbent v1 PCC-verified trust-spine render (#782: the v0 wasm
+/// emitter is retired). A v1 wall is an honest, diagnosed hard error, never
+/// a silent fallback into unverified codegen: a program that compiles is
+/// verified, a program the renderer cannot verify is refused with the wall
+/// reason (refusal over risk — the medical-grade bar). Extracted verbatim.
 fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang::ast::Program, bool)], library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
     // `almide build` may produce a main-less LIBRARY module (pub-fn exports,
     // synthesized empty `_start` — #881); `almide run` must keep the no-main
@@ -715,13 +804,86 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
 
-    // v1 OPT-IN verified codegen: after every v0 gate above (type-check, IR-verify, native-matrix
-    // guard) has passed, TRY the PCC-verified trust-spine renderer. It is byte-
-    // identical to v0 where it lowers and WALLS (`Err`) otherwise — on a wall we fall through to
-    // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
-    // exactly as without `--verified`.
+    // Routing inputs (see render_wasm_module_routed): project shape, decided
+    // from what the v0 gates already computed — never from a failure.
+    let has_main = ir_program.functions.iter().any(|f| f.name.as_str() == "main");
+    // `@export`-attributed fns must survive as wasm exports (the DCE-root
+    // contract, wasm_export_dce_root_test) — the structural leg has no
+    // export mode yet (#1598's sibling surface), so those modules stay on
+    // the incumbent leg.
+    let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
+    let has_pkg_deps = resolved.modules.iter().any(|(_, _, pkg, _)| pkg.is_some());
+    let host_variant = std::iter::once(&program)
+        .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
+        .flat_map(|p| p.imports.iter())
+        .any(|d| {
+            matches!(d, almide::ast::Decl::Import { path, .. }
+                if path.first().is_some_and(|r| matches!(r.as_str(), "fs" | "env" | "process")))
+        });
+    // Explicit `matrix.*` / `io.*` module calls stay on the incumbent leg:
+    // the structural leg links neither the matrix intrinsics (llama_block)
+    // nor the stdin-read io surface (io.read_all — stdin programs CANNOT
+    // live in the spec corpus, so the shape is unmeasured by construction).
+    // Module-granular on purpose: bare println/print are Named calls and
+    // stay structural; the gates keep judging the structural leg directly
+    // through emit_program, so verification coverage is unchanged (#1598).
+    let uses_incumbent_stdlib = {
+        fn expr_hits(e: &almide::ir::IrExpr, hit: &mut bool) {
+            if let almide::ir::IrExprKind::Call { target, .. }
+            | almide::ir::IrExprKind::TailCall { target, .. } = &e.kind
+            {
+                if let almide::ir::CallTarget::Module { module, .. } = target {
+                    if matches!(module.as_str(), "matrix" | "io") {
+                        *hit = true;
+                    }
+                }
+            }
+            if !*hit {
+                e.clone().map_children(&mut |c| {
+                    expr_hits(&c, hit);
+                    c
+                });
+            }
+        }
+        let mut hit = false;
+        for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+            expr_hits(&f.body, &mut hit);
+            if hit {
+                break;
+            }
+        }
+        if !hit {
+            for tl in ir_program.top_lets.iter().chain(ir_program.modules.iter().flat_map(|m| m.top_lets.iter())) {
+                expr_hits(&tl.value, &mut hit);
+                if hit {
+                    break;
+                }
+            }
+        }
+        hit
+    };
+    // `import self as m` projects stay on the incumbent leg: the structural
+    // driver misaligns self-package top-let storage (#1596 — the crossmod
+    // matrix walls/panics there), and the shape sits outside the measured
+    // corpus (the run manifest sweeps wasm_cross/wasm_fail only).
+    let has_self_import = std::iter::once(&program)
+        .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
+        .flat_map(|p| p.imports.iter())
+        .any(|d| {
+            matches!(d, almide::ast::Decl::Import { path, .. }
+                if path.first().is_some_and(|r| r.as_str() == "self"))
+        });
     let _ = (&mut ir_program, allow_unverified, verified);
-    render_wasm_module(&source_text, &v1_self_modules, library_ok)
+    render_wasm_module_routed(
+        file,
+        &source_text,
+        &v1_self_modules,
+        library_ok,
+        has_main,
+        has_pkg_deps,
+        has_self_import || uses_incumbent_stdlib || has_exports,
+        host_variant,
+    )
 }
 
 /// Best-effort map of a validation-error byte offset to the function that

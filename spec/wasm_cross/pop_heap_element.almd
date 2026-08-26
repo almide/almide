@@ -1,0 +1,15 @@
+// @contract: C-101
+// Graduated from proofs/wall-corpus/pop_heap_element.almd at the
+// commissioning switchover: the structural emitter's RC discipline gives
+// the popped heap element its ownership event, so the shape lowers.
+// list.pop over a HEAP element: popping through the scalar in-place self-host
+// would move the handle out without an ownership event (double-free at the
+// list's recursive drop). The router refuses via the unregistered _x name;
+// this fixture pins that refusal (#1481).
+fn f(xs: List[String]) -> List[String] = {
+  var ys = xs
+  let _p = list.pop(ys)
+  ys
+}
+
+effect fn main() -> Unit = println(int.to_string(list.len(f(["a", "b"]))))

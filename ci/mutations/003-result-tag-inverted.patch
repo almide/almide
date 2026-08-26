@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
+index f98fdbd6e..bf14825b1 100644
+--- a/crates/almide-wasm/src/data.rs
++++ b/crates/almide-wasm/src/data.rs
+@@ -65,7 +65,7 @@ impl Emitter<'_> {
+                     .i32_const(16)
+                     .call(F_ALLOC)
+                     .local_tee(hold)
+-                    .i32_const(i32::from(!is_ok))
++                    .i32_const(i32::from(is_ok)) // [MUTANT: inverted]
+                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                 self.f.instructions().local_get(hold);
+                 self.lower(expr, Some(side))?;
