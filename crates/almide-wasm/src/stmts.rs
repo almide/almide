@@ -210,7 +210,7 @@ impl Emitter<'_> {
             // (loop rebinds; zero on the first pass) is released, and
             // the local joins the epilogue's owner set.
             if self.rc_droppable(declared) {
-                if declared == STR && !crate::emitter::rc_certainly_fresh(&value.kind) {
+                if declared == STR && !crate::rc_ownership::rc_certainly_fresh(&value.kind) {
                     self.rc_inc_top();
                 }
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
@@ -315,9 +315,9 @@ impl Emitter<'_> {
                 if let Some(idx) = local
                     && !self.cells.contains(var)
                     && self.rc_droppable(declared)
-                    && !crate::emitter::rc_mentions_var(value, *var)
+                    && !crate::rc_ownership::rc_mentions_var(value, *var)
                 {
-                    if declared == STR && !crate::emitter::rc_certainly_fresh(&value.kind) {
+                    if declared == STR && !crate::rc_ownership::rc_certainly_fresh(&value.kind) {
                         self.rc_inc_top();
                     }
                     self.f.instructions().local_get(idx).call(F_DEC_FLAT);

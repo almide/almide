@@ -270,7 +270,7 @@ pub(crate) fn lower_fn(
                 // RC-3: a droppable result that may BORROW a local
                 // takes +1 before the epilogue releases the owners.
                 if em.rc_droppable(want)
-                    && !crate::emitter::rc_certainly_fresh(&crate::emitter::rc_tail(body).kind)
+                    && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
                 {
                     em.rc_inc_top();
                 }
@@ -293,7 +293,7 @@ pub(crate) fn lower_fn(
                     // past the epilogue — same borrow rule as the pure
                     // arm, and the +1 must precede the wrap.
                     if em.rc_droppable(raw)
-                        && !crate::emitter::rc_certainly_fresh(&crate::emitter::rc_tail(body).kind)
+                        && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
                     {
                         em.rc_inc_top();
                     }
