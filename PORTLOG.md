@@ -2778,3 +2778,28 @@ record the closure.
   (heap adjacency), hardening the runtime can silence it — the refresh
   is to judge the invariant where it lives, not to find another
   accident.
+
+## Stage 104 (2026-08-26): RC-5 — copy-on-write, the arc completes
+
+- Binds of Lists and Bytes SHARE (+1 on borrowed rhs, cells included);
+  the value-semantics copy moved to the mutation gates: every in-place
+  route reads its receiver through `$cow` (rc > 1 → copy, repoint the
+  var/cell, release one ref). Maps/Sets keep the bind copy (functional
+  mutations never pass a COW gate); strings already concat-fresh.
+- Params are COW-EXEMPT borrowed views: writes through a plain Bytes
+  param stay caller-visible (bytes_param_writeback — native's by-ref
+  slot + make_mut semantics, reached by exemption instead of writeback).
+- TWO accidental-mechanism exposures, both fixed at the source:
+  bytes.new never guarded its i64 count — the old C-197 die was the
+  BIND COPY's alloc failing on the wrapped length (exit-0 with
+  4294967295 printed once the copy vanished); now the route carries its
+  own i64-judged bound. And the 128 KiB anti-vacuous churn twin died of
+  SUCCESS (the whole churn now fits 128 KiB) — replaced by the
+  live-set-over-budget form reclamation can never save.
+- MEASURED (alloc ledger re-ratified): 271 fixtures changed, 263 DOWN,
+  18.3% of the changed mass reclaimed — loop_push −8.0 MB,
+  mut_param_call_chain −1.3 MB, and sort_by_str_key_heap's RC-2 win
+  RETURNS (−640 KB): the bind copy was the anomaly's whole cause.
+- Mutants 004/041 refreshed (004 recast as the COW-skip — the modern
+  spelling of a skipped bind copy); perf relations hold (3.88/4.36,
+  lockstep 1.16); 599/599, alias, gauntlet, fuzz, workspace all green.
