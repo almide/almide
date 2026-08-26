@@ -188,7 +188,11 @@ if [ -f "$SAFETY_FILE" ]; then
     while read -r sf floor; do
         [ -n "$sf" ] || continue
         case "$sf" in \#*) continue ;; esac
-        pct="$(printf '%s\n' "$FULL_REPORT" | awk -v f="$sf" 'index($0, f) { n=0; for (i=1;i<=NF;i++) if ($i ~ /%$/) { n++; if (n==3) { gsub(/%/,"",$i); print $i; exit } } }')"
+        # Herestring, not a pipe: `printf | awk '{…exit}'` dies of SIGPIPE
+        # under pipefail the moment awk exits early — the #1244 class; the
+        # whole block then vanishes under set -e with no output at all
+        # (caught by this gate's own red-canary landing run).
+        pct="$(awk -v f="$sf" 'index($0, f) { n=0; for (i=1;i<=NF;i++) if ($i ~ /%$/) { n++; if (n==3) { gsub(/%/,"",$i); print $i; exit } } }' <<< "$FULL_REPORT")"
         if [ -z "$pct" ]; then
             echo "SAFETY COVERAGE FAIL: $sf not found in the report (renamed or dropped from the instrumented set)"
             fail=1; continue
