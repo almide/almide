@@ -1009,6 +1009,12 @@ jobs:
       - name: Setup
         run: chmod +x /tmp/almide-bin/almide
 
+      # The idiom relation gates on callgrind instruction counts (wall time
+      # is machine-state bimodal on this runner class — see the IDIOM_CEILING
+      # comment in scripts/check-perf-ratio.sh).
+      - name: valgrind (for the Ir idiom gate)
+        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+
       - name: Native runtime ratio vs handwritten Rust
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
 
