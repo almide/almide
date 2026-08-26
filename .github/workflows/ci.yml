@@ -866,8 +866,8 @@ jobs:
           $ALMIDE "$f" --emit-ast > /dev/null
           echo "AST emit OK"
 
-      - name: fmt gate (spec/ + examples/ stay formatted, #919)
-        run: /tmp/almide-bin/almide fmt --check spec/ examples/
+      - name: fmt gate (spec/ + examples/ stay formatted, #919; gauntlet reject cells excluded by the manifest)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-fmt-gate.sh
 
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
