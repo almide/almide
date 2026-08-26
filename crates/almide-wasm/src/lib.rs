@@ -78,6 +78,7 @@ mod emitter_vars;
 mod patterns;
 mod prim;
 mod runtime;
+mod runtime_alloc;
 mod runtime_str;
 mod scalar_ext;
 mod data;
