@@ -362,6 +362,26 @@ impl LowerCtx {
             }
         }
 
+        // A TUPLE element (`List[(String, String)]` — the url.query_pairs
+        // assertion shape): a tuple is an anonymous record, so the same
+        // synthesized per-element helper serves, keyed by a deterministic
+        // spelling of its slot types. A slot the engine cannot compare fails
+        // the `ensure` and the site walls — honest refusal, never wrong bytes.
+        if let Ty::Tuple(tys) = elem {
+            let key = format!(
+                "anontup_{}",
+                tys.iter()
+                    .map(|t| crate::lower::sanitize_ty_ident(&format!("{t:?}")))
+                    .collect::<Vec<_>>()
+                    .join("_")
+            );
+            if !self.ensure_list_record_eq_helper(&key, tys) {
+                return Some(None);
+            }
+            let name = self.list_record_eq_helper_name(&key);
+            return Some(Some(self.emit_eq_helper_call(name, lv, rv)));
+        }
+
         // `List[Option[<record>]]`: the loop runs over the option-element helper —
         // tag eq per element, with the record compare guarded to both-Some.
         let Ty::Applied(TC::Option, oa) = elem else { return None };

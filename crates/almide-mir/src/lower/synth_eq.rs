@@ -383,7 +383,7 @@ fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
 
 /// Identifier-safe spelling of a type/fn name (`varlib.Pigment` → `varlib_Pigment`,
 /// test names carry spaces/1+1 — flattened the same way).
-fn sanitize_ty_ident(name: &str) -> String {
+pub(crate) fn sanitize_ty_ident(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
 }
 
