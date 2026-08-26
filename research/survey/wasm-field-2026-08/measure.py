@@ -159,11 +159,27 @@ def measure_compile(lane, defs, kernel):
     (unique trailing comment), not mtime: go/gradle/moon build caches are
     content-hashed, so an mtime touch would hand them a no-op cache hit."""
     cmd, cwd, env, touch = defs["compile"](kernel)
+    wasm_out = defs["wasm"](kernel)
     orig = touch.read_bytes()
     times = []
     try:
         for i in range(6):  # rep 0 = warmup
-            touch.write_bytes(orig + f"// invalidate {time.time_ns()}\n".encode())
+            # Delete the target artifact: every non-gradle toolchain rewrites
+            # its output unconditionally so this changes nothing for them, but
+            # gradle skips the binaryen Optimize task when the output file is
+            # already present and inputs match — which would under-report the
+            # kotlin lane's end-to-end compile.
+            wasm_out.unlink(missing_ok=True)
+            # Kotlin's incremental compilation proves a comment-only change
+            # semantically inert and skips codegen entirely (verified: the
+            # artifact keeps its mtime), so the .kt invalidation must add a
+            # declaration. Everyone else honestly recompiles on any content
+            # change, where a comment is the least invasive.
+            if touch.suffix == ".kt":
+                inv = f"private val invalidate{time.time_ns()} = 0\n"
+            else:
+                inv = f"// invalidate {time.time_ns()}\n"
+            touch.write_bytes(orig + inv.encode())
             t, p = timed(cmd, cwd, env, timeout=600)
             if p.returncode != 0:
                 return dict(ok=False, error=(p.stderr.strip().splitlines() or ["?"])[-1])
