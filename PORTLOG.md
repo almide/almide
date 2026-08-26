@@ -2830,3 +2830,33 @@ record the closure.
   pinned it to ONE new info (a println! in the new gate test); folded
   into the assert, A(90) restored. The gate defended the new goal's
   A-clause twice in one day.
+
+## Stage 106 (2026-08-26): the front pin advances — Stage 1 of the confluence
+
+- a877d2138 → 4e5a15696 by BLOB-LEVEL 3-way (`git diff base..sync |
+  git apply --3way` against the RECORDED vendor base — the honest
+  mechanism for an orphan-branch vendor relationship; a plain
+  unrelated-histories merge would have been baseless add/add). 29
+  files clean, 3 conflicts, all resolved by class:
+  - specialization: both sides carry the same mutated_params fix;
+    develop's comment adopted.
+  - heap LEN_OFF: develop's visibility + greenfield's layout-DSL
+    single-source (both, not either).
+  - C-320: the MIXED model (develop's eval + greenfield's saved-stack
+    dispatch) broke 18/168 fuzz seeds — resolved by taking develop's
+    det_saved model WHOLESALE (dispatch + the lib frame-repair loop
+    deleted). The fuzzer was the referee: 18 → 0.
+- fn_clone_discipline named the ONE unannotated incoming site
+  (develop's new auto_derive_variant_repr — the #1539 fix) — audited
+  fresh, annotated. The discipline gate's first real catch of foreign
+  code.
+- check/ast parity stayed GREEN under the new front — the incoming
+  fixes change no diagnostics on the judged surface; no oracle advance
+  needed.
+- Gauntlet: 7 ratified drifts — THREE RUN PROMOTIONS (c4 derived
+  variant repr #1539, c5 cross-module generics #1556, x16 effect×mut
+  #1575 — all native-verified byte matches), s1/s2/c7/c8 move from
+  front-reject to honest walls (the front now accepts; the emitter
+  walls on cross-module convention calls). RUN_FLOOR 18 → 21.
+- Full battery green: 599/599, fuzz 200-seed clean, workspace, alias,
+  ledgers/ratchets untouched.
