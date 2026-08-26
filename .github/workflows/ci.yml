@@ -991,13 +991,14 @@ jobs:
 
       # rustc/cargo: the ratchet compiles the handwritten references and the
       # generated Rust of each benchmark with the same toolchain — STABLE,
-      # not the MSRV pin: the ratios describe what users run, the baselines
-      # were historically recorded under the then-stable, and rustc 1.94's
-      # optimizer misses the flat_map array lowering that 1.89 and 1.96 both
-      # optimize (the idiom ceiling failed 1.20-1.37x on 1.94 while holding
-      # 1.02x on 1.96 — measured at the commissioning toolchain bump). Build
-      # and test jobs keep the 1.94 MSRV pin; this job's claim is about the
-      # GENERATED CODE, not the compiler's build floor.
+      # not the MSRV pin: the ratios describe what users run, and the
+      # baselines were historically recorded under the then-stable. (An
+      # earlier version of this comment blamed rustc 1.94's optimizer for
+      # idiom-ceiling reds; a probe on the runner class showed those reds
+      # were runner bimodality under-sampled at 3 runs — see the RUNS
+      # comment in scripts/check-perf-ratio.sh. Toolchain choice was never
+      # the cause.) Build and test jobs keep the 1.94 MSRV pin; this job's
+      # claim is about the GENERATED CODE, not the compiler's build floor.
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/download-artifact@v8
