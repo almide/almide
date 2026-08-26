@@ -2,8 +2,10 @@
 
 Same-harness measurement of Almide's greenfield wasm lane against 2026's
 active wasm-targeting languages. Results: [LEDGER.md](./LEDGER.md).
-Raw generated tables: `out/results.md` / `out/results.json` (not committed;
-produced by `./measure.sh`).
+Committed raw snapshots of the measurement runs of record: `results/`
+(run 2 is canonical; run 1 is the cross-check, see the ledger). A fresh
+`./measure.sh` regenerates `out/results.md` / `out/results.json` (not
+committed).
 
 ## What is measured
 
@@ -112,6 +114,8 @@ README.md          this file
 setup.sh           one-time build of all lanes
 measure.sh/.py     the measurement driver (re-runnable)
 src/<lane>/        ported kernel sources + empty baselines
+decomposition/     loss-decomposition kernel variants (+ decompose.py driver)
 tools/emit-only/   Almide compile-time driver (emit without execute)
-out/               build artifacts + results (gitignored)
+results/           committed snapshots of the runs of record
+out/               build artifacts + fresh results (gitignored)
 ```
