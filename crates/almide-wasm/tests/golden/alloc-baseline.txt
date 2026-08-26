@@ -392,11 +392,13 @@
 66768	spec/wasm_cross/option_unwrap_or_else_heap.almd
 65840	spec/wasm_cross/optional_chain_scalar.almd
 65856	spec/wasm_cross/phantom_type_param.almd
+65760	spec/wasm_cross/pipe_chain_scalar_bind.almd
 65968	spec/wasm_cross/pipe_compose_forms.almd
 65792	spec/wasm_cross/pipe_lambda_block_value.almd
 66480	spec/wasm_cross/place_assign_ascription.almd
 66528	spec/wasm_cross/place_mutation.almd
 76576	spec/wasm_cross/playground_default.almd
+65856	spec/wasm_cross/pop_heap_element.almd
 ~	spec/wasm_cross/process_args.almd
 66096	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 66896	spec/wasm_cross/pure_bang_propagation.almd
@@ -580,6 +582,7 @@
 65792	spec/wasm_cross/tuple_single.almd
 79776	spec/wasm_cross/uint64_upper_half.almd
 65840	spec/wasm_cross/unannotated_toplet_generic_ctor.almd
+65856	spec/wasm_cross/unique_non_flat_element.almd
 66112	spec/wasm_cross/unit_effect_abi.almd
 66336	spec/wasm_cross/unsigned_literal_domain.almd
 66144	spec/wasm_cross/unwrap_in_callarg.almd

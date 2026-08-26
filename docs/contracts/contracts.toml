@@ -270,6 +270,7 @@ evidence  = [
   { path = "spec/wasm_cross/deep_eq_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/variant_record_literal_equality.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unique_non_flat_element.almd", class = "fixture" },
 ]
 
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────
@@ -1347,6 +1348,7 @@ evidence  = [
   { path = "spec/wasm_cross/reduce_str.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_object_leak_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/pop_heap_element.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1540,6 +1542,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/pipe_lambda_block_value.almd", class = "fixture" },
+  { path = "spec/wasm_cross/pipe_chain_scalar_bind.almd", class = "fixture" },
 ]
 
 [[contract]]

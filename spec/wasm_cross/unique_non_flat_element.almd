@@ -1,4 +1,8 @@
-// @wall: list.unique_x
+// @contract: C-015
+// Graduated from proofs/wall-corpus/unique_non_flat_element.almd at the
+// commissioning switchover: the structural emitter compares non-flat heap
+// elements by deep CONTENT equality, so unique over List[List[String]]
+// dedups correctly instead of refusing.
 // list.unique over a NON-FLAT heap element (List[String] elements own
 // further heap): the _hshare slot-wise eq is exact only for flat scalar
 // blocks, and a String-bearing element would compare HANDLES — two equal
@@ -6,4 +10,7 @@
 // router refuses via the unregistered _x name; this fixture pins it (#1481).
 fn f(xs: List[List[String]]) -> List[List[String]] = list.unique(xs)
 
-effect fn main() -> Unit = println(int.to_string(list.len(f([["a"], ["b"]]))))
+effect fn main() -> Unit = println(int.to_string(list.len(f([
+  ["a"],
+  ["b"]
+]))))
