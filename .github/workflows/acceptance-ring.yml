@@ -34,7 +34,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.89.0"
+  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV: the almide binary embeds wasmtime 47 (commissioned host); compiler crates keep the 1.89 claim per-crate
   CARGO_INCREMENTAL: "0"
   GIT_TERMINAL_PROMPT: "0"
 
