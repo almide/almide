@@ -142,3 +142,34 @@ impl Emitter<'_> {
         }
     }
 }
+
+/// True when the body makes ANY `prim.*` module call — the raw-address
+/// origin (`prim.handle`, raw loads). A fn whose body touches prim may
+/// hand a tail callee a pointer into a param's block, so the tail-site
+/// param release (calls.rs) is fenced off for it.
+pub(crate) fn body_uses_prim(body: &almide_ir::IrExpr) -> bool {
+    struct Scan {
+        hit: bool,
+    }
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if self.hit {
+                return;
+            }
+            if let almide_ir::IrExprKind::Call { target, .. }
+            | almide_ir::IrExprKind::TailCall { target, .. } = &e.kind
+            {
+                if let almide_ir::CallTarget::Module { module, .. } = target
+                    && module.as_str() == "prim"
+                {
+                    self.hit = true;
+                    return;
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan { hit: false };
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.hit
+}

@@ -181,3 +181,64 @@ pub(crate) fn emit_str_replace() -> Function {
     i.end();
     f
 }
+
+/// `$str_append(dst, src) -> i32` — the growing-accumulator window (the
+/// incumbent's `__str_append1` doctrine, #519/#910): when `dst` is an
+/// OWNED heap block (rc == 1) whose class-rounded capacity already holds
+/// `len + src_len`, the bytes append in place and `dst` returns as-is;
+/// otherwise a fresh concat is taken and the outgrown block released.
+/// Growth stays geometric without an explicit doubling: an exact-size
+/// alloc rounds up to its 16<<class slab, the slack absorbs the next
+/// appends in place, and each spill doubles the class. `src` is borrowed
+/// (F_CONCAT's contract); `dst`'s ownership transfers through the call.
+pub(crate) fn emit_str_append() -> Function {
+    // params: 0=dst, 1=src; locals: 2=la, 3=lb, 4=out, 5=p, 6=q, 7=end
+    let (dst, src, la, lb, out) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let (p, q, endp) = (5u32, 6u32, 7u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let mut f = Function::new([(6, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(dst).i32_load(len_memarg()).local_set(la);
+    i.local_get(src).i32_load(len_memarg()).local_set(lb);
+    // In-place window: a heap block (>= the static line end), owned
+    // outright (rc == 1), with capacity for the grown length.
+    i.local_get(dst).global_get(G_LINE_END).i32_ge_u();
+    i.local_get(dst).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq();
+    i.i32_and();
+    i.local_get(la).local_get(lb).i32_add();
+    i.local_get(dst).i32_load(word(almide_layout::CAP.offset)).i32_le_u();
+    i.i32_and();
+    i.if_(BlockType::Empty);
+    {
+        // dst[la..la+lb] = src[0..lb] — byte loop under 16 (the tiny-copy
+        // rule F_CONCAT measured), memory.copy else.
+        i.local_get(dst).i32_const(payload).i32_add().local_get(la).i32_add().local_set(p);
+        i.local_get(src).i32_const(payload).i32_add().local_set(q);
+        i.local_get(lb).i32_const(16).i32_lt_u().if_(BlockType::Empty);
+        i.local_get(q).local_get(lb).i32_add().local_set(endp);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(q).local_get(endp).i32_ge_u().br_if(1);
+        i.local_get(p).local_get(q).i32_load8_u(byte).i32_store8(byte);
+        i.local_get(p).i32_const(1).i32_add().local_set(p);
+        i.local_get(q).i32_const(1).i32_add().local_set(q);
+        i.br(0).end().end();
+        i.else_();
+        i.local_get(p);
+        i.local_get(q);
+        i.local_get(lb);
+        i.memory_copy(0, 0);
+        i.end();
+        i.local_get(dst).local_get(la).local_get(lb).i32_add().i32_store(len_memarg());
+        i.local_get(dst).return_();
+    }
+    i.end();
+    // Outgrown (or shared, or static): fresh concat, release the old
+    // accumulator ($dec_flat guards static addresses itself).
+    i.local_get(dst).local_get(src).call(F_CONCAT).local_set(out);
+    i.local_get(dst).call(F_DEC_FLAT);
+    i.local_get(out);
+    i.end();
+    f
+}

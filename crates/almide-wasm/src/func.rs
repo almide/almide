@@ -197,6 +197,7 @@ pub(crate) fn lower_fn(
             pool,
             locals: &locals,
             rc_param_ceiling: env_shift + params.len() as u32,
+            rc_droppable_params: Vec::new(),
             rc_owned: std::collections::BTreeSet::new(),
             table: ctx.table,
             types: ctx.types,
@@ -228,6 +229,7 @@ pub(crate) fn lower_fn(
             }),
             f: &mut f,
         };
+        populate_tail_release_set(&mut em, cur_module, env_shift, params, body);
         if let Some((_, dl)) = em.region_repair {
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
         }
@@ -391,4 +393,28 @@ fn body_region_enter_var(body: &IrExpr) -> Option<VarId> {
         }
     }
     None
+}
+
+/// Fill the tail-site param-release set (calls.rs `emit_tail_param_release`).
+/// Sound by construction: ENTRY fns only, never lambdas, and only when the
+/// body derives no raw addresses — a `prim.*` call like `prim.handle(s)`
+/// hands the tail callee a raw pointer into a param's block, and releasing
+/// that param at the tail site is a use-after-free (string.is_whitespace
+/// read garbage codepoints exactly this way). Pool/registry bodies keep the
+/// pre-existing accounting.
+fn populate_tail_release_set(
+    em: &mut Emitter<'_>,
+    cur_module: Option<&str>,
+    env_shift: u32,
+    params: &[(VarId, SliceTy)],
+    body: &IrExpr,
+) {
+    if cur_module.is_some() || env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
+        return;
+    }
+    for (k, &(_, pty)) in params.iter().enumerate() {
+        if em.rc_droppable(pty) {
+            em.rc_droppable_params.push(env_shift + k as u32);
+        }
+    }
 }
