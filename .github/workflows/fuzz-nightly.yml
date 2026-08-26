@@ -467,3 +467,43 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Measure coverage and enforce the ratchet
         run: bash proofs/coverage.sh --check
+
+  coverage-condition:
+    name: Condition-level coverage — the MC/DC ledger's measured backstop (#566)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      # rustc's MC/DC instrumentation was REMOVED upstream (rust-lang/rust
+      # #144999, Aug 2025); `condition` is the strongest remaining option and
+      # is nightly-gated, so this job pins a DATED nightly — the stable
+      # 1.89.0 job above stays authoritative for the ratchet, this one adds
+      # per-condition branch records (incl. the RHS of lazy operators) under
+      # the SAME floors. The first step PROBES the flag on this exact pin: a
+      # toolchain bump that loses the flag turns the job red, never silently
+      # weaker (#990 class).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "nightly-2026-08-01"
+          components: llvm-tools-preview
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-condition-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Probe — this pin accepts -Z coverage-options=condition
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d)"
+          printf 'fn main() { let a = std::env::args().count() > 1; let b = a || !a; println!("{b}"); }\n' > "$d/m.rs"
+          rustc -C instrument-coverage -Z coverage-options=condition "$d/m.rs" -o "$d/m"
+          "$d/m" > /dev/null
+          echo "condition instrumentation OK on $(rustc --version)"
+      - name: Build almide (stamp expects an installed binary)
+        run: |
+          cargo build --release
+          mkdir -p ~/.local/bin && cp target/release/almide ~/.local/bin/
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Measure with per-condition records — same floors, same ratchet
+        run: ALMIDE_COVERAGE_CONDITION=1 bash proofs/coverage.sh --check

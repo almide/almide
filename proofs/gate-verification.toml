@@ -80,9 +80,14 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5 (coqc/ocamlopt present locally, so the gate RAN): the forge went into the TRUSTED GLUE the proof does not cover — driver.ml's ownership arm rubber-stamped to `true` gave 'FAIL double_free.cert: got exit 0 want 1 (ACCEPT)', and to `false` gave 'FAIL balanced.cert: got exit 1 want 0 (REJECT)'; both the accept and the reject assertions therefore bind. Restored green (26/26)"
 
 [[gate]]
+path = "proofs/mcdc-ledger.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Landing run (2026-08-26), each restored to green: a dropped row -> 'boolean site … has NO ledger row' naming file:line and excerpt; a vectors row naming a nonexistent test fn -> red with the fn and file named; pending ceiling raised by one -> 'BELOW ceiling — ratchet it down'; a pending row hand-flipped to refactored while the site still scans -> red at the site. Zero-sites-scanned is a hard error (broken instrument). Scanner honesty was tuned by its own first runs: closure heads (.or_else(|| …)) are excluded by the preceding-token rule, and sites past a file's first #[cfg(test)] are the tests themselves and are not ledgered."
+
+[[gate]]
 path = "proofs/coverage.sh"
 class = "NEGATIVE_TESTED"
-evidence = "#1244 round 5: the FIRST probe exposed a real hole — `find -perm /111` is GNU-only, so on any BSD/macOS host the gate died at step 2/4 with 'illegal mode string' and never reached the ratchet; fixed portably (same PR) plus a hard error when discovery finds no test binaries (a 0-binary run would still have reported a number). Then the ratchet itself: proofs/coverage-baseline.txt forged 5819 -> 9900 gave 'COVERAGE RATCHET FAIL: TOTAL 70.09% < baseline 99.00%' on a full real measurement, and `coverage.sh --bogus` gave the #990 usage error exit 2. Measured 70.09% is above the real 58.19% floor, so the same measurement is the pass direction"
+evidence = "#1244 round 5: the FIRST probe exposed a real hole — `find -perm /111` is GNU-only, so on any BSD/macOS host the gate died at step 2/4 with 'illegal mode string' and never reached the ratchet; fixed portably (same PR) plus a hard error when discovery finds no test binaries (a 0-binary run would still have reported a number). Then the ratchet itself: proofs/coverage-baseline.txt forged 5819 -> 9900 gave 'COVERAGE RATCHET FAIL: TOTAL 70.09% < baseline 99.00%' on a full real measurement, and `coverage.sh --bogus` gave the #990 usage error exit 2. Measured 70.09% is above the real 58.19% floor, so the same measurement is the pass direction. 2026-08-26 (#566 rung 2, safety floors): a canary row with floor 99.99 -> 'SAFETY COVERAGE FAIL: … 55.16% < floor 99.99%' and a row naming a nonexistent file -> 'not found in the report', both on one full run, exit 1; clean run -> 'safety floors OK (10 file(s))', exit 0. The FIRST canary run caught the gate's own bug: the floor block died of SIGPIPE (printf | early-exit awk under pipefail) and produced no output at all — fixed to a herestring in its own commit"
 
 [[gate]]
 path = "proofs/diff-fuzz.sh"

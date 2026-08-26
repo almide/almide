@@ -1,0 +1,422 @@
+# MC/DC DECISION LEDGER (#566 rung 2) — every boolean-operator site in the
+# safety set, each resolved or pending. Regenerate rows: proofs/mcdc-ledger.sh
+# --write (hand-written resolution/tests/note fields survive by id). A
+# `vectors` row names unit tests demonstrating each operand's INDEPENDENT
+# effect on the outcome (the MC/DC pair); `refactored` rows disappear when the
+# site stops scanning; `pending` is a shrink-only debt.
+#
+# pending_ceiling = "45"
+
+[[site]]
+id = "d144f08238"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "87"
+op = "&&"
+excerpt = "if !matches!(info.mutability, almide_ir::Mutability::Var) && decs > incs + 1 {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_baseline_immutable_overdec_reports_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_c1_mutability_alone_suppresses_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_c2_balance_alone_suppresses_double_free"
+
+[[site]]
+id = "0a261e092a"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "183"
+op = "||"
+excerpt = "vname.starts_with(\"__tco_\") || vname.starts_with(\"__br_\")"
+resolution = "pending"
+
+[[site]]
+id = "c6daa3639c"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "207"
+op = "&&"
+excerpt = "if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_baseline_undecced_immutable_unmoved_reports_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c1_a_dec_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c2_mutability_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c3_moved_out_alone_suppresses_the_leak"
+
+[[site]]
+id = "793e81bbe8"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "207"
+op = "&&"
+excerpt = "if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_baseline_undecced_immutable_unmoved_reports_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c1_a_dec_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c2_mutability_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c3_moved_out_alone_suppresses_the_leak"
+
+[[site]]
+id = "f77e06ee65"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "213"
+op = "&&"
+excerpt = "if !is_mutable && decs > incs + 1 {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_baseline_immutable_overdec_reports_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c1_mutability_alone_suppresses_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c2_balance_alone_suppresses_double_free"
+
+[[site]]
+id = "29349f0ce1"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "41"
+op = "&&"
+excerpt = "if !fr.then_ev.contains_key(&o) && !fr.else_ev.contains_key(&o) {"
+resolution = "pending"
+
+[[site]]
+id = "1e01dc92f8"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "87"
+op = "&&"
+excerpt = "&& seg_net(&e) == 0"
+resolution = "pending"
+
+[[site]]
+id = "cb216c3194"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "88"
+op = "&&"
+excerpt = "&& !t.contains('x')"
+resolution = "pending"
+
+[[site]]
+id = "a1029583e9"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "89"
+op = "&&"
+excerpt = "&& !e.contains('x')"
+resolution = "pending"
+
+[[site]]
+id = "ec00fbd7e4"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "93"
+op = "||"
+excerpt = "|| e.contains(['(', ')', '{', '}', '[', ']'])"
+resolution = "pending"
+
+[[site]]
+id = "378ce05f1c"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "233"
+op = "||"
+excerpt = "let heap = then_heap || val.map_or(false, |v| heap_objs.contains(&v));"
+resolution = "pending"
+
+[[site]]
+id = "c4d0e1acfe"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "465"
+op = "&&"
+excerpt = "if self.line_slots.contains(&slot) && self.s.frames.is_empty() {"
+resolution = "pending"
+
+[[site]]
+id = "00ae0b0002"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "491"
+op = "&&"
+excerpt = "&& self.s.balance(self.s.object_of(v)) > 0"
+resolution = "pending"
+
+[[site]]
+id = "eec367f86c"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "492"
+op = "&&"
+excerpt = "&& !self.consumed_values.contains(&v)"
+resolution = "pending"
+
+[[site]]
+id = "636e113fdf"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "493"
+op = "&&"
+excerpt = "&& !self.slots.contains(&self.s.object_of(v))"
+resolution = "pending"
+
+[[site]]
+id = "133e5a883f"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "494"
+op = "&&"
+excerpt = "&& !self.feeder_to_slot.contains_key(&v)"
+resolution = "pending"
+
+[[site]]
+id = "e97d83aaa3"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "495"
+op = "&&"
+excerpt = "&& !self.line_slots.contains(&self.s.object_of(v))"
+resolution = "pending"
+
+[[site]]
+id = "ff262a0414"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "501"
+op = "||"
+excerpt = "|| self.s.frames.iter().any(|fr| {"
+resolution = "pending"
+
+[[site]]
+id = "635360bdc1"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "503"
+op = "||"
+excerpt = "|| fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))"
+resolution = "pending"
+
+[[site]]
+id = "dc146d10c4"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "515"
+op = "&&"
+excerpt = "if self.line_slots.contains(&local) && self.s.frames.is_empty() {"
+resolution = "pending"
+
+[[site]]
+id = "36a52f04ed"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "551"
+op = "&&"
+excerpt = "if !self.try_feed(d, 'i') && self.released_merge_dsts.contains(&d) {"
+resolution = "pending"
+
+[[site]]
+id = "01c2eda1af"
+file = "crates/almide-mir/src/certificate_b.rs"
+line = "719"
+op = "||"
+excerpt = "feeder_to_slot.contains_key(d) || released.contains(d)"
+resolution = "pending"
+
+[[site]]
+id = "9aeaccc7a8"
+file = "crates/almide-mir/src/certificate_b_tail.rs"
+line = "201"
+op = "&&"
+excerpt = "i == allocs + heap_results + merge_credits && a == dups"
+resolution = "pending"
+
+[[site]]
+id = "27c1b9b665"
+file = "crates/almide-mir/src/certificate_c.rs"
+line = "146"
+op = "&&"
+excerpt = "&& f.params"
+resolution = "pending"
+
+[[site]]
+id = "059b2acc0f"
+file = "crates/almide-mir/src/certificate_p2.rs"
+line = "516"
+op = "&&"
+excerpt = "i == allocs + heap_results && a == dups"
+resolution = "pending"
+
+[[site]]
+id = "0092b5eacf"
+file = "crates/almide-mir/src/certificate_p2.rs"
+line = "799"
+op = "&&"
+excerpt = ".any(|v| v.kind == crate::ViolationKind::Leak && v.op_index == 3 && v.value == x),"
+resolution = "pending"
+
+[[site]]
+id = "c9c00ee8e3"
+file = "crates/almide-mir/src/certificate_p2.rs"
+line = "799"
+op = "&&"
+excerpt = ".any(|v| v.kind == crate::ViolationKind::Leak && v.op_index == 3 && v.value == x),"
+resolution = "pending"
+
+[[site]]
+id = "935b55bfdf"
+file = "crates/almide-mir/src/translation_validation.rs"
+line = "240"
+op = "&&"
+excerpt = "positives && body_rc_decs >= drop_count(mir)"
+resolution = "pending"
+
+[[site]]
+id = "ac9c1b2a7d"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "184"
+op = "&&"
+excerpt = "&& call_sig.as_ref().and_then(|sig| sig.params.get(i)).is_some_and("
+resolution = "pending"
+
+[[site]]
+id = "55c857cd97"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "215"
+op = "||"
+excerpt = "hit(t) || t.any_child_recursive(&hit)"
+resolution = "pending"
+
+[[site]]
+id = "11cfddc353"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "402"
+op = "&&"
+excerpt = "if sig.is_effect && !self.env.can_call_effect {"
+resolution = "vectors"
+tests = "tests/mcdc_effect_vectors_test.rs::site402_baseline_effect_callee_from_pure_fn_is_e006, tests/mcdc_effect_vectors_test.rs::site402_c1_pure_callee_alone_is_clean, tests/mcdc_effect_vectors_test.rs::site402_c2_effect_caller_alone_is_clean"
+
+[[site]]
+id = "2bc2167940"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "449"
+op = "||"
+excerpt = "if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {"
+resolution = "vectors"
+tests = "tests/mcdc_effect_vectors_test.rs::site449_baseline_exact_arity_is_clean, tests/mcdc_effect_vectors_test.rs::site449_c1_too_few_arguments_alone_is_e004, tests/mcdc_effect_vectors_test.rs::site449_c2_too_many_arguments_alone_is_e004"
+
+[[site]]
+id = "4268fddb2e"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "554"
+op = "&&"
+excerpt = "if sig.is_effect && !ret.is_result()"
+resolution = "pending"
+
+[[site]]
+id = "20b80b94a4"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "555"
+op = "&&"
+excerpt = "&& self.env.functions.contains_key(&sym(name))"
+resolution = "pending"
+
+[[site]]
+id = "bed3bc78a7"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "556"
+op = "&&"
+excerpt = "&& !is_bundled_stdlib_call"
+resolution = "pending"
+
+[[site]]
+id = "46d3fe2297"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "852"
+op = "&&"
+excerpt = "if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {"
+resolution = "pending"
+
+[[site]]
+id = "1e9fac54bd"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "872"
+op = "&&"
+excerpt = "&& s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')"
+resolution = "pending"
+
+[[site]]
+id = "0cadd35fc5"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "872"
+op = "||"
+excerpt = "&& s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')"
+resolution = "pending"
+
+[[site]]
+id = "721b31df3a"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "873"
+op = "&&"
+excerpt = "&& !s.starts_with('.')"
+resolution = "pending"
+
+[[site]]
+id = "a0743cf2d2"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "874"
+op = "&&"
+excerpt = "&& !s.ends_with('.')"
+resolution = "pending"
+
+[[site]]
+id = "788ca8886a"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "45"
+op = "||"
+excerpt = "Ty::Fn { params: a_params.clone(), ret: c_ret.clone(), is_effect: *a_eff || *c_eff }"
+resolution = "pending"
+
+[[site]]
+id = "885fd7f763"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "515"
+op = "&&"
+excerpt = "&& args.len() >= 2"
+resolution = "pending"
+
+[[site]]
+id = "fe8845d575"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "605"
+op = "||"
+excerpt = "if ph.line != call.line || ph.col < call.col || ph.col >= call.end_col {"
+resolution = "pending"
+
+[[site]]
+id = "870778154e"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "605"
+op = "||"
+excerpt = "if ph.line != call.line || ph.col < call.col || ph.col >= call.end_col {"
+resolution = "pending"
+
+[[site]]
+id = "b21b7edbf8"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "621"
+op = "&&"
+excerpt = "if next < offsets.len() && i == offsets[next] {"
+resolution = "pending"
+
+[[site]]
+id = "152c953260"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "715"
+op = "||"
+excerpt = "let became_fallible = self.env.lambda_prop_used || slot_effect;"
+resolution = "pending"
+
+[[site]]
+id = "7bd61873e9"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "967"
+op = "||"
+excerpt = "|| self.env.top_lets.contains_key(&sym(name))"
+resolution = "pending"
+
+[[site]]
+id = "1006bf18fa"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "968"
+op = "||"
+excerpt = "|| matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. }))"
+resolution = "pending"
+
+[[site]]
+id = "d27157682f"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "1005"
+op = "||"
+excerpt = "if self.env.auto_unwrap || self.env.in_test_block {"
+resolution = "pending"
+
+[[site]]
+id = "636a787028"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "1045"
+op = "&&"
+excerpt = ") if ra.len() == 2 && oa.len() == 2 => {"
+resolution = "pending"
+
+[[site]]
+id = "154d040b6e"
+file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
+line = "1082"
+op = "&&"
+excerpt = ") if ra.len() == 2 && oa.len() == 2 => {"
+resolution = "pending"
