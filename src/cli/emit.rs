@@ -68,6 +68,9 @@ pub struct EmitArgs<'a> {
     pub emit_dialect: bool,
     pub no_check: bool,
     pub repr_c: bool,
+    /// #572: emit `// almd:` fn anchors and write the sidecar map
+    /// (`<file>.trace.json`: each anchor's almd line ↔ its rust line).
+    pub trace_map: bool,
 }
 
 /// `cmd_emit`'s `--dialect` output path. Extracted verbatim.
@@ -103,7 +106,7 @@ fn emit_ast_output(program: &almide::ast::Program) {
 
 /// `cmd_emit`'s default codegen output path (Rust/WGSL source). Extracted
 /// verbatim.
-fn emit_codegen_output(ir_program: &mut Option<almide::ir::IrProgram>, target: &str, repr_c: bool) {
+fn emit_codegen_output(ir_program: &mut Option<almide::ir::IrProgram>, target: &str, repr_c: bool, trace_map: bool, src_file: &str) {
     let ir = ir_program.as_mut().expect("IR required for codegen");
     almide::ir_link::ir_link(ir);
     let t = match target {
@@ -111,15 +114,48 @@ fn emit_codegen_output(ir_program: &mut Option<almide::ir::IrProgram>, target: &
         "wgsl" => codegen::pass::Target::Wgsl,
         other => { err(&format!("Unknown target: {}. Use rust, wgsl.", other)); std::process::exit(1); }
     };
-    let opts = codegen::CodegenOptions { repr_c, allow_unverified: false };
+    let opts = codegen::CodegenOptions { repr_c, allow_unverified: false, trace: trace_map, ..Default::default() };
     match codegen::codegen_with(ir, t, &opts) {
-        codegen::CodegenOutput::Source(code) => out_no_nl(&format!("{}", code)),
+        codegen::CodegenOutput::Source(code) => {
+            if trace_map {
+                write_trace_map(src_file, &code);
+            }
+            out_no_nl(&format!("{}", code));
+        }
         codegen::CodegenOutput::Binary(_) => unreachable!(),
     }
 }
 
+/// #572: derive the sidecar map from the anchors the renderer emitted —
+/// `<src>.trace.json`, an array of {fn, almd_line, rust_line}. Scanning
+/// the OUTPUT (not re-walking the IR) means the map can never disagree
+/// with the shipped text.
+fn write_trace_map(src_file: &str, code: &str) {
+    let mut rows = Vec::new();
+    for (i, line) in code.lines().enumerate() {
+        let t = line.trim_start();
+        if let Some(rest) = t.strip_prefix("// almd: fn ") {
+            if let Some((name, ln)) = rest.split_once(" @ line ") {
+                if let Ok(almd_line) = ln.trim().parse::<usize>() {
+                    rows.push(format!(
+                        "{{\"fn\":\"{}\",\"almd_line\":{},\"rust_line\":{}}}",
+                        name, almd_line, i + 2
+                    ));
+                }
+            }
+        }
+    }
+    let out = format!("[\n  {}\n]\n", rows.join(",\n  "));
+    let path = format!("{}.trace.json", src_file.strip_suffix(".almd").unwrap_or(src_file));
+    if let Err(e) = std::fs::write(&path, out) {
+        err(&format!("Failed to write {}: {}", path, e));
+        std::process::exit(1);
+    }
+    err(&format!("Trace map: {path} ({} function(s))", rows.len()));
+}
+
 pub fn cmd_emit(args: EmitArgs) {
-    let EmitArgs { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c } = args;
+    let EmitArgs { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } = args;
     let (mut program, source_text, parse_errors) = parse_file(file);
     exit_on_parse_errors(&parse_errors, &source_text);
 
@@ -176,5 +212,5 @@ pub fn cmd_emit(args: EmitArgs) {
         emit_ast_output(&program);
         return;
     }
-    emit_codegen_output(&mut ir_program, target, repr_c);
+    emit_codegen_output(&mut ir_program, target, repr_c, trace_map, file);
 }

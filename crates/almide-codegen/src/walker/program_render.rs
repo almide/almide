@@ -227,6 +227,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         generic_types: std::rc::Rc::new(generic_types),
         minimal_generic_bounds: false,
         repr_c: ctx.repr_c,
+        trace: ctx.trace,
         ref_params: std::collections::HashSet::new(),
         param_vars: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),

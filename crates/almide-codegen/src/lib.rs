@@ -76,6 +76,12 @@ pub enum CodegenOutput {
 pub struct CodegenOptions {
     /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
     pub repr_c: bool,
+    /// #572: prepend a `// almd: fn <name> @ line <N>` anchor comment to
+    /// every rendered function (the source-to-generated correspondence
+    /// unit). Default off — the emitted bytes stay identical to the
+    /// baselines; `--trace-map` turns it on and derives the sidecar map
+    /// from these anchors.
+    pub trace: bool,
     /// Waiver for the Perceus RC gate (`--emit-unverified`): when a function
     /// fails Perceus verification, emit it anyway with a warning instead of
     /// refusing the build. A violation is a compiler bug (callee-inserted RC,
@@ -628,6 +634,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
         .with_target(target)
         .with_annotations(ann);
     ctx.repr_c = options.repr_c;
+    ctx.trace = options.trace;
     let user_code = walker::render_program(&ctx, program);
 
     // Prepend runtime preamble

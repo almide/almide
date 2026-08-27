@@ -167,7 +167,7 @@ pub fn cmd_build(args: BuildArgs) {
 
     let output = compute_output_path(file, output, is_wasm);
 
-    let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false };
+    let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false };
     let (rs_code, _ir) = crate::try_compile_with_ir(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
 
