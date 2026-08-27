@@ -32,4 +32,4 @@ reject	parse errors: 2	cells/s3_module_qualified_protocol
 run	exit=0 sha256=80da02f3ba2e0d126442f9a66e3cb2a6e36681fc13b0a427010edb4b6848768a	cells/x14_layered_ports
 run	exit=0 sha256=21033a6a6014440d5c1fb029758d979be090b0a0c3935fd399899dccf73be9a4	cells/x15_directory_namespace
 run	exit=0 sha256=54c2c296b37584f7b7550e0fcfda053e01b78ea5f11e4e6a2a9ede236cb86930	pkg/functional_port
-wall	call-fn:place_order.place_order__system_clock_FixedClock_memory_repo_MemoryOrderRepo:mut-param	pkg/mut_port
+wall	call-fn:place_order.place_order__system_clock_FixedClock_memory_repo_MemoryOrderRepo:mut-param:can-err-effect(#1576)	pkg/mut_port

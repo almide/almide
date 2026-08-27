@@ -1,0 +1,31 @@
+// @contract: C-132
+// #1622: a protocol method declared `effect fn` with a `mut self` receiver,
+// reached through a GENERIC BOUND (monomorphized), takes the C-132 move-mode
+// rewrite when it provably cannot err — the effect marker changes the return
+// channel, not the parameter convention (#1575's rule, extended to the
+// never-err FIXPOINT: `put` has no err arm, so the `uc` that reaches it with
+// `!` cannot err either). Both wasm targets used to refuse exactly this
+// combination (plain-method via bound lowered, direct effect-method call
+// lowered — only the pair walled). The caller's `var` must observe BOTH
+// writes made through the bound. The can-err half stays an honest #1576 wall.
+protocol Store {
+  effect fn put(mut self: Self, k: String) -> Unit
+}
+
+type Mem: Store = { ks: List[String] }
+
+effect fn Mem.put(mut self: Mem, k: String) -> Unit = {
+  self.ks = self.ks + [k]
+}
+
+effect fn uc[S: Store](mut s: S, k: String) -> Int = {
+  s.put(k)!
+  s.put(k + "2")!
+  1
+}
+
+effect fn main() -> Unit = {
+  var m = Mem { ks: ["z"] }
+  let n = uc(m, "a")!
+  println("${n} ${m.ks}")
+}

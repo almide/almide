@@ -91,12 +91,13 @@
 4061	spec/wasm_cross/destructure_let_unwrap.almd
 6914	spec/wasm_cross/early_return_control_flow.almd
 4749	spec/wasm_cross/edge_closure_matrix.almd
-17149	spec/wasm_cross/edge_float_formatting.almd
+17189	spec/wasm_cross/edge_float_formatting.almd
 8048	spec/wasm_cross/edge_int_boundaries.almd
 5120	spec/wasm_cross/edge_map_order.almd
 57394	spec/wasm_cross/edge_string_unicode.almd
 4506	spec/wasm_cross/effect_assign_unwrap.almd
 7485	spec/wasm_cross/effect_fn_value.almd
+4723	spec/wasm_cross/effect_mut_generic_port.almd
 7313	spec/wasm_cross/effect_option_explicit_bang.almd
 6484	spec/wasm_cross/effect_slot_carrier.almd
 7161	spec/wasm_cross/effect_tail_carrier_family.almd
@@ -135,7 +136,7 @@
 4251	spec/wasm_cross/flight_pid_control.almd
 9066	spec/wasm_cross/float32_literal_excess_precision.almd
 9384	spec/wasm_cross/float_clamp_invalid.almd
-10456	spec/wasm_cross/float_clamp_negative_zero.almd
+10496	spec/wasm_cross/float_clamp_negative_zero.almd
 17023	spec/wasm_cross/float_concrete.almd
 9563	spec/wasm_cross/float_interp_forms.almd
 14756	spec/wasm_cross/float_no_contraction.almd
@@ -143,8 +144,8 @@
 14816	spec/wasm_cross/float_parse_special.almd
 9919	spec/wasm_cross/float_round_negzero.almd
 9152	spec/wasm_cross/float_shortest_roundtrip.almd
-10956	spec/wasm_cross/float_sign_minmax_ieee.almd
-9782	spec/wasm_cross/float_signed_zero_minmax.almd
+11182	spec/wasm_cross/float_sign_minmax_ieee.almd
+9908	spec/wasm_cross/float_signed_zero_minmax.almd
 9603	spec/wasm_cross/float_subnormal_preserved.almd
 9027	spec/wasm_cross/float_to_fixed.almd
 5558	spec/wasm_cross/float_to_int_edges.almd
@@ -440,7 +441,7 @@
 3872	spec/wasm_cross/ref_gleam_div_zero_abort.almd
 4148	spec/wasm_cross/ref_gleam_fnvalue_shadow.almd
 4029	spec/wasm_cross/ref_gleam_tail_deep.almd
-10059	spec/wasm_cross/ref_grain_nan_struct.almd
+10079	spec/wasm_cross/ref_grain_nan_struct.almd
 3845	spec/wasm_cross/ref_int_min_div_abort.almd
 4714	spec/wasm_cross/ref_koka_guard_liveness.almd
 4473	spec/wasm_cross/ref_koka_rescrutinee.almd
