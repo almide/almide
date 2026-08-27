@@ -198,6 +198,49 @@ fn p3_component_emits_and_matches_core() {
     assert_eq!(p3_code, core_code, "p3 exit code diverged");
 }
 
+
+// fan.* on the p3 component (#1628 stage 2, the deterministic half): the
+// C-004 contract's combinators — list-order map, first-success any,
+// settle — must answer byte-identically through the async canonical ABI.
+// Deterministic fan needs NO overlap machinery (arms evaluate in list
+// order by the language's own semantics); the async-I/O overlap half
+// arrives with an async import surface (wasi:http p3) and rides the SAME
+// plumbing this pins.
+const FAN: &str = r#"effect fn dbl(x: Int) -> Result[Int, String] = ok(x * 2)
+
+effect fn main() -> Unit = {
+  let doubled = fan.map([1, 2, 3, 4], (x) => dbl(x))!
+  println(doubled |> list.map((x) => int.to_string(x)) |> list.join(","))
+  let first = fan.any([9, 10], (x) => dbl(x)) ?? -1
+  println(int.to_string(first))
+}
+"#;
+
+#[test]
+fn p3_component_runs_fan_deterministically() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir();
+    let src = d.join("fan.almd");
+    std::fs::write(&src, FAN).expect("write");
+    let core = d.join("fan_core.wasm");
+    let p3 = d.join("fan_p3.wasm");
+    build_core(&src, &core);
+    build_p3(&src, &p3);
+    if !wasmtime_available() {
+        return;
+    }
+    let (core_out, _, core_code) = run_core(&core, "");
+    assert_eq!(core_out, "2,4,6,8\n18\n");
+    assert_eq!(core_code, 0);
+    let Some((p3_out, _, p3_code)) = run_p3(&p3, "") else {
+        return;
+    };
+    assert_eq!(p3_out, core_out, "fan output diverged on the p3 leg");
+    assert_eq!(p3_code, core_code);
+}
+
 #[test]
 fn p3_component_abort_answers_exit_one() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
