@@ -39,7 +39,7 @@ fn bench_native(file: &str, runs: u32) {
             std::process::exit(1);
         }
     };
-    err(&format!("bench: building native release binary…"));
+    err("bench: building native release binary…");
     let bin = match super::run::build_native_cached(&rs_code, false, true, None, &[], None) {
         Ok(b) => b,
         Err(e) => {
