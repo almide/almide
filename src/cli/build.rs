@@ -373,10 +373,16 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
     // see the wasm-opt parity leg (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`) for the
     // differential-testing evidence backing this tier's own guarantee.
+    // Name the LEG in the one line every build prints: "which renderer
+    // produced these bytes" was invisible by default (the line said
+    // v1-verified even for structural output), and that opacity cost real
+    // diagnosis time — a "wasm doesn't work" report cannot be split
+    // between legs without it.
+    let leg = if structural { "structural leg" } else { "incumbent v1 leg" };
     if !wasm_opt {
         err(&format!(
-            "Built {} ({} bytes, v1-verified — wasm-opt skipped; pass --wasm-opt for a smaller, non-verified build)",
-            output, pre_size
+            "Built {} ({} bytes, {}, verified — wasm-opt skipped; pass --wasm-opt for a smaller, non-verified build)",
+            output, pre_size, leg
         ));
         return;
     }
@@ -589,8 +595,14 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
 /// the greenfield engine — measured 610/610 byte-identical to native on
 /// the full wasm_cross corpus) and the incumbent WAT trust-spine.
 ///
-/// Routing is by PROJECT SHAPE, never by failure fallback (a wall stays an
-/// honest hard error on whichever leg owns the program):
+/// Routing has TWO tiers. Tier 1 is by PROJECT SHAPE (the enumerated
+/// conditions below). Tier 2: a program the shape routing gives to the
+/// structural leg whose lowering then WALLS is re-rendered by the incumbent
+/// — a verified-to-verified handover, NOT the retired v0 fallback (#782's
+/// sin was falling into UNVERIFIED codegen). A program NEITHER leg lowers
+/// still fails hard with the incumbent's wall diagnostics. The handover is
+/// named on stderr under `ALMIDE_VERIFIED_DEBUG=1`, and the leg that
+/// produced the bytes is named in the `Built …` line / `--time-report`:
 ///   - `ALMIDE_WASM_INCUMBENT=1`     → incumbent (the reversible switch,
 ///                                      kept for one release)
 ///   - main-less library module      → incumbent (#881 export mode — the
@@ -664,6 +676,15 @@ fn render_wasm_module_routed(
             // never ship bytes wasmtime would refuse at load.
             if let Err(e) = wasmparser::validate(&bytes) {
                 return reroute(&format!("validation: {}", e.message()));
+            }
+            // With the debug env, ALWAYS name the winning leg — the
+            // incumbent path and the reroute already speak, so a silent
+            // structural success made the env an incomplete oracle.
+            if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+                err(&format!(
+                    "[almide] structural leg emitted the module ({} bytes)",
+                    bytes.len()
+                ));
             }
             Ok((bytes, true))
         }
