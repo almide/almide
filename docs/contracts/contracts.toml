@@ -1752,6 +1752,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_heap_param.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_param_writeback.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_never_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_mut_generic_port.almd", class = "fixture" },
 ]
 
 [[contract]]
