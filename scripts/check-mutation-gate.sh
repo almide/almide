@@ -60,8 +60,33 @@ SHARD="${ALMIDE_MUTATION_SHARD:-0}"
 # --lib carries the direct invariant referees (the layout-order judge
 # that replaced mutant 015's heap-adjacency kill after class-rounded
 # allocation padded that corruption into silence).
-SUITES=(--lib --test backend_parity --test fuzz_differential --test alias_semantics --test tail_calls)
+#
+# Killer-first (#1619 item 3), REGISTRY-FREE: the suites run one at a
+# time, cheapest link first, and the loop stops at the FIRST red — a
+# mutant most nets catch in --lib or backend_parity never links the other
+# three binaries (~45 s → ~25 s per caught mutant). The verdict is
+# unchanged: "caught" still means "the net goes red", because ANY suite
+# failing IS the net failing; only a SURVIVOR pays for all five. A
+# recorded-killer table was considered and rejected — a hand-maintained
+# map drifts (the repo's own matrix doctrine), while the killer suite is
+# rediscovered and PRINTED on every run, so the evidence stays live.
 fail=0
+
+# Run the net suites sequentially against the currently-applied mutant;
+# echoes the killer. Returns 0 = some suite went red (caught), 1 = all
+# suites green (survived).
+net_catches() {
+  local s
+  for s in lib backend_parity fuzz_differential alias_semantics tail_calls; do
+    local args
+    if [ "$s" = "lib" ]; then args=(--lib); else args=(--test "$s"); fi
+    if ! cargo test --release -p almide-wasm --locked "${args[@]}" >/dev/null 2>&1; then
+      echo "$s"
+      return 0
+    fi
+  done
+  return 1
+}
 
 idx=-1
 for patch in ci/mutations/*.patch; do
@@ -90,11 +115,11 @@ for patch in ci/mutations/*.patch; do
     fail=1
     continue
   fi
-  if cargo test --release -p almide-wasm --locked "${SUITES[@]}" >/dev/null 2>&1; then
+  if killer=$(net_catches); then
+    echo "ok:   $name caught (by $killer)"
+  else
     echo "FAIL: $name SURVIVED — the net did not catch this mutant"
     fail=1
-  else
-    echo "ok:   $name caught"
   fi
   git apply -R "$patch"
 done
