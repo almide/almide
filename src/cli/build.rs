@@ -854,48 +854,14 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
             matches!(d, almide::ast::Decl::Import { path, .. }
                 if path.first().is_some_and(|r| matches!(r.as_str(), "fs" | "env" | "process")))
         });
-    // Explicit `matrix.*` / `io.*` module calls stay on the incumbent leg:
-    // the structural leg links neither the matrix intrinsics (llama_block)
-    // nor the stdin-read io surface (io.read_all — stdin programs CANNOT
-    // live in the spec corpus, so the shape is unmeasured by construction).
-    // Module-granular on purpose: bare println/print are Named calls and
-    // stay structural; the gates keep judging the structural leg directly
-    // through emit_program, so verification coverage is unchanged (#1598).
-    let uses_incumbent_stdlib = {
-        fn expr_hits(e: &almide::ir::IrExpr, hit: &mut bool) {
-            if let almide::ir::IrExprKind::Call { target, .. }
-            | almide::ir::IrExprKind::TailCall { target, .. } = &e.kind
-            {
-                if let almide::ir::CallTarget::Module { module, .. } = target {
-                    if matches!(module.as_str(), "matrix" | "io") {
-                        *hit = true;
-                    }
-                }
-            }
-            if !*hit {
-                e.clone().map_children(&mut |c| {
-                    expr_hits(&c, hit);
-                    c
-                });
-            }
-        }
-        let mut hit = false;
-        for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
-            expr_hits(&f.body, &mut hit);
-            if hit {
-                break;
-            }
-        }
-        if !hit {
-            for tl in ir_program.top_lets.iter().chain(ir_program.modules.iter().flat_map(|m| m.top_lets.iter())) {
-                expr_hits(&tl.value, &mut hit);
-                if hit {
-                    break;
-                }
-            }
-        }
-        hit
-    };
+    // #1598 CLOSED as per-fn auto-flip: the matrix/io module pre-scan is
+    // GONE. The linked surfaces (io.read_all via the host's op-31 drain
+    // joined io.print/write/write_bytes/read_n_bytes; the measured matrix
+    // arms) lower structurally; anything still unlinked (the qwen/llama
+    // matrix long tail, io.read_line/read_byte) WALLS at lowering and the
+    // tier-2 verified-to-verified reroute hands it to the incumbent — so
+    // every future linked fn flips its own route with no hand-mirrored
+    // list to drift.
     // #1596 CLOSED: `import self as m` projects run the structural leg.
     // The spaced globals machinery ((space, VarId) keys — separately-
     // lowered modules each restart VarIds at 0) fixed the top-let storage
@@ -910,7 +876,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         library_ok,
         has_main,
         has_pkg_deps,
-        uses_incumbent_stdlib || has_exports,
+        has_exports,
         host_variant,
     )
 }
