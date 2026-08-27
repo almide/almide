@@ -28,6 +28,8 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "intrinsic",
     "wasm_intrinsic",
     "inline_rust",
+    // The bounded profile (ALS §B, E070–E078)
+    "bounded",
     // Ownership / calling convention
     "mutating",
     "consume",

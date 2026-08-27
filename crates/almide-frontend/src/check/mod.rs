@@ -1026,6 +1026,7 @@ impl Checker {
         self.validate_unresolved_binding_types();
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
+        self.check_bounded_profile(program);
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -1242,4 +1243,5 @@ pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
 
 include!("post_solve_validation.rs");
 include!("lint_error_surface.rs");
+include!("bounded.rs");
 include!("module_inference.rs");
