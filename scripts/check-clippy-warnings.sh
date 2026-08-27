@@ -28,26 +28,47 @@ export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
 
 BASELINE_FILE="scripts/clippy-warnings-baseline.txt"
-CARGO="${CARGO:-cargo}"
 UNIT_FLOOR=40
+
+# THE COUNT IS TOOLCHAIN-COUPLED (first CI run's finding: 1,480 under the
+# pinned 1.94.0, 1,494 under a local 1.96 — clippy grows lints every
+# release). The NORMATIVE environment is CI's pinned RUST_TOOLCHAIN; the
+# baseline is that toolchain's count. A local run on the pin gives the
+# real verdict; a local run on any other toolchain prints its count for
+# information and exits 0 — a number measured in the wrong environment
+# must not be able to fail (or greenwash) the gate.
+PINNED_TOOLCHAIN="1.94.0"
+VERDICT=1
+if rustup toolchain list 2>/dev/null | grep -q "^${PINNED_TOOLCHAIN}"; then
+  CARGO="rustup run ${PINNED_TOOLCHAIN} cargo"
+elif [ "${CLIPPY_REQUIRE_PIN:-}" = "1" ]; then
+  echo "::error::clippy-warnings: pinned toolchain ${PINNED_TOOLCHAIN} not installed" >&2
+  exit 1
+else
+  CARGO="${CARGO:-cargo}"
+  echo "clippy-warnings: pinned toolchain ${PINNED_TOOLCHAIN} not installed —"
+  echo "counting under $(rustc --version 2>/dev/null || echo unknown) for information only (no verdict)."
+  VERDICT=0
+fi
 
 json="$(mktemp)"
 err="$(mktemp)"
 trap 'rm -f "$json" "$err"' EXIT
 
-if ! "$CARGO" clippy --release --workspace --all-targets --message-format=json > "$json" 2> "$err"; then
+if ! $CARGO clippy --release --workspace --all-targets --message-format=json > "$json" 2> "$err"; then
   cat "$err" >&2
   echo "::error::clippy-warnings: \`cargo clippy --workspace --all-targets\` FAILED."
   echo "This gate counts warnings; it cannot do that on a tree that does not compile."
   exit 1
 fi
 
-python3 - "$json" "$BASELINE_FILE" "$UNIT_FLOOR" <<'PY'
+python3 - "$json" "$BASELINE_FILE" "$UNIT_FLOOR" "$VERDICT" <<'PY'
 import json as jsonlib
 import os
 import sys
 
 stream_path, baseline_path, unit_floor = sys.argv[1], sys.argv[2], int(sys.argv[3])
+verdict = sys.argv[4] == "1"
 root = os.getcwd()
 
 units = 0
@@ -94,6 +115,11 @@ if units < unit_floor:
 count = len(warnings)
 baseline = int(open(baseline_path, encoding="utf-8").read().strip())
 print(f"clippy-warnings: {count} warning(s) over {units} workspace units (baseline {baseline})")
+
+if not verdict:
+    print("clippy-warnings: NON-PINNED toolchain — count printed for information; the"
+          " pinned-toolchain run in CI is the verdict.")
+    sys.exit(0)
 
 if count > baseline:
     for w in sorted(warnings.values()):
