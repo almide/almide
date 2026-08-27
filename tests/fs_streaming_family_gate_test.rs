@@ -19,19 +19,19 @@
 /// (cell signature, fallible carrier — `None` = a reasoned omission).
 const STREAMING_MATRIX: &[(&str, Option<&str>)] = &[
     (
-        "fn fold_lines[A](path: String, init: A, f: fn(A, String) -> A) -> Result[A, String]",
-        Some("fn __fallible_fold_lines[A, E](path: String, init: A, f: fn(A, String) -> Result[A, E]) -> Result[A, E]"),
+        "fn fold_lines[A](path: String, init: A, f: (A, String) -> A) -> Result[A, String]",
+        Some("fn __fallible_fold_lines[A, E](path: String, init: A, f: (A, String) -> Result[A, E]) -> Result[A, E]"),
     ),
     (
-        "fn for_each_line(path: String, f: fn(String) -> Unit) -> Result[Unit, String]",
-        Some("fn __fallible_for_each_line[E](path: String, f: fn(String) -> Result[Unit, E]) -> Result[Unit, E]"),
+        "fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String]",
+        Some("fn __fallible_for_each_line[E](path: String, f: (String) -> Result[Unit, E]) -> Result[Unit, E]"),
     ),
     (
-        "fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: fn(A, String) -> A) -> Result[A, String]",
+        "fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String]",
         None,
     ),
     (
-        "fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: fn(A, String) -> A) -> Result[List[A], String]",
+        "fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String]",
         None,
     ),
 ];
