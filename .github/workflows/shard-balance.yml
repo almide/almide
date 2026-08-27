@@ -1,0 +1,32 @@
+name: Shard balance ratchet
+
+# #1615 item 4: the Test Rust shard weights (scripts/ci-test-weights.txt)
+# are the packer's only input, and they went stale silently once already
+# (2026-08-08 laptop capture → 344 s of measured skew by 2026-08-27).
+# This weekly check measures the latest green develop run's per-shard
+# `Cargo tests` totals from its OWN logs and fails when max/min exceeds
+# the ratio — the fix it demands is `scripts/refresh-ci-test-weights.sh`
+# plus a commit of the refreshed file.
+
+on:
+  schedule:
+    # 06:20 UTC Monday — clear of the fuzz night (03:00), conformance
+    # (04:30) and the mutation sweep (05:15).
+    - cron: "20 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  balance:
+    name: Shard skew vs the weights file
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: measure the latest green develop run's shard skew
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/refresh-ci-test-weights.sh --check
