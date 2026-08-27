@@ -214,7 +214,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Derived count | Value |
 |---|---|
 | Stdlib | 969 functions across 43 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 421 `.almd` test files under `spec/` (`almide test spec/`) + the 311-contract cross-target ledger |
+| Tests | 422 `.almd` test files under `spec/` (`almide test spec/`) + the 311-contract cross-target ledger |
 <!-- stats:generated:end -->
 
 ## Ecosystem and documentation
