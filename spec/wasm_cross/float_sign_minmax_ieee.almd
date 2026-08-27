@@ -65,6 +65,6 @@ fn main() -> Unit = {
   // 1
   println(float.to_string(float.sign(math.fmin(mz, pz))))
   // -1
-  println(float.to_string(float.sign(math.fmin(pz, mz))))
   // -1 (IEEE: min tie -> -0)
+  println(float.to_string(float.sign(math.fmin(pz, mz))))
 }
