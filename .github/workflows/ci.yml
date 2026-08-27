@@ -48,6 +48,63 @@ env:
 
 jobs:
   # ═══════════════════════════════════════════════
+  # Change class — a docs-only change skips the test matrix
+  # ═══════════════════════════════════════════════
+
+  changes:
+    # A README-only PR used to buy the whole matrix: four Test Rust shards
+    # (14–20 min), two determinism sweeps, the gates job, the perf ratchet —
+    # none of which read what changed. scripts/check-docs-only.sh classifies
+    # the change set (allow-list: *.md, images, LICENSE; everything else is
+    # code, and the markdown a test or the binary consumes is code too), and
+    # the heavy jobs carry `if: needs.changes.outputs.docs_only != 'true'`.
+    #
+    # Job-level `if`, NOT a workflow `paths` filter: a job skipped by its own
+    # `if` reports SUCCESS to branch protection ("Jobs that are skipped will
+    # report their status as Success. They will not prevent a pull request
+    # from merging, even if it is a required check" — GitHub docs, "Handling
+    # skipped but required checks"), while a workflow filtered out by `paths`
+    # leaves its required checks Expected forever and the PR blocked.
+    #
+    # Fail-safe direction: the classify step is `continue-on-error`, so a
+    # broken classifier yields an EMPTY output, `'' != 'true'` holds, and
+    # everything runs. Breakage costs twenty minutes, never a skipped suite.
+    #
+    # What still runs on a docs-only change: build (the checks need the
+    # binary), Emit & Format (LLM-surface fences, stdlib doc indexes, README
+    # stats, the build-speed block, `almide docs-gen --check`), Lean proofs.
+    name: Change class (docs-only skips the test matrix)
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: classify
+        name: Classify the change set (scripts/check-docs-only.sh)
+        continue-on-error: true
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            # HEAD is the PR's merge commit; its merge-base with the base branch
+            # is the base tip, so the range is exactly the PR's own change set.
+            git fetch -q origin "${{ github.base_ref }}"
+            bash scripts/check-docs-only.sh "$(git merge-base "origin/${{ github.base_ref }}" HEAD)" HEAD
+          else
+            before="${{ github.event.before }}"
+            if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+              bash scripts/check-docs-only.sh "$before" HEAD
+            else
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              echo "check-docs-only: no comparable base for this push — full run"
+            fi
+          fi
+
+      - name: Verdict
+        run: echo "docs_only=${{ steps.classify.outputs.docs_only }} (empty means the classifier failed — full run)"
+
+  # ═══════════════════════════════════════════════
   # Build — shared by all jobs
   # ═══════════════════════════════════════════════
 
@@ -98,7 +155,8 @@ jobs:
     # twice. Cheap (no tests run, just enumeration) and it gates the same commit
     # the shards run on.
     name: Test shards cover every target
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -145,7 +203,8 @@ jobs:
     # total) and `wasm_runtime_test` alone is ~270s, so past 4 shards the
     # longest target IS the floor and extra jobs buy nothing.
     name: Test Rust (shard ${{ matrix.shard }}/4)
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -256,7 +315,8 @@ jobs:
     # downloaded binary, which is why this job installs wasmtime/wasm-opt but
     # skips the heavy cargo cache the shards restore.
     name: Almide gates (compiler-driven, shard-independent)
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -376,6 +436,8 @@ jobs:
 
   test-arm:
     name: Test ARM (NEON, Apple Silicon)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     # almide-kernel's NEON kernels (silu/softmax/gelu/q1_0) cross-built on the x86
     # runners but were never *executed* — build-cross only proves they compile.
     # macos-14 is Apple Silicon, where NEON is the ARMv8 baseline, so the public
@@ -412,7 +474,8 @@ jobs:
 
   test-wasm:
     name: Test WASM
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -465,6 +528,8 @@ jobs:
 
   test-wasm-windows:
     name: Test WASM (Windows host)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     # Self-sufficient build: the `almide-windows` artifact exists only on
     # release PRs (build-cross is PR-to-main-gated), and this gate must run on
     # every develop push — a Windows-host regression found at release time is
@@ -557,7 +622,8 @@ jobs:
   # `walled` tally before it can land).
   wasm-host-determinism:
     name: WASM host-arch determinism
-    if: github.server_url == 'https://github.com'
+    needs: changes
+    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -641,7 +707,8 @@ jobs:
     # repos/almide/almide/branches/develop/protection/required_status_checks
     # in the same change.
     name: WASM browser-ABI determinism
-    if: github.server_url == 'https://github.com'
+    needs: changes
+    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -841,7 +908,8 @@ jobs:
     # inviting baseline conflicts. This runs the SAME gate at push/PR time —
     # ~14 min measured — but only when something it measures changed.
     name: Coverage ratchet at push time (#566)
-    if: github.server_url == 'https://github.com'
+    needs: changes
+    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1009,6 +1077,19 @@ jobs:
       - name: README counts derived, Hello, world bytes match the stamped baseline, no undated hand-written count
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/gen-readme-stats.sh --check && bash scripts/check-readme-numbers.sh
 
+      # The two README-reading checks that otherwise live only in jobs a
+      # docs-only change skips (tests/docs_gen_test.rs in Test Rust, the
+      # build-speed render in Almide gates). This job always runs, so a README
+      # edit cannot dodge them by being docs-only.
+      - name: docs-gen --check (stdlib-count claim in README/SPEC/WASM-OUTPUT, llms.txt version and codes)
+        run: /tmp/almide-bin/almide docs-gen --check
+
+      - name: README build-speed block is fresh (#999 — render check, no measurement)
+        # `almide run` builds the gates tool natively, so this step needs cargo.
+        run: |
+          rustup toolchain install stable --profile minimal >/dev/null 2>&1 || true
+          /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check-readme
+
       - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
 
@@ -1047,7 +1128,8 @@ jobs:
 
   perf-ratchet:
     name: Perf ratchet (native/Rust ratio, #917)
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1272,6 +1354,8 @@ jobs:
   # these suites (cfg_attr debug ignore), so this job is their ONLY runner.
   commissioned-wasm-gates:
     name: Commissioned wasm gates (structural leg, release)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1290,6 +1374,8 @@ jobs:
   # discipline is the cheap proxy for the measured primary slippage driver.
   commissioned-aviation-quality:
     name: Commissioned aviation quality (codopsy A + file discipline)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1310,6 +1396,8 @@ jobs:
   # retire).
   commissioned-mutation-gate:
     name: Commissioned mutation gate (the net keeps its teeth)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
