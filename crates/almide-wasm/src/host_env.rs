@@ -94,6 +94,17 @@ impl Emitter<'_> {
                 }
                 Some(SliceTy::List(self.types.intern(STR)))
             }
+            // stdin read-to-end (#1598's io half): the host's op-31 drain
+            // parks the stream, and the raw-text builder collects it. RAW
+            // String, not a Result block: the frontend absorbs the `!` on
+            // this @intrinsic effect call (the probe showed the Bind's
+            // value is the bare Call typed String), the same convention
+            // env.os / env.temp_dir ride — and op 31 cannot fail.
+            ("io", "read_all", []) => {
+                self.fs_call_0(OP_STDIN_READ)?;
+                self.fs_take_text()?;
+                Some(STR)
+            }
             ("io", "write", [b]) => {
                 self.lower(b, Some(SliceTy::Scalar(Scalar::Bytes)))?;
                 self.io_stdout_raw()?;
