@@ -2,13 +2,10 @@
 # safety set, each resolved or pending. Regenerate rows: proofs/mcdc-ledger.sh
 # --write (hand-written resolution/tests/note fields survive by id). A
 # `vectors` row names unit tests demonstrating each operand's INDEPENDENT
-# effect on the outcome (the MC/DC pair) — and the claim is MECHANICAL, not
-# taken on faith: proofs/mcdc-mutation.sh swaps the site's operator and
-# requires the named tests to be green unmutated and red under the mutant
-# (nightly job "mcdc-mutation"). `refactored` rows disappear when the site
-# stops scanning; `pending` is a shrink-only debt.
+# effect on the outcome (the MC/DC pair); `refactored` rows disappear when the
+# site stops scanning; `pending` is a shrink-only debt.
 #
-# pending_ceiling = "45"
+# pending_ceiling = "28"
 
 [[site]]
 id = "d144f08238"
@@ -53,142 +50,6 @@ op = "&&"
 excerpt = "if !is_mutable && decs > incs + 1 {"
 resolution = "vectors"
 tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_baseline_immutable_overdec_reports_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c1_mutability_alone_suppresses_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c2_balance_alone_suppresses_double_free"
-
-[[site]]
-id = "29349f0ce1"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "41"
-op = "&&"
-excerpt = "if !fr.then_ev.contains_key(&o) && !fr.else_ev.contains_key(&o) {"
-resolution = "pending"
-
-[[site]]
-id = "1e01dc92f8"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "87"
-op = "&&"
-excerpt = "&& seg_net(&e) == 0"
-resolution = "pending"
-
-[[site]]
-id = "cb216c3194"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "88"
-op = "&&"
-excerpt = "&& !t.contains('x')"
-resolution = "pending"
-
-[[site]]
-id = "a1029583e9"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "89"
-op = "&&"
-excerpt = "&& !e.contains('x')"
-resolution = "pending"
-
-[[site]]
-id = "ec00fbd7e4"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "93"
-op = "||"
-excerpt = "|| e.contains(['(', ')', '{', '}', '[', ']'])"
-resolution = "pending"
-
-[[site]]
-id = "378ce05f1c"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "233"
-op = "||"
-excerpt = "let heap = then_heap || val.map_or(false, |v| heap_objs.contains(&v));"
-resolution = "pending"
-
-[[site]]
-id = "c4d0e1acfe"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "465"
-op = "&&"
-excerpt = "if self.line_slots.contains(&slot) && self.s.frames.is_empty() {"
-resolution = "pending"
-
-[[site]]
-id = "00ae0b0002"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "491"
-op = "&&"
-excerpt = "&& self.s.balance(self.s.object_of(v)) > 0"
-resolution = "pending"
-
-[[site]]
-id = "eec367f86c"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "492"
-op = "&&"
-excerpt = "&& !self.consumed_values.contains(&v)"
-resolution = "pending"
-
-[[site]]
-id = "636e113fdf"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "493"
-op = "&&"
-excerpt = "&& !self.slots.contains(&self.s.object_of(v))"
-resolution = "pending"
-
-[[site]]
-id = "133e5a883f"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "494"
-op = "&&"
-excerpt = "&& !self.feeder_to_slot.contains_key(&v)"
-resolution = "pending"
-
-[[site]]
-id = "e97d83aaa3"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "495"
-op = "&&"
-excerpt = "&& !self.line_slots.contains(&self.s.object_of(v))"
-resolution = "pending"
-
-[[site]]
-id = "ff262a0414"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "501"
-op = "||"
-excerpt = "|| self.s.frames.iter().any(|fr| {"
-resolution = "pending"
-
-[[site]]
-id = "635360bdc1"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "503"
-op = "||"
-excerpt = "|| fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))"
-resolution = "pending"
-
-[[site]]
-id = "dc146d10c4"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "515"
-op = "&&"
-excerpt = "if self.line_slots.contains(&local) && self.s.frames.is_empty() {"
-resolution = "pending"
-
-[[site]]
-id = "36a52f04ed"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "551"
-op = "&&"
-excerpt = "if !self.try_feed(d, 'i') && self.released_merge_dsts.contains(&d) {"
-resolution = "pending"
-
-[[site]]
-id = "01c2eda1af"
-file = "crates/almide-mir/src/certificate_b.rs"
-line = "719"
-op = "||"
-excerpt = "feeder_to_slot.contains_key(d) || released.contains(d)"
-resolution = "pending"
 
 [[site]]
 id = "9aeaccc7a8"
