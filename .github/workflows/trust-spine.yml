@@ -24,6 +24,9 @@ on:
     # before this trigger existed each release shipped without the proof spine,
     # the PCC gate, or the corpus wall ever running on that ref.
     branches: [develop, develop-v1, main]
+    # #571: every release tag runs the full spine on ITS tree, and a green
+    # run assembles + attests the qualification dossier (tail steps below).
+    tags: ["v*"]
     paths:
       - 'proofs/**'
       # The corpus wall drives the REAL frontend (parse→check→lower→optimize→
@@ -64,6 +67,11 @@ on:
 concurrency:
   group: trust-spine-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
 
 env:
   # Bump this suffix to force a clean rebuild of the opam (Rocq) cache.
@@ -217,3 +225,40 @@ jobs:
         with:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}
+
+      # ── #571: the qualification dossier, on release tags only ──────────
+      # The spine just verified THIS tree, so the receipt inside the dossier
+      # folds the verdicts via the fingerprint rail (no re-derivation). The
+      # dossier is the trust-layer receipts REFORMATTED — assembled from the
+      # standing artifacts, attested with Sigstore (verify externally:
+      # `gh attestation verify almide-dossier-<tag>.md -R almide/almide`),
+      # and attached to the release (retrying while release.yml creates it).
+      - name: Assemble the qualification dossier
+        if: success() && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          bash scripts/gen-dossier.sh "$TAG" > "almide-dossier-${TAG}.md"
+          tail -5 "almide-dossier-${TAG}.md"
+
+      - name: Attest the dossier (Sigstore)
+        if: success() && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: almide-dossier-*.md
+
+      - name: Attach the dossier to the release
+        if: success() && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          for i in $(seq 1 20); do
+            if gh release upload "$TAG" "almide-dossier-${TAG}.md" --clobber; then
+              echo "dossier attached"
+              exit 0
+            fi
+            echo "release not ready yet ($i/20) — waiting"
+            sleep 30
+          done
+          echo "::error::release $TAG never appeared — dossier not attached"
+          exit 1
