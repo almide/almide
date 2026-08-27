@@ -12,7 +12,7 @@ almide-base = { path = "../almide-base" }
 almide-types = { path = "../almide-types" }
 almide-layout = { path = "../almide-layout" }
 wasm-encoder = { version = "0.256", features = ["wasmparser"] }
-wasmparser = "0.256"
+wasmparser = "0.257"
 
 [dev-dependencies]
 almide-corpus = { path = "../almide-corpus" }
@@ -20,7 +20,7 @@ anyhow = "1"
 almide-spine = { path = "../almide-spine" }
 almide-wasm-run = { path = "../almide-wasm-run" }
 almide = { path = "../.." }
-wasmparser = "0.256"
+wasmparser = "0.257"
 wasmtime = "47"
 sha2 = "0.10"
 

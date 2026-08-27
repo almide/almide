@@ -60,7 +60,7 @@ dependencies = [
  "tempfile",
  "toml 1.1.4+spec-1.1.0",
  "wasi-preview1-component-adapter-provider",
- "wasmparser 0.256.0",
+ "wasmparser 0.257.1",
  "wat",
  "wit-component 0.256.0",
 ]
@@ -86,7 +86,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 1.1.4+spec-1.1.0",
- "wasmparser 0.256.0",
+ "wasmparser 0.257.1",
 ]
 
 [[package]]
@@ -253,7 +253,7 @@ dependencies = [
  "anyhow",
  "sha2",
  "wasm-encoder 0.256.0",
- "wasmparser 0.256.0",
+ "wasmparser 0.257.1",
  "wasmtime",
 ]
 
@@ -264,7 +264,7 @@ dependencies = [
  "almide-wasm",
  "anyhow",
  "wasm-encoder 0.256.0",
- "wasmparser 0.256.0",
+ "wasmparser 0.257.1",
  "wasmtime",
  "wit-component 0.256.0",
  "wit-parser 0.256.0",
@@ -2336,7 +2336,6 @@ dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
  "semver",
- "serde",
 ]
 
 [[package]]
@@ -2346,8 +2345,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d92fc335fb6d48f46bda1d8b26b69e28320c15ac3272208333833d6e217e2b4a"
 dependencies = [
  "bitflags 2.11.1",
+ "hashbrown 0.17.1",
  "indexmap",
  "semver",
+ "serde",
 ]
 
 [[package]]
