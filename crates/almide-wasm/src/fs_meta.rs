@@ -24,6 +24,7 @@ pub(crate) const OP_TEMP_DIR: i32 = 28;
 pub(crate) const OP_ARGS: i32 = 29;
 pub(crate) const OP_STDOUT_RAW: i32 = 30;
 pub(crate) const OP_STDIN_READ: i32 = 31;
+pub(crate) const OP_STDIN_TAKE: i32 = 35;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;
 pub(crate) const OP_WALL_NOW: i32 = 34;
@@ -112,6 +113,18 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.i32_const(op);
         i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+        i.call(F_FS_CALL);
+        Ok(())
+    }
+
+    /// Incremental stdin (op 35): up to `count` bytes off the stream's
+    /// cursor. The count rides in the a_len SLOT with a null a_ptr — a
+    /// scalar, never a guest buffer (the op-31 comment's 4 GiB trap) —
+    /// and the host special-cases the op before its buffer reads.
+    pub(crate) fn fs_call_stdin_take(&mut self, count: i32) -> Result<(), EmitError> {
+        let mut i = self.f.instructions();
+        i.i32_const(OP_STDIN_TAKE);
+        i.i32_const(0).i32_const(count).i32_const(0).i32_const(0);
         i.call(F_FS_CALL);
         Ok(())
     }

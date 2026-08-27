@@ -9,7 +9,7 @@ use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
 use crate::fs_meta::{
-    OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_STDIN_READ, OP_STDOUT_RAW, OP_TEMP_DIR,
+    OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_STDIN_TAKE, OP_STDOUT_RAW, OP_STDIN_READ, OP_TEMP_DIR,
 };
 use crate::*;
 
@@ -105,6 +105,86 @@ impl Emitter<'_> {
                 self.fs_take_text()?;
                 Some(STR)
             }
+            // One byte off the stdin CURSOR (op 35): parked len 0 = EOF
+            // -> -1, else the byte zero-extended — the native intrinsic's
+            // exact contract, and the read composes with read_line /
+            // read_n_bytes on the same cursor.
+            ("io", "read_byte", []) => {
+                self.fs_call_stdin_take(1)?;
+                let hret = self.hold_i64()?;
+                let hb = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hret);
+                i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i64_eqz();
+                i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+                i.i64_const(-1);
+                i.else_();
+                i.i32_const(1).call(F_ALLOC).local_set(hb);
+                i.local_get(hb)
+                    .i32_const(almide_layout::PAYLOAD as i32)
+                    .i32_add()
+                    .call(F_HOST_READ);
+                i.local_get(hb).i64_load8_u(crate::bytes::byte_k(0));
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i64();
+                Some(INT)
+            }
+            // Byte-at-a-time off the stdin cursor until '\n' (excluded)
+            // or EOF, trailing '\r' stripped — native
+            // read_line().trim_end_matches and the incumbent leg's fd-0
+            // cadence, on the SAME 4096 line cap as its scratch. RAW
+            // String like read_all (the frontend absorbs the `!` on this
+            // @intrinsic effect call; the read itself cannot fail).
+            ("io", "read_line", []) => {
+                let hbuf = self.hold_i32()?;
+                let hn = self.hold_i32()?;
+                let hret = self.hold_i64()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.i32_const(4096).call(F_ALLOC).local_set(hbuf);
+                    i.i32_const(0).local_set(hn);
+                    i.block(BlockType::Empty).loop_(BlockType::Empty);
+                    i.local_get(hn).i32_const(4096).i32_ge_u().br_if(1);
+                }
+                self.fs_call_stdin_take(1)?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hret);
+                    // EOF -> done with what we have.
+                    i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i64_eqz().br_if(1);
+                    // park byte -> buf[n].
+                    i.local_get(hbuf)
+                        .i32_const(almide_layout::PAYLOAD as i32)
+                        .i32_add()
+                        .local_get(hn)
+                        .i32_add()
+                        .call(F_HOST_READ);
+                    // newline -> done (NOT counted).
+                    i.local_get(hbuf).local_get(hn).i32_add();
+                    i.i64_load8_u(crate::bytes::byte_k(0));
+                    i.i64_const(10).i64_eq().br_if(1);
+                    i.local_get(hn).i32_const(1).i32_add().local_set(hn);
+                    i.br(0).end().end();
+                    // strip one trailing '\r' (CRLF endings).
+                    i.local_get(hn).i32_const(0).i32_gt_u().if_(BlockType::Empty);
+                    i.local_get(hbuf).local_get(hn).i32_add().i32_const(1).i32_sub();
+                    i.i64_load8_u(crate::bytes::byte_k(0)).i64_const(13).i64_eq();
+                    i.if_(BlockType::Empty);
+                    i.local_get(hn).i32_const(1).i32_sub().local_set(hn);
+                    i.end();
+                    i.end();
+                    // the block was allocated len=4096; the LINE's length
+                    // is what the string observes.
+                    i.local_get(hbuf).local_get(hn).i32_store(len_memarg());
+                    i.local_get(hbuf);
+                }
+                self.release_i64();
+                self.release_i32();
+                self.release_i32();
+                Some(STR)
+            }
             ("io", "write", [b]) => {
                 self.lower(b, Some(SliceTy::Scalar(Scalar::Bytes)))?;
                 self.io_stdout_raw()?;
@@ -175,14 +255,22 @@ impl Emitter<'_> {
                 i.if_(BlockType::Result(wasm_encoder::ValType::I32));
                 i.i32_const(0).call(F_ALLOC);
                 i.else_();
-                // n does NOT cross the boundary: a len slot makes the
-                // host read guest memory (i64::MAX once pulled 4 GiB out
-                // of a 17-page instance) and even a 0-len read validates
-                // the pointer. The harness has no stdin, so the host
-                // answers the WHOLE stream and the count cap would be
-                // applied guest-side when a real host arrives.
-                i.i32_const(OP_STDIN_READ);
-                i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+                // The count rides the a_len SLOT of op 35 (never a guest
+                // buffer — a len slot makes the host read guest memory;
+                // i64::MAX once pulled 4 GiB out of a 17-page instance).
+                // The host serves UP TO n bytes off the stdin CURSOR, so
+                // sequential reads compose with read_byte/read_line
+                // exactly as native's shared stdin handle does.
+                i.i32_const(OP_STDIN_TAKE);
+                i.i32_const(0);
+                i.local_get(hn).i64_const(0x7FFF_FFFF).i64_lt_s();
+                i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+                i.local_get(hn);
+                i.else_();
+                i.i64_const(0x7FFF_FFFF);
+                i.end();
+                i.i32_wrap_i64();
+                i.i32_const(0).i32_const(0);
                 i.call(F_FS_CALL);
                 let _ = i;
                 // decode: n bytes → n i64 slots (never errs)

@@ -402,11 +402,11 @@ fn shim_exit() -> Function {
     f
 }
 
-/// The almide `fs_call` contract over WASI: ops 30/31/32/34 supported,
+/// The almide `fs_call` contract over WASI: ops 30/31/32/34/35 supported,
 /// everything else takes the defined refusal (stderr + exit 1).
 fn shim_fs_call(park: u64, g_plen: u32, g_pcap: u32) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=total 6=nread
-    let (op, b_ptr, b_len, total, nread) = (0u32, 3u32, 4u32, 5u32, 6u32);
+    let (op, a_len, b_ptr, b_len, total, nread) = (0u32, 2u32, 3u32, 4u32, 5u32, 6u32);
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
 
@@ -420,6 +420,40 @@ fn shim_fs_call(park: u64, g_plen: u32, g_pcap: u32) -> Function {
     i.i32_const((park + NREAD) as i32);
     i.call(0).drop();
     i.i64_const(0).return_();
+    i.end();
+
+    // op 35: incremental stdin — ONE fd_read of up to min(a_len, 4096)
+    // bytes into the park data region (the count rides in a_len, op 32's
+    // b_len convention). Short reads are the contract ("up to n"): the
+    // guest's read_line/read_byte loops ask byte-at-a-time, so one
+    // fd_read per call is exactly the incumbent leg's cadence. An errno
+    // or EOF answers 0 bytes.
+    i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
+    i.i32_const(park as i32).i32_const((park + DATA) as i32).i32_store(mem(IOV));
+    // len = clamp(a_len, 0..=4096) — unsigned min folds a negative count
+    // into the 4096 arm, and 4096 stays inside the fixed park span.
+    i.local_get(a_len).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    i.i32_const(0).local_set(a_len);
+    i.end();
+    i.local_get(a_len).i32_const(4096).i32_lt_u().if_(BlockType::Result(ValType::I32));
+    i.local_get(a_len);
+    i.else_();
+    i.i32_const(4096);
+    i.end();
+    i.local_set(nread);
+    i.i32_const(park as i32).local_get(nread).i32_store(mem(IOV + 4));
+    i.i32_const(0);
+    i.i32_const((park + IOV) as i32);
+    i.i32_const(1);
+    i.i32_const((park + NREAD) as i32);
+    i.call(4); // fd_read
+    i.if_(BlockType::Empty); // errno != 0 → 0 bytes
+    i.i32_const(0).global_set(g_plen);
+    i.i64_const(0).return_();
+    i.end();
+    i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(nread);
+    i.local_get(nread).global_set(g_plen);
+    i.local_get(nread).i64_extend_i32_u().return_();
     i.end();
 
     // op 31: stdin read-to-end into the park data region (grown on demand).
