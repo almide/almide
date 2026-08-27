@@ -105,8 +105,11 @@ MISRA C / Ada Ravenscar / SPARK subset の analog。`almide check --profile crit
 出発で `--allow IO|Net|Env|Time|Rand|Process` が grant。スコープはエントリ
 プログラム (stdlib はプロファイルの下の trusted runtime)。subset 性は
 `tests/critical_profile_test.rs` が全負例で通常モード PASS を突き合わせて
-CI 強制。残: `fan.*` の admissibility (#1628 stage 2 のコスト境界待ち)、
-静的メモリモード (#568)、RC drop カスケード上限。
+CI 強制。静的メモリ規律 (#568) も着地: 参照アプリが critical-clean +
+カーネル emit 無割当 + `--heap-cap` 固定予算で完走(予算超過は決定的
+OOM abort)、分割ホスト要件は docs/project/PARTITIONED-RUNTIME.md。
+残: `fan.*` の admissibility (#1628 stage 2 のコスト境界待ち)、
+RC drop カスケード上限。
 
 ### CG-4: Translation validation (L)
 
