@@ -73,6 +73,32 @@ regex.captures("b+", "aabbb!")               // => some(["bbb"])
 regex.captures("(z)", "abc")                 // => none
 ```
 
+Executable form of the rows above — gated by `scripts/check-doc-fences.sh`
+(this is the function whose documented behavior once drifted from the
+implementation, #1432; the pin below cannot):
+
+```almd run
+import regex
+
+fn show(o: Option[List[String]]) -> String = match o {
+  some(xs) => "[" + (xs |> list.join(",")) + "]",
+  none => "none",
+}
+
+effect fn main() -> Unit = {
+  println(show(regex.captures("(\\w+)@(\\w+)", "user@host")))
+  println(show(regex.captures("(x)?(y)", "y")))
+  println(show(regex.captures("b+", "aabbb!")))
+  println(show(regex.captures("(z)", "abc")))
+}
+```
+```output
+[user@host,user,host]
+[y,,y]
+[bbb]
+none
+```
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
 ## Signature index (8 functions)

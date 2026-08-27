@@ -394,6 +394,21 @@ Remove consecutive duplicates.
 list.dedup([1, 1, 2, 2, 1]) // => [1, 2, 1]
 ```
 
+Executable pin of the ADJACENT-duplicates rule (dedup is not distinct —
+the trailing `1` survives), gated by `scripts/check-doc-fences.sh`:
+
+```almd run
+fn main() -> Unit = {
+  let xs = list.dedup([1, 1, 2, 2, 1])
+  println(xs |> list.map((x) => int.to_string(x)) |> list.join(","))
+  println(int.to_string(list.len(xs)))
+}
+```
+```output
+1,2,1
+3
+```
+
 ### `list.zip_with(xs: List[A], ys: List[B], f: Fn[A, B] -> C) -> List[C]`
 
 Combine two lists element-wise using a function.

@@ -1021,6 +1021,9 @@ jobs:
       - name: fmt gate (spec/ + examples/ stay formatted, #919; gauntlet reject cells excluded by the manifest)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-fmt-gate.sh
 
+      - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-doc-fences.sh
+
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
 
