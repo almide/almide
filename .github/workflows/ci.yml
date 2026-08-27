@@ -1140,9 +1140,25 @@ jobs:
       # gate reads. It resolves `ALMIDE`, not the `ALMIDE_BIN` the rest of the
       # job passes, and `checks` never builds — it downloads the artifact — so
       # the default `target/release/almide` probe finds nothing.
+      # The grammar gate's Earley pass over the ~1,500-file corpus was this
+      # job's longest step (~5 min of ~6.5). Accepted verdicts are memoized
+      # under a key of (grammar, lark version, gate script); the memo is
+      # restored by prefix so a run inherits the newest memo for the same
+      # grammar and re-parses only files whose bytes moved. Any change to the
+      # key parses everything again — the memo is a memo of a pure function,
+      # never a relaxation. Caches are branch-scoped: a PR reads develop's
+      # memo, develop never reads a PR's.
+      - name: Grammar-gate corpus memo
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/lark-gate-memo.json
+          key: lark-gate-memo-${{ hashFiles('docs/grammar/almide.lark', 'scripts/lib/lark-gate.py') }}-${{ github.run_id }}
+          restore-keys: lark-gate-memo-${{ hashFiles('docs/grammar/almide.lark', 'scripts/lib/lark-gate.py') }}-
+
       - name: Grammar stays in sync with the parser (#1365)
         env:
           ALMIDE: /tmp/almide-bin/almide
+          LARK_GATE_CACHE: ${{ runner.temp }}/lark-gate-memo.json
         run: |
           python3 -m pip install --quiet lark
           bash scripts/check-lark-grammar.sh
