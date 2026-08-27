@@ -127,6 +127,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # clippy rides this job's compile cache for its ratchet (#1462).
+          components: clippy
 
       - uses: actions/cache@v6
         with:
@@ -145,6 +147,13 @@ jobs:
       # compilation the artifact came from (#1379 / #1228).
       - name: Rustc warning ratchet (a noisy build hides the one warning that matters)
         run: bash scripts/check-rustc-warnings.sh
+
+      # The clippy tier of the same discipline (#1462): a shrink-only
+      # baseline over `cargo clippy --workspace --all-targets`. Lives in
+      # `build` for the same reason the rustc ratchet does — it compiles,
+      # and the release build above primes the dependency cache.
+      - name: Clippy warning ratchet (#1462 — the lint tier rustc does not see)
+        run: bash scripts/check-clippy-warnings.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -1018,7 +1027,7 @@ jobs:
           $ALMIDE "$f" --emit-ast > /dev/null
           echo "AST emit OK"
 
-      - name: fmt gate (spec/ + examples/ stay formatted, #919; gauntlet reject cells excluded by the manifest)
+      - name: fmt gate (spec/ + examples/ + stdlib/ stay formatted, #919/#1462; gauntlet reject cells excluded by the manifest; stdlib under --no-import-edit)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-fmt-gate.sh
 
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
