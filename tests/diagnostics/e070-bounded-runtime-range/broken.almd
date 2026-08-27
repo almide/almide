@@ -1,0 +1,9 @@
+// ALS-B3: a range whose end is a run-time value has no static trip count.
+@bounded
+fn sum_to(n: Int) -> Int = {
+  var acc = 0
+  for i in 0..<n { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${sum_to(4)}")

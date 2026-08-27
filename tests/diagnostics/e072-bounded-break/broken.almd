@@ -1,0 +1,12 @@
+// ALS-B5: break weakens the exact trip count to at-most — not admissible.
+@bounded
+fn first_cube_over(limit: Int) -> Int = {
+  var found = 0
+  for i in 0..<100 {
+    if i * i * i > limit then break
+    found = i
+  }
+  found
+}
+
+fn main() -> Unit = println("${first_cube_over(100)}")

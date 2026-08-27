@@ -1,0 +1,8 @@
+// ALS-B7: creating a closure makes an indirect callee the profile cannot follow.
+@bounded
+fn plus_one(x: Int) -> Int = {
+  let f = (y: Int) => y + 1
+  f(x)
+}
+
+fn main() -> Unit = println("${plus_one(4)}")

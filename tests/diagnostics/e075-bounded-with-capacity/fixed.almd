@@ -1,0 +1,8 @@
+// ALS-B8: a compile-time capacity is admissible.
+@bounded
+fn buffer() -> Int = {
+  let xs: List[Int] = list.with_capacity(8)
+  list.len(xs)
+}
+
+fn main() -> Unit = println("${buffer()}")

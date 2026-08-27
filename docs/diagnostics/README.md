@@ -40,6 +40,15 @@ Use `almide explain <code>` to read these from the CLI.
 | [E047](E047.md) | Invalid escape in a string literal — an undefined escape, or `\u{…}` outside the Unicode scalar range |
 | [E048](E048.md) | Variant pattern the subject's type does not have — wrong family (`ok`/`err` on an Option), a builtin carrier over a user variant, or a foreign user case |
 | [E049](E049.md) | `let ... in <expr>` is OCaml/Haskell syntax — bindings chain by newline (machine-applicable fix-it + `almide fix`) |
+| [E070](E070.md) | `@bounded`: counted loops only (ALS-B3) |
+| [E071](E071.md) | `@bounded`: no allocation inside a counted loop (ALS-B4) |
+| [E072](E072.md) | `@bounded`: no `break`/`continue` (ALS-B5) |
+| [E073](E073.md) | `@bounded`: no recursion — the call graph is a DAG (ALS-B6) |
+| [E074](E074.md) | `@bounded`: callees are `@bounded` or first-order pure stdlib (ALS-B7) |
+| [E075](E075.md) | `@bounded`: no run-time-length heap construction (ALS-B8) |
+| [E076](E076.md) | `@bounded`: effects bounded to standard output (ALS-B9) |
+| [E077](E077.md) | `@bounded`: no Float arithmetic, provisional (ALS-B10) |
+| [E078](E078.md) | `@bounded`: no early exit inside a counted loop (ALS-B11) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

@@ -1,0 +1,9 @@
+// ALS-B3: `while` has no static trip count — not admissible in a @bounded function.
+@bounded
+fn count_down(n: Int) -> Int = {
+  var k = n
+  while k > 0 { k = k - 1 }
+  k
+}
+
+fn main() -> Unit = println("${count_down(3)}")

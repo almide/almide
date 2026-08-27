@@ -1,0 +1,5 @@
+// ALS-B8: a constant-size construction is admissible.
+@bounded
+fn pad3() -> String = string.repeat("x", 3)
+
+fn main() -> Unit = println(pad3())

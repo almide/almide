@@ -1,0 +1,11 @@
+// ALS-B5: run the whole counted range and carry the answer in a value.
+@bounded
+fn last_cube_under(limit: Int) -> Int = {
+  var found = 0
+  for i in 0..<100 {
+    if i * i * i <= limit then found = i
+  }
+  found
+}
+
+fn main() -> Unit = println("${last_cube_under(100)}")

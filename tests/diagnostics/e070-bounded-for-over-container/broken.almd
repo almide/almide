@@ -1,0 +1,9 @@
+// ALS-B3: iterating a container has a run-time trip count — not admissible.
+@bounded
+fn total(xs: List[Int]) -> Int = {
+  var acc = 0
+  for x in xs { acc = acc + x }
+  acc
+}
+
+fn main() -> Unit = println("${total([1, 2, 3])}")

@@ -1,0 +1,12 @@
+// ALS-B5: continue skips an iteration's tail — not a single-exit loop.
+@bounded
+fn sum_odds() -> Int = {
+  var acc = 0
+  for i in 0..<10 {
+    if i % 2 == 0 then continue
+    acc = acc + i
+  }
+  acc
+}
+
+fn main() -> Unit = println("${sum_odds()}")

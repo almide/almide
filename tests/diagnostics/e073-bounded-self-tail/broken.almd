@@ -1,0 +1,5 @@
+// ALS-B6: a tail self-call is still recursion — the graph has a self edge.
+@bounded
+fn drain(n: Int, acc: Int) -> Int = if n == 0 then acc else drain(n - 1, acc + n)
+
+fn main() -> Unit = println("${drain(5, 0)}")

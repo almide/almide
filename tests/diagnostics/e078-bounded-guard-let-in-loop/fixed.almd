@@ -1,0 +1,11 @@
+// ALS-B11: `??` defaults without exiting the iteration.
+@bounded
+fn first_three_sum(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<3 {
+    acc = acc + (list.get(xs, i) ?? 0)
+  }
+  acc
+}
+
+fn main() -> Unit = println("${first_three_sum([4, 5, 6])}")

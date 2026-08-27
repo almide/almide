@@ -1,0 +1,5 @@
+// ALS-B9: fan.* scheduling is outside the profile's capability.
+@bounded
+fn pick() -> Int = fan.bounded(compute.ms(1)) { 40 + 2 } ?? -1
+
+fn main() -> Unit = println("${pick()}")

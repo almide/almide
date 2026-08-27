@@ -1,0 +1,5 @@
+// ALS-B7: a higher-order call passes a function value — an indirect callee — not admissible.
+@bounded
+fn doubled(xs: List[Int]) -> List[Int] = list.map(xs, (x) => x * 2)
+
+fn main() -> Unit = println("${list.len(doubled([1, 2, 3]))}")

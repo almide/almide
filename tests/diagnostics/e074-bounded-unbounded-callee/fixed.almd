@@ -1,0 +1,8 @@
+// ALS-B7: the callee joins the profile.
+@bounded
+fn helper(x: Int) -> Int = x + 1
+
+@bounded
+fn uses_bounded(x: Int) -> Int = helper(x)
+
+fn main() -> Unit = println("${uses_bounded(1)}")

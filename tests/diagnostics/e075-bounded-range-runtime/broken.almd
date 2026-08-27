@@ -1,0 +1,5 @@
+// ALS-B8: list.range with a run-time end constructs a run-time-length list.
+@bounded
+fn upto(n: Int) -> Int = list.len(list.range(0, n))
+
+fn main() -> Unit = println("${upto(3)}")

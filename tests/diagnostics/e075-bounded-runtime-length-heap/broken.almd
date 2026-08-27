@@ -1,0 +1,5 @@
+// ALS-B8: a string whose length is a run-time value — not admissible.
+@bounded
+fn pad(n: Int) -> String = string.repeat("x", n)
+
+fn main() -> Unit = println(pad(3))
