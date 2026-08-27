@@ -163,7 +163,21 @@ pub struct Interpreter<'a> {
     /// The global scope holding evaluated top-level lets. Every top-level fn
     /// call and `FnRef` closure parents off this so globals are visible from
     /// nested calls (not just from `main`'s body). Seeded once, lazily.
+    /// SPACE 0 of the spaced-global model (#1602) — the program root's frame.
     pub(crate) globals: env::Scope,
+    /// Per-MODULE global frames (#1602): space i+1 = `program.modules[i]`.
+    /// Separately-lowered modules each restart `VarId`s at 0, so one shared
+    /// `VarId`-keyed frame let module A's global overwrite module B's (the
+    /// last-wins `by_var` collision). Each module's top-lets now live in its
+    /// own frame, and a lowered fn's hop frame parents off ITS module's
+    /// frame (`space_scope`), so a body's `VarId`s only ever resolve against
+    /// the table they index. Cross-space reads are pre-bound by alias at
+    /// init (see `ensure_globals`); a MUTABLE cross-space alias abstains.
+    pub(crate) module_globals: Vec<env::Scope>,
+    /// `&IrFunction` address → the space whose `VarId`s its body indexes
+    /// (0 = root, i+1 = `modules[i]`). Pool fns are absent (their bodies are
+    /// self-contained — the pool has no top-lets) and default to space 0.
+    pub(crate) fn_space: HashMap<usize, u32>,
     pub(crate) globals_ready: Cell<bool>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -370,9 +384,14 @@ impl<'a> Interpreter<'a> {
             }
         }
         let mut module_fns = HashMap::new();
-        for m in &program.modules {
+        let mut fn_space: HashMap<usize, u32> = HashMap::new();
+        for f in &program.functions {
+            fn_space.insert(f as *const IrFunction as usize, 0);
+        }
+        for (i, m) in program.modules.iter().enumerate() {
             for f in &m.functions {
                 module_fns.insert((m.name, f.name), f);
+                fn_space.insert(f as *const IrFunction as usize, i as u32 + 1);
             }
         }
         // A module's `__`-prefixed PRIVATE helpers also join the flat table:
@@ -436,6 +455,8 @@ impl<'a> Interpreter<'a> {
             named_records,
             variant_ctors,
             globals: env::Scope::root(),
+            module_globals: program.modules.iter().map(|_| env::Scope::root()).collect(),
+            fn_space,
             globals_ready: Cell::new(false),
             stdout: String::new(),
             stderr: String::new(),
@@ -692,67 +713,123 @@ impl<'a> Interpreter<'a> {
         // Mark ready up front so a top-let that calls a fn (which itself wants
         // globals) does not recurse into re-seeding.
         self.globals_ready.set(true);
-        let globals = self.globals.clone();
         // DEPENDENCY-ORDERED init (#632, C-007): a top-let whose initializer reads a
         // LATER-declared global (directly or through a fn it calls — `BANNER =
         // make_banner()` reading `APP_NAME`) must see it already bound. Both backends
-        // interprocedurally topo-sort the declaration order (`dependency_init_order`);
-        // evaluating in bare declaration order here left the forward-referenced global
-        // unbound (`unbound variable APP_NAME`) — a WRONG third vote vs the native==wasm
-        // consensus. Reuse the SAME ordering utility so the interp matches by construction.
+        // interprocedurally topo-sort the declaration order; evaluating in bare
+        // declaration order here left the forward-referenced global unbound — a WRONG
+        // third vote vs the native==wasm consensus. Reuse the SAME ordering utility so
+        // the interp matches by construction.
+        //
+        // SPACED identities throughout (#1602): every top-let is a `GVar =
+        // (space, VarId)` — separately-lowered modules each restart `VarId`s
+        // at 0, so a bare-`VarId` index here silently collided (last module
+        // wins). Each decl evaluates in ITS OWN space's frame, and every
+        // module-origin alias of it is bound into the alias's space
+        // IMMEDIATELY after — a topo-later initializer in another space reads
+        // through its own alias `VarId`, so the bind cannot wait.
         use almide_ir::top_let_storage::{
-            build_global_tables, dependency_init_order, top_let_inputs,
+            build_global_tables_spaced, dependency_init_order_spaced, GVar,
         };
-        let mut inputs = Vec::new();
+        let (_globals_info, alias, _offenders) = build_global_tables_spaced(self.program);
+        // Increment-1 boundary: a MUTABLE global aliased across spaces cannot
+        // be modeled by per-space value binds (an assignment through one
+        // alias would not propagate to the others) — abstain by name rather
+        // than vote wrong. Immutable aliases are sound: the bound Value is a
+        // snapshot of a binding that can never change.
+        let mut mutable_decls: std::collections::HashSet<GVar> =
+            std::collections::HashSet::new();
         for tl in &self.program.top_lets {
-            inputs.push(top_let_inputs(tl));
-        }
-        for m in &self.program.modules {
-            for tl in &m.top_lets {
-                inputs.push(top_let_inputs(tl));
+            if tl.mutable {
+                mutable_decls.insert((0, tl.var));
             }
         }
-        let (_globals_info, alias, _offenders) =
-            build_global_tables(&inputs, &self.program.var_table);
-        let order = dependency_init_order(self.program, &alias);
-        // Index every top-let (root + modules) by its VarId so the sorted order can
-        // fetch its initializer. A VarId in `order` but absent here (unreachable) is
-        // skipped; a top-let absent from `order` (defensive) falls back to decl order.
-        let mut by_var: std::collections::HashMap<almide_ir::VarId, &almide_ir::IrExpr> =
+        for (i, m) in self.program.modules.iter().enumerate() {
+            for tl in &m.top_lets {
+                if tl.mutable {
+                    mutable_decls.insert((i as u32 + 1, tl.var));
+                }
+            }
+        }
+        let mut aliases_of: std::collections::HashMap<GVar, Vec<GVar>> =
+            std::collections::HashMap::new();
+        for (&site, &decl) in &alias {
+            if site.0 != decl.0 && mutable_decls.contains(&decl) {
+                return Err(Flow::Unsupported(format!(
+                    "cross-space alias of mutable global `{}`",
+                    almide_ir::top_let_storage::spaced_var(self.program, decl)
+                        .name
+                        .as_str()
+                )));
+            }
+            aliases_of.entry(decl).or_default().push(site);
+        }
+        let order = dependency_init_order_spaced(self.program, &alias);
+        // Index every top-let by its GVar so the sorted order can fetch its
+        // initializer. A GVar in `order` but absent here (unreachable) is
+        // skipped; a top-let absent from `order` (defensive) falls back to
+        // decl order.
+        let mut by_var: std::collections::HashMap<GVar, &almide_ir::IrExpr> =
             std::collections::HashMap::new();
         for tl in &self.program.top_lets {
-            by_var.insert(tl.var, &tl.value);
+            by_var.insert((0, tl.var), &tl.value);
         }
-        for m in &self.program.modules {
+        for (i, m) in self.program.modules.iter().enumerate() {
             for tl in &m.top_lets {
-                by_var.insert(tl.var, &tl.value);
+                by_var.insert((i as u32 + 1, tl.var), &tl.value);
             }
         }
-        let mut seen: std::collections::HashSet<almide_ir::VarId> =
-            std::collections::HashSet::new();
-        let ordered: Vec<(almide_ir::VarId, &almide_ir::IrExpr)> = order
+        let mut seen: std::collections::HashSet<GVar> = std::collections::HashSet::new();
+        let ordered: Vec<(GVar, &almide_ir::IrExpr)> = order
             .iter()
-            .filter_map(|v| by_var.get(v).map(|e| (*v, *e)))
+            .filter_map(|g| by_var.get(g).map(|e| (*g, *e)))
             .chain(
                 // Any top-let the sort omitted (a self-referential cycle the topo-sort
                 // dropped) is appended in declaration order — never silently unbound.
                 self.program
                     .top_lets
                     .iter()
-                    .map(|tl| (tl.var, &tl.value))
-                    .chain(self.program.modules.iter().flat_map(|m| {
-                        m.top_lets.iter().map(|tl| (tl.var, &tl.value))
+                    .map(|tl| ((0, tl.var), &tl.value))
+                    .chain(self.program.modules.iter().enumerate().flat_map(|(i, m)| {
+                        m.top_lets.iter().map(move |tl| ((i as u32 + 1, tl.var), &tl.value))
                     })),
             )
-            .filter(|(v, _)| seen.insert(*v))
+            .filter(|(g, _)| seen.insert(*g))
             .collect();
-        for (var, value) in ordered {
-            match self.eval_expr(value, &globals) {
-                Flow::Value(v) => globals.bind(var, v),
+        for ((space, var), value) in ordered {
+            let frame = self.space_scope(space).clone();
+            match self.eval_expr(value, &frame) {
+                Flow::Value(v) => {
+                    if let Some(sites) = aliases_of.get(&(space, var)) {
+                        for &(s, sv) in sites {
+                            self.space_scope(s).bind(sv, v.clone());
+                        }
+                    }
+                    frame.bind(var, v);
+                }
                 other => return Err(other),
             }
         }
         Ok(())
+    }
+
+    /// The globals frame whose bindings a `VarId` in `space` resolves against
+    /// (#1602): 0 = the program root (`self.globals`), i+1 = `modules[i]`.
+    pub(crate) fn space_scope(&self, space: u32) -> &env::Scope {
+        if space == 0 {
+            &self.globals
+        } else {
+            &self.module_globals[(space - 1) as usize]
+        }
+    }
+
+    /// The space whose `VarTable` `f`'s body indexes. Pool fns (self-contained,
+    /// no top-lets) are absent from the map and resolve to the root frame.
+    pub(crate) fn fn_space_of(&self, f: &IrFunction) -> u32 {
+        self.fn_space
+            .get(&(f as *const IrFunction as usize))
+            .copied()
+            .unwrap_or(0)
     }
 
     fn outcome_from_flow(&self, flow: Flow) -> RunOutcome {
@@ -908,7 +985,16 @@ impl<'a> Interpreter<'a> {
                 break 'tramp cut;
             }
 
-            let (frame, fn_body, clo_body) = bind_hop_frame(&callee, &mut args, base);
+            // #1602: a lowered fn's body indexes ITS space's VarTable, so its
+            // frame parents off that space's globals frame — never the
+            // caller's chain, whose same-numbered VarIds may belong to a
+            // different table. Closures keep their captured chain (which was
+            // built under this rule at creation).
+            let fn_base = match &callee {
+                TailCallee::Fn(f) => self.space_scope(self.fn_space_of(f)).clone(),
+                TailCallee::Clo(_) => base.clone(),
+            };
+            let (frame, fn_body, clo_body) = bind_hop_frame(&callee, &mut args, &fn_base);
             if first_frame.is_none() {
                 first_frame = Some(frame.clone());
             }

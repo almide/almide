@@ -1822,9 +1822,11 @@ impl<'a> Interpreter<'a> {
             let clo = Closure {
                 params,
                 body: Rc::new(func.body.clone()),
-                // Top-level fn closes only over top-level lets, modeled by the
-                // root scope.
-                captured: self.root_scope(),
+                // A named fn closes only over top-level lets — the frame of
+                // the SPACE its body's VarIds index (#1602: a module `__`
+                // helper in the flat table captures its module's frame, not
+                // the root's).
+                captured: self.space_scope(self.fn_space_of(func)).clone(),
                 // The fn's DECLARED return type rides along so the closure
                 // boundary can run the same #1226 read-back a direct call
                 // gets (value.as_array as an FnRef leaked raw addresses).
