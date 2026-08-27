@@ -478,6 +478,14 @@ pub(crate) struct LiftedLambda {
     /// The variable space the body's VarIds index (the lifting fn's own
     /// space — a lambda inside a module fn reads module-space globals).
     pub(crate) var_space: u32,
+    /// The module whose bare Named calls the body resolves first. `None`
+    /// for real lambdas (their calls resolved at lift time); `Some` for
+    /// the #1627 synthetic module-initializer entries.
+    pub(crate) cur_module: Option<String>,
+    /// Closure hops charge one meter unit at entry; a #1627 synthetic
+    /// initializer does NOT — its call is a lowering artifact, and native
+    /// charges nothing for reaching a top-let's value.
+    pub(crate) charge_hop: bool,
 }
 
 /// A call_indirect signature at the wasm value-type level.

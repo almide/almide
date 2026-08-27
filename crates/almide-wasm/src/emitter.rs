@@ -714,6 +714,8 @@ impl Emitter<'_> {
                     body: body.clone(),
                     captures: captures.clone(),
                     var_space: self.var_space,
+                    cur_module: None,
+                    charge_hop: true,
                 });
                 let slot = self.work.slot(TableEntry::Lambda(j));
                 if captures.is_empty() {

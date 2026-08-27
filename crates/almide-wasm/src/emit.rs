@@ -186,15 +186,19 @@ fn emit_program_pass(
         for ll in pending {
             let plan = FnPlan {
                 ret: ll.ret,
-                cur_module: None,
+                cur_module: ll.cur_module.clone(),
                 var_space: ll.var_space,
                 effect_raw: ll.effect_raw,
                 in_main: false,
                 env_captures: Some(ll.captures.clone()),
                 // Closure hops always charge (TailCallee::Clo mirror) —
                 // unless the whole meter elided (no regions anywhere).
+                // #1627 synthetic initializers never hop-charge (native
+                // charges nothing for reaching a top-let's value), but
+                // their bodies stay metered like the main prologue whose
+                // inline lowering they replace.
                 metered: !meter.user.is_empty(),
-                charge_entry: !meter.user.is_empty(),
+                charge_entry: !meter.user.is_empty() && ll.charge_hop,
             };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
             display_helper_calls

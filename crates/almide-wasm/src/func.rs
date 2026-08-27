@@ -62,6 +62,42 @@ impl Pool {
     }
 }
 
+/// #1627: does this module-space initializer carry inner binds? Those
+/// binds index the MODULE's VarTable, so the value cannot lower inline in
+/// the calling frame — it needs its own.
+fn initializer_needs_own_frame(il: &crate::InitLet, ctx: &Ctx) -> Result<bool, EmitError> {
+    if il.space == 0 {
+        return Ok(false);
+    }
+    let mut probe: Vec<(VarId, SliceTy)> = Vec::new();
+    let mut probe_seen: HashSet<VarId> = HashSet::new();
+    collect_binds(&il.tl.value, &mut probe, &mut probe_seen, ctx.types)?;
+    Ok(!probe.is_empty())
+}
+
+/// #1627: register the binds-carrying module initializer as a synthetic
+/// zero-param entry on the lifted pipeline — lowered in its own frame
+/// with the module's space and name — and call_indirect it exactly as a
+/// closure would (env 0: nothing to capture; no hop charge: native
+/// charges nothing for reaching a top-let's value).
+fn emit_modinit_call(em: &mut crate::emitter::Emitter<'_>, il: &crate::InitLet, declared: SliceTy) {
+    let j = em.work.register_lambda(crate::LiftedLambda {
+        params: Vec::new(),
+        ret: Some(declared),
+        effect_raw: None,
+        body: il.tl.value.clone(),
+        captures: Vec::new(),
+        var_space: il.space,
+        cur_module: il.module.clone(),
+        charge_hop: false,
+    });
+    let slot = em.work.slot(crate::TableEntry::Lambda(j));
+    let ti = em.work.itype(vec![ValType::I32], Some(declared.val_type()));
+    em.f.instructions().i32_const(0); // env: unused
+    em.f.instructions().i32_const(slot as i32);
+    em.f.instructions().call_indirect(0, ti);
+}
+
 /// Lower one function body (used for `main` and every program function):
 /// params become the leading locals, collected Binds follow, then the
 /// scratch locals (interp cursor, tmp i32, match/unwrap subjects).
@@ -131,19 +167,11 @@ pub(crate) fn lower_fn(
             // inner binds need main locals.
             seen.insert(tl.var);
             collect_binds(&tl.value, &mut binds, &mut seen, ctx.types)?;
-        } else {
-            // A MODULE-space initializer (#1596): its inner binds would
-            // index a different VarTable than main's locals map, so
-            // increment 1 admits only bind-free initializers (literals,
-            // ctor/fn-call values). The rest wall honestly — and the
-            // routing rerroutes the program to the incumbent leg.
-            let mut probe: Vec<(VarId, SliceTy)> = Vec::new();
-            let mut probe_seen: HashSet<VarId> = HashSet::new();
-            collect_binds(&tl.value, &mut probe, &mut probe_seen, ctx.types)?;
-            if !probe.is_empty() {
-                return unsup("modinit:inner-binds");
-            }
         }
+        // A MODULE-space initializer (#1596/#1627) allocates NOTHING in
+        // this frame: bind-free values lower inline against globals only,
+        // and binds-carrying values become synthetic lifted entries whose
+        // own frame holds their locals (the emission loop below).
     }
     collect_binds(body, &mut binds, &mut seen, ctx.types)?;
 
@@ -272,17 +300,25 @@ pub(crate) fn lower_fn(
             let Some(&(gidx, declared)) = ctx.globals.get(&(il.space, tl.var)) else {
                 return unsup(&format!("bind-ty:{}", ty_name(&tl.ty)));
             };
-            // A module initializer lowers in ITS OWN space: its Var reads
-            // index that module's table and its bare Named calls resolve
-            // module-qualified first (#1596).
-            let saved_space = em.var_space;
-            let saved_module = em.cur_module;
-            em.var_space = il.space;
-            em.cur_module = il.module.as_deref();
-            let lowered = em.lower(&tl.value, Some(declared));
-            em.var_space = saved_space;
-            em.cur_module = saved_module;
-            lowered?;
+            // #1627: a MODULE-space initializer whose value carries inner
+            // binds cannot lower inline (its binds index the module's
+            // VarTable, not this frame's locals map) — it becomes a
+            // synthetic entry in its own frame instead.
+            if initializer_needs_own_frame(il, ctx)? {
+                emit_modinit_call(&mut em, il, declared);
+            } else {
+                // A module initializer lowers in ITS OWN space: its Var
+                // reads index that module's table and its bare Named calls
+                // resolve module-qualified first (#1596).
+                let saved_space = em.var_space;
+                let saved_module = em.cur_module;
+                em.var_space = il.space;
+                em.cur_module = il.module.as_deref();
+                let lowered = em.lower(&tl.value, Some(declared));
+                em.var_space = saved_space;
+                em.cur_module = saved_module;
+                lowered?;
+            }
             if matches!(
                 declared,
                 SliceTy::List(_)
