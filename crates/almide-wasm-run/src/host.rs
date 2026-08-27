@@ -61,6 +61,36 @@ impl StdinSource {
             StdinSource::Drained => Vec::new(),
         }
     }
+
+    /// Take UP TO `n` bytes off the stream's cursor (op 35 — the
+    /// incremental sibling of op 31's drain). A fixed buffer serves its
+    /// front; the real stream reads lazily WITHOUT draining, so a
+    /// terminal program keeps native's line-at-a-time interleaving (a
+    /// line-buffered read blocks until Enter, not until EOF). A later
+    /// op-31 drain still answers the remainder.
+    fn take(&mut self, n: usize) -> Vec<u8> {
+        if n == 0 {
+            return Vec::new();
+        }
+        match self {
+            StdinSource::Buf(b) => {
+                let k = n.min(b.len());
+                b.drain(..k).collect()
+            }
+            StdinSource::RealOnce => {
+                use std::io::Read;
+                let mut buf = vec![0u8; n];
+                match std::io::stdin().read(&mut buf) {
+                    Ok(got) => {
+                        buf.truncate(got);
+                        buf
+                    }
+                    Err(_) => Vec::new(),
+                }
+            }
+            StdinSource::Drained => Vec::new(),
+        }
+    }
 }
 
 /// io_err = Display — VERBATIM the native runtime's formatting, so error
@@ -316,6 +346,8 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         }
         // stdin read (up to n = a bytes) — the harness has no stdin.
         31 => (pack(0, 0), Vec::new()),
+        // incremental stdin (op 35) — same empty answer in the harness.
+        35 => (pack(0, 0), Vec::new()),
         // cwd — the same std::env the native runtime reads.
         33 => match std::env::current_dir() {
             Ok(p) => ok_text(p.to_string_lossy().replace('\\', "/")),
@@ -479,6 +511,18 @@ fn run_wasm_src(
          b_ptr: i32,
          b_len: i32|
          -> wasmtime::Result<i64> {
+            // op 35 = incremental stdin (up to a_len bytes off the cursor).
+            // Handled BEFORE the a/b buffer reads: the count rides in
+            // a_len with a null a_ptr, and materializing it as a guest
+            // buffer would read a_len bytes of guest memory (the 4 GiB
+            // trap the op-31 comment in the emitter records).
+            if op == 35 {
+                let n = i64::from(a_len).max(0) as usize;
+                let got = caller.data().stdin.lock().expect("stdin").take(n);
+                let len = got.len();
+                *caller.data().fs_buf.lock().expect("fs buf") = got;
+                return Ok((len as i64) & 0xFFFF_FFFF);
+            }
             let mem = caller
                 .get_export("memory")
                 .and_then(|e| e.into_memory())
