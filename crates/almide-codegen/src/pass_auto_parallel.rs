@@ -24,10 +24,25 @@ fn collect_effect_fn_names(program: &IrProgram) -> std::collections::HashSet<Sym
         }
     }
     for module in &program.modules {
+        let mod_ident = module.versioned_name
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| module.name.to_string())
+            .replace('.', "_");
         for func in &module.functions {
             if func.is_effect {
+                // Module-QUALIFIED plus the mangled runtime symbol
+                // StdlibLowering renames call targets to — never the bare
+                // name, which could only ever collide with a root fn or
+                // another module's fn (#1597's wrong-source family). The
+                // Named-call purity check sees the MANGLED spelling by
+                // this point in the pipeline, so the old bare insert was
+                // checking a name no call site carries.
                 effect_fns.insert(sym(&format!("{}.{}", module.name, func.name)));
-                effect_fns.insert(func.name);
+                effect_fns.insert(sym(&format!(
+                    "almide_rt_{}_{}",
+                    mod_ident,
+                    func.name.as_str().replace('.', "_")
+                )));
             }
         }
     }
@@ -133,8 +148,14 @@ fn is_pure_call(
                 }
             }
         }
-        CallTarget::Module { module, .. } => {
+        CallTarget::Module { module, func, .. } => {
             if matches!(&**module, "fs" | "http" | "env" | "process" | "time") {
+                return false;
+            }
+            // A USER module's effect fn is impure too — the old arm never
+            // consulted effect_fns for Module targets, so only the five
+            // stdlib modules were screened.
+            if effect_fns.contains(&sym(&format!("{}.{}", module, func))) {
                 return false;
             }
         }

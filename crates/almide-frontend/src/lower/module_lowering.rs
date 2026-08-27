@@ -544,10 +544,15 @@ fn lower_fn_value_params(ctx: &mut LowerCtx, name: &str, params: &[ast::Param], 
 // "option.unwrap_or") to avoid picking up a user function with the same
 // bare name.
 fn resolve_fn_ret_ty(ctx: &LowerCtx, name: &str, module_prefix: Option<&str>, body: &ast::Expr) -> Ty {
-    let prefixed = module_prefix.map(|p| format!("{}.{}", p, name));
-    let sig = prefixed.as_ref()
-        .and_then(|pn| ctx.env.functions.get(&sym(pn)))
-        .or_else(|| ctx.env.functions.get(&sym(name)));
+    // Scope-aware (#1597's wrong-source family): `env.functions` keys module
+    // fns PREFIXED and root fns bare, so a MODULE fn whose prefixed lookup
+    // misses must fall to the body's inferred type — the bare key can only
+    // name a ROOT fn, and grabbing it here would type this fn's return from
+    // an unrelated same-named function.
+    let sig = match module_prefix {
+        Some(p) => ctx.env.functions.get(&sym(&format!("{}.{}", p, name))),
+        None => ctx.env.functions.get(&sym(name)),
+    };
     if let Some(sig) = sig {
         sig.ret.clone()
     } else {

@@ -370,11 +370,15 @@ fn build_purity_registry(
     }
     for m in &program.modules {
         for f in &m.functions {
+            // QUALIFIED only (#1597's wrong-source family): the bare insert
+            // let a module fn's BODY shadow a root fn of the same name in
+            // `fns_by_name` — the purity recursion (and any inline decided
+            // from it) then read ANOTHER function's body. A Named call can
+            // only mean a root fn; a Module call looks up its qualified
+            // spelling (the consumer already does).
             let qualified = format!("{}.{}", m.name.as_str(), f.name.as_str());
-            fns_by_name.insert(f.name.as_str().to_string(), f.body.clone());
             fns_by_name.insert(qualified.clone(), f.body.clone());
             if f.is_effect {
-                effect_fns.insert(f.name.as_str().to_string());
                 effect_fns.insert(qualified);
             }
         }
