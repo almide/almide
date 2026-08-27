@@ -166,6 +166,82 @@ pub fn almide_http_url_decode(s: &str) -> String {
 /// surfaced as `read failed: Resource temporarily unavailable (os error 35)`
 /// on any long call (#1561). One env var governs all three clients
 /// (request / request_bytes at 30 s default, the SSE stream at 120 s).
+/// Read a full `Connection: close` HTTP response, tolerating a peer that
+/// closes without TLS close_notify (#1592: Google front-ends — api.osv.dev —
+/// close this way on EVERY request, and rustls surfaces it as
+/// `UnexpectedEof`). The data is read incrementally; a read error after a
+/// SYNTACTICALLY COMPLETE response keeps the data (curl's and every
+/// browser's behavior — the error only concerns bytes after the body), and
+/// a read error before completeness still propagates: a truncated body is
+/// never silently returned.
+fn read_response_tolerant(stream: &mut impl Read) -> Result<Vec<u8>, String> {
+    let mut response = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Err(e) => {
+                if response_is_complete(&response) {
+                    break;
+                }
+                return Err(read_error_msg(&e));
+            }
+        }
+    }
+    Ok(response)
+}
+
+/// Is this response whole by ITS OWN framing? Headers must have ended, and
+/// then: a `Content-Length` body is complete when that many bytes arrived;
+/// a chunked body when its terminal 0-chunk (and closing CRLF) arrived —
+/// judged by the same size-walk the decoder performs, never a substring
+/// probe (a body CONTAINING "0\r\n" must not read as terminated); a body
+/// with neither is EOF-delimited, so the close IS its end.
+fn response_is_complete(resp: &[u8]) -> bool {
+    let Some(idx) = resp.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return false;
+    };
+    let headers = String::from_utf8_lossy(&resp[..idx]).to_lowercase();
+    let body = &resp[idx + 4..];
+    if headers.contains("transfer-encoding: chunked") {
+        return chunked_body_terminated(body);
+    }
+    if let Some(cl) = headers
+        .lines()
+        .find_map(|l| l.strip_prefix("content-length:"))
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        return body.len() >= cl;
+    }
+    true
+}
+
+/// Walk the chunk sizes exactly as `decode_chunked_bytes` does and report
+/// whether the terminal 0-chunk was reached.
+fn chunked_body_terminated(body: &[u8]) -> bool {
+    let mut pos = 0usize;
+    loop {
+        let Some(line_end) = body[pos..].windows(2).position(|w| w == b"\r\n") else {
+            return false;
+        };
+        let size_str = String::from_utf8_lossy(&body[pos..pos + line_end]);
+        let Ok(size) = usize::from_str_radix(size_str.trim(), 16) else {
+            return false;
+        };
+        if size == 0 {
+            return true;
+        }
+        pos += line_end + 2 + size;
+        if pos > body.len() {
+            return false;
+        }
+        if body[pos..].starts_with(b"\r\n") {
+            pos += 2;
+        }
+    }
+}
+
 /// A read error message the caller can ACT on: the timeout case names the
 /// env var (the raw `Resource temporarily unavailable (os error 35)` gave no
 /// path to the fix — #1561); everything else keeps the original detail.
@@ -284,8 +360,7 @@ fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, pat
 
     stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
 
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).map_err(|e| read_error_msg(&e))?;
+    let response = read_response_tolerant(stream)?;
     let text = String::from_utf8_lossy(&response).to_string();
 
     // Split headers and body
@@ -587,8 +662,7 @@ fn http_exchange_bytes(stream: &mut (impl Read + Write), method: &str, host: &st
 
     stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
 
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).map_err(|e| read_error_msg(&e))?;
+    let response = read_response_tolerant(stream)?;
 
     // Split header/body on the raw bytes — never decode the body as UTF-8.
     if let Some(idx) = response.windows(4).position(|w| w == b"\r\n\r\n") {
@@ -700,3 +774,4 @@ fn write_response(stream: &mut TcpStream, resp: &AlmideHttpResponse) -> Result<(
     out.push_str(&resp.body);
     stream.write_all(out.as_bytes()).map_err(|e| e.to_string())
 }
+
