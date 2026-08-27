@@ -10,8 +10,22 @@
 
 /// Front half of `run_file`: parse → check → lower → link, returning the
 /// linked IR (unit 6's emission gate shares this exact pipeline so the
-/// interpreter and the wasm backend judge the SAME IR).
+/// interpreter and the wasm backend judge the SAME IR). The dep-free form —
+/// the spine gates and the corpus judge through here.
 pub fn lower_to_ir(path: &str, source_text: &str) -> Result<crate::ir::IrProgram, String> {
+    lower_to_ir_with_deps(path, source_text, &[])
+}
+
+/// The full-front form: external package dependencies resolve through the
+/// SAME table the incumbent driver uses (`resolve_imports_with_deps`), and
+/// dependency modules lower under their VERSIONED name (`pkg_v0_1_0[...]`)
+/// so two major versions of one package coexist without symbol collision —
+/// the incumbent's `lower_one_user_module` versioning, replicated here.
+pub fn lower_to_ir_with_deps(
+    path: &str,
+    source_text: &str,
+    dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
+) -> Result<crate::ir::IrProgram, String> {
     let tokens = crate::lexer::Lexer::tokenize(source_text);
     let mut parser = crate::parser::Parser::new(tokens).with_file(path);
     let mut program = parser.parse().map_err(|e| format!("parse: {e}"))?;
@@ -19,7 +33,7 @@ pub fn lower_to_ir(path: &str, source_text: &str) -> Result<crate::ir::IrProgram
         return Err(format!("parse errors: {}", parser.errors.len()));
     }
 
-    let mut resolved = crate::resolve::resolve_imports_with_deps(path, &program, &[])
+    let mut resolved = crate::resolve::resolve_imports_with_deps(path, &program, dep_paths)
         .map_err(|e| format!("resolve: {e}"))?;
 
     let canon = crate::canonicalize::canonicalize_program(
@@ -64,11 +78,24 @@ pub fn lower_to_ir(path: &str, source_text: &str) -> Result<crate::ir::IrProgram
             checker.env.self_module_name = Some(crate::intern::sym(&pid.name));
         }
         infer_module_capturing(&mut checker, name, mod_prog, &sources, &mut module_diags);
+        // Dependency modules lower under their VERSIONED name so two major
+        // versions of one package coexist (incumbent's lower_one_user_module
+        // versioning, verbatim). Project-local modules keep their bare name.
+        let versioned = pkg_id.as_ref().map(|pid| {
+            let base = pid.mod_name();
+            match name.strip_prefix(&pid.name) {
+                Some(suffix) => format!("{}{}", base, suffix),
+                None => base,
+            }
+        });
+        if let Some(ref v) = versioned {
+            checker.env.module_versioned_names.insert(crate::intern::sym(name), crate::intern::sym(v));
+        }
         let self_name = checker.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = crate::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, None);
+        let mod_ir_module = crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
         checker.env.import_table = saved_table;
         checker.env.self_module_name = saved_self;
         ir.modules.push(mod_ir_module);
