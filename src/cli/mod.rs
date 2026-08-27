@@ -2,6 +2,7 @@
 
 mod run;
 mod build;
+mod bench;
 mod compile;
 mod emit;
 mod check;
@@ -27,6 +28,7 @@ use cargo_build::{cargo_build_cdylib, cargo_build_generated, cargo_build_generat
 
 pub use run::{cmd_run, RunArgs};
 pub use build::{cmd_build, BuildArgs};
+pub use bench::cmd_bench;
 pub use compile::cmd_compile;
 pub use emit::{cmd_emit, EmitArgs};
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
