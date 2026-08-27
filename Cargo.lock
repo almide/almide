@@ -266,6 +266,8 @@ dependencies = [
  "wasm-encoder 0.256.0",
  "wasmparser 0.256.0",
  "wasmtime",
+ "wit-component 0.256.0",
+ "wit-parser 0.256.0",
 ]
 
 [[package]]
