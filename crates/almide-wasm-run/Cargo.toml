@@ -12,11 +12,11 @@ description = "The greenfield wasm HOST: the almide.* import surface (print/exit
 [dependencies]
 almide-wasm = { path = "../almide-wasm" }
 anyhow = "1"
-wasmparser = "0.256"
-wasm-encoder = "0.256"
+wasmparser = "0.257"
+wasm-encoder = "0.257"
 wasmtime = "47"
-wit-component = "0.256"
-wit-parser = "0.256"
+wit-component = "0.257"
+wit-parser = "0.257"
 
 [lints]
 workspace = true
