@@ -113,6 +113,7 @@ almide test                      # Find all .almd with test blocks (recursive)
 almide test spec/lang/           # Run tests in a directory
 almide test spec/lang/expr_test.almd  # Run a single test file
 almide test --run "pattern"      # Filter tests by name
+almide bench app.almd            # Verify-then-time (median; --target wasm for the embedded host)
 almide compile                    # Module interface (project)
 almide compile parser             # Module interface (by name)
 almide compile app.almd --json    # Module interface (JSON)
