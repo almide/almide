@@ -1,0 +1,34 @@
+name: Dependency audit (RustSec)
+
+# #1534: the dependency tree against the RustSec advisory database —
+# weekly, on every lockfile change, and on demand. An advisory with no
+# fixed release gets an issue, not a silence; permanent ignores need a
+# written justification HERE.
+
+on:
+  schedule:
+    - cron: "20 6 * * 1"
+  push:
+    branches: [develop]
+    paths: ["Cargo.lock", "**/Cargo.toml", ".github/workflows/dependency-audit.yml"]
+  pull_request:
+    paths: ["Cargo.lock", "**/Cargo.toml", ".github/workflows/dependency-audit.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit (advisory database)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "dep-audit"
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit the lockfile
+        run: cargo audit

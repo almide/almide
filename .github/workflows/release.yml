@@ -13,6 +13,9 @@ env:
 
 permissions:
   contents: write
+  # #1534: release-asset attestation (Sigstore).
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -127,6 +130,14 @@ jobs:
             *-rc*) bash scripts/count-release-blockers.sh || true ;;
             *)     bash scripts/count-release-blockers.sh --gate ;;
           esac
+
+      # #1534: every release asset is Sigstore-attested — verify with
+      #   gh attestation verify <asset> -R almide/almide
+      # (documented in SECURITY.md). The checksums file is attested too.
+      - name: Attest release assets (Sigstore)
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release/*
 
       - name: Create GitHub Release
         env:
