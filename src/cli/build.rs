@@ -459,7 +459,8 @@ pub(super) fn lower_one_wasm_module(
 /// `compile_to_wasm_bytes`'s parse + dependency-fetch + import-resolution
 /// phase. Extracted verbatim — prints diagnostics and returns `Err(())` on
 /// any parse/fetch/resolve failure, mirroring the original early returns.
-fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, resolve::ResolvedModules), ()> {
+#[allow(clippy::type_complexity)]
+fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, resolve::ResolvedModules, Vec<(project::PkgId, std::path::PathBuf)>), ()> {
     let (program, source_text, parse_errors) = parse_file(file);
 
     if !parse_errors.is_empty() {
@@ -488,7 +489,7 @@ fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, r
         Err(e) => { err(&format!("{}", e)); return Err(()); }
     };
 
-    Ok((program, source_text, resolved))
+    Ok((program, source_text, resolved, dep_paths))
 }
 
 /// `compile_to_wasm_bytes`'s type-check phase: canonicalize, build the
@@ -608,8 +609,6 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
 ///   - main-less library module      → incumbent (#881 export mode — the
 ///                                      structural emitter has no library
 ///                                      form yet)
-///   - external dependency packages  → incumbent (the structural driver
-///                                      resolves without a dep table)
 ///   - host-variant program on the BUILD path → incumbent (its artifact
 ///                                      speaks real WASI fs/env; the WASI
 ///                                      transform's shims cover less)
@@ -624,7 +623,7 @@ fn render_wasm_module_routed(
     v1_self_modules: &[(String, almide_lang::ast::Program, bool)],
     library_ok: bool,
     has_main: bool,
-    has_pkg_deps: bool,
+    dep_paths: &[(project::PkgId, std::path::PathBuf)],
     uses_incumbent_features: bool,
     host_variant: bool,
 ) -> Result<(Vec<u8>, bool), ()> {
@@ -644,7 +643,6 @@ fn render_wasm_module_routed(
         && (std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
             || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
             || !has_main
-            || has_pkg_deps
             || uses_incumbent_features
             || (library_ok && host_variant));
     if incumbent {
@@ -666,7 +664,7 @@ fn render_wasm_module_routed(
         }
         render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false))
     };
-    let ir = match almide::wasm_leg::lower_to_ir(file, source_text) {
+    let ir = match almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths) {
         Ok(ir) => ir,
         Err(e) => return reroute(&format!("front: {e}")),
     };
@@ -824,7 +822,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
 }
 
 pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
-    let (mut program, source_text, mut resolved) = parse_and_resolve_wasm(file)?;
+    let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
 
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
     // below mutates them in place — the v1 pipeline re-runs its own canonicalize/infer/lower from
@@ -846,7 +844,6 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // export mode yet (#1598's sibling surface), so those modules stay on
     // the incumbent leg.
     let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
-    let has_pkg_deps = resolved.modules.iter().any(|(_, _, pkg, _)| pkg.is_some());
     let host_variant = std::iter::once(&program)
         .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
         .flat_map(|p| p.imports.iter())
@@ -875,7 +872,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         &v1_self_modules,
         library_ok,
         has_main,
-        has_pkg_deps,
+        &dep_paths,
         has_exports,
         host_variant,
     )
