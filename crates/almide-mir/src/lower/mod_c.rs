@@ -811,10 +811,21 @@ fn lower_function_all_impl(
     // default while v0 pushed — the #790 mut_list_param row, main-reachable).
     // WALL the fn — v0 emits the correct convention on both targets.
     if !func.mutated_params.is_empty() {
+        // The C-132 move-mode pass rewrites every eligible shape upstream
+        // (mutated_params cleared), so a surviving entry names the honest
+        // boundary: a value-returning effect fn that CAN err carries #1576's
+        // unratified question (what the caller's `mut` argument holds after
+        // an err), not a missing brick (#1622).
+        let why = if func.is_effect && !matches!(func.ret_ty, almide_lang::types::Ty::Unit) {
+            "a value-returning effect fn with a `mut` param that CAN err — what \
+             the caller's argument holds after an err is #1576's unratified \
+             design question (never-err forms rewrite via C-132)"
+        } else {
+            "the move-mode write-back convention (C-132) not in this brick"
+        };
         return Err(LowerError::Unsupported(format!(
-            "fn `{}` mutates its `mut` param(s) — the move-mode write-back \
-             convention (C-132) not in this brick",
-            func.name
+            "fn `{}` mutates its `mut` param(s) — {}",
+            func.name, why
         )));
     }
     let mut ctx = new_lower_ctx(func, globals, global_inits, record_layouts, variant_layouts);

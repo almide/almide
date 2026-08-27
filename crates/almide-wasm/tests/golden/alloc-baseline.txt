@@ -97,6 +97,7 @@
 113792	spec/wasm_cross/edge_string_unicode.almd
 66656	spec/wasm_cross/effect_assign_unwrap.almd
 67232	spec/wasm_cross/effect_fn_value.almd
+66352	spec/wasm_cross/effect_mut_generic_port.almd
 67296	spec/wasm_cross/effect_option_explicit_bang.almd
 66496	spec/wasm_cross/effect_slot_carrier.almd
 66864	spec/wasm_cross/effect_tail_carrier_family.almd

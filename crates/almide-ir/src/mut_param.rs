@@ -29,11 +29,15 @@
 //! the caller's `mut` argument holds after an err is #1576's unratified
 //! design question). A NEVER-ERR effect fn has no err arm to answer for, so
 //! it takes the same tuple rewrite as a plain value fn (#1575: the effect
-//! marker changes the return channel, not the parameter convention);
-//! never-err is judged by a conservative syntactic scan — any propagation
-//! node, err construction, lambda, or call that cannot be proven to land on
-//! a non-effect fn keeps the exclusion. A rewritten fn's `mutated_params` is
-//! CLEARED:
+//! marker changes the return channel, not the parameter convention).
+//! Never-err is judged by a conservative syntactic scan over a FIXPOINT
+//! allow-list (#1622): err construction, `!` over a non-admitted callee,
+//! `fan`, and runtime calls keep the exclusion; a bare (un-`!`ed) call
+//! cannot feed the effect channel because propagation is EXPLICIT
+//! (ADR-0008); lambda bodies are scanned like any expression; and an effect
+//! fn whose own body passes joins the allow-list, so a never-err protocol
+//! method admits the monomorphized generic caller that reaches it with `!`.
+//! A rewritten fn's `mutated_params` is CLEARED:
 //! the convention is now explicit in the tree (the v1 C-132 wall keys on it,
 //! and LICM's conservatism is subsumed by the call-site Assign).
 //!
@@ -291,16 +295,26 @@ fn mut_fn_entry(
     same_scope_count: usize,
     pure_names: &std::collections::HashSet<String>,
 ) -> Option<(usize, Ty, bool, Ty)> {
+    let probe = std::env::var("ALMIDE_MP_PROBE").is_ok();
     if func.mutated_params.len() != 1 {
+        if probe && !func.mutated_params.is_empty() {
+            eprintln!("[mp-reject] {} mutated_params={:?}", func.name, func.mutated_params);
+        }
         return None;
     }
     if same_scope_count != 1 {
+        if probe {
+            eprintln!("[mp-reject] {} same_scope_count={}", func.name, same_scope_count);
+        }
         return None;
     }
     let idx = func.mutated_params[0];
     let p = func.params.get(idx)?;
     let was_unit = matches!(func.ret_ty, Ty::Unit);
     if !was_unit && func.is_effect && !fn_cannot_err(func, pure_names) {
+        if probe {
+            eprintln!("[mp-reject] {} can-err (#1576 exclusion)", func.name);
+        }
         // The err arm carries no buffer channel — #1576's unratified design
         // question. A NEVER-ERR effect fn has no err arm, so it rides the
         // value-fn tuple rewrite (#1575).
@@ -310,52 +324,93 @@ fn mut_fn_entry(
 }
 
 /// Every callee name (bare, dotted, mangled) whose EVERY program definition
-/// is a non-effect fn — the allow-list [`fn_cannot_err`] resolves Named calls
-/// against. A name that any scope defines as an effect fn, or that resolves
-/// to nothing in the program (a stdlib/runtime spelling), is NOT in the set:
-/// the never-err scan must under-approximate, never over-approximate.
+/// provably cannot err — the allow-list [`fn_cannot_err`] resolves Named
+/// calls against: all non-effect fns (they cannot err by type), plus the
+/// FIXPOINT of effect fns whose own bodies pass the scan (#1622 — a
+/// protocol method `effect fn put` with no err arm admits the generic
+/// caller that reaches it with `!`). A name that resolves to nothing in the
+/// program (a stdlib/runtime spelling), or that any scope defines as a
+/// possibly-erring fn, is NOT in the set: the never-err scan must
+/// under-approximate, never over-approximate.
 fn collect_provably_pure_names(program: &IrProgram) -> std::collections::HashSet<String> {
-    let mut pure: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut effectful: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut note = |name: String, is_effect: bool| {
-        if is_effect {
-            effectful.insert(name);
-        } else {
-            pure.insert(name);
-        }
-    };
+    // Group every program definition under each spelling a call site can use.
+    let mut defs: std::collections::HashMap<String, Vec<&IrFunction>> =
+        std::collections::HashMap::new();
     for func in &program.functions {
-        note(func.name.to_string(), func.is_effect);
+        defs.entry(func.name.to_string()).or_default().push(func);
     }
     for m in &program.modules {
         for func in &m.functions {
-            note(func.name.to_string(), func.is_effect);
-            note(format!("{}.{}", m.name, func.name), func.is_effect);
-            note(
-                format!(
-                    "almide_rt_{}_{}",
-                    m.name.as_str().replace('.', "_"),
-                    func.name.as_str().replace('.', "_")
-                ),
-                func.is_effect,
-            );
+            defs.entry(func.name.to_string()).or_default().push(func);
+            defs.entry(format!("{}.{}", m.name, func.name)).or_default().push(func);
+            defs.entry(format!(
+                "almide_rt_{}_{}",
+                m.name.as_str().replace('.', "_"),
+                func.name.as_str().replace('.', "_")
+            ))
+            .or_default()
+            .push(func);
         }
     }
-    pure.retain(|n| !effectful.contains(n));
-    pure
+    // Fixpoint (#1622): non-effect fns cannot err by type and seed the set;
+    // an EFFECT fn whose body passes [`fn_cannot_err`] against the current
+    // set joins it, so `effect fn put` with no err arm admits the
+    // `effect fn uc` that calls it with `!` — the effect marker changes the
+    // return channel, not the err-ability. A spelling joins only when EVERY
+    // definition under it qualifies (the same collision discipline the flat
+    // set had), and growth is monotone, so the loop terminates.
+    let mut allow: std::collections::HashSet<String> = std::collections::HashSet::new();
+    loop {
+        let mut grew = false;
+        for (name, fs) in &defs {
+            if allow.contains(name) {
+                continue;
+            }
+            if fs.iter().all(|f| !f.is_effect || fn_cannot_err(f, &allow)) {
+                allow.insert(name.clone());
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    allow
 }
 
-/// Conservative syntactic never-err verdict for an effect fn's body: no
-/// propagation node (`Try`/`Unwrap`/`UnwrapOr`), no err construction, no
-/// lambda (its deferred body is opaque to this scan), and every call lands on
-/// a name [`collect_provably_pure_names`] admits — module/method/computed/
-/// runtime calls all fail the scan. Anything unrecognized keeps the #1576
-/// exclusion, so a wrong answer here can only DECLINE a rewrite, never admit
-/// an err path.
+/// Conservative syntactic never-err verdict for an effect fn's body: no err
+/// construction, no lambda (its deferred body is opaque to this scan), no
+/// bare propagation node (`Unwrap`/`UnwrapOr`), and every call lands on a
+/// name [`collect_provably_pure_names`] admits — module/method/computed/
+/// runtime calls all fail the scan. `Try` (`!`) over an ADMITTED call is a
+/// pass-through, not an err source (#1622): the callee cannot err, so the
+/// propagation arm is dead; `Try` over anything else keeps the exclusion.
+/// Anything unrecognized keeps the #1576 exclusion, so a wrong answer here
+/// can only DECLINE a rewrite, never admit an err path.
 fn fn_cannot_err(func: &IrFunction, pure_names: &std::collections::HashSet<String>) -> bool {
     struct Scan<'a> {
         pure_names: &'a std::collections::HashSet<String>,
         err_source: bool,
+    }
+    impl Scan<'_> {
+        fn admitted_call(&self, expr: &IrExpr) -> bool {
+            let target = match &expr.kind {
+                IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => target,
+                _ => return false,
+            };
+            match target {
+                CallTarget::Named { name } => self.pure_names.contains(name.as_str()),
+                // The dotted spelling — the defs map lists every fully-bodied
+                // module fn there, so a stdlib/user module fn qualifies
+                // exactly when its definition does. A spelling with no
+                // definition (an @intrinsic bridge surface, a HOF's fallible
+                // instantiation) is not admitted.
+                CallTarget::Module { module, func, .. } => {
+                    self.pure_names.contains(&format!("{}.{}", module, func))
+                }
+                _ => false,
+            }
+        }
     }
     impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, expr: &IrExpr) {
@@ -363,24 +418,41 @@ fn fn_cannot_err(func: &IrFunction, pure_names: &std::collections::HashSet<Strin
                 return;
             }
             match &expr.kind {
+                IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
+                    if self.admitted_call(inner) =>
+                {
+                    // On a callee that cannot err, `!` is the identity in
+                    // both its spellings — Try's propagation arm and
+                    // Unwrap's abort arm are equally dead. walk_expr
+                    // descends into the admitted call, whose own Call arm
+                    // passes and scans the arguments.
+                }
                 IrExprKind::Try { .. }
                 | IrExprKind::Unwrap { .. }
-                | IrExprKind::UnwrapOr { .. }
                 | IrExprKind::ResultErr { .. }
-                | IrExprKind::Lambda { .. }
                 | IrExprKind::Fan { .. }
                 | IrExprKind::RuntimeCall { .. } => {
                     self.err_source = true;
                     return;
                 }
-                IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => {
-                    let named_pure = matches!(target, CallTarget::Named { name }
-                        if self.pure_names.contains(name.as_str()));
-                    if !named_pure {
-                        self.err_source = true;
-                        return;
-                    }
-                }
+                // `??` HANDLES its operand's err — nothing propagates. Its
+                // children are scanned like any expression (the fallback may
+                // itself contain a propagation node).
+                IrExprKind::UnwrapOr { .. } => {}
+                // A lambda's body is scanned like any other expression (#1622):
+                // a closure whose body cannot err cannot err ANYWHERE it
+                // escapes to — even a HOF's fallible instantiation degenerates
+                // to never-err when the callback is clean. A `!` inside the
+                // body over a non-admitted callee still poisons via the arms
+                // above.
+                IrExprKind::Lambda { .. } => {}
+                // A BARE call — one the Try/Unwrap arms above did not consume
+                // — cannot feed the enclosing effect channel: propagation is
+                // EXPLICIT (ADR-0008), so an effect callee without `!` is
+                // E041/E042 upstream or a `let _ =` discard, and a discarded
+                // err never propagates. Its arguments are scanned by the
+                // walk (a lambda argument's `!` is judged where it appears).
+                IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => {}
                 _ => {}
             }
             walk_expr(self, expr);

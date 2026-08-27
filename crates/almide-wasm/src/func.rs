@@ -376,8 +376,12 @@ pub(crate) fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<Sli
     // The C-132 move-mode pass rewrote eligible mut-param fns (their
     // `mutated_params` is CLEARED, the write-back is explicit in the
     // tree); a REMAINING entry marks the excluded shapes — the same key
-    // the incumbent's v1 wall uses.
+    // the incumbent's v1 wall uses. The dominant survivor is the can-err
+    // effect fn, #1576's unratified design question — name it (#1622).
     if !f.mutated_params.is_empty() {
+        if f.is_effect && !matches!(f.ret_ty, Ty::Unit) {
+            return Err("mut-param:can-err-effect(#1576)".into());
+        }
         return Err("mut-param".into());
     }
     let mut params = Vec::new();
