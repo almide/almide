@@ -66,6 +66,15 @@ jobs:
     # skipped but required checks"), while a workflow filtered out by `paths`
     # leaves its required checks Expected forever and the PR blocked.
     #
+    # MATRIX jobs are the exception: a job-level `if` skips the job BEFORE the
+    # matrix expands, so the one skipped check-run is named with the literal
+    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 0/4)`…
+    # `(shard 3/4)` never receive a run — the first docs-only PR (#1609) sat
+    # BLOCKED on exactly that. test-rust therefore keeps its job-level guard
+    # OFF and guards every STEP instead (`if: env.DOCS_ONLY != 'true'`): the
+    # four shards expand, each finishes in seconds, each reports success under
+    # its real name.
+    #
     # Fail-safe direction: the classify step is `continue-on-error`, so a
     # broken classifier yields an EMPTY output, `'' != 'true'` holds, and
     # everything runs. Breakage costs twenty minutes, never a skipped suite.
@@ -204,24 +213,34 @@ jobs:
     # longest target IS the floor and extra jobs buy nothing.
     name: Test Rust (shard ${{ matrix.shard }}/4)
     needs: [changes, build]
-    if: needs.changes.outputs.docs_only != 'true'
+    # No job-level docs-only guard here — see the `changes` job: a skipped
+    # MATRIX job never expands, so the required `Test Rust (shard N/4)`
+    # contexts would stay Expected. Every step is guarded instead; on a
+    # docs-only change the four shards expand, run nothing, and report
+    # success under their real names in seconds.
     runs-on: ubuntu-latest
+    env:
+      DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
+        if: env.DOCS_ONLY != 'true'
 
       - uses: actions/download-artifact@v8
+        if: env.DOCS_ONLY != 'true'
         with:
           name: almide-linux
           path: /tmp/almide-bin
 
       - name: Setup
+        if: env.DOCS_ONLY != 'true'
         run: chmod +x /tmp/almide-bin/almide
 
       - uses: dtolnay/rust-toolchain@stable
+        if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
@@ -231,6 +250,7 @@ jobs:
       # shape as fuzz-nightly's cache — registry + git + target, keyed on
       # Cargo.lock, prefix restore so a lockfile bump still warm-starts.
       - uses: actions/cache@v6
+        if: env.DOCS_ONLY != 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -240,11 +260,13 @@ jobs:
           restore-keys: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
+        if: env.DOCS_ONLY != 'true'
         uses: actions/cache@v6
         with:
           path: wasmtime-v47.0.3-x86_64-linux.tar.xz
           key: wasmtime-v47.0.3-x86_64-linux
       - name: Install wasmtime
+        if: env.DOCS_ONLY != 'true'
         # Required by the cross-target gate (wasm_cross_target_spec) and the
         # wasm_runtime_test capture tests — without it they skip, so the
         # cross-target ratchet would not actually enforce here.
@@ -267,12 +289,14 @@ jobs:
           wasmtime --version
 
       - name: Install wasm-opt (binaryen)
+        if: env.DOCS_ONLY != 'true'
         # Required by the wasm-opt parity gate (wasm_runtime_test::wasm_opt_parity_spec) — without
         # it the test silently early-returns as a pass, so `--wasm-opt`'s
         # differential-equivalence claim would never actually be checked here.
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
 
       - name: Cargo tests
+        if: env.DOCS_ONLY != 'true'
         # Parallel-safe: the shared build scratch dir (/tmp/almide-run,
         # /tmp/almide-build) is serialized across processes by an advisory
         # flock (see src/cli/run.rs BuildDirLock). Unix only — this runner
