@@ -214,15 +214,39 @@ impl Emitter<'_> {
         i.if_(BlockType::Result(ValType::F64));
         i.local_get(ha);
         i.else_();
-        // select(v1, v2, cond) = cond ? v1 : v2 — push v1 first
-        i.local_get(hb).local_get(ha);
+        // Strict winner, else the TIE branch. IEEE-754-2019 zero ordering
+        // (C-049, ALS-T23): a ±0 tie resolves by SIGN — min = -0.0, max =
+        // +0.0, commutative — computed as the bitwise OR (min: either
+        // sign bit wins) / AND (max: both must be negative) of the two
+        // payloads, which is the identity on non-zero equal ties.
         i.local_get(ha).local_get(hb);
         if is_max {
-            i.f64_lt();
-        } else {
             i.f64_gt();
+        } else {
+            i.f64_lt();
         }
-        i.select();
+        i.if_(BlockType::Result(ValType::F64));
+        i.local_get(ha);
+        i.else_();
+        i.local_get(hb).local_get(ha);
+        if is_max {
+            i.f64_gt();
+        } else {
+            i.f64_lt();
+        }
+        i.if_(BlockType::Result(ValType::F64));
+        i.local_get(hb);
+        i.else_();
+        i.local_get(ha).i64_reinterpret_f64();
+        i.local_get(hb).i64_reinterpret_f64();
+        if is_max {
+            i.i64_and();
+        } else {
+            i.i64_or();
+        }
+        i.f64_reinterpret_i64();
+        i.end();
+        i.end();
         i.end();
         i.end();
         let _ = i;
