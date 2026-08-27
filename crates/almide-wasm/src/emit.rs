@@ -54,7 +54,7 @@ fn emit_program_pass(
 
     let mut table =
         FnTable { by_name: HashMap::new(), impl_index: HashMap::new(), infos: Vec::new() };
-    for (i, (f, qual)) in program_fns.iter().enumerate() {
+    for (i, (f, qual, _space)) in program_fns.iter().enumerate() {
         let (params, ret, refuse) = match fn_signature(f, &types) {
             Ok((p, r)) => (p, r, None),
             Err(reason) => (Vec::new(), None, Some(reason)),
@@ -90,7 +90,7 @@ fn emit_program_pass(
     // Lower every callable function; a body that doesn't lower yet is
     // recorded (not fatal) — fatal only if `main` can reach it.
     let mut lowered: Vec<Result<(Function, HashSet<usize>), String>> = Vec::new();
-    for (i, (f, qual)) in program_fns.iter().enumerate() {
+    for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
             continue;
@@ -122,6 +122,7 @@ fn emit_program_pass(
             metered: meter.user.contains(f.name.as_str()),
             charge_entry: meter.user.contains(f.name.as_str())
                 && !meter.exempt.contains(f.name.as_str()),
+            var_space: *space,
         };
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
             Ok(ok) => {
@@ -158,6 +159,7 @@ fn emit_program_pass(
     let main_plan = FnPlan {
         ret: None,
         cur_module: None,
+        var_space: 0,
         effect_raw: None,
         in_main: true,
         env_captures: None,
@@ -185,6 +187,7 @@ fn emit_program_pass(
             let plan = FnPlan {
                 ret: ll.ret,
                 cur_module: None,
+                var_space: ll.var_space,
                 effect_raw: ll.effect_raw,
                 in_main: false,
                 env_captures: Some(ll.captures.clone()),
@@ -245,7 +248,7 @@ fn emit_program_pass(
     // lowers; one that (transitively) hits an unlowered body is simply not
     // exported — main-reachable strictness above is untouched.
     let mut export_fns: Vec<(String, u32)> = Vec::new();
-    for (i, (f, qual)) in program_fns.iter().enumerate() {
+    for (i, (f, qual, _space)) in program_fns.iter().enumerate() {
         let name = f.name.as_str();
         if qual.is_some()
             || name == "main"

@@ -495,7 +495,7 @@ impl Emitter<'_> {
 
                 let (is_local, declared) = match self.locals.get(target) {
                     Some(&(_, d)) => (true, d),
-                    None => match self.globals.get(target) {
+                    None => match self.globals.get(&(self.var_space, *target)) {
                         Some(&(_, d)) => (false, d),
                         None => return unsup("index-assign:unmapped"),
                     },
@@ -513,11 +513,12 @@ impl Emitter<'_> {
                 let hv = self.hold_val(el)?;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hv);
-                let get_target = |f: &mut wasm_encoder::Function, locals: &HashMap<VarId, (u32, SliceTy)>, globals: &HashMap<VarId, (u32, SliceTy)>| {
+                let var_space = self.var_space;
+                let get_target = |f: &mut wasm_encoder::Function, locals: &HashMap<VarId, (u32, SliceTy)>, globals: &HashMap<GVar, (u32, SliceTy)>| {
                     if is_local {
                         f.instructions().local_get(locals[target].0);
                     } else {
-                        f.instructions().global_get(globals[target].0);
+                        f.instructions().global_get(globals[&(var_space, *target)].0);
                     }
                 };
                 // OOB → the exact native frame + exit 1.
@@ -543,7 +544,7 @@ impl Emitter<'_> {
                     let idx = self.locals[target].0;
                     self.f.instructions().local_get(hb).local_set(idx);
                 } else {
-                    let g = self.globals[target].0;
+                    let g = self.globals[&(self.var_space, *target)].0;
                     self.f.instructions().local_get(hb).global_set(g);
                 }
                 {
@@ -612,7 +613,7 @@ impl Emitter<'_> {
                 }
                 let (local, declared) = match self.locals.get(var) {
                     Some(&(idx, d)) => (Some(idx), d),
-                    None => match self.globals.get(var) {
+                    None => match self.globals.get(&(self.var_space, *var)) {
                         Some(&(gidx, d)) => (None, {
                             let _ = gidx;
                             d
@@ -651,7 +652,7 @@ impl Emitter<'_> {
                 match local {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,
                     None => {
-                        let gidx = self.globals[var].0;
+                        let gidx = self.globals[&(self.var_space, *var)].0;
                         self.f.instructions().global_set(gidx);
                     }
                 }
@@ -677,7 +678,7 @@ impl Emitter<'_> {
                 }
                 let (slot, declared) = match self.locals.get(target) {
                     Some(&(idx, d)) => (Ok(idx), d),
-                    None => match self.globals.get(target) {
+                    None => match self.globals.get(&(self.var_space, *target)) {
                         Some(&(gidx, d)) => (Err(gidx), d),
                         None => return unsup("field-assign:unmapped"),
                     },
