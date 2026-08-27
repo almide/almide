@@ -1,0 +1,27 @@
+# Release evidence seal — v0.59.2. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.59.2"
+tag = "v0.59.2"
+tag_commit = "0e70d938b58795f7d701c8e3e88e12136667d32e"
+date = "2026-08-27"
+url = "https://github.com/almide/almide/releases/tag/v0.59.2"
+
+[derived]
+cargo_version = "0.59.2"
+contracts_sha256 = "1360e5677ae0d504b880178dbbc89d76cbb07f7df323795de060c98f5f617190"
+contracts_total = "302"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "06211c5ba984367710c33455eb8c9c52965a672b67799cb8445dd3169ea9a171"
+abstain_ledger_entries = "23"
+wasm_cross_fixtures = "602"
+rust_toolchain = "1.89.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Patch release from a v0.59.1-based branch (bounded-profile) carrying no engine change, per the RC doctrine: the deferred Stage 2 switchover stays on develop for 0.60. Evidence: the full workspace battery green at the tag tree (cargo test --release, exit 0, incl. the 27-family e07x diagnostic harness and the docs/coverage/explain gates); release workflow run 33044265673 (2026-08-27, 5-platform build+publish, success); judge-side, the als corpus at the tag date judges the release binary doctest 192/192 (all nine @bounded rejection fences green, the ALS-T23 tie-order example green) and the als reference evaluator (611/611 totality) is a third vote on the shipped semantics. No dedicated fuzz dispatch for this tag: no codegen-reachable surface changed (a new check pass and a scalar tie order); the nightly develop fuzz does not cover this branch."
+assets = "6: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256"
+known_problems = "none discovered at release. Bookkeeping notes: (1) develop carries an independent, superset implementation of the same ±0 tie order (#1595, adds the structural-emitter leg this base does not have) — the forward-port drops this branch's ±0 commit in its favour; (2) v0.59.1 has no seal in proofs/releases/ (the discipline lagged one release before this tag; restoring it retroactively is develop bookkeeping, tracked in the forward-port)."
