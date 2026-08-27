@@ -37,3 +37,11 @@ done < "$work/all"
 
 # xargs batches keep the arg list within limits; any drift fails the gate.
 xargs "$BIN" fmt --check < "$list"
+
+# stdlib/ (#1462): the largest .almd tree and the one users read as the
+# idiom reference, formatted under --no-import-edit — stdlib sources are
+# splice-context (the self-host registry extracts bodies), and the
+# formatter's import auto-insertion is the one transform that corrupts
+# them. --check writes nothing either way; the flag scopes what counts as
+# drift to what the sweep actually applied.
+"$BIN" fmt --check --no-import-edit stdlib/
