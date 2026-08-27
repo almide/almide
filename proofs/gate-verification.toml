@@ -80,6 +80,11 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5 (coqc/ocamlopt present locally, so the gate RAN): the forge went into the TRUSTED GLUE the proof does not cover — driver.ml's ownership arm rubber-stamped to `true` gave 'FAIL double_free.cert: got exit 0 want 1 (ACCEPT)', and to `false` gave 'FAIL balanced.cert: got exit 1 want 0 (REJECT)'; both the accept and the reject assertions therefore bind. Restored green (26/26)"
 
 [[gate]]
+path = "proofs/mcdc-mutation.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Landing run (2026-08-27): all 6 vectors-resolved sites' operator-swap mutants killed (green unmutated, red mutated, 79 s wall, sources hash-verified restored). Fail directions each demonstrated and restored: a site's tests pointed at an unrelated always-green test -> 'MUTANT SURVIVED' naming site, mutation and tests, exit 1; a named vector assertion inverted -> 'vectors FAIL UNMUTATED — fix the tests first' (a red baseline cannot fake kills); the source pre-mutated by hand -> the site's id no longer scans and the row goes red. The smoke run caught the gate's own first bug: the scanner emits CHARACTER offsets but the mutator read bytes, so multi-byte comments shifted the site — fixed to text-mode before landing."
+
+[[gate]]
 path = "proofs/mcdc-ledger.sh"
 class = "NEGATIVE_TESTED"
 evidence = "Landing run (2026-08-26), each restored to green: a dropped row -> 'boolean site … has NO ledger row' naming file:line and excerpt; a vectors row naming a nonexistent test fn -> red with the fn and file named; pending ceiling raised by one -> 'BELOW ceiling — ratchet it down'; a pending row hand-flipped to refactored while the site still scans -> red at the site. Zero-sites-scanned is a hard error (broken instrument). Scanner honesty was tuned by its own first runs: closure heads (.or_else(|| …)) are excluded by the preceding-token rule, and sites past a file's first #[cfg(test)] are the tests themselves and are not ledgered."

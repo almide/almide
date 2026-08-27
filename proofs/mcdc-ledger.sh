@@ -14,6 +14,9 @@
 #   bash proofs/mcdc-ledger.sh --write    # re-scan; add pending rows for new
 #                                         # sites, refresh line numbers, keep
 #                                         # hand-written fields by id
+#   bash proofs/mcdc-ledger.sh --emit-sites  # JSON per scanned site (id, file,
+#                                         # byte offset, op) — the ONE scanner,
+#                                         # consumed by proofs/mcdc-mutation.sh
 set -uo pipefail
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -86,7 +89,7 @@ def scan(path):
         norm = re.sub(r'\s+', ' ', excerpt)
         dup = counts.get((path, norm), 0); counts[(path, norm)] = dup + 1
         sid = hashlib.sha256(f"{path}|{norm}|{dup}".encode()).hexdigest()[:10]
-        sites.append({"id": sid, "file": path, "line": line, "op": m.group(0), "excerpt": excerpt})
+        sites.append({"id": sid, "file": path, "line": line, "op": m.group(0), "excerpt": excerpt, "offset": m.start()})
     return sites
 
 sites = [s for p in SAFETY_SET for s in scan(p)]
@@ -104,6 +107,11 @@ def read_ledger():
     return hdr, rows, src
 
 mode = sys.argv[1]
+if mode == "--emit-sites":
+    import json
+    for s_ in sites:
+        print(json.dumps(s_))
+    sys.exit(0)
 hdr, rows, _ = read_ledger()
 
 if mode == "--write":
