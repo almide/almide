@@ -6,14 +6,14 @@
 # scheduler noise, not a measurement. Cold clears BOTH $TMPDIR/almide-run and the
 # dependency cache before every repetition — clearing only the latter produces a warm
 # build wearing a cold label.
-version   = almide 0.46.0
-binary    = sha256:f6a9994b450fa946
+version   = almide 0.59.1
+binary    = sha256:01542a30f66e05ae
 machine   = arm64 Darwin
-date      = 2026-08-01
+date      = 2026-08-27
 target    = examples/lisp.almd
 lines     = 268
 tolerance = 150
-check_ms  = 22.7   n=20
-cold_ms   = 643.9   n=3
-warm_ms   = 266.1   n=5
-wasm_ms   = 299.1   n=3
+check_ms  = 15.2   n=20
+cold_ms   = 635.3   n=3
+warm_ms   = 237.2   n=5
+wasm_ms   = 61.7   n=3

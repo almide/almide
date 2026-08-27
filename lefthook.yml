@@ -12,6 +12,12 @@ pre-commit:
     contracts:
       glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/gen-claims.sh,README.md}"
       run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+    readme-stats:
+      # The README's derived-count blocks and the no-undated-count rule. The
+      # Hello, world baseline (docs/benchmarks/wasm-size.txt) is re-stamped by
+      # `--measure`, never by hand — CI rebuilds it and demands the same bytes.
+      glob: "{README.md,docs/stdlib/*.md,docs/benchmarks/wasm-size.txt,docs/contracts/contracts.toml,spec/**/*.almd,scripts/gen-readme-stats.sh,scripts/check-readme-numbers.sh,docs/wasm/README.md,docs/project/BENCHMARKS.md}"
+      run: bash scripts/gen-readme-stats.sh && git add README.md && bash scripts/check-readme-numbers.sh
     release-seals:
       glob: "{proofs/releases/*.toml,scripts/release-seal.sh}"
       run: bash scripts/release-seal.sh check

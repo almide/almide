@@ -1006,6 +1006,9 @@ jobs:
       - name: Stdlib doc signature indexes up to date (regenerate and diff)
         run: ALMIDE_BIN=/tmp/almide-bin/almide python3 tools/gen-stdlib-doc-index.py --check
 
+      - name: README counts derived, Hello, world bytes match the stamped baseline, no undated hand-written count
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/gen-readme-stats.sh --check && bash scripts/check-readme-numbers.sh
+
       - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
 

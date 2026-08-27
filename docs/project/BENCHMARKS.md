@@ -2,7 +2,7 @@
 
 ## WASM Binary Size
 
-Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Since the verified (PCC) pipeline became the sole wasm path, **the shipped binary is the exact module the certificate was checked against**: reachability DCE inside the renderer prunes unreached preamble helpers, imports, and data segments before assembly, and the debug-name section keeps only function names (for trap backtraces) — but no post-hoc optimizer touches the shipped bytes.
+Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Since the unverified v0 emitter was retired (#782), every wasm build comes from a verified renderer — the certified MIR spine, or since commissioning (#1599) the structural engine, whichever the router picks — and **the shipped binary is the exact module that renderer produced** (on the incumbent leg, the exact module the certificate was checked against): reachability DCE inside the renderer prunes unreached preamble helpers, imports, and data segments before assembly, and the debug-name section keeps only function names (for trap backtraces) — but no post-hoc optimizer touches the shipped bytes.
 
 | Program | Verified, as shipped | After `wasm-opt -Oz --all-features` |
 |---------|-----:|-----:|
