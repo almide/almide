@@ -142,11 +142,14 @@ fn indirect_callee_indices(
 
 /// Does `f`'s signature accept this arg list — same arity, same heap-ness per slot?
 fn shape_matches(f: &MirFunction, args: &[CallArg]) -> bool {
-    f.params.len() == args.len()
-        && f.params
-            .iter()
-            .zip(args)
-            .all(|(p, a)| p.repr.is_heap() == matches!(a, CallArg::Handle(_)))
+    // Single-condition decisions (MC/DC ledger, #566): && as early return.
+    if f.params.len() != args.len() {
+        return false;
+    }
+    f.params
+        .iter()
+        .zip(args)
+        .all(|(p, a)| p.repr.is_heap() == matches!(a, CallArg::Handle(_)))
 }
 
 #[cfg(test)]

@@ -513,7 +513,11 @@
                 })
                 .count();
             let dups = f.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count();
-            i == allocs + heap_results && a == dups
+            // Single-condition decisions (MC/DC ledger, #566).
+            if i != allocs + heap_results {
+                return false;
+            }
+            a == dups
         }
         for seed in 0u64..500 {
             let f = gen_wellformed(seed);
@@ -794,9 +798,19 @@
         leaky.ret = Some(c);
         assert_eq!(ownership_certificate(&leaky), "i{x|}d\n");
         let errs = verify_ownership(&leaky).unwrap_err();
+        // Single-condition decisions (MC/DC ledger, #566): the predicate
+        // splits into sequential guards.
+        fn leak_at_return_of(v: &crate::Violation, x: crate::ValueId) -> bool {
+            if v.kind != crate::ViolationKind::Leak {
+                return false;
+            }
+            if v.op_index != 3 {
+                return false;
+            }
+            v.value == x
+        }
         assert!(
-            errs.iter()
-                .any(|v| v.kind == crate::ViolationKind::Leak && v.op_index == 3 && v.value == x),
+            errs.iter().any(|v| leak_at_return_of(v, x)),
             "expected a Leak at the Return, got {errs:?}"
         );
 
