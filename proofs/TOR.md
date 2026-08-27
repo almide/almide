@@ -7,6 +7,8 @@ third of the goal-directed Stage-5 artifact trio (tool-verification ledger =
 `known_problems` field every release seal must carry). Companion boundary
 documents: `proofs/TRUSTED_BASE.md` (what is trusted vs proven) and
 `docs/contracts/proven-vs-trusted.md` (what each gate does and does not claim).
+The DO-330-shaped package INDEX over all of these is
+`proofs/TOOL-QUALIFICATION.md` (#574).
 
 Each requirement names the instrument that ENFORCES it (`enforced-by:`) or is
 marked `procedural` (relies on the operator; a future instrument is named where
