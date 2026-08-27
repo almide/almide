@@ -197,6 +197,16 @@ enum Commands {
         /// not in `fmt`.
         #[arg(long)]
         stamp: bool,
+        /// Check under a named profile. `critical` (#567) applies the bounded
+        /// profile (ALS §B, E070–E078) to EVERY function — no `@bounded`
+        /// attribute needed — with capabilities starting deny-all. A subset,
+        /// not a dialect: critical-valid code is always valid in normal mode.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Grant a capability under `--profile critical` (repeatable):
+        /// IO, Net, Env, Time, Rand, Process
+        #[arg(long)]
+        allow: Vec<String>,
     },
     /// Start the Language Server Protocol server (for editor integration)
     Lsp,
@@ -603,19 +613,70 @@ fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json
 /// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
 /// returns early into the caller via its own `bool` return (`true` = already
 /// handled, caller should return).
-fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool, timings: bool, stamp: bool) {
+fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool, timings: bool, stamp: bool, profile: Option<String>, allow: Vec<String>) {
     if let Some(code) = explain {
         print_error_explanation(&code);
         return;
     }
+    // #567: `--profile critical` — validate the profile name and expand the
+    // capability grants to module names HERE, so the checker below the CLI
+    // never sees capability vocabulary.
+    let critical: Option<Vec<String>> = match profile.as_deref() {
+        None => {
+            if !allow.is_empty() {
+                eprintln!("error: --allow requires --profile critical");
+                std::process::exit(1);
+            }
+            None
+        }
+        Some("critical") => Some(expand_capability_grants(&allow)),
+        Some(other) => {
+            eprintln!("error: unknown profile `{other}` — the only profile is `critical`");
+            std::process::exit(1);
+        }
+    };
     let file = resolve_file(file);
     if effects {
+        if critical.is_some() {
+            eprintln!("error: --profile is not supported with --effects");
+            std::process::exit(1);
+        }
         cli::cmd_check_effects(&file);
     } else if json {
-        cli::cmd_check_json(&file);
+        cli::cmd_check_json(&file, critical.as_deref());
     } else {
-        cli::cmd_check(&file, deny_warnings, timings, stamp);
+        cli::cmd_check(&file, deny_warnings, timings, stamp, critical.as_deref());
     }
+}
+
+/// `--allow` capability names → the effect-module names the bounded checker
+/// denies (E076). The vocabulary is the effect-inference capability set minus
+/// `Fan`: `fan.*` scheduling stays outside the critical profile until the
+/// component-model async mapping gives its arms a bounded-cost story (#1628).
+fn expand_capability_grants(allow: &[String]) -> Vec<String> {
+    let mut modules: Vec<String> = Vec::new();
+    for cap in allow {
+        let granted: &[&str] = match cap.as_str() {
+            "IO" => &["io", "fs", "log"],
+            "Net" => &["http", "net"],
+            "Env" => &["env", "args"],
+            "Time" => &["datetime", "time", "duration"],
+            "Rand" => &["random"],
+            "Process" => &["process"],
+            other => {
+                eprintln!(
+                    "error: unknown capability `{other}` — grantable capabilities are IO, Net, Env, Time, Rand, Process"
+                );
+                std::process::exit(1);
+            }
+        };
+        for m in granted {
+            if !modules.iter().any(|x| x == m) {
+                modules.push(m.to_string());
+            }
+        }
+    }
+    modules
 }
 
 /// `dispatch`'s `Commands::Ide` arm (nested `IdeCommand` match). Extracted verbatim.
@@ -854,7 +915,7 @@ fn dispatch(cli: Cli) {
             });
         }
         Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
-        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp),
+        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp, profile, allow),
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
             cli::cmd_fix(&file, dry_run, json);

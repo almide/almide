@@ -78,6 +78,16 @@ pub struct Checker {
     pub diagnostics: Vec<Diagnostic>,
     pub source_file: Option<String>,
     pub source_text: Option<String>,
+    /// #567 `--profile critical`: the bounded profile (ALS §B) applied to
+    /// EVERY fn of the program under inference — no `@bounded` attribute
+    /// needed — with capabilities starting deny-all. Set by the check CLI
+    /// around the ENTRY program's inference only (imported modules,
+    /// stdlib above all, are the trusted runtime below the profile).
+    pub profile_critical: bool,
+    /// The GRANTED module names under `--profile critical`, already
+    /// expanded from capability names (`--allow Rand` → `random`) at the
+    /// CLI boundary. Empty = deny-all.
+    pub critical_allow: Vec<String>,
     pub(crate) current_span: Option<crate::ast::Span>,
     /// Span of the current call's callee expression (the identifier
     /// / member reference). Set by `check_named_call_spanned` so E002
@@ -493,6 +503,8 @@ impl Checker {
             env, type_map: crate::types::TypeMap::new(),
             diagnostics: Vec::new(),
             source_file: None, source_text: None,
+            profile_critical: false,
+            critical_allow: Vec::new(),
             current_span: None,
             callee_span_hint: None,
             call_span_hint: None,
