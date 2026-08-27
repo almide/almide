@@ -11,12 +11,21 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-105 normative sections; 661 distinct executable fixtures.
+114 normative sections; 673 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
 | ALS-B1 | C-308 | `spec/wasm_cross/bounded_kernel.almd` (byte-compare) |
 | ALS-B2 | C-309 | `spec/wasm_cross/bounded_kernel.almd` (byte-compare)<br>`spec/wasm_cross/bounded_kernel_plain.almd` (byte-compare) |
+| ALS-B3 | C-310 | `tests/diagnostics/e070-bounded-unbounded-loop/broken.almd` (checker)<br>`tests/diagnostics/e070-bounded-for-over-container/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
+| ALS-B4 | C-311 | `tests/diagnostics/e071-bounded-alloc-in-loop/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
+| ALS-B5 | C-312 | `tests/diagnostics/e072-bounded-break/broken.almd` (checker) |
+| ALS-B6 | C-313 | `tests/diagnostics/e073-bounded-recursion/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
+| ALS-B7 | C-314 | `tests/diagnostics/e074-bounded-unbounded-callee/broken.almd` (checker)<br>`tests/diagnostics/e074-bounded-higher-order/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
+| ALS-B8 | C-315 | `tests/diagnostics/e075-bounded-runtime-length-heap/broken.almd` (checker) |
+| ALS-B9 | C-316 | `tests/diagnostics/e076-bounded-effect-outside-capability/broken.almd` (checker) |
+| ALS-B10 | C-317 | `tests/diagnostics/e077-bounded-float-arithmetic/broken.almd` (checker) |
+| ALS-B11 | C-318 | `tests/diagnostics/e078-bounded-early-exit-in-loop/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
 | ALS-C1 | C-013 | `spec/wasm_cross/map_insertion_order.almd` (byte-compare)<br>`spec/wasm_cross/map_filter.almd` (byte-compare)<br>`spec/wasm_cross/map_fold.almd` (byte-compare)<br>`spec/wasm_cross/map_index_order.almd` (byte-compare)<br>`spec/wasm_cross/map_core_trio.almd` (byte-compare)<br>`spec/wasm_cross/map_fold_heap_accumulator.almd` (byte-compare)<br>`spec/wasm_cross/map_of_maps_value.almd` (byte-compare) |
 | ALS-C2 | C-014 | `spec/wasm_cross/set_insertion_order.almd` (byte-compare)<br>`spec/wasm_cross/set_index_order.almd` (byte-compare) |
 | ALS-C3 | C-015, C-124, C-185 | `spec/wasm_cross/compound_eq.almd` (byte-compare)<br>`spec/wasm_cross/deep_eq_heap.almd` (byte-compare)<br>`spec/wasm_cross/map_set_eq.almd` (byte-compare)<br>`spec/wasm_cross/variant_record_literal_equality.almd` (byte-compare)<br>`spec/wasm_cross/unique_non_flat_element.almd` (byte-compare)<br>`spec/wasm_cross/list_of_tuples_equality.almd` (byte-compare)<br>`spec/wasm_cross/map_rich_variant_key.almd` (byte-compare)<br>`spec/wasm_cross/value_deep_eq.almd` (byte-compare)<br>`spec/wasm_cross/fan_any_early_winner.almd` (byte-compare) |

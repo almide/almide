@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-311 contracts
+320 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -337,6 +337,15 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-307 | float.to_int truncates toward zero and saturates, NaN to 0; the checked family is exact-or-none | 0.58.0 | active | fixture | 1 |
 | C-308 | @bounded is a function attribute that changes nothing about types or values — a bounded function is an ordinary function | 0.60.0 | active | fixture | 1 |
 | C-309 | Subset, not dialect: a program's observable behaviour is identical with and without @bounded | 0.60.0 | active | fixture | 2 |
+| C-310 | Only counted loops with compile-time-constant range bounds are admissible in a @bounded function (E070) | 0.60.0 | active | fixture | 0 |
+| C-311 | No allocation inside a counted loop in a @bounded function (E071) | 0.60.0 | active | fixture | 0 |
+| C-312 | break and continue are rejected inside a @bounded function's loops (E072) | 0.60.0 | active | fixture | 0 |
+| C-313 | Recursion is rejected in the bounded profile — the reachable call graph is a DAG (E073) | 0.60.0 | active | fixture | 0 |
+| C-314 | A @bounded function calls only @bounded functions and first-order pure stdlib members (E074) | 0.60.0 | active | fixture | 0 |
+| C-315 | Run-time-length heap construction is rejected in a @bounded function (E075) | 0.60.0 | active | fixture | 0 |
+| C-316 | A @bounded effect fn may only use standard output; other effect modules, host-reaching modules and fan are rejected (E076) | 0.60.0 | active | fixture | 0 |
+| C-317 | Float operations are provisionally rejected in a @bounded function (E077) | 0.60.0 | active | fixture | 0 |
+| C-318 | Early exit inside a counted loop body is rejected in a @bounded function (E078) | 0.60.0 | active | fixture | 0 |
 | C-319 | A captured-and-mutated var List is shared storage through a closure | 0.59.0 | active | fixture | 2 |
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.59.2 | active | fixture | 1 |
 

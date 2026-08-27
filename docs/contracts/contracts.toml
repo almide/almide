@@ -4009,3 +4009,109 @@ evidence  = [
   { path = "spec/wasm_cross/bounded_kernel.almd", class = "fixture" },
   { path = "spec/wasm_cross/bounded_kernel_plain.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-310"
+spec      = "ALS-B3"
+title     = "Only counted loops with compile-time-constant range bounds are admissible in a @bounded function (E070)"
+statement = "Loops in a `@bounded` function are `for i in a..<b` / `a...b` with both bounds compile-time constants; nesting is admissible (bound = product). `while`, `for x in <container>` and a range with a run-time bound are rejected with E070 (hint `counted range`). Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e070-bounded-unbounded-loop/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e070-bounded-for-over-container/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-311"
+spec      = "ALS-B4"
+title     = "No allocation inside a counted loop in a @bounded function (E071)"
+statement = "Inside a counted loop body of a `@bounded` function, constructing, concatenating or pushing to a list/string/map/set or creating a closure is rejected with E071 (hint `allocate outside the loop`); reading, borrowing and passing existing heap values is admissible; allocation outside loops is admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e071-bounded-alloc-in-loop/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-312"
+spec      = "ALS-B5"
+title     = "break and continue are rejected inside a @bounded function's loops (E072)"
+statement = "`break` / `continue` in a counted loop of a `@bounded` function are rejected with E072 (hint `single exit`): the trip count is exactly the range length, never at-most. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e072-bounded-break/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-313"
+spec      = "ALS-B6"
+title     = "Recursion is rejected in the bounded profile — the reachable call graph is a DAG (E073)"
+statement = "Self or mutual recursion reachable from a `@bounded` function is rejected with E073 (hint `call graph`); an unresolvable callee is rejected conservatively. Recursive types are admissible; recursive traversal is not. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e073-bounded-recursion/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-314"
+spec      = "ALS-B7"
+title     = "A @bounded function calls only @bounded functions and first-order pure stdlib members (E074)"
+statement = "Calls from a `@bounded` function to a non-`@bounded` user function, creation or call of a closure/lambda, a higher-order stdlib call (a function value passed), a function reference, or `any P` dispatch are rejected with E074 (hint `@bounded callee`). Calls to `@bounded` functions and to first-order members of pure stdlib modules are admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e074-bounded-unbounded-callee/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e074-bounded-higher-order/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-315"
+spec      = "ALS-B8"
+title     = "Run-time-length heap construction is rejected in a @bounded function (E075)"
+statement = "`string.repeat`, `list.with_capacity`, `list.range` and any list/string construction whose size is a run-time value are rejected with E075 (hint `compile-time size`) in a `@bounded` function; literals and constant-size construction are admissible, and `push` outside loops is admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e075-bounded-runtime-length-heap/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-316"
+spec      = "ALS-B9"
+title     = "A @bounded effect fn may only use standard output; other effect modules, host-reaching modules and fan are rejected (E076)"
+statement = "In a `@bounded` function, calls into `env`, `fs`, `http`, `io` (other than print), `net`, `process`, `random`, `zlib`, the host-reaching `datetime`/`args`/`mem`/`testing`, and `fan.*` are rejected with E076 (hint `declared capability`); `println` and its family are admissible in a `@bounded effect fn`. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e076-bounded-effect-outside-capability/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-317"
+spec      = "ALS-B10"
+title     = "Float operations are provisionally rejected in a @bounded function (E077)"
+statement = "Operators on Float (arithmetic, comparison) and calls to Float-taking stdlib functions inside a `@bounded` function are rejected with E077 (hint `Int arithmetic`); holding and passing Float values is admissible. Provisional: revised — never silently relaxed — once the ALS-T19 numeric family is normative AND the certification seat has a Float operation set. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e077-bounded-float-arithmetic/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-318"
+spec      = "ALS-B11"
+title     = "Early exit inside a counted loop body is rejected in a @bounded function (E078)"
+statement = "`!` propagation (effect fn) and `guard … else` inside a counted loop body of a `@bounded` function are rejected with E078 (hint `outside the loop`); propagation and guards outside loops are admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e078-bounded-early-exit-in-loop/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
