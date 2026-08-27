@@ -475,21 +475,20 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
 /// expression type (for LICM-hoisted vars whose kind is Var but type is
 /// Result[Unit,_]). Extracted verbatim (cog>25 decomposition).
 fn stmt_guard_is_loop_control(else_: &IrExpr) -> bool {
-    matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue)
-        || (matches!(&else_.kind, IrExprKind::ResultOk { .. }) && {
-            if let IrExprKind::ResultOk { expr: inner } = &else_.kind {
-                matches!(&inner.kind, IrExprKind::Unit)
-            } else { false }
-        })
+    // ONLY an actual Break/Continue expression (bare, or as a block's single
+    // statement) is loop control. A VALUE else — `ok(())` included — is a
+    // FUNCTION return, per the interp's normative semantics (exec_stmt_guard:
+    // Flow::Value → Flow::Return). The retired arms here (Unit, ResultOk(Unit),
+    // the LICM-hoisted Result[Unit,_] Var) classified `guard c else ok(())` in
+    // an effect fn as `break` — E0268 outside a loop (#1593), and inside one a
+    // silent semantic split from the interp/wasm legs, which return.
+    matches!(&else_.kind, IrExprKind::Break | IrExprKind::Continue)
         // Block wrapping Continue/Break: { continue } has ty=Unit but action=continue
         || (matches!(&else_.kind, IrExprKind::Block { .. }) && {
             if let IrExprKind::Block { stmts, expr: None } = &else_.kind {
                 stmts.len() == 1 && matches!(&stmts[0].kind, IrStmtKind::Expr { expr } if matches!(&expr.kind, IrExprKind::Continue | IrExprKind::Break))
             } else { false }
         })
-        // LICM-hoisted ok(()) → Var with Result[Unit,_] type
-        || (matches!(&else_.kind, IrExprKind::Var { .. }) &&
-            matches!(&else_.ty, Ty::Applied(TypeConstructorId::Result, args) if args.first().is_some_and(|t| matches!(t, Ty::Unit))))
 }
 
 /// `render_stmt_guard` step: within a loop-control guard, is the action
