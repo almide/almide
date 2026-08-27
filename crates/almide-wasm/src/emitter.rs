@@ -707,16 +707,9 @@ impl Emitter<'_> {
                     .zip(offsets.iter().skip(1))
                     .map(|(&(v, t), &off)| (v, t, off, self.cells.contains(&v)))
                     .collect();
-                let j = self.work.register_lambda(LiftedLambda {
-                    params: ps,
-                    ret: def.ret,
-                    effect_raw,
-                    body: body.clone(),
-                    captures: captures.clone(),
-                    var_space: self.var_space,
-                    cur_module: None,
-                    charge_hop: true,
-                });
+                let j = self.work.register_closure_lambda(
+                    ps, def.ret, effect_raw, body.clone(), captures.clone(), self.var_space,
+                );
                 let slot = self.work.slot(TableEntry::Lambda(j));
                 if captures.is_empty() {
                     let block = self.pool.intern_block(&(slot).to_le_bytes());

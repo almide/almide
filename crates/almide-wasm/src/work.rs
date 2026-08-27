@@ -185,5 +185,29 @@ impl FnWork {
         v.push(ll);
         i
     }
+
+    /// A REAL closure lift: no module of its own, hop-charged. The #1627
+    /// synthetic module initializers are the one other construction site
+    /// (crate::func::emit_modinit_call) and spell their fields directly.
+    pub(crate) fn register_closure_lambda(
+        &self,
+        params: Vec<(almide_ir::VarId, crate::SliceTy)>,
+        ret: Option<crate::SliceTy>,
+        effect_raw: Option<crate::SliceTy>,
+        body: almide_ir::IrExpr,
+        captures: Vec<(almide_ir::VarId, crate::SliceTy, u32, bool)>,
+        var_space: u32,
+    ) -> u32 {
+        self.register_lambda(crate::LiftedLambda {
+            params,
+            ret,
+            effect_raw,
+            body,
+            captures,
+            var_space,
+            cur_module: None,
+            charge_hop: true,
+        })
+    }
 }
 
