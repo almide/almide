@@ -1,0 +1,9 @@
+// ALS-B3: index a fixed number of slots with a counted range instead.
+@bounded
+fn total(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<3 { acc = acc + (list.get(xs, i) ?? 0) }
+  acc
+}
+
+fn main() -> Unit = println("${total([1, 2, 3])}")

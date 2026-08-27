@@ -1,0 +1,13 @@
+// ALS-B5: run every iteration; select with a branch.
+@bounded
+fn grid() -> Int = {
+  var acc = 0
+  for i in 0..<4 {
+    for j in 0..<4 {
+      acc = acc + (if j > i then 0 else 1)
+    }
+  }
+  acc
+}
+
+fn main() -> Unit = println("${grid()}")

@@ -1,0 +1,11 @@
+// ALS-B11: default inside the loop; keep every iteration total.
+@bounded
+fn all_positive(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<3 {
+    acc = acc + (if (list.get(xs, i) ?? 0) > 0 then 1 else 0)
+  }
+  acc
+}
+
+fn main() -> Unit = println("${all_positive([1, 2, 3])}")

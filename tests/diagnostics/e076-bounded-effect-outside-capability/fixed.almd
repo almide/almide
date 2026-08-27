@@ -1,0 +1,5 @@
+// ALS-B9: standard output is the one admissible effect.
+@bounded
+effect fn report() -> Unit = println("bounded")
+
+effect fn main() -> Unit = report()

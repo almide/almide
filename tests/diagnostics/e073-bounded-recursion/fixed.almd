@@ -1,0 +1,9 @@
+// ALS-B6: a counted loop computes the same product without recursion.
+@bounded
+fn fact5() -> Int = {
+  var acc = 1
+  for i in 1...5 { acc = acc * i }
+  acc
+}
+
+fn main() -> Unit = println("${fact5()}")

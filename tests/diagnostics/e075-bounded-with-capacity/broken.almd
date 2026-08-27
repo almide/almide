@@ -1,0 +1,8 @@
+// ALS-B8: a run-time capacity is a run-time-length heap construction.
+@bounded
+fn buffer(n: Int) -> Int = {
+  let xs: List[Int] = list.with_capacity(n)
+  list.len(xs)
+}
+
+fn main() -> Unit = println("${buffer(3)}")

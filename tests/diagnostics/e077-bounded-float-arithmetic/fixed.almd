@@ -1,0 +1,5 @@
+// ALS-B10: Int arithmetic is admissible.
+@bounded
+fn scale(x: Int) -> Int = x * 2
+
+fn main() -> Unit = println("${scale(15)}")

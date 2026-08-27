@@ -253,6 +253,15 @@ let root_i = float.to_int(root_f)    // truncating
 | E059 | `for` over a non-iterable head (`for x in 5`) — the loop head must be a List or a Map | Iterate a List, a range (`for i in 0...n`), or a Map (`for (k, v) in m`) |
 | E060 | (warning) Import hygiene: a module imported and never used, or imported twice under two names | Remove the unused/duplicate import; `import _name` suppresses a deliberate one |
 | E061 | Top-level `let` bound to a lambda — the closure has no home in a module constant and the binding is not callable | Declare it as a function: `fn name(…) = …`; a `let`-bound lambda inside a fn/test body is fine |
+| E070 | `@bounded`: a loop without a compile-time trip count (`while`, `for` over a container, run-time range bounds) | Use a counted range with literal bounds: `for i in 0..<N` (ALS-B3) |
+| E071 | `@bounded`: allocation inside a counted loop (list/map/string construction, concat, push, closure) | Allocate outside the loop; accumulate scalars inside (ALS-B4) |
+| E072 | `@bounded`: `break`/`continue` inside a counted loop | Single exit: run every iteration and select with a branch (ALS-B5) |
+| E073 | `@bounded`: recursion — the reachable call graph must be a DAG | Replace recursion with a counted loop (ALS-B6) |
+| E074 | `@bounded`: a non-`@bounded` callee, closure, or higher-order call | Mark the callee `@bounded` or call a first-order pure stdlib member (ALS-B7) |
+| E075 | `@bounded`: run-time-length heap construction (`string.repeat(s, n)`, `list.with_capacity(n)`, …) | Give every constructed length a compile-time size (ALS-B8) |
+| E076 | `@bounded`: an effect outside the declared capability (env/fs/http/… or `fan.*`) | The profile's capability is standard output only (ALS-B9) |
+| E077 | `@bounded`: Float arithmetic or comparison (provisional rule) | Keep to Int arithmetic; Float values may be held and passed (ALS-B10) |
+| E078 | `@bounded`: `!` propagation or `guard` inside a counted loop | Propagate or guard outside the loop; default with `??` inside (ALS-B11) |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 

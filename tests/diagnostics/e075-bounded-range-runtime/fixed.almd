@@ -1,0 +1,5 @@
+// ALS-B8: constant bounds construct a compile-time-length list.
+@bounded
+fn upto() -> Int = list.len(list.range(0, 8))
+
+fn main() -> Unit = println("${upto()}")

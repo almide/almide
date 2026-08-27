@@ -1,0 +1,5 @@
+// ALS-B10: a Float comparison is a Float operation.
+@bounded
+fn hot(t: Float) -> Int = if t > 30.0 then 1 else 0
+
+fn main() -> Unit = println("${hot(31.5)}")

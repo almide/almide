@@ -1,0 +1,9 @@
+// ALS-B3: a counted loop with literal bounds is admissible.
+@bounded
+fn count_down() -> Int = {
+  var k = 3
+  for i in 0..<3 { k = k - 1 }
+  k
+}
+
+fn main() -> Unit = println("${count_down()}")

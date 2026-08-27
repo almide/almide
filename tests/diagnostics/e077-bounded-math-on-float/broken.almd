@@ -1,0 +1,5 @@
+// ALS-B10: a math call computing on Float arguments is a Float operation.
+@bounded
+fn lower(a: Float, b: Float) -> Float = math.fmin(a, b)
+
+fn main() -> Unit = println(float.to_string(lower(1.5, 2.5)))

@@ -1,0 +1,14 @@
+// ALS-B5: break in a nested counted loop still weakens the trip count.
+@bounded
+fn grid() -> Int = {
+  var acc = 0
+  for i in 0..<4 {
+    for j in 0..<4 {
+      if j > i then break
+      acc = acc + 1
+    }
+  }
+  acc
+}
+
+fn main() -> Unit = println("${grid()}")

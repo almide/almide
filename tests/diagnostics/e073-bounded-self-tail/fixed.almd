@@ -1,0 +1,9 @@
+// ALS-B6: the same sum as a counted loop.
+@bounded
+fn drain() -> Int = {
+  var acc = 0
+  for i in 1...5 { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${drain()}")

@@ -1,0 +1,5 @@
+// ALS-B4: a compile-time-sized construction outside the loop.
+@bounded
+fn ruler() -> String = string.repeat("x", 8)
+
+fn main() -> Unit = println(ruler())

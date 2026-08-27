@@ -1,0 +1,9 @@
+// ALS-B4: accumulate a scalar inside the loop; allocate nothing per iteration.
+@bounded
+fn sum_of_squares() -> Int = {
+  var acc = 0
+  for i in 0..<8 { acc = acc + i * i }
+  acc
+}
+
+fn main() -> Unit = println("${sum_of_squares()}")

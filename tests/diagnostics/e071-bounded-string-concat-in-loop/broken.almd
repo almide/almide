@@ -1,0 +1,9 @@
+// ALS-B4: growing a string inside a counted loop allocates per iteration.
+@bounded
+fn ruler() -> String = {
+  var s = ""
+  for i in 0..<8 { s = s + "x" }
+  s
+}
+
+fn main() -> Unit = println(ruler())

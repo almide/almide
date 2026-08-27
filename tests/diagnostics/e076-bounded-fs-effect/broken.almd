@@ -1,0 +1,7 @@
+// ALS-B9: fs reaches the host outside the profile's capability.
+import fs
+
+@bounded
+effect fn peek() -> String = fs.read_text("x.txt") ?? "missing"
+
+effect fn main() -> Unit = println(peek())

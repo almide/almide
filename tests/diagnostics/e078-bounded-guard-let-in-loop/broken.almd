@@ -1,0 +1,12 @@
+// ALS-B11: guard let inside a counted loop exits past the bound.
+@bounded
+fn first_three_sum(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<3 {
+    guard let v = list.get(xs, i) else 0
+    acc = acc + v
+  }
+  acc
+}
+
+fn main() -> Unit = println("${first_three_sum([4, 5, 6])}")

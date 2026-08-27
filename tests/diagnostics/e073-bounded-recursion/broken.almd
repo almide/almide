@@ -1,0 +1,5 @@
+// ALS-B6: self-recursion is a cycle in the call graph — not admissible.
+@bounded
+fn fact(n: Int) -> Int = if n <= 1 then 1 else n * fact(n - 1)
+
+fn main() -> Unit = println("${fact(5)}")

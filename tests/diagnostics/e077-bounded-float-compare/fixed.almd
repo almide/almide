@@ -1,0 +1,5 @@
+// ALS-B10: compare in Int; Float values may be held and passed.
+@bounded
+fn hot(deci: Int) -> Int = if deci > 300 then 1 else 0
+
+fn main() -> Unit = println("${hot(315)}")

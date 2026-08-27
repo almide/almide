@@ -1,0 +1,5 @@
+// ALS-B10: the Int twin computes inside the profile.
+@bounded
+fn lower(a: Int, b: Int) -> Int = math.min(a, b)
+
+fn main() -> Unit = println("${lower(1, 2)}")
