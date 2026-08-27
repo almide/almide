@@ -71,8 +71,12 @@ while IFS=$'\t' read -r _hash _exit path; do
   fi
   # 2. The generated program must BUILD under the lane's toolchain (the
   #    shared build dir keeps this incremental across the corpus).
-  if ! "$BIN" build "$path" -o /tmp/ferrocene-lane-out >/dev/null 2>&1; then
+  if ! out=$("$BIN" build "$path" -o /tmp/ferrocene-lane-out 2>&1); then
     echo "FAIL: $path — generated Rust did not build under the lane toolchain" >&2
+    # The compiler's own words, or the finding is not actionable from a
+    # machine without this toolchain (the gen-claims diagnosability rule).
+    printf '%s
+' "$out" | grep -B2 -A8 "^error" | head -40 >&2
     build_fail=$((build_fail + 1))
   fi
 done < "$MANIFEST"
