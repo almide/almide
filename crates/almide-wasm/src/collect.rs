@@ -163,7 +163,9 @@ pub(crate) fn collect_pattern_binds(
             }
             Ok(())
         }
-        IrPattern::Constructor { args, .. } | IrPattern::Tuple { elements: args } => {
+        IrPattern::Constructor { args, .. }
+        | IrPattern::Tuple { elements: args }
+        | IrPattern::List { elements: args } => {
             for a in args {
                 collect_pattern_binds(a, out, seen, types)?;
             }

@@ -208,6 +208,29 @@ impl Emitter<'_> {
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
             }
+            (IrPattern::List { elements }, SliceTy::List(h)) => {
+                // Fixed-arity list pattern (#1584's last lowering wall):
+                // the block's byte LEN equals arity × stride, then each
+                // REFUTABLE element tests at its payload slot. `[]` is the
+                // pure length test.
+                let et = self.types.el(h);
+                let stride = et.slot_size();
+                self.f.instructions().local_get(scr);
+                self.f.instructions().i32_load(len_memarg());
+                self.f.instructions().i32_const((elements.len() as u32 * stride) as i32);
+                self.f.instructions().i32_eq();
+                for (i, ep) in elements.iter().enumerate() {
+                    if pattern_irrefutable(ep) {
+                        continue;
+                    }
+                    self.f.instructions().if_(BlockType::Result(ValType::I32));
+                    self.f.instructions().local_get(scr);
+                    self.load_ty_slot(et, i as u32 * stride);
+                    self.test_nested(ep, et)?;
+                    self.f.instructions().else_().i32_const(0).end();
+                }
+                Ok(())
+            }
             _ => unsup(&format!("pattern:{}", pattern_name(p))),
         }
     }
@@ -294,6 +317,16 @@ impl Emitter<'_> {
                 };
                 self.bind_inner(inner, e, almide_layout::SUM_FIELD, scr)
             }
+            IrPattern::List { elements } => {
+                let SliceTy::List(h) = subj_ty else {
+                    return unsup("pattern:list-on-nonlist");
+                };
+                let stride = self.types.el(h).slot_size();
+                for (i, ep) in elements.iter().enumerate() {
+                    self.bind_inner(ep, h, i as u32 * stride, scr)?;
+                }
+                Ok(())
+            }
             IrPattern::Tuple { elements } => {
                 let SliceTy::Tuple(ti) = subj_ty else {
                     return unsup("pattern:tuple-on-nontuple");
@@ -331,7 +364,7 @@ impl Emitter<'_> {
             IrPattern::Constructor { name, args } => {
                 self.bind_ctor_fields(name, args, subj_ty, scr)
             }
-            other => unsup(&format!("pattern:{}", pattern_name(other))),
+            // exhaustive: every IrPattern form above has a binds arm
         }
     }
 
