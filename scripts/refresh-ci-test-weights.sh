@@ -16,10 +16,23 @@
 # `Cargo tests` total so the max/min skew is visible at refresh time.
 #
 # Usage: bash scripts/refresh-ci-test-weights.sh [run-id]
+#        bash scripts/refresh-ci-test-weights.sh --check [run-id]
+#
+# --check (#1615 item 4, the balance ratchet): measure the latest run's
+# per-shard `Cargo tests` totals and FAIL when max/min exceeds
+# WEIGHTS_SKEW_RATIO (default 1.4) — the signal that the weights went
+# stale again. Run weekly by .github/workflows/shard-balance.yml; the fix
+# it demands is exactly this script without --check.
 
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
+
+CHECK=0
+if [ "${1:-}" = "--check" ]; then
+  CHECK=1
+  shift
+fi
 
 RUN_ID="${1:-}"
 if [ -z "$RUN_ID" ]; then
@@ -40,12 +53,14 @@ for job in $JOB_IDS; do
   gh api "repos/{owner}/{repo}/actions/jobs/$job/logs" > "$TMP/$job.log"
 done
 
-python3 - "$TMP" <<'EOF'
+python3 - "$TMP" "$CHECK" "${WEIGHTS_SKEW_RATIO:-1.4}" <<'EOF'
 import os, re, sys
 from collections import defaultdict
 
 tmp = sys.argv[1]
+check, skew_limit = sys.argv[2] == "1", float(sys.argv[3])
 weights = defaultdict(float)
+shard_totals = []
 ansi = re.compile(r"\x1b\[[0-9;]*m")
 running_test = re.compile(r"Running\s+tests/([A-Za-z0-9_]+)\.rs\s+\(")
 running_unit = re.compile(r"Running\s+unittests\s+\S+\s+\(.*/deps/([A-Za-z0-9_]+)-[0-9a-f]{16}\)")
@@ -69,6 +84,24 @@ for logf in sorted(os.listdir(tmp)):
         print(f"WARN: {logf}: {len(queue)} Running line(s) without a result "
               f"(a crashed target?) — dropped: {', '.join(queue)}", file=sys.stderr)
     print(f"  shard {logf.split('.')[0]}: measured test time {total:.0f}s")
+    shard_totals.append(total)
+
+if check:
+    # A partially-fetched run must not pass by omission: the worst shard
+    # could be the missing one.
+    if len(shard_totals) < 4:
+        print(f"::error::only {len(shard_totals)} shard log(s) parsed (expected 4) — "
+              "cannot judge balance from a partial run", file=sys.stderr)
+        sys.exit(1)
+    lo, hi = min(shard_totals), max(shard_totals)
+    ratio = hi / lo if lo > 0 else float("inf")
+    print(f"shard balance: max {hi:.0f}s / min {lo:.0f}s = {ratio:.2f} (limit {skew_limit})")
+    if ratio > skew_limit:
+        print(f"::error::shard skew {ratio:.2f} exceeds {skew_limit} — the weights went "
+              "stale; run scripts/refresh-ci-test-weights.sh and commit the refreshed "
+              "scripts/ci-test-weights.txt", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
 
 rows = sorted(((n, s) for n, s in weights.items() if s >= 5.0),
               key=lambda kv: -kv[1])
