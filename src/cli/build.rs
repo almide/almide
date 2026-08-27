@@ -613,19 +613,28 @@ fn render_wasm_module_routed(
     library_ok: bool,
     has_main: bool,
     has_pkg_deps: bool,
-    has_self_import: bool,
+    uses_incumbent_features: bool,
     host_variant: bool,
 ) -> Result<(Vec<u8>, bool), ()> {
     //   - `ALMIDE_FUEL_PROBE` set         → incumbent (the charge-trace
     //     probe line is that leg's Σ-probe instrumentation — contract
     //     evidence keeps its measured meaning; the structural leg's C-320
     //     conformance has its own gates in crates/almide-wasm)
-    let incumbent = std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
-        || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
-        || !has_main
-        || has_pkg_deps
-        || has_self_import
-        || (library_ok && host_variant);
+    // `ALMIDE_WASM_STRUCTURAL=1` — the frontier-development probe switch:
+    // force the STRUCTURAL leg on shapes the routing would send to the
+    // incumbent, and turn every wall/decline into a hard error instead of
+    // the reroute (a probe that silently rerouted would measure nothing).
+    // This is how a routed-away shape (#1596 self-import, #1598 matrix/io)
+    // is exercised while its structural support is built, and the lever the
+    // eventual route flip is verified with.
+    let force_structural = std::env::var_os("ALMIDE_WASM_STRUCTURAL").is_some();
+    let incumbent = !force_structural
+        && (std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
+            || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
+            || !has_main
+            || has_pkg_deps
+            || uses_incumbent_features
+            || (library_ok && host_variant));
     if incumbent {
         return render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
     }
@@ -636,6 +645,10 @@ fn render_wasm_module_routed(
     // lower still fails hard with the incumbent's rich wall diagnostics.
     // ALMIDE_VERIFIED_DEBUG=1 names the wall that rerouted.
     let reroute = |why: &str| {
+        if force_structural {
+            err(&format!("error: structural leg walled under ALMIDE_WASM_STRUCTURAL ({why})"));
+            return Err(());
+        }
         if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
             err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
         }
@@ -862,17 +875,12 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         }
         hit
     };
-    // `import self as m` projects stay on the incumbent leg: the structural
-    // driver misaligns self-package top-let storage (#1596 — the crossmod
-    // matrix walls/panics there), and the shape sits outside the measured
-    // corpus (the run manifest sweeps wasm_cross/wasm_fail only).
-    let has_self_import = std::iter::once(&program)
-        .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
-        .flat_map(|p| p.imports.iter())
-        .any(|d| {
-            matches!(d, almide::ast::Decl::Import { path, .. }
-                if path.first().is_some_and(|r| r.as_str() == "self"))
-        });
+    // #1596 CLOSED: `import self as m` projects run the structural leg.
+    // The spaced globals machinery ((space, VarId) keys — separately-
+    // lowered modules each restart VarIds at 0) fixed the top-let storage
+    // misalignment; the full crossmod matrix passes on the forced
+    // structural leg, and a shape it still cannot lower (a module
+    // initializer with inner binds) walls honestly and reroutes.
     let _ = (&mut ir_program, allow_unverified, verified);
     render_wasm_module_routed(
         file,
@@ -881,7 +889,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         library_ok,
         has_main,
         has_pkg_deps,
-        has_self_import || uses_incumbent_stdlib || has_exports,
+        uses_incumbent_stdlib || has_exports,
         host_variant,
     )
 }
