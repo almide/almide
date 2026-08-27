@@ -1,0 +1,9 @@
+package wasi:clocks@0.3.0;
+
+interface system-clock {
+  record instant {
+    seconds: s64,
+    nanoseconds: u32,
+  }
+  now: func() -> instant;
+}

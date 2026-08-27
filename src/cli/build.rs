@@ -357,7 +357,21 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     let direct_p2 = component
         && structural
         && std::env::var_os("ALMIDE_COMPONENT_ADAPTER").is_none();
-    let bytes = if direct_p2 {
+    // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
+    // component — stdio over component-model streams on the async
+    // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
+    // env opt-in until the fan lowering lands on the same plumbing and
+    // the corpus gates cover it.
+    let direct_p3 = direct_p2 && std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
+    let bytes = if direct_p3 {
+        match almide_wasm_run::wasi_p3::to_p3(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
+            }
+        }
+    } else if direct_p2 {
         match almide_wasm_run::wasi_p2::to_p2(&bytes) {
             Ok(c) => c,
             Err(e) => {
@@ -416,6 +430,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     let leg = match (structural, component) {
         (true, false) => "structural leg",
         (false, false) => "incumbent v1 leg",
+        (true, true) if direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
         (true, true) if direct_p2 => "structural leg, WASI 0.2 component (direct)",
         (true, true) => "structural leg, WASI 0.2 component (adapter)",
         (false, true) => "incumbent v1 leg, WASI 0.2 component (adapter)",
