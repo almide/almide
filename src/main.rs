@@ -347,6 +347,13 @@ enum Commands {
         /// Add #[repr(C)] to structs/enums for stable C ABI
         #[arg(long)]
         repr_c: bool,
+        /// #572: emit `// almd: fn <name> @ line <N>` anchors on every
+        /// rendered function and write the sidecar traceability map
+        /// (`<file>.trace.json`) — the source-to-generated correspondence
+        /// a third-party review aligns on. Default off: the plain emission
+        /// stays byte-identical to the baselines.
+        #[arg(long = "trace-map")]
+        trace_map: bool,
     },
 }
 
@@ -793,8 +800,8 @@ fn dispatch_rest(command: Commands) {
         Commands::SelfUpdate { version } => {
             cli::cmd_self_update(version.as_deref());
         }
-        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c } => {
-            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c });
+        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
+            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }
         // `command`'s static type is the full `Commands` enum — Rust can't
         // narrow it to "one of the 12 variants `dispatch` doesn't handle"
