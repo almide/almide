@@ -117,6 +117,7 @@ almide compile                    # Module interface (project)
 almide compile parser             # Module interface (by name)
 almide compile app.almd --json    # Module interface (JSON)
 almide check app.almd             # Type check only
+almide check app.almd --profile critical --allow IO  # Critical profile (#567): bounded rules on every fn, capabilities deny-all
 almide fmt app.almd               # Format source
 almide fmt --check spec/          # Formatting gate (non-zero on drift)
 almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-context sources)
