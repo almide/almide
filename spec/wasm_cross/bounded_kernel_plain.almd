@@ -8,13 +8,19 @@ fn step(s: State, accel: Int) -> State = State { pos: s.pos + s.vel, vel: s.vel 
 
 fn simulate(accel: Int) -> State = {
   var s = State { pos: 0, vel: 0 }
-  for i in 0..<10 { s = step(s, accel) }
+  for _i in 0..<10 {
+    s = step(s, accel)
+  }
   s
 }
 
 fn grid_sum() -> Int = {
   var acc = 0
-  for i in 0..<4 { for j in 0..<3 { acc = acc + i * j } }
+  for i in 0..<4 {
+    for j in 0..<3 {
+      acc = acc + i * j
+    }
+  }
   acc
 }
 
@@ -26,6 +32,6 @@ fn main() -> Unit = {
   // 90 20
   println("${grid_sum()}")
   // 18
-  println("${half(8) ?? -1} ${half(7) ?? -1}")
   // 4 -1
+  println("${half(8) ?? -1} ${half(7) ?? -1}")
 }

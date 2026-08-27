@@ -15,28 +15,38 @@ fn quadruple(x: Int) -> Int = double(double(x))
 @bounded
 fn triangle() -> Int = {
   var acc = 0
-  for i in 1...10 { acc = acc + i }
+  for i in 1...10 {
+    acc = acc + i
+  }
   acc
 }
 
 @bounded
 fn grid_sum() -> Int = {
   var acc = 0
-  for i in 0..<4 { for j in 0..<3 { acc = acc + i * j } }
+  for i in 0..<4 {
+    for j in 0..<3 {
+      acc = acc + i * j
+    }
+  }
   acc
 }
 
 @bounded
 fn factorial_10() -> Int = {
   var acc = 1
-  for i in 1...10 { acc = acc * i }
+  for i in 1...10 {
+    acc = acc * i
+  }
   acc
 }
 
 @bounded
 fn dot(xs: List[Int], ys: List[Int]) -> Int = {
   var acc = 0
-  for i in 0..<3 { acc = acc + (list.get(xs, i) ?? 0) * (list.get(ys, i) ?? 0) }
+  for i in 0..<3 {
+    acc = acc + (list.get(xs, i) ?? 0) * (list.get(ys, i) ?? 0)
+  }
   acc
 }
 
@@ -46,7 +56,9 @@ fn step(s: State, accel: Int) -> State = State { pos: s.pos + s.vel, vel: s.vel 
 @bounded
 fn simulate(accel: Int) -> State = {
   var s = State { pos: 0, vel: 0 }
-  for i in 0..<10 { s = step(s, accel) }
+  for _i in 0..<10 {
+    s = step(s, accel)
+  }
   s
 }
 
