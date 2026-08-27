@@ -537,16 +537,25 @@ fn float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
 
 /// `min` / `max` / `clamp` — the explicit NaN/tie tree mirroring
 /// runtime/rs/src/float.rs `almide_rt_float_min`/`_max`, NOT `f64::min`/`max`
-/// (llvm.minnum/maxnum has unspecified ±0-tie order). Ties return the FIRST
-/// operand (C-049).
+/// (llvm.minnum/maxnum has unspecified ±0-tie order). The ±0 tie follows
+/// IEEE 754-2019 via totalOrder (ALS-T23, ADR-0016): min answers -0.0 and
+/// max answers +0.0, commutative; non-zero ties keep the first operand.
 fn float_order_fn(func: &str, args: &[Value]) -> Option<Flow> {
     match func {
         "min" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
+            if a == 0.0 && b == 0.0 && !a.is_nan() && !b.is_nan() {
+                let v = if a.is_sign_negative() { a } else { b };
+                return Some(Flow::val(Value::Float(v)));
+            }
             Some(Flow::val(Value::Float(pick_ordered(a, b, a > b))))
         }
         "max" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
+            if a == 0.0 && b == 0.0 && !a.is_nan() && !b.is_nan() {
+                let v = if a.is_sign_positive() { a } else { b };
+                return Some(Flow::val(Value::Float(v)));
+            }
             Some(Flow::val(Value::Float(pick_ordered(a, b, a < b))))
         }
         "clamp" => {

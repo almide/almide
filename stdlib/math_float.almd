@@ -15,7 +15,15 @@ fn math_fmin(a: Float, b: Float) -> Float = {
     if bnan then a
     else {
       let agtb = prim.fgt(a, b)
-      if agtb then b else a
+      if agtb then b
+      else {
+        // ALS-T23 (ADR-0016): the ±0 tie orders -0.0 < +0.0, commutative
+        let azero = prim.feq(a, 0.0)
+        let bzero = prim.feq(b, 0.0)
+        if azero and bzero then {
+          if prim.fbits(a) < 0 then a else b
+        } else a
+      }
     }
   }
 }
@@ -28,7 +36,15 @@ fn math_fmax(a: Float, b: Float) -> Float = {
     if bnan then a
     else {
       let altb = prim.flt(a, b)
-      if altb then b else a
+      if altb then b
+      else {
+        // ALS-T23: the ±0 tie answers +0.0
+        let azero = prim.feq(a, 0.0)
+        let bzero = prim.feq(b, 0.0)
+        if azero and bzero then {
+          if prim.fbits(a) < 0 then b else a
+        } else a
+      }
     }
   }
 }

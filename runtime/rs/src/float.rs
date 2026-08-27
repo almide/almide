@@ -16,12 +16,19 @@ pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
 pub fn almide_rt_float_sqrt(n: f64) -> f64 { n.sqrt() }
 // Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
 // why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
-// must not be used. Ties return the FIRST operand (C-049).
+// must not be used. The ±0 tie follows IEEE 754-2019 minimum/maximum via
+// totalOrder (ALS-T23, ADR-0016): -0.0 < +0.0, commutative — min answers
+// -0.0 and max answers +0.0 whichever operand order. Non-zero exact ties
+// keep the first operand as before (indistinguishable values).
 pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b } else if b.is_nan() { a } else if a > b { b } else { a }
+    if a.is_nan() { b } else if b.is_nan() { a }
+    else if a == 0.0 && b == 0.0 { if a.is_sign_negative() { a } else { b } }
+    else if a > b { b } else { a }
 }
 pub fn almide_rt_float_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }
+    if a.is_nan() { b } else if b.is_nan() { a }
+    else if a == 0.0 && b == 0.0 { if a.is_sign_positive() { a } else { b } }
+    else if a < b { b } else { a }
 }
 // ALS-T6: lo > hi OR a NaN bound aborts in the T6 form — `!(lo <= hi)` covers
 // both (f64::clamp panics raw on either).
