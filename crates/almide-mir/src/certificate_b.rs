@@ -1,4 +1,38 @@
 
+/// The flat-concat gate (MC/DC ledger, #566): every operand of the old
+/// four-way && is its own single-condition decision, same short-circuit
+/// One frame's arm buffers hold a +1 for `o` — the || split into early
+/// returns (MC/DC ledger, #566).
+fn frame_owns(fr: &BranchFrame, o: ValueId) -> bool {
+    if fr.then_ev.get(&o).map_or(false, |l| l.contains(['i', 'a'])) {
+        return true;
+    }
+    fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+}
+
+/// order. Net-zero, divergence-marker-free arms flatten.
+fn flat_concat_ok(t: &str, e: &str) -> bool {
+    if seg_net(t) != 0 {
+        return false;
+    }
+    if seg_net(e) != 0 {
+        return false;
+    }
+    if t.contains('x') {
+        return false;
+    }
+    !e.contains('x')
+}
+
+/// Either arm still carries a structural delimiter — the poisoned-flush
+/// gate, split from its || for the same ledger.
+fn either_has_delimiter(t: &str, e: &str) -> bool {
+    if t.contains(['(', ')', '{', '}', '[', ']']) {
+        return true;
+    }
+    e.contains(['(', ')', '{', '}', '[', ']'])
+}
+
 /// Per-object refcount-event accumulator, preserving object creation order.
 struct Streams {
     of: BTreeMap<ValueId, ValueId>, // handle → object representative
@@ -38,8 +72,12 @@ impl Streams {
     /// one exists (buffered until the region's flush), else onto the stream.
     fn append_seg(&mut self, o: ValueId, seg: &str) {
         if let Some(fr) = self.frames.last_mut() {
-            if !fr.then_ev.contains_key(&o) && !fr.else_ev.contains_key(&o) {
-                fr.order.push(o);
+            // Single-condition decisions (MC/DC ledger, #566): the &&
+            // short-circuit is the nested if, verbatim.
+            if !fr.then_ev.contains_key(&o) {
+                if !fr.else_ev.contains_key(&o) {
+                    fr.order.push(o);
+                }
             }
             let map = if fr.in_else { &mut fr.else_ev } else { &mut fr.then_ev };
             map.entry(o).or_default().push_str(seg);
@@ -83,15 +121,9 @@ impl Streams {
             // An arm carrying the divergence marker `x` NEVER flattens (even at
             // net 0): the bracket is what tells the checker WHICH side exited
             // the frame, so the flat concat would erase the exit obligation.
-            let seg = if seg_net(&t) == 0
-                && seg_net(&e) == 0
-                && !t.contains('x')
-                && !e.contains('x')
-            {
+            let seg = if flat_concat_ok(&t, &e) {
                 format!("{t}{e}")
-            } else if t.contains(['(', ')', '{', '}', '[', ']'])
-                || e.contains(['(', ')', '{', '}', '[', ']'])
-            {
+            } else if either_has_delimiter(&t, &e) {
                 self.poisoned = true;
                 "{i|}".to_string()
             } else {
@@ -230,7 +262,12 @@ fn endif_merge_heap(
     if_stack: &mut Vec<(Option<ValueId>, bool)>,
 ) {
     if let Some((dst, then_heap)) = if_stack.pop() {
-        let heap = then_heap || val.map_or(false, |v| heap_objs.contains(&v));
+        // Single-condition decisions (MC/DC ledger): || as if/else, verbatim.
+        let heap = if then_heap {
+            true
+        } else {
+            val.map_or(false, |v| heap_objs.contains(&v))
+        };
         if heap {
             if let Some(d) = dst {
                 heap_objs.insert(d);
@@ -462,8 +499,10 @@ impl CertScan {
         let Some(&slot) = self.feeder_to_slot.get(&dst) else { return false };
         let so = self.s.object_of(slot);
         self.s.of.insert(dst, so);
-        if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
-            self.s.event(so, '(');
+        if self.line_slots.contains(&slot) {
+            if self.s.frames.is_empty() {
+                self.s.event(so, '(');
+            }
         }
         self.s.event(so, ev);
         true
@@ -487,21 +526,34 @@ impl CertScan {
     /// loop is NOT a move-out (heap_result_if_append's accumulator would
     /// double-`m`).
     fn arm_val_moves(&self, v: crate::ValueId) -> bool {
-        self.s.of.contains_key(&v)
-            && self.s.balance(self.s.object_of(v)) > 0
-            && !self.consumed_values.contains(&v)
-            && !self.slots.contains(&self.s.object_of(v))
-            && !self.feeder_to_slot.contains_key(&v)
-            && !self.line_slots.contains(&self.s.object_of(v))
+        // Single-condition decisions (MC/DC ledger): each guard is its own
+        // early return — the && chain's short-circuit order, verbatim.
+        if !self.s.of.contains_key(&v) {
+            return false;
+        }
+        if self.s.balance(self.s.object_of(v)) <= 0 {
+            return false;
+        }
+        if self.consumed_values.contains(&v) {
+            return false;
+        }
+        if self.slots.contains(&self.s.object_of(v)) {
+            return false;
+        }
+        if self.feeder_to_slot.contains_key(&v) {
+            return false;
+        }
+        !self.line_slots.contains(&self.s.object_of(v))
     }
 
     /// Does object `o`'s stream (or an open arm buffer) hold a +1 event?
     fn stream_owns(&self, o: ValueId) -> bool {
-        self.s.stream.get(&o).map_or(false, |l| l.contains(['i', 'a']))
-            || self.s.frames.iter().any(|fr| {
-                fr.then_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
-                    || fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
-            })
+        // Single-condition decisions (MC/DC ledger): the || arms become
+        // early returns; the per-frame check is its own predicate.
+        if self.s.stream.get(&o).map_or(false, |l| l.contains(['i', 'a'])) {
+            return true;
+        }
+        self.s.frames.iter().any(|fr| frame_owns(fr, o))
     }
 
     /// Close a STRAIGHT-LINE slot's `(id)` CLoop body: the feeder's `i` + the drop-old's `d`
@@ -512,9 +564,11 @@ impl CertScan {
     /// flat `i…d` nets 0 and a delimiter in an arm buffer poisons the flush
     /// (`{i|}`); the fold is only needed for straight-line REPEATED reassigns.)
     fn line_slot_close(&mut self, local: ValueId) {
-        if self.line_slots.contains(&local) && self.s.frames.is_empty() {
-            let so = self.s.object_of(local);
-            self.s.event(so, ')');
+        if self.line_slots.contains(&local) {
+            if self.s.frames.is_empty() {
+                let so = self.s.object_of(local);
+                self.s.event(so, ')');
+            }
         }
     }
 
@@ -548,9 +602,13 @@ impl CertScan {
     /// acquired at the merge point, outside either arm.
     fn open_merge(&mut self, dst: Option<ValueId>) {
         if let Some(d) = dst {
-            if !self.try_feed(d, 'i') && self.released_merge_dsts.contains(&d) {
-                self.s.of.insert(d, d);
-                self.s.event(d, 'i');
+            // try_feed EMITS on success — the nested if keeps the &&'s
+            // exact short-circuit (feed first, fall through only on false).
+            if !self.try_feed(d, 'i') {
+                if self.released_merge_dsts.contains(&d) {
+                    self.s.of.insert(d, d);
+                    self.s.event(d, 'i');
+                }
             }
         }
         self.s.open_branch();
@@ -716,7 +774,12 @@ pub fn merge_dst_i_credits(func: &MirFunction) -> usize {
         .iter()
         .filter(|op| match op {
             Op::IfThen { dst: Some(d), .. } => {
-                feeder_to_slot.contains_key(d) || released.contains(d)
+                // Single-condition decisions (MC/DC ledger): || as if/else.
+                if feeder_to_slot.contains_key(d) {
+                    true
+                } else {
+                    released.contains(d)
+                }
             }
             _ => false,
         })
