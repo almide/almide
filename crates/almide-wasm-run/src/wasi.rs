@@ -28,37 +28,41 @@ use wasm_encoder::{
 };
 use wasmparser::{Parser, Payload};
 
-const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
+pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 // Park-page layout (offsets from park base).
-const IOV: u64 = 0; // two iovec entries (16 bytes)
-const NREAD: u64 = 16;
-const NL: u64 = 24;
-const MSG: u64 = 64;
-const DATA: u64 = 1024; // stdin/entropy bytes
+pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)
+pub(crate) const NREAD: u64 = 16;
+pub(crate) const NL: u64 = 24;
+pub(crate) const MSG: u64 = 64;
+pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes
 /// The park span: four pages carved out at the original heap base.
-const PARK_SPAN: u64 = 4 * 65536;
+pub(crate) const PARK_SPAN: u64 = 4 * 65536;
 
-struct Remap {
-    shim_base: u32,
+pub(crate) struct Remap {
+    pub(crate) shim_base: u32,
+    /// How far NON-import function indices move (0 for the p1 build — it
+    /// keeps the import count at five; the p2 build imports eight, so
+    /// every original index >= 5 shifts by three).
+    pub(crate) shift: u32,
 }
 
 impl Reencode for Remap {
     type Error = std::convert::Infallible;
     fn function_index(&mut self, func: u32) -> Result<u32, wasm_encoder::reencode::Error<Self::Error>> {
-        Ok(if func < 5 { self.shim_base + func } else { func })
+        Ok(if func < 5 { self.shim_base + func } else { func + self.shift })
     }
 }
 
-fn mem(offset: u64) -> MemArg {
+pub(crate) fn mem(offset: u64) -> MemArg {
     MemArg { offset, align: 2, memory_index: 0 }
 }
 
-fn mem8(offset: u64) -> MemArg {
+pub(crate) fn mem8(offset: u64) -> MemArg {
     MemArg { offset, align: 0, memory_index: 0 }
 }
 
 /// Find a function type's index, or append it.
-fn type_index(
+pub(crate) fn type_index(
     types: &mut Vec<(Vec<ValType>, Vec<ValType>)>,
     params: &[ValType],
     results: &[ValType],
@@ -71,19 +75,19 @@ fn type_index(
 }
 
 /// Everything `to_wasi` needs out of the source module, in one parse pass.
-struct Parsed<'a> {
-    types: Vec<(Vec<ValType>, Vec<ValType>)>,
-    func_types: Vec<u32>,
-    tables: TableSection,
-    old_mem_min: u64,
-    parsed_globals: Vec<(GlobalType, Option<i32>, Option<i64>, Option<u64>)>,
-    global_count: u32,
-    heap_global: Option<u32>,
-    exports: ExportSection,
-    main_index: Option<u32>,
-    elements: ElementSection,
-    data: DataSection,
-    bodies: Vec<wasmparser::FunctionBody<'a>>,
+pub(crate) struct Parsed<'a> {
+    pub(crate) types: Vec<(Vec<ValType>, Vec<ValType>)>,
+    pub(crate) func_types: Vec<u32>,
+    pub(crate) tables: TableSection,
+    pub(crate) old_mem_min: u64,
+    pub(crate) parsed_globals: Vec<(GlobalType, Option<i32>, Option<i64>, Option<u64>)>,
+    pub(crate) global_count: u32,
+    pub(crate) heap_global: Option<u32>,
+    pub(crate) exports: ExportSection,
+    pub(crate) main_index: Option<u32>,
+    pub(crate) elements: ElementSection,
+    pub(crate) data: DataSection,
+    pub(crate) bodies: Vec<wasmparser::FunctionBody<'a>>,
 }
 
 /// One global's type and const-init operands (i32/i64/f64 — the only forms
@@ -135,7 +139,7 @@ fn parse_export(e: wasmparser::Export<'_>, p: &mut Parsed<'_>) -> anyhow::Result
     Ok(())
 }
 
-fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
+pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
     let mut p = Parsed {
         types: Vec::new(),
         func_types: Vec::new(),
@@ -309,9 +313,9 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     exports.export("_start", ExportKind::Func, main_index);
 
     let mut code = CodeSection::new();
-    let mut remap = Remap { shim_base };
+    let mut remap = Remap { shim_base, shift: 0 };
     for b in bodies {
-        code.function(&reencode_body(&b, &mut remap)?);
+        code.function(&reencode_body(&b, &mut remap, 1)?);
     }
     // Shims (their own calls target the NEW imports — no remap).
     code.function(&shim_print(1, park));
@@ -348,7 +352,7 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
 /// engine-fault split), and a stock WASI runtime would otherwise surface
 /// 128+SIGABRT. The trailing `unreachable` stays for stack-polymorphic
 /// validity.
-fn reencode_body(b: &wasmparser::FunctionBody<'_>, remap: &mut Remap) -> anyhow::Result<Function> {
+pub(crate) fn reencode_body(b: &wasmparser::FunctionBody<'_>, remap: &mut Remap, exit_fn: u32) -> anyhow::Result<Function> {
     let locals: Vec<(u32, ValType)> = b
         .get_locals_reader()?
         .into_iter()
@@ -361,7 +365,9 @@ fn reencode_body(b: &wasmparser::FunctionBody<'_>, remap: &mut Remap) -> anyhow:
     for op in b.get_operators_reader()? {
         let op = op?;
         if matches!(op, wasmparser::Operator::Unreachable) {
-            f.instructions().i32_const(1).call(1); // proc_exit(1)
+            // A trap becomes the DEFINED failure exit (p1: proc_exit(1);
+            // p2: wasi:cli/exit exit(err)) — both spell "exit code 1".
+            f.instructions().i32_const(1).call(exit_fn);
         }
         let inst = remap.instruction(op).expect("instruction reencode");
         f.instruction(&inst);

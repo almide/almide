@@ -347,34 +347,50 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // the WASI form — same index space, shimmed imports, proc_exit on trap
     // (the #1588 transform; the 578-fixture stock-wasmtime gate is its
     // reproduction witness).
-    let bytes = if structural {
-        match almide_wasm_run::wasi::to_wasi(&bytes) {
-            Ok(w) => w,
-            Err(e) => {
-                err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
-                std::process::exit(1);
-            }
-        }
-    } else {
-        bytes
-    };
-
-    // `--component` (#1628 stage 0): wrap the WASI core module into a
-    // WASI 0.2 component with the PINNED preview1 adapter (the
-    // wasi-preview1-component-adapter-provider crate — versioned by Cargo,
-    // no vendored blob). Sync surface only; the fan/async component target
-    // is stage 2. The wrap is a packaging step, not a rewrite: the core
-    // module inside is byte-identical to the plain artifact.
-    let bytes = if component {
-        match wrap_component(&bytes) {
+    // `--component` on the STRUCTURAL leg (#1628 stage 1): the DIRECT p2
+    // path — canonical-ABI imports straight off the almide.* module, no
+    // preview1 adapter (~25 KB lighter, and the only shape the stage-2
+    // fan/async lowering can build on). `ALMIDE_COMPONENT_ADAPTER=1` is
+    // the reversible switch back to the stage-0 adapter wrap; the
+    // incumbent leg stays on the adapter path (its module is already
+    // p1-shaped).
+    let direct_p2 = component
+        && structural
+        && std::env::var_os("ALMIDE_COMPONENT_ADAPTER").is_none();
+    let bytes = if direct_p2 {
+        match almide_wasm_run::wasi_p2::to_p2(&bytes) {
             Ok(c) => c,
             Err(e) => {
-                err(&format!("error: component encoding failed — this is an Almide bug: {e}"));
+                err(&format!("error: p2 component transform failed — this is an Almide bug: {e}"));
                 std::process::exit(1);
             }
         }
     } else {
-        bytes
+        let bytes = if structural {
+            match almide_wasm_run::wasi::to_wasi(&bytes) {
+                Ok(w) => w,
+                Err(e) => {
+                    err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            bytes
+        };
+        // Stage-0 adapter wrap (the incumbent leg's component form, and
+        // the structural leg's reversible fallback): the WASI core module
+        // + the Cargo-pinned preview1 adapter. Packaging, not a rewrite.
+        if component {
+            match wrap_component(&bytes) {
+                Ok(c) => c,
+                Err(e) => {
+                    err(&format!("error: component encoding failed — this is an Almide bug: {e}"));
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            bytes
+        }
     };
 
     let pre_size = bytes.len();
@@ -400,8 +416,9 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     let leg = match (structural, component) {
         (true, false) => "structural leg",
         (false, false) => "incumbent v1 leg",
-        (true, true) => "structural leg, WASI 0.2 component",
-        (false, true) => "incumbent v1 leg, WASI 0.2 component",
+        (true, true) if direct_p2 => "structural leg, WASI 0.2 component (direct)",
+        (true, true) => "structural leg, WASI 0.2 component (adapter)",
+        (false, true) => "incumbent v1 leg, WASI 0.2 component (adapter)",
     };
     if !wasm_opt {
         err(&format!(

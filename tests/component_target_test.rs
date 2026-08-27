@@ -98,9 +98,11 @@ fn component_wrap_preserves_behavior_on_both_legs() {
     let comp = dir.join("echo_comp.wasm");
     build(&src, &core, false, false);
     let line = build(&src, &comp, true, false);
+    // #1628 stage 1: the structural leg's component form is the DIRECT
+    // canonical-ABI encode — no preview1 adapter aboard.
     assert!(
-        line.contains("WASI 0.2 component"),
-        "the build line must name the component form:\n{line}"
+        line.contains("WASI 0.2 component (direct)"),
+        "the structural component must take the direct p2 path:\n{line}"
     );
     // A component starts with the component layer marker; a core module
     // does not. (Bytes 4..8: version+layer; layer 1 = component.)
@@ -108,7 +110,31 @@ fn component_wrap_preserves_behavior_on_both_legs() {
     assert_eq!(&comp_bytes[6..8], &[1, 0], "not a component-layer artifact");
 
     let icomp = dir.join("echo_icomp.wasm");
-    build(&src, &icomp, true, true);
+    let iline = build(&src, &icomp, true, true);
+    assert!(
+        iline.contains("component (adapter)"),
+        "the incumbent component stays on the adapter path:\n{iline}"
+    );
+    // The reversible switch: the structural leg's stage-0 adapter wrap.
+    let acomp = dir.join("echo_acomp.wasm");
+    {
+        let o = Command::new(almide_bin())
+            .args([
+                "build",
+                src.to_str().unwrap(),
+                "--target",
+                "wasm",
+                "--component",
+                "-o",
+                acomp.to_str().unwrap(),
+            ])
+            .env("ALMIDE_COMPONENT_ADAPTER", "1")
+            .output()
+            .expect("spawn almide");
+        let e = String::from_utf8_lossy(&o.stderr);
+        assert!(o.status.success(), "adapter fallback failed:\n{e}");
+        assert!(e.contains("component (adapter)"), "fallback must name the adapter form:\n{e}");
+    }
 
     if !wasmtime_available() {
         return;
@@ -124,5 +150,10 @@ fn component_wrap_preserves_behavior_on_both_legs() {
         run_wasmtime(&icomp, STDIN),
         core_out,
         "incumbent component diverged from the core module"
+    );
+    assert_eq!(
+        run_wasmtime(&acomp, STDIN),
+        core_out,
+        "the adapter-fallback component diverged from the core module"
     );
 }
