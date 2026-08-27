@@ -1434,13 +1434,30 @@ jobs:
   # mutant in ci/mutations/ must be CAUGHT by the release-shape net; a
   # surviving mutant or a no-longer-applying patch is red (refresh, never
   # retire).
+  #
+  # #1619: PR runs are INCREMENTAL — only mutants whose patched files (or
+  # patch file, or the shared killer infrastructure) intersect the PR's
+  # change set run, so most PRs finish in seconds instead of ~45 min. The
+  # FULL 40-mutant sweep lives in mutation-sweep.yml (develop pushes in an
+  # uncancelable concurrency group + nightly), where it actually completes —
+  # under ci.yml's cancel-in-progress group the develop sweep was routinely
+  # canceled mid-run, which is standing evidence that never lands. Push
+  # events therefore skip this job entirely (skipped = success for the
+  # required-check, and the sweep workflow owns the push-side evidence).
   commissioned-mutation-gate:
     name: Commissioned mutation gate (the net keeps its teeth)
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The incremental scope diffs against the PR base ref.
+          fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
-      - name: mutants must be caught
-        run: bash scripts/check-mutation-gate.sh
+      - name: in-scope mutants must be caught (full sweep lives in mutation-sweep.yml)
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          ALMIDE_MUTATION_SCOPE=incremental \
+          ALMIDE_MUTATION_BASE="origin/${{ github.base_ref }}" \
+            bash scripts/check-mutation-gate.sh
