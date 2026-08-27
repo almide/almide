@@ -537,17 +537,17 @@ fn float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
 
 /// `min` / `max` / `clamp` — the explicit NaN/tie tree mirroring
 /// runtime/rs/src/float.rs `almide_rt_float_min`/`_max`, NOT `f64::min`/`max`
-/// (llvm.minnum/maxnum has unspecified ±0-tie order). Ties return the FIRST
-/// operand (C-049).
+/// (llvm.minnum/maxnum has unspecified ±0-tie order). Ties follow the
+/// IEEE-754-2019 zero ordering (C-049, ALS-T23).
 fn float_order_fn(func: &str, args: &[Value]) -> Option<Flow> {
     match func {
         "min" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
-            Some(Flow::val(Value::Float(pick_ordered(a, b, a > b))))
+            Some(Flow::val(Value::Float(pick_min(a, b))))
         }
         "max" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
-            Some(Flow::val(Value::Float(pick_ordered(a, b, a < b))))
+            Some(Flow::val(Value::Float(pick_max(a, b))))
         }
         "clamp" => {
             let n = as_float(args.first())?;
@@ -564,17 +564,24 @@ fn float_order_fn(func: &str, args: &[Value]) -> Option<Flow> {
     }
 }
 
-/// The min/max body shared by [`float_order_fn`]: a NaN operand loses, and
-/// `take_b` decides the non-NaN comparison so a tie keeps `a` (the first
-/// operand) either way.
-fn pick_ordered(a: f64, b: f64, take_b: bool) -> f64 {
-    if a.is_nan() {
-        b
-    } else if b.is_nan() || !take_b {
-        a
-    } else {
-        b
-    }
+/// The min/max bodies shared by [`float_order_fn`]: a NaN operand loses,
+/// and a TIE (the ±0 pair included) follows IEEE-754-2019 zero ordering
+/// (C-049, ALS-T23): min = -0.0, max = +0.0, commutative — the same
+/// decision tree the native runtime and both wasm legs implement.
+fn pick_min(a: f64, b: f64) -> f64 {
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a < b { a }
+    else if b < a { b }
+    else if a.is_sign_negative() { a } else { b }
+}
+
+fn pick_max(a: f64, b: f64) -> f64 {
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a > b { a }
+    else if b > a { b }
+    else if a.is_sign_positive() { a } else { b }
 }
 
 /// The text surface: rendering to a string and parsing back.
