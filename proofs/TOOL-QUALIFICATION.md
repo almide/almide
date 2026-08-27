@@ -100,8 +100,9 @@ attested and attached to the release by the trust-spine tag run.
 | Line-level source traceability in generated Rust | #572 | closed — `--trace-map` + review guide |
 | Lean/Rocq proof coverage of the RUNTIME (allocator, free-list, RC ops as shipped) | #576 | model proven (FC-3); implementation gap open |
 | Qualified/minimal wasm execution environment | #865 | not started |
-| Critical-profile subset (`almide check --profile critical`) + static memory mode | #567, #568 | not started |
-| Flight reference app through `make verify` | #776 | not started |
+| Critical-profile subset (`almide check --profile critical`) | #567 | closed — bounded profile on every fn, deny-all capabilities with `--allow` grants, subset property CI-enforced |
+| Static memory mode for the Critical profile | #568 | not started |
+| Flight reference app through `make verify` | #776 | closed — G-F4 chain evidenced end to end; the receipt derives all six stages (`proofs/receipt.sh`) |
 | First dossier-carrying release (fires #571/#1534 closure) | #571, #1534 | machinery live; next tag |
 
 A qualification engineer reading this package starts at §2 (what the
