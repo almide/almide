@@ -45,6 +45,15 @@ impl Checker {
             return ty;
         }
         if let Some(ty) = self.check_call_target_convention(&obj_concrete, &field, &obj_ty, arg_tys) {
+            // The convention path's `check_named_call` populated
+            // `last_mut_params` and nothing consumed it: an immutable
+            // receiver of a `mut self` method sailed through (native died
+            // in rustc E0596, wasm RAN and mutated the let — a leg split),
+            // and the STALE entry then fired E032 on the NEXT call
+            // (`println("${...}")` accused of a mut param it never had).
+            // Validate with the receiver at argument 0, like the builtin
+            // path above (#1624).
+            self.validate_ufcs_mut_args(&field, object, args);
             return ty;
         }
         if let Some(ty) = self.check_call_target_typevar_protocol(&obj_concrete, &field) {
@@ -54,9 +63,12 @@ impl Checker {
         if self.env.functions.contains_key(&sym(&field)) {
             let mut all_args = vec![obj_ty];
             all_args.extend(arg_tys.iter().cloned());
-            return self.check_named_call(&field, &all_args);
+            let ty = self.check_named_call(&field, &all_args);
+            self.validate_ufcs_mut_args(&field, object, args);
+            return ty;
         }
         if let Some(ty) = self.check_call_target_cross_module_ufcs(&obj_concrete, &field, &obj_ty, arg_tys) {
+            self.validate_ufcs_mut_args(&field, object, args);
             return ty;
         }
         if let Some(ty) = self.check_call_target_e002_hint(builtin_module, &field, object) {
