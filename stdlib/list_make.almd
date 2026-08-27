@@ -26,8 +26,7 @@ fn __range_count(start: Int, end: Int) -> Int = if end <= start then 0
 else if start >= 0 then end - start
 else if end < 0 then end - start
 else if end > 268435456 then 0 - 1
-else if start < 0 - 268435456 then 0 - 1
-else end - start
+else if start < 0 - 268435456 then 0 - 1 else end - start
 
 fn list_range(start: Int, end: Int) -> List[Int] = {
   let count = __range_count(start, end)

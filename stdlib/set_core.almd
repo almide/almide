@@ -31,8 +31,7 @@ else {
 // The index is VALID iff `ilen == len`, and `__set_alloc` stamps every fresh block with
 // ilen = -1: a producer that writes elements without touching the buckets yields an
 // INVALID index that the next read rebuilds, so the two can never silently disagree.
-fn __set_pow2(n: Int, e: Int) -> Int = if e >= n then e
-else __set_pow2(n, e * 2)
+fn __set_pow2(n: Int, e: Int) -> Int = if e >= n then e else __set_pow2(n, e * 2)
 
 fn __set_cap_for(need: Int) -> Int = if need <= 0 then 0
 else {
@@ -40,8 +39,7 @@ else {
   if e >= 16 then e * 2 + 1 else e
 }
 
-fn __set_ecap(cap: Int) -> Int = if cap >= 33 then (cap - 1) / 2
-else cap
+fn __set_ecap(cap: Int) -> Int = if cap >= 33 then (cap - 1) / 2 else cap
 
 fn __set_il(h: Int, ecap: Int) -> Int = h + 12 + ecap * 8
 
@@ -119,7 +117,8 @@ fn __set_has_ix(h: Int, len: Int, cap: Int, x: Int) -> Bool = {
   if ecap < 16 then __set_has(h, len, x, 0)
   else {
     let ilen = prim.load64(__set_il(h, ecap))
-    let _r = if ilen == len then 0 else __set_reindex(h, ecap, len)
+    let _r = if ilen == len then 0
+    else __set_reindex(h, ecap, len)
     let mask = ecap * 2 - 1
     __set_probe(h, __set_bb(h, ecap), mask, x, prim.band(__set_mix(x), mask)) >= 0
   }
@@ -265,7 +264,8 @@ fn set_union(a: Set[Int], b: Set[Int]) -> Set[Int] = {
   let ecap = __set_ecap(prim.load32(rh + 8))
   let _c = __set_copy(ah, rh, alen, 0)
   // a's elements first (a's order)
-  let _i = if ecap < 16 then 0 else __set_reindex(rh, ecap, alen)
+  let _i = if ecap < 16 then 0
+  else __set_reindex(rh, ecap, alen)
   let w = __set_addb(bh, blen, rh, ecap, 0, alen)
   prim.store32(rh + 4, w)
   r

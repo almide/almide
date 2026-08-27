@@ -8,6 +8,5 @@ effect fn fs_modified_at(path: String) -> Result[Int, String] = {
   let buf = prim.alloc_bytes(64)
   let p = prim.handle(buf) + 12
   let errno = prim.path_filestat(p, path)
-  if errno != 0 then err("stat failed: " + path)
-  else ok(prim.load64(p + 48) / 1000000000)
+  if errno != 0 then err("stat failed: " + path) else ok(prim.load64(p + 48) / 1000000000)
 }

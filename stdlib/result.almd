@@ -11,15 +11,15 @@
 // opposite.)
 @intrinsic("almide_rt_result_map")
 @consume(r)
-fn map[A, B, E](r: Result[A, E], f: fn(A) -> B) -> Result[B, E] = _
+fn map[A, B, E](r: Result[A, E], f: (A) -> B) -> Result[B, E] = _
 
 @intrinsic("almide_rt_result_map_err")
 @consume(r)
-fn map_err[A, E, F](r: Result[A, E], f: fn(E) -> F) -> Result[A, F] = _
+fn map_err[A, E, F](r: Result[A, E], f: (E) -> F) -> Result[A, F] = _
 
 @intrinsic("almide_rt_result_flat_map")
 @consume(r)
-fn flat_map[A, B, E](r: Result[A, E], f: fn(A) -> Result[B, E]) -> Result[B, E] = _
+fn flat_map[A, B, E](r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E] = _
 
 @intrinsic("almide_rt_result_unwrap_or")
 @consume(r)
@@ -27,7 +27,7 @@ fn unwrap_or[A, E](r: Result[A, E], default: A) -> A = _
 
 @intrinsic("almide_rt_result_unwrap_or_else")
 @consume(r)
-fn unwrap_or_else[A, E](r: Result[A, E], f: fn(E) -> A) -> A = _
+fn unwrap_or_else[A, E](r: Result[A, E], f: (E) -> A) -> A = _
 
 @intrinsic("almide_rt_result_is_ok")
 @borrow_ref(r)
@@ -75,12 +75,12 @@ fn zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E] = match a
   err(e) => err(e),
 }
 
-fn or_else[A, E, F](r: Result[A, E], f: fn(E) -> Result[A, F]) -> Result[A, F] = match r {
+fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = match r {
   ok(v) => ok(v),
   err(e) => f(e),
 }
 
-fn filter[A, E](r: Result[A, E], pred: fn(A) -> Bool, err_val: E) -> Result[A, E] = match r {
+fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
   ok(v) => if pred(v) then ok(v) else err(err_val),
   err(e) => err(e),
 }

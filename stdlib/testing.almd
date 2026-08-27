@@ -7,7 +7,7 @@
 // Named dispatcher holding hardcoded assert_contains / assert_approx /
 // etc. implementations; that tree was retired in c71eff7b.)
 @intrinsic("almide_rt_test_assert_throws")
-fn assert_throws(f: fn() -> Unit, expected: String) -> Unit = _
+fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
 
 @intrinsic("almide_rt_test_assert_contains")
 fn assert_contains(haystack: String, needle: String) -> Unit = _

@@ -134,7 +134,8 @@ fn bytes_chunks(b: Bytes, size: Int) -> List[Bytes] = {
   // overflows, and the chunk COUNT computed from the overflowed value is garbage — the
   // allocation that follows is then sized from it. `bytes.chunks(b, i64::MAX)` is one chunk,
   // not a wrapped count. Identical to the form `list.chunk` takes for the same reason.
-  let num = if size <= 0 then 0 else total / size + (if total % size != 0 then 1 else 0)
+  let num = if size <= 0 then 0
+  else total / size + (if total % size != 0 then 1 else 0)
   let outer = prim.alloc_list_str(num)
   let _x = if size <= 0 then 0
   else __bc_outer(prim.handle(outer), bh, total, size, 0, 0)

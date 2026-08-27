@@ -19,12 +19,12 @@ fn __rcopy_at(mh: Int) -> String = {
 }
 
 // Ok(f(x)) — the closure applied on the Ok arm only (a heap-result helper isolates the call).
-fn __res_map_ok(x: Int, f: fn(Int) -> Int) -> Result[Int, String] = {
+fn __res_map_ok(x: Int, f: (Int) -> Int) -> Result[Int, String] = {
   let y = f(x)
   ok(y)
 }
 
-fn result_map(r: Result[Int, String], f: fn(Int) -> Int) -> Result[Int, String] = {
+fn result_map(r: Result[Int, String], f: (Int) -> Int) -> Result[Int, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -34,12 +34,12 @@ fn result_map(r: Result[Int, String], f: fn(Int) -> Int) -> Result[Int, String] 
 // result.flat_map(r, f) = r.and_then(f): Ok(x) → f(x) (an Result itself), Err(e) → Err(e). The
 // closure RETURNS a Result (heap-result CallIndirect), invoked ONLY on the Ok arm; its fresh owned
 // result is moved straight out. The Err message is preserved by deep copy, as in result.map.
-fn __res_flatmap_ok(x: Int, f: fn(Int) -> Result[Int, String]) -> Result[Int, String] = {
+fn __res_flatmap_ok(x: Int, f: (Int) -> Result[Int, String]) -> Result[Int, String] = {
   let r = f(x)
   r
 }
 
-fn result_flat_map(r: Result[Int, String], f: fn(Int) -> Result[Int, String]) -> Result[Int, String] = {
+fn result_flat_map(r: Result[Int, String], f: (Int) -> Result[Int, String]) -> Result[Int, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -60,13 +60,13 @@ fn result_to_err_option(r: Result[Int, String]) -> String? = {
 // the Err message (a HEAP arg — the uniform-i64 closure ABI) and returns a scalar. f is invoked
 // ONLY on the Err arm, over a deep COPY of the message (so f borrows a value the input still owns);
 // the copy is freed at the helper's scope end. `r` is borrowed; the result is a scalar Int.
-fn __res_unwrap_else(emsg: Int, f: fn(String) -> Int) -> Int = {
+fn __res_unwrap_else(emsg: Int, f: (String) -> Int) -> Int = {
   let e = __rcopy_at(emsg)
   let y = f(e)
   y
 }
 
-fn result_unwrap_or_else(r: Result[Int, String], f: fn(String) -> Int) -> Int = {
+fn result_unwrap_or_else(r: Result[Int, String], f: (String) -> Int) -> Int = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -77,13 +77,13 @@ fn result_unwrap_or_else(r: Result[Int, String], f: fn(String) -> Int) -> Int = 
 // message (a HEAP String arg) to a new String (heap result), invoked ONLY on the Err arm over a
 // deep COPY of the message. The closure's fresh result is moved into the new Err (an owned Var, so
 // the Err materializes); the copy `e` is freed at the helper's scope end.
-fn __res_maperr_err(emsg: Int, f: fn(String) -> String) -> Result[Int, String] = {
+fn __res_maperr_err(emsg: Int, f: (String) -> String) -> Result[Int, String] = {
   let e = __rcopy_at(emsg)
   let new = f(e)
   err(new)
 }
 
-fn result_map_err(r: Result[Int, String], f: fn(String) -> String) -> Result[Int, String] = {
+fn result_map_err(r: Result[Int, String], f: (String) -> String) -> Result[Int, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -105,12 +105,12 @@ fn __rfil_propagate(emsg: Int) -> Result[Int, String] = {
   err(copy)
 }
 
-fn __rfil_ok(v: Int, pred: fn(Int) -> Bool, err_val: String) -> Result[Int, String] = {
+fn __rfil_ok(v: Int, pred: (Int) -> Bool, err_val: String) -> Result[Int, String] = {
   let p = pred(v)
   if p then ok(v) else __rfil_err_val(err_val)
 }
 
-fn result_filter(r: Result[Int, String], pred: fn(Int) -> Bool, err_val: String) -> Result[Int, String] = {
+fn result_filter(r: Result[Int, String], pred: (Int) -> Bool, err_val: String) -> Result[Int, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -122,13 +122,13 @@ fn result_filter(r: Result[Int, String], pred: fn(Int) -> Bool, err_val: String)
 // error). SCALAR Result[Int, String]; the closure RETURNS a Result, invoked via a heap-result
 // CallIndirect ONLY on the Err arm (the proven heap-result call-arm). `r` borrowed; f's fresh result
 // moved straight out.
-fn __ror_recover(emsg: Int, f: fn(String) -> Result[Int, String]) -> Result[Int, String] = {
+fn __ror_recover(emsg: Int, f: (String) -> Result[Int, String]) -> Result[Int, String] = {
   let e = __rcopy_at(emsg)
   let r = f(e)
   r
 }
 
-fn result_or_else(r: Result[Int, String], f: fn(String) -> Result[Int, String]) -> Result[Int, String] = {
+fn result_or_else(r: Result[Int, String], f: (String) -> Result[Int, String]) -> Result[Int, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -184,12 +184,12 @@ fn __rmh_err_share(x: String) -> Result[String, String] = err(x)
 fn __rmh_some_share(x: String) -> String? = some(x)
 
 // result.map_h: ok(x) → ok(f(x)), err(e) → err(e shared)
-fn __rmh_map_ok(x: String, f: fn(String) -> String) -> Result[String, String] = {
+fn __rmh_map_ok(x: String, f: (String) -> String) -> Result[String, String] = {
   let y = f(x)
   ok(y)
 }
 
-fn result_map_h(r: Result[String, String], f: fn(String) -> String) -> Result[String, String] = {
+fn result_map_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
   if tag == 0 then {
@@ -202,12 +202,12 @@ fn result_map_h(r: Result[String, String], f: fn(String) -> String) -> Result[St
 }
 
 // result.map_err_h: ok(x) → ok(x shared), err(e) → err(f(e))
-fn __rmh_maperr_err(e: String, f: fn(String) -> String) -> Result[String, String] = {
+fn __rmh_maperr_err(e: String, f: (String) -> String) -> Result[String, String] = {
   let y = f(e)
   err(y)
 }
 
-fn result_map_err_h(r: Result[String, String], f: fn(String) -> String) -> Result[String, String] = {
+fn result_map_err_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
   if tag == 0 then {
@@ -220,12 +220,12 @@ fn result_map_err_h(r: Result[String, String], f: fn(String) -> String) -> Resul
 }
 
 // result.flat_map_h: ok(x) → f(x) (its fresh Result moved out), err(e) → err(e shared)
-fn __rmh_flatmap_ok(x: String, f: fn(String) -> Result[String, String]) -> Result[String, String] = {
+fn __rmh_flatmap_ok(x: String, f: (String) -> Result[String, String]) -> Result[String, String] = {
   let r2 = f(x)
   r2
 }
 
-fn result_flat_map_h(r: Result[String, String], f: fn(String) -> Result[String, String]) -> Result[String, String] = {
+fn result_flat_map_h(r: Result[String, String], f: (String) -> Result[String, String]) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
   if tag == 0 then {
@@ -238,12 +238,12 @@ fn result_flat_map_h(r: Result[String, String], f: fn(String) -> Result[String, 
 }
 
 // result.unwrap_or_else_h: ok(x) → x, err(e) → f(e) (option_unwrap_or_else_h's shape)
-fn __rmh_uoe_err(e: String, f: fn(String) -> String) -> String = {
+fn __rmh_uoe_err(e: String, f: (String) -> String) -> String = {
   let y = f(e)
   y
 }
 
-fn result_unwrap_or_else_h(r: Result[String, String], f: fn(String) -> String) -> String = {
+fn result_unwrap_or_else_h(r: Result[String, String], f: (String) -> String) -> String = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
   if tag == 0 then {
@@ -261,12 +261,12 @@ fn result_unwrap_or_else_h(r: Result[String, String], f: fn(String) -> String) -
 // heap-Ok instantiation rides this one routine. The E side stays String-pinned
 // by the err_val argument (the #1431 rule: filter's E is argument-pinned, and
 // the router's E guard runs before the heap-Ok arm).
-fn __rmh_filter_ok(x: String, pred: fn(String) -> Bool, err_val: String) -> Result[String, String] = {
+fn __rmh_filter_ok(x: String, pred: (String) -> Bool, err_val: String) -> Result[String, String] = {
   let keep = pred(x)
   if keep then ok(x) else err(err_val)
 }
 
-fn result_filter_h(r: Result[String, String], pred: fn(String) -> Bool, err_val: String) -> Result[String, String] = {
+fn result_filter_h(r: Result[String, String], pred: (String) -> Bool, err_val: String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
   if tag == 0 then {
@@ -303,12 +303,12 @@ fn result_to_err_option_h(r: Result[String, String]) -> String? = {
 // which the scalar impl's i64-result type traps on), and `ok(y)` builds the
 // CAP-AS-TAG heap-Ok Result (the _h family layout). Value-erased payload; the
 // Err message deep-copies as in result.map.
-fn __res_map_s2h_ok(x: Int, f: fn(Int) -> Value) -> Result[Value, String] = {
+fn __res_map_s2h_ok(x: Int, f: (Int) -> Value) -> Result[Value, String] = {
   let y = f(x)
   ok(y)
 }
 
-fn result_map_s2h(r: Result[Int, String], f: fn(Int) -> Value) -> Result[Value, String] = {
+fn result_map_s2h(r: Result[Int, String], f: (Int) -> Value) -> Result[Value, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -345,8 +345,7 @@ fn result_zip_fs(a: Result[Float, String], b: Result[String, String]) -> Result[
   if prim.load32(ah + 4) >= 1 then __rzfs_err_scalar(ah)
   else {
     let bh = prim.handle(b)
-    if prim.load32(bh + 16) >= 1 then __rzfs_err_heap(b)
-    else __rzfs_ok(prim.ffrombits(prim.load64(ah + 12)), b)
+    if prim.load32(bh + 16) >= 1 then __rzfs_err_heap(b) else __rzfs_ok(prim.ffrombits(prim.load64(ah + 12)), b)
   }
 }
 
@@ -354,9 +353,9 @@ fn result_zip_fs(a: Result[Float, String], b: Result[String, String]) -> Result[
 // same frontier row (`result.unwrap_or_else(result.zip(y, t), (e) => (f, s))`).
 // Ok shares the pair back out; Err feeds the deep-copied message to the
 // fallback closure, whose (Float, String) result is the value.
-fn __ruoefs_err(e: String, f: fn(String) -> (Float, String)) -> (Float, String) = f(e)
+fn __ruoefs_err(e: String, f: (String) -> (Float, String)) -> (Float, String) = f(e)
 
-fn result_unwrap_or_else_fs(r: Result[(Float, String), String], f: fn(String) -> (Float, String)) -> (Float, String) = {
+fn result_unwrap_or_else_fs(r: Result[(Float, String), String], f: (String) -> (Float, String)) -> (Float, String) = {
   let h = prim.handle(r)
   if prim.load32(h + 16) >= 1 then {
     let e: String = prim.load_handle(h + 12)

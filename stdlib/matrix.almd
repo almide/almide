@@ -174,7 +174,7 @@ fn neg(m: Matrix) -> Matrix = _
 fn pow(m: Matrix, exp: Float) -> Matrix = _
 
 @intrinsic("almide_rt_matrix_map")
-fn map(m: Matrix, f: fn(Float) -> Float) -> Matrix = _
+fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 // ── bytes serialisation ──
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")

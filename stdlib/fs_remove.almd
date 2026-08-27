@@ -12,8 +12,7 @@ fn __rm_ftype(path: String) -> Int = {
   let buf = prim.alloc_bytes(64)
   let p = prim.handle(buf) + 12
   let errno = prim.path_filestat(p, path)
-  if errno != 0 then 0
-  else prim.load8(p + 16)
+  if errno != 0 then 0 else prim.load8(p + 16)
 }
 
 fn __rm_floor(path: String) -> Result[Unit, String] = {
@@ -35,8 +34,7 @@ effect fn fs_remove(path: String) -> Result[Unit, String] = {
       err(m)
     } else {
       let entries: List[String] = prim.load_handle(rh + 12)
-      if list.len(entries) > 0 then err("directory not empty: " + path)
-      else __rm_floor(path)
+      if list.len(entries) > 0 then err("directory not empty: " + path) else __rm_floor(path)
     }
   } else __rm_floor(path)
 }

@@ -56,27 +56,27 @@ effect fn read_lines(path: String) -> Result[List[String], String] = _
 // observable), so an erring chunk body handles its own error — an intentional
 // omission the family gate pins.
 @intrinsic("almide_rt_fs_fold_lines")
-effect fn fold_lines[A](path: String, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
+effect fn fold_lines[A](path: String, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 @intrinsic("almide_rt_fs_for_each_line")
-effect fn for_each_line(path: String, f: fn(String) -> Unit) -> Result[Unit, String] = _
+effect fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String] = _
 
 // The ADR-0006 fallible carriers. NOT spellings: the checker rewrites
 // `fs.fold_lines`/`fs.for_each_line` to these when the callback is fallible
 // (`infer_calls_closures.rs::normalize_fallible_hof_callback`), exactly as
 // `list.map` becomes `list.__fallible_map`; naming one in source is E043.
 @intrinsic("almide_rt_fs_fold_lines_effect")
-effect fn __fallible_fold_lines[A, E](path: String, init: A, f: fn(A, String) -> Result[A, E]) -> Result[A, E] = _
+effect fn __fallible_fold_lines[A, E](path: String, init: A, f: (A, String) -> Result[A, E]) -> Result[A, E] = _
 
 @intrinsic("almide_rt_fs_for_each_line_effect")
-effect fn __fallible_for_each_line[E](path: String, f: fn(String) -> Result[Unit, E]) -> Result[Unit, E] = _
+effect fn __fallible_for_each_line[E](path: String, f: (String) -> Result[Unit, E]) -> Result[Unit, E] = _
 
 // The chunk worker's walker: fold exactly the lines owned by the byte range
 // [start, end) — a line belongs to the chunk containing the byte before its
 // first byte — so folding a partition of [0, file_size) visits every line
 // exactly once, and per-chunk partials merge afterwards.
 @intrinsic("almide_rt_fs_fold_lines_range")
-effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
+effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 // Chunk-PARALLEL fold: N workers each fold their byte-range partition on
 // real threads inside the runtime, returning the partials in CHUNK ORDER —
@@ -84,7 +84,7 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: fn
 // the thread schedule. The callback must not capture mutable state (the
 // emitted program's Send + Sync bounds make a violation a compile error).
 @intrinsic("almide_rt_fs_fold_lines_chunked")
-effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: fn(A, String) -> A) -> Result[List[A], String] = _
+effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): none ⇔ the path
 // does not exist (parents included); err = permission / directory / IO. The

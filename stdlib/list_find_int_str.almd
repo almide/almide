@@ -10,17 +10,17 @@ fn __lfis_some(x: (Int, String)) -> (Int, String)? = some(x)
 
 // Split so the lets live in a function BODY and the heap-result `if` is its TAIL (mirrors
 // list_find_str's flat helper-tail shape — a block with lets as a heap-result-if arm does not lower).
-fn __list_find_is_at(h: Int, f: fn((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? = {
+fn __list_find_is_at(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? = {
   let x: (Int, String) = prim.load_handle(h + 12 + i * 8)
   let hit = f(x)
   if hit then __lfis_some(x)
   else __list_find_is_loop(h, f, n, i + 1)
 }
 
-fn __list_find_is_loop(h: Int, f: fn((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? = if i >= n then __lfis_none()
+fn __list_find_is_loop(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? = if i >= n then __lfis_none()
 else __list_find_is_at(h, f, n, i)
 
-fn list_find_int_str(xs: List[(Int, String)], f: fn((Int, String)) -> Bool) -> (Int, String)? = {
+fn list_find_int_str(xs: List[(Int, String)], f: ((Int, String)) -> Bool) -> (Int, String)? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __list_find_is_loop(h, f, n, 0)
