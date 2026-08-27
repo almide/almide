@@ -203,6 +203,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Category | Status |
 |----------|--------|
 | Maturity | Pre-1.0, under active development on `develop`; the LLM-facing surface is frozen by [STABILITY.md](docs/STABILITY.md) (declared 2026-08-20) |
+| Support | Latest release line only, pre-1.0 — policy and versioning guarantees: [SUPPORT.md](./SUPPORT.md) · vulnerabilities: [SECURITY.md](./SECURITY.md) |
 | Compiler | Pure Rust, single binary, 0 ICE |
 | Targets | Rust (native), WASM (direct emit — two verified legs behind one router, see [How It Works](#how-it-works)) |
 | Verified codegen | Incumbent v1 leg: PCC certificates re-verified on every build since 0.29.0 (`--no-verified` opts out). Structural leg: byte-exact corpus and mutation gates, no certificate yet |
