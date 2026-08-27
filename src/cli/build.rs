@@ -395,10 +395,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
                 output, pre_size, post_size, pct
             ));
         }
-        Err(_) => {
+        Err(why) => {
             err(&format!(
-                "Built {} ({} bytes) — --wasm-opt requested but wasm-opt is not installed; shipped the verified module unoptimized",
-                output, pre_size
+                "Built {} ({} bytes) — --wasm-opt requested but not applied: {}; shipped the verified module unoptimized",
+                output, pre_size, why
             ));
         }
     }
@@ -1061,19 +1061,35 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     // --enable-nontrapping-float-to-int: float→int renders as
     // `i64.trunc_sat_f64_s` (the saturating truncate, lib_b.rs).
     // --enable-tail-call: mutual/self tail recursion renders `return_call`.
-    let status = std::process::Command::new("wasm-opt")
+    // --enable-bulk-memory: the STRUCTURAL leg renders `memory.copy`
+    // (#1616 — without the flag wasm-opt refuses the module, and the old
+    // message blamed a missing install).
+    // --enable-mutable-globals: the structural leg EXPORTS mutable
+    // globals; newer binaryen accepts that by default but older releases
+    // (CI's) validate the MVP restriction unless told otherwise — the
+    // first CI run of the honest-refusal path caught exactly this.
+    let out = std::process::Command::new("wasm-opt")
         .args([
             "-Oz",
             "--enable-nontrapping-float-to-int",
             "--enable-tail-call",
+            "--enable-bulk-memory",
+            "--enable-mutable-globals",
             path,
             "-o",
             path,
         ])
-        .status()
-        .map_err(|e| format!("wasm-opt not available ({})", e))?;
-    if !status.success() {
-        return Err(format!("wasm-opt failed (exit {:?})", status.code()));
+        .output()
+        .map_err(|e| format!("wasm-opt is not installed ({})", e))?;
+    if !out.status.success() {
+        // The tool RAN and refused — a different failure class than a
+        // missing install, and its stderr names the real cause (#1616:
+        // "not installed" sent users to reinstall a tool they had).
+        return Err(format!(
+            "wasm-opt ran and refused (exit {:?}): {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
     Ok(meta.len() as usize)
