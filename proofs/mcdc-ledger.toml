@@ -2,8 +2,11 @@
 # safety set, each resolved or pending. Regenerate rows: proofs/mcdc-ledger.sh
 # --write (hand-written resolution/tests/note fields survive by id). A
 # `vectors` row names unit tests demonstrating each operand's INDEPENDENT
-# effect on the outcome (the MC/DC pair); `refactored` rows disappear when the
-# site stops scanning; `pending` is a shrink-only debt.
+# effect on the outcome (the MC/DC pair) — and the claim is MECHANICAL, not
+# taken on faith: proofs/mcdc-mutation.sh swaps the site's operator and
+# requires the named tests to be green unmutated and red under the mutant
+# (nightly job "mcdc-mutation"). `refactored` rows disappear when the site
+# stops scanning; `pending` is a shrink-only debt.
 #
 # pending_ceiling = "45"
 

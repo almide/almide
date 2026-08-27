@@ -510,3 +510,21 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Measure with per-condition records — same floors, same ratchet
         run: ALMIDE_COVERAGE_CONDITION=1 bash proofs/coverage.sh --check
+
+  mcdc-mutation:
+    name: MC/DC vectors are real — operator-swap mutants must die (#566)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.94.0"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: mcdc-mutation-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Every vectors-resolved ledger site kills its mutant
+        run: bash proofs/mcdc-mutation.sh

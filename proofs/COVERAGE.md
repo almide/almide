@@ -102,3 +102,15 @@ per-decision argument, not a compiler flag:
 The scanner's own honesty was tuned by its first runs: closure heads
 (`.or_else(|| …)`) are excluded by the preceding-token rule, and sites past a
 file's first `#[cfg(test)]` are the tests themselves, not ledgered.
+
+## Vector truth check — 2026-08-27 (#566, mutation)
+
+A `vectors` ledger row used to be verified only for EXISTENCE of the named
+tests — a vacuous test would have kept the gate green. `proofs/mcdc-mutation.sh`
+closes that: for every resolved site it applies the operator-swap mutant
+(&& <-> ||) at the site's exact character offset (sources restored and
+hash-verified on every exit path) and requires the named vectors to be green
+unmutated and red under the mutant. v1 mutant class is the operator swap;
+condition-level stuck-at mutants need operand extents (an AST) and are the
+next ratchet. Runs nightly (job "mcdc-mutation"); never run cargo
+concurrently with it.
