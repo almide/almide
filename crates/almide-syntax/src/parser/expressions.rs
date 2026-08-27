@@ -662,13 +662,9 @@ impl Parser {
             self.advance(); // skip :
             self.skip_newlines();
             let value = self.parse_expr()?;
-            if !named_args.is_empty() || true {
-                // Once named starts, check no positional after
-                if named_args.is_empty() && !args.is_empty() {
-                    // First named arg after positional — OK
-                }
-                named_args.push((name, value));
-            }
+            // Named args may begin after positionals; the reverse order
+            // (a positional AFTER a named) is rejected in the else arm.
+            named_args.push((name, value));
         } else {
             if !named_args.is_empty() {
                 let tok = self.current();

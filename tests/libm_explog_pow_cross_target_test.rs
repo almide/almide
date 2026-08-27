@@ -13,6 +13,9 @@
 //!
 //! Skips cleanly when the `almide` binary or a WASM runtime is unavailable.
 
+// The pi/e-adjacent literals below are DELIBERATE test vectors (bit-exact
+// cross-target probes), not attempts to name the std consts.
+#![allow(clippy::approx_constant)]
 use std::path::Path;
 use std::process::Command;
 
