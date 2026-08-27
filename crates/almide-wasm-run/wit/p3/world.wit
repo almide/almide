@@ -1,0 +1,18 @@
+// The direct-p3 world (#1628 stage 2): the SAME five-op host surface as
+// the p2 world (console out, exit, stdin, entropy, wall clock), spelled
+// as WASI 0.3 interfaces — stdio rides component-model streams and the
+// async canonical ABI (write-via-stream is an async import; the guest
+// drives it with sync stream builtins and retires the subtask before
+// task-return). fs/env/process keep the defined refusal inside the shims.
+package almide:runtime-p3@0.1.0;
+
+world p3-command {
+  import wasi:cli/stdin@0.3.0;
+  import wasi:cli/stdout@0.3.0;
+  import wasi:cli/stderr@0.3.0;
+  import wasi:cli/exit@0.3.0;
+  import wasi:clocks/system-clock@0.3.0;
+  import wasi:random/random@0.3.0;
+
+  export wasi:cli/run@0.3.0;
+}
