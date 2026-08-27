@@ -939,7 +939,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
 /// the name section (still present — validation runs before
 /// [`strip_wasm_name_section`]). `None` only if the module is too broken
 /// to walk section-by-section; the caller still reports the offset.
-fn wasm_function_at(bytes: &[u8], offset: usize) -> Option<String> {
+fn wasm_function_at(bytes: &[u8], offset: u64) -> Option<String> {
     use wasmparser::{KnownCustom, Name, Parser, Payload, TypeRef};
     let mut imported_funcs: u32 = 0;
     let mut code_index: u32 = 0;

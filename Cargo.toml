@@ -50,7 +50,7 @@ wat = "1"
 # Structural validation of the assembled v1 module: `wat` assembles without full stack-shape
 # validation, so the test harness validates before accepting a v1 module (invalid → the test
 # harness falls back to native execution; there is no v0 wasm emitter anymore).
-wasmparser = "0.256"
+wasmparser = "0.257"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -59,7 +59,7 @@ toml = "1.1"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 lsp-server = "0.10"
 lsp-types = "0.97"
-wit-component = "0.256"
+wit-component = "0.257"
 wasi-preview1-component-adapter-provider = "47.0.2"
 
 # Cross-platform advisory file lock (flock / LockFileEx) for the shared build
