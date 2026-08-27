@@ -7,10 +7,10 @@
 // ride the generic lambda-prep in `pass_stdlib_lowering` — same
 // clone-binding logic as the TOML path's `ArgTransform::LambdaClone`.
 @intrinsic("almide_rt_option_map")
-fn map[A, B](o: A?, f: fn(A) -> B) -> B? = _
+fn map[A, B](o: A?, f: (A) -> B) -> B? = _
 
 @intrinsic("almide_rt_option_and_then")
-fn flat_map[A, B](o: A?, f: fn(A) -> B?) -> B? = _
+fn flat_map[A, B](o: A?, f: (A) -> B?) -> B? = _
 
 @intrinsic("almide_rt_option_flatten")
 fn flatten[A](o: (A?)?) -> A? = _
@@ -19,7 +19,7 @@ fn flatten[A](o: (A?)?) -> A? = _
 fn unwrap_or[A](o: A?, default: A) -> A = _
 
 @intrinsic("almide_rt_option_unwrap_or_else")
-fn unwrap_or_else[A](o: A?, f: fn() -> A) -> A = _
+fn unwrap_or_else[A](o: A?, f: () -> A) -> A = _
 
 @intrinsic("almide_rt_option_is_some")
 fn is_some[A](o: A?) -> Bool = _
@@ -37,13 +37,13 @@ fn to_result[A, E](o: A?, e: E) -> Result[A, E] = match o {
 }
 
 @intrinsic("almide_rt_option_filter")
-fn filter[A](o: A?, f: fn(A) -> Bool) -> A? = _
+fn filter[A](o: A?, f: (A) -> Bool) -> A? = _
 
 @intrinsic("almide_rt_option_zip")
 fn zip[A, B](a: A?, b: B?) -> (A, B)? = _
 
 @intrinsic("almide_rt_option_or_else")
-fn or_else[A](o: A?, f: fn() -> A?) -> A? = _
+fn or_else[A](o: A?, f: () -> A?) -> A? = _
 
 @intrinsic("almide_rt_option_to_list")
 fn to_list[A](o: A?) -> List[A] = _
@@ -65,4 +65,4 @@ fn collect[T](xs: List[T?]) -> List[T]? = list.fold(xs, some([]), (acc, item) =>
   none => none,
 })
 
-fn collect_map[T, U](xs: List[T], f: fn(T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
+fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))

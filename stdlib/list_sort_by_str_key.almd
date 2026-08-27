@@ -6,7 +6,7 @@
 // scratch keys are fresh OWNED Strings in a List[String] (its recursive scope-end
 // drop frees each); slot shuffles move the raw handles WITHIN that list (no
 // ownership event). The result value list is returned owned; the source borrowed.
-fn __sbs_init(bh: Int, sh: Int, kh: Int, f: fn(Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
+fn __sbs_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let v = prim.load64(sh + 12 + i * 8)
   let k = f(v)
@@ -35,8 +35,7 @@ fn __sbs_gt(a: String, b: String) -> Bool = {
 }
 
 // Byte-lexicographic `a <= b` on raw String handles — the merge's stability test.
-fn __sbs_le_h(ah: Int, bh: Int) -> Bool =
-  __sbs_cmp_at(ah + 12, bh + 12, prim.load32(ah + 4), prim.load32(bh + 4), 0) <= 0
+fn __sbs_le_h(ah: Int, bh: Int) -> Bool = __sbs_cmp_at(ah + 12, bh + 12, prim.load32(ah + 4), prim.load32(bh + 4), 0) <= 0
 
 // ── stable bottom-up mergesort over the paired (value, key) buffers (#1459):
 // O(n log n) in place of the O(n^2) insertion shift; `<=` takes the left run
@@ -44,8 +43,7 @@ fn __sbs_le_h(ah: Int, bh: Int) -> Bool =
 fn __sbs_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
   let takel = if j >= hi then true
-    else if i >= mid then false
-    else __sbs_le_h(prim.load64(skh + 12 + i * 8), prim.load64(skh + 12 + j * 8))
+  else if i >= mid then false else __sbs_le_h(prim.load64(skh + 12 + i * 8), prim.load64(skh + 12 + j * 8))
   if takel then {
     prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
     prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
@@ -84,13 +82,14 @@ else {
 // String-key twin) never holds a stale handle at its recursive scope-end drop.
 fn __sbs_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
   let fin = __sbs_mrounds(bvh, bkh, tvh, tkh, n, 1)
-  if fin == bvh then 0 else {
+  if fin == bvh then 0
+  else {
     let _v = __sbs_mcopy(tvh, bvh, n, 0)
     __sbs_mcopy(tkh, bkh, n, 0)
   }
 }
 
-fn list_sort_by_str_key(xs: List[Int], f: fn(Int) -> String) -> List[Int] = {
+fn list_sort_by_str_key(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
   let keys: List[String] = prim.alloc_list_str(n)
@@ -110,7 +109,7 @@ fn list_sort_by_str_key(xs: List[Int], f: fn(Int) -> String) -> List[Int] = {
 // list_sort_by_float_rc; the merge phase is shared verbatim (moving raw handles
 // BETWEEN the owned key list and the flat scratch is not an ownership event,
 // and __sbs_msort guarantees the owned list ends holding each handle once).
-fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: fn(Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
+fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let v = prim.load64(sh + 12 + i * 8)
   let k = f(v)
@@ -120,7 +119,7 @@ else {
   __sbsr_init(bh, sh, kh, f, n, i + 1)
 }
 
-fn list_sort_by_str_key_rc(xs: List[Int], f: fn(Int) -> String) -> List[Int] = {
+fn list_sort_by_str_key_rc(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
   let keys: List[String] = prim.alloc_list_str(n)

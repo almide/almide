@@ -8,6 +8,5 @@
 fn io_read_byte() -> Int = {
   let b = prim.read_n_bytes(1)
   let h = prim.handle(b)
-  if prim.load32(h + 4) < 1 then 0 - 1
-  else prim.load8(h + 12)
+  if prim.load32(h + 4) < 1 then 0 - 1 else prim.load8(h + 12)
 }

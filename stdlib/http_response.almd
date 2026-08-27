@@ -46,7 +46,8 @@ else __hr_ci_at(a, b, i + 1)
 fn __hr_ci_eq(x: String, y: String) -> Bool = {
   let a = string.chars(x)
   let b = string.chars(y)
-  if list.len(a) != list.len(b) then false else __hr_ci_at(a, b, 0)
+  if list.len(a) != list.len(b) then false
+  else __hr_ci_at(a, b, 0)
 }
 
 // Fold the caller's map over __hr_set: EXACTLY the given headers (no seeded

@@ -26,8 +26,7 @@ fn float_min(a: Float, b: Float) -> Float = {
       if agtb then b
       else {
         let bgta = prim.fgt(b, a)
-        if bgta then a
-        else prim.ffrombits(prim.bor(prim.fbits(a), prim.fbits(b)))
+        if bgta then a else prim.ffrombits(prim.bor(prim.fbits(a), prim.fbits(b)))
       }
     }
   }
@@ -44,8 +43,7 @@ fn float_max(a: Float, b: Float) -> Float = {
       if altb then b
       else {
         let blta = prim.flt(b, a)
-        if blta then a
-        else prim.ffrombits(prim.band(prim.fbits(a), prim.fbits(b)))
+        if blta then a else prim.ffrombits(prim.band(prim.fbits(a), prim.fbits(b)))
       }
     }
   }

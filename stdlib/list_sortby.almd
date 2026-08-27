@@ -4,7 +4,7 @@
 // bottom-up mergesort reorders the value copy AND the key array together (O(n log n), #1459;
 // `<=` takes the left run first so equal keys keep their order). List[Int]/Int key. The scratch key list is owned + dropped at scope end
 // (no leak); the result value list is returned owned rc=1. Source borrowed.
-fn __sb_init(bh: Int, sh: Int, kh: Int, f: fn(Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
+fn __sb_init(bh: Int, sh: Int, kh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let v = prim.load64(sh + 12 + i * 8)
   let k = f(v)
@@ -19,8 +19,7 @@ else {
 fn __sb_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
   let takel = if j >= hi then true
-    else if i >= mid then false
-    else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
+  else if i >= mid then false else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
   if takel then {
     prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
     prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
@@ -59,13 +58,14 @@ else {
 // String-key twin) never holds a stale handle at its recursive scope-end drop.
 fn __sb_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
   let fin = __sb_mrounds(bvh, bkh, tvh, tkh, n, 1)
-  if fin == bvh then 0 else {
+  if fin == bvh then 0
+  else {
     let _v = __sb_mcopy(tvh, bvh, n, 0)
     __sb_mcopy(tkh, bkh, n, 0)
   }
 }
 
-fn list_sort_by(xs: List[Int], f: fn(Int) -> Int) -> List[Int] = {
+fn list_sort_by(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
   let keys = prim.alloc_list(n)
@@ -81,7 +81,7 @@ fn list_sort_by(xs: List[Int], f: fn(Int) -> Int) -> List[Int] = {
 // the result list CO-OWNS every element, so both lists' recursive drops are balanced
 // (the raw-copy variant shares without acquiring and the two deep drops double-free:
 // rc_dec trap in the caller's epilogue). Mirrors list_sort_by_float_rc.
-fn __sbr_init(bh: Int, sh: Int, kh: Int, f: fn(Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
+fn __sbr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let v = prim.load64(sh + 12 + i * 8)
   let k = f(v)
@@ -91,7 +91,7 @@ else {
   __sbr_init(bh, sh, kh, f, n, i + 1)
 }
 
-fn list_sort_by_rc(xs: List[Int], f: fn(Int) -> Int) -> List[Int] = {
+fn list_sort_by_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
   let keys = prim.alloc_list(n)

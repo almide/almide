@@ -13,8 +13,7 @@ fn __sort_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 fn __merge_run(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
   let takel = if j >= hi then true
-    else if i >= mid then false
-    else __sort_load(srch, i) <= __sort_load(srch, j)
+  else if i >= mid then false else __sort_load(srch, i) <= __sort_load(srch, j)
   if takel then {
     prim.store64(dsth + 12 + k * 8, __sort_load(srch, i))
     __merge_run(srch, dsth, mid, hi, i + 1, j, k + 1)
@@ -62,7 +61,8 @@ fn list_sort(xs: List[Int]) -> List[Int] = {
   let tmp = prim.alloc_list(n)
   let th = prim.handle(tmp)
   let fin = __merge_rounds(bh, th, n, 1)
-  let _cb = if fin == bh then 0 else __sort_copy(fin, bh, n, 0)
+  let _cb = if fin == bh then 0
+  else __sort_copy(fin, bh, n, 0)
   buf
 }
 
@@ -100,8 +100,7 @@ else {
 fn __merge_run_str(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
   let takel = if j >= hi then true
-    else if i >= mid then false
-    else __strcmp(prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
+  else if i >= mid then false else __strcmp(prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
   if takel then {
     prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
     __merge_run_str(srch, dsth, mid, hi, i + 1, j, k + 1)
@@ -139,7 +138,8 @@ fn list_sort_str(xs: List[String]) -> List[String] = {
   let tmp = prim.alloc_list(n)
   let th = prim.handle(tmp)
   let fin = __merge_rounds_str(bh, th, n, 1)
-  let _cb = if fin == bh then 0 else __sort_copy(fin, bh, n, 0)
+  let _cb = if fin == bh then 0
+  else __sort_copy(fin, bh, n, 0)
   buf
 }
 

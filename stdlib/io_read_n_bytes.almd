@@ -36,9 +36,7 @@ fn __read_n_chunked(remaining: Int) -> List[Int] = if remaining <= 0 then prim.r
 else {
   let want = if remaining > 67108864 then 67108864 else remaining
   let got = prim.read_n_bytes(want)
-  if list.len(got) < want then got
-  else got + __read_n_chunked(remaining - want)
+  if list.len(got) < want then got else got + __read_n_chunked(remaining - want)
 }
 
-fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0)
-else __read_n_chunked(n)
+fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n)

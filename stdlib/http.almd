@@ -124,7 +124,7 @@ effect fn request_bytes(method: String, url: String, body: String, headers: Map[
 // the caller's job to do SSE line splitting / event parsing.
 @intrinsic("almide_http_request_stream")
 @borrow_ref(headers)
-effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: fn(String) -> Unit) -> Result[Unit, String] = _
+effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = _
 
 // OpenAI-compatible /chat/completions SSE helper. The runtime opens the
 // stream, parses each `data: {...}` event, calls `on_text_delta` with
@@ -138,7 +138,7 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 // `body_json` must already include `"stream": true`. The almai layer
 // (or any caller) is expected to `json.parse` the result.
 @intrinsic("almide_rt_sse_openai_chat")
-effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: fn(String) -> Unit) -> Result[String, String] = _
+effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
 
 // Anthropic Messages API streaming. Same return shape as
 // `openai_streaming_call`; the runtime translates Anthropic's distinct
@@ -146,4 +146,4 @@ effect fn openai_streaming_call(base_url: String, api_key: String, body_json: St
 // LLMResponse-shaped JSON ({content, model, usage, finish_reason,
 // tool_calls}).
 @intrinsic("almide_rt_sse_anthropic_messages")
-effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: fn(String) -> Unit) -> Result[String, String] = _
+effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _

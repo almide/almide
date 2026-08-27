@@ -20,8 +20,7 @@ fn __sortf_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 fn __sortf_mrun(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
   let takel = if j >= hi then true
-    else if i >= mid then false
-    else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
+  else if i >= mid then false else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
   if takel then {
     prim.store64(dsth + 12 + k * 8, __sortf_load(srch, i))
     __sortf_mrun(srch, dsth, mid, hi, i + 1, j, k + 1)
@@ -63,7 +62,8 @@ fn list_sort_float(xs: List[Float]) -> List[Float] = {
   let tmp = prim.alloc_list_f64(n)
   let th = prim.handle(tmp)
   let fin = __sortf_mrounds(bh, th, n, 1)
-  let _cb = if fin == bh then 0 else __sortf_copy(fin, bh, n, 0)
+  let _cb = if fin == bh then 0
+  else __sortf_copy(fin, bh, n, 0)
   buf
 }
 

@@ -79,16 +79,15 @@ else {
 // place of four O(n^2) selection sorts) instead of four duplicated walkers.
 fn __ordc_cmp(sel: Int, a: Int, b: Int) -> Int = if sel == 0 then __cmp_tss(a, b)
 else if sel == 1 then __cmp_tsstr(a, b)
-else if sel == 2 then __cmp_lint(a, b)
-else __cmp_oint(a, b)
+else if sel == 2 then __cmp_lint(a, b) else __cmp_oint(a, b)
 
 // `<=` takes the left run first, so equal elements keep their order — matching
 // native's stable derived-Ord sort where the difference is even observable.
 fn __ordc_mrun(sel: Int, srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
 else {
   let takel = if j >= hi then true
-    else if i >= mid then false
-    else __ordc_cmp(sel, prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
+  else if i >= mid then false
+  else __ordc_cmp(sel, prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
   if takel then {
     prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
     __ordc_mrun(sel, srch, dsth, mid, hi, i + 1, j, k + 1)
@@ -126,7 +125,8 @@ else {
 // exactly once; the caller's type-routed recursive drop balances the rc_incs.
 fn __ordc_msort(sel: Int, bh: Int, th: Int, n: Int) -> Int = {
   let fin = __ordc_mrounds(sel, bh, th, n, 1)
-  if fin == bh then 0 else __ordc_copy(th, bh, n, 0)
+  if fin == bh then 0
+  else __ordc_copy(th, bh, n, 0)
 }
 
 fn __exidx_tss(h: Int, n: Int, i: Int, best: Int, want_max: Bool) -> Int = if i >= n then best

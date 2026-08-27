@@ -4,7 +4,7 @@
 // len <= cap invariant, the list.pop precedent). Scalar elements raw-copy; the `_rc`
 // variant CO-OWNS each flat heap element into whichever side takes it (rc_inc — the
 // zip_rc/filter_rc discipline). Result is the (yes, no) tuple block (two owned lists).
-fn __lpart_fill(yh: Int, nh: Int, sh: Int, f: fn(Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int = if i >= n then yi * 1048576 + ni
+fn __lpart_fill(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int = if i >= n then yi * 1048576 + ni
 else {
   let v = prim.load64(sh + 12 + i * 8)
   if f(v) then {
@@ -16,7 +16,7 @@ else {
   }
 }
 
-fn list_partition(xs: List[Int], f: fn(Int) -> Bool) -> (List[Int], List[Int]) = {
+fn list_partition(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
   let no = prim.alloc_list(n)
@@ -26,7 +26,7 @@ fn list_partition(xs: List[Int], f: fn(Int) -> Bool) -> (List[Int], List[Int]) =
   (yes, no)
 }
 
-fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: fn(Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int = if i >= n then yi * 1048576 + ni
+fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int = if i >= n then yi * 1048576 + ni
 else {
   let v = prim.load64(sh + 12 + i * 8)
   if f(v) then {
@@ -40,7 +40,7 @@ else {
   }
 }
 
-fn list_partition_rc(xs: List[Int], f: fn(Int) -> Bool) -> (List[Int], List[Int]) = {
+fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
   let no = prim.alloc_list(n)
