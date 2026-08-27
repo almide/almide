@@ -176,6 +176,31 @@ delta leaving 1.00 (and gets re-anchored, visibly); a pass that starts
 shape and the wasm leg (which has no LLVM behind it — ablating there costs a
 file its lowering, not its speed; see `optimize_program`'s header note).
 
+## Edit-loop scale (#1334)
+
+The README's build-speed row is measured on a 268-line file, which does not establish
+that the edit loop is *scale-independent* — a fast check on a small file is also exactly
+what a quadratic compiler produces. So the same command is measured over a ladder of
+nested prefixes of this repo's own stdlib (303 hand-written modules, 30,624 lines;
+nothing synthesized), 40 interleaved runs per rung:
+
+| project size | `almide check` p50 | p95 | µs/line |
+|---:|---:|---:|---:|
+| 2,047 lines | 18.4 ms | 19.5 ms | 2.87 |
+| 5,456 lines | 31.2 ms | 32.3 ms | 3.29 |
+| **10,151 lines** | **52.1 ms** | **53.3 ms** | 3.78 |
+| 20,378 lines | 97.4 ms | 99.5 ms | 4.06 |
+| 30,624 lines | 141.5 ms | 145.1 ms | 4.06 |
+
+arm64 Darwin, almide 0.57.0, 2026-08-13, load average 6.7. **The p95 column is an
+observation, not a promise**: the same commit on the same box at load average 42 read
+p95 332 ms at the 10,151-line rung — 6× — so the CI ratchet
+(`scripts/check-edit-loop-scale.sh`) anchors two dimensionless same-run ratios instead:
+the log-log slope of marginal check time against project lines (**1.13**, where 1.0 is
+linear and 2.0 quadratic; it moved 0.6% across that 7× load swing) and the cost of the
+10k-line rung in units of the empty-project floor (**4.4×**). Reproduce with
+`python3 research/benchmark/editloop/scale.py`.
+
 ## AI Coding Language Benchmark
 
 Based on [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task: v1 implement, v2 extend).
