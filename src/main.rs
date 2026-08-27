@@ -81,6 +81,18 @@ enum Commands {
         #[arg(allow_hyphen_values = true)]
         program_args: Vec<String>,
     },
+    /// Benchmark a program: verify-then-time, median headline (#1490)
+    Bench {
+        /// Source file (default: src/main.almd)
+        file: Option<String>,
+        /// Timed runs after the warmup (default 5)
+        #[arg(long, default_value_t = 5)]
+        runs: u32,
+        /// Leg to time: native (default, release binary) or wasm
+        /// (embedded host)
+        #[arg(long)]
+        target: Option<String>,
+    },
     /// Build a binary
     Build {
         /// Source file (default: src/main.almd)
@@ -893,6 +905,10 @@ fn dispatch(cli: Cli) {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
             dispatch_run(file, no_check, release, target, no_verified, time_report, program_args),
+        Commands::Bench { file, runs, target } => {
+            let file = resolve_file(file);
+            cli::cmd_bench(&file, runs, target.as_deref());
+        }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
