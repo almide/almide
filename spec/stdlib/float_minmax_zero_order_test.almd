@@ -1,0 +1,18 @@
+// ALS-T23 — min/max order -0 below +0 in either argument order (C-306),
+// IEEE 754-2019 minimum/maximum. Adjudicated 2026-08-21 (#28) and written
+// requirements-first: the 0.58.0 release still returns the FIRST operand on
+// ±0 ties, so this file is red against it by design until an implementation
+// advances its pin — that red is the judge describing the release.
+fn neg_zero() -> Float = (0.0 - float.abs(-1.0)) * 0.0
+
+test "T23: min -> -0, max -> +0, in either order" {
+  let mz = neg_zero()
+  assert_eq(float.sign(float.min(mz, 0.0)), -1.0)
+  assert_eq(float.sign(float.min(0.0, mz)), -1.0)
+  assert_eq(float.sign(float.max(mz, 0.0)), 1.0)
+  assert_eq(float.sign(float.max(0.0, mz)), 1.0)
+  assert_eq(float.sign(math.fmin(mz, 0.0)), -1.0)
+  assert_eq(float.sign(math.fmin(0.0, mz)), -1.0)
+  assert_eq(float.sign(math.fmax(mz, 0.0)), 1.0)
+  assert_eq(float.sign(math.fmax(0.0, mz)), 1.0)
+}
