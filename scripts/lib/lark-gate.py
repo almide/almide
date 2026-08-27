@@ -30,6 +30,8 @@ Env:   ALMIDE  path to the almide binary (default: target/release/almide, then
 
 from __future__ import annotations
 
+import hashlib
+import json
 import multiprocessing
 import os
 import re
@@ -137,6 +139,55 @@ def _try_parse(path_str: str):
         return (path_str, None)
     except Exception as exc:  # lark raises several unrelated exception types
         return (path_str, str(exc).splitlines()[0])
+
+
+# ── the corpus memo ──────────────────────────────────────────────────
+# The Earley parse of the ~1,500-file corpus is this gate's whole cost (~5 min
+# on a 4-vCPU runner, the longest step of the always-on checks job). One
+# file's verdict is a pure function of (grammar text, lark version, this
+# script, the file's bytes), so an ACCEPTED verdict is memoized under exactly
+# that key and re-used until any of the four moves. Only acceptance is
+# memoized: a rejected file is re-parsed every run, because its verdict is
+# what the compiler oracle is consulted on. LARK_GATE_CACHE names the memo
+# file; unset means every file is parsed — the no-memo baseline the memoized
+# run must agree with.
+
+
+def memo_key(grammar_text: str) -> str:
+    import lark
+
+    h = hashlib.sha256()
+    h.update(grammar_text.encode("utf-8"))
+    h.update(b"\0lark=" + lark.__version__.encode("utf-8"))
+    h.update(b"\0gate=" + Path(__file__).read_bytes())
+    return h.hexdigest()
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def memo_load(path: Path | None, key: str) -> set[str]:
+    """Accepted-file digests recorded under `key`; empty when absent, unreadable, or keyed elsewhere."""
+    if path is None or not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(data, dict) or data.get("key") != key:
+        return set()
+    accepted = data.get("accepted")
+    return set(accepted) if isinstance(accepted, list) else set()
+
+
+def memo_store(path: Path | None, key: str, accepted: set[str]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({"key": key, "accepted": sorted(accepted)}), encoding="utf-8")
+    tmp.replace(path)
 
 
 def parses_with_compiler(almide: str, path: Path) -> bool:
@@ -285,11 +336,21 @@ def main() -> int:
             f"corpus is EMPTY over {corpus_dirs} — a find-nothing-exit-0 gate is a blind gate"
         )
     t0 = time.time()
+    cache_env = os.environ.get("LARK_GATE_CACHE")
+    cache_path = Path(cache_env) if cache_env else None
+    key = memo_key(grammar_text)
+    memo = memo_load(cache_path, key)
+    digests = {str(f): file_digest(f) for f in files}
+    to_parse = [p for p, d in digests.items() if d not in memo]
     workers = min(os.cpu_count() or 1, 8)
-    with multiprocessing.Pool(workers, initializer=_init, initargs=(grammar_text,)) as pool:
-        results = pool.map(_try_parse, [str(f) for f in files], chunksize=8)
-    accepted = [p for p, e in results if e is None]
+    results: list[tuple[str, str | None]] = []
+    if to_parse:
+        with multiprocessing.Pool(workers, initializer=_init, initargs=(grammar_text,)) as pool:
+            results = pool.map(_try_parse, to_parse, chunksize=8)
+    newly_accepted = {digests[p] for p, e in results if e is None}
+    accepted = [p for p, d in digests.items() if d in memo or d in newly_accepted]
     rejected = [(p, e) for p, e in results if e is not None]
+    memo_store(cache_path, key, memo | newly_accepted)
 
     disagreements = []
     for path_str, why in rejected:
@@ -301,7 +362,8 @@ def main() -> int:
             f"the published grammar does not — {why}"
         )
     print(
-        f"corpus superset: {len(accepted)}/{len(files)} accepted by the grammar, "
+        f"corpus superset: {len(accepted)}/{len(files)} accepted by the grammar "
+        f"({len(files) - len(to_parse)} from the memo, {len(to_parse)} parsed), "
         f"{len(rejected) - len(disagreements)} rejected by both, "
         f"{len(disagreements)} disagreements ({time.time() - t0:.1f}s, {workers} workers)"
     )
