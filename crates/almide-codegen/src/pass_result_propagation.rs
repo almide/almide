@@ -25,11 +25,11 @@ impl NanoPass for ResultPropagationPass {
         // Result wrapping is Rust/WASM-only. (The TS target and its ResultErasurePass were removed.)
         let wrap_non_result = matches!(target, Target::Rust);
 
-        let lifted_fns = lift_effect_fn_signatures(&mut program, wrap_non_result);
+        let lifted = lift_effect_fn_signatures(&mut program, wrap_non_result);
         let intrinsic_effect_syms = collect_intrinsic_effect_result_syms(wrap_non_result);
 
-        transform_lifted_fn_bodies(&mut program, &lifted_fns, &intrinsic_effect_syms);
-        repair_already_result_effect_fn_bodies(&mut program, wrap_non_result, &lifted_fns, &intrinsic_effect_syms);
+        transform_lifted_fn_bodies(&mut program, &lifted, &intrinsic_effect_syms);
+        repair_already_result_effect_fn_bodies(&mut program, wrap_non_result, &lifted, &intrinsic_effect_syms);
         insert_try_in_test_fans(&mut program);
 
         PassResult { program, changed: true }
@@ -52,24 +52,44 @@ fn is_template_dispatch(attrs: &[almide_lang::ast::Attribute]) -> bool {
 
 /// Phase 1: Lift effect fn signatures.
 ///
+/// The identities Phase 1 produces (#1597 — the fn-identity rebuild):
+///
+/// - `bodies`: WHICH IrFunctions were lifted, as structural positions
+///   (module index or root, fn index). Phase 2 transforms exactly these —
+///   selection can no longer be poisoned by a name collision, because
+///   there is no name in it.
+/// - `call_names`: the spellings a CALL SITE may use for a lifted fn, for
+///   the tail-wrap's "already returns Result" test. A bare name names a
+///   ROOT fn only; a module fn is listed module-qualified (its IR name,
+///   its versioned name, and its mangled runtime symbol). A dependency's
+///   `close` can no longer claim another module's `close` (#1597: sqlite's
+///   `pub effect fn close` Ok-wrapped svg.path's PURE `close`, E0308 —
+///   the same wrong-source family as #1087–#1094).
+struct LiftedFns {
+    bodies: Vec<(Option<usize>, usize)>,
+    call_names: HashMap<String, Ty>,
+}
+
 /// For each non-test, non-extern, non-template effect fn: T → Result[T, String].
 /// Also register mangled names (almide_rt_<mod>_<fn>) so lookups succeed
 /// after StdlibLowering renames call targets.
-fn lift_effect_fn_signatures(program: &mut IrProgram, wrap_non_result: bool) -> HashMap<String, Ty> {
-    let mut lifted_fns: HashMap<String, Ty> = HashMap::new();
+fn lift_effect_fn_signatures(program: &mut IrProgram, wrap_non_result: bool) -> LiftedFns {
+    let mut lifted = LiftedFns { bodies: Vec::new(), call_names: HashMap::new() };
 
-    for func in &mut program.functions {
+    for (i, func) in program.functions.iter_mut().enumerate() {
         if should_lift_effect_fn_ret(func, wrap_non_result) {
             let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
             func.ret_ty = Ty::result(orig, Ty::String);
-            lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
+            lifted.bodies.push((None, i));
+            // A root fn is callable by its bare name.
+            lifted.call_names.insert(func.name.to_string(), func.ret_ty.clone());
         }
     }
 
-    for module in &mut program.modules {
-        lift_module_effect_fn_signatures(module, wrap_non_result, &mut lifted_fns);
+    for (mi, module) in program.modules.iter_mut().enumerate() {
+        lift_module_effect_fn_signatures(module, mi, wrap_non_result, &mut lifted);
     }
-    lifted_fns
+    lifted
 }
 
 /// Shared predicate of `lift_effect_fn_signatures`'s two loops, extracted
@@ -82,25 +102,38 @@ fn should_lift_effect_fn_ret(func: &IrFunction, wrap_non_result: bool) -> bool {
 }
 
 /// Module-scope loop body of `lift_effect_fn_signatures`, extracted
-/// verbatim (cog>30 decomposition, sequential-phase pattern — `lifted_fns`
+/// verbatim (cog>30 decomposition, sequential-phase pattern — `lifted`
 /// is a write-only accumulator shared with the root-scope loop above).
-fn lift_module_effect_fn_signatures(module: &mut IrModule, wrap_non_result: bool, lifted_fns: &mut HashMap<String, Ty>) {
+/// A module fn's call spellings are all MODULE-QUALIFIED (#1597): the IR
+/// module name, the versioned name, and the mangled runtime symbol — the
+/// bare name is deliberately absent, so it cannot claim a root fn or
+/// another module's fn of the same name.
+fn lift_module_effect_fn_signatures(
+    module: &mut IrModule,
+    module_index: usize,
+    wrap_non_result: bool,
+    lifted: &mut LiftedFns,
+) {
     let mod_name = module.versioned_name
         .map(|v| v.to_string())
         .unwrap_or_else(|| module.name.to_string());
     let mod_ident = mod_name.replace('.', "_");
-    for func in &mut module.functions {
+    for (fi, func) in module.functions.iter_mut().enumerate() {
         if should_lift_effect_fn_ret(func, wrap_non_result) {
             let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
             func.ret_ty = Ty::result(orig, Ty::String);
+            lifted.bodies.push((Some(module_index), fi));
             let bare = func.name.to_string();
-            lifted_fns.insert(bare.clone(), func.ret_ty.clone());
+            lifted.call_names.insert(format!("{}.{}", module.name, bare), func.ret_ty.clone());
+            if module.versioned_name.is_some() {
+                lifted.call_names.insert(format!("{}.{}", mod_name, bare), func.ret_ty.clone());
+            }
             let sanitized = bare
                 .replace(' ', "_")
                 .replace('-', "_")
                 .replace('.', "_");
             let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
-            lifted_fns.insert(mangled, func.ret_ty.clone());
+            lifted.call_names.insert(mangled, func.ret_ty.clone());
         }
     }
 }
@@ -158,22 +191,18 @@ fn collect_intrinsic_effect_result_syms(wrap_non_result: bool) -> HashSet<String
 /// 1. resolve_err_types: fill Unknown in err() expressions using
 ///    the function's Ok type. Must run BEFORE wrap_tail_in_ok.
 /// 2. wrap_tail_in_ok: wrap all exit paths in Ok(...).
-fn transform_lifted_fn_bodies(program: &mut IrProgram, lifted_fns: &HashMap<String, Ty>, intrinsic_effect_syms: &HashSet<String>) {
-    for func in &mut program.functions {
-        if lifted_fns.contains_key(func.name.as_str()) {
-            let ok_ty = extract_ok_type(&func.ret_ty);
-            resolve_err_types(&mut func.body, &ok_ty);
-            func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
-        }
-    }
-    for module in &mut program.modules {
-        for func in &mut module.functions {
-            if lifted_fns.contains_key(func.name.as_str()) {
-                let ok_ty = extract_ok_type(&func.ret_ty);
-                resolve_err_types(&mut func.body, &ok_ty);
-                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
-            }
-        }
+fn transform_lifted_fn_bodies(program: &mut IrProgram, lifted: &LiftedFns, intrinsic_effect_syms: &HashSet<String>) {
+    // Exactly the fns Phase 1 lifted, by structural position — never by
+    // name (#1597: a bare-name selection let a dependency's effect `close`
+    // Ok-wrap an unrelated module's PURE `close`).
+    for &(mi, fi) in &lifted.bodies {
+        let func = match mi {
+            None => &mut program.functions[fi],
+            Some(m) => &mut program.modules[m].functions[fi],
+        };
+        let ok_ty = extract_ok_type(&func.ret_ty);
+        resolve_err_types(&mut func.body, &ok_ty);
+        func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted.call_names, intrinsic_effect_syms);
     }
 }
 
@@ -186,14 +215,14 @@ fn transform_lifted_fn_bodies(program: &mut IrProgram, lifted_fns: &HashMap<Stri
 /// trailing `unreachable` the fall-through reaches (porta read_message cross-module trap).
 /// Re-run the tail-ty fix ONLY on such a mismatch; a body already Result (a bare `ok()`
 /// tail) has body.ty == ret_ty and is untouched.
-fn repair_already_result_effect_fn_bodies(program: &mut IrProgram, wrap_non_result: bool, lifted_fns: &HashMap<String, Ty>, intrinsic_effect_syms: &HashSet<String>) {
+fn repair_already_result_effect_fn_bodies(program: &mut IrProgram, wrap_non_result: bool, lifted: &LiftedFns, intrinsic_effect_syms: &HashSet<String>) {
     for func in &mut program.functions {
         if func.is_effect && !func.is_test && wrap_non_result
             && func.ret_ty.is_result() && !func.body.ty.is_result()
         {
             let ok_ty = extract_ok_type(&func.ret_ty);
             resolve_err_types(&mut func.body, &ok_ty);
-            func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
+            func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted.call_names, intrinsic_effect_syms);
         }
     }
     for module in &mut program.modules {
@@ -203,7 +232,7 @@ fn repair_already_result_effect_fn_bodies(program: &mut IrProgram, wrap_non_resu
             {
                 let ok_ty = extract_ok_type(&func.ret_ty);
                 resolve_err_types(&mut func.body, &ok_ty);
-                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
+                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted.call_names, intrinsic_effect_syms);
             }
         }
     }
@@ -363,9 +392,14 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
         // call-site ty IS already Result — wrapping it double-wraps (porta
         // `__almide_main`'s match arms calling `engine.serve` etc., E0308).
         IrExprKind::Call { ref target, .. } => {
+            // The spelling mirrors `call_names`' keying (#1597): a bare
+            // name can only be a ROOT fn; a module call looks up its
+            // module-qualified spelling, so a dependency's lifted `close`
+            // cannot exempt an unrelated module's pure `close` from the
+            // wrap (nor vice versa).
             let callee_name = match target {
                 CallTarget::Named { name } => Some(name.to_string()),
-                CallTarget::Module { func, .. } => Some(func.to_string()),
+                CallTarget::Module { module, func, .. } => Some(format!("{}.{}", module, func)),
                 _ => None,
             };
             if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) || ty.is_result() {
