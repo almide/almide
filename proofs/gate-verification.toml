@@ -217,7 +217,7 @@ evidence = "#1310 landing PR: 5 fail directions demonstrated before first green 
 [[gate]]
 path = "scripts/check-clippy-warnings.sh"
 class = "NEGATIVE_TESTED"
-evidence = "#1462 landing (2026-08-28): three fail directions demonstrated before first green — a compile-failing tree (clippy deny-level overly_complex_bool_expr in the parser: the gate refused to count, and the finding itself was a real vestigial `|| true`), a wrong baseline (1494 < 999999, ratchet-down demand), and the shared count-compare with its 40-unit blindness floor inherited verbatim from the rustc sibling"
+evidence = "#1462 landing (2026-08-28): three fail directions demonstrated before first green — a compile-failing tree (clippy deny-level overly_complex_bool_expr in the parser: the gate refused to count, and the finding itself was a real vestigial `|| true`), a wrong baseline (ratchet-down demand), and the shared count-compare with its 40-unit blindness floor inherited verbatim from the rustc sibling. The FIRST CI RUN fired the ratchet-down branch for real (1,480 under the pinned 1.94.0 vs a 1,494 baseline measured on a local 1.96) — which exposed that the count is TOOLCHAIN-COUPLED; the gate now runs the pinned toolchain for its verdict and demotes non-pinned local runs to informative"
 
 [[gate]]
 path = "scripts/check-rustc-warnings.sh"
