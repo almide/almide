@@ -128,6 +128,30 @@ impl Session {
 
     fn eval_expr(&mut self, input: &str) {
         let source = build_program(&self.top, &self.body, Some(input));
+        // #1490: rustc-free fast path FIRST — the session program runs on
+        // the embedded wasm host (the same leg `almide run --target wasm`
+        // uses), so the common REPL line answers in milliseconds with no
+        // cargo in the loop. A shape the leg cannot lower falls back to
+        // the rustc path silently; both paths print the language's own
+        // `${expr}` rendering, so the answer is path-independent.
+        match self.run_wasm_fast(&source) {
+            Some(Ok(result)) => {
+                let result = result.trim();
+                if !result.is_empty() {
+                    out(&format!("{}", result));
+                }
+                return;
+            }
+            Some(Err(runtime_err)) => {
+                // The program RAN and failed (abort, error propagation):
+                // that verdict is real on either path — report, no fallback.
+                if !runtime_err.is_empty() {
+                    err(&format!("{}", runtime_err.trim()));
+                }
+                return;
+            }
+            None => {} // wall / any wasm-path refusal: the rustc path decides
+        }
         match self.compile_and_run(&source) {
             Ok(result) => {
                 let result = result.trim();
@@ -137,6 +161,32 @@ impl Session {
             }
             Err(_) => {} // errors already printed by compiler / cargo
         }
+    }
+
+    /// The wasm fast path, as a SUBPROCESS of this same binary (`almide
+    /// run <session> --target wasm`): the wall/refusal chatter of a
+    /// declined shape stays captured instead of leaking into the session.
+    /// `None` = the leg declined (fall back); `Some(Ok)` = stdout;
+    /// `Some(Err)` = the program ran and failed (a real verdict).
+    fn run_wasm_fast(&self, source: &str) -> Option<Result<String, String>> {
+        let path = self.source_path();
+        std::fs::write(&path, source).ok()?;
+        let exe = std::env::current_exe().ok()?;
+        let out = std::process::Command::new(exe)
+            .args(["run", path.to_str()?, "--target", "wasm"])
+            .output()
+            .ok()?;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if out.status.success() {
+            return Some(Ok(String::from_utf8_lossy(&out.stdout).to_string()));
+        }
+        // The leg names its refusals ("wall: …", "error: …" at emit); a
+        // RUNTIME failure prints the program's own abort ("Error: …").
+        // Only the latter is a verdict; everything else falls back.
+        if stderr.starts_with("Error: ") {
+            return Some(Err(stderr.to_string()));
+        }
+        None
     }
 
     fn compile(&self, source: &str) -> Result<String, String> {
@@ -155,11 +205,12 @@ impl Session {
 
     fn compile_and_run(&self, source: &str) -> Result<String, String> {
         let rust_code = self.compile_quiet(source)?;
-        // Use Debug format for the REPL print so List, records etc. work
-        let rust_code = rust_code.replace(
-            r#"format!("{}\n", __r)"#,
-            r#"format!("{:?}\n", __r)"#,
-        );
+        // NOTE: this used to patch the emitted print to Debug format
+        // ({:?}) "so List, records etc. work" — but `${expr}` interpolation
+        // renders those natively on both targets now, and the patch made
+        // the rustc path's answer DIFFER from the wasm fast path's (a
+        // String answered `"hi"` here and `hi` there). One rendering — the
+        // language's own — on both paths.
         let bin = super::cargo_build_generated(&rust_code, &self.build_dir, false)?;
         let output = std::process::Command::new(&bin)
             .output()
