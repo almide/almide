@@ -96,8 +96,8 @@ attested and attached to the release by the trust-spine tag run.
 
 | Gap | Issue | State |
 |---|---|---|
-| WCET-analyzable codegen for the Critical profile | #569 | not started |
-| Line-level source traceability in generated Rust | #572 | not started |
+| WCET-analyzable codegen for the Critical profile | #569 | story + gated reference kernel (`docs/project/WCET-STORY.md`); target calibration external |
+| Line-level source traceability in generated Rust | #572 | closed — `--trace-map` + review guide |
 | Lean/Rocq proof coverage of the RUNTIME (allocator, free-list, RC ops as shipped) | #576 | model proven (FC-3); implementation gap open |
 | Qualified/minimal wasm execution environment | #865 | not started |
 | Critical-profile subset (`almide check --profile critical`) + static memory mode | #567, #568 | not started |
