@@ -62,6 +62,11 @@ var nums = [1, 2]
 
 let PAIR = ("a", 1)
 
+let DERIVED = {
+  let parts = ["mod", "init"]
+  parts |> list.join("-")
+}
+
 fn bump() -> Unit = {
   count = count + 1
 }
@@ -138,6 +143,21 @@ struct Cell {
 
 fn cells() -> Vec<Cell> {
     vec![
+        Cell {
+            name: "module_toplet_initializer_with_inner_binds",
+            // #1627: a module-space top-let whose initializer carries inner
+            // binds walled the structural leg (`modinit:inner-binds`) and
+            // the incumbent reroute walled too (unbound VarId) — the
+            // program was unbuildable on wasm while native ran it fine.
+            // The initializer now lowers as a synthetic zero-param entry
+            // in its OWN frame (module space + module name), called from
+            // main's prologue through the funcref table.
+            main: r#"import self as m
+effect fn main() -> Unit = println(m.DERIVED)
+"#,
+            expected: "mod-init",
+            status: Status::Works,
+        },
         Cell {
             name: "generic_fn_mutates_module_var",
             // #788: a MONOMORPHIZED copy of a generic module fn alpha-renamed
