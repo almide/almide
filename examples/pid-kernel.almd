@@ -1,0 +1,41 @@
+// The WCET reference kernel (#569, feeding #776): a PID control step in
+// the Critical shape — statically bounded iteration, no allocation inside
+// the loop, scalar state threaded through parameters. The WCET story this
+// demonstrates is docs/project/WCET-STORY.md; the emitted-Rust properties
+// are gated by tests/wcet_kernel_test.rs.
+// One PID step: pure scalars in, pure scalars out. No heap anywhere.
+fn pid_step(kp: Float, ki: Float, kd: Float, setpoint: Float, measured: Float, integral: Float, prev_err: Float, dt: Float) -> (Float, Float, Float) = {
+  let error = setpoint - measured
+  let integral2 = integral + error * dt
+  let derivative = (error - prev_err) / dt
+  let output = kp * error + ki * integral2 + kd * derivative
+  (output, integral2, error)
+}
+
+// A first-order plant model: pure scalars, one multiply-add.
+fn plant(state: Float, control: Float, dt: Float) -> Float = state + (control - state) * 0.5 * dt
+
+// The control loop: STATICALLY BOUNDED (1000 iterations — a compile-time
+// literal, the Critical-shape loop form), no allocation in the body.
+fn run_loop(steps: Int) -> Float = {
+  var state = 0.0
+  var integral = 0.0
+  var prev_err = 0.0
+  var worst_output = 0.0
+  for _i in 1...steps {
+    let (output, integral2, error) = pid_step(2.0, 0.5, 0.1, 1.0, state, integral, prev_err, 0.01)
+    integral = integral2
+    prev_err = error
+    state = plant(state, output, 0.01)
+    let mag = float.max(output, 0.0 - output)
+    worst_output = float.max(worst_output, mag)
+  }
+  worst_output
+}
+
+fn main() -> Unit = {
+  let worst = run_loop(1000)
+  // The settled loop's worst |output| — a deterministic scalar both
+  // targets must reproduce bit-identically.
+  println(float.to_string(worst))
+}
