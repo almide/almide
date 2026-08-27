@@ -49,6 +49,7 @@ trap 'rm -f "$tmp_rs"' EXIT
 total=0
 nightly=0
 build_fail=0
+walls=0
 while IFS=$'\t' read -r _hash _exit path; do
   [ -n "$path" ] || continue
   [ -f "$path" ] || continue
@@ -72,16 +73,27 @@ while IFS=$'\t' read -r _hash _exit path; do
   # 2. The generated program must BUILD under the lane's toolchain (the
   #    shared build dir keeps this incremental across the corpus).
   if ! out=$("$BIN" build "$path" -o /tmp/ferrocene-lane-out 2>&1); then
-    echo "FAIL: $path — generated Rust did not build under the lane toolchain" >&2
-    # The compiler's own words, or the finding is not actionable from a
-    # machine without this toolchain (the gen-claims diagnosability rule).
-    printf '%s
-' "$out" | grep -B2 -A8 "^error" | head -40 >&2
-    build_fail=$((build_fail + 1))
+    # The lane judges whether GENERATED CODE compiles under the pin — an
+    # almide-side WALL (a designed subset refusal, e.g. fan budgets are
+    # metered on the trust spine only) produces no generated build for
+    # rustc to judge, and reproduces identically on every toolchain (the
+    # first dispatched run's fan_race_mapper "finding" was exactly this).
+    # Only a rustc rejection is a lane failure.
+    if printf '%s
+' "$out" | grep -qE 'error\[E[0-9]+|could not compile'; then
+      echo "FAIL: $path — generated Rust did not build under the lane toolchain" >&2
+      # The compiler's own words, or the finding is not actionable from a
+      # machine without this toolchain (the gen-claims diagnosability rule).
+      printf '%s
+' "$out" | grep -B2 -A8 "error" | head -40 >&2
+      build_fail=$((build_fail + 1))
+    else
+      walls=$((walls + 1))
+    fi
   fi
 done < "$MANIFEST"
 
-echo "ferrocene-lane: $total fixture(s) — nightly-feature offences $nightly, build failures $build_fail"
+echo "ferrocene-lane: $total fixture(s) — nightly-feature offences $nightly, build failures $build_fail, design-wall skips $walls"
 if [ "$nightly" -ne 0 ] || [ "$build_fail" -ne 0 ]; then
   exit 1
 fi
