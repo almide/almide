@@ -17,11 +17,17 @@ use almide_lang::types::constructor::TypeConstructorId;
 impl Checker {
     pub(crate) fn check_bounded_profile(&mut self, program: &ast::Program) {
         use std::collections::HashMap;
+        // #567 `--profile critical`: the same profile, applied to EVERY fn
+        // (no attribute needed) with capabilities deny-all + `--allow` grants.
+        // Critical only WIDENS what is rejected, so the subset property
+        // (critical-valid ⇒ normal-valid) holds by construction.
+        let critical = self.profile_critical;
         // the user fn index: name -> (is_bounded, body) — the call-graph nodes
         let mut fns: HashMap<&str, (bool, Option<&ast::Expr>)> = HashMap::new();
         for decl in &program.decls {
             if let ast::Decl::Fn { name, attrs, body, .. } = decl {
-                let is_bounded = attrs.iter().any(|a| a.name.as_str() == "bounded");
+                let is_bounded =
+                    critical || attrs.iter().any(|a| a.name.as_str() == "bounded");
                 fns.insert(name.as_str(), (is_bounded, body.as_ref()));
             }
         }
@@ -33,7 +39,7 @@ impl Checker {
             let ast::Decl::Fn { name, attrs, effect, body: Some(body), span, .. } = decl else {
                 continue;
             };
-            if !attrs.iter().any(|a| a.name.as_str() == "bounded") {
+            if !critical && !attrs.iter().any(|a| a.name.as_str() == "bounded") {
                 continue;
             }
             // ALS-B6 / E073: the reachable call graph must be a DAG — a DFS
@@ -62,6 +68,22 @@ impl Checker {
         for mut d in diags {
             if d.file.is_none() {
                 d.file = self.source_file.clone();
+            }
+            // Under critical the author wrote NO attribute — a message telling
+            // them about `@bounded` would name a construct they never used.
+            // Same rules, same codes; only the addressing is rewritten.
+            if critical {
+                d.message = d
+                    .message
+                    .replace("in a @bounded function", "under `--profile critical`");
+                d.context = d.context.replace("@bounded fn", "fn");
+                d.hint = d
+                    .hint
+                    .replace("mark the callee @bounded, or use", "use")
+                    .replace(
+                        "the profile's declared capability is standard output only",
+                        "capabilities start deny-all — grant one with --allow IO|Net|Env|Time|Rand|Process",
+                    );
             }
             self.diagnostics.push(d);
         }
@@ -201,6 +223,15 @@ impl BoundedCx<'_, '_> {
             self.fn_name,
             span.or(self.fn_span),
         ));
+    }
+
+    /// #567: is this effect module GRANTED under `--profile critical`?
+    /// Always false in plain `@bounded` mode (its capability is fixed at
+    /// standard output only — ALS-B9), so attribute-mode behaviour is
+    /// untouched.
+    fn module_granted(&self, m: &str) -> bool {
+        self.checker.profile_critical
+            && self.checker.critical_allow.iter().any(|g| g == m)
     }
 
     fn is_const_int(&self, e: &ast::Expr) -> bool {
@@ -600,6 +631,9 @@ impl BoundedCx<'_, '_> {
                 let m = resolved.as_str();
                 let f = field.as_str();
                 if m == "io" {
+                    if self.module_granted("io") {
+                        return;
+                    }
                     if !(f.starts_with("print") || f.starts_with("eprint")) {
                         self.err(
                             "an effect outside the declared capability is not admissible in a @bounded function",
@@ -611,6 +645,12 @@ impl BoundedCx<'_, '_> {
                     return;
                 }
                 if BOUNDED_DENIED_MODULES.contains(&m) {
+                    // #567: a granted capability un-denies its module wholesale
+                    // (the module is not in the pure set, so return — its calls
+                    // are the capability's own surface, not profile callees)
+                    if self.module_granted(m) {
+                        return;
+                    }
                     // ALS-B9 / E076
                     self.err(
                         "an effect outside the declared capability is not admissible in a @bounded function",
