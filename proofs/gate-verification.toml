@@ -328,6 +328,11 @@ class = "NEGATIVE_TESTED"
 evidence = "Commissioning PR (2026-08-26): an 801-line probe file under crates/almide-wasm/src => exit 1 naming the file; removed => exit 0. Adopted from the greenfield burn, where the 800-line cap was the measured primary driver of codopsy slippage (stages 39 and 51)."
 
 [[gate]]
+path = "scripts/check-ferrocene-lane.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Lane landing (2026-08-28, #573): both fail directions demonstrated with wrapper shims over the real binary and the committed tree as the positive control — (1) an emitter shim prepending `#![feature(never_type)]` to every --target rust emission => 'generated Rust carries a nightly feature gate' naming the fixture, exit 1 (the grep is line-start-anchored so a feature-gate STRING inside generated string literals cannot false-positive); (2) a build shim failing every `almide build` => 'did not build under the lane toolchain', exit 1; clean 3-fixture run => 'ferrocene-lane OK', exit 0. The pin (Ferrocene 26.05.0 == upstream 1.95.0, als ADR-0015 clause 4's convention) lives in the weekly workflow; the local run smokes the mechanics under the ambient toolchain by design, and the header records why."
+
+[[gate]]
 path = "scripts/check-mutation-gate.sh"
 class = "EXERCISED"
 evidence = "Greenfield CI mutation-gate job (2026-08-20..26, PORTLOG stages 74+): both verdict directions observed in real operation — 40-42 pre-authored mutants caught green on every push, and the no-longer-applies direction fired at the stage-39 split refresh (a drifted patch went red until refreshed, never retired). All 40 patches re-verified apply-clean against this tree at commissioning. Split evidence model since #1619: PR runs are INCREMENTAL (a mutant is in scope when the PR's change set touches its patched files, the patch itself, or the shared killer infrastructure — crates/almide-wasm/tests/ or the runner script, which put EVERY mutant in scope), and the FULL 40-mutant sweep's standing evidence is .github/workflows/mutation-sweep.yml: develop pushes in an uncancelable concurrency group plus the 05:15 UTC nightly, 4-way positional shard. Under ci.yml's cancel-in-progress group the develop sweep was routinely canceled mid-run (run 33045982751: 18/40 then canceled), which is why push-side evidence moved to the sweep workflow."

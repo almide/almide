@@ -1,0 +1,46 @@
+name: Ferrocene lane (qualified-toolchain build of generated Rust)
+
+# #573: Almide-generated Rust for the whole run-manifest corpus builds
+# under the FERROCENE-PINNED rustc. The split of qualification
+# responsibility: Almide is the code GENERATOR (the #574 tool-qualification
+# package's subject); the compiler below it is Ferrocene's ISO 26262
+# ASIL-D / IEC 61508 SIL-4 qualification.
+#
+# THE PIN (mirrors als ADR-0015 clause 4):
+#   Ferrocene 26.05.0 (2026-07-28) == upstream Rust 1.95.0.
+# Until a Ferrocene subscription exists this lane builds with STOCK rustc
+# of that version — chosen so the day `criticalup` arrives the lane
+# rebuilds under the qualified binary with no code or version change.
+# Bump here and in scripts/check-ferrocene-lane.sh together.
+#
+# Weekly + dispatch (a full-corpus native compile is not PR-path work).
+
+on:
+  schedule:
+    - cron: "45 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ferrocene-lane-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lane:
+    name: Generated Rust builds under the Ferrocene pin (1.95.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the almide binary (workspace toolchain)
+        run: cargo build --release
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+      - name: Corpus compiles under the pin
+        run: |
+          RUSTUP_TOOLCHAIN=1.95.0 ALMIDE_BIN=target/release/almide \
+            bash scripts/check-ferrocene-lane.sh
