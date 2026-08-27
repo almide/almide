@@ -138,7 +138,7 @@ impl Session {
             Some(Ok(result)) => {
                 let result = result.trim();
                 if !result.is_empty() {
-                    out(&format!("{}", result));
+                    out(result);
                 }
                 return;
             }
@@ -146,7 +146,7 @@ impl Session {
                 // The program RAN and failed (abort, error propagation):
                 // that verdict is real on either path — report, no fallback.
                 if !runtime_err.is_empty() {
-                    err(&format!("{}", runtime_err.trim()));
+                    err(runtime_err.trim());
                 }
                 return;
             }
@@ -226,7 +226,11 @@ impl Session {
     }
 
     fn source_path(&self) -> PathBuf {
-        self.repl_dir.join("repl.almd")
+        // Per-process: two concurrent REPLs (parallel tests, two shells)
+        // sharing one fixed file clobbered each other's session between
+        // the write and the subprocess read — the fast path then ran the
+        // OTHER session's program and answered nothing.
+        self.repl_dir.join(format!("repl-{}.almd", std::process::id()))
     }
 
     fn print_history(&self) {
