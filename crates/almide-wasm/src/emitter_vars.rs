@@ -34,7 +34,7 @@ impl Emitter<'_> {
         self.locals
             .get(id)
             .map(|&(i, t)| (i, t, false))
-            .or_else(|| self.globals.get(id).map(|&(i, t)| (i, t, true)))
+            .or_else(|| self.globals.get(&(self.var_space, *id)).map(|&(i, t)| (i, t, true)))
     }
 
     /// Push the mut var's current VALUE (cells deref for locals).

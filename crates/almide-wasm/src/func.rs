@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use almide_ir::{IrFunction, IrTopLet, VarId};
+use almide_ir::{IrFunction, VarId};
 use almide_types::types::Ty;
 use wasm_encoder::{Function, ValType};
 
@@ -83,17 +83,21 @@ pub(crate) struct FnPlan {
     /// Lifted lambda: raw wasm param 0 is the closure ENV block; the
     /// prelude loads each capture into a fresh local (value snapshot).
     pub(crate) env_captures: Option<Vec<(VarId, SliceTy, u32, bool)>>,
+    /// Which VarTable this body's VarIds index (0 = entry program,
+    /// i+1 = `ir.modules[i]`) — the global-lookup space (#1596).
+    pub(crate) var_space: u32,
 }
 
 pub(crate) fn lower_fn(
     params: &[(VarId, SliceTy)],
     plan: FnPlan,
     body: &IrExpr,
-    top_lets: &[IrTopLet],
+    top_lets: &[crate::InitLet],
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
-    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module, metered, charge_entry } = plan;
+    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module, metered, charge_entry, var_space } =
+        plan;
     let cur_module = cur_module.as_deref();
     let env_shift: u32 = u32::from(env_captures.is_some());
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
@@ -117,14 +121,29 @@ pub(crate) fn lower_fn(
             }
         }
     }
-    for tl in top_lets {
+    for il in top_lets {
+        let tl = &il.tl;
         if slice_ty_of(&tl.ty, ctx.types).is_none() {
             return unsup(&format!("bind-ty:{}", ty_name(&tl.ty)));
         };
-        // The top-let var itself is a GLOBAL; only its initializer's
-        // inner binds need main locals.
-        seen.insert(tl.var);
-        collect_binds(&tl.value, &mut binds, &mut seen, ctx.types)?;
+        if il.space == 0 {
+            // The top-let var itself is a GLOBAL; only its initializer's
+            // inner binds need main locals.
+            seen.insert(tl.var);
+            collect_binds(&tl.value, &mut binds, &mut seen, ctx.types)?;
+        } else {
+            // A MODULE-space initializer (#1596): its inner binds would
+            // index a different VarTable than main's locals map, so
+            // increment 1 admits only bind-free initializers (literals,
+            // ctor/fn-call values). The rest wall honestly — and the
+            // routing rerroutes the program to the incumbent leg.
+            let mut probe: Vec<(VarId, SliceTy)> = Vec::new();
+            let mut probe_seen: HashSet<VarId> = HashSet::new();
+            collect_binds(&tl.value, &mut probe, &mut probe_seen, ctx.types)?;
+            if !probe.is_empty() {
+                return unsup("modinit:inner-binds");
+            }
+        }
     }
     collect_binds(body, &mut binds, &mut seen, ctx.types)?;
 
@@ -217,6 +236,7 @@ pub(crate) fn lower_fn(
             loop_ctl: None,
             in_tail: false,
             cur_module,
+            var_space,
             in_main,
             work: ctx.work,
             globals: ctx.globals,
@@ -247,11 +267,22 @@ pub(crate) fn lower_fn(
                 em.f.instructions().local_set(idx);
             }
         }
-        for tl in top_lets {
-            let Some(&(gidx, declared)) = ctx.globals.get(&tl.var) else {
+        for il in top_lets {
+            let tl = &il.tl;
+            let Some(&(gidx, declared)) = ctx.globals.get(&(il.space, tl.var)) else {
                 return unsup(&format!("bind-ty:{}", ty_name(&tl.ty)));
             };
-            em.lower(&tl.value, Some(declared))?;
+            // A module initializer lowers in ITS OWN space: its Var reads
+            // index that module's table and its bare Named calls resolve
+            // module-qualified first (#1596).
+            let saved_space = em.var_space;
+            let saved_module = em.cur_module;
+            em.var_space = il.space;
+            em.cur_module = il.module.as_deref();
+            let lowered = em.lower(&tl.value, Some(declared));
+            em.var_space = saved_space;
+            em.cur_module = saved_module;
+            lowered?;
             if matches!(
                 declared,
                 SliceTy::List(_)

@@ -49,9 +49,14 @@ pub(crate) struct Emitter<'a> {
     /// Function-value work: funcref-table entries, call_indirect types,
     /// lifted lambdas (W-1/W-2).
     pub(crate) work: &'a FnWork,
-    /// Top-let globals (VarId → wasm global index + type): the fallback
-    /// when a Var/Assign misses the locals map.
-    pub(crate) globals: &'a HashMap<VarId, (u32, SliceTy)>,
+    /// Top-let globals ((space, VarId) → wasm global index + type): the
+    /// fallback when a Var/Assign misses the locals map. Spaced (#1596):
+    /// separately-lowered modules each restart VarIds at 0, so the bare
+    /// id is ambiguous — lookups pair it with `var_space`.
+    pub(crate) globals: &'a HashMap<crate::GVar, (u32, SliceTy)>,
+    /// Which VarTable this function's VarIds index (0 = the entry
+    /// program, i+1 = `ir.modules[i]`).
+    pub(crate) var_space: u32,
     /// Deferred head-only range binds (C-238): VarId → (start local,
     /// end local, inclusive). No block exists for these vars.
     pub(crate) deferred_ranges: &'a HashMap<VarId, (u32, u32, bool)>,
@@ -312,7 +317,7 @@ impl Emitter<'_> {
                         self.load_ty_slot(ty, 0);
                     }
                     ty
-                } else if let Some(&(gidx, ty)) = self.globals.get(id) {
+                } else if let Some(&(gidx, ty)) = self.globals.get(&(self.var_space, *id)) {
                     self.f.instructions().global_get(gidx);
                     ty
                 } else {
@@ -708,6 +713,7 @@ impl Emitter<'_> {
                     effect_raw,
                     body: body.clone(),
                     captures: captures.clone(),
+                    var_space: self.var_space,
                 });
                 let slot = self.work.slot(TableEntry::Lambda(j));
                 if captures.is_empty() {

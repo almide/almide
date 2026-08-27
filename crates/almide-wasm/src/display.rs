@@ -486,6 +486,7 @@ fn build_one_scan_helper(
     let empty_cells = std::collections::HashSet::new();
     {
         let mut em = Emitter {
+            var_space: 0,
             pool,
             locals: &empty_locals,
             rc_param_ceiling: 0,
@@ -579,6 +580,7 @@ fn build_one_eq_helper(
     let empty_cells = std::collections::HashSet::new();
     {
         let mut em = Emitter {
+            var_space: 0,
             pool,
             locals: &empty_locals,
             rc_param_ceiling: 0,
@@ -646,6 +648,7 @@ fn build_one_display_helper(
     let empty_cells = std::collections::HashSet::new();
     {
         let mut em = Emitter {
+            var_space: 0,
             pool,
             locals: &empty_locals,
             rc_param_ceiling: 0,

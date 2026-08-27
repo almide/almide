@@ -443,10 +443,10 @@ pub(crate) struct Ctx<'a> {
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
     pub(crate) work: &'a FnWork,
-    /// Top-let vars (root + module) as WASM GLOBALS: VarId → (global
-    /// index, slice type). Functions read them across function
+    /// Top-let vars (root + module) as WASM GLOBALS: (space, VarId) →
+    /// (global index, slice type). Functions read them across function
     /// boundaries — the class main-local top-lets could never serve.
-    pub(crate) globals: &'a HashMap<VarId, (u32, SliceTy)>,
+    pub(crate) globals: &'a HashMap<GVar, (u32, SliceTy)>,
 }
 
 /// Function-VALUE work discovered during lowering: funcref-table entries
@@ -475,6 +475,9 @@ pub(crate) struct LiftedLambda {
     /// The lifted fn's prelude loads each from the env param (raw param
     /// slot 0) into a fresh local — by-value snapshot semantics.
     pub(crate) captures: Vec<(VarId, SliceTy, u32, bool)>,
+    /// The variable space the body's VarIds index (the lifting fn's own
+    /// space — a lambda inside a module fn reads module-space globals).
+    pub(crate) var_space: u32,
 }
 
 /// A call_indirect signature at the wasm value-type level.
@@ -513,26 +516,45 @@ fn pattern_irrefutable(p: &IrPattern) -> bool {
     }
 }
 
+pub(crate) use almide_ir::top_let_storage::GVar;
+
+/// One top-let initializer for main's prelude: the space its body's VarIds
+/// index and the module whose fns it may call by bare name (None = root).
+#[derive(Clone)]
+pub(crate) struct InitLet {
+    pub(crate) space: u32,
+    pub(crate) module: Option<String>,
+    pub(crate) tl: IrTopLet,
+}
+
 /// Top-lets (root + module) as wasm globals + the dependency init order
 /// (split from emit_program for the complexity budget).
 #[allow(clippy::type_complexity)]
 fn build_globals(
     ir: &IrProgram,
     types: &TypeTable,
-) -> (HashMap<VarId, (u32, SliceTy)>, Vec<(VarId, SliceTy)>, Vec<IrTopLet>) {
+) -> (HashMap<GVar, (u32, SliceTy)>, Vec<(VarId, SliceTy)>, Vec<InitLet>) {
     // Top-lets (root + module) become wasm globals — zero-initialized,
     // then set by main's prelude in DEPENDENCY order (C-077: the same
     // `dependency_init_order` the interp uses, so the order matches by
-    // construction).
-    let mut global_map: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
+    // construction). Identities are SPACED (#1596): separately-lowered
+    // modules each carry their own VarTable starting at VarId 0, so a
+    // bare-VarId key collides across tables — the (space, var) pair is
+    // the unambiguous name, and every use-site alias (the entry reading
+    // `m.SYSTEM`) maps to its declaration's slot.
+    use almide_ir::top_let_storage::{
+        build_global_tables_spaced, dependency_init_order_spaced,
+    };
+    let mut global_map: HashMap<GVar, (u32, SliceTy)> = HashMap::new();
     let mut global_decls: Vec<(VarId, SliceTy)> = Vec::new();
     {
         let mut next = G_FIXED_COUNT;
-        let mut add = |tl: &IrTopLet,
-                       map: &mut HashMap<VarId, (u32, SliceTy)>,
+        let mut add = |space: u32,
+                       tl: &IrTopLet,
+                       map: &mut HashMap<GVar, (u32, SliceTy)>,
                        decls: &mut Vec<(VarId, SliceTy)>| {
             if let Some(sty) = slice_ty_of(&tl.ty, types) {
-                map.insert(tl.var, (next, sty));
+                map.insert((space, tl.var), (next, sty));
                 decls.push((tl.var, sty));
                 next += 1;
             }
@@ -540,55 +562,53 @@ fn build_globals(
             // refuses at the var site with its own honest reason.
         };
         for tl in &ir.top_lets {
-            add(tl, &mut global_map, &mut global_decls);
+            add(0, tl, &mut global_map, &mut global_decls);
         }
-        for m in &ir.modules {
+        for (i, m) in ir.modules.iter().enumerate() {
             for tl in &m.top_lets {
-                add(tl, &mut global_map, &mut global_decls);
+                add(i as u32 + 1, tl, &mut global_map, &mut global_decls);
             }
         }
     }
-    let init_order: Vec<VarId> = {
-        use almide_ir::top_let_storage::{
-            build_global_tables, dependency_init_order, top_let_inputs,
-        };
-        let mut inputs = Vec::new();
-        for tl in &ir.top_lets {
-            inputs.push(top_let_inputs(tl));
+    let (_info, alias, _off) = build_global_tables_spaced(ir);
+    // Use-site aliases resolve to the declaration's slot — one lookup at
+    // the Var site whatever space the read happens in.
+    for (&use_g, &decl_g) in &alias {
+        if let Some(&slot) = global_map.get(&decl_g) {
+            global_map.insert(use_g, slot);
         }
-        for m in &ir.modules {
-            for tl in &m.top_lets {
-                inputs.push(top_let_inputs(tl));
-            }
-        }
-        let (_info, alias, _off) = build_global_tables(&inputs, &ir.var_table);
-        dependency_init_order(ir, &alias)
-    };
-    let mut init_by_var: HashMap<VarId, &IrTopLet> = HashMap::new();
+    }
+    let init_order = dependency_init_order_spaced(ir, &alias);
+    let mut init_by_var: HashMap<GVar, InitLet> = HashMap::new();
     for tl in &ir.top_lets {
-        init_by_var.insert(tl.var, tl);
+        init_by_var.insert((0, tl.var), InitLet { space: 0, module: None, tl: tl.clone() });
     }
-    for m in &ir.modules {
+    for (i, m) in ir.modules.iter().enumerate() {
         for tl in &m.top_lets {
-            init_by_var.insert(tl.var, tl);
+            init_by_var.insert(
+                (i as u32 + 1, tl.var),
+                InitLet { space: i as u32 + 1, module: Some(m.name.as_str().to_string()), tl: tl.clone() },
+            );
         }
     }
-    let init_lets: Vec<IrTopLet> =
-        init_order.iter().filter_map(|v| init_by_var.get(v).map(|tl| (*tl).clone())).collect();
+    let init_lets: Vec<InitLet> =
+        init_order.iter().filter_map(|g| init_by_var.get(g).cloned()).collect();
     (global_map, global_decls, init_lets)
 }
 
 
 /// The callable-fn flattening (entry fns + module fns under qualified
-/// names, Hole-bodied surfaces excluded) — split from emit_program.
-fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>)> {
-    let mut program_fns: Vec<(&IrFunction, Option<String>)> = ir
+/// names, Hole-bodied surfaces excluded) — split from emit_program. The
+/// third field is the fn's variable SPACE (0 = entry program, i+1 =
+/// `ir.modules[i]` — #1596): module fn bodies index their own VarTable.
+fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>, u32)> {
+    let mut program_fns: Vec<(&IrFunction, Option<String>, u32)> = ir
         .functions
         .iter()
         .filter(|f| !f.is_test && f.name.as_str() != "main")
-        .map(|f| (f, None))
+        .map(|f| (f, None, 0))
         .collect();
-    for m in &ir.modules {
+    for (i, m) in ir.modules.iter().enumerate() {
         for f in &m.functions {
             // A Hole body is a bodyless SURFACE decl (`= _`) — a bridge
             // boundary, not an implementation. Registering it would
@@ -596,8 +616,11 @@ fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>)> {
             // an unlowersble stub (found by the burn-up: expr:Hole ×70).
             let is_surface = matches!(f.body.kind, IrExprKind::Hole);
             if !f.is_test && !is_surface {
-                program_fns
-                    .push((f, Some(format!("{}.{}", m.name.as_str(), f.name.as_str()))));
+                program_fns.push((
+                    f,
+                    Some(format!("{}.{}", m.name.as_str(), f.name.as_str())),
+                    i as u32 + 1,
+                ));
             }
         }
     }
