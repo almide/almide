@@ -5,7 +5,7 @@
 # effect on the outcome (the MC/DC pair); `refactored` rows disappear when the
 # site stops scanning; `pending` is a shrink-only debt.
 #
-# pending_ceiling = "28"
+# pending_ceiling = "0"
 
 [[site]]
 id = "d144f08238"
@@ -17,17 +17,9 @@ resolution = "vectors"
 tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_baseline_immutable_overdec_reports_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_c1_mutability_alone_suppresses_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_c2_balance_alone_suppresses_double_free"
 
 [[site]]
-id = "0a261e092a"
-file = "crates/almide-codegen/src/perceus_verified.rs"
-line = "183"
-op = "||"
-excerpt = "vname.starts_with(\"__tco_\") || vname.starts_with(\"__br_\")"
-resolution = "pending"
-
-[[site]]
 id = "c6daa3639c"
 file = "crates/almide-codegen/src/perceus_verified.rs"
-line = "207"
+line = "211"
 op = "&&"
 excerpt = "if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {"
 resolution = "vectors"
@@ -36,7 +28,7 @@ tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_basel
 [[site]]
 id = "793e81bbe8"
 file = "crates/almide-codegen/src/perceus_verified.rs"
-line = "207"
+line = "211"
 op = "&&"
 excerpt = "if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {"
 resolution = "vectors"
@@ -45,80 +37,16 @@ tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_basel
 [[site]]
 id = "f77e06ee65"
 file = "crates/almide-codegen/src/perceus_verified.rs"
-line = "213"
+line = "217"
 op = "&&"
 excerpt = "if !is_mutable && decs > incs + 1 {"
 resolution = "vectors"
 tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_baseline_immutable_overdec_reports_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c1_mutability_alone_suppresses_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c2_balance_alone_suppresses_double_free"
 
 [[site]]
-id = "9aeaccc7a8"
-file = "crates/almide-mir/src/certificate_b_tail.rs"
-line = "201"
-op = "&&"
-excerpt = "i == allocs + heap_results + merge_credits && a == dups"
-resolution = "pending"
-
-[[site]]
-id = "27c1b9b665"
-file = "crates/almide-mir/src/certificate_c.rs"
-line = "146"
-op = "&&"
-excerpt = "&& f.params"
-resolution = "pending"
-
-[[site]]
-id = "059b2acc0f"
-file = "crates/almide-mir/src/certificate_p2.rs"
-line = "516"
-op = "&&"
-excerpt = "i == allocs + heap_results && a == dups"
-resolution = "pending"
-
-[[site]]
-id = "0092b5eacf"
-file = "crates/almide-mir/src/certificate_p2.rs"
-line = "799"
-op = "&&"
-excerpt = ".any(|v| v.kind == crate::ViolationKind::Leak && v.op_index == 3 && v.value == x),"
-resolution = "pending"
-
-[[site]]
-id = "c9c00ee8e3"
-file = "crates/almide-mir/src/certificate_p2.rs"
-line = "799"
-op = "&&"
-excerpt = ".any(|v| v.kind == crate::ViolationKind::Leak && v.op_index == 3 && v.value == x),"
-resolution = "pending"
-
-[[site]]
-id = "935b55bfdf"
-file = "crates/almide-mir/src/translation_validation.rs"
-line = "240"
-op = "&&"
-excerpt = "positives && body_rc_decs >= drop_count(mir)"
-resolution = "pending"
-
-[[site]]
-id = "ac9c1b2a7d"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "184"
-op = "&&"
-excerpt = "&& call_sig.as_ref().and_then(|sig| sig.params.get(i)).is_some_and("
-resolution = "pending"
-
-[[site]]
-id = "55c857cd97"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "215"
-op = "||"
-excerpt = "hit(t) || t.any_child_recursive(&hit)"
-resolution = "pending"
-
-[[site]]
 id = "11cfddc353"
 file = "crates/almide-frontend/src/check/calls.rs"
-line = "402"
+line = "411"
 op = "&&"
 excerpt = "if sig.is_effect && !self.env.can_call_effect {"
 resolution = "vectors"
@@ -127,160 +55,8 @@ tests = "tests/mcdc_effect_vectors_test.rs::site402_baseline_effect_callee_from_
 [[site]]
 id = "2bc2167940"
 file = "crates/almide-frontend/src/check/calls.rs"
-line = "449"
+line = "458"
 op = "||"
 excerpt = "if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {"
 resolution = "vectors"
 tests = "tests/mcdc_effect_vectors_test.rs::site449_baseline_exact_arity_is_clean, tests/mcdc_effect_vectors_test.rs::site449_c1_too_few_arguments_alone_is_e004, tests/mcdc_effect_vectors_test.rs::site449_c2_too_many_arguments_alone_is_e004"
-
-[[site]]
-id = "4268fddb2e"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "554"
-op = "&&"
-excerpt = "if sig.is_effect && !ret.is_result()"
-resolution = "pending"
-
-[[site]]
-id = "20b80b94a4"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "555"
-op = "&&"
-excerpt = "&& self.env.functions.contains_key(&sym(name))"
-resolution = "pending"
-
-[[site]]
-id = "bed3bc78a7"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "556"
-op = "&&"
-excerpt = "&& !is_bundled_stdlib_call"
-resolution = "pending"
-
-[[site]]
-id = "46d3fe2297"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "852"
-op = "&&"
-excerpt = "if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {"
-resolution = "pending"
-
-[[site]]
-id = "1e9fac54bd"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "872"
-op = "&&"
-excerpt = "&& s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')"
-resolution = "pending"
-
-[[site]]
-id = "0cadd35fc5"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "872"
-op = "||"
-excerpt = "&& s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')"
-resolution = "pending"
-
-[[site]]
-id = "721b31df3a"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "873"
-op = "&&"
-excerpt = "&& !s.starts_with('.')"
-resolution = "pending"
-
-[[site]]
-id = "a0743cf2d2"
-file = "crates/almide-frontend/src/check/calls.rs"
-line = "874"
-op = "&&"
-excerpt = "&& !s.ends_with('.')"
-resolution = "pending"
-
-[[site]]
-id = "788ca8886a"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "45"
-op = "||"
-excerpt = "Ty::Fn { params: a_params.clone(), ret: c_ret.clone(), is_effect: *a_eff || *c_eff }"
-resolution = "pending"
-
-[[site]]
-id = "885fd7f763"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "515"
-op = "&&"
-excerpt = "&& args.len() >= 2"
-resolution = "pending"
-
-[[site]]
-id = "fe8845d575"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "605"
-op = "||"
-excerpt = "if ph.line != call.line || ph.col < call.col || ph.col >= call.end_col {"
-resolution = "pending"
-
-[[site]]
-id = "870778154e"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "605"
-op = "||"
-excerpt = "if ph.line != call.line || ph.col < call.col || ph.col >= call.end_col {"
-resolution = "pending"
-
-[[site]]
-id = "b21b7edbf8"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "621"
-op = "&&"
-excerpt = "if next < offsets.len() && i == offsets[next] {"
-resolution = "pending"
-
-[[site]]
-id = "152c953260"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "715"
-op = "||"
-excerpt = "let became_fallible = self.env.lambda_prop_used || slot_effect;"
-resolution = "pending"
-
-[[site]]
-id = "7bd61873e9"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "967"
-op = "||"
-excerpt = "|| self.env.top_lets.contains_key(&sym(name))"
-resolution = "pending"
-
-[[site]]
-id = "1006bf18fa"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "968"
-op = "||"
-excerpt = "|| matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. }))"
-resolution = "pending"
-
-[[site]]
-id = "d27157682f"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "1005"
-op = "||"
-excerpt = "if self.env.auto_unwrap || self.env.in_test_block {"
-resolution = "pending"
-
-[[site]]
-id = "636a787028"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "1045"
-op = "&&"
-excerpt = ") if ra.len() == 2 && oa.len() == 2 => {"
-resolution = "pending"
-
-[[site]]
-id = "154d040b6e"
-file = "crates/almide-frontend/src/check/infer_calls_closures.rs"
-line = "1082"
-op = "&&"
-excerpt = ") if ra.len() == 2 && oa.len() == 2 => {"
-resolution = "pending"

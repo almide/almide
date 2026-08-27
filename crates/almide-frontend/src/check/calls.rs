@@ -180,10 +180,15 @@ impl Checker {
             // with effect-fn body ergonomics (the flag is consumed by the
             // lambda inference and reset around every other arg).
             let prev_slot_effect = self.lambda_slot_effect;
-            self.lambda_slot_effect = is_lambda_arg(a)
-                && call_sig.as_ref().and_then(|sig| sig.params.get(i)).is_some_and(
+            // Single-condition decisions (MC/DC ledger, #566): the && as
+            // its short-circuit if/else, verbatim.
+            self.lambda_slot_effect = if is_lambda_arg(a) {
+                call_sig.as_ref().and_then(|sig| sig.params.get(i)).is_some_and(
                     |(_, pty)| matches!(pty, Ty::Fn { is_effect: true, .. }),
-                );
+                )
+            } else {
+                false
+            };
             let aty = self.infer_expr(a);
             self.lambda_slot_effect = prev_slot_effect;
             self.lambda_arg_hint = prev_hint;
@@ -212,7 +217,11 @@ impl Checker {
             .collect();
         let mentions_unbound = |t: &Ty| -> bool {
             let hit = |t: &Ty| matches!(t, Ty::TypeVar(n) if unbound.contains(n));
-            hit(t) || t.any_child_recursive(&hit)
+            // Single-condition decisions (MC/DC ledger): || as early return.
+            if hit(t) {
+                return true;
+            }
+            t.any_child_recursive(&hit)
         };
         Some(params.into_iter()
             .map(|t| if mentions_unbound(&t) { None } else { Some(t) })
@@ -551,11 +560,16 @@ impl Checker {
         let is_bundled_stdlib_call = name.split_once('.')
             .map(|(m, _)| almide_lang::stdlib_info::is_bundled_module(m))
             .unwrap_or(false);
-        if sig.is_effect && !ret.is_result()
-            && self.env.functions.contains_key(&sym(name))
-            && !is_bundled_stdlib_call
-        {
-            return Ty::result(ret, Ty::String);
+        // Single-condition decisions (MC/DC ledger): the && chain as its
+        // short-circuit-order nested ifs, verbatim.
+        if sig.is_effect {
+            if !ret.is_result() {
+                if self.env.functions.contains_key(&sym(name)) {
+                    if !is_bundled_stdlib_call {
+                        return Ty::result(ret, Ty::String);
+                    }
+                }
+            }
         }
         ret
     }
@@ -849,7 +863,10 @@ impl Checker {
             }
             for (i, (aty, ety)) in arg_tys.iter().zip(expected_tys.iter()).enumerate() {
                 let concrete_arg = resolve_ty(aty, &self.uf);
-                if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {
+                if concrete_arg == Ty::Unknown {
+                    continue;
+                }
+                if !ety.compatible(&concrete_arg) {
                     // Richer hint: show the constructor signature + a conversion suggestion when the argument type is numeric / string-like.
                     let sig_shape = expected_tys.iter()
                         .map(|t| t.display()).collect::<Vec<_>>().join(", ");
@@ -868,10 +885,29 @@ impl Checker {
 }
 /// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.chars + list.all"`).
 fn is_clean_fn_name(s: &str) -> bool {
-    !s.is_empty()
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
-        && !s.starts_with('.')
-        && !s.ends_with('.')
+    // Single-condition decisions (MC/DC ledger, #566): each guard is its
+    // own early return, same short-circuit order.
+    if s.is_empty() {
+        return false;
+    }
+    if !s.chars().all(is_dotted_ident_char) {
+        return false;
+    }
+    if s.starts_with('.') {
+        return false;
+    }
+    !s.ends_with('.')
+}
+
+/// One character of a dotted identifier — the || chain split likewise.
+fn is_dotted_ident_char(c: char) -> bool {
+    if c.is_ascii_alphanumeric() {
+        return true;
+    }
+    if c == '_' {
+        return true;
+    }
+    c == '.'
 }
 
 include!("calls_ufcs.rs");
