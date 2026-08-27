@@ -135,6 +135,13 @@ enum Commands {
         /// flag the module ships verbatim. No-op on the native target.
         #[arg(long = "wasm-opt")]
         wasm_opt: bool,
+        /// Package the wasm output as a WASI 0.2 COMPONENT (#1628 stage 0):
+        /// the core module is wrapped with the pinned
+        /// wasi_snapshot_preview1 adapter via wit-component, so the artifact
+        /// runs anywhere components run (wasmtime, jco, wasmCloud). Sync
+        /// surface only — the fan/async component target is #1628 stage 2.
+        #[arg(long = "component")]
+        component: bool,
         /// Bake a hard heap ceiling (bytes) into the built artifact (#1530).
         /// Exceeding it is the DEFINED "Error: out of memory" abort (exit 1)
         /// on both targets: the wasm bump frontier checks the cap in $alloc,
@@ -818,7 +825,7 @@ fn dispatch(cli: Cli) {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
             dispatch_run(file, no_check, release, target, no_verified, time_report, program_args),
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, heap_cap } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -835,6 +842,7 @@ fn dispatch(cli: Cli) {
                 verified: !no_verified,
                 native_verified: !no_verified,
                 wasm_opt,
+                component,
                 heap_cap,
             });
         }

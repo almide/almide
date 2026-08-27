@@ -20,6 +20,7 @@ pub struct BuildArgs<'a> {
     pub verified: bool,
     pub native_verified: bool,
     pub wasm_opt: bool,
+    pub component: bool,
     pub heap_cap: Option<u32>,
 }
 
@@ -147,7 +148,7 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, heap_cap,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
@@ -160,7 +161,7 @@ pub fn cmd_build(args: BuildArgs) {
         // the whole CLI runs on the one `almide-main` worker thread, so the
         // thread-local is exactly as scoped as this call.
         let _cap = heap_cap.map(almide_mir::heap_cap::HeapCapGuard::set);
-        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt);
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component);
         return;
     }
 
@@ -328,7 +329,7 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
 }
 
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
-fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool) {
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool, component: bool) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
 
@@ -358,6 +359,24 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         bytes
     };
 
+    // `--component` (#1628 stage 0): wrap the WASI core module into a
+    // WASI 0.2 component with the PINNED preview1 adapter (the
+    // wasi-preview1-component-adapter-provider crate — versioned by Cargo,
+    // no vendored blob). Sync surface only; the fan/async component target
+    // is stage 2. The wrap is a packaging step, not a rewrite: the core
+    // module inside is byte-identical to the plain artifact.
+    let bytes = if component {
+        match wrap_component(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                err(&format!("error: component encoding failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
+            }
+        }
+    } else {
+        bytes
+    };
+
     let pre_size = bytes.len();
     if let Err(e) = std::fs::write(output, &bytes) {
         err(&format!("Failed to write {}: {}", output, e));
@@ -378,7 +397,12 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // v1-verified even for structural output), and that opacity cost real
     // diagnosis time — a "wasm doesn't work" report cannot be split
     // between legs without it.
-    let leg = if structural { "structural leg" } else { "incumbent v1 leg" };
+    let leg = match (structural, component) {
+        (true, false) => "structural leg",
+        (false, false) => "incumbent v1 leg",
+        (true, true) => "structural leg, WASI 0.2 component",
+        (false, true) => "incumbent v1 leg, WASI 0.2 component",
+    };
     if !wasm_opt {
         err(&format!(
             "Built {} ({} bytes, {}, verified — wasm-opt skipped; pass --wasm-opt for a smaller, non-verified build)",
@@ -1051,6 +1075,23 @@ fn write_leb128_u32(mut v: u32) -> Vec<u8> {
 
 /// Run `wasm-opt -Oz` on the output file, in-place.
 /// Returns the new file size on success.
+/// Wrap a WASI-preview1 core module into a WASI 0.2 component: the
+/// wit-component encoder + the adapter the provider crate pins. The
+/// spike evidence (issue #1628): hello-world and the stdin family run
+/// byte-identically core vs component on wasmtime 47.
+fn wrap_component(core: &[u8]) -> Result<Vec<u8>, String> {
+    wit_component::ComponentEncoder::default()
+        .module(core)
+        .map_err(|e| format!("module: {e}"))?
+        .adapter(
+            "wasi_snapshot_preview1",
+            wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_COMMAND_ADAPTER,
+        )
+        .map_err(|e| format!("adapter: {e}"))?
+        .encode()
+        .map_err(|e| format!("encode: {e}"))
+}
+
 fn run_wasm_opt(path: &str) -> Result<usize, String> {
     // `-Oz`, matching the flag's documented contract: `--wasm-opt` exists to
     // shrink the module (the published size tables are -Oz numbers), and the
