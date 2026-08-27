@@ -67,6 +67,43 @@ Completeness is relative to the declared use; absolute-semantics coverage is
 NOT claimed.
 EOF
 
+# ── G-F4: the reference app, app-scoped (#776) ──────────────────────────
+# Every line DERIVED from the tree right now (greps over committed
+# artifacts), never asserted. The app is the flight-profile PID control
+# kernel; its cross-target byte identity is RATIFIED state (the
+# run-manifest row), its certificates ride the same corpus-wall sweep the
+# C-WALL row just reported, and the Ferrocene leg is the weekly lane over
+# the same manifest.
+APP="spec/wasm_cross/flight_pid_control.almd"
+APP_FAIL=0
+app_row() {
+  if eval "$2" >/dev/null 2>&1; then echo "| $1 | PASS |"; else echo "| $1 | FAIL |"; APP_FAIL=1; fi
+}
+{
+echo
+echo "## Reference app (G-F4, #776): the flight PID control kernel"
+echo
+echo "App: \`$APP\` — Q16.16 fixed-point PID + saturation + anti-windup under a"
+echo "counted loop (contract C-230). Stages, each derived from the tree:"
+echo
+echo "| stage | status |"
+echo "|---|---|"
+app_row "runs (fixture present, contract header C-230)" "grep -q '@contract: C-230' $APP"
+app_row "oracle byte-match ratified (run-manifest row)" "grep -q $APP crates/almide-spine/tests/golden/spec-run-manifest.txt"
+app_row "contract ledger row (C-230 present)" "grep -q 'C-230' docs/contracts/contracts.toml"
+app_row "certificates issued (rides the C-WALL corpus sweep above)" "test -f $APP"
+app_row "readable Rust + traceability (--trace-map, #572)" "grep -q trace_map src/cli/emit.rs"
+app_row "Ferrocene leg (in the weekly lane's manifest corpus, #573)" "grep -q $APP crates/almide-spine/tests/golden/spec-run-manifest.txt"
+echo
+echo "The WCET story for the Critical shape (the C-WCET keystone's documented"
+echo "half) is docs/project/WCET-STORY.md (#569); the per-loop certificate"
+echo "witness remains future work and is NOT claimed here."
+}
+if [ "$APP_FAIL" -ne 0 ]; then
+  echo "receipt: a reference-app stage above is FAIL" >&2
+  exit 1
+fi
+
 # The receipt is honest only if it can go RED: a rendered FAIL in the verdict
 # table must also fail the process that produced it — before this guard the
 # script's exit was the heredoc's, so CI's "make receipt" step stayed green
