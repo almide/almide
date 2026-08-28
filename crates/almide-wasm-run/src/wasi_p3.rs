@@ -4,10 +4,18 @@
 //! sync stream/future builtins, and an async-lifted entry are exactly the
 //! vocabulary fan arms will schedule on.
 //!
-//! Same doctrine and five-op host surface as `to_p2` (#1588/#1628 stage 1):
-//! console out, exit codes, stdin (cursor + read-to-end), entropy, the wall
-//! clock; fs/env/process keep the DEFINED refusal. The transform is a
-//! post-pass — the emitter's verified envelope is untouched.
+//! Same doctrine as `to_p2` (#1588/#1628 stage 1) with the five-op host
+//! surface (console out, exit codes, stdin, entropy, wall clock) PLUS the
+//! filesystem READ surface (increment 2a): exists/is-dir/is-file via
+//! stat-at, read_text/read_bytes via open-at + sync stream reads, guest
+//! paths resolved against the FIRST preopen (`wasmtime run --dir=.`).
+//! Canonical-ABI facts (variant discriminants, payload offsets) are
+//! DERIVED from the vendored WIT at emit time (`FsAbi`), never
+//! hand-counted. fs writes, env and process keep the DEFINED refusal;
+//! the fs-program route flip to this leg waits on the write surface
+//! (until then it is exercised via ALMIDE_WASM_STRUCTURAL=1). The
+//! transform is a post-pass — the emitter's verified envelope is
+//! untouched.
 //!
 //! The 0.3 shapes used (as wasmtime 46+ implements them; vendored WIT
 //! under `crates/almide-wasm-run/wit/p3/`):
@@ -68,11 +76,111 @@ const I_STDIN_DROP_FUT: u32 = 14;
 const I_CLOCK_NOW: u32 = 15;
 const I_RANDOM: u32 = 16;
 const I_TASK_RETURN: u32 = 17;
-const IMPORTS: u32 = 18;
+// The filesystem READ surface (#1628 increment 2a): preopens + stat-at +
+// open-at + read-via-stream, all SYNC lowers (an async-declared func may
+// be lowered sync — the fiber blocks, same doctrine as the 🚝 builtins).
+const I_FS_PRE: u32 = 18; // preopens.get-directories (retptr)
+const I_FS_OPEN: u32 = 19; // [method]descriptor.open-at
+const I_FS_STAT: u32 = 20; // [method]descriptor.stat-at
+const I_FS_RVS: u32 = 21; // [method]descriptor.read-via-stream
+const I_FS_SREAD: u32 = 22; // [stream-read-0] of read-via-stream
+const I_FS_SDROP: u32 = 23; // [stream-drop-readable-0] of read-via-stream
+const I_FS_FDROP: u32 = 24; // [future-drop-readable-1] of read-via-stream
+const I_FS_RESDROP: u32 = 25; // [resource-drop]descriptor
+const IMPORTS: u32 = 26;
 const SHIFT: u32 = IMPORTS - 5;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
+// stat-at's result<descriptor-stat, error-code> needs 112 bytes — parked
+// past MSG (64..109), before the fs message statics at 256.
+const STATRET: u64 = 128;
+// Static fs error messages (canonical-ABI error-code -> the SAME strings
+// the native runtime's io::Error Display produces, so the common error
+// legs stay byte-identical). Offsets within the park span.
+const MSG_NOENT: u64 = 256;
+const MSG_ACCES: u64 = 320;
+const MSG_ISDIR: u64 = 384;
+const MSG_GEN: u64 = 448;
+const MSG_NOPRE: u64 = 512;
+const E_NOENT: &[u8] = b"No such file or directory (os error 2)";
+const E_ACCES: &[u8] = b"Permission denied (os error 13)";
+const E_ISDIR: &[u8] = b"Is a directory (os error 21)";
+const E_GEN: &[u8] = b"filesystem operation failed";
+const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
+
+/// Canonical-ABI facts the fs shim stores through — DERIVED from the
+/// vendored WIT at emit time, never hand-counted (the wit-bindgen
+/// doctrine: a case index or payload offset written as a literal drifts
+/// silently when the WIT moves; a lookup by name fails loudly).
+struct FsAbi {
+    ec_no_entry: i32,      // error-code case index
+    ec_access: i32,
+    ec_not_permitted: i32,
+    ec_is_directory: i32,
+    dt_directory: i32,     // descriptor-type case index
+    dt_regular_file: i32,
+    open_payload: u64,     // result<descriptor, error-code> payload offset
+    stat_payload: u64,     // result<descriptor-stat, error-code> payload offset
+    stat_size: u64,        // full result size (park-span room check)
+}
+
+fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
+    use wit_parser::{Type, TypeDefKind};
+    // Scope the lookups to wasi:filesystem's `types` interface — bare
+    // name search collides (wasi:cli has its own `error-code`).
+    let (_, fs_pkg) = resolve
+        .packages
+        .iter()
+        .find(|(_, p)| p.name.namespace == "wasi" && p.name.name == "filesystem")
+        .ok_or_else(|| anyhow::anyhow!("wasi:filesystem package not in the resolve"))?;
+    let iface_id = *fs_pkg
+        .interfaces
+        .get("types")
+        .ok_or_else(|| anyhow::anyhow!("wasi:filesystem/types interface not found"))?;
+    let iface = &resolve.interfaces[iface_id];
+    let find = |name: &str| -> anyhow::Result<wit_parser::TypeId> {
+        iface
+            .types
+            .get(name)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("wit type {name} not found in wasi:filesystem/types"))
+    };
+    let case = |id: wit_parser::TypeId, name: &str| -> anyhow::Result<i32> {
+        match &resolve.types[id].kind {
+            TypeDefKind::Variant(v) => v
+                .cases
+                .iter()
+                .position(|c| c.name == name)
+                .map(|p| p as i32)
+                .ok_or_else(|| anyhow::anyhow!("variant case {name} not found")),
+            k => Err(anyhow::anyhow!("expected variant, got {k:?}")),
+        }
+    };
+    let ec = find("error-code")?;
+    let dt = find("descriptor-type")?;
+    let stat = find("descriptor-stat")?;
+    let mut sa = wit_parser::SizeAlign::default();
+    sa.fill(resolve);
+    // result<T, error-code> payload offset = discriminant (1 byte for
+    // <=255 cases) aligned up to max(align(T), align(error-code)).
+    let ec_align = sa.align(&Type::Id(ec)).align_wasm32() as u64;
+    let stat_align = sa.align(&Type::Id(stat)).align_wasm32() as u64;
+    let stat_sz = sa.size(&Type::Id(stat)).size_wasm32() as u64;
+    let open_payload = 4u64.max(ec_align); // own<descriptor> aligns 4
+    let stat_payload = stat_align.max(ec_align);
+    Ok(FsAbi {
+        ec_no_entry: case(ec, "no-entry")?,
+        ec_access: case(ec, "access")?,
+        ec_not_permitted: case(ec, "not-permitted")?,
+        ec_is_directory: case(ec, "is-directory")?,
+        dt_directory: case(dt, "directory")?,
+        dt_regular_file: case(dt, "regular-file")?,
+        open_payload,
+        stat_payload,
+        stat_size: stat_payload + stat_sz,
+    })
+}
 
 /// 8-byte MemArg.
 fn mem64(offset: u64) -> MemArg {
@@ -80,6 +188,43 @@ fn mem64(offset: u64) -> MemArg {
 }
 
 pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
+    // The vendored WIT first: the fs shim's layout facts derive from it,
+    // so a WIT/shim drift refuses to emit instead of corrupting stores.
+    let mut resolve = wit_parser::Resolve::default();
+    for (name, text) in [
+        ("clocks.wit", include_str!("../wit/p3/deps/clocks/package.wit")),
+        ("random.wit", include_str!("../wit/p3/deps/random/package.wit")),
+        ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
+        ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
+    ] {
+        resolve
+            .push_str(name, text)
+            .map_err(|e| anyhow::anyhow!("wit {name}: {e}"))?;
+    }
+    let pkg = resolve
+        .push_str("world.wit", include_str!("../wit/p3/world.wit"))
+        .map_err(|e| anyhow::anyhow!("wit world: {e}"))?;
+    let world = resolve
+        .select_world(&[pkg], Some("p3-command"))
+        .map_err(|e| anyhow::anyhow!("world: {e}"))?;
+    let abi = fs_abi(&resolve)?;
+    // Park layout, checked: retptr spans and message statics must not
+    // collide with each other or the stdin/entropy DATA span.
+    assert!(RET + 32 <= MSG, "RET span reaches MSG");
+    assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET, "MSG reaches STATRET");
+    assert!(STATRET + abi.stat_size <= MSG_NOENT, "STATRET reaches the messages");
+    let msgs = [
+        (MSG_NOENT, E_NOENT.len() as u64),
+        (MSG_ACCES, E_ACCES.len() as u64),
+        (MSG_ISDIR, E_ISDIR.len() as u64),
+        (MSG_GEN, E_GEN.len() as u64),
+        (MSG_NOPRE, E_NOPRE.len() as u64),
+    ];
+    for w in msgs.windows(2) {
+        assert!(w[0].0 + w[0].1 <= w[1].0, "fs message statics overlap");
+    }
+    assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= DATA, "messages reach DATA");
+
     let parsed = parse_module(bytes)?;
     let Parsed {
         mut types,
@@ -115,6 +260,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let (g_out_tx, g_out_fut) = (global_count + 2, global_count + 3);
     let (g_err_tx, g_err_fut) = (global_count + 4, global_count + 5);
     let (g_in_rx, g_in_fut) = (global_count + 6, global_count + 7);
+    let g_pre = global_count + 8; // first preopen descriptor (lazy, -1 = unresolved)
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -131,8 +277,8 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mutable_i32 = GlobalType { val_type: ValType::I32, mutable: true, shared: false };
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // plen
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // ppos
-    for _ in 0..6 {
-        globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // stream state
+    for _ in 0..7 {
+        globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // stream state + g_pre
     }
 
     // Canonical-ABI core types.
@@ -155,48 +301,62 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let t_realloc = type_index(&mut types, &[ValType::I32; 4], &[ValType::I32]);
     let t_status = type_index(&mut types, &[], &[ValType::I32]);
     let t_callback = type_index(&mut types, &[ValType::I32; 3], &[ValType::I32]);
+    // fs read-surface core shapes (sync lowers).
+    let t_open = type_index(&mut types, &[ValType::I32; 7], &[]);
+    let t_stat = type_index(&mut types, &[ValType::I32; 5], &[]);
+    let t_rvs = type_index(
+        &mut types,
+        &[ValType::I32, ValType::I64, ValType::I32],
+        &[],
+    );
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
         type_sec.ty().function(p.iter().copied(), r.iter().copied());
     }
 
+    // The import table, POSITION-CHECKED against the I_* constants: the
+    // list is the single source of order, and a drifted constant fails
+    // the build of every artifact instead of silently calling the wrong
+    // host function.
+    let cli_out = "wasi:cli/stdout@0.3.0";
+    let cli_err = "wasi:cli/stderr@0.3.0";
+    let cli_in = "wasi:cli/stdin@0.3.0";
+    let fs_types = "wasi:filesystem/types@0.3.0";
+    let import_list: &[(u32, &str, &str, u32)] = &[
+        (I_EXIT, "wasi:cli/exit@0.3.0", "exit", t_exit),
+        (I_OUT_CALL, cli_out, "write-via-stream", t_call),
+        (I_OUT_NEW, cli_out, "[stream-new-0]write-via-stream", t_new),
+        (I_OUT_WRITE, cli_out, "[stream-write-0]write-via-stream", t_rw),
+        (I_OUT_DROP_TX, cli_out, "[stream-drop-writable-0]write-via-stream", t_drop),
+        (I_OUT_FUT_READ, cli_out, "[future-read-1]write-via-stream", t_fut_read),
+        (I_ERR_CALL, cli_err, "write-via-stream", t_call),
+        (I_ERR_NEW, cli_err, "[stream-new-0]write-via-stream", t_new),
+        (I_ERR_WRITE, cli_err, "[stream-write-0]write-via-stream", t_rw),
+        (I_ERR_DROP_TX, cli_err, "[stream-drop-writable-0]write-via-stream", t_drop),
+        (I_ERR_FUT_READ, cli_err, "[future-read-1]write-via-stream", t_fut_read),
+        (I_STDIN_OPEN, cli_in, "read-via-stream", t_retptr),
+        (I_STDIN_READ, cli_in, "[stream-read-0]read-via-stream", t_rw),
+        (I_STDIN_DROP_RX, cli_in, "[stream-drop-readable-0]read-via-stream", t_drop),
+        (I_STDIN_DROP_FUT, cli_in, "[future-drop-readable-1]read-via-stream", t_drop),
+        (I_CLOCK_NOW, "wasi:clocks/system-clock@0.3.0", "now", t_retptr),
+        (I_RANDOM, "wasi:random/random@0.3.0", "get-random-bytes", t_random),
+        (I_TASK_RETURN, "[export]wasi:cli/run@0.3.0", "[task-return]run", t_exit),
+        (I_FS_PRE, "wasi:filesystem/preopens@0.3.0", "get-directories", t_retptr),
+        (I_FS_OPEN, fs_types, "[method]descriptor.open-at", t_open),
+        (I_FS_STAT, fs_types, "[method]descriptor.stat-at", t_stat),
+        (I_FS_RVS, fs_types, "[method]descriptor.read-via-stream", t_rvs),
+        (I_FS_SREAD, fs_types, "[stream-read-0][method]descriptor.read-via-stream", t_rw),
+        (I_FS_SDROP, fs_types, "[stream-drop-readable-0][method]descriptor.read-via-stream", t_drop),
+        (I_FS_FDROP, fs_types, "[future-drop-readable-1][method]descriptor.read-via-stream", t_drop),
+        (I_FS_RESDROP, fs_types, "[resource-drop]descriptor", t_drop),
+    ];
+    assert_eq!(import_list.len() as u32, IMPORTS, "IMPORTS count drift");
     let mut imports = ImportSection::new();
-    imports.import("wasi:cli/exit@0.3.0", "exit", EntityType::Function(t_exit));
-    for iface in ["wasi:cli/stdout@0.3.0", "wasi:cli/stderr@0.3.0"] {
-        imports.import(iface, "write-via-stream", EntityType::Function(t_call));
-        imports.import(iface, "[stream-new-0]write-via-stream", EntityType::Function(t_new));
-        imports.import(iface, "[stream-write-0]write-via-stream", EntityType::Function(t_rw));
-        imports.import(
-            iface,
-            "[stream-drop-writable-0]write-via-stream",
-            EntityType::Function(t_drop),
-        );
-        imports.import(iface, "[future-read-1]write-via-stream", EntityType::Function(t_fut_read));
+    for (k, (want, m, n, t)) in import_list.iter().enumerate() {
+        assert_eq!(k as u32, *want, "import order drift at {m}#{n}");
+        imports.import(m, n, EntityType::Function(*t));
     }
-    imports.import("wasi:cli/stdin@0.3.0", "read-via-stream", EntityType::Function(t_retptr));
-    imports.import(
-        "wasi:cli/stdin@0.3.0",
-        "[stream-read-0]read-via-stream",
-        EntityType::Function(t_rw),
-    );
-    imports.import(
-        "wasi:cli/stdin@0.3.0",
-        "[stream-drop-readable-0]read-via-stream",
-        EntityType::Function(t_drop),
-    );
-    imports.import(
-        "wasi:cli/stdin@0.3.0",
-        "[future-drop-readable-1]read-via-stream",
-        EntityType::Function(t_drop),
-    );
-    imports.import("wasi:clocks/system-clock@0.3.0", "now", EntityType::Function(t_retptr));
-    imports.import("wasi:random/random@0.3.0", "get-random-bytes", EntityType::Function(t_random));
-    imports.import(
-        "[export]wasi:cli/run@0.3.0",
-        "[task-return]run",
-        EntityType::Function(t_exit),
-    );
 
     let mut functions = FunctionSection::new();
     for ti in &func_types {
@@ -238,6 +398,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_exit());
     code.function(&shim_fs_call(
         park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut,
+        g_pre, f_realloc, &abi,
     ));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
@@ -254,6 +415,15 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_callback());
 
     data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
+    for (off, msg) in [
+        (MSG_NOENT, E_NOENT),
+        (MSG_ACCES, E_ACCES),
+        (MSG_ISDIR, E_ISDIR),
+        (MSG_GEN, E_GEN),
+        (MSG_NOPRE, E_NOPRE),
+    ] {
+        data.active(0, &ConstExpr::i32_const((park + off) as i32), msg.iter().copied());
+    }
 
     let mut m = Module::new();
     m.section(&type_sec)
@@ -269,22 +439,6 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut core = m.finish();
     wasmparser::validate(&core)?;
 
-    let mut resolve = wit_parser::Resolve::default();
-    for (name, text) in [
-        ("clocks.wit", include_str!("../wit/p3/deps/clocks/package.wit")),
-        ("random.wit", include_str!("../wit/p3/deps/random/package.wit")),
-        ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
-    ] {
-        resolve
-            .push_str(name, text)
-            .map_err(|e| anyhow::anyhow!("wit {name}: {e}"))?;
-    }
-    let pkg = resolve
-        .push_str("world.wit", include_str!("../wit/p3/world.wit"))
-        .map_err(|e| anyhow::anyhow!("wit world: {e}"))?;
-    let world = resolve
-        .select_world(&[pkg], Some("p3-command"))
-        .map_err(|e| anyhow::anyhow!("world: {e}"))?;
     wit_component::embed_component_metadata(
         &mut core,
         &resolve,
@@ -395,6 +549,36 @@ fn open_stdin(i: &mut wasm_encoder::InstructionSink<'_>, g_rx: u32, g_fut: u32, 
     i.end();
 }
 
+/// Lazy first-preopen resolve: `if g_pre < 0 { get-directories(retptr);
+/// if len > 0 { g_pre = mem[listptr] } }` — increment 2a resolves guest
+/// paths against the FIRST preopen verbatim (relative paths under
+/// `wasmtime run --dir=.`); prefix matching over the full preopen list
+/// is the follow-up noted in the module header.
+fn fs_preopen(i: &mut wasm_encoder::InstructionSink<'_>, g_pre: u32, park: u64) {
+    i.global_get(g_pre).i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).call(I_FS_PRE);
+    i.i32_const((park + RET) as i32).i32_load(mem(4));
+    i.if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).i32_load(mem(0)).global_set(g_pre);
+    i.end();
+    i.end();
+}
+
+/// Err return: park the static message, answer `pack(1, len)`.
+fn fs_err(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    g_ppos: u32,
+    g_plen: u32,
+    park: u64,
+    off: u64,
+    len: usize,
+) {
+    i.i32_const((park + off) as i32).global_set(g_ppos);
+    i.i32_const(len as i32).global_set(g_plen);
+    i.i64_const((1i64 << 32) | len as i64).return_();
+}
+
 /// The five-op host contract over p3 (op codes shared with the embedded
 /// host): 30 raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32
 /// entropy, 34 wall clock; anything else = the defined refusal.
@@ -409,12 +593,16 @@ fn shim_fs_call(
     g_out_fut: u32,
     g_err_tx: u32,
     g_err_fut: u32,
+    g_pre: u32,
+    f_realloc: u32,
+    abi: &FsAbi,
 ) -> Function {
-    let (op, _a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let total = 5u32;
     let n = 6u32;
     let s64 = 7u32;
-    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
+    let (d, buf, cap, rx, fut) = (8u32, 9u32, 10u32, 11u32, 12u32);
+    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (5, ValType::I32)]);
     let mut i = f.instructions();
 
     // op 30: raw stdout append (no newline) — b carries the bytes.
@@ -479,6 +667,123 @@ fn shim_fs_call(
     i.i64_const(1_000_000_000).i64_mul();
     i.i32_const((park + RET) as i32).i64_load32_u(mem(8));
     i.i64_add().return_();
+    i.end();
+
+    // ── The filesystem READ surface (#1628 increment 2a) ──────────────
+
+    // ops 4/5/6: exists / is_dir / is_file — stat-at with symlink-follow
+    // (the native `fs::metadata` behavior). The flag rides the len half;
+    // these never err: any stat failure (including no preopen) is false.
+    i.local_get(op).i32_const(4).i32_eq();
+    i.local_get(op).i32_const(5).i32_eq().i32_or();
+    i.local_get(op).i32_const(6).i32_eq().i32_or();
+    i.if_(BlockType::Empty);
+    fs_preopen(&mut i, g_pre, park);
+    i.global_get(g_pre).i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    i.i64_const(0).return_();
+    i.end();
+    i.global_get(g_pre);
+    i.i32_const(1); // path-flags: symlink-follow
+    i.local_get(a_ptr).local_get(a_len);
+    i.i32_const((park + STATRET) as i32);
+    i.call(I_FS_STAT);
+    // result disc @0: nonzero = error-code → false.
+    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(0));
+    i.if_(BlockType::Empty);
+    i.i64_const(0).return_();
+    i.end();
+    i.local_get(op).i32_const(4).i32_eq();
+    i.if_(BlockType::Empty);
+    i.i64_const(1).return_();
+    i.end();
+    // descriptor-stat's %type is its first field, so its discriminant
+    // sits at the result payload offset (both WIT-derived).
+    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload)).local_set(n);
+    i.local_get(op).i32_const(5).i32_eq();
+    i.if_(BlockType::Result(ValType::I32));
+    i.local_get(n).i32_const(abi.dt_directory).i32_eq();
+    i.else_();
+    i.local_get(n).i32_const(abi.dt_regular_file).i32_eq();
+    i.end();
+    i.i64_extend_i32_u().return_();
+    i.end();
+
+    // ops 1/13/14: read_text / read_text_if_exists / read_bytes —
+    // open-at(read) then a sync stream-read loop into a cabi_realloc'd
+    // buffer (grown by doubling; the bump never frees). DROPPED (n=0)
+    // is EOF: stream bytes arrive in order, so total is the whole file.
+    i.local_get(op).i32_const(1).i32_eq();
+    i.local_get(op).i32_const(13).i32_eq().i32_or();
+    i.local_get(op).i32_const(14).i32_eq().i32_or();
+    i.if_(BlockType::Empty);
+    fs_preopen(&mut i, g_pre, park);
+    i.global_get(g_pre).i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
+    i.end();
+    i.global_get(g_pre);
+    i.i32_const(1); // path-flags: symlink-follow
+    i.local_get(a_ptr).local_get(a_len);
+    i.i32_const(0); // open-flags: none
+    i.i32_const(1); // descriptor-flags: read
+    i.i32_const((park + RET) as i32);
+    i.call(I_FS_OPEN);
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0));
+    i.if_(BlockType::Empty);
+    // error-code discriminant at the result payload offset — case
+    // indices WIT-derived, mapped to the native io::Error Display
+    // strings so the error legs match.
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.open_payload)).local_set(n);
+    i.local_get(op).i32_const(13).i32_eq();
+    i.local_get(n).i32_const(abi.ec_no_entry).i32_eq().i32_and();
+    i.if_(BlockType::Empty);
+    i.i64_const(2i64 << 32).return_(); // ok-none
+    i.end();
+    i.local_get(n).i32_const(abi.ec_no_entry).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOENT, E_NOENT.len());
+    i.end();
+    i.local_get(n).i32_const(abi.ec_access).i32_eq();
+    i.local_get(n).i32_const(abi.ec_not_permitted).i32_eq().i32_or();
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_ACCES, E_ACCES.len());
+    i.end();
+    i.local_get(n).i32_const(abi.ec_is_directory).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_ISDIR, E_ISDIR.len());
+    i.end();
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_GEN, E_GEN.len());
+    i.end();
+    i.i32_const((park + RET) as i32).i32_load(mem(abi.open_payload)).local_set(d);
+    i.local_get(d).i64_const(0).i32_const((park + RET) as i32).call(I_FS_RVS);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(rx);
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).local_set(fut);
+    i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_realloc).local_set(buf);
+    i.i32_const(65536).local_set(cap);
+    i.i32_const(0).local_set(total);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(total).local_get(cap).i32_ge_u();
+    i.if_(BlockType::Empty);
+    i.local_get(buf).local_get(cap).i32_const(8);
+    i.local_get(cap).i32_const(1).i32_shl();
+    i.call(f_realloc).local_set(buf);
+    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    i.end();
+    i.local_get(rx);
+    i.local_get(buf).local_get(total).i32_add();
+    i.local_get(cap).local_get(total).i32_sub();
+    i.call(I_FS_SREAD);
+    i.i32_const(4).i32_shr_u().local_set(n);
+    i.local_get(n).i32_eqz().br_if(1);
+    i.local_get(total).local_get(n).i32_add().local_set(total);
+    i.br(0).end().end();
+    i.local_get(rx).call(I_FS_SDROP);
+    i.local_get(fut).call(I_FS_FDROP);
+    i.local_get(d).call(I_FS_RESDROP);
+    i.local_get(buf).global_set(g_ppos);
+    i.local_get(total).global_set(g_plen);
+    i.local_get(total).i64_extend_i32_u().return_();
     i.end();
 
     // Everything else: the defined refusal — the message on stderr, exit 1.
