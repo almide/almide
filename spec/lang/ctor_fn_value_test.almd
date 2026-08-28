@@ -2,22 +2,21 @@
 // (bare `some` / `ok` / `err` synthesize their eta-expansion) and user
 // ctors (1-ary = (A) -> T, multi-arg = (A, B, …) -> T, no partial
 // application; 0-ary = the value itself).
-
-type Shape = Circle(Int) | Rect(Int, Int) | Dot
+type Shape = | Circle(Int) | Rect(Int, Int) | Dot
 
 test "bare some maps" {
-  assert_eq([1, 2] |> list.map(some), [some(1), some(2)])
+  assert_eq([1, 2] |> list.map((__ctor_arg) => some(__ctor_arg)), [some(1), some(2)])
 }
 
 test "bare ok and err map" {
-  let oks: List[Result[Int, String]] = [1] |> list.map(ok)
+  let oks: List[Result[Int, String]] = [1] |> list.map((__ctor_arg) => ok(__ctor_arg))
   assert_eq(oks, [ok(1)])
-  let errs: List[Result[Int, String]] = ["e"] |> list.map(err)
+  let errs: List[Result[Int, String]] = ["e"] |> list.map((__ctor_arg) => err(__ctor_arg))
   assert_eq(errs, [err("e")])
 }
 
 test "builtin ctor binds and applies" {
-  let f = some
+  let f = (__ctor_arg) => some(__ctor_arg)
   assert_eq(f(7), some(7))
 }
 
