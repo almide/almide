@@ -24,6 +24,12 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
     ) -> Result<Option<Option<SliceTy>>, EmitError> {
+        // ALMIDE_DBG_FAN=1: name the route each fan call takes (the
+        // ALMIDE_DBG_ELEM precedent) — the p3 prefetch test asserts the
+        // "prefetch" line so a pattern regression cannot pass silently
+        // (the import-section assertion alone is vacuous: to_p3 declares
+        // the async imports unconditionally).
+        let dbg = std::env::var_os("ALMIDE_DBG_FAN").is_some();
         let out = match (func, args) {
             // The PREFETCH form (#1628 increment 2b): a map whose whole
             // arm body is one fs.read_text on the element starts every
@@ -33,11 +39,23 @@ impl Emitter<'_> {
             // component) serves the reads concurrently. Hosts that
             // cannot treat start as a no-op.
             ("map", [xs, cb]) if body_is_fs_read_text(cb) => {
+                if dbg {
+                    eprintln!("[fan-dbg] fan.map: prefetch lowering engaged");
+                }
                 Some(self.lower_fan_map_fs_prefetch(xs)?)
             }
             ("map" | "any" | "any_map", [xs, cb]) => {
+                if dbg {
+                    eprintln!("[fan-dbg] fan.{func}: sequential accumulator");
+                }
                 let first_ok_wins = func != "map";
                 let (params, body) = self.hof_lambda(cb, 1)?;
+                // ADR-0006 (#1663): the callback's top-level `!` IS the
+                // fallible form's instantiation — the accumulator below
+                // performs exactly its first-err semantics, so the Try
+                // layer strips instead of propagating into the caller's
+                // frame (which aborted main where native carries a value).
+                let body = strip_callback_try(body);
                 let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
                 // The callback body VALUE is a Result block.
                 let hr = self.hold_i32()?;
@@ -133,6 +151,7 @@ impl Emitter<'_> {
                 let mut result_ty: Option<SliceTy> = None;
                 for arm in elements {
                     let (_p, body) = self.hof_lambda(arm, 0)?;
+                    let body = strip_callback_try(body);
                     let got = self.lower(body, None)?;
                     match got {
                         SliceTy::Result(..) => {
@@ -358,6 +377,31 @@ impl Emitter<'_> {
     }
 }
 
+/// The fan callback's top-level `!` strips (#1663). The frontend spells
+/// the fallible form's instantiation as `ok(unwrap(expr))` around the
+/// callback body (observed IR; `Try{expr}` kept for robustness): for a
+/// Result-typed `expr` that wrapper is the identity, and the emitter's
+/// `Unwrap` lowering is ENCLOSING-FUNCTION propagation — inlined into
+/// the caller it aborted main where native carries the err into the
+/// fan's per-element Result. The fan accumulator IS the fallible form's
+/// first-err semantics, so the wrapper strips to the raw Result expr.
+fn strip_callback_try(body: &IrExpr) -> &IrExpr {
+    match &body.kind {
+        IrExprKind::Try { expr } => expr.as_ref(),
+        IrExprKind::ResultOk { expr } => match &expr.kind {
+            IrExprKind::Unwrap { expr: inner }
+                if matches!(&inner.ty,
+                            Ty::Applied(c, _)
+                            if matches!(c, TypeConstructorId::Result)) =>
+            {
+                inner.as_ref()
+            }
+            _ => body,
+        },
+        _ => body,
+    }
+}
+
 /// `(p) => fs.read_text(p)` — possibly under the callback's `!` (one
 /// `Try` layer): the shape whose Result flows straight into the fan
 /// protocol, so prefetching the read is unobservable.
@@ -368,10 +412,7 @@ fn body_is_fs_read_text(cb: &IrExpr) -> bool {
     let [(param, _)] = params.as_slice() else {
         return false;
     };
-    let body = match &body.kind {
-        IrExprKind::Try { expr } => expr.as_ref(),
-        _ => body.as_ref(),
-    };
+    let body = strip_callback_try(body);
     let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
         &body.kind
     else {

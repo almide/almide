@@ -284,6 +284,7 @@ fn build_p3_structural(src: &Path, out: &Path) -> String {
         ])
         .env("ALMIDE_COMPONENT_P3", "1")
         .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_DBG_FAN", "1")
         .output()
         .expect("spawn almide");
     let stderr = String::from_utf8_lossy(&o.stderr).to_string();
@@ -405,9 +406,17 @@ fn p3_component_fan_prefetch_reads_concurrently() {
     let src = d.join("pf.almd");
     std::fs::write(&src, FAN_PREFETCH).expect("write");
     let p3 = d.join("pf_p3.wasm");
-    build_p3_structural(&src, &p3);
-    // The artifact must actually carry the async machinery — a silent
-    // fallback to sequential opens would still pass the output check.
+    let build_log = build_p3_structural(&src, &p3);
+    // The build must actually take the PREFETCH route — asserted on the
+    // emitter's own route line (ALMIDE_DBG_FAN), because the import
+    // assertion below is vacuous on its own: to_p3 declares the async
+    // imports unconditionally, so a pattern regression that fell back to
+    // the sequential accumulator would still carry them.
+    assert!(
+        build_log.contains("prefetch lowering engaged"),
+        "fan.map over fs.read_text must lower through the prefetch route:
+{build_log}"
+    );
     let bytes = std::fs::read(&p3).expect("read");
     let hay = String::from_utf8_lossy(&bytes).into_owned();
     assert!(
