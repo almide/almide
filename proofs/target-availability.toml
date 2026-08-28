@@ -1,0 +1,513 @@
+# The target-availability matrix (#1423 stage 2): the DECLARED single-leg
+# stdlib surface, diffed bidirectionally against the measured reality by
+# scripts/check-target-availability.sh (CI). Measurement = the renderer's
+# own verdict: tools/target_availability_probe.py synthesizes a minimal
+# well-typed call per public stdlib fn (the docs/stdlib signature indexes)
+# and attempts the STRUCTURAL wasm lowering under ALMIDE_WASM_STRUCTURAL=1.
+#
+# Row discipline (the rustc tier-check rule): every measured wall MUST have
+# a row here (a new wall without a declaration fails CI), and every row
+# here MUST still measure as a wall (a fn that starts lowering makes its
+# row STALE — delete it in the same PR, the shrink direction). A row
+# without a reason fails. Reasons:
+#   host-surface      the module has no structural host binding yet
+#                     (env/process/testing/random/http/io — the embedded
+#                     almide.* surface and the p1/p2/p3 shims do not carry
+#                     it); the incumbent leg serves these today.
+#   pending-self-host the fn needs a self-host body / registry link on the
+#                     structural leg (#1423 stage 4 burns these down; the
+#                     count is a SHRINK-ONLY ratchet).
+#
+# The probe-unsynthesizable table is the honesty bucket: fns whose minimal
+# call the probe cannot yet type (nominal runtime types, residual generator
+# gaps). They are claimed NEITHER way; shrinking this list is probe work,
+# not renderer work.
+
+# Measured (this generation): 323 ok / 66 native-only / 39 unsynthesizable.
+pending_self_host_ceiling = 31
+
+[[native-only]]
+fn = "datetime.parse_iso"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "env.millis"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "env.set"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "env.sleep_ms"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "env.unix_timestamp"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "error.chain"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "error.context"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "error.message"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "fs.fold_lines_chunked"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "fs.fold_lines_range"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "fs.glob"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "fs.stat"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "hex.decode"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "html.empty"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "html.escape"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "html.raw"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.delete"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.get"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.get_bytes"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.patch"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.post"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.put"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.request"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.request_bytes"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.url_decode"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "int.bnot"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "int.to_u32"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "int.to_u8"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "io.print"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "json.to_map"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "list.find_index"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "list.shuffle"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "map.all"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "map.any"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "map.clear"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "map.count"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "map.delete"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "map.is_empty"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "path.from_string"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "path.trusted"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.env"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.exec"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.exec_in"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.exec_status"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.exec_status_timeout"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.exec_with_stdin"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.exit"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.is_alive"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.kill"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.pid"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.spawn"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "process.stdin_lines"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "random.choice"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "random.float"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "random.shuffle"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "set.all"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "set.any"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "set.is_empty"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "testing.assert_approx"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "testing.assert_contains"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "testing.assert_gt"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "testing.assert_lt"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "testing.assert_some"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "testing.assert_throws"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "value.to_camel_case"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[native-only]]
+fn = "value.to_snake_case"
+reason = "pending-self-host"
+issue = "#1423"
+
+[[unsynthesizable]]
+fn = "compute.ns"
+note = "Int) -> Compute` … `compute.h(n: Int"
+
+[[unsynthesizable]]
+fn = "duration.ns"
+note = "Int) -> Duration` … `duration.h(n: Int"
+
+[[unsynthesizable]]
+fn = "html.concat"
+note = "SafeHtml"
+
+[[unsynthesizable]]
+fn = "html.to_string"
+note = "SafeHtml"
+
+[[unsynthesizable]]
+fn = "http.body"
+note = "HttpResponse"
+
+[[unsynthesizable]]
+fn = "http.get_header"
+note = "HttpResponse"
+
+[[unsynthesizable]]
+fn = "http.query_params"
+note = "HttpRequest"
+
+[[unsynthesizable]]
+fn = "http.req_body"
+note = "HttpRequest"
+
+[[unsynthesizable]]
+fn = "http.req_header"
+note = "HttpRequest"
+
+[[unsynthesizable]]
+fn = "http.req_method"
+note = "HttpRequest"
+
+[[unsynthesizable]]
+fn = "http.req_path"
+note = "HttpRequest"
+
+[[unsynthesizable]]
+fn = "http.serve"
+note = "(HttpRequest) -> HttpResponse"
+
+[[unsynthesizable]]
+fn = "http.set_header"
+note = "HttpResponse"
+
+[[unsynthesizable]]
+fn = "http.status"
+note = "HttpResponse"
+
+[[unsynthesizable]]
+fn = "json.field"
+note = "JsonPath"
+
+[[unsynthesizable]]
+fn = "json.get_path"
+note = "JsonPath"
+
+[[unsynthesizable]]
+fn = "json.index"
+note = "JsonPath"
+
+[[unsynthesizable]]
+fn = "json.remove_path"
+note = "JsonPath"
+
+[[unsynthesizable]]
+fn = "json.set_path"
+note = "JsonPath"
+
+[[unsynthesizable]]
+fn = "list.partition"
+note = "Fn[A] -> Bool) -> (List[A]"
+
+[[unsynthesizable]]
+fn = "mem.restore"
+note = "probe-ill-typed: error[E003]: undefined variable 'mem'"
+
+[[unsynthesizable]]
+fn = "mem.save"
+note = "probe-ill-typed: error[E003]: undefined variable 'mem'"
+
+[[unsynthesizable]]
+fn = "net.tcp_is_open"
+note = "probe-ill-typed: error[E003]: undefined variable 'net'"
+
+[[unsynthesizable]]
+fn = "option.or_else"
+note = "probe-ill-typed: error[E005]: argument 'f' expects fn() -> Option[Int] but got fn(?1) -> Option[I"
+
+[[unsynthesizable]]
+fn = "option.unwrap_or_else"
+note = "probe-ill-typed: error[E005]: argument 'f' expects fn() -> Int but got fn(?1) -> Int"
+
+[[unsynthesizable]]
+fn = "path.to_string"
+note = "SafePath"
+
+[[unsynthesizable]]
+fn = "result.flat_map"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.is_err"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.is_ok"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.map"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.map_err"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.partition"
+note = "List[Result[T, E]]) -> (List[T]"
+
+[[unsynthesizable]]
+fn = "result.to_err_option"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.to_option"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.unwrap_or"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "result.unwrap_or_else"
+note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
+
+[[unsynthesizable]]
+fn = "set.new"
+note = "probe-ill-typed: error[E018]: cannot infer the element type of `set.new()`"
+
+[[unsynthesizable]]
+fn = "testing.assert_ok"
+note = "probe-ill-typed: error[E005]: argument 'result' expects Result[A, B] but got String"
+
+[[unsynthesizable]]
+fn = "url.to_string"
+note = "Url"
