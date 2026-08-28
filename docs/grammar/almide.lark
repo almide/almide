@@ -347,7 +347,7 @@ match_expr: MATCH _nl expr _nl "{" match_body "}"
 match_body: _nl (match_arm _seps)* _o_match_arm
 _o_match_arm: match_arm
             |
-match_arm: pattern _o_guard FATARROW _nl expr
+match_arm: pattern (PIPE _nl pattern)* _o_guard FATARROW _nl expr
 _o_guard: IF expr
         |
 
