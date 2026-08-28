@@ -9,6 +9,10 @@ Name-diffs over self_host_registry.rs over-report (~199 false rows — linkage
 is multi-mechanism); this probe cannot: it asks the one authority, the
 renderer itself.
 
+With --default-routing the sweep drops the structural force: walls then
+mean NO leg serves the fn on `--target wasm` (the reroute included) — the
+check-time-diagnostic set (#1423 stage 3).
+
 Output (stdout): one line per fn — `status<TAB>module.fn<TAB>detail`.
   ok        lowered and emitted
   wall      the structural leg refused (detail = first error line)
@@ -158,14 +162,26 @@ def synth(mod, fn, params, ret, variant):
         prelude = f"  var subj = {args[0]}\n"
         args = ["subj"] + args[1:]
     call = f"{mod}.{fn}({', '.join(args)})"
-    # Result-returning fns propagate; everything else binds discarded.
+    # Result-returning fns propagate; Unit-returning fns sit in STATEMENT
+    # position (a bare Unit call is legal and matches real usage);
+    # everything else binds discarded. The probe body opens with a print
+    # so the call sits MID-BODY — a single-call main measures the
+    # renderer's minimal-program shape support, not the fn (the
+    # process.exit lesson: the fn was served, the one-statement main was
+    # not, and the conflated wall row broke real programs through E081).
     is_result = ret.strip().startswith("Result[")
-    bind = "let _"
+    is_unit = ret.strip() == "Unit"
     if variant == 2:
         if not ret.strip().startswith("Map["):
             return None, "no-map-ret"
-        bind = "let _r: Map[Int, Int]"
-    body = f"{prelude}  {bind} = {call}{'!' if is_result else ''}\n  println(\"p\")"
+        stmt = f"let _r: Map[Int, Int] = {call}"
+    elif is_result:
+        stmt = f"let _ = {call}!"
+    elif is_unit:
+        stmt = call
+    else:
+        stmt = f"let _ = {call}"
+    body = f"  println(\"pre\")\n{prelude}  {stmt}\n  println(\"p\")"
     imp = f"import {mod}\n\n" if mod in EXPLICIT_IMPORT else ""
     return f"{imp}effect fn main() -> Unit = {{\n{body}\n}}\n", None
 
@@ -173,7 +189,14 @@ def synth(mod, fn, params, ret, variant):
 def main():
     sigs = parse_sigs()
     tmp = tempfile.mkdtemp(prefix="almide-avail-")
-    env = dict(os.environ, ALMIDE_WASM_STRUCTURAL="1")
+    if "--default-routing" in sys.argv[1:]:
+        env = dict(os.environ)
+        env.pop("ALMIDE_WASM_STRUCTURAL", None)
+    else:
+        env = dict(os.environ, ALMIDE_WASM_STRUCTURAL="1")
+    # Measure the ground truth, not our own declaration (see
+    # check_wasm_availability's escape).
+    env["ALMIDE_NO_AVAIL_CHECK"] = "1"
     for mod, fn, params, ret in sigs:
         verdict = None
         for variant in (0, 1, 2):

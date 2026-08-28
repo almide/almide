@@ -635,6 +635,77 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
 /// decomposition) have no WASM lowering. Reject at build time with a clear
 /// message rather than letting the emitter ICE deep in codegen. Extracted
 /// verbatim.
+/// #1423 stage 3 — the check-time availability diagnostic. The declared
+/// BOTH-LEGS wall set (proofs/target-availability.toml, measured with
+/// default routing and gated four-directionally by
+/// scripts/check-target-availability.sh) turns the late render wall into
+/// an E081 at check time, naming the reason and — where one exists — the
+/// portable alternative. The render wall stays as the backstop.
+fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
+    // The measurement escape: the availability PROBE builds through this
+    // binary to measure the ground truth the table declares — with the
+    // check armed it would measure its own declaration (circular).
+    if std::env::var_os("ALMIDE_NO_AVAIL_CHECK").is_some() {
+        return Ok(());
+    }
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+    static UNAVAILABLE: OnceLock<BTreeMap<String, (String, Option<String>)>> = OnceLock::new();
+    let table = UNAVAILABLE.get_or_init(|| {
+        let toml = include_str!("../../proofs/target-availability.toml");
+        let mut out = BTreeMap::new();
+        for block in toml.split("[[wasm-unavailable]]").skip(1) {
+            let field = |k: &str| {
+                block.lines().find_map(|l| {
+                    l.strip_prefix(&format!("{k} = \"")).and_then(|r| r.strip_suffix('"')).map(str::to_string)
+                })
+            };
+            if let (Some(fn_name), Some(reason)) = (field("fn"), field("reason")) {
+                out.insert(fn_name, (reason, field("alt")));
+            }
+        }
+        out
+    });
+    let mut hits: BTreeMap<String, &(String, Option<String>)> = BTreeMap::new();
+    use almide::ir::visit::IrVisitor;
+    struct Scan<'a> {
+        table: &'a BTreeMap<String, (String, Option<String>)>,
+        hits: BTreeMap<String, &'a (String, Option<String>)>,
+    }
+    impl<'a> IrVisitor for Scan<'a> {
+        fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
+            if let almide::ir::IrExprKind::Call {
+                target: almide::ir::CallTarget::Module { module, func, .. }, ..
+            } = &e.kind
+            {
+                let key = format!("{}.{}", module.as_str(), func.as_str());
+                if let Some(row) = self.table.get(&key) {
+                    self.hits.entry(key).or_insert(row);
+                }
+            }
+            almide::ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut scan = Scan { table, hits: BTreeMap::new() };
+    for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+        scan.visit_expr(&f.body);
+    }
+    hits.extend(scan.hits);
+    if hits.is_empty() {
+        return Ok(());
+    }
+    for (key, (reason, alt)) in &hits {
+        let alt_line = alt.as_ref().map(|a| format!("\n  try: {a}")).unwrap_or_default();
+        err(&format!(
+            "error[E081]: `{key}` is not available on --target wasm\n  \
+             reason: {reason}{alt_line}\n  \
+             note: the availability matrix is proofs/target-availability.toml (#1423); \
+             the same program builds with --target rust"
+        ));
+    }
+    Err(())
+}
+
 fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(ir_program) {
         err(&format!(
@@ -891,6 +962,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
+    check_wasm_availability(&ir_program)?;
 
     // Routing inputs (see render_wasm_module_routed): project shape, decided
     // from what the v0 gates already computed — never from a failure.
