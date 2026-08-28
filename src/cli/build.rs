@@ -900,13 +900,25 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // export mode yet (#1598's sibling surface), so those modules stay on
     // the incumbent leg.
     let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
-    let host_variant = std::iter::once(&program)
-        .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
-        .flat_map(|p| p.imports.iter())
-        .any(|d| {
-            matches!(d, almide::ast::Decl::Import { path, .. }
-                if path.first().is_some_and(|r| matches!(r.as_str(), "fs" | "env" | "process")))
-        });
+    let imports_module = |names: &[&str]| {
+        std::iter::once(&program)
+            .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
+            .flat_map(|p| p.imports.iter())
+            .any(|d| {
+                matches!(d, almide::ast::Decl::Import { path, .. }
+                    if path.first().is_some_and(|r| names.contains(&r.as_str())))
+            })
+    };
+    // Build-time host routing: env/process ride the incumbent (no
+    // structural surface); fs rides the incumbent because the p1
+    // `to_wasi` transform carries no fs ops — EXCEPT when the build is
+    // headed for the direct p3 component (#1628 increment 2d), whose
+    // shim now carries the full fs read+write surface, so fs programs
+    // flip to the structural leg there by default (#1584's first
+    // default-route slice).
+    let p3_requested = std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
+    let host_variant = imports_module(&["env", "process"])
+        || (imports_module(&["fs"]) && !p3_requested);
     // #1598 CLOSED as per-fn auto-flip: the matrix/io module pre-scan is
     // GONE. The linked surfaces (io.read_all via the host's op-31 drain
     // joined io.print/write/write_bytes/read_n_bytes; the measured matrix
