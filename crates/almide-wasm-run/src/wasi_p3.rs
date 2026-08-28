@@ -6,9 +6,14 @@
 //!
 //! Same doctrine as `to_p2` (#1588/#1628 stage 1) with the five-op host
 //! surface (console out, exit codes, stdin, entropy, wall clock) PLUS the
-//! filesystem READ surface (increment 2a): exists/is-dir/is-file via
-//! stat-at, read_text/read_bytes via open-at + sync stream reads, guest
-//! paths resolved against the FIRST preopen (`wasmtime run --dir=.`).
+//! filesystem READ surface (increment 2a: exists/is-dir/is-file via
+//! stat-at, read_text/read_bytes via open-at + sync stream reads) AND
+//! the WRITE surface (increment 2d: write/append/write_bytes through
+//! write-via-stream with the completion-future durability handshake,
+//! recursive mkdir_p, remove/remove_all via stat-then-unlink-or-rmdir —
+//! a NON-EMPTY remove_all answers the honest not-empty error until the
+//! recursive walk lands). Guest paths resolve against the FIRST preopen
+//! (`wasmtime run --dir=.`).
 //! Canonical-ABI facts (variant discriminants, payload offsets) are
 //! DERIVED from the vendored WIT at emit time (`FsAbi`), never
 //! hand-counted. fs writes, env and process keep the DEFINED refusal;
@@ -97,7 +102,20 @@ const I_WS_WAIT: u32 = 29; // [waitable-set-wait]
 const I_SUBTASK_DROP: u32 = 30; // [subtask-drop]
 const I_WS_DROP: u32 = 31; // [waitable-set-drop]
 const I_SUBTASK_CANCEL: u32 = 32; // [subtask-cancel] — the loser-arm abandonment
-const IMPORTS: u32 = 33;
+// The filesystem WRITE surface (#1628 increment 2d): write/append streams
+// (the guest keeps the writable end, sync stream.write feeds it, and the
+// completion future.read is the durability handshake), plus the three
+// path ops. All sync lowers, as the read surface.
+const I_FS_WVS: u32 = 33; // [method]descriptor.write-via-stream
+const I_FS_AVS: u32 = 34; // [method]descriptor.append-via-stream
+const I_FS_WNEW: u32 = 35; // [stream-new-0] of write-via-stream
+const I_FS_WWRITE: u32 = 36; // [stream-write-0] of write-via-stream
+const I_FS_WDROP: u32 = 37; // [stream-drop-writable-0] of write-via-stream
+const I_FS_WFUT: u32 = 38; // [future-read-1] of write-via-stream
+const I_FS_MKDIR: u32 = 39; // [method]descriptor.create-directory-at
+const I_FS_UNLINK: u32 = 40; // [method]descriptor.unlink-file-at
+const I_FS_RMDIR: u32 = 41; // [method]descriptor.remove-directory-at
+const IMPORTS: u32 = 42;
 const SHIFT: u32 = IMPORTS - 5;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
@@ -154,9 +172,11 @@ struct FsAbi {
     ec_access: i32,
     ec_not_permitted: i32,
     ec_is_directory: i32,
+    ec_exist: i32,
     dt_directory: i32,     // descriptor-type case index
     dt_regular_file: i32,
     open_payload: u64,     // result<descriptor, error-code> payload offset
+    unit_payload: u64,     // result<_, error-code> payload offset (the path ops)
     stat_payload: u64,     // result<descriptor-stat, error-code> payload offset
     stat_size: u64,        // full result size (park-span room check)
 }
@@ -204,15 +224,18 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
     let stat_align = sa.align(&Type::Id(stat)).align_wasm32() as u64;
     let stat_sz = sa.size(&Type::Id(stat)).size_wasm32() as u64;
     let open_payload = 4u64.max(ec_align); // own<descriptor> aligns 4
+    let unit_payload = ec_align; // result<_, error-code>: the err IS the payload
     let stat_payload = stat_align.max(ec_align);
     Ok(FsAbi {
         ec_no_entry: case(ec, "no-entry")?,
         ec_access: case(ec, "access")?,
         ec_not_permitted: case(ec, "not-permitted")?,
         ec_is_directory: case(ec, "is-directory")?,
+        ec_exist: case(ec, "exist")?,
         dt_directory: case(dt, "directory")?,
         dt_regular_file: case(dt, "regular-file")?,
         open_payload,
+        unit_payload,
         stat_payload,
         stat_size: stat_payload + stat_sz,
     })
@@ -337,6 +360,17 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         &[],
     );
     let t_aopen = type_index(&mut types, &[ValType::I32; 2], &[ValType::I32]);
+    // write-via-stream: (self, stream, offset:i64) -> future — the future
+    // returns DIRECTLY (1 flat result), as stdio's write-via-stream.
+    let t_wvs = type_index(
+        &mut types,
+        &[ValType::I32, ValType::I32, ValType::I64],
+        &[ValType::I32],
+    );
+    // append-via-stream: (self, stream) -> future.
+    let t_avs = type_index(&mut types, &[ValType::I32; 2], &[ValType::I32]);
+    // path ops: (self, ptr, len, retptr).
+    let t_pathop = type_index(&mut types, &[ValType::I32; 4], &[]);
     let t_ws_new = type_index(&mut types, &[], &[ValType::I32]);
     let t_ws_join = type_index(&mut types, &[ValType::I32; 2], &[]);
     let t_ws_wait = type_index(&mut types, &[ValType::I32; 2], &[ValType::I32]);
@@ -388,6 +422,15 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         (I_SUBTASK_DROP, "$root", "[subtask-drop]", t_drop),
         (I_WS_DROP, "$root", "[waitable-set-drop]", t_drop),
         (I_SUBTASK_CANCEL, "$root", "[subtask-cancel]", t_call),
+        (I_FS_WVS, fs_types, "[method]descriptor.write-via-stream", t_wvs),
+        (I_FS_AVS, fs_types, "[method]descriptor.append-via-stream", t_avs),
+        (I_FS_WNEW, fs_types, "[stream-new-0][method]descriptor.write-via-stream", t_new),
+        (I_FS_WWRITE, fs_types, "[stream-write-0][method]descriptor.write-via-stream", t_rw),
+        (I_FS_WDROP, fs_types, "[stream-drop-writable-0][method]descriptor.write-via-stream", t_drop),
+        (I_FS_WFUT, fs_types, "[future-read-1][method]descriptor.write-via-stream", t_fut_read),
+        (I_FS_MKDIR, fs_types, "[method]descriptor.create-directory-at", t_pathop),
+        (I_FS_UNLINK, fs_types, "[method]descriptor.unlink-file-at", t_pathop),
+        (I_FS_RMDIR, fs_types, "[method]descriptor.remove-directory-at", t_pathop),
     ];
     assert_eq!(import_list.len() as u32, IMPORTS, "IMPORTS count drift");
     let mut imports = ImportSection::new();
@@ -974,6 +1017,166 @@ fn shim_fs_call(
     i.end();
     i.local_get(sl).i32_load(mem(24 + abi.open_payload)).local_set(d);
     fs_read_tail(&mut i, park, f_realloc, g_ppos, g_plen, d, rx, fut, buf, cap, total, n);
+    i.end();
+
+    // ── The filesystem WRITE surface (#1628 increment 2d) ─────────────
+
+    // ops 2/15 (write: create|truncate), 16 (append: create), 3
+    // (write_bytes: the List[Int] payload packs to raw bytes first).
+    // Shape: open-at(write) → stream.new → write/append-via-stream hands
+    // the host the readable end → sync stream.write feeds the writable
+    // end → drop writable → future.read is the DURABILITY handshake
+    // (blocks until the host wrote every byte) → resource-drop → ok.
+    i.local_get(op).i32_const(2).i32_eq();
+    i.local_get(op).i32_const(15).i32_eq().i32_or();
+    i.local_get(op).i32_const(16).i32_eq().i32_or();
+    i.local_get(op).i32_const(3).i32_eq().i32_or();
+    i.if_(BlockType::Empty);
+    fs_preopen(&mut i, g_pre, park);
+    i.global_get(g_pre).i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
+    i.end();
+    // write_bytes: pack the 8-byte slots' low bytes into a compact buffer.
+    i.local_get(op).i32_const(3).i32_eq();
+    i.if_(BlockType::Empty);
+    i.local_get(b_len).i32_const(3).i32_shr_u().local_set(cap);
+    i.i32_const(0).i32_const(0).i32_const(8).local_get(cap).call(f_realloc).local_set(buf);
+    i.i32_const(0).local_set(j);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(j).local_get(cap).i32_ge_u().br_if(1);
+    i.local_get(buf).local_get(j).i32_add();
+    i.local_get(b_ptr).local_get(j).i32_const(3).i32_shl().i32_add();
+    i.i32_load8_u(mem8(0));
+    i.i32_store8(mem8(0));
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
+    i.br(0).end().end();
+    i.local_get(buf).local_set(b_ptr);
+    i.local_get(cap).local_set(b_len);
+    i.end();
+    // open for write: append keeps the tail (create), write truncates.
+    i.global_get(g_pre);
+    i.i32_const(1); // path-flags: symlink-follow
+    i.local_get(a_ptr).local_get(a_len);
+    i.local_get(op).i32_const(16).i32_eq();
+    i.if_(BlockType::Result(ValType::I32));
+    i.i32_const(1); // open-flags: create
+    i.else_();
+    i.i32_const(9); // open-flags: create|truncate
+    i.end();
+    i.i32_const(2); // descriptor-flags: write
+    i.i32_const((park + RET) as i32);
+    i.call(I_FS_OPEN);
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0));
+    i.if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.open_payload)).local_set(n);
+    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
+    i.end();
+    i.i32_const((park + RET) as i32).i32_load(mem(abi.open_payload)).local_set(d);
+    // the write stream: tx = high half, rx = low half (the stdio packing).
+    i.call(I_FS_WNEW).local_set(s64);
+    i.local_get(s64).i64_const(32).i64_shr_u().i32_wrap_i64().local_set(rx); // rx local holds TX
+    i.local_get(op).i32_const(16).i32_eq();
+    i.if_(BlockType::Result(ValType::I32));
+    i.local_get(d).local_get(s64).i32_wrap_i64().call(I_FS_AVS);
+    i.else_();
+    i.local_get(d).local_get(s64).i32_wrap_i64().i64_const(0).call(I_FS_WVS);
+    i.end();
+    i.local_set(fut);
+    // sync write loop on the LOCAL writable end.
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(b_len).i32_eqz().br_if(1);
+    i.local_get(rx);
+    i.local_get(b_ptr).local_get(b_len);
+    i.call(I_FS_WWRITE);
+    i.i32_const(4).i32_shr_u().local_set(n);
+    i.local_get(n).i32_eqz().br_if(1);
+    i.local_get(b_ptr).local_get(n).i32_add().local_set(b_ptr);
+    i.local_get(b_len).local_get(n).i32_sub().local_set(b_len);
+    i.br(0).end().end();
+    i.local_get(rx).call(I_FS_WDROP);
+    i.local_get(fut).i32_const((park + RET) as i32).call(I_FS_WFUT).drop();
+    i.local_get(d).call(I_FS_RESDROP);
+    i.i64_const(0).return_();
+    i.end();
+
+    // op 7: mkdir_p — create-directory-at per '/'-prefix, exist ignored
+    // (idempotent, the create_dir_all shape); the FULL path's non-exist
+    // error surfaces through the shared map.
+    i.local_get(op).i32_const(7).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_preopen(&mut i, g_pre, park);
+    i.global_get(g_pre).i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
+    i.end();
+    i.i32_const(0).local_set(j);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(j).local_get(a_len).i32_gt_u().br_if(1);
+    // segment boundary: end-of-path or '/'
+    i.local_get(j).local_get(a_len).i32_eq();
+    i.local_get(j).local_get(a_len).i32_lt_u();
+    i.local_get(a_ptr).local_get(j).i32_add().i32_load8_u(mem8(0)).i32_const(47).i32_eq();
+    i.i32_and().i32_or();
+    i.local_get(j).i32_const(0).i32_gt_u().i32_and();
+    i.if_(BlockType::Empty);
+    i.global_get(g_pre);
+    i.local_get(a_ptr).local_get(j);
+    i.i32_const((park + RET) as i32);
+    i.call(I_FS_MKDIR);
+    // the FULL path's error decides; 'exist' is success (idempotent).
+    i.local_get(j).local_get(a_len).i32_eq();
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0)).i32_and();
+    i.if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.unit_payload)).local_set(n);
+    i.local_get(n).i32_const(abi.ec_exist).i32_ne();
+    i.if_(BlockType::Empty);
+    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
+    i.end();
+    i.end();
+    i.end();
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
+    i.br(0).end().end();
+    i.i64_const(0).return_();
+    i.end();
+
+    // ops 8/9: remove / remove_all — stat decides file vs directory (the
+    // embedded host's `is_dir()` shape); a NON-EMPTY directory under op 9
+    // answers the honest not-empty error (the recursive walk is a later
+    // increment, not a refusal).
+    i.local_get(op).i32_const(8).i32_eq();
+    i.local_get(op).i32_const(9).i32_eq().i32_or();
+    i.if_(BlockType::Empty);
+    fs_preopen(&mut i, g_pre, park);
+    i.global_get(g_pre).i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
+    i.end();
+    i.global_get(g_pre);
+    i.i32_const(1);
+    i.local_get(a_ptr).local_get(a_len);
+    i.i32_const((park + STATRET) as i32);
+    i.call(I_FS_STAT);
+    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(0));
+    i.if_(BlockType::Empty);
+    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload)).local_set(n);
+    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
+    i.end();
+    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload));
+    i.i32_const(abi.dt_directory).i32_eq();
+    i.if_(BlockType::Empty);
+    i.global_get(g_pre).local_get(a_ptr).local_get(a_len).i32_const((park + RET) as i32);
+    i.call(I_FS_RMDIR);
+    i.else_();
+    i.global_get(g_pre).local_get(a_ptr).local_get(a_len).i32_const((park + RET) as i32);
+    i.call(I_FS_UNLINK);
+    i.end();
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0));
+    i.if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.unit_payload)).local_set(n);
+    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
+    i.end();
+    i.i64_const(0).return_();
     i.end();
 
     // op 42: ABANDON slot k (k rides b_len; the path args are unused) —

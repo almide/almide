@@ -497,6 +497,65 @@ fn p3_component_fan_any_cancels_the_losers() {
     assert_eq!(code, 0, "a leaked loser subtask would trap at task exit");
 }
 
+// The filesystem WRITE surface (#1628 increment 2d): recursive mkdir_p
+// (create-directory-at per prefix, exist idempotent), write (truncate) /
+// append / write_bytes (slot packing) through write-via-stream with the
+// completion-future durability handshake, remove / remove_all via
+// stat-then-unlink-or-rmdir, and the missing-parent error leg — all
+// byte-identical to the incumbent adapter leg.
+const FS_WRITE: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  let _ = fs.mkdir_p("wtmp/deep/nest")!
+  let _ = fs.write("wtmp/deep/nest/x.txt", "written-body")!
+  let _ = fs.append("wtmp/deep/nest/x.txt", "+tail")!
+  println(fs.read_text("wtmp/deep/nest/x.txt")!)
+  let _ = fs.write_bytes("wtmp/deep/nest/b.bin", [72, 73, 10])!
+  println(fs.read_text("wtmp/deep/nest/b.bin")!)
+  let _ = fs.remove("wtmp/deep/nest/x.txt")!
+  let _ = fs.remove("wtmp/deep/nest/b.bin")!
+  let _ = fs.remove("wtmp/deep/nest")!
+  let _ = fs.remove_all("wtmp/deep")!
+  println(if fs.exists("wtmp/deep") then "BAD-still-there" else "cleaned")
+  match fs.write("wtmp/deep/nope.txt", "x") {
+    ok(_)  => println("BAD-ghost-dir"),
+    err(m) => println("werr=${m}"),
+  }
+  let _ = fs.remove("wtmp")!
+}
+"#;
+
+#[test]
+fn p3_component_writes_the_filesystem() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir().join("fswrite");
+    std::fs::create_dir_all(&d).expect("mkdir");
+    let src = d.join("wr.almd");
+    std::fs::write(&src, FS_WRITE).expect("write");
+    let p3 = d.join("wr_p3.wasm");
+    build_p3_structural(&src, &p3);
+    if !wasmtime_available() {
+        return;
+    }
+    let Some((out, err, code)) = run_p3_dir(&p3, &d) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        "written-body+tail
+HI
+
+cleaned
+werr=No such file or directory (os error 2)
+",
+        "fs write surface diverged (stderr: {err})"
+    );
+    assert_eq!(code, 0);
+    assert!(!d.join("wtmp").exists(), "the fixture must clean up after itself");
+}
+
 #[test]
 fn p3_component_abort_answers_exit_one() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
