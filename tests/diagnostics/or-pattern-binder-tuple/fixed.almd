@@ -1,0 +1,4 @@
+fn quad(p: (Int, Int)) -> String = match p {
+  (0, _) | (1, 0) => "axis",
+  _ => "free",
+}
