@@ -977,8 +977,9 @@ impl<'a> Interpreter<'a> {
         // First hop's frame — what mut-param copy-out reads. Meaningful only
         // when no transfer happened, and a transfer implies no mut params.
         let mut first_frame: Option<env::Scope> = None;
-        // (marker node type, run length) — pending `Try` normalizations.
-        let mut pending: Vec<(Ty, u32)> = Vec::new();
+        // (marker Option-identity bit, run length) — pending `Try`
+        // normalizations (the bit is the only fact the fold reads, #1232).
+        let mut pending: Vec<(bool, u32)> = Vec::new();
 
         let result = 'tramp: loop {
             if let Some(cut) = self.charge_hop_entry(&callee) {
@@ -1092,7 +1093,7 @@ impl<'a> Interpreter<'a> {
     /// boundary first — and at each level, a `Return(x)` means "that level's fn
     /// returns x", which is the next level's call VALUE. Anything that is not a
     /// value (an abort, a fuel cut) stops the fold where it is.
-    fn fold_pending_try(&mut self, result: Flow, pending: &[(Ty, u32)]) -> Flow {
+    fn fold_pending_try(&mut self, result: Flow, pending: &[(bool, u32)]) -> Flow {
         let mut result = match result {
             Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
             other => other,
@@ -1101,7 +1102,7 @@ impl<'a> Interpreter<'a> {
             for _ in 0..*n {
                 match result {
                     Flow::Value(v) => {
-                        result = match self.try_unwrap_value(v, ty) {
+                        result = match self.try_unwrap_value_flag(v, *ty) {
                             Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
                             other => other,
                         }
@@ -1208,7 +1209,7 @@ pub(crate) enum SpineOutcome<'a> {
     /// `try_marker` carries the `Try`/`Unwrap` marker node's type when the
     /// tail was the effect wrapper `Try{Call}`, so the engine can fold the
     /// normalization over the final value.
-    Transfer { next: TailCallee<'a>, next_args: Vec<Value>, try_marker: Option<Ty> },
+    Transfer { next: TailCallee<'a>, next_args: Vec<Value>, try_marker: Option<bool> },
 }
 
 /// If `main`'s result value is an unhandled error, return the message that the
