@@ -557,6 +557,54 @@ werr=No such file or directory (os error 2)
 }
 
 #[test]
+fn p3_requested_fs_builds_route_structurally_by_default() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir().join("fsflip");
+    std::fs::create_dir_all(&d).expect("mkdir");
+    let src = d.join("flip.almd");
+    std::fs::write(
+        &src,
+        "import fs
+
+effect fn main() -> Unit = {
+  println(if fs.exists(\"x\") then \"y\" else \"n\")
+}
+",
+    )
+    .expect("write");
+    // With the p3 component requested, an fs program's build takes the
+    // STRUCTURAL leg by default (#1584's first default-route slice) —
+    // no ALMIDE_WASM_STRUCTURAL override.
+    let o = Command::new(almide_bin())
+        .args(["build", src.to_str().unwrap(), "--target", "wasm", "--component", "-o",
+               d.join("flip_p3.wasm").to_str().unwrap()])
+        .env("ALMIDE_COMPONENT_P3", "1")
+        .output()
+        .expect("spawn almide");
+    let log = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(o.status.success(), "build failed:\n{log}");
+    assert!(
+        log.contains("structural leg, WASI 0.3 component (direct, async ABI)"),
+        "the p3-requested fs build must route structurally by default:\n{log}"
+    );
+    // Without the p3 request the incumbent keeps the route (the p1/p2
+    // transforms carry no fs ops).
+    let o = Command::new(almide_bin())
+        .args(["build", src.to_str().unwrap(), "--target", "wasm", "--component", "-o",
+               d.join("flip_ad.wasm").to_str().unwrap()])
+        .output()
+        .expect("spawn almide");
+    let log = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(o.status.success(), "build failed:\n{log}");
+    assert!(
+        log.contains("incumbent v1 leg"),
+        "the non-p3 fs build must keep the incumbent route:\n{log}"
+    );
+}
+
+#[test]
 fn p3_component_abort_answers_exit_one() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;
