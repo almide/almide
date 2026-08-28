@@ -657,6 +657,14 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:{module}.{func}"))
             }
+            // #1423 stage 4: the error trio — semantics verbatim from
+            // runtime/rs/src/error.rs.
+            CallTarget::Module { module, func, .. } if module.as_str() == "error" => {
+                if let Some(out) = self.lower_error_call(func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:error.{func}"))
+            }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);

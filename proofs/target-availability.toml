@@ -24,8 +24,8 @@
 # minimal call the probe cannot yet type (nominal runtime types, residual
 # generator gaps). Claimed neither way; shrinking it is probe work.
 
-# Measured (this generation): structural 330 ok / 59 native-only; default-routing 25 wasm-unavailable; 39 unsynthesizable.
-pending_self_host_ceiling = 26
+# Measured (this generation): structural 333 ok / 56 native-only; default-routing 25 wasm-unavailable; 39 unsynthesizable.
+pending_self_host_ceiling = 23
 
 [[native-only]]
 fn = "datetime.parse_iso"
@@ -50,21 +50,6 @@ issue = "#1423"
 [[native-only]]
 fn = "env.unix_timestamp"
 reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "error.chain"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "error.context"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "error.message"
-reason = "pending-self-host"
 issue = "#1423"
 
 [[native-only]]

@@ -368,3 +368,95 @@ impl Emitter<'_> {
         .map(Some)
     }
 }
+
+impl Emitter<'_> {
+    /// #1423 stage 4 — the `error` module trio, semantics verbatim from
+    /// runtime/rs/src/error.rs:
+    ///   message(r)      = err payload, or "" on ok
+    ///   context(r, msg) = ok passes through; err rebuilds as
+    ///                     "{msg}: {e}"
+    ///   chain(outer, c) = "{outer}\ncaused by: {c}"
+    /// Ok(None) = not an error-module fn handled here.
+    pub(crate) fn lower_error_call(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+        let out: SliceTy = match (func, args) {
+            ("message", [r]) => {
+                let got = self.lower(r, None)?;
+                let SliceTy::Result(_, er) = got else {
+                    return unsup(&format!("error-message-of:{got:?}"));
+                };
+                if self.types.el(er) != STR {
+                    return unsup("error-message-err-ty");
+                }
+                let hr = self.hold_i32()?;
+                let empty = self.pool.intern("");
+                let mut i = self.f.instructions();
+                i.local_tee(hr)
+                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                    .i32_eqz()
+                    .if_(BlockType::Result(ValType::I32));
+                i.i32_const(empty as i32);
+                i.else_();
+                i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+                i.end();
+                let _ = i;
+                self.release_i32();
+                STR
+            }
+            ("context", [r, msg]) => {
+                let got = self.lower(r, None)?;
+                let SliceTy::Result(ok_h, er) = got else {
+                    return unsup(&format!("error-context-of:{got:?}"));
+                };
+                if self.types.el(er) != STR {
+                    return unsup("error-context-err-ty");
+                }
+                let hr = self.hold_i32()?;
+                self.f.instructions().local_set(hr);
+                self.lower(msg, Some(STR))?;
+                let hm = self.hold_i32()?;
+                let sep = self.pool.intern(": ");
+                let hout = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(hm);
+                i.local_get(hr)
+                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                    .i32_eqz()
+                    .if_(BlockType::Result(ValType::I32));
+                // ok: pass the Result through untouched.
+                i.local_get(hr);
+                i.else_();
+                // err: "{msg}: {e}" in a fresh err block.
+                i.local_get(hm).i32_const(sep as i32).call(F_CONCAT);
+                i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+                i.call(F_CONCAT).local_set(hm);
+                i.i32_const(16)
+                    .call(F_ALLOC)
+                    .local_tee(hout)
+                    .i32_const(1)
+                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                i.local_get(hout).local_get(hm).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                i.local_get(hout);
+                i.end();
+                let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
+                SliceTy::Result(ok_h, er)
+            }
+            ("chain", [outer, cause]) => {
+                self.lower(outer, Some(STR))?;
+                let sep = self.pool.intern("\ncaused by: ");
+                self.f.instructions().i32_const(sep as i32).call(F_CONCAT);
+                self.lower(cause, Some(STR))?;
+                self.f.instructions().call(F_CONCAT);
+                STR
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(Some(out)))
+    }
+}
