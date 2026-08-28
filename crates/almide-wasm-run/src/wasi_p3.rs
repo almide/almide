@@ -109,6 +109,20 @@ const E_ISDIR: &[u8] = b"Is a directory (os error 21)";
 const E_GEN: &[u8] = b"filesystem operation failed";
 const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
 
+// Park layout, checked at COMPILE time: retptr spans and the message
+// statics must not collide with each other or the stdin/entropy DATA
+// span. (The stat result's WIT-derived footprint is checked at emit
+// time where the resolve is in hand.)
+const _: () = {
+    assert!(RET + 32 <= MSG);
+    assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET);
+    assert!(MSG_NOENT + E_NOENT.len() as u64 <= MSG_ACCES);
+    assert!(MSG_ACCES + E_ACCES.len() as u64 <= MSG_ISDIR);
+    assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_GEN);
+    assert!(MSG_GEN + E_GEN.len() as u64 <= MSG_NOPRE);
+    assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= DATA);
+};
+
 /// Canonical-ABI facts the fs shim stores through — DERIVED from the
 /// vendored WIT at emit time, never hand-counted (the wit-bindgen
 /// doctrine: a case index or payload offset written as a literal drifts
@@ -208,22 +222,8 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         .select_world(&[pkg], Some("p3-command"))
         .map_err(|e| anyhow::anyhow!("world: {e}"))?;
     let abi = fs_abi(&resolve)?;
-    // Park layout, checked: retptr spans and message statics must not
-    // collide with each other or the stdin/entropy DATA span.
-    assert!(RET + 32 <= MSG, "RET span reaches MSG");
-    assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET, "MSG reaches STATRET");
+    // The stat result's WIT-derived footprint must fit its park slot.
     assert!(STATRET + abi.stat_size <= MSG_NOENT, "STATRET reaches the messages");
-    let msgs = [
-        (MSG_NOENT, E_NOENT.len() as u64),
-        (MSG_ACCES, E_ACCES.len() as u64),
-        (MSG_ISDIR, E_ISDIR.len() as u64),
-        (MSG_GEN, E_GEN.len() as u64),
-        (MSG_NOPRE, E_NOPRE.len() as u64),
-    ];
-    for w in msgs.windows(2) {
-        assert!(w[0].0 + w[0].1 <= w[1].0, "fs message statics overlap");
-    }
-    assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= DATA, "messages reach DATA");
 
     let parsed = parse_module(bytes)?;
     let Parsed {
