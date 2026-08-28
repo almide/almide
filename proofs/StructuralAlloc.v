@@ -188,7 +188,7 @@ Definition alloc_body : list astmt :=
         ASetWant (AShl (AC 16) ANext) ];
     (* bump *)
     ASetBase AGHeap;
-    ASetNext (ALand (AAdd (AAdd ABase (AC 12)) (AAdd ALen (AC 3))) (AC (-4)));
+    ASetNext (ALand (AAdd (AAdd (AAdd ABase (AC 12)) ALen) (AC 3)) (AC (-4)));
     AIf (ALeU AWant (AC 524288))
       [ ASetNext (AAdd ABase AWant) ];
     AIf (AGtU ANext (AShl AMemSize (AC 16))) [ SGrow ];

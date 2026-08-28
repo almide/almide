@@ -311,6 +311,9 @@ mod byte_dump {
             ("inc", super::emit_inc()),
             ("dec_flat", super::emit_dec_flat()),
             ("free", super::emit_free()),
+            // 0 stands in for the per-program OOM message address; the
+            // .v side carries that immediate as a parameter.
+            ("alloc", super::emit_alloc(0)),
         ] {
             let mut cs = CodeSection::new();
             cs.function(&f);
