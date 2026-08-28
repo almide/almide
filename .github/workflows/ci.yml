@@ -1054,6 +1054,9 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      - name: WASI/Component-Model pin policy (#1628 stage 4)
+        run: bash scripts/check-wasi-pins.sh
+
       - name: Allocation ceilings (one 2 GiB limit, every spelling agrees)
         run: bash scripts/check-alloc-ceilings.sh
 
