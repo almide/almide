@@ -387,6 +387,9 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     if op == 41 {
         return fs_dispatch(1, a, b);
     }
+    if op == 42 {
+        return (pack(0, 0), Vec::new());
+    }
     if matches!(op, 2 | 3 | 7..=9 | 15 | 16) {
         return fs_dispatch_w(op, a, b);
     }
