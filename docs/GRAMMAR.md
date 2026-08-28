@@ -86,7 +86,7 @@ guard_stmt  = "guard" expr "else" expr
 if_expr     = "if" expr "then" expr ("else" expr)?         (* no else => Unit *)
 if_let      = "if" "let" IDENT "=" expr block "else" block (* else required, branches braced *)
 match_expr  = "match" expr "{" (arm ","?)* "}"
-arm         = pattern ("if" expr)? "=>" expr               (* optional guard *)
+arm         = pattern ("|" pattern)* ("if" expr)? "=>" expr  (* or-alternatives + optional guard *)
 for_in      = "for" (binder | "(" binder ("," binder)* ")") "in" expr block
 binder      = IDENT | "_"
 while_expr  = "while" expr block

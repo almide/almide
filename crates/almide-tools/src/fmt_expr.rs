@@ -757,6 +757,12 @@ fn fmt_pattern(out: &mut String, pat: &Pattern) {
             if *rest { if !fields.is_empty() { out.push_str(", "); } out.push_str(".."); }
             out.push_str(" }");
         }
+        Pattern::Or { alts } => {
+            for (i, a) in alts.iter().enumerate() {
+                if i > 0 { out.push_str(" | "); }
+                fmt_pattern(out, a);
+            }
+        }
         Pattern::Tuple { elements } => { out.push('('); comma_sep(out, elements, |out, e| fmt_pattern(out, e)); out.push(')'); }
         Pattern::List { elements } => { out.push('['); comma_sep(out, elements, |out, e| fmt_pattern(out, e)); out.push(']'); }
         Pattern::Some { inner } => { out.push_str("some("); fmt_pattern(out, inner); out.push(')'); }

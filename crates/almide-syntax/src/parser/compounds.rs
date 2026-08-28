@@ -114,6 +114,18 @@ impl Parser {
 
     pub(crate) fn parse_match_arm(&mut self) -> Result<MatchArm, String> {
         let pattern = self.parse_pattern()?;
+        // #1461: or-pattern alternatives — `a | b | c => body`.
+        let pattern = if self.check(TokenType::Pipe) {
+            let mut alts = vec![pattern];
+            while self.check(TokenType::Pipe) {
+                self.advance();
+                self.skip_newlines();
+                alts.push(self.parse_pattern()?);
+            }
+            crate::ast::Pattern::Or { alts }
+        } else {
+            pattern
+        };
         let guard = if self.check(TokenType::If) {
             self.advance();
             Some(self.parse_expr()?)

@@ -4140,3 +4140,16 @@ evidence  = [
   { path = "spec/wasm_cross/ctor_fn_value.almd", class = "fixture" },
   { path = "spec/lang/ctor_fn_value_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-323"
+spec      = "ALS-E18"
+title     = "Or-patterns: an arm's alternatives match as a union, binder-free"
+statement = "A match arm may carry or-pattern alternatives `a | b | c => body` (#1461): the arm is taken when ANY alternative matches, first-arm-wins ordering is unchanged, the arm covers the alternatives' UNION for exhaustiveness (an or-covered match needs no wildcard), and alternatives are BINDER-FREE — a variable binder inside an alternative is E080 with the write-separate-arms hint, because the body cannot depend on which alternative matched. Lowering desugars the arm into one IR arm per alternative, so both backends and the interp process plain single-pattern arms — cross-target identity is constructive, not re-proved per backend."
+since     = "0.59.3"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/or_pattern.almd", class = "fixture" },
+  { path = "spec/lang/or_pattern_test.almd", class = "fixture" },
+  { path = "tests/diagnostics/or-pattern-binder/broken.almd", class = "fixture" },
+]

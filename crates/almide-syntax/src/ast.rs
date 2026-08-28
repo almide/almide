@@ -119,6 +119,10 @@ pub enum Pattern {
     Ok { inner: Box<Pattern> },
     Err { inner: Box<Pattern> },
     List { elements: Vec<Pattern> },
+    /// Or-pattern (#1461): `a | b | c => body` — the arm matches when ANY
+    /// alternative matches. Alternatives are binder-free (checker rule);
+    /// lowering desugars the arm into one IR arm per alternative.
+    Or { alts: Vec<Pattern> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -588,6 +592,7 @@ fn visit_pattern_exprs_mut(pat: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
         }
         Pattern::Tuple { elements } | Pattern::List { elements } => { for e in elements.iter_mut() { visit_pattern_exprs_mut(e, f); } }
         Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs_mut(inner, f),
+        Pattern::Or { alts } => { for a in alts.iter_mut() { visit_pattern_exprs_mut(a, f); } }
         Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
     }
 }
@@ -784,6 +789,7 @@ fn visit_pattern_exprs(pat: &Pattern, f: &mut impl FnMut(&Expr)) {
         }
         Pattern::Tuple { elements } | Pattern::List { elements } => { for e in elements.iter() { visit_pattern_exprs(e, f); } }
         Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs(inner, f),
+        Pattern::Or { alts } => { for a in alts.iter() { visit_pattern_exprs(a, f); } }
         Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
     }
 }

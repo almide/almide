@@ -1,0 +1,6 @@
+effect fn main() -> Unit = {
+  let f = (x: Option[Int]) => match x {
+    some(_) | none => "?",
+  }
+  println(f(none))
+}

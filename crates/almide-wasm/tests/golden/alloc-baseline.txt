@@ -407,6 +407,7 @@
 67616	spec/wasm_cross/option_tuple_payload_matrix.almd
 66768	spec/wasm_cross/option_unwrap_or_else_heap.almd
 65840	spec/wasm_cross/optional_chain_scalar.almd
+66176	spec/wasm_cross/or_pattern.almd
 65856	spec/wasm_cross/phantom_type_param.almd
 65760	spec/wasm_cross/pipe_chain_scalar_bind.almd
 65968	spec/wasm_cross/pipe_compose_forms.almd
