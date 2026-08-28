@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-320 contracts
+321 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -348,4 +348,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-318 | Early exit inside a counted loop body is rejected in a @bounded function (E078) | 0.60.0 | active | fixture | 0 |
 | C-319 | A captured-and-mutated var List is shared storage through a closure | 0.59.0 | active | fixture | 2 |
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.59.2 | active | fixture | 1 |
+| C-321 | The fan prefetch split (start-all, await-in-arm-order) is unobservable | 0.59.3 | active | fixture | 1 |
 
