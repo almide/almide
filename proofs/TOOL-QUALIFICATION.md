@@ -98,7 +98,7 @@ attested and attached to the release by the trust-spine tag run.
 |---|---|---|
 | WCET-analyzable codegen for the Critical profile | #569 | story + gated reference kernel (`docs/project/WCET-STORY.md`); target calibration external |
 | Line-level source traceability in generated Rust | #572 | closed — `--trace-map` + review guide |
-| Lean/Rocq proof coverage of the RUNTIME (allocator, free-list, RC ops as shipped) | #576 | model proven (FC-3); implementation gap open |
+| Lean/Rocq proof coverage of the RUNTIME (allocator, free-list, RC ops as shipped) | #576 | closed — the StructuralRuntime arc (45 theorems, `StructuralRuntime/Alloc/Decode/Run.v`): emitted bytes decode to proven trees, trees realize the model transitions, and whole runs preserve `RINV` on the concrete memory; the F-class is a violated lemma of the emitted code. Grow retry / unclassed bump stay at the declared abstraction boundary |
 | Qualified/minimal wasm execution environment | #865 | not started |
 | Critical-profile subset (`almide check --profile critical`) | #567 | closed — bounded profile on every fn, deny-all capabilities with `--allow` grants, subset property CI-enforced |
 | Static memory mode for the Critical profile | #568 | closed — the reference app is critical-clean with allocation-free kernel emission and completes under a fixed enforced `--heap-cap` budget; host requirements in `docs/project/PARTITIONED-RUNTIME.md` |
