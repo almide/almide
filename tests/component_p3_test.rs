@@ -241,6 +241,135 @@ fn p3_component_runs_fan_deterministically() {
     assert_eq!(p3_code, core_code);
 }
 
+// The filesystem READ surface (#1628 increment 2a): exists/is_dir/is_file
+// via stat-at, read_text via open-at + sync stream reads, the if-exists
+// none leg, and the not-found error leg — all against the first preopen,
+// byte-identical to the incumbent adapter leg. The structural leg still
+// routes fs programs to the incumbent by default (the write surface is
+// not ported), so the build uses the frontier probe switch
+// ALMIDE_WASM_STRUCTURAL=1 — the documented lever the eventual route
+// flip is verified with.
+const FS_READ: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  println(if fs.exists("data.txt") then "exists" else "missing")
+  println(if fs.is_file("data.txt") then "file" else "not-file")
+  println(if fs.is_dir("sub") then "dir" else "not-dir")
+  let t = fs.read_text("data.txt")!
+  println("len=${string.len(t)}")
+  println(string.trim_end(t))
+  let opt = fs.read_text_if_exists("nope.txt")!
+  println(opt ?? "(none)")
+}
+"#;
+
+const FS_ERR: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  let t = fs.read_text("missing.txt")!
+  println(t)
+}
+"#;
+
+fn build_p3_structural(src: &Path, out: &Path) -> String {
+    let o = Command::new(almide_bin())
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--component",
+            "-o",
+            out.to_str().unwrap(),
+        ])
+        .env("ALMIDE_COMPONENT_P3", "1")
+        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .output()
+        .expect("spawn almide");
+    let stderr = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(o.status.success(), "p3 structural build failed:\n{stderr}");
+    stderr
+}
+
+/// Run under wasmtime with the p3 feature set AND `--dir .` from `cwd`.
+fn run_p3_dir(module: &Path, cwd: &Path) -> Option<(String, String, i32)> {
+    let out = Command::new("wasmtime")
+        .args([
+            "run",
+            "-W",
+            "component-model-async=y,component-model-more-async-builtins=y",
+            "-S",
+            "p3=y",
+            "--dir",
+            ".",
+            module.to_str().unwrap(),
+        ])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn wasmtime");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    if !out.status.success()
+        && (stderr.contains("unexpected argument")
+            || stderr.contains("unknown")
+            || stderr.contains("requires the component model"))
+    {
+        eprintln!("skipping p3 execution: this wasmtime lacks the p3 async feature set");
+        return None;
+    }
+    Some((
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr,
+        out.status.code().unwrap_or(-1),
+    ))
+}
+
+#[test]
+fn p3_component_reads_the_filesystem() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir().join("fsread");
+    std::fs::create_dir_all(d.join("sub")).expect("mkdir");
+    std::fs::write(d.join("data.txt"), "hello from a file\nsecond line\n").expect("write");
+    let src = d.join("rd.almd");
+    std::fs::write(&src, FS_READ).expect("write");
+    let p3 = d.join("rd_p3.wasm");
+    let line = build_p3_structural(&src, &p3);
+    assert!(
+        line.contains("structural leg, WASI 0.3 component (direct, async ABI)"),
+        "the forced-structural p3 build must stay on the direct leg:\n{line}"
+    );
+    if !wasmtime_available() {
+        return;
+    }
+    let Some((out, err, code)) = run_p3_dir(&p3, &d) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        "exists\nfile\ndir\nlen=30\nhello from a file\nsecond line\n(none)\n",
+        "fs read surface diverged (stderr: {err})"
+    );
+    assert_eq!(code, 0);
+
+    // The not-found error leg: the WIT-derived no-entry mapping must
+    // answer the native io::Error Display string, exit 1.
+    let esrc = d.join("err.almd");
+    std::fs::write(&esrc, FS_ERR).expect("write");
+    let ep3 = d.join("err_p3.wasm");
+    build_p3_structural(&esrc, &ep3);
+    let Some((eout, eerr, ecode)) = run_p3_dir(&ep3, &d) else {
+        return;
+    };
+    assert_eq!(eout, "");
+    assert!(
+        eerr.contains("No such file or directory (os error 2)"),
+        "the not-found leg must carry the native error string:\n{eerr}"
+    );
+    assert_eq!(ecode, 1);
+}
+
 #[test]
 fn p3_component_abort_answers_exit_one() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
