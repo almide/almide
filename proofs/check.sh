@@ -25,7 +25,7 @@ SPINE_FILES=(
   CoownCompose.v ALS.v Translation.v RuntimeModel.v NameTotality.v
   TypeConcretization.v CapabilityBound.v CapabilityReach.v CallModes.v
   StackBalance.v Termination.v FreeList.v FreeListRc.v WasmRcDec.v WasmEncode.v WasmExec.v
-  WasmIsa.v WasmDecode.v CowSafety.v StructuralRuntime.v StructuralAlloc.v
+  WasmIsa.v WasmDecode.v CowSafety.v StructuralRuntime.v StructuralAlloc.v StructuralDecode.v
 )
 
 echo "== kernel check (coqc) + axiom audit (Print Assumptions) =="
@@ -140,6 +140,7 @@ done
 echo
 echo "== A2 byte-binding grounding (wat2wasm cross-check; SKIP if wabt absent) =="
 bash ./check-wasm-bytes.sh
+bash ./check-structural-bytes.sh
 
 echo
 echo "== A2 byte-EXECUTION grounding (wasmtime cross-check; SKIP if wasmtime absent) =="
