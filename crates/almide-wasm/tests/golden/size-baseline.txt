@@ -80,6 +80,7 @@
 5659	spec/wasm_cross/count_domain_nonbytes.almd
 3984	spec/wasm_cross/cross_dep_accumulator.almd
 9898	spec/wasm_cross/cross_module_spread.almd
+6054	spec/wasm_cross/ctor_fn_value.almd
 7241	spec/wasm_cross/ctor_if_payload.almd
 17574	spec/wasm_cross/ctor_scalar_call_payload.almd
 4251	spec/wasm_cross/ctor_turbofish_family.almd
@@ -122,7 +123,7 @@
 3992	spec/wasm_cross/fan_block_err_list_order.almd
 7429	spec/wasm_cross/fan_deterministic.almd
 5147	spec/wasm_cross/fan_effect_mapper.almd
-7769	spec/wasm_cross/fan_effect_mapper_capability.almd
+7973	spec/wasm_cross/fan_effect_mapper_capability.almd
 4062	spec/wasm_cross/fan_map_err.almd
 4029	spec/wasm_cross/fan_map_inline_err.almd
 6599	spec/wasm_cross/fan_map_inline_lambda.almd

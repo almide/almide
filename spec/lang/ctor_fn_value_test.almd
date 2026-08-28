@@ -1,0 +1,36 @@
+// #1111 — constructors are function values (ALS-E27): the builtin trio
+// (bare `some` / `ok` / `err` synthesize their eta-expansion) and user
+// ctors (1-ary = (A) -> T, multi-arg = (A, B, …) -> T, no partial
+// application; 0-ary = the value itself).
+
+type Shape = Circle(Int) | Rect(Int, Int) | Dot
+
+test "bare some maps" {
+  assert_eq([1, 2] |> list.map(some), [some(1), some(2)])
+}
+
+test "bare ok and err map" {
+  let oks: List[Result[Int, String]] = [1] |> list.map(ok)
+  assert_eq(oks, [ok(1)])
+  let errs: List[Result[Int, String]] = ["e"] |> list.map(err)
+  assert_eq(errs, [err("e")])
+}
+
+test "builtin ctor binds and applies" {
+  let f = some
+  assert_eq(f(7), some(7))
+}
+
+test "user 1-ary ctor maps" {
+  assert_eq([1, 2] |> list.map(Circle), [Circle(1), Circle(2)])
+}
+
+test "user multi-arg ctor binds and applies" {
+  let mk = Rect
+  assert_eq(mk(3, 4), Rect(3, 4))
+}
+
+test "zero-arity case is a value" {
+  let d = Dot
+  assert_eq(d, Dot)
+}

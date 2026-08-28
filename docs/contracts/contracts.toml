@@ -4128,3 +4128,15 @@ evidence  = [
   { path = "spec/wasm_cross/fan_prefetch_fs.almd", class = "fixture" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_fan_prefetch_reads_concurrently" },
 ]
+
+[[contract]]
+id        = "C-322"
+spec      = "ALS-E27"
+title     = "Constructors are function values, the builtin trio included"
+statement = "A payload-carrying constructor's bare reference is a function value: user ctors as (A) -> T for 1-ary and (A, B, …) -> T for multi-arg (NO partial application — currying is spelled with a lambda), the 0-ary case a plain value; and the builtin trio some / ok / err is first-class the same way — a bare `some` parses as its synthesized eta-expansion `(x) => some(x)`, so every leg (checker, native, wasm, interp) processes the lambda form it already carries, making cross-target identity constructive rather than re-proved per backend (#1111, ratified 2026-08-05: the asymmetry where `list.map(xs, Circle)` worked but `list.map(xs, some)` was a parse error is closed). The pre-change parse error carried the eta-expansion hint; A/B: v0.59.2 errors, this build maps `[1, 2] |> list.map(some)` to `[some(1), some(2)]` on both targets."
+since     = "0.59.3"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_fn_value.almd", class = "fixture" },
+  { path = "spec/lang/ctor_fn_value_test.almd", class = "fixture" },
+]
