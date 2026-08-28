@@ -27,7 +27,7 @@ evidence = "#1490 landing (2026-08-28): the output-drift direction demonstrated 
 [[gate]]
 path = "proofs/check-structural-bytes.sh"
 class = "NEGATIVE_TESTED"
-evidence = "#576 slice-3 landing (2026-08-28): a hand-corrupted byte in StructuralDecode.v's inc_bytes list (65;1 -> 65;2) failed the gate naming the exact emitter-vs-proven diff, restored green (23/37/70 bytes matched). The gate re-derives BOTH sides per run — the emitter's bytes through its own dump helper, the proven lists parsed out of the .v source — so neither can drift silently against the decode theorems."
+evidence = "#576 slice-3 landing (2026-08-28): a hand-corrupted byte in StructuralDecode.v's inc_bytes list (65;1 -> 65;2) failed the gate naming the exact emitter-vs-proven diff, restored green (23/37/70/259 bytes matched; slice 4 added the $alloc row with LEB-aware wrapper stripping). The gate re-derives BOTH sides per run — the emitter's bytes through its own dump helper, the proven lists parsed out of the .v source — so neither can drift silently against the decode theorems."
 
 [[gate]]
 path = "scripts/check-contracts.sh"

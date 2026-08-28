@@ -220,3 +220,245 @@ Proof. reflexivity. Qed.
 Theorem free_bytes_decode_to_the_tree :
   decode free_naming free_bytes = Some (free_body 48).
 Proof. reflexivity. Qed.
+
+(* ══════════════════════════════════════════════════════════════════════
+   SLICE 4: `$alloc`'s bytes decode to StructuralAlloc's tree.
+
+   New ground relative to the first decoder: `local.tee` (desugared to a
+   binder statement plus the local's reader on the stack — exactly how
+   the transcription spells it), the second global (`G_HEAP`, index 1)
+   read AND written, `memory.size`, the value-carrying `return` and the
+   value-carrying implicit fall-through at `end`, multi-byte SLEB128
+   (524288 = [128;128;32]), and the GROW ARM: its guard decodes
+   structurally, its BODY is matched VERBATIM against the emitted span
+   (parameterized by the per-program OOM-message immediate) and
+   abstracted to `SGrow` — the same honesty boundary slice 2 declared
+   for its semantics. *)
+
+From AlmideTrust Require Import StructuralAlloc.
+
+(* Multi-byte SLEB128 (up to 3 bytes — the largest immediate here). *)
+Definition sleb_dec (bs : list Z) : option (Z * list Z) :=
+  match bs with
+  | b0 :: r0 =>
+      if b0 <? 128 then Some (sleb1 b0, r0)
+      else match r0 with
+           | b1 :: r1 =>
+               if b1 <? 128
+               then Some ((b0 - 128) + Z.shiftl (sleb1 b1) 7, r1)
+               else match r1 with
+                    | b2 :: r2 =>
+                        if b2 <? 128
+                        then Some ((b0 - 128) + Z.shiftl (b1 - 128) 7
+                                   + Z.shiftl (sleb1 b2) 14, r2)
+                        else None
+                    | [] => None
+                    end
+           | [] => None
+           end
+  | [] => None
+  end.
+
+(* The emitted grow-arm BODY span, verbatim (select/grow/OOM), with the
+   OOM-message immediate as a parameter (its SLEB bytes). Matched byte-
+   for-byte and abstracted to `SGrow`. Call indices: 6 = $eprintln_block,
+   2 = the exit import; 0 = unreachable. *)
+Definition grow_span (oom_leb : list Z) : list Z :=
+  [32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
+   32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
+   75;27;64;0] ++ [65] ++ oom_leb ++ [72;4;64] ++ [65] ++ oom_leb ++
+  [16;6;65;1;16;2;0;11].
+
+Fixpoint strip_prefix (pre bs : list Z) : option (list Z) :=
+  match pre, bs with
+  | [], r => Some r
+  | p :: pre', b :: bs' => if p =? b then strip_prefix pre' bs' else None
+  | _ :: _, [] => None
+  end.
+
+(* Local naming for $alloc: 0=len, 1=base, 2=next, 3=want, 4=head. *)
+Definition a_get (i : Z) : option aexpr :=
+  if i =? 0 then Some ALen else if i =? 1 then Some ABase
+  else if i =? 2 then Some ANext else if i =? 3 then Some AWant
+  else if i =? 4 then Some AHead else None.
+
+Definition a_set (i : Z) : option (aexpr -> astmt) :=
+  if i =? 1 then Some ASetBase else if i =? 2 then Some ASetNext
+  else if i =? 3 then Some ASetWant else if i =? 4 then Some ASetHead
+  else None.
+
+(* The $alloc decoder: same symbolic-stack shape, over the slice-2
+   grammar, with the tee desugar and the grow-span match. `if` bodies
+   are statement LISTS here (slice 2's `AIf` takes a list). *)
+Fixpoint adecode_go (fuel : nat) (oom_leb : list Z) (bs : list Z)
+                    (stk : list aexpr) (acc : list astmt)
+  : option (list astmt * list Z) :=
+  match fuel with
+  | O => None
+  | S f =>
+      match strip_prefix (4 :: 64 :: grow_span oom_leb ++ [11]) bs with
+      | Some r =>
+          match stk with
+          | cnd :: stk' =>
+              adecode_go f oom_leb r stk' (AIf cnd [SGrow] :: acc)
+          | [] => None
+          end
+      | None =>
+      match bs with
+      | 11 :: r =>
+          match stk with
+          | [] => Some (rev acc, r)
+          | [v] => Some (rev (ARetV v :: acc), r)
+          | _ => None
+          end
+      | 15 :: r =>
+          match stk with
+          | v :: stk' => adecode_go f oom_leb r stk' (ARetV v :: acc)
+          | [] => None
+          end
+      | 32 :: i :: r =>
+          match a_get i with
+          | Some e => adecode_go f oom_leb r (e :: stk) acc
+          | None => None
+          end
+      | 33 :: i :: r =>
+          match a_set i, stk with
+          | Some mk, v :: stk' => adecode_go f oom_leb r stk' (mk v :: acc)
+          | _, _ => None
+          end
+      | 34 :: i :: r =>
+          match a_set i, a_get i, stk with
+          | Some mk, Some rd, v :: stk' =>
+              adecode_go f oom_leb r (rd :: stk') (mk v :: acc)
+          | _, _, _ => None
+          end
+      | 35 :: 1 :: r => adecode_go f oom_leb r (AGHeap :: stk) acc
+      | 36 :: 1 :: r =>
+          match stk with
+          | v :: stk' => adecode_go f oom_leb r stk' (ASetGHeap v :: acc)
+          | [] => None
+          end
+      | 63 :: 0 :: r => adecode_go f oom_leb r (AMemSize :: stk) acc
+      | 40 :: 2 :: off :: r =>
+          match stk with
+          | a :: stk' =>
+              adecode_go f oom_leb r
+                (ALoad (if off =? 0 then a else AAdd a (AC off)) :: stk') acc
+          | [] => None
+          end
+      | 54 :: 2 :: off :: r =>
+          match stk with
+          | v :: a :: stk' =>
+              adecode_go f oom_leb r stk'
+                (AStore (if off =? 0 then a else AAdd a (AC off)) v :: acc)
+          | _ => None
+          end
+      | 65 :: r =>
+          match sleb_dec r with
+          | Some (z, r') => adecode_go f oom_leb r' (AC z :: stk) acc
+          | None => None
+          end
+      | 73 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (ALtU a b :: stk') acc
+          | _ => None
+          end
+      | 75 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (AGtU a b :: stk') acc
+          | _ => None
+          end
+      | 77 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (ALeU a b :: stk') acc
+          | _ => None
+          end
+      | 103 :: r =>
+          match stk with
+          | a :: stk' => adecode_go f oom_leb r (AClz a :: stk') acc
+          | [] => None
+          end
+      | 106 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (AAdd a b :: stk') acc
+          | _ => None
+          end
+      | 107 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (ASub a b :: stk') acc
+          | _ => None
+          end
+      | 113 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (ALand a b :: stk') acc
+          | _ => None
+          end
+      | 116 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (AShl a b :: stk') acc
+          | _ => None
+          end
+      | 118 :: r =>
+          match stk with
+          | b :: a :: stk' => adecode_go f oom_leb r (AShrU a b :: stk') acc
+          | _ => None
+          end
+      | 4 :: 64 :: r =>
+          match stk with
+          | cnd :: stk' =>
+              match adecode_go f oom_leb r [] [] with
+              | Some (body, rest) =>
+                  adecode_go f oom_leb rest stk' (AIf cnd body :: acc)
+              | None => None
+              end
+          | [] => None
+          end
+      | _ => None
+      end
+      end
+  end.
+
+Definition adecode (oom_leb : list Z) (bs : list Z) : option (list astmt) :=
+  match adecode_go 1000 oom_leb bs [] [] with
+  | Some (ss, []) => Some ss
+  | _ => None
+  end.
+
+(* The emitted $alloc body (probe OOM immediate 0; wrapper and locals
+   vector stripped — dumped by `dump_runtime_bytes`, grounded by
+   check-structural-bytes.sh). *)
+Definition alloc_bytes : list Z :=
+  [32;0;65;15;106;65;124;113;33;3;
+   32;3;65;16;73;4;64;65;16;33;3;11;
+   65;28;32;3;65;1;107;103;107;33;2;
+   32;2;65;16;73;4;64;
+     32;2;65;2;116;65;48;106;33;2;
+     32;2;40;2;0;34;4;4;64;
+       32;2;32;4;40;2;12;54;2;0;
+       32;4;65;1;54;2;0;
+       32;4;32;0;54;2;4;
+       32;4;65;16;32;2;65;48;107;65;2;118;116;65;12;107;54;2;8;
+       32;4;15;11;
+     65;28;32;3;65;1;107;103;107;33;2;
+     65;16;32;2;116;33;3;11;
+   35;1;33;1;
+   32;1;65;12;106;32;0;106;65;3;106;65;124;113;33;2;
+   32;3;65;128;128;32;77;4;64;32;1;32;3;106;33;2;11;
+   32;2;63;0;65;16;116;75;
+   4;64;32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
+   32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
+   75;27;64;0;65;0;72;4;64;65;0;16;6;65;1;16;2;0;11;11;
+   32;1;65;1;54;2;0;
+   32;1;32;0;54;2;4;
+   32;1;32;3;65;12;107;54;2;8;
+   32;2;36;1;
+   32;1;11].
+
+(* ══ THE ALLOC DECODE THEOREM — by computation ══════════════════════════
+
+   With the probe OOM immediate ([0]) and 48 = FREELIST_BASE, the bytes
+   decode to EXACTLY slice 2's proven tree. *)
+Theorem alloc_bytes_decode_to_the_tree :
+  adecode [0] alloc_bytes = Some (alloc_body 48).
+Proof. reflexivity. Qed.
+
