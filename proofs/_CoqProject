@@ -21,3 +21,4 @@ WasmRcDec.v
 WasmEncode.v
 WasmExec.v
 CowSafety.v
+StructuralRuntime.v
