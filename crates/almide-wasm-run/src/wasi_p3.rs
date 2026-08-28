@@ -87,7 +87,16 @@ const I_FS_SREAD: u32 = 22; // [stream-read-0] of read-via-stream
 const I_FS_SDROP: u32 = 23; // [stream-drop-readable-0] of read-via-stream
 const I_FS_FDROP: u32 = 24; // [future-drop-readable-1] of read-via-stream
 const I_FS_RESDROP: u32 = 25; // [resource-drop]descriptor
-const IMPORTS: u32 = 26;
+// The fan prefetch machinery (#1628 increment 2b): an ASYNC-lowered
+// open-at (>4 flats, so ONE argptr + retptr -> packed status) plus the
+// $root waitable-set builtins the drain loop schedules on.
+const I_FS_AOPEN: u32 = 26; // [async-lower][method]descriptor.open-at
+const I_WS_NEW: u32 = 27; // [waitable-set-new]
+const I_WS_JOIN: u32 = 28; // [waitable-join]
+const I_WS_WAIT: u32 = 29; // [waitable-set-wait]
+const I_SUBTASK_DROP: u32 = 30; // [subtask-drop]
+const I_WS_DROP: u32 = 31; // [waitable-set-drop]
+const IMPORTS: u32 = 32;
 const SHIFT: u32 = IMPORTS - 5;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
@@ -122,6 +131,18 @@ const _: () = {
     assert!(MSG_GEN + E_GEN.len() as u64 <= MSG_NOPRE);
     assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= DATA);
 };
+
+// The fan prefetch slot table: SLOT_CAP slots of SLOT_STRIDE bytes on
+// the bump heap (fresh memory is zero, and the bump never moves a
+// handed-out range — argptr/retptr stay stable for the subtask's whole
+// life, which the async ABI requires). Layout per slot:
+//   args block @0..24 (self, path-flags, path ptr, path len,
+//                      open-flags, descriptor-flags),
+//   open result @24..44, state @48 (0 empty / 1 pending / 2 done),
+//   subtask @52. Arms past SLOT_CAP simply stay sequential (the await
+//   falls back to the sync op-1 path).
+const SLOT_CAP: i32 = 1024;
+const SLOT_STRIDE: i32 = 64;
 
 /// Canonical-ABI facts the fs shim stores through — DERIVED from the
 /// vendored WIT at emit time, never hand-counted (the wit-bindgen
@@ -261,6 +282,9 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let (g_err_tx, g_err_fut) = (global_count + 4, global_count + 5);
     let (g_in_rx, g_in_fut) = (global_count + 6, global_count + 7);
     let g_pre = global_count + 8; // first preopen descriptor (lazy, -1 = unresolved)
+    let g_wset = global_count + 9; // the ONE waitable set (lazy, -1)
+    let g_slots = global_count + 10; // fan slot-table base (0 = unallocated)
+    let g_slotn = global_count + 11; // slot high-water mark
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -277,9 +301,11 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mutable_i32 = GlobalType { val_type: ValType::I32, mutable: true, shared: false };
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // plen
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // ppos
-    for _ in 0..7 {
-        globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // stream state + g_pre
+    for _ in 0..8 {
+        globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // stream state + g_pre + g_wset
     }
+    globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slots
+    globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slotn
 
     // Canonical-ABI core types.
     let t_exit = type_index(&mut types, &[ValType::I32], &[]);
@@ -309,6 +335,10 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         &[ValType::I32, ValType::I64, ValType::I32],
         &[],
     );
+    let t_aopen = type_index(&mut types, &[ValType::I32; 2], &[ValType::I32]);
+    let t_ws_new = type_index(&mut types, &[], &[ValType::I32]);
+    let t_ws_join = type_index(&mut types, &[ValType::I32; 2], &[]);
+    let t_ws_wait = type_index(&mut types, &[ValType::I32; 2], &[ValType::I32]);
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
@@ -350,6 +380,12 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         (I_FS_SDROP, fs_types, "[stream-drop-readable-0][method]descriptor.read-via-stream", t_drop),
         (I_FS_FDROP, fs_types, "[future-drop-readable-1][method]descriptor.read-via-stream", t_drop),
         (I_FS_RESDROP, fs_types, "[resource-drop]descriptor", t_drop),
+        (I_FS_AOPEN, fs_types, "[async-lower][method]descriptor.open-at", t_aopen),
+        (I_WS_NEW, "$root", "[waitable-set-new]", t_ws_new),
+        (I_WS_JOIN, "$root", "[waitable-join]", t_ws_join),
+        (I_WS_WAIT, "$root", "[waitable-set-wait]", t_ws_wait),
+        (I_SUBTASK_DROP, "$root", "[subtask-drop]", t_drop),
+        (I_WS_DROP, "$root", "[waitable-set-drop]", t_drop),
     ];
     assert_eq!(import_list.len() as u32, IMPORTS, "IMPORTS count drift");
     let mut imports = ImportSection::new();
@@ -396,9 +432,10 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(g_out_tx, g_out_fut, I_OUT_CALL, I_OUT_NEW, I_OUT_WRITE, park, true));
     code.function(&shim_print(g_err_tx, g_err_fut, I_ERR_CALL, I_ERR_NEW, I_ERR_WRITE, park, true));
     code.function(&shim_exit());
+    let f_fs_self = shim_base + 3;
     code.function(&shim_fs_call(
         park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut,
-        g_pre, f_realloc, &abi,
+        g_pre, f_realloc, &abi, f_fs_self, g_wset, g_slots, g_slotn,
     ));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
@@ -411,6 +448,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         g_err_fut,
         g_in_rx,
         g_in_fut,
+        g_wset,
     ));
     code.function(&shim_callback());
 
@@ -579,6 +617,81 @@ fn fs_err(
     i.i64_const((1i64 << 32) | len as i64).return_();
 }
 
+/// Error-code discriminant in local `n` -> the fs_err mapping (no-entry
+/// / access / not-permitted / is-directory / generic). Always returns.
+#[allow(clippy::too_many_arguments)]
+fn fs_open_err_map(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    g_ppos: u32,
+    g_plen: u32,
+    park: u64,
+    abi: &FsAbi,
+    n: u32,
+) {
+    i.local_get(n).i32_const(abi.ec_no_entry).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_err(i, g_ppos, g_plen, park, MSG_NOENT, E_NOENT.len());
+    i.end();
+    i.local_get(n).i32_const(abi.ec_access).i32_eq();
+    i.local_get(n).i32_const(abi.ec_not_permitted).i32_eq().i32_or();
+    i.if_(BlockType::Empty);
+    fs_err(i, g_ppos, g_plen, park, MSG_ACCES, E_ACCES.len());
+    i.end();
+    i.local_get(n).i32_const(abi.ec_is_directory).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_err(i, g_ppos, g_plen, park, MSG_ISDIR, E_ISDIR.len());
+    i.end();
+    fs_err(i, g_ppos, g_plen, park, MSG_GEN, E_GEN.len());
+}
+
+/// Open descriptor in local `d` -> read-via-stream, the doubling sync
+/// read loop (DROPPED = EOF), handle drops, payload park, and the
+/// `pack(0, total)` return.
+#[allow(clippy::too_many_arguments)]
+fn fs_read_tail(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    park: u64,
+    f_realloc: u32,
+    g_ppos: u32,
+    g_plen: u32,
+    d: u32,
+    rx: u32,
+    fut: u32,
+    buf: u32,
+    cap: u32,
+    total: u32,
+    n: u32,
+) {
+    i.local_get(d).i64_const(0).i32_const((park + RET) as i32).call(I_FS_RVS);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(rx);
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).local_set(fut);
+    i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_realloc).local_set(buf);
+    i.i32_const(65536).local_set(cap);
+    i.i32_const(0).local_set(total);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(total).local_get(cap).i32_ge_u();
+    i.if_(BlockType::Empty);
+    i.local_get(buf).local_get(cap).i32_const(8);
+    i.local_get(cap).i32_const(1).i32_shl();
+    i.call(f_realloc).local_set(buf);
+    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    i.end();
+    i.local_get(rx);
+    i.local_get(buf).local_get(total).i32_add();
+    i.local_get(cap).local_get(total).i32_sub();
+    i.call(I_FS_SREAD);
+    i.i32_const(4).i32_shr_u().local_set(n);
+    i.local_get(n).i32_eqz().br_if(1);
+    i.local_get(total).local_get(n).i32_add().local_set(total);
+    i.br(0).end().end();
+    i.local_get(rx).call(I_FS_SDROP);
+    i.local_get(fut).call(I_FS_FDROP);
+    i.local_get(d).call(I_FS_RESDROP);
+    i.local_get(buf).global_set(g_ppos);
+    i.local_get(total).global_set(g_plen);
+    i.local_get(total).i64_extend_i32_u().return_();
+}
+
 /// The five-op host contract over p3 (op codes shared with the embedded
 /// host): 30 raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32
 /// entropy, 34 wall clock; anything else = the defined refusal.
@@ -596,13 +709,18 @@ fn shim_fs_call(
     g_pre: u32,
     f_realloc: u32,
     abi: &FsAbi,
+    f_self: u32,
+    g_wset: u32,
+    g_slots: u32,
+    g_slotn: u32,
 ) -> Function {
     let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let total = 5u32;
     let n = 6u32;
     let s64 = 7u32;
     let (d, buf, cap, rx, fut) = (8u32, 9u32, 10u32, 11u32, 12u32);
-    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (5, ValType::I32)]);
+    let (sl, j) = (13u32, 14u32);
+    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (7, ValType::I32)]);
     let mut i = f.instructions();
 
     // op 30: raw stdout append (no newline) — b carries the bytes.
@@ -740,50 +858,120 @@ fn shim_fs_call(
     i.if_(BlockType::Empty);
     i.i64_const(2i64 << 32).return_(); // ok-none
     i.end();
-    i.local_get(n).i32_const(abi.ec_no_entry).i32_eq();
-    i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOENT, E_NOENT.len());
-    i.end();
-    i.local_get(n).i32_const(abi.ec_access).i32_eq();
-    i.local_get(n).i32_const(abi.ec_not_permitted).i32_eq().i32_or();
-    i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_ACCES, E_ACCES.len());
-    i.end();
-    i.local_get(n).i32_const(abi.ec_is_directory).i32_eq();
-    i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_ISDIR, E_ISDIR.len());
-    i.end();
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_GEN, E_GEN.len());
+    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
     i.end();
     i.i32_const((park + RET) as i32).i32_load(mem(abi.open_payload)).local_set(d);
-    i.local_get(d).i64_const(0).i32_const((park + RET) as i32).call(I_FS_RVS);
-    i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(rx);
-    i.i32_const((park + RET) as i32).i32_load(mem(4)).local_set(fut);
-    i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_realloc).local_set(buf);
-    i.i32_const(65536).local_set(cap);
-    i.i32_const(0).local_set(total);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(total).local_get(cap).i32_ge_u();
-    i.if_(BlockType::Empty);
-    i.local_get(buf).local_get(cap).i32_const(8);
-    i.local_get(cap).i32_const(1).i32_shl();
-    i.call(f_realloc).local_set(buf);
-    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    fs_read_tail(&mut i, park, f_realloc, g_ppos, g_plen, d, rx, fut, buf, cap, total, n);
     i.end();
-    i.local_get(rx);
-    i.local_get(buf).local_get(total).i32_add();
-    i.local_get(cap).local_get(total).i32_sub();
-    i.call(I_FS_SREAD);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    i.local_get(total).local_get(n).i32_add().local_set(total);
+
+    // ── The fan prefetch pair (#1628 increment 2b) ────────────────────
+
+    // op 40: START a slot — async-lower open-at for slot k (k rides
+    // b_len; the path rides a). The subtask joins the ONE waitable set;
+    // an immediate Returned (packed status 2, no subtask) marks the slot
+    // done on the spot. No preopen / k past the cap: the slot stays
+    // empty and the await falls back to the sync path.
+    i.local_get(op).i32_const(40).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_preopen(&mut i, g_pre, park);
+    i.global_get(g_pre).i32_const(0).i32_ge_s();
+    i.local_get(b_len).i32_const(SLOT_CAP).i32_lt_u().i32_and();
+    i.if_(BlockType::Empty);
+    i.global_get(g_slots).i32_eqz();
+    i.if_(BlockType::Empty);
+    i.i32_const(0).i32_const(0).i32_const(8);
+    i.i32_const(SLOT_CAP * SLOT_STRIDE);
+    i.call(f_realloc).global_set(g_slots);
+    i.end();
+    i.global_get(g_wset).i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    i.call(I_WS_NEW).global_set(g_wset);
+    i.end();
+    i.global_get(g_slots).local_get(b_len).i32_const(SLOT_STRIDE).i32_mul().i32_add();
+    i.local_set(sl);
+    // hiwater
+    i.local_get(b_len).i32_const(1).i32_add().global_get(g_slotn).i32_gt_u();
+    i.if_(BlockType::Empty);
+    i.local_get(b_len).i32_const(1).i32_add().global_set(g_slotn);
+    i.end();
+    // the argptr block (canonical layout of open-at's params)
+    i.local_get(sl).global_get(g_pre).i32_store(mem(0));
+    i.local_get(sl).i32_const(1).i32_store(mem(4)); // path-flags: symlink-follow
+    i.local_get(sl).local_get(a_ptr).i32_store(mem(8));
+    i.local_get(sl).local_get(a_len).i32_store(mem(12));
+    i.local_get(sl).i32_const(0).i32_store(mem(16)); // open-flags: none
+    i.local_get(sl).i32_const(1).i32_store(mem(20)); // descriptor-flags: read
+    // packed = [async-lower]open-at(args, ret)
+    i.local_get(sl);
+    i.local_get(sl).i32_const(24).i32_add();
+    i.call(I_FS_AOPEN).local_set(n);
+    i.local_get(n).i32_const(15).i32_and().i32_const(2).i32_eq();
+    i.if_(BlockType::Empty);
+    i.local_get(sl).i32_const(2).i32_store(mem(48)); // returned already
+    i.else_();
+    i.local_get(n).i32_const(4).i32_shr_u().local_set(j);
+    i.local_get(j).global_get(g_wset).call(I_WS_JOIN);
+    i.local_get(sl).i32_const(1).i32_store(mem(48)); // pending
+    i.local_get(sl).local_get(j).i32_store(mem(52));
+    i.end();
+    i.end();
+    i.i64_const(0).return_();
+    i.end();
+
+    // op 41: AWAIT slot k in arm order (the path rides a again, so every
+    // fallback is one recursive op-1 call). The drain loop is THE guest
+    // scheduler: wait on the one set, mark each Returned subtask's slot
+    // done, until slot k is done; then decode its parked open result and
+    // run the same stream-read tail as the sync path.
+    i.local_get(op).i32_const(41).i32_eq();
+    i.if_(BlockType::Empty);
+    i.global_get(g_slots).i32_eqz();
+    i.local_get(b_len).i32_const(SLOT_CAP).i32_ge_u().i32_or();
+    i.if_(BlockType::Empty);
+    i.i32_const(1).local_get(a_ptr).local_get(a_len).i32_const(0).i32_const(0);
+    i.call(f_self).return_();
+    i.end();
+    i.global_get(g_slots).local_get(b_len).i32_const(SLOT_STRIDE).i32_mul().i32_add();
+    i.local_set(sl);
+    i.local_get(sl).i32_load(mem(48)).i32_eqz();
+    i.if_(BlockType::Empty);
+    i.i32_const(1).local_get(a_ptr).local_get(a_len).i32_const(0).i32_const(0);
+    i.call(f_self).return_();
+    i.end();
+    // drain until slot k reads done
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(sl).i32_load(mem(48)).i32_const(2).i32_eq().br_if(1);
+    i.global_get(g_wset).i32_const((park + RET) as i32).call(I_WS_WAIT);
+    i.i32_const(1).i32_eq(); // EVENT_SUBTASK
+    i.if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).i32_const(2).i32_eq(); // Returned
+    i.if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(n); // subtask handle
+    i.i32_const(0).local_set(j);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(j).global_get(g_slotn).i32_ge_u().br_if(1);
+    i.global_get(g_slots).local_get(j).i32_const(SLOT_STRIDE).i32_mul().i32_add();
+    i.local_set(d);
+    i.local_get(d).i32_load(mem(48)).i32_const(1).i32_eq();
+    i.local_get(d).i32_load(mem(52)).local_get(n).i32_eq().i32_and();
+    i.if_(BlockType::Empty);
+    i.local_get(n).call(I_SUBTASK_DROP);
+    i.local_get(d).i32_const(2).i32_store(mem(48));
+    i.end();
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
     i.br(0).end().end();
-    i.local_get(rx).call(I_FS_SDROP);
-    i.local_get(fut).call(I_FS_FDROP);
-    i.local_get(d).call(I_FS_RESDROP);
-    i.local_get(buf).global_set(g_ppos);
-    i.local_get(total).global_set(g_plen);
-    i.local_get(total).i64_extend_i32_u().return_();
+    i.end();
+    i.end();
+    i.br(0).end().end();
+    // consume the slot; decode the parked open result
+    i.local_get(sl).i32_const(0).i32_store(mem(48));
+    i.local_get(sl).i32_load8_u(mem8(24));
+    i.if_(BlockType::Empty);
+    i.local_get(sl).i32_load8_u(mem8(24 + abi.open_payload)).local_set(n);
+    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
+    i.end();
+    i.local_get(sl).i32_load(mem(24 + abi.open_payload)).local_set(d);
+    fs_read_tail(&mut i, park, f_realloc, g_ppos, g_plen, d, rx, fut, buf, cap, total, n);
     i.end();
 
     // Everything else: the defined refusal — the message on stderr, exit 1.
@@ -863,6 +1051,7 @@ fn shim_run(
     g_err_fut: u32,
     g_in_rx: u32,
     g_in_fut: u32,
+    g_wset: u32,
 ) -> Function {
     let mut f = Function::new([]);
     let mut i = f.instructions();
@@ -887,6 +1076,13 @@ fn shim_run(
     i.if_(BlockType::Empty);
     i.global_get(g_in_rx).call(I_STDIN_DROP_RX);
     i.global_get(g_in_fut).call(I_STDIN_DROP_FUT);
+    i.end();
+
+    // Drop the fan waitable set if one was created (every subtask was
+    // dropped at its await, so the set is empty).
+    i.global_get(g_wset).i32_const(0).i32_ge_s();
+    i.if_(BlockType::Empty);
+    i.global_get(g_wset).call(I_WS_DROP);
     i.end();
 
     // task.return(ok), then EXIT: the task is complete.
