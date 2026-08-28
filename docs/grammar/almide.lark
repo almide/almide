@@ -328,6 +328,12 @@ ctor_expr: SOME "(" expr ")"
          | ERR "(" expr ")"
          | ERR_UC "(" expr ")"
          | TODO "(" plain_string ")"
+         // #1111: a bare builtin ctor is a FUNCTION VALUE (the parser
+         // synthesizes its eta-expansion) — accepted wherever an
+         // expression atom is.
+         | SOME | SOME_UC
+         | OK | OK_UC
+         | ERR | ERR_UC
 
 // ── control flow ─────────────────────────────────────────────────
 
