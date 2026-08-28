@@ -1,0 +1,6 @@
+type Shape = Circle(Int) | Rect(Int, Int) | Dot
+
+fn radius(s: Shape) -> Int = match s {
+  Circle(r) | Dot => 1,
+  Rect(_, _) => 0,
+}
