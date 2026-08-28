@@ -280,6 +280,7 @@ impl Emitter<'_> {
             ("update", [m, key, cb]) => self.lower_map_update(m, key, cb),
             ("upsert", [m, key, init, cb]) => self.lower_map_upsert(m, key, init, cb),
             ("filter", [m, cb]) => self.lower_map_filter(m, cb),
+            ("all" | "any" | "count", [m, cb]) => self.lower_map_pred(func, m, cb),
             ("map", [m, cb]) => self.lower_map_map(m, cb),
             ("merge", [a, b]) => self.lower_map_merge(a, b),
             // Functional remove: the map minus the entry (a plain copy

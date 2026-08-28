@@ -127,6 +127,73 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
     }
 
+    /// #1423 stage 4 — the map predicate family: all / any (early-exit
+    /// Bool) and count (a matching-entry counter), the filter loop's
+    /// (k, v) callback protocol without the output map.
+    pub(crate) fn lower_map_pred(
+        &mut self,
+        func: &str,
+        m: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 2)?;
+        let (mh, k, v) = self.map_hof_open(m)?;
+        let (koff, voff, esz) = entry_layout(k, v);
+        let hcur = self.hold_i32()?;
+        let hend = self.hold_i32()?;
+        let hr = self.hold_i32()?;
+        let count = func == "count";
+        {
+            let mut i = self.f.instructions();
+            // all starts true; any starts false; count starts 0.
+            i.i32_const(if func == "all" { 1 } else { 0 }).local_set(hr);
+            i.local_get(mh).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hcur);
+            i.local_get(hcur).local_get(mh).i32_load(len_memarg()).i32_add().local_set(hend);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hcur).local_get(hend).i32_ge_u().br_if(1);
+            i.local_get(hcur).i32_const(koff as i32).i32_add();
+        }
+        self.load_ty_slot_at(k);
+        self.f.instructions().local_set(params[0]);
+        self.f.instructions().local_get(hcur).i32_const(voff as i32).i32_add();
+        self.load_ty_slot_at(v);
+        self.f.instructions().local_set(params[1]);
+        self.lower(body, Some(BOOL))?;
+        {
+            let mut i = self.f.instructions();
+            match func {
+                "all" => {
+                    // a false verdict decides — flip and break.
+                    i.i32_eqz().if_(BlockType::Empty);
+                    i.i32_const(0).local_set(hr);
+                    i.br(2);
+                    i.end();
+                }
+                "any" => {
+                    i.if_(BlockType::Empty);
+                    i.i32_const(1).local_set(hr);
+                    i.br(2);
+                    i.end();
+                }
+                _ => {
+                    i.if_(BlockType::Empty);
+                    i.local_get(hr).i32_const(1).i32_add().local_set(hr);
+                    i.end();
+                }
+            }
+            i.local_get(hcur).i32_const(esz as i32).i32_add().local_set(hcur);
+            i.br(0).end().end();
+            i.local_get(hr);
+            if count {
+                i.i64_extend_i32_u();
+            }
+        }
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        Ok(Some(if count { INT } else { BOOL }))
+    }
+
     /// Value transform (the 1-arg surface): keys copy, the value slot
     /// takes the callback's result — the OUT entry layout re-packs for
     /// the new value type.

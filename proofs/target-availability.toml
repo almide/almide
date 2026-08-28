@@ -24,8 +24,8 @@
 # minimal call the probe cannot yet type (nominal runtime types, residual
 # generator gaps). Claimed neither way; shrinking it is probe work.
 
-# Measured (this generation): structural 333 ok / 56 native-only; default-routing 25 wasm-unavailable; 39 unsynthesizable.
-pending_self_host_ceiling = 23
+# Measured (this generation): structural 338 ok / 51 native-only; default-routing 25 wasm-unavailable; 39 unsynthesizable.
+pending_self_host_ceiling = 18
 
 [[native-only]]
 fn = "datetime.parse_iso"
@@ -153,22 +153,7 @@ reason = "pending-self-host"
 issue = "#1423"
 
 [[native-only]]
-fn = "map.all"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "map.any"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
 fn = "map.clear"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "map.count"
 reason = "pending-self-host"
 issue = "#1423"
 
@@ -255,16 +240,6 @@ issue = "#1423"
 [[native-only]]
 fn = "random.shuffle"
 reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "set.all"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "set.any"
-reason = "pending-self-host"
 issue = "#1423"
 
 [[native-only]]
