@@ -266,7 +266,8 @@ mod tests {
         out
     }
 
-    /// #576: proofs/StructuralRuntime.v transcribes THESE trees. The pin
+    /// #576: proofs/StructuralRuntime.v + proofs/StructuralAlloc.v
+    /// transcribe THESE trees. The pin
     /// makes drift bidirectional and loud: change an emitted runtime
     /// body and this hash moves, which is the signal to re-transcribe
     /// the .v side (and re-prove); the .v file's header names this test
@@ -280,12 +281,16 @@ mod tests {
         body_bytes(&super::emit_inc()).hash(&mut h);
         body_bytes(&super::emit_dec_flat()).hash(&mut h);
         body_bytes(&super::emit_free()).hash(&mut h);
+        // $alloc with a FIXED probe immediate for its one per-program
+        // parameter (the OOM message address): the tree shape is pinned;
+        // the immediate's value is not part of the transcription.
+        body_bytes(&super::emit_alloc(0)).hash(&mut h);
         let got = h.finish();
         // Recorded at the StructuralRuntime.v landing. A mismatch means
         // the emitted trees moved: update proofs/StructuralRuntime.v to
         // the new trees (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0x6d1acd4ac51a6024,
+            got, 0x71738094f6c49c05,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }
