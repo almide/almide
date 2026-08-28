@@ -250,3 +250,43 @@ pub(crate) fn emit_cow() -> Function {
     i.end();
     f
 }
+
+#[cfg(test)]
+mod tests {
+    use wasm_encoder::{CodeSection, Function};
+
+    fn body_bytes(f: &Function) -> Vec<u8> {
+        // Encode through a code section so the byte form is exactly what
+        // ships (locals prefix + operators + end).
+        let mut cs = CodeSection::new();
+        cs.function(f);
+        let mut out = Vec::new();
+        use wasm_encoder::Encode as _;
+        cs.encode(&mut out);
+        out
+    }
+
+    /// #576: proofs/StructuralRuntime.v transcribes THESE trees. The pin
+    /// makes drift bidirectional and loud: change an emitted runtime
+    /// body and this hash moves, which is the signal to re-transcribe
+    /// the .v side (and re-prove); the .v file's header names this test
+    /// back. The oom_msg parameter of $alloc keeps it out of this
+    /// constant-byte pin — its slice is the next .v increment.
+    #[test]
+    fn runtime_trees_match_the_proof_transcription() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        body_bytes(&super::emit_inc()).hash(&mut h);
+        body_bytes(&super::emit_dec_flat()).hash(&mut h);
+        body_bytes(&super::emit_free()).hash(&mut h);
+        let got = h.finish();
+        // Recorded at the StructuralRuntime.v landing. A mismatch means
+        // the emitted trees moved: update proofs/StructuralRuntime.v to
+        // the new trees (re-proving what changed), then this constant.
+        assert_eq!(
+            got, 0x6d1acd4ac51a6024,
+            "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
+        );
+    }
+}
