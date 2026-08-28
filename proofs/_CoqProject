@@ -23,3 +23,4 @@ WasmExec.v
 CowSafety.v
 StructuralRuntime.v
 StructuralAlloc.v
+StructuralDecode.v
