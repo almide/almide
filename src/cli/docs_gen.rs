@@ -147,13 +147,17 @@ fn check_diagnostic_registry_bijection() -> Vec<String> {
 /// and false positives produce obvious error messages.
 fn collect_emitted_codes() -> Result<Vec<String>, String> {
     let mut codes = std::collections::BTreeSet::new();
-    walk_rs_files(Path::new("crates"), &mut |path, contents| {
+    let mut scan = |_path: &Path, contents: &str| {
         for mat in contents.match_indices("with_code(\"") {
             let start = mat.0 + "with_code(\"".len();
             let rest = &contents[start..];
             let end = rest.find('"').unwrap_or(0);
             if end == 0 { continue; }
             let code = &rest[..end];
+            if code.len() > 1 && !code[1..].bytes().all(|b| b.is_ascii_digit()) {
+                // Doc-comment placeholders (EXXX in this file's own docs).
+                continue;
+            }
             if looks_like_diag_code(code) {
                 codes.insert(code.to_string());
             } else if !code.is_empty() {
@@ -161,10 +165,26 @@ fn collect_emitted_codes() -> Result<Vec<String>, String> {
                 // codes; flag them but include so the bijection check
                 // can report them.
                 codes.insert(code.to_string());
-                let _ = path;
             }
         }
-    })?;
+        // CLI-path diagnostics print the code as a literal
+        // (`error[EXXX]:` — E081's build-time availability check); those
+        // are emitted codes too.
+        for mat in contents.match_indices("error[E") {
+            let start = mat.0 + "error[".len();
+            let rest = &contents[start..];
+            let end = rest.find(']').unwrap_or(0);
+            if end == 0 || end > 5 { continue; }
+            let code = &rest[..end];
+            if looks_like_diag_code(code)
+                && code[1..].bytes().all(|b| b.is_ascii_digit())
+            {
+                codes.insert(code.to_string());
+            }
+        }
+    };
+    walk_rs_files(Path::new("crates"), &mut scan)?;
+    walk_rs_files(Path::new("src"), &mut scan)?;
     Ok(codes.into_iter().collect())
 }
 

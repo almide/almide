@@ -30,12 +30,13 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 missing"; exit 1; }
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 ALMIDE="$ALMIDE" python3 tools/target_availability_probe.py > "$tmp/measured.tsv"
+ALMIDE="$ALMIDE" python3 tools/target_availability_probe.py --default-routing > "$tmp/measured-default.tsv"
 
-python3 - "$tmp/measured.tsv" proofs/target-availability.toml <<'PY'
+python3 - "$tmp/measured.tsv" proofs/target-availability.toml "$tmp/measured-default.tsv" <<'PY'
 import re
 import sys
 
-measured_path, toml_path = sys.argv[1], sys.argv[2]
+measured_path, toml_path, default_path = sys.argv[1], sys.argv[2], sys.argv[3]
 walls, oks = set(), set()
 for line in open(measured_path):
     status, fn, _ = line.rstrip("\n").split("\t", 2)
@@ -64,6 +65,25 @@ for fn in sorted(declared):
     if not reasons[fn]:
         print(f"::error::reasonless declaration: {fn}")
         fail = 1
+# The BOTH-LEGS set (#1423 stage 3): default-routing walls vs the
+# declared wasm-unavailable table, both directions.
+dwalls, doks = set(), set()
+for line in open(default_path):
+    status, fn, _ = line.rstrip("\n").split("\t", 2)
+    if status == "wall":
+        dwalls.add(fn)
+    elif status == "ok":
+        doks.add(fn)
+unavail = set()
+for block in re.findall(r"\[\[wasm-unavailable\]\]\n(?:[a-z]+ = .*\n)+", toml):
+    unavail.add(re.search(r'fn = "([^"]+)"', block).group(1))
+for fn in sorted(dwalls - unavail):
+    print(f"::error::walls under DEFAULT routing but not declared wasm-unavailable: {fn}")
+    fail = 1
+for fn in sorted(unavail & doks):
+    print(f"::error::declared wasm-unavailable but it BUILDS now: {fn} — delete the stale row (and its E081 reach)")
+    fail = 1
+
 pending = sum(1 for fn in declared if reasons.get(fn) == "pending-self-host")
 if pending > ceiling:
     print(f"::error::pending-self-host grew: {pending} > ceiling {ceiling} (the ratchet only shrinks)")
@@ -74,6 +94,7 @@ if pending < ceiling:
 
 if not fail:
     print(f"target-availability OK: {len(oks)} lower, {len(declared)} declared native-only "
-          f"(pending-self-host {pending}/{ceiling}), both directions agree.")
+          f"(pending-self-host {pending}/{ceiling}), {len(unavail)} wasm-unavailable "
+          f"(both-legs), all four directions agree.")
 sys.exit(fail)
 PY
