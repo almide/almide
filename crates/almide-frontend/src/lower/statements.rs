@@ -418,6 +418,13 @@ fn bare_ctor_name(name: &almide_base::intern::Sym) -> almide_base::intern::Sym {
 
 pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> IrPattern {
     match pat {
+        // #1461: or-pattern arms are expanded into one IR arm per
+        // alternative BEFORE pattern lowering (lower_expr_match_arm);
+        // the IR pattern language stays or-free by construction.
+        ast::Pattern::Or { alts } => match alts.first() {
+            Some(first) => lower_pattern(ctx, first, ty),
+            None => IrPattern::Wildcard,
+        },
         ast::Pattern::Wildcard => IrPattern::Wildcard,
         ast::Pattern::Ident { name } => {
             let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);

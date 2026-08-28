@@ -122,7 +122,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 322 contracts — 322 active, 0 flagged-for-revision.**
+> **Ledger: 323 contracts — 323 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
@@ -215,7 +215,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Derived count | Value |
 |---|---|
 | Stdlib | 969 functions across 43 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 423 `.almd` test files under `spec/` (`almide test spec/`) + the 322-contract cross-target ledger |
+| Tests | 424 `.almd` test files under `spec/` (`almide test spec/`) + the 323-contract cross-target ledger |
 <!-- stats:generated:end -->
 
 ## Ecosystem and documentation

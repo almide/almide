@@ -1,0 +1,46 @@
+// #1461 — or-patterns (ALS-E18): `a | b | c => body` matches when any
+// alternative matches. Alternatives are binder-free (E080); the arm
+// covers the union for exhaustiveness; lowering desugars to one arm per
+// alternative, so both backends and the interp see plain arms.
+type Color = | Red | Green | Blue | Rgb(Int)
+
+fn color_class(c: Color) -> String = match c {
+  Red | Green => "warmish",
+  Blue => "cool",
+  Rgb(_) => "custom",
+}
+
+fn word_class(s: String) -> String = match s {
+  "a" | "an" | "the" => "article",
+  _ => "word",
+}
+
+fn size(x: Int) -> String = match x {
+  0 | 1 => "small",
+  _ => "big",
+}
+
+test "variant alternatives" {
+  assert_eq(color_class(Red), "warmish")
+  assert_eq(color_class(Green), "warmish")
+  assert_eq(color_class(Blue), "cool")
+  assert_eq(color_class(Rgb(7)), "custom")
+}
+
+test "string literal alternatives" {
+  assert_eq(word_class("an"), "article")
+  assert_eq(word_class("dog"), "word")
+}
+
+test "int literal alternatives" {
+  assert_eq(size(0), "small")
+  assert_eq(size(1), "small")
+  assert_eq(size(9), "big")
+}
+
+test "or arm satisfies exhaustiveness" {
+  let v = match some(3) {
+    some(_) | none => "covered"
+  }
+  assert_eq(v, "covered")
+}

@@ -57,6 +57,15 @@ enum CtorSet {
 fn lower(pat: &ast::Pattern) -> Pat {
     match pat {
         ast::Pattern::Wildcard | ast::Pattern::Ident { .. } => Pat::Wild,
+        // #1461: or-patterns are expanded at the ARM level (one row per
+        // alternative) before this per-pattern lowering; a NESTED or-
+        // pattern (inside a ctor) is not accepted by the parser today.
+        // Totality fallback: the first alternative (an under-
+        // approximation — exhaustiveness stays sound, usefulness may
+        // over-report if this path is ever reached).
+        ast::Pattern::Or { alts } => {
+            alts.first().map(lower).unwrap_or(Pat::Wild)
+        }
         ast::Pattern::Constructor { name, args, .. } => {
             // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
             let bare = name.as_str().rsplit_once('.').map(|(_, b)| almide_base::intern::sym(b)).unwrap_or(*name);
@@ -537,11 +546,16 @@ pub fn check_exhaustiveness(
         return vec![];
     }
 
-    // Build 1-column matrix (skip guarded arms — guards don't guarantee coverage).
+    // Build 1-column matrix (skip guarded arms — guards don't guarantee
+    // coverage). An or-pattern arm (#1461) contributes one row per
+    // alternative — the arm covers their union.
     let matrix: Vec<Vec<Pat>> = arms
         .iter()
         .filter(|a| a.guard.is_none())
-        .map(|a| vec![lower(&a.pattern)])
+        .flat_map(|a| match &a.pattern {
+            ast::Pattern::Or { alts } => alts.iter().map(|p| vec![lower(p)]).collect::<Vec<_>>(),
+            p => vec![vec![lower(p)]],
+        })
         .collect();
 
     let types = vec![resolved];
@@ -597,7 +611,13 @@ pub fn find_unreachable_arms(
     let mut matrix: Vec<Vec<Pat>> = Vec::with_capacity(arms.len());
     let mut dead = Vec::new();
     for (idx, arm) in arms.iter().enumerate() {
-        let row = vec![lower(&arm.pattern)];
+        // #1461: an or-pattern arm contributes one ROW per alternative —
+        // the arm covers their union, and it is dead only when EVERY
+        // alternative is dead.
+        let alt_rows: Vec<Vec<Pat>> = match &arm.pattern {
+            ast::Pattern::Or { alts } => alts.iter().map(|a| vec![lower(a)]).collect(),
+            p => vec![vec![lower(p)]],
+        };
         if arm.guard.is_some() {
             // Skip — guarded rows don't extend `matrix`. We don't
             // examine their usefulness either: a guarded arm is always
@@ -605,10 +625,15 @@ pub fn find_unreachable_arms(
             // through a value earlier arms would have caught).
             continue;
         }
-        if !is_useful(&matrix, &row, &types, env) {
+        let mut any_useful = false;
+        for row in alt_rows {
+            if is_useful(&matrix, &row, &types, env) {
+                any_useful = true;
+                matrix.push(row);
+            }
+        }
+        if !any_useful {
             dead.push(idx);
-        } else {
-            matrix.push(row);
         }
     }
     dead
