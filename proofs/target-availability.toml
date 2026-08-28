@@ -24,8 +24,8 @@
 # minimal call the probe cannot yet type (nominal runtime types, residual
 # generator gaps). Claimed neither way; shrinking it is probe work.
 
-# Measured (this generation): structural 338 ok / 51 native-only; default-routing 25 wasm-unavailable; 39 unsynthesizable.
-pending_self_host_ceiling = 18
+# Measured (this generation): structural 339 ok / 50 native-only; default-routing 25 wasm-unavailable; 39 unsynthesizable.
+pending_self_host_ceiling = 17
 
 [[native-only]]
 fn = "datetime.parse_iso"
@@ -139,11 +139,6 @@ issue = "#1423"
 
 [[native-only]]
 fn = "json.to_map"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "list.find_index"
 reason = "pending-self-host"
 issue = "#1423"
 

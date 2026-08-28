@@ -30,7 +30,7 @@ impl Emitter<'_> {
             | "flatten" | "unique" | "enumerate", [xs]) => {
                 self.lower_list_unary_named(func, xs)
             }
-            ("get" | "join" | "find" | "contains" | "index_of" | "intersperse"
+            ("get" | "join" | "find" | "find_index" | "contains" | "index_of" | "intersperse"
             | "zip" | "map" | "filter" | "any" | "all" | "count" | "take_while"
             | "drop_while" | "reduce" | "flat_map" | "filter_map" | "binary_search"
             | "window" | "unique_by" | "group_by", [a, b]) => {
@@ -291,6 +291,39 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::Option(self.types.intern(elem))))
     }
 
+    fn lower_list_find_index(
+        &mut self,
+        xs: &IrExpr,
+        cb: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let rh = self.hold_i32()?;
+        self.f.instructions().i32_const(0).local_set(rh);
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.lower(body, Some(BOOL))?;
+        self.f.instructions().if_(BlockType::Empty);
+        // some(i): the first match's INDEX, then break the scan.
+        self.f
+            .instructions()
+            .i32_const(8)
+            .call(F_ALLOC)
+            .local_tee(rh)
+            .local_get(ih)
+            .i64_extend_i32_u();
+        self.store_ty_slot(INT, almide_layout::OPTION_FIELD);
+        self.f.instructions().br(2);
+        self.f.instructions().end();
+        self.hof_step(ih);
+        self.f.instructions().local_get(rh);
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+    }
+
     fn lower_list_contains(&mut self, xs: &IrExpr, x: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
         let got = self.lower_list_index_of(xs, x)?;
         let _ = got;
@@ -407,6 +440,9 @@ impl Emitter<'_> {
             "get" => self.lower_list_get_arm(a, b),
             "join" => self.lower_list_join_arm(a, b),
             "find" => self.lower_list_find(a, b),
+            // #1423 stage 4: the index sibling — the same first-match
+            // scan, the some payload is the INDEX (an Int slot).
+            "find_index" => self.lower_list_find_index(a, b),
             "contains" => self.lower_list_contains(a, b),
             "index_of" => self.lower_list_index_of(a, b),
             "intersperse" => self.lower_list_intersperse(a, b),
