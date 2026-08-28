@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-114 normative sections; 676 distinct executable fixtures.
+114 normative sections; 678 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -69,7 +69,7 @@
 | ALS-E24 | C-256 | `spec/wasm_cross/loop_break_continue.almd` (byte-compare) |
 | ALS-E25 | C-257, C-271 | `spec/wasm_cross/error_operators.almd` (byte-compare)<br>`spec/wasm_cross/unwrap_or_unwrap_fallback.almd` (byte-compare) |
 | ALS-E26 | C-258 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare) |
-| ALS-E27 | C-259 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare) |
+| ALS-E27 | C-259, C-322 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare)<br>`spec/wasm_cross/ctor_fn_value.almd` (byte-compare)<br>`spec/lang/ctor_fn_value_test.almd` (both-target test) |
 | ALS-E28 | C-264 | `spec/wasm_cross/optional_chain_scalar.almd` (byte-compare) |
 | ALS-E29 | C-267 | `spec/wasm_cross/binary_operators.almd` (byte-compare) |
 | ALS-E30 | C-268 | `tests/diagnostics/e046-call-arg-placeholder/broken.almd` (checker)<br>`tests/diagnostic_harness_test.rs` (cargo gate) |

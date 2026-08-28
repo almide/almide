@@ -80,6 +80,7 @@
 66848	spec/wasm_cross/count_domain_nonbytes.almd
 66416	spec/wasm_cross/cross_dep_accumulator.almd
 72704	spec/wasm_cross/cross_module_spread.almd
+66976	spec/wasm_cross/ctor_fn_value.almd
 67488	spec/wasm_cross/ctor_if_payload.almd
 79776	spec/wasm_cross/ctor_scalar_call_payload.almd
 66016	spec/wasm_cross/ctor_turbofish_family.almd

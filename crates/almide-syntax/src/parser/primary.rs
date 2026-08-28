@@ -187,18 +187,34 @@ impl Parser {
         })
     }
 
+
+    /// #1111: a bare builtin ctor (`some` / `ok` / `err`, no parens) IS a
+    /// function value — synthesized as its eta-expansion
+    /// `(x) => ctor(x)`, so every consumer (checker, both backends, the
+    /// interp) sees the lambda form that already works. The parameter
+    /// name is gensym-ish (`__ctor_arg`) — lowering assigns fresh VarIds,
+    /// so collision with user names is impossible by construction.
+    fn bare_ctor_fn_value(
+        &mut self,
+        span: Option<Span>,
+        make: fn(Box<Expr>) -> ExprKind,
+    ) -> Expr {
+        let arg = almide_base::intern::sym("__ctor_arg");
+        let var = Expr::new(self.next_id(), span, ExprKind::Ident { name: arg });
+        let body = Expr::new(self.next_id(), span, make(Box::new(var)));
+        Expr::new(self.next_id(), span, ExprKind::Lambda {
+            params: vec![crate::ast::LambdaParam { name: arg, tuple_names: None, ty: None }],
+            body: Box::new(body),
+        })
+    }
+
     fn parse_some_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
         self.advance();
         let open = self.current().clone();
-        // #1111 interim: a bare `some` (no parens) is most often an attempted
-        // function value (`list.map(xs, some)`). Until builtin ctors become
-        // first-class, name the eta-expansion escape instead of a bare
-        // "Expected LParen".
+        // #1111: a bare `some` (no parens) is the ctor as a FUNCTION
+        // VALUE — `list.map(xs, some)` — synthesized as `(x) => some(x)`.
         if open.token_type != TokenType::LParen {
-            return Err(format!(
-                "`some` needs its payload here: `some(value)` at line {}:{}\n  Hint: to pass it as a function value, write the lambda form: (x) => some(x)",
-                open.line, open.col
-            ));
+            return Ok(self.bare_ctor_fn_value(span, |e| ExprKind::Some { expr: e }));
         }
         self.expect(TokenType::LParen)?;
         let expr = self.parse_expr()?;
@@ -209,15 +225,9 @@ impl Parser {
     fn parse_ok_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
         self.advance();
         let open = self.current().clone();
-        // #1111 interim: a bare `ok` (no parens) is most often an attempted
-        // function value (`list.map(xs, ok)`). Until builtin ctors become
-        // first-class, name the eta-expansion escape instead of a bare
-        // "Expected LParen".
+        // #1111: a bare `ok` is the ctor as a function value.
         if open.token_type != TokenType::LParen {
-            return Err(format!(
-                "`ok` needs its payload here: `ok(value)` at line {}:{}\n  Hint: to pass it as a function value, write the lambda form: (x) => ok(x)",
-                open.line, open.col
-            ));
+            return Ok(self.bare_ctor_fn_value(span, |e| ExprKind::Ok { expr: e }));
         }
         self.expect(TokenType::LParen)?;
         let expr = self.parse_expr()?;
@@ -228,15 +238,9 @@ impl Parser {
     fn parse_err_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
         self.advance();
         let open = self.current().clone();
-        // #1111 interim: a bare `err` (no parens) is most often an attempted
-        // function value (`list.map(xs, err)`). Until builtin ctors become
-        // first-class, name the eta-expansion escape instead of a bare
-        // "Expected LParen".
+        // #1111: a bare `err` is the ctor as a function value.
         if open.token_type != TokenType::LParen {
-            return Err(format!(
-                "`err` needs its payload here: `err(value)` at line {}:{}\n  Hint: to pass it as a function value, write the lambda form: (e) => err(e)",
-                open.line, open.col
-            ));
+            return Ok(self.bare_ctor_fn_value(span, |e| ExprKind::Err { expr: e }));
         }
         self.expect(TokenType::LParen)?;
         let expr = self.parse_expr()?;
