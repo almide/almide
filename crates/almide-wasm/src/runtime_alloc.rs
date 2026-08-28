@@ -295,3 +295,28 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod byte_dump {
+    /// The proofs/StructuralDecode.v byte lists' source: dump the trees'
+    /// code-section bytes as decimal lists. proofs/check-structural-bytes.sh
+    /// runs this per check and diffs the output against the .v lists, so
+    /// neither side can drift silently. Manual run:
+    /// `cargo test -p almide-wasm --lib dump_runtime_bytes -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn dump_runtime_bytes() {
+        use wasm_encoder::{CodeSection, Encode as _};
+        for (name, f) in [
+            ("inc", super::emit_inc()),
+            ("dec_flat", super::emit_dec_flat()),
+            ("free", super::emit_free()),
+        ] {
+            let mut cs = CodeSection::new();
+            cs.function(&f);
+            let mut out = Vec::new();
+            cs.encode(&mut out);
+            println!("{name}: {:?}", out);
+        }
+    }
+}
