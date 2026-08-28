@@ -11,6 +11,7 @@
 #   6. the wasm-tools family pins (wasmparser / wit-component) agree
 #      with [wasm-tools].family AND with each other (lockstep doctrine).
 set -euo pipefail
+export LC_ALL=C
 cd "$(dirname "$0")/.."
 
 fail=0
