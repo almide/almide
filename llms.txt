@@ -262,6 +262,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E076 | `@bounded`: an effect outside the declared capability (env/fs/http/… or `fan.*`) | The profile's capability is standard output only (ALS-B9) |
 | E077 | `@bounded`: Float arithmetic or comparison (provisional rule) | Keep to Int arithmetic; Float values may be held and passed (ALS-B10) |
 | E078 | `@bounded`: `!` propagation or `guard` inside a counted loop | Propagate or guard outside the loop; default with `??` inside (ALS-B11) |
+| E080 | An or-pattern alternative binds a variable (`some(n) \| none`) — the body cannot depend on which alternative matched | Write separate arms when the body needs the payload, or use `_` inside the alternative |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
