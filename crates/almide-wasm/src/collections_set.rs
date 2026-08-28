@@ -33,6 +33,10 @@ impl Emitter<'_> {
             ("symmetric_difference", [a, b]) => self.lower_set_symdiff(a, b),
             // Transform + first-seen dedup (a set stays a set).
             ("map", [s, cb]) => self.lower_set_hof_map(s, cb),
+            // #1423 stage 4: all/any — the list machinery applies
+            // verbatim (hof_loop_open accepts Set; Bool result).
+            ("all", [s, cb]) => self.lower_list_all(s, cb),
+            ("any", [s, cb]) => self.lower_list_any(s, cb),
             _ => self.lower_set_call_b(func, args, ret_hint),
         }
     }
