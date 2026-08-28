@@ -511,9 +511,15 @@ impl<'a> Interpreter<'a> {
     /// final value (`run_callable`'s pending list) instead of re-implementing
     /// it: one instrument, two call sites.
     pub(crate) fn try_unwrap_value(&mut self, v: Value, node_ty: &Ty) -> Flow {
-        if matches!(node_ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1)
-        {
+        self.try_unwrap_value_flag(v, marker_is_option_identity(node_ty))
+    }
+
+    /// The flag form: the only fact `!` normalization reads off the marker
+    /// node's type is "is it the C-216 Option identity" — one bit, so the
+    /// trampoline carries the bit instead of cloning a `Ty` per hop
+    /// (#1232, the last quick-win row).
+    pub(crate) fn try_unwrap_value_flag(&mut self, v: Value, opt_identity: bool) -> Flow {
+        if opt_identity {
             if let Value::Option(_) = v {
                 return Flow::val(v);
             }
@@ -868,7 +874,7 @@ impl<'a> Interpreter<'a> {
                             SpineOutcome::Transfer {
                                 next,
                                 next_args,
-                                try_marker: Some(cur.ty.clone()),
+                                try_marker: Some(marker_is_option_identity(&cur.ty)),
                             }
                         }
                         Some(out) => out,
@@ -1044,4 +1050,12 @@ fn lift_to_declared_carrier(ty: &Ty, flow: Flow) -> Flow {
         Flow::Value(v) => Flow::Value(Value::Result(Ok(Box::new(v)))),
         other => other,
     }
+}
+
+/// The C-216 marker fact (see `try_unwrap_value_flag`): a `Try`/`Unwrap`
+/// node TYPED `Option[_]` is the effect-RESULT-layer strip on a
+/// declared-Option effect call — identity on Option values.
+pub(crate) fn marker_is_option_identity(node_ty: &Ty) -> bool {
+    matches!(node_ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1)
 }
