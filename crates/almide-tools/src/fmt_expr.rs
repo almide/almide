@@ -489,21 +489,22 @@ fn fmt_expr_lambda(out: &mut String, expr: &Expr, depth: usize) {
     // bare ctor. A user-written lambda never carries the reserved
     // `__ctor_arg` spelling, and even if one did, the two forms are
     // semantically identical.
-    if let [p] = params.as_slice() {
-        if p.name.as_str() == "__ctor_arg" && p.ty.is_none() && p.tuple_names.is_none() {
-            let inner = match &body.kind {
-                ExprKind::Some { expr } => Some(("some", expr)),
-                ExprKind::Ok { expr } => Some(("ok", expr)),
-                ExprKind::Err { expr } => Some(("err", expr)),
-                _ => None,
-            };
-            if let Some((ctor, inner)) = inner {
-                if matches!(&inner.kind, ExprKind::Ident { name } if name.as_str() == "__ctor_arg")
-                {
-                    out.push_str(ctor);
-                    return;
-                }
-            }
+    if let [p] = params.as_slice()
+        && p.name.as_str() == "__ctor_arg"
+        && p.ty.is_none()
+        && p.tuple_names.is_none()
+    {
+        let inner = match &body.kind {
+            ExprKind::Some { expr } => Some(("some", expr)),
+            ExprKind::Ok { expr } => Some(("ok", expr)),
+            ExprKind::Err { expr } => Some(("err", expr)),
+            _ => None,
+        };
+        if let Some((ctor, inner)) = inner
+            && matches!(&inner.kind, ExprKind::Ident { name } if name.as_str() == "__ctor_arg")
+        {
+            out.push_str(ctor);
+            return;
         }
     }
     out.push('(');
