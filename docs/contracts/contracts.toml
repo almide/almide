@@ -4116,3 +4116,15 @@ evidence  = [
   { path = "tests/diagnostics/e078-bounded-early-exit-in-loop/broken.almd", class = "fixture" },
   { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-321"
+spec      = "ALS-R3"
+title     = "The fan prefetch split (start-all, await-in-arm-order) is unobservable"
+statement = "A fan.map whose whole arm body is one fs.read_text on the element lowers to two phases (#1628 increment 2b): every read STARTS in list order, then every arm AWAITS in arm order — and the split is unobservable against the sequential contract (C-004): results in list order, the FIRST err in ARM order decides (certified by stacking two different failures — a directory at arm 2, a missing file at arm 3 — where a completion-order drain could surface either message and arm order admits only arm 2's), and after the deciding err the remaining started reads drain and are discarded, so no read outlives the fan. The determinism split this stages (#1628 stage 3): GUEST-side order is fixed by construction — the p3 component drains its waitable set in arm order regardless of the order the host completes the async-lowered open-at subtasks — while hosts that cannot overlap treat the start as a no-op (the embedded host answers op 40 with ok(0) and re-dispatches the read at the await), making sequential equality hold by construction there. The p3 component leg of the same shapes is pinned by tests/component_p3_test.rs::p3_component_fan_prefetch_reads_concurrently, which also asserts the artifact imports the async machinery ([async-lower]…open-at, [waitable-set-wait]) so a silent sequential fallback cannot pass. Scope note: the fixture keeps the fan inside a Result-returning wrapper fn because the un-banged fallible form diverges on the wasm leg today (#1663, pre-existing, independent of the prefetch)."
+since     = "0.59.3"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_prefetch_fs.almd", class = "fixture" },
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_fan_prefetch_reads_concurrently" },
+]
