@@ -60,7 +60,7 @@
 | ALS-E15 | C-244 | `spec/wasm_cross/while_loops.almd` (byte-compare) |
 | ALS-E16 | C-245 | `spec/wasm_cross/string_interpolation.almd` (byte-compare) |
 | ALS-E17 | C-246 | `spec/wasm_cross/string_interpolation.almd` (byte-compare) |
-| ALS-E18 | C-247, C-281, C-323 | `spec/wasm_cross/match_forms.almd` (byte-compare)<br>`spec/wasm_cross/result_default_and_passthrough.almd` (byte-compare)<br>`spec/wasm_cross/effect_tail_carrier_family.almd` (byte-compare)<br>`spec/wasm_cross/or_pattern.almd` (byte-compare)<br>`spec/lang/or_pattern_test.almd` (both-target test)<br>`tests/diagnostics/or-pattern-binder/broken.almd` (checker) |
+| ALS-E18 | C-247, C-281, C-323 | `spec/wasm_cross/match_forms.almd` (byte-compare)<br>`spec/wasm_cross/result_default_and_passthrough.almd` (byte-compare)<br>`spec/wasm_cross/effect_tail_carrier_family.almd` (byte-compare)<br>`spec/wasm_cross/or_pattern.almd` (byte-compare)<br>`spec/lang/or_pattern_test.almd` (both-target test)<br>`tests/diagnostics/e080-or-pattern-binder/broken.almd` (checker) |
 | ALS-E19 | C-248, C-279 | `spec/wasm_cross/for_in_forms.almd` (byte-compare)<br>`spec/wasm_cross/licm_zero_trip_hoist.almd` (byte-compare) |
 | ALS-E20 | C-250 | `spec/wasm_cross/pipe_compose_forms.almd` (byte-compare) |
 | ALS-E21 | C-251 | `spec/wasm_cross/if_let_forms.almd` (byte-compare) |

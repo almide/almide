@@ -516,7 +516,7 @@ Circle(x))`。
 `spec/wasm_cross/ctor_fn_value.almd`(契約 C-322)、
 `spec/lang/ctor_fn_value_test.almd`。or-パターン:
 `spec/wasm_cross/or_pattern.almd`(契約 C-323)、
-`spec/lang/or_pattern_test.almd`、`tests/diagnostics/or-pattern-binder/`。
+`spec/lang/or_pattern_test.almd`、`tests/diagnostics/e080-or-pattern-binder/`。
 
 ## ALS-D1 宣言(`Decl::Module` / `Decl::Import` / `Decl::Type` / `Decl::Fn` / `Decl::TopLet` / `Decl::Protocol` / `Decl::Test` / `Decl::TestWhereDef`)
 

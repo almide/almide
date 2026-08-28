@@ -4151,5 +4151,5 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/or_pattern.almd", class = "fixture" },
   { path = "spec/lang/or_pattern_test.almd", class = "fixture" },
-  { path = "tests/diagnostics/or-pattern-binder/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e080-or-pattern-binder/broken.almd", class = "fixture" },
 ]
