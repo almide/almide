@@ -11,7 +11,7 @@
 //!     payloads unwrap; the FIRST err aborts (after all arms ran) with
 //!     the bare message; one arm = the bare value, else a tuple.
 
-use almide_ir::{IrExpr, IrExprKind};
+use almide_ir::{CallTarget, IrExpr, IrExprKind};
 use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
@@ -25,6 +25,16 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<SliceTy>>, EmitError> {
         let out = match (func, args) {
+            // The PREFETCH form (#1628 increment 2b): a map whose whole
+            // arm body is one fs.read_text on the element starts every
+            // read up front (op 40) and awaits in arm order (op 41) —
+            // sequential semantics verbatim (C-004 list order, first err
+            // is the result), but a host that can overlap I/O (the p3
+            // component) serves the reads concurrently. Hosts that
+            // cannot treat start as a no-op.
+            ("map", [xs, cb]) if body_is_fs_read_text(cb) => {
+                Some(self.lower_fan_map_fs_prefetch(xs)?)
+            }
             ("map" | "any" | "any_map", [xs, cb]) => {
                 let first_ok_wins = func != "map";
                 let (params, body) = self.hof_lambda(cb, 1)?;
@@ -255,4 +265,120 @@ impl Emitter<'_> {
         self.release_i32();
         Ok(out)
     }
+
+    /// The two-phase prefetch map (see `body_is_fs_read_text`): phase A
+    /// starts slot k per element, phase B awaits every slot in arm
+    /// order. Phase B never breaks early — after the first err the
+    /// remaining awaits run and their results are DISCARDED, so no
+    /// started read outlives the fan (the p3 shim relies on this to
+    /// leave no subtask outstanding at task exit).
+    fn lower_fan_map_fs_prefetch(
+        &mut self,
+        xs: &IrExpr,
+    ) -> Result<SliceTy, EmitError> {
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        if elem != STR {
+            return unsup(&format!("fan-prefetch-elem:{elem:?}"));
+        }
+        let hp = self.hold_i32()?;
+        // ── phase A: start every read ──
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, hp);
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(40);
+            i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hp).i32_load(len_memarg());
+            i.i32_const(0).local_get(ih);
+            i.call(F_FS_CALL).drop();
+        }
+        self.hof_step(ih);
+        // ── phase B: await in arm order, fan.map accumulation ──
+        let hr = self.hold_i32()?;
+        let hacc = self.hold_i32()?;
+        let h64 = self.hold_i64()?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(0).local_set(hr);
+            i.i32_const(0).call(F_ALLOC).local_set(hacc);
+            i.i32_const(0).local_set(ih);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+        }
+        self.hof_elem_into(elem, bh, ch, ih, hp);
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(41);
+            i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hp).i32_load(len_memarg());
+            i.i32_const(0).local_get(ih);
+            i.call(F_FS_CALL).local_set(h64);
+            // an err already decided the result: drain only
+            i.local_get(hr).i32_eqz().if_(BlockType::Empty);
+            i.local_get(h64);
+        }
+        let got = self.fs_result_string()?;
+        debug_assert!(matches!(got, SliceTy::Result(..)));
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hp);
+            i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG));
+            i.if_(BlockType::Empty);
+            // first err IS the whole result
+            i.local_get(hp).local_set(hr);
+            i.else_();
+            i.local_get(hacc).local_get(hp);
+            i.i32_load(slot_memarg(almide_layout::SUM_FIELD));
+            i.call(F_LIST_PUSH_4).local_set(hacc);
+            i.end();
+            i.end();
+        }
+        self.hof_step(ih);
+        // finale: no err → ok(acc)
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hr).i32_eqz().if_(BlockType::Empty);
+            i.i32_const(16)
+                .call(F_ALLOC)
+                .local_tee(hr)
+                .i32_const(0)
+                .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hr)
+                .local_get(hacc)
+                .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.end();
+            i.local_get(hr);
+        }
+        for _ in 0..6 {
+            self.release_i32();
+        }
+        self.release_i64();
+        let sh = self.types.intern(STR);
+        let lh = self.types.intern(SliceTy::List(sh));
+        Ok(SliceTy::Result(lh, sh))
+    }
+}
+
+/// `(p) => fs.read_text(p)` — possibly under the callback's `!` (one
+/// `Try` layer): the shape whose Result flows straight into the fan
+/// protocol, so prefetching the read is unobservable.
+fn body_is_fs_read_text(cb: &IrExpr) -> bool {
+    let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
+        return false;
+    };
+    let [(param, _)] = params.as_slice() else {
+        return false;
+    };
+    let body = match &body.kind {
+        IrExprKind::Try { expr } => expr.as_ref(),
+        _ => body.as_ref(),
+    };
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
+        &body.kind
+    else {
+        return false;
+    };
+    module.as_str() == "fs"
+        && func.as_str() == "read_text"
+        && matches!(args.as_slice(),
+                    [IrExpr { kind: IrExprKind::Var { id }, .. }] if id == param)
 }

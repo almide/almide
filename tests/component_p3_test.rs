@@ -370,6 +370,76 @@ fn p3_component_reads_the_filesystem() {
     assert_eq!(ecode, 1);
 }
 
+// The fan prefetch (#1628 increment 2b): fan.map whose arm body is one
+// fs.read_text lowers to start-all (op 40, [async-lower]open-at joined
+// to the one waitable set) then await-in-arm-order (op 41, the drain
+// loop). Output must be byte-identical to the sequential semantics on
+// BOTH the happy path and the first-err path (where remaining awaits
+// drain and discard).
+const FAN_PREFETCH: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  let texts = fan.map(["f1.txt", "f2.txt", "f3.txt"], (p) => fs.read_text(p)!)!
+  println(texts |> list.map((t) => string.trim_end(t)) |> list.join("|"))
+}
+"#;
+
+const FAN_PREFETCH_ERR: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  let texts = fan.map(["f1.txt", "gone.txt", "f3.txt"], (p) => fs.read_text(p)!)!
+  println(texts |> list.join("|"))
+}
+"#;
+
+#[test]
+fn p3_component_fan_prefetch_reads_concurrently() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir().join("fanpf");
+    std::fs::create_dir_all(&d).expect("mkdir");
+    for k in 1..=3 {
+        std::fs::write(d.join(format!("f{k}.txt")), format!("file-{k} body\n")).expect("write");
+    }
+    let src = d.join("pf.almd");
+    std::fs::write(&src, FAN_PREFETCH).expect("write");
+    let p3 = d.join("pf_p3.wasm");
+    build_p3_structural(&src, &p3);
+    // The artifact must actually carry the async machinery — a silent
+    // fallback to sequential opens would still pass the output check.
+    let bytes = std::fs::read(&p3).expect("read");
+    let hay = String::from_utf8_lossy(&bytes).into_owned();
+    assert!(
+        hay.contains("[async-lower][method]descriptor.open-at")
+            && hay.contains("[waitable-set-wait]"),
+        "the prefetch build must import the async open + waitable-set builtins"
+    );
+    if !wasmtime_available() {
+        return;
+    }
+    let Some((out, err, code)) = run_p3_dir(&p3, &d) else {
+        return;
+    };
+    assert_eq!(out, "file-1 body|file-2 body|file-3 body\n", "stderr: {err}");
+    assert_eq!(code, 0);
+
+    // First-err path: arm 2 fails; arms 1/3 drain and discard.
+    let esrc = d.join("pferr.almd");
+    std::fs::write(&esrc, FAN_PREFETCH_ERR).expect("write");
+    let ep3 = d.join("pferr_p3.wasm");
+    build_p3_structural(&esrc, &ep3);
+    let Some((eout, eerr, ecode)) = run_p3_dir(&ep3, &d) else {
+        return;
+    };
+    assert_eq!(eout, "");
+    assert!(
+        eerr.contains("No such file or directory (os error 2)"),
+        "the err leg must carry the native error string:\n{eerr}"
+    );
+    assert_eq!(ecode, 1);
+}
+
 #[test]
 fn p3_component_abort_answers_exit_one() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {

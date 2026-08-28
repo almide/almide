@@ -377,6 +377,16 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
 
 fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use std::path::Path;
+    // The fan prefetch pair (#1628 increment 2b). The guest re-sends the
+    // path at await, so the sequential host needs NO slot state: start is
+    // a no-op and await IS the read — byte-identical to sequential fan.
+    // (The p3 component's shim is where start actually goes async.)
+    if op == 40 {
+        return (pack(0, 0), Vec::new());
+    }
+    if op == 41 {
+        return fs_dispatch(1, a, b);
+    }
     if matches!(op, 2 | 3 | 7..=9 | 15 | 16) {
         return fs_dispatch_w(op, a, b);
     }
