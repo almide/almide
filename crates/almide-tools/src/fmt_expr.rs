@@ -482,6 +482,30 @@ fn fmt_expr_while(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_expr_lambda(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Lambda { params, body, .. } = &expr.kind else { unreachable!() };
+    // #1111's parser synthesis, inverted: a bare builtin ctor parses as
+    // `(__ctor_arg) => some(__ctor_arg)` — printing that form would leak
+    // the internal name into user source (it did: the C-322 fixtures on
+    // 2026-08-28), so the exact synthesized shape prints back as the
+    // bare ctor. A user-written lambda never carries the reserved
+    // `__ctor_arg` spelling, and even if one did, the two forms are
+    // semantically identical.
+    if let [p] = params.as_slice() {
+        if p.name.as_str() == "__ctor_arg" && p.ty.is_none() && p.tuple_names.is_none() {
+            let inner = match &body.kind {
+                ExprKind::Some { expr } => Some(("some", expr)),
+                ExprKind::Ok { expr } => Some(("ok", expr)),
+                ExprKind::Err { expr } => Some(("err", expr)),
+                _ => None,
+            };
+            if let Some((ctor, inner)) = inner {
+                if matches!(&inner.kind, ExprKind::Ident { name } if name.as_str() == "__ctor_arg")
+                {
+                    out.push_str(ctor);
+                    return;
+                }
+            }
+        }
+    }
     out.push('(');
     comma_sep(out, params, |out, p| {
         if let Some(n) = &p.tuple_names { w!(out, "({})", join_syms(n, ", ")); } else { out.push_str(&p.name); }

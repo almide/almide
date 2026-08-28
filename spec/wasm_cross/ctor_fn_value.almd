@@ -10,13 +10,13 @@
 type Shape = | Circle(Int) | Rect(Int, Int) | Dot
 
 effect fn main() -> Unit = {
-  let opts = [1, 2] |> list.map((__ctor_arg) => some(__ctor_arg))
+  let opts = [1, 2] |> list.map(some)
   println(if opts == [some(1), some(2)] then "some-maps" else "BAD")
-  let oks: List[Result[Int, String]] = [3] |> list.map((__ctor_arg) => ok(__ctor_arg))
+  let oks: List[Result[Int, String]] = [3] |> list.map(ok)
   println(if oks == [ok(3)] then "ok-maps" else "BAD")
-  let errs: List[Result[Int, String]] = ["e"] |> list.map((__ctor_arg) => err(__ctor_arg))
+  let errs: List[Result[Int, String]] = ["e"] |> list.map(err)
   println(if errs == [err("e")] then "err-maps" else "BAD")
-  let f = (__ctor_arg) => some(__ctor_arg)
+  let f = some
   println(if f(7) == some(7) then "bound-applies" else "BAD")
   let shapes = [1, 2] |> list.map(Circle)
   println(if shapes == [Circle(1), Circle(2)] then "user-maps" else "BAD")
