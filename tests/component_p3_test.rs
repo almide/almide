@@ -449,6 +449,54 @@ fn p3_component_fan_prefetch_reads_concurrently() {
     assert_eq!(ecode, 1);
 }
 
+// fan.any over the same shape (#1628 increment 2c): first ok in ARM
+// order wins, the started loser arms are ABANDONED via subtask.cancel —
+// the p3 run must exit clean (an outstanding subtask at task exit would
+// trap), and all-fail answers the C-004 ledger Err.
+const FAN_ANY: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  let first = fan.any(["gone-a.txt", "f2.txt", "f3.txt"], (p) => fs.read_text(p)!) ?? "(none)"
+  println(string.trim_end(first))
+  let nores = fan.any(["gone-a.txt", "gone-b.txt"], (p) => fs.read_text(p)!)
+  match nores {
+    ok(_)  => println("BAD"),
+    err(m) => println("allfail=${m}"),
+  }
+}
+"#;
+
+#[test]
+fn p3_component_fan_any_cancels_the_losers() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir().join("fanany");
+    std::fs::create_dir_all(&d).expect("mkdir");
+    for k in 2..=3 {
+        std::fs::write(d.join(format!("f{k}.txt")), format!("file-{k} body\n")).expect("write");
+    }
+    let src = d.join("anyp.almd");
+    std::fs::write(&src, FAN_ANY).expect("write");
+    let p3 = d.join("anyp_p3.wasm");
+    let build_log = build_p3_structural(&src, &p3);
+    assert!(
+        build_log.contains("prefetch-any lowering engaged"),
+        "fan.any over fs.read_text must lower through the prefetch-any route:\n{build_log}"
+    );
+    if !wasmtime_available() {
+        return;
+    }
+    let Some((out, err, code)) = run_p3_dir(&p3, &d) else {
+        return;
+    };
+    assert_eq!(
+        out, "file-2 body\nallfail=fan.any: all candidates failed\n",
+        "fan.any prefetch diverged (stderr: {err})"
+    );
+    assert_eq!(code, 0, "a leaked loser subtask would trap at task exit");
+}
+
 #[test]
 fn p3_component_abort_answers_exit_one() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {

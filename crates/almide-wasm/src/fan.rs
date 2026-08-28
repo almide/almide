@@ -44,6 +44,18 @@ impl Emitter<'_> {
                 }
                 Some(self.lower_fan_map_fs_prefetch(xs)?)
             }
+            // fan.any over the same shape (#1628 increment 2c): start every
+            // read, await in ARM order, FIRST OK wins — and the remaining
+            // started reads are ABANDONED (op 42): on the p3 component that
+            // is the subtask.cancel cooperative handshake, so no losing
+            // subtask outlives the fan. Element errs skip (C-004's any);
+            // all-fail answers the ledger-constant Err.
+            ("any" | "any_map", [xs, cb]) if body_is_fs_read_text(cb) => {
+                if dbg {
+                    eprintln!("[fan-dbg] fan.{func}: prefetch-any lowering engaged");
+                }
+                Some(self.lower_fan_any_fs_prefetch(xs)?)
+            }
             ("map" | "any" | "any_map", [xs, cb]) => {
                 if dbg {
                     eprintln!("[fan-dbg] fan.{func}: sequential accumulator");
@@ -283,6 +295,101 @@ impl Emitter<'_> {
         }
         self.release_i32();
         Ok(out)
+    }
+
+    /// The prefetch ANY (#1628 increment 2c): phase A starts every read
+    /// (op 40); phase B awaits in ARM order (op 41) — the first ok is the
+    /// winner, an err skips its arm — then every arm AFTER the winner is
+    /// abandoned via op 42 (the p3 shim's subtask.cancel handshake; a
+    /// sequential host answers ok(0)). All-fail is the C-004 ledger Err.
+    fn lower_fan_any_fs_prefetch(
+        &mut self,
+        xs: &IrExpr,
+    ) -> Result<SliceTy, EmitError> {
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        if elem != STR {
+            return unsup(&format!("fan-prefetch-any-elem:{elem:?}"));
+        }
+        let hp = self.hold_i32()?;
+        // ── phase A: start every read ──
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        self.hof_elem_into(elem, bh, ch, ih, hp);
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(40);
+            i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hp).i32_load(len_memarg());
+            i.i32_const(0).local_get(ih);
+            i.call(F_FS_CALL).drop();
+        }
+        self.hof_step(ih);
+        // ── phase B: await in arm order; first ok breaks ──
+        let hr = self.hold_i32()?;
+        let h64 = self.hold_i64()?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(0).local_set(hr);
+            i.i32_const(0).local_set(ih);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+        }
+        self.hof_elem_into(elem, bh, ch, ih, hp);
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(41);
+            i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hp).i32_load(len_memarg());
+            i.i32_const(0).local_get(ih);
+            i.call(F_FS_CALL).local_set(h64);
+            i.local_get(h64);
+        }
+        let got = self.fs_result_string()?;
+        debug_assert!(matches!(got, SliceTy::Result(..)));
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hp);
+            i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG));
+            i.i32_eqz().if_(BlockType::Empty);
+            // winner: hr = the ok Result, break to the abandon sweep.
+            i.local_get(hp).local_set(hr);
+            i.end();
+            i.local_get(hr).i32_const(0).i32_ne().br_if(1);
+        }
+        self.hof_step(ih);
+        // ── abandon sweep: cancel every arm after the winner ──
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ih).i32_const(1).i32_add().local_set(ih);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(ih).local_get(ch).i32_ge_u().br_if(1);
+            i.i32_const(42);
+            i.i32_const(0).i32_const(0);
+            i.i32_const(0).local_get(ih);
+            i.call(F_FS_CALL).drop();
+            i.local_get(ih).i32_const(1).i32_add().local_set(ih);
+            i.br(0).end().end();
+            // all-fail (hr still 0): the ledger-constant Err.
+            i.local_get(hr).i32_eqz().if_(BlockType::Empty);
+        }
+        let msg = self.pool.intern("fan.any: all candidates failed");
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(16)
+                .call(F_ALLOC)
+                .local_tee(hr)
+                .i32_const(1)
+                .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hr)
+                .i32_const(msg as i32)
+                .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.end();
+            i.local_get(hr);
+        }
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        self.release_i64();
+        let sh = self.types.intern(STR);
+        Ok(SliceTy::Result(sh, sh))
     }
 
     /// The two-phase prefetch map (see `body_is_fs_read_text`): phase A

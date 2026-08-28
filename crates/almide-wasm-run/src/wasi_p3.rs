@@ -96,7 +96,8 @@ const I_WS_JOIN: u32 = 28; // [waitable-join]
 const I_WS_WAIT: u32 = 29; // [waitable-set-wait]
 const I_SUBTASK_DROP: u32 = 30; // [subtask-drop]
 const I_WS_DROP: u32 = 31; // [waitable-set-drop]
-const IMPORTS: u32 = 32;
+const I_SUBTASK_CANCEL: u32 = 32; // [subtask-cancel] — the loser-arm abandonment
+const IMPORTS: u32 = 33;
 const SHIFT: u32 = IMPORTS - 5;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
@@ -386,6 +387,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         (I_WS_WAIT, "$root", "[waitable-set-wait]", t_ws_wait),
         (I_SUBTASK_DROP, "$root", "[subtask-drop]", t_drop),
         (I_WS_DROP, "$root", "[waitable-set-drop]", t_drop),
+        (I_SUBTASK_CANCEL, "$root", "[subtask-cancel]", t_call),
     ];
     assert_eq!(import_list.len() as u32, IMPORTS, "IMPORTS count drift");
     let mut imports = ImportSection::new();
@@ -972,6 +974,46 @@ fn shim_fs_call(
     i.end();
     i.local_get(sl).i32_load(mem(24 + abi.open_payload)).local_set(d);
     fs_read_tail(&mut i, park, f_realloc, g_ppos, g_plen, d, rx, fut, buf, cap, total, n);
+    i.end();
+
+    // op 42: ABANDON slot k (k rides b_len; the path args are unused) —
+    // fan.any's loser-arm handshake (#1628 increment 2c). A PENDING slot
+    // gets subtask.cancel: if the open still RETURNED (packed status 2 —
+    // cancel raced completion), its ok descriptor must be dropped; either
+    // way the subtask handle drops. A DONE slot just drops its ok
+    // descriptor. The slot clears to empty; never an error.
+    i.local_get(op).i32_const(42).i32_eq();
+    i.if_(BlockType::Empty);
+    i.global_get(g_slots).i32_eqz();
+    i.local_get(b_len).i32_const(SLOT_CAP).i32_ge_u().i32_or();
+    i.if_(BlockType::Empty);
+    i.i64_const(0).return_();
+    i.end();
+    i.global_get(g_slots).local_get(b_len).i32_const(SLOT_STRIDE).i32_mul().i32_add();
+    i.local_set(sl);
+    i.local_get(sl).i32_load(mem(48)).i32_const(1).i32_eq();
+    i.if_(BlockType::Empty);
+    // pending: cancel, then reap a raced completion.
+    i.local_get(sl).i32_load(mem(52)).call(I_SUBTASK_CANCEL).local_set(n);
+    i.local_get(n).i32_const(15).i32_and().i32_const(2).i32_eq();
+    i.if_(BlockType::Empty);
+    i.local_get(sl).i32_load8_u(mem8(24)).i32_eqz();
+    i.if_(BlockType::Empty);
+    i.local_get(sl).i32_load(mem(24 + abi.open_payload)).call(I_FS_RESDROP);
+    i.end();
+    i.end();
+    i.local_get(sl).i32_load(mem(52)).call(I_SUBTASK_DROP);
+    i.end();
+    i.local_get(sl).i32_load(mem(48)).i32_const(2).i32_eq();
+    i.if_(BlockType::Empty);
+    // done: the parked open result holds an owned descriptor on ok.
+    i.local_get(sl).i32_load8_u(mem8(24)).i32_eqz();
+    i.if_(BlockType::Empty);
+    i.local_get(sl).i32_load(mem(24 + abi.open_payload)).call(I_FS_RESDROP);
+    i.end();
+    i.end();
+    i.local_get(sl).i32_const(0).i32_store(mem(48));
+    i.i64_const(0).return_();
     i.end();
 
     // Everything else: the defined refusal — the message on stderr, exit 1.
