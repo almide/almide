@@ -5,8 +5,9 @@
 // drives it with sync stream builtins and retires the subtask before
 // task-return) — PLUS the filesystem READ surface (increment 2a:
 // exists/is-dir/is-file via stat-at, read_text/read_bytes via open-at +
-// read-via-stream against the first preopen). fs writes, env and
-// process keep the defined refusal inside the shims.
+// read-via-stream against the first preopen) and WRITE surface
+// (increment 2d: write/append/write_bytes/mkdir_p/remove/remove_all).
+// env and process keep the defined refusal inside the shims.
 package almide:runtime-p3@0.1.0;
 
 world p3-command {

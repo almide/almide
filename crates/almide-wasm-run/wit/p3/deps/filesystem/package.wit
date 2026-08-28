@@ -96,8 +96,13 @@ interface types {
 
   resource descriptor {
     read-via-stream: func(offset: filesize) -> tuple<stream<u8>, future<result<_, error-code>>>;
+    write-via-stream: func(data: stream<u8>, offset: filesize) -> future<result<_, error-code>>;
+    append-via-stream: func(data: stream<u8>) -> future<result<_, error-code>>;
+    create-directory-at: async func(path: string) -> result<_, error-code>;
     open-at: async func(path-flags: path-flags, path: string, open-flags: open-flags, %flags: descriptor-flags) -> result<descriptor, error-code>;
+    remove-directory-at: async func(path: string) -> result<_, error-code>;
     stat-at: async func(path-flags: path-flags, path: string) -> result<descriptor-stat, error-code>;
+    unlink-file-at: async func(path: string) -> result<_, error-code>;
   }
 }
 
