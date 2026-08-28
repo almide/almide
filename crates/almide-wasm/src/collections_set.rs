@@ -449,6 +449,14 @@ impl Emitter<'_> {
                     .i64_extend_i32_u();
                 Ok(Some(INT))
             }
+            // #1423 stage 4: is_empty = the len slot at zero (stride-free).
+            ("is_empty", [s]) => {
+                if !matches!(self.lower(s, None)?, SliceTy::Set(..)) {
+                    return unsup("set-op-of:non-set");
+                }
+                self.f.instructions().i32_load(len_memarg()).i32_eqz();
+                Ok(Some(BOOL))
+            }
             ("to_list", [s]) => {
                 // Layout-identical; sharing the base is unobservable
                 // (no in-place list/set mutation exists, binds deep-copy).

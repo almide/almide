@@ -135,6 +135,16 @@ impl Emitter<'_> {
                     .i64_extend_i32_u();
                 Ok(Some(INT))
             }
+            // #1423 stage 4: is_empty = the len slot at zero — stride-free
+            // (0 entries is 0 bytes whatever the entry layout), semantics
+            // verbatim from stdlib/map_core.almd's load32(handle+4) == 0.
+            ("is_empty", [m]) => {
+                if !matches!(self.lower(m, None)?, SliceTy::Map(..)) {
+                    return unsup("map-op-of:non-map");
+                }
+                self.f.instructions().i32_load(len_memarg()).i32_eqz();
+                Ok(Some(BOOL))
+            }
             ("contains", [m, key]) => {
                 let (_mh, _kh, eh, k, ..) = self.map_scan(m, key)?;
                 self.f.instructions().local_get(eh).i32_const(0).i32_ne();

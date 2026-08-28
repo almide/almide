@@ -87,7 +87,8 @@ impl Emitter<'_> {
                 self.f.instructions().f64_convert_i64_s();
                 Some(FLOAT)
             }
-            ("int", "band" | "bor" | "bxor" | "bshl" | "bshr" | "wrap_add" | "wrap_mul", _) => {
+            ("int", "band" | "bor" | "bxor" | "bshl" | "bshr" | "wrap_add" | "wrap_mul"
+                | "bnot" | "to_u32" | "to_u8", _) => {
                 return self.lower_int_bitops(func.as_str(), args).map(Some);
             }
             // f64.ceil is IEEE-exact on both targets.
@@ -274,6 +275,25 @@ impl Emitter<'_> {
                     "bshl" => i.i64_shl(),
                     _ => i.i64_shr_s(),
                 };
+                Ok(Some(INT))
+            }
+            // #1423 stage 4: the pure bit family's unary/masking trio —
+            // semantics verbatim from stdlib/int_wrap.almd (`bnot(n) =
+            // bxor(n, -1)`, `to_u32(n) = n & 0xFFFFFFFF`, `to_u8(n) =
+            // n & 0xFF`, low bits zero-extended).
+            ("bnot", [a]) => {
+                self.lower(a, Some(INT))?;
+                self.f.instructions().i64_const(-1).i64_xor();
+                Ok(Some(INT))
+            }
+            ("to_u32", [a]) => {
+                self.lower(a, Some(INT))?;
+                self.f.instructions().i64_const(0xFFFF_FFFF).i64_and();
+                Ok(Some(INT))
+            }
+            ("to_u8", [a]) => {
+                self.lower(a, Some(INT))?;
+                self.f.instructions().i64_const(0xFF).i64_and();
                 Ok(Some(INT))
             }
             ("wrap_add" | "wrap_mul", [a, b, bits]) => {
