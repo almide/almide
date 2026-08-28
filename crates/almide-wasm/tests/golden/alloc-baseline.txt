@@ -126,6 +126,7 @@
 66144	spec/wasm_cross/fan_map_err.almd
 66144	spec/wasm_cross/fan_map_inline_err.almd
 68720	spec/wasm_cross/fan_map_inline_lambda.almd
+~	spec/wasm_cross/fan_prefetch_fs.almd
 66592	spec/wasm_cross/fan_pure_thunks.almd
 66592	spec/wasm_cross/fan_race_mapper.almd
 ~	spec/wasm_cross/fan_settle_tuple.almd

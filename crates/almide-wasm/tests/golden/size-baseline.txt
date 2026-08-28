@@ -77,7 +77,7 @@
 9348	spec/wasm_cross/const_fold_nonfinite_float.almd
 3930	spec/wasm_cross/container_alias_return.almd
 4156	spec/wasm_cross/control_flow.almd
-5599	spec/wasm_cross/count_domain_nonbytes.almd
+5659	spec/wasm_cross/count_domain_nonbytes.almd
 3984	spec/wasm_cross/cross_dep_accumulator.almd
 9898	spec/wasm_cross/cross_module_spread.almd
 7241	spec/wasm_cross/ctor_if_payload.almd
@@ -126,6 +126,7 @@
 4062	spec/wasm_cross/fan_map_err.almd
 4029	spec/wasm_cross/fan_map_inline_err.almd
 6599	spec/wasm_cross/fan_map_inline_lambda.almd
+5577	spec/wasm_cross/fan_prefetch_fs.almd
 5464	spec/wasm_cross/fan_pure_thunks.almd
 7631	spec/wasm_cross/fan_race_mapper.almd
 4819	spec/wasm_cross/fan_settle_tuple.almd
