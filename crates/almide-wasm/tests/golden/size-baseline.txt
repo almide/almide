@@ -247,6 +247,7 @@
 4211	spec/wasm_cross/io_write_ordering.almd
 24742	spec/wasm_cross/json_gltf_walk.almd
 30203	spec/wasm_cross/json_number_unicode.almd
+24308	spec/wasm_cross/json_parse_lenient_edges.almd
 32238	spec/wasm_cross/json_path_edges.almd
 24357	spec/wasm_cross/json_string_span.almd
 15023	spec/wasm_cross/json_stringify_pretty.almd
