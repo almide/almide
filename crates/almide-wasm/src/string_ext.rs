@@ -460,3 +460,25 @@ impl Emitter<'_> {
         Ok(Some(Some(out)))
     }
 }
+
+impl Emitter<'_> {
+    /// `string.split` — the split helper call (moved verbatim out of the
+    /// calls.rs dispatch for the 800-line file cap).
+    pub(crate) fn lower_string_split(
+        &mut self,
+        subject: &IrExpr,
+        sep: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        self.lower(subject, Some(STR))?;
+        let h = self.hold_i32()?;
+        self.f.instructions().local_set(h);
+        self.lower(sep, Some(STR))?;
+        let hs = self.hold_i32()?;
+        self.f.instructions().local_set(hs);
+        let sp = self.work.helper(Helper::StringSplit);
+        self.f.instructions().local_get(h).local_get(hs).call(sp);
+        self.release_i32();
+        self.release_i32();
+        Ok(Some(SliceTy::List(self.types.intern(STR))))
+    }
+}

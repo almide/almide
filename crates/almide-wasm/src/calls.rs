@@ -677,17 +677,7 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string" && func.as_str() == "split" && args.len() == 2 =>
             {
-                self.lower(&args[0], Some(STR))?;
-                let h = self.hold_i32()?;
-                self.f.instructions().local_set(h);
-                self.lower(&args[1], Some(STR))?;
-                let hs = self.hold_i32()?;
-                self.f.instructions().local_set(hs);
-                let sp = self.work.helper(Helper::StringSplit);
-                self.f.instructions().local_get(h).local_get(hs).call(sp);
-                self.release_i32();
-                self.release_i32();
-                Ok(Some(SliceTy::List(self.types.intern(STR))))
+                self.lower_string_split(&args[0], &args[1])
             }
             _ => self.lower_module_call_c(target, args, tail, ret_hint),
         }
