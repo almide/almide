@@ -207,7 +207,7 @@ fn handle_sse_data(
 fn get_field(v: &Value, key: &str) -> Option<Value> {
     if let Value::Object(pairs) = v {
         for (k, val) in pairs {
-            if k == key {
+            if k.as_ref() == key {
                 return Some(val.clone());
             }
         }
