@@ -1,0 +1,2 @@
+expects_error = "Expected identifier"
+hint_substring = "built-in Result constructor err(e)"

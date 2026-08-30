@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let msg = compute()
+  println("${msg}")
+}
+
+fn compute() -> Int = 2
