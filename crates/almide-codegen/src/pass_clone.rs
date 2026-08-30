@@ -11,7 +11,7 @@ use almide_ir::*;
 use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
-use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while};
+use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while, take_borrowed_loop_vars};
 
 #[derive(Debug)]
 pub struct CloneInsertionPass;
@@ -98,6 +98,9 @@ impl NanoPass for CloneInsertionPass {
                 tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false, memo: &memo, fresh: &no_fresh });
             }
         }
+        // Loop binders the bodies only borrowed (#1673): the walker binds them
+        // `&T` off `xs.iter()`.
+        program.codegen_annotations.borrowed_loop_vars = take_borrowed_loop_vars();
         PassResult { program, changed: true }
     }
 }

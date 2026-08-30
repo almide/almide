@@ -27,6 +27,13 @@ pub struct CodegenAnnotations {
     /// (the #486-class fragility: a rename scheme change silently broke
     /// classification with no gate).
     pub always_clone_vars: HashSet<VarId>,
+    /// `for x in xs` binders the body only ever BORROWS (every occurrence
+    /// sits directly under a shared `Borrow`, a `Member` read, or a `Clone`),
+    /// so the Rust loop iterates `xs.iter()` and binds `x: &T` — no per-element
+    /// copy at all (#1673). Decided by `CloneInsertionPass` after it has
+    /// placed the body's clones and moves. A bare (moving) use, a `&mut`, a
+    /// closure capture, a match on `x`, or a tuple binder keeps `.cloned()`.
+    pub borrowed_loop_vars: HashSet<VarId>,
     /// §4 Stage 1 — the unified top-let storage attribute, computed once by
     /// `TopLetStoragePass` and asserted equal to every legacy predicate by
     /// the walker-side agreement verifier. Stage 2 makes consumers read THIS

@@ -191,8 +191,11 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
         _ => {
             let base = render_expr(ctx, iterable);
             // List types: .iter().cloned() works for both RcCow<Vec<T>>
-            // (via Deref) and plain Vec<T>, giving owned T values.
+            // (via Deref) and plain Vec<T>, giving owned T values. A binder
+            // the body only borrows (`borrowed_loop_vars`, #1673) skips the
+            // per-element copy: `.iter()` binds `&T`.
             match &iterable.ty {
+                Ty::Applied(TypeConstructorId::List, _) if ctx.ann.borrowed_loop_vars.contains(var) => format!("{}.iter()", base),
                 Ty::Applied(TypeConstructorId::List, _) => format!("{}.iter().cloned()", base),
                 _ => base,
             }
