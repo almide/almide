@@ -127,7 +127,10 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                         | "exec_status_timeout"
                         | "env"
                 ))
-            || (module == "http" && matches!(func, "request" | "serve"))
+            // request_status/get_status are the same OS-socket client as
+            // request — the status-preserving twins added in 0.61.0.
+            || (module == "http"
+                && matches!(func, "request" | "serve" | "request_status" | "get_status"))
             || (module == "testing" && func == "assert_throws")
             // #1106 / C-215: the _if_exists classification keys on
             // ErrorKind::NotFound, which the WASI prim floor does not expose
