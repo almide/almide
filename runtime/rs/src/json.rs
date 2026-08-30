@@ -151,7 +151,10 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
         let b = t.as_bytes();
         *pos += 1;
         skip_ws(t, pos);
-        let mut items = Vec::new();
+        // Sized for the common small container: a Vec that grows from 0 reallocates
+        // at 4 and 8 on the way to a typical 8-field object (#1678 follow-up, measured
+        // 3-8% on the parse benchmark).
+        let mut items = Vec::with_capacity(8);
         if *pos < b.len() && b[*pos] == b']' { *pos += 1; return Ok(Value::Array(items)); }
         loop {
             items.push(parse_value(t, pos)?);
@@ -166,7 +169,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
         let b = t.as_bytes();
         *pos += 1;
         skip_ws(t, pos);
-        let mut pairs = Vec::new();
+        let mut pairs = Vec::with_capacity(8);
         if *pos < b.len() && b[*pos] == b'}' { *pos += 1; return Ok(Value::Object(pairs)); }
         loop {
             skip_ws(t, pos);
