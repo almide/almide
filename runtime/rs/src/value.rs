@@ -72,6 +72,16 @@ pub fn almide_rt_value_decode_list<T, F: Fn(Value) -> Result<T, String>>(v: Valu
     }
 }
 
+/// By-reference twin of `almide_rt_value_decode_list` for an element decoder
+/// that BORROWS its input (#1679): every derived `T.decode` takes `&Value`,
+/// so the elements are read in place instead of moved out of a copy.
+pub fn almide_rt_value_decode_list_ref<T, F: Fn(&Value) -> Result<T, String>>(v: &Value, f: F) -> Result<Vec<T>, String> {
+    match v {
+        Value::Array(items) => items.iter().map(f).collect(),
+        _ => Err("expected Array".to_string()),
+    }
+}
+
 // ── Option encode/decode ──
 
 pub fn almide_rt_value_option_encode<T, F: Fn(T) -> Value>(opt: Option<T>, f: F) -> Value {
@@ -89,6 +99,26 @@ pub fn almide_rt_value_decode_option<T, F: Fn(Value) -> Result<T, String>>(v: &V
 /// wrapper borrows for the by-ref generic above (新②).
 pub fn almide_rt_value_decode_option_custom<T, F: Fn(Value) -> Result<T, String>>(v: Value, key: String, f: F) -> Result<Option<T>, String> {
     almide_rt_value_decode_option(&v, &key, f)
+}
+/// By-reference twin of `almide_rt_value_decode_option_custom` (#1679): the
+/// field is looked up without a copy and handed to a `&Value` decoder.
+pub fn almide_rt_value_decode_option_custom_ref<T, F: Fn(&Value) -> Result<T, String>>(v: &Value, key: String, f: F) -> Result<Option<T>, String> {
+    match value_field_ref(v, &key) {
+        Ok(Value::Null) => Ok(None),
+        Ok(val) => f(val).map(Some),
+        Err(_) => Ok(None),
+    }
+}
+/// `almide_rt_value_field` without the copy: a borrow into the object.
+fn value_field_ref<'a>(v: &'a Value, key: &str) -> Result<&'a Value, String> {
+    if let Value::Object(pairs) = v {
+        for (k, val) in pairs {
+            if k == key { return Ok(val); }
+        }
+        Err(format!("missing field '{}'", key))
+    } else {
+        Err("expected Object".to_string())
+    }
 }
 pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, default: T, f: F) -> Result<T, String> {
     match almide_rt_value_field(v, key) {
