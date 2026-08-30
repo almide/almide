@@ -33,6 +33,7 @@ fn tool_available() -> bool {
 }
 
 /// Emit Rust for `source` and return the body of `pub fn main`.
+/// (Shared by the clone-elision and the borrowed-binder tests below.)
 fn emitted_main(source: &str, tag: &str) -> String {
     let dir = std::env::temp_dir().join(format!("almide-forin-clone-{}-{}", tag, std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -151,4 +152,39 @@ fn map_loop_still_consumes_a_copy_when_the_map_is_used_after() {
           println(\"${t} ${list.len(map.keys(m))}\")\n\
         }\n", "map");
     assert!(body.contains("for (k, v) in m.clone()"), "a Map loop iterates BY VALUE — the copy is what keeps `m` alive for the later use:\n{body}");
+}
+
+#[test]
+fn binder_the_body_only_borrows_iterates_by_reference() {
+    if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
+    let body = emitted_main(&format!("{PRELUDE}\
+        fn main() -> Unit = {{\
+          let us: List[U] = [U {{ a: 1 }}, U {{ a: 2 }}]\
+          let names: List[String] = [\"ab\", \"c\"]\
+          var t = 0\
+          for u in us {{ t = t + hitu(u) }}\
+          for u in us {{ t = t + u.a }}\
+          for s in names {{ t = t + string.len(s) }}\
+          println(\"${{t}}\")\
+        }}\n"), "borrowed-binder");
+    assert!(body.contains("for u in us.iter() {"), "a binder only ever passed by `&` never needs an owned element:\n{body}");
+    assert!(body.contains("hitu(&u)"), "the borrowed call site is unchanged (`&&T` coerces):\n{body}");
+    assert!(body.contains("for s in names.iter() {"), "a String binder read through `&*s` iterates by reference too:\n{body}");
+    assert!(!body.contains("iter().cloned()"), "no loop in this program consumes its element — every `.cloned()` here is a copy nobody reads:\n{body}");
+}
+
+#[test]
+fn binder_that_is_consumed_or_matched_keeps_the_element_copy() {
+    if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
+    let body = emitted_main(&format!("{PRELUDE}\
+        fn main() -> Unit = {{\
+          let us: List[U] = [U {{ a: 1 }}]\
+          let data: List[Value] = [value.int(1)]\
+          var t = 0\
+          for v in data {{ t = t + hit(v) }}\
+          for u in us {{ t = t + (match u {{ U {{ a }} => a }}) }}\
+          println(\"${{t}}\")\
+        }}\n"), "consumed-binder");
+    assert!(body.contains("for v in data.iter().cloned() {") && body.contains("hit(v)"), "an owned-arg call consumes the element — it must be copied out of the list, then moved:\n{body}");
+    assert!(body.contains("for u in us.iter().cloned() {"), "a match subject binds payloads by value — the element stays owned:\n{body}");
 }
