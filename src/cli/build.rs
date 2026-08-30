@@ -789,20 +789,19 @@ fn render_wasm_module_routed(
             && std::env::var_os("ALMIDE_FUEL_PROBE").is_none()
             && has_main
             && !uses_incumbent_features;
-        if r.is_err() && shape_routed {
-            if let Ok(ir) = almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths) {
-                if let Ok(bytes) = almide_wasm::emit_program(&ir) {
-                    if wasmparser::validate(&bytes).is_ok() {
-                        if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
-                            err(&format!(
-                                "[almide] incumbent walled — structural leg took the build ({} bytes)",
-                                bytes.len()
-                            ));
-                        }
-                        return Ok((bytes, true));
-                    }
-                }
+        if r.is_err()
+            && shape_routed
+            && let Ok(ir) = almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths)
+            && let Ok(bytes) = almide_wasm::emit_program(&ir)
+            && wasmparser::validate(&bytes).is_ok()
+        {
+            if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+                err(&format!(
+                    "[almide] incumbent walled — structural leg took the build ({} bytes)",
+                    bytes.len()
+                ));
             }
+            return Ok((bytes, true));
         }
         return r;
     }
