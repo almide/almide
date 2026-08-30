@@ -107,6 +107,7 @@ call:bytes.skip_length_prefixed_le
 call:bytes.slice
 call:bytes.to_list
 call:bytes.to_string
+call:bytes.to_string_lossy
 call:bytes.write_bool
 call:bytes.write_f64_be
 call:bytes.write_float32
@@ -202,6 +203,7 @@ call:int.bits_to_float
 call:int.bor
 call:int.bshl
 call:int.bshr
+call:int.bxor
 call:int.clamp
 call:int.from_hex
 call:int.from_int16
