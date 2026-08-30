@@ -85,6 +85,8 @@ fi
 # walls them, so they are tracked skips of the INCUMBENT'S determinism
 # domain, locally re-measured at exactly 16 over 634 fixtures). A NEW wall
 # is a conscious ceiling bump, never silent shrinkage of coverage.
+# 19 as of 2026-08-31 (third bump): env_set_overlay.almd (C-328) — env.set
+# has no capability seat in the incumbent brick either; same prune path.
 # 18 as of 2026-08-30 (second bump): env_sleep_pause.almd (C-327) walls on
 # the incumbent brick (env.sleep_ms has no capability seat there) — same
 # structural-only division, prunes with #1696 steps 4-5.
@@ -92,7 +94,7 @@ fi
 # — the incumbent's brick walls its loop-level tuple write-back
 # (WhileHeapAccumulator), which is the intended division of labor until
 # #1696 steps 4-5 move the certificate and retire the incumbent.
-MAX_WALLED=18
+MAX_WALLED=19
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
