@@ -45,6 +45,8 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     ("spec/integration/extern_c/extern_c_test.almd", SkipReason::NativeOnlyApi),
     // OS sockets and subprocesses: outside the WASI surface the runtime targets.
     ("spec/stdlib/net_test.almd", SkipReason::NativeOnlyApi),
+    // The http client opens an OS socket; the status twins have no wasm leg.
+    ("spec/stdlib/http_status_test.almd", SkipReason::NativeOnlyApi),
     ("spec/stdlib/process_ext_test.almd", SkipReason::NativeOnlyApi),
     ("spec/stdlib/process_exec_status_test.almd", SkipReason::NativeOnlyApi),
     // `http.serve` binds a TCP listener.
