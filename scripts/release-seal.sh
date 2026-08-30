@@ -28,7 +28,7 @@ SEALS_DIR="$ROOT/proofs/releases"
 
 tag_file() { git -C "$ROOT" show "$1:$2" 2>/dev/null; }
 
-m_cargo_version()   { tag_file "$1" Cargo.toml | sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
+m_cargo_version()   { tag_file "$1" Cargo.toml | awk '/^\[/{f=($0=="[package]")} f && /^version = "/{sub(/^version = "/,""); sub(/".*$/,""); print; exit}'; }
 m_contracts_sha()   { tag_file "$1" docs/contracts/contracts.toml | shasum -a 256 | cut -d' ' -f1; }
 m_contracts_total() { tag_file "$1" docs/contracts/contracts.toml | grep -c '^\[\[contract\]\]'; }
 m_contracts_flagged() {

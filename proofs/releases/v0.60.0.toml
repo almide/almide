@@ -1,0 +1,27 @@
+# Release evidence seal — v0.60.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.60.0"
+tag = "v0.60.0"
+tag_commit = "6e958f1740ab4081c62074edd795aa79b7d7703a"
+date = "2026-08-30"
+url = "https://github.com/almide/almide/releases/tag/v0.60.0"
+
+[derived]
+cargo_version = "0.60.0"
+contracts_sha256 = "761a3475cda75f2d2d03e611c42fcede23972fe9fb5efb043568c13827db3a2e"
+contracts_total = "326"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "32dc2fbff95234ae685cf1df7c41e452678c63af0df425d82bf7d0241d2184a9"
+abstain_ledger_entries = "25"
+wasm_cross_fixtures = "644"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "RC channel: v0.60.0-rc1, rc2, rc3 (2026-08-30). Two blockers found against rc2 by a real-program port (gzip inflate, SQL tokenizer) and closed on develop before the final with cross-target fixtures: #1688 (structural leg: mut-param forwarding from a branch arm emitted wrong bytes; I-divergence+regression; fixture C-324) and #1689 (structural leg: bytes.push growth OOM at ~69k; C-325); the inflate itself joined the corpus as C-326 (#1697). scripts/count-release-blockers.sh = 0 at the tag. Interface diff v0.59.2 -> v0.60.0 = additive (added 6 url.* signatures, removed 0). Nightly differential fuzz run 33301893855 (2026-08-30): 8/8 generative shards completed on x86_64+aarch64, 0 findings filed; its one red job is the MC/DC condition-coverage ledger, not a fuzz finding. develop CI green at 6b98c3044 across CI, Trust Spine (v1), Mutation sweep (full net), Acceptance Ring, RustSec; release PR #1698 green (57 checks) after one infra re-run (wasmtime missing from PATH on a PR runner; the same job passed on the same commit in the push run)."
+assets = "6: almide-checksums.sha256, almide-linux-aarch64.tar.gz, almide-linux-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-windows-x86_64.zip — built and attached by release.yml run 33310952055 (Sigstore attestation per #1636). Qualification dossier workflow on the tag: Release: completed success (33310952055);Trust Spine (v1): in_progress  (33310952052);"
+known_problems = "The default wasm leg (structural) is trusted, not proven: the per-build ownership certificate is emitted only by the incumbent v1 leg (ALMIDE_WASM_INCUMBENT=1); docs/TRUST-SPINE.md and MEMORY-SAFETY.md say so as of #1697; the plan to one certified leg is #1696. Open, non-blocking: #1690 (when both legs wall only the incumbent wall is printed), #1691 (incumbent brick cannot express a modular imperative decoder — five walls), #1694 (binding a reserved constructor name gets a fix-less diagnostic). Observed, unverified: --wasm-opt produced identical sizes on 0.60.0 builds. Bookkeeping: the v0.59.2 tag commit lives on bounded-profile; 6b98c3044 reconnected main into develop so this release merged cleanly. cargo_version derivation in release-seal.sh fixed in this same commit to read the [package] section (Cargo.toml gained a [workspace.package] block during 0.60)."
