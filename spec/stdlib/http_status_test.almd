@@ -1,23 +1,30 @@
 // http.get_status / http.request_status return (status_code, body) for any
-// complete response — a 404 is Ok((404, body)), not an Err. These helpers are
-// compile-checks that the tuple return typechecks and destructures; the network
-// client fns have no live-network spec (coverage is the target-availability
-// gate), so the executed test exercises only the pure status verdict.
+// complete response; Err is transport-only. Probes live INSIDE test blocks so
+// no top-level fn walls on the wasm leg (the walled-real ratchet) — the same
+// discipline as net_test.almd. The closed-local-port probe exercises the
+// transport-Err path without touching any external network; the status-code
+// semantics are declared out-of-band in docs/stdlib/semantics-manifest.toml.
 import http
-
-effect fn _status_of(url: String) -> Int = match http.request_status("GET", url, "", ["User-Agent": "almide-test"]) {
-  ok(pair) => pair.0,
-  err(_) => -1,
-}
-
-effect fn _get_status_of(url: String) -> Int = match http.get_status(url) {
-  ok(pair) => pair.0,
-  err(_) => -1,
-}
 
 fn verdict(code: Int) -> String = if code == 404 then "available" else "taken"
 
-test "http status verdict" {
+test "status verdict is a pure branch on the code" {
   assert_eq(verdict(404), "available")
   assert_eq(verdict(200), "taken")
+}
+
+test "request_status to a closed local port is a transport err" {
+  let got = match http.request_status("GET", "http://127.0.0.1:1", "", ["User-Agent": "almide-test"]) {
+    ok(_) => "response",
+    err(_) => "transport-err",
+  }
+  assert_eq(got, "transport-err")
+}
+
+test "get_status to a closed local port is a transport err" {
+  let got = match http.get_status("http://127.0.0.1:1") {
+    ok(_) => "response",
+    err(_) => "transport-err",
+  }
+  assert_eq(got, "transport-err")
 }
