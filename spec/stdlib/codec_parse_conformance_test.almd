@@ -1,0 +1,142 @@
+// Parsing conformance corpus for the type-first Codec surface, ported from
+// the test suite of an upstream schema-validation library (see
+// ../almide-references, packages/zod/src/v4/classic/tests/*.test.ts, MIT).
+// Each block names the upstream test it mirrors, file:line.
+// The port keeps the upstream ACCEPT / REJECT verdicts and the decoded
+// VALUES; it does not port issue text (ADR-0003: branch on structure, not
+// message text) or the issue LIST (a derived decode is first-error, #1675).
+//
+// What is deliberately absent, with the reason, so the corpus is honest
+// about the surface rather than silently narrower:
+//   - `.strict()` / `.passthrough()` / `.catchall()` (object.test.ts:96-160):
+//     a derived decode STRIPS unknown keys and there is no other mode.
+//   - unions, `.refine`, `.transform`, `.min/.max` (array.test.ts:9-79):
+//     not in the derived surface (#1674 tracks the refine/transform class).
+//   - `undefined` vs `null` vs absent (optional.test.ts:138-185): a `T?`
+//     field folds all three into `none`; the upstream distinguishes them.
+import json
+
+// ── object.test.ts:5-10 — the `Test` schema ──
+// f4's element is `{ t: string | boolean }` upstream; the union is narrowed to
+// String here (unions are not in the derived surface).
+type Elem: Codec = { t: String }
+
+type Test: Codec = { f1: Int, f2: String?, f3: String?, f4: List[Elem] }
+
+fn test_accepts(s: String) -> Bool = match Test.decode(json.parse(s) ?? value.null()) {
+  ok(_) => true,
+  err(_) => false,
+}
+
+test "object.test.ts:40 correct parsing — both documents decode" {
+  assert(test_accepts('{"f1": 12, "f2": "string", "f3": "string", "f4": [{"t": "string"}]}'))
+  assert(test_accepts('{"f1": 12, "f3": null, "f4": [{"t": "x"}]}'))
+}
+
+test "object.test.ts:23 unknown throw — a bare number is not an object" {
+  assert(not test_accepts("35"))
+}
+
+// ── object.test.ts:63-114 — unknown keys ──
+type Points: Codec = { points: Int }
+
+test "object.test.ts:63 nonstrict by default — an unknown key is accepted" {
+  match Points.decode(json.parse('{"points": 2314, "unknown": "asdf"}')!) {
+    ok(p) => assert_eq(p.points, 2314),
+    err(e) => assert(false, e),
+  }
+}
+
+test "object.test.ts:91 strip by default — the unknown key does not survive the round trip" {
+  let p = Points.decode(json.parse('{"points": 2314, "unknown": "asdf"}')!)!
+  assert_eq(json.stringify(Points.encode(p)), '{"points":2314}')
+}
+
+// ── object.test.ts:70 / :162 — optional keys ──
+type OptA: Codec = { a: String? }
+
+type Named: Codec = { id: String, set: String?, unset: String? }
+
+test "object.test.ts:70 parse optional keys — a present optional decodes to some" {
+  let v = OptA.decode(json.parse('{"a": "asdf"}')!)!
+  assert_eq(v.a, some("asdf"))
+}
+
+test "object.test.ts:162 optional keys are unset — absent and null both decode to none" {
+  let v = Named.decode(json.parse('{"id": "asdf", "set": null}')!)!
+  assert_eq(v.id, "asdf")
+  assert_eq(v.set, none)
+  assert_eq(v.unset, none)
+  // The upstream keeps the explicit `set: undefined` key; the derived encoder omits a
+  // none field, so only `id` survives (codec_none_omission).
+  assert_eq(json.stringify(Named.encode(v)), '{"id":"asdf"}')
+}
+
+// ── object.test.ts:77 — the empty object ──
+test "object.test.ts:77 empty object — null and a string are not objects" {
+  assert(not test_accepts("null"))
+  assert(not test_accepts('"asdf"'))
+}
+
+// ── array.test.ts:101 / :107 — element checks ──
+type People: Codec = { people: List[String] }
+
+test "array.test.ts:101 get element — the element schema accepts a string and rejects a number" {
+  match People.decode(json.parse('{"people": ["asdf"]}')!) {
+    ok(p) => assert_eq(p.people, ["asdf"]),
+    err(e) => assert(false, e),
+  }
+  match People.decode(json.parse('{"people": [12]}')!) {
+    ok(_) => assert(false, "a number is not a string"),
+    err(_) => assert(true),
+  }
+}
+
+test "array.test.ts:107 a wrong element fails the whole document" {
+  // The upstream also reports the `.min(2)` size issue; the derived decode has no
+  // size constraint and stops at the first error.
+  match People.decode(json.parse('{"people": [123]}')!) {
+    ok(_) => assert(false, "should reject"),
+    err(_) => assert(true),
+  }
+}
+
+// ── nullable.test.ts:5 ──
+type Nullable: Codec = { s: String? }
+
+test "nullable.test.ts:5 .nullable() — null, a string, and a number" {
+  let n = Nullable.decode(json.parse('{"s": null}')!)!
+  assert_eq(n.s, none)
+  let s = Nullable.decode(json.parse('{"s": "asdf"}')!)!
+  assert_eq(s.s, some("asdf"))
+  match Nullable.decode(json.parse('{"s": 123}')!) {
+    ok(_) => assert(false, "a number is not a string"),
+    err(_) => assert(true),
+  }
+}
+
+// ── optional.test.ts:180 — defaults ──
+type Defaulted: Codec = { value: String = "fallback" }
+
+test "optional.test.ts:180 defaulted — an absent key takes the default" {
+  let absent = Defaulted.decode(json.parse("{}")!)!
+  assert_eq(absent.value, "fallback")
+  let given = Defaulted.decode(json.parse('{"value": "given"}')!)!
+  assert_eq(given.value, "given")
+}
+
+// ── number.test.ts — the Int/Float split the upstream does not have ──
+// Upstream `z.number()` accepts 12 and 12.5 alike; `z.int()` rejects 12.5. The
+// derived surface types the field: an `Int` field rejects a fraction, a
+// `Float` field widens an integral number (C-085, codec_int_float_boundaries).
+type Num: Codec = { i: Int, f: Float }
+
+test "number.test.ts — an Int field rejects 12.5, a Float field accepts 12" {
+  match Num.decode(json.parse('{"i": 12.5, "f": 1.0}')!) {
+    ok(_) => assert(false, "an Int field must reject a fraction"),
+    err(_) => assert(true),
+  }
+  let n = Num.decode(json.parse('{"i": 12, "f": 12}')!)!
+  assert_eq(n.i, 12)
+  assert_eq(n.f, 12.0)
+}
