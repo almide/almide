@@ -793,7 +793,16 @@ fn render_wasm_module_routed(
         if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
             err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
         }
-        render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false))
+        let res = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        if res.is_err() {
+            // #1690: BOTH legs refused. The incumbent just printed its own wall
+            // above — without these lines the DEFAULT leg's reason is invisible,
+            // and the reader bisects a function the structural leg lowers fine
+            // for a reason that belongs to the other engine.
+            err(&format!("wall (structural leg, the default): {why}"));
+            err("note: both wasm legs refused this program — the failure above these lines is the incumbent fallback's; the structural leg's own reason is the `wall (structural leg…)` line.");
+        }
+        res
     };
     let ir = match almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths) {
         Ok(ir) => ir,
