@@ -479,3 +479,100 @@ impl Emitter<'_> {
         Ok(Some(out))
     }
 }
+
+impl Emitter<'_> {
+    /// #1423 bucket A — `json.to_map`: an OBJECT Value's pairs become a
+    /// `Map[String, String]` (a Str value's payload verbatim, any other
+    /// value stringified — semantics verbatim from
+    /// `runtime/rs/src/json.rs::almide_json_to_map`); a non-object is
+    /// `none`.
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn lower_json_to_map(
+        &mut self,
+        j: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        self.lower(j, Some(SliceTy::Value))?;
+        let ti = self.types.tuple(vec![STR, SliceTy::Value]);
+        let def = self.types.tuple_def(ti);
+        let (key_off, val_off) = (def.fields[0].1, def.fields[1].1);
+        let (koff, voff, esz) = crate::collections::entry_layout(STR, STR);
+        let hv = self.hold_i32()?;
+        let hp = self.hold_i32()?;
+        let hend = self.hold_i32()?;
+        let hout = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hpair = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hv);
+            i.local_get(hv)
+                .i32_load(slot_memarg(0))
+                .i32_const(value_tags::VT_OBJECT)
+                .i32_ne()
+                .if_(BlockType::Result(wasm_encoder::ValType::I32));
+            i.i32_const(almide_layout::NULL_ADDR as i32);
+            i.else_();
+            // pairs list: n 4-byte slots, each a (key, value) pair block.
+            i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hv);
+            i.local_get(hv).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hp);
+            i.local_get(hp).local_get(hv).i32_load(len_memarg()).i32_add().local_set(hend);
+            // out map: len/4 entries of the (String, String) entry layout.
+            i.local_get(hv)
+                .i32_load(len_memarg())
+                .i32_const(2)
+                .i32_shr_u()
+                .i32_const(esz as i32)
+                .i32_mul()
+                .call(F_ALLOC)
+                .local_set(hout);
+            i.local_get(hout).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(hw);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hp).local_get(hend).i32_ge_u().br_if(1);
+            i.local_get(hp).i32_load(raw_mem()).local_set(hpair);
+            // key
+            i.local_get(hw).i32_const(koff as i32).i32_add();
+            i.local_get(hpair).i32_load(slot_memarg(key_off));
+            i.i32_store(raw_mem());
+            // value: Str payload verbatim, else the canonical stringify.
+            i.local_get(hw).i32_const(voff as i32).i32_add();
+            i.local_get(hpair).i32_load(slot_memarg(val_off)).local_set(hpair);
+            i.local_get(hpair)
+                .i32_load(slot_memarg(0))
+                .i32_const(VT_STR)
+                .i32_eq()
+                .if_(BlockType::Result(wasm_encoder::ValType::I32));
+            i.local_get(hpair).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+            i.else_();
+            i.local_get(hpair);
+        }
+        self.emit_value_stringify()?;
+        {
+            let mut i = self.f.instructions();
+            i.end();
+            i.i32_store(raw_mem());
+            i.local_get(hp).i32_const(4).i32_add().local_set(hp);
+            i.local_get(hw).i32_const(esz as i32).i32_add().local_set(hw);
+            i.br(0).end().end();
+            // some(map): the Option block holding the map.
+            i.i32_const(4)
+                .call(F_ALLOC)
+                .local_tee(hv)
+                .local_get(hout)
+                .i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+            i.local_get(hv);
+            i.end();
+        }
+        for _ in 0..6 {
+            self.release_i32();
+        }
+        let sh = self.types.intern(STR);
+        let mh = self.types.intern(SliceTy::Map(sh, sh));
+        Ok(Some(SliceTy::Option(mh)))
+    }
+}
+
+/// Raw 4-byte addressing for pointers that already carry the payload
+/// offset (the pairs-list walk) — `slot_memarg` would double-shift.
+fn raw_mem() -> wasm_encoder::MemArg {
+    wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }
+}

@@ -568,6 +568,11 @@ impl Emitter<'_> {
                 Ok(Some(SliceTy::Result(vh, self.types.intern(STR))))
             }
             CallTarget::Module { module, func, .. }
+                if module.as_str() == "json" && func.as_str() == "to_map" && args.len() == 1 =>
+            {
+                self.lower_json_to_map(&args[0])
+            }
+            CallTarget::Module { module, func, .. }
                 if module.as_str() == "json"
                     && func.as_str() == "remove_path"
                     && args.len() == 2 =>
