@@ -17,7 +17,12 @@
 #
 #   [[native-only]]       walls on the STRUCTURAL leg (the incumbent may
 #                         still serve it — informational for #1584).
-#   [[wasm-unavailable]]  walls under DEFAULT routing: NO leg builds it —
+#   [[wasm-unavailable]]
+fn = "env.set"
+reason = "stock artifact pending the p1-shim environ story; the embedded host serves the overlay (op 37/26)"
+issue = "#1423"
+
+[[wasm-unavailable]]  walls under DEFAULT routing: NO leg builds it —
 #                         the E081 check-time-diagnostic set.
 #
 # The probe-unsynthesizable table is the honesty bucket: fns whose
@@ -50,6 +55,11 @@ issue = "#1423"
 [[native-only]]
 fn = "fs.fold_lines_range"
 reason = "structural-leg-gap: the incumbent links the four self-host twins (#1423 bucket A) and the default route BUILDS; the structural leg has no fold_lines_range arm yet and declines under ALMIDE_WASM_STRUCTURAL=1"
+issue = "#1423"
+
+[[native-only]]
+fn = "env.set"
+reason = "embedded-lane-only: the overlay (op 37) serves `almide run --target wasm`; the stock p1 shim has no environ service yet, and the to_wasi op-audit refuses the artifact at BUILD time rather than shipping a runtime refusal (#1423 bucket C follow-up: shim overlay + environ_get remap)"
 issue = "#1423"
 
 [[native-only]]

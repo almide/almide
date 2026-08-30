@@ -115,7 +115,6 @@
 3902	spec/wasm_cross/env_args.almd
 4451	spec/wasm_cross/env_get.almd
 4436	spec/wasm_cross/env_platform_reporting.almd
-4538	spec/wasm_cross/env_set_overlay.almd
 3908	spec/wasm_cross/env_sleep_pause.almd
 4137	spec/wasm_cross/error_operators.almd
 3839	spec/wasm_cross/expr_stmt_comment.almd

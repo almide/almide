@@ -199,7 +199,9 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_set(hn);
                 i.global_get(G_T_DEADLINE).local_set(hd);
-                i.i32_const(crate::fs_meta::OP_WALL_NOW);
+                self.note_host_op(crate::fs_meta::OP_WALL_NOW);
+        let mut i = self.f.instructions();
+        i.i32_const(crate::fs_meta::OP_WALL_NOW);
                 i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
                 i.call(F_FS_CALL);
                 i.local_get(hn).i64_add().local_set(hn); // now + ns
@@ -309,6 +311,8 @@ impl Emitter<'_> {
         i.global_get(G_T_DEADLINE).i64_const(i64::MAX).i64_ne();
         i.if_(BlockType::Empty);
         i.global_get(G_T_HIT).i32_eqz().if_(BlockType::Empty);
+        self.note_host_op(crate::fs_meta::OP_WALL_NOW);
+        let mut i = self.f.instructions();
         i.i32_const(crate::fs_meta::OP_WALL_NOW);
         i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
         i.call(F_FS_CALL);

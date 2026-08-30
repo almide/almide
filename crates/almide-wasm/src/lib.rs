@@ -73,7 +73,7 @@ mod collections;
 mod collections_hof;
 mod collections_set;
 mod emit;
-pub use emit::emit_program;
+pub use emit::{emit_program, emit_program_with_ops};
 mod emitter;
 mod emitter_values;
 mod emitter_vars;

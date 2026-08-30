@@ -119,7 +119,12 @@ impl Emitter<'_> {
     }
 
     /// no-arg host op: fs_call(op, 0,0,0,0) — ret on the stack.
+    pub(crate) fn note_host_op(&self, op: i32) {
+        self.work.host_ops.borrow_mut().insert(op);
+    }
+
     pub(crate) fn fs_call_0(&mut self, op: i32) -> Result<(), EmitError> {
+        self.note_host_op(op);
         let mut i = self.f.instructions();
         i.i32_const(op);
         i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
@@ -132,6 +137,7 @@ impl Emitter<'_> {
     /// scalar, never a guest buffer (the op-31 comment's 4 GiB trap) —
     /// and the host special-cases the op before its buffer reads.
     pub(crate) fn fs_call_stdin_take(&mut self, count: i32) -> Result<(), EmitError> {
+        self.note_host_op(OP_STDIN_TAKE);
         let mut i = self.f.instructions();
         i.i32_const(OP_STDIN_TAKE);
         i.i32_const(0).i32_const(count).i32_const(0).i32_const(0);

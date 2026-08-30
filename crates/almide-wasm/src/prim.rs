@@ -102,6 +102,8 @@ impl Emitter<'_> {
                 let hn = self.hold_i64()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
+                self.note_host_op(crate::fs_meta::OP_RANDOM_GET);
+                let mut i = self.f.instructions();
                 i.i32_const(crate::fs_meta::OP_RANDOM_GET);
                 i.i32_const(0).i32_const(0).i32_const(0);
                 i.local_get(hn).i32_wrap_i64();

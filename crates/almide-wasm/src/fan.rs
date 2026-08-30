@@ -18,6 +18,14 @@ use crate::emitter::Emitter;
 use crate::*;
 
 impl Emitter<'_> {
+    /// The prefetch protocol's host ops (40 start / 41 await / 42 abandon),
+    /// noted for the build-time stock-service audit.
+    fn note_fan_ops(&self) {
+        for op in [40, 41, 42] {
+            self.note_host_op(op);
+        }
+    }
+
     /// `fan.*` module calls. Ok(None) = not handled here.
     pub(crate) fn lower_fan_call(
         &mut self,
@@ -306,6 +314,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
+        self.note_fan_ops();
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         if elem != STR {
             return unsup(&format!("fan-prefetch-any-elem:{elem:?}"));
@@ -402,6 +411,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
+        self.note_fan_ops();
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         if elem != STR {
             return unsup(&format!("fan-prefetch-elem:{elem:?}"));
