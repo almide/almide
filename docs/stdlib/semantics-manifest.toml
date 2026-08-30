@@ -2626,6 +2626,34 @@ reason text.
 """
 
 [[http.fn]]
+name = "get_status"
+index_unit = "status-code"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: the Int in the return tuple `(status, body)` is the HTTP
+STATUS CODE of the response — the same unit as response/json/with_headers
+above, read back instead of written. A calling probe would hit the network
+and push this generated file off the wasm leg (the client is HOST_CAPABILITY,
+proofs/wasm-fallback-baseline.txt). Measured out-of-band on the native leg
+(2026-08-30): get_status("https://registry.npmjs.org/react") is (200, body)
+and a missing package is (404, body) — any complete response is Ok; Err is
+transport-only.
+"""
+
+[[http.fn]]
+name = "request_status"
+index_unit = "status-code"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed, same unit and same out-of-band measurement as
+get_status above: the Int is the response STATUS CODE in `(status, body)`.
+The general form of get_status (method + body + headers), mirroring how
+request generalizes get.
+"""
+
+[[http.fn]]
 name = "serve"
 index_unit = "port"
 probe = "1"
