@@ -122,7 +122,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 323 contracts — 323 active, 0 flagged-for-revision.**
+> **Ledger: 325 contracts — 325 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
