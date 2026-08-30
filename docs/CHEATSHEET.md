@@ -831,6 +831,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `1 :: 2 :: []` → **WRONG**. Write `[1, 2]`. There is no cons operator `::`
 - `fn foo<T>(x: T)` → **WRONG**. Write `fn foo[T](x: T)`. Use `[]` for generics, not `<>`
 - `let mut x = 1` → **WRONG**. Write `var x = 1`. `mut` is only a parameter modifier (`fn f(mut x: Int)`), not a binding modifier
+- `let err = f()` → **WRONG**. `ok`/`err`/`some`/`none` (and capitalized forms) are the built-in Result/Option constructors — reserved words. Rename the binding (`let msg = f()`), or backtick-escape to keep the name (`let `err` = f()`)
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms
