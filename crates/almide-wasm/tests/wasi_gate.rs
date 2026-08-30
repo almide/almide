@@ -65,7 +65,13 @@ fn corpus_reproduces_on_stock_wasmtime() {
             continue;
         }
         let ir = almide_spine::s5::lower_to_ir(rel, &text).expect("front");
-        let bytes = almide_wasm::emit_program(&ir).expect("emit");
+        // Structurally-refused fixtures (the CLI reroutes them to the
+        // incumbent; the alloc ledger's `!` row asserts the refusal
+        // stays a refusal) have no structural module to reproduce.
+        let Ok(bytes) = almide_wasm::emit_program(&ir) else {
+            skipped += 1;
+            continue;
+        };
         let wasi = almide_wasm_run::wasi::to_wasi(&bytes).expect("to_wasi");
         let path = dir.join("m.wasm");
         std::fs::write(&path, &wasi).expect("write module");
