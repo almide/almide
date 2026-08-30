@@ -236,6 +236,12 @@ jobs:
       - name: Assemble the qualification dossier
         if: success() && startsWith(github.ref, 'refs/tags/v')
         run: |
+          # opam env is per-step: without it coqc leaves the PATH, the
+          # toolchain fingerprint no longer matches the verify-trust stamp,
+          # and the receipt re-derives all four gates coqc-less (v0.60.0-rc1
+          # failed exactly here). The output redirect must also not perturb
+          # the fingerprint — almide-dossier-*.md is gitignored for that.
+          eval "$(opam env)"
           TAG="${GITHUB_REF#refs/tags/}"
           bash scripts/gen-dossier.sh "$TAG" > "almide-dossier-${TAG}.md"
           tail -5 "almide-dossier-${TAG}.md"
