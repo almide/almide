@@ -82,6 +82,10 @@ pub(crate) struct Emitter<'a> {
     /// call in tail position with a matching return type emits
     /// `return_call` — constant stack for deep (incl. mutual) recursion.
     pub(crate) in_tail: bool,
+    /// #1696 phase A: armed by lower_fn when the straightline gate
+    /// admits the body — the Bind route and the epilogue record their
+    /// RC events here; the certificate is pushed to the witness sink.
+    pub(crate) witness: Option<crate::witness::WitnessRecorder>,
     /// Positive while lowering an if/match arm. A droppable PARAM reassigned
     /// under a branch has no sound ownership story (one path frees the
     /// caller's block, the other keeps it — #1688 shipped wrong bytes

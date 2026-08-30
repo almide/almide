@@ -122,6 +122,10 @@ pub(crate) struct FnPlan {
     /// Which VarTable this body's VarIds index (0 = entry program,
     /// i+1 = `ir.modules[i]`) — the global-lookup space (#1596).
     pub(crate) var_space: u32,
+    /// Some(name) = the witness sweep may record this fn (#1696 phase A):
+    /// the straightline gate still decides; None = never (display
+    /// helpers, lifted lambdas — later phases).
+    pub(crate) witness_name: Option<String>,
 }
 
 pub(crate) fn lower_fn(
@@ -132,7 +136,7 @@ pub(crate) fn lower_fn(
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
-    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module, metered, charge_entry, var_space } =
+    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module, metered, charge_entry, var_space, witness_name } =
         plan;
     let cur_module = cur_module.as_deref();
     let env_shift: u32 = u32::from(env_captures.is_some());
@@ -264,6 +268,7 @@ pub(crate) fn lower_fn(
             loop_ctl: None,
             in_tail: false,
             branch_depth: 0,
+            witness: None,
             cur_module,
             var_space,
             in_main,
@@ -278,6 +283,29 @@ pub(crate) fn lower_fn(
             }),
             f: &mut f,
         };
+        // #1696 phase A: arm the witness recorder when the sweep is
+        // collecting and the straightline gate admits this body (no
+        // effect wrap, no captures, no top-let prelude — every excluded
+        // form has RC sites the two hooks do not cover yet).
+        if let Some(_name) = &witness_name
+            && crate::witness::collecting()
+            && effect_raw.is_none()
+            && env_captures.is_none()
+            && top_lets.is_empty()
+            && crate::witness::straightline_subset(
+                body,
+                ret.is_some_and(crate::witness::heapish_ret),
+            )
+            .is_none()
+        {
+            let mut w = crate::witness::WitnessRecorder::new();
+            for (k, &(_, pty)) in params.iter().enumerate() {
+                if em.rc_droppable(pty) {
+                    w.param_owned(env_shift + k as u32);
+                }
+            }
+            em.witness = Some(w);
+        }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body);
         if let Some((_, dl)) = em.region_repair {
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
@@ -344,6 +372,20 @@ pub(crate) fn lower_fn(
                     && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
                 {
                     em.rc_inc_top();
+                    if em.witness.is_some() {
+                        let tail = crate::rc_ownership::rc_tail(body);
+                        let src = if let almide_ir::IrExprKind::Var { id } = &tail.kind {
+                            em.locals.get(id).map(|&(l, _)| l)
+                        } else {
+                            None
+                        };
+                        if let Some(w) = em.witness.as_mut() {
+                            match src {
+                                Some(l) if w.ret_move(l) => {}
+                                _ => w.poison(),
+                            }
+                        }
+                    }
                 }
             }
             (Some(want), Some(raw)) => {
@@ -380,6 +422,7 @@ pub(crate) fn lower_fn(
         // dangle. BTreeSet order keeps the release deterministic.
         for idx in std::mem::take(&mut em.rc_owned) {
             em.f.instructions().local_get(idx).call(F_DEC_FLAT);
+            em.witness_dec(idx);
         }
         for (k, &(_, pty)) in params.iter().enumerate() {
             if em.rc_droppable(pty) {
@@ -388,7 +431,13 @@ pub(crate) fn lower_fn(
                 // first invoke (call_indirect then read a freelist
                 // pointer: "uninitialized element", the C-319 trio).
                 em.f.instructions().local_get(env_shift + k as u32).call(F_DEC_FLAT);
+                em.witness_dec(env_shift + k as u32);
             }
+        }
+        // The armed recorder's certificate goes to the sink — poisoned
+        // or not (the floor test fails loudly on the sentinel).
+        if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
+            crate::witness::push(name, w.certificate());
         }
         // Hold-balance invariant: every arm releases exactly what it
         // held. An over-release WRAPS the u32 depth and poisons every
