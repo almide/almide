@@ -128,3 +128,11 @@ spec/wasm_cross/codec_list_default.almd :: main
 spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
 spec/wasm_cross/nested_payload_guard.almd :: pick_opt
 spec/wasm_cross/nested_three_level_literal.almd :: main
+# (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
+# STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
+# tuple write-back (WhileHeapAccumulator) and its dispatch callee by design —
+# the same division the host-determinism MAX_WALLED=17 row records. Both rows
+# prune with #1696 steps 4-5 (certificate on the structural leg, incumbent
+# retirement) — or earlier if the incumbent learns the shape.
+spec/wasm_cross/gzip_inflate_members.almd :: gunzip
+spec/wasm_cross/gzip_inflate_members.almd :: inflate
