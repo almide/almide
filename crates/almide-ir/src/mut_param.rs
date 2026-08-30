@@ -111,10 +111,11 @@ fn fold_one_fn_tail_writebacks(func: &mut IrFunction, scope: &str, mut_fns: &Mut
     if !matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Var { id }) if *id == p) {
         return;
     }
-    // The last statement must be the terminal Unit `if`.
+    // The last statement must be the terminal Unit `if` (or `match` —
+    // the same branch-leaf write-back shape, #1688's second column).
     let Some(last) = stmts.last_mut() else { return };
     let IrStmtKind::Expr { expr: if_expr } = &mut last.kind else { return };
-    if !matches!(if_expr.kind, IrExprKind::If { .. }) {
+    if !matches!(if_expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) {
         return;
     }
     let mut folded = if_expr.clone();
@@ -135,6 +136,15 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
         e.ty = mut_ty.clone();
         return fold_if_arms(then, p, mut_ty, scope, mut_fns) && fold_if_arms(else_, p, mut_ty, scope, mut_fns);
     }
+    // A terminal `match` folds arm-wise like `if` (#1688): every arm body
+    // is a leaf of the same vocabulary. Guards are Bool expressions — a
+    // Unit write-back cannot appear there, so only bodies are rewritten.
+    if let IrExprKind::Match { arms, .. } = &mut e.kind {
+        e.ty = mut_ty.clone();
+        return arms
+            .iter_mut()
+            .all(|arm| fold_if_arms(&mut arm.body, p, mut_ty, scope, mut_fns));
+    }
     let param_read = |span| IrExpr {
         kind: IrExprKind::Var { id: p },
         ty: mut_ty.clone(),
@@ -147,14 +157,17 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
         // The rotation leaves the write-back block as the arm block's TAIL
         // (`{ …; { let t = call!; p = t; () } }`) — recurse into a structured
         // tail so the fold reaches the leaf.
-        if let Some(t) = expr.as_deref_mut() {
-            if matches!(t.kind, IrExprKind::Block { .. } | IrExprKind::If { .. }) {
-                if !fold_if_arms(t, p, mut_ty, scope, mut_fns) {
-                    return false;
-                }
-                e.ty = mut_ty.clone();
-                return true;
+        if let Some(t) = expr.as_deref_mut()
+            && matches!(
+                t.kind,
+                IrExprKind::Block { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. }
+            )
+        {
+            if !fold_if_arms(t, p, mut_ty, scope, mut_fns) {
+                return false;
             }
+            e.ty = mut_ty.clone();
+            return true;
         }
     }
     if let IrExprKind::Block { stmts, expr } = &mut e.kind {
@@ -206,6 +219,21 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
     // A bare Unit leaf (`()` arm): the param read.
     if matches!(e.kind, IrExprKind::Unit) {
         *e = param_read(e.span);
+        return true;
+    }
+    // Any other Unit-typed leaf expression (`bytes.push(out, b)` as a bare
+    // arm, a println, a loop): keep it as a statement and return the param
+    // — the same treatment the Unit BLOCK leaf already gets. Post-phase-2
+    // no bare user mut-call can sit here (every one became a write-back
+    // block), so the leaf mutates `p` only through conventions the
+    // lowering already owns in straight-line position (#1688).
+    if matches!(e.ty, Ty::Unit) {
+        let span = e.span;
+        let leaf = std::mem::replace(e, param_read(span));
+        e.kind = IrExprKind::Block {
+            stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: leaf }, span }],
+            expr: Some(Box::new(param_read(span))),
+        };
         return true;
     }
     false

@@ -102,13 +102,16 @@ impl Emitter<'_> {
         result: Option<SliceTy>,
         tail: bool,
     ) -> Result<(), EmitError> {
-        match result {
+        self.branch_depth += 1;
+        let r = match result {
             Some(ty) => {
                 self.in_tail = tail;
                 self.lower(body, Some(ty)).map(|_| ())
             }
             None => self.lower_stmt_expr(body),
-        }
+        };
+        self.branch_depth -= 1;
+        r
     }
 
     /// Push an i32 bool: does the subject (in `scr`) match `p`?
