@@ -144,8 +144,10 @@ fn body_writes_var(body: &[IrStmt], v: VarId) -> bool {
     struct W { v: VarId, hit: bool }
     impl almide_ir::visit::IrVisitor for W {
         fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Borrow { expr: inner, mutable: true, .. } = &e.kind {
-                if matches!(&inner.kind, IrExprKind::Var { id } if *id == self.v) { self.hit = true; }
+            if let IrExprKind::Borrow { expr: inner, mutable: true, .. } = &e.kind
+                && matches!(&inner.kind, IrExprKind::Var { id } if *id == self.v)
+            {
+                self.hit = true;
             }
             almide_ir::visit::walk_expr(self, e);
         }
