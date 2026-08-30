@@ -213,6 +213,52 @@ impl Emitter<'_> {
                 let sh = self.types.intern(STR);
                 Some(SliceTy::Result(uh, sh))
             }
+            // Unit effect with no failure channel and no observable value:
+            // sleep on the host (the ms count rides the a_len slot with a
+            // null a_ptr — the op-35 scalar discipline; clamped to
+            // [0, i32::MAX]), the i64 status dropped, then the always-ok
+            // unit carrier io.print builds (#1423 bucket A).
+            ("env", "sleep_ms", [ms]) => {
+                self.lower(ms, Some(INT))?;
+                let hm = self.hold_i64()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hm);
+                    i.i32_const(crate::fs_meta::OP_SLEEP_MS);
+                    i.i32_const(0);
+                    i.local_get(hm).i64_const(0).i64_lt_s();
+                    i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+                    i.i64_const(0);
+                    i.else_();
+                    i.local_get(hm).i64_const(0x7FFF_FFFF).i64_lt_s();
+                    i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+                    i.local_get(hm);
+                    i.else_();
+                    i.i64_const(0x7FFF_FFFF);
+                    i.end();
+                    i.end();
+                    i.i32_wrap_i64();
+                    i.i32_const(0).i32_const(0);
+                    i.call(F_FS_CALL);
+                    i.drop();
+                }
+                self.release_i64();
+                let hb = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.i32_const(16)
+                        .call(F_ALLOC)
+                        .local_tee(hb)
+                        .i32_const(0)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    i.local_get(hb);
+                }
+                self.release_i32();
+                let uh = self.types.intern(SliceTy::Unit);
+                let sh = self.types.intern(STR);
+                Some(SliceTy::Result(uh, sh))
+            }
             // List[Int] → low bytes, then the same raw sink.
             ("io", "write_bytes", [xs]) => {
                 match self.lower(xs, None)? {

@@ -28,6 +28,11 @@ pub(crate) const OP_STDIN_TAKE: i32 = 35;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;
 pub(crate) const OP_WALL_NOW: i32 = 34;
+/// env.sleep_ms (#1423 bucket A): the millisecond count rides the a_len
+/// slot with a null a_ptr (the op-35 scalar discipline — never a guest
+/// buffer), handled by the host BEFORE its buffer reads. No observable
+/// value: the guest builds the always-ok unit carrier itself.
+pub(crate) const OP_SLEEP_MS: i32 = 36;
 const OP_READ_BYTES: i32 = 14;
 
 impl Emitter<'_> {

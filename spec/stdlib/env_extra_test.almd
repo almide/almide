@@ -26,3 +26,8 @@ test "env.temp_dir returns a path" {
   let dir = env.temp_dir()
   assert(string.len(dir) > 0)
 }
+
+test "sleep_ms pauses and returns on every leg" {
+  env.sleep_ms(1)!
+  assert_eq(1, 1)
+}

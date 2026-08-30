@@ -43,11 +43,6 @@ reason = "host-surface"
 issue = "#1423"
 
 [[native-only]]
-fn = "env.sleep_ms"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
 fn = "env.unix_timestamp"
 reason = "host-surface"
 issue = "#1423"
@@ -288,11 +283,6 @@ issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "env.set"
-reason = "mutating/timing env surface has no wasm binding (reads work)"
-issue = "#1423"
-
-[[wasm-unavailable]]
-fn = "env.sleep_ms"
 reason = "mutating/timing env surface has no wasm binding (reads work)"
 issue = "#1423"
 

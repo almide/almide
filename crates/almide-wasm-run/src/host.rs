@@ -536,6 +536,13 @@ fn run_wasm_src(
                 *caller.data().fs_buf.lock().expect("fs buf") = got;
                 return Ok((len as i64) & 0xFFFF_FFFF);
             }
+            // op 36 = env.sleep_ms: the count rides a_len (scalar, null
+            // a_ptr — the op-35 discipline). No observable value.
+            if op == 36 {
+                let ms = i64::from(a_len).max(0) as u64;
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                return Ok(0);
+            }
             let mem = caller
                 .get_export("memory")
                 .and_then(|e| e.into_memory())
