@@ -792,8 +792,12 @@ fn render_wasm_module_routed(
         if r.is_err()
             && shape_routed
             && let Ok(ir) = almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths)
-            && let Ok(bytes) = almide_wasm::emit_program(&ir)
+            && let Ok((bytes, host_ops)) = almide_wasm::emit_program_with_ops(&ir)
             && wasmparser::validate(&bytes).is_ok()
+            && (!library_ok
+                || host_ops
+                    .iter()
+                    .all(|op| almide_wasm_run::wasi::P1_SERVED_OPS.contains(op)))
         {
             if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
                 err(&format!(
@@ -834,12 +838,26 @@ fn render_wasm_module_routed(
         Ok(ir) => ir,
         Err(e) => return reroute(&format!("front: {e}")),
     };
-    match almide_wasm::emit_program(&ir) {
-        Ok(bytes) => {
+    match almide_wasm::emit_program_with_ops(&ir) {
+        Ok((bytes, host_ops)) => {
             // Same emit-time validation discipline as the incumbent leg:
             // never ship bytes wasmtime would refuse at load.
             if let Err(e) = wasmparser::validate(&bytes) {
                 return reroute(&format!("validation: {}", e.message()));
+            }
+            // BUILD artifacts run on stock runtimes through to_wasi: an
+            // emitted host op the p1 shim cannot serve would be a RUNTIME
+            // refusal there (the env.set lesson) — refuse at build time,
+            // through the same reroute (the incumbent may serve the fn
+            // with real WASI imports; if not, its wall names the reason).
+            if library_ok
+                && let Some(op) = host_ops
+                    .iter()
+                    .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op))
+            {
+                return reroute(&format!(
+                    "host op {op} has no stock-WASI service (the embedded host                      — `almide run --target wasm` — serves it)"
+                ));
             }
             // With the debug env, ALWAYS name the winning leg — the
             // incumbent path and the reroute already speak, so a silent

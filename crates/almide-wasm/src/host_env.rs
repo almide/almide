@@ -227,6 +227,7 @@ impl Emitter<'_> {
             ("env", "sleep_ms", [ms]) => {
                 self.lower(ms, Some(INT))?;
                 let hm = self.hold_i64()?;
+                self.note_host_op(crate::fs_meta::OP_SLEEP_MS);
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hm);
@@ -313,6 +314,8 @@ impl Emitter<'_> {
                 // The host serves UP TO n bytes off the stdin CURSOR, so
                 // sequential reads compose with read_byte/read_line
                 // exactly as native's shared stdin handle does.
+                self.note_host_op(OP_STDIN_TAKE);
+                let mut i = self.f.instructions();
                 i.i32_const(OP_STDIN_TAKE);
                 i.i32_const(0);
                 i.local_get(hn).i64_const(0x7FFF_FFFF).i64_lt_s();
@@ -369,6 +372,8 @@ impl Emitter<'_> {
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hb);
+        self.note_host_op(OP_STDOUT_RAW);
+        let mut i = self.f.instructions();
         i.i32_const(OP_STDOUT_RAW);
         i.i32_const(0).i32_const(0);
         i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();

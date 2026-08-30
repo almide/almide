@@ -66,6 +66,8 @@ impl Emitter<'_> {
                 let hb = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hb);
+                self.note_host_op(OP_WRITE_BYTES);
+                let mut i = self.f.instructions();
                 i.i32_const(OP_WRITE_BYTES);
                 i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                 i.local_get(hp).i32_load(len_memarg());
@@ -88,6 +90,8 @@ impl Emitter<'_> {
                 let hb = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hb);
+                self.note_host_op(OP_WRITE_BYTES_RAW);
+                let mut i = self.f.instructions();
                 i.i32_const(OP_WRITE_BYTES_RAW);
                 i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                 i.local_get(hp).i32_load(len_memarg());
@@ -189,6 +193,7 @@ impl Emitter<'_> {
 
     /// path → fs_call(op, path, 0, 0): the i64 ret is on the stack.
     pub(crate) fn fs_call_1(&mut self, p: &IrExpr, op: i32) -> Result<(), EmitError> {
+        self.note_host_op(op);
         self.lower(p, Some(STR))?;
         let hp = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -205,6 +210,7 @@ impl Emitter<'_> {
 
     /// (path, content) both strings → fs_call(op, path, content).
     pub(crate) fn fs_call_str2(&mut self, p: &IrExpr, c: &IrExpr, op: i32) -> Result<(), EmitError> {
+        self.note_host_op(op);
         self.lower(p, Some(STR))?;
         let hp = self.hold_i32()?;
         self.f.instructions().local_set(hp);

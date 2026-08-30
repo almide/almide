@@ -28,6 +28,12 @@ use wasm_encoder::{
 };
 use wasmparser::{Parser, Payload};
 
+/// The host ops `shim_fs_call` SERVES on a stock WASI runtime. The build
+/// path audits an artifact's emitted op set against this before shipping
+/// (an unserved op = a runtime refusal on a runtime the developer never
+/// ran — the env.set lesson): extend the shim and this list TOGETHER.
+pub const P1_SERVED_OPS: &[i32] = &[30, 31, 32, 34, 35, 36];
+
 pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 // Park-page layout (offsets from park base).
 pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)

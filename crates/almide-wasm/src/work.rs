@@ -113,6 +113,12 @@ pub(crate) struct JsonFrags {
 
 #[derive(Default)]
 pub(crate) struct FnWork {
+    /// Every host op number an `almide.fs_call` site in this emission
+    /// spelled (#1710/#1423): build.rs audits the set against the stock
+    /// p1 shim's served ops BEFORE shipping — an unserved op refuses at
+    /// build time instead of the runtime refusal (the env.set lesson:
+    /// a reverse-handover artifact refused on stock where native ran).
+    pub(crate) host_ops: std::cell::RefCell<std::collections::BTreeSet<i32>>,
     pub(crate) entries: std::cell::RefCell<Vec<TableEntry>>,
     pub(crate) entry_ids: std::cell::RefCell<HashMap<TableEntry, u32>>,
     pub(crate) itypes: std::cell::RefCell<Vec<WasmSig>>,
