@@ -41,13 +41,19 @@ fn corpus_allocation_watermarks_hold() {
     let update = std::env::var("ALMIDE_UPDATE_ALLOC").is_ok();
     let bp = baseline_path();
     let mut baseline: std::collections::BTreeMap<String, Option<u64>> = std::collections::BTreeMap::new();
+    let mut refused: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     if !update {
         for l in std::fs::read_to_string(&bp)
             .expect("golden/alloc-baseline.txt — generate with ALMIDE_UPDATE_ALLOC=1")
             .lines()
         {
             let (v, rel) = l.split_once('\t').expect("baseline row");
-            baseline.insert(rel.to_string(), if v == "~" { None } else { Some(v.parse().expect("watermark")) });
+            if v == "!" {
+                refused.insert(rel.to_string());
+            } else {
+                baseline
+                    .insert(rel.to_string(), if v == "~" { None } else { Some(v.parse().expect("watermark")) });
+            }
         }
     }
 
@@ -79,7 +85,24 @@ fn corpus_allocation_watermarks_hold() {
             continue;
         }
         let ir = almide_spine::s5::lower_to_ir(rel, &text).expect("front");
-        let bytes = almide_wasm::emit_program(&ir).expect("emit");
+        // A `!` row: the structural leg REFUSES this fixture (the CLI
+        // reroutes it to the incumbent — sql_highlight_tokens' unfoldable
+        // mut write-back under a loop branch, #1688). The ledger asserts
+        // the refusal STAYS a refusal: this shape silently emitting again
+        // is exactly the regression the wall exists to prevent.
+        let bytes = match almide_wasm::emit_program(&ir) {
+            Ok(b) => b,
+            Err(_) => {
+                if update {
+                    rows.push_str(&format!("!\t{rel}\n"));
+                } else if !refused.remove(rel) {
+                    offences.push(format!(
+                        "{rel}: structural leg refuses it but the ledger has no `!` row — regenerate"
+                    ));
+                }
+                continue;
+            }
+        };
         let w = watermark(&bytes);
         if update {
             // Self-calibration: a second run separates deterministic
@@ -105,6 +128,11 @@ fn corpus_allocation_watermarks_hold() {
     }
     for (rel, _) in baseline {
         offences.push(format!("{rel}: in the ledger but not in the corpus — regenerate"));
+    }
+    for rel in refused {
+        offences.push(format!(
+            "{rel}: ledgered `!` (structural-refused) but now lowers — regenerate to ratify the emit"
+        ));
     }
     assert!(
         offences.is_empty(),
