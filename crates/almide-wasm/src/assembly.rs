@@ -241,40 +241,77 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
 
     let mut code = CodeSection::new();
-    code.function(&emit_block_print(F_PRINTLN_IMPORT));
-    code.function(&emit_block_print(F_EPRINTLN_IMPORT));
-    code.function(&emit_append_copy());
-    code.function(&emit_itoa());
-    code.function(&emit_append_i64());
-    code.function(&emit_append_bool(true_base, false_base));
-    code.function(&emit_alloc(oom_msg));
-    code.function(&emit_int_to_string());
-    code.function(&emit_concat());
-    code.function(&emit_str_eq());
-    code.function(&emit_list_get(Scalar::Int));
-    code.function(&emit_list_get(Scalar::Str));
-    code.function(&emit_list_push(Scalar::Int));
-    code.function(&emit_list_push(Scalar::Str));
-    code.function(&emit_list_join());
-    code.function(&emit_block_copy());
-    code.function(&emit_buf_to_block());
-    code.function(&emit_str_len_chars());
-    code.function(&emit_scan_w64());
-    code.function(&emit_scan_w32());
-    code.function(&emit_scan_str());
-    code.function(&emit_f16_to_f64());
-    code.function(&emit_cp_off());
-    code.function(&emit_str_slice());
-    code.function(&emit_str_repeat());
-    code.function(&emit_str_cmp());
-    code.function(&emit_str_replace());
-    code.function(&emit_copy());
-    code.function(&emit_free());
-    code.function(&emit_inc());
-    code.function(&emit_dec_flat());
-    code.function(&emit_cow());
-    code.function(&emit_str_append());
-    code.function(&emit_bytes_push());
+    // #1699: the 34 fixed-slot helpers used to ship in EVERY module, and in
+    // a small program most are dead weight (hello: 3,824 B of code, ~92 %
+    // provably unreachable). Their indices are position constants, so
+    // pruning is a STUB, never a renumber — the same discipline unreached
+    // registry bodies already use below. Which helpers a module reaches is
+    // SCANNED (wasmparser over the bodies this very assembly encodes),
+    // never hand-listed, so a helper growing a new callee cannot drift the
+    // edge set. The proven runtime core (the trees StructuralRuntime.v
+    // grounds byte-for-byte: alloc, free, inc, dec_flat, cow) ships
+    // unconditionally so the grounding gate keeps its subject.
+    let static_helpers: Vec<(u32, Function)> = vec![
+        (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT)),
+        (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT)),
+        (F_APPEND_COPY, emit_append_copy()),
+        (F_ITOA, emit_itoa()),
+        (F_APPEND_I64, emit_append_i64()),
+        (F_APPEND_BOOL, emit_append_bool(true_base, false_base)),
+        (F_ALLOC, emit_alloc(oom_msg)),
+        (F_INT_TO_STRING, emit_int_to_string()),
+        (F_CONCAT, emit_concat()),
+        (F_STR_EQ, emit_str_eq()),
+        (F_LIST_GET_8, emit_list_get(Scalar::Int)),
+        (F_LIST_GET_4, emit_list_get(Scalar::Str)),
+        (F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
+        (F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
+        (F_LIST_JOIN, emit_list_join()),
+        (F_BLOCK_COPY, emit_block_copy()),
+        (F_BUF_TO_BLOCK, emit_buf_to_block()),
+        (F_STR_LEN_CHARS, emit_str_len_chars()),
+        (F_SCAN_W64, emit_scan_w64()),
+        (F_SCAN_W32, emit_scan_w32()),
+        (F_SCAN_STR, emit_scan_str()),
+        (F_F16_TO_F64, emit_f16_to_f64()),
+        (F_CP_OFF, emit_cp_off()),
+        (F_STR_SLICE, emit_str_slice()),
+        (F_STR_REPEAT, emit_str_repeat()),
+        (F_STR_CMP, emit_str_cmp()),
+        (F_STR_REPLACE, emit_str_replace()),
+        (F_COPY, emit_copy()),
+        (F_FREE, emit_free()),
+        (F_INC, emit_inc()),
+        (F_DEC_FLAT, emit_dec_flat()),
+        (F_COW, emit_cow()),
+        (F_STR_APPEND, emit_str_append()),
+        (F_BYTES_PUSH, emit_bytes_push()),
+    ];
+    debug_assert!(
+        static_helpers.iter().enumerate().all(|(i, (idx, _))| *idx == F_PRINTLN_BLOCK + i as u32),
+        "static helper list must mirror the F_* slot order exactly"
+    );
+    let used = used_static_helpers(
+        &static_helpers,
+        lowered
+            .iter()
+            .enumerate()
+            .filter_map(|(i, l)| match l {
+                Ok((f, _)) if reachable.contains(&i) => Some(f),
+                _ => None,
+            })
+            .chain(std::iter::once(main_fn))
+            .chain(extra_fns.iter().map(|(_, f)| f)),
+    );
+    for (idx, f) in &static_helpers {
+        if used.contains(idx) {
+            code.function(f);
+        } else {
+            let mut stub = Function::new([]);
+            stub.instructions().unreachable().end();
+            code.function(&stub);
+        }
+    }
     for (i, l) in lowered.iter().enumerate() {
         match l {
             // A lowered body ships only when the main BFS reaches it —
@@ -478,4 +515,72 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
     },
     _ => unreachable!("helper routed to the wrong half"),
     }
+}
+
+/// #1699 — which of the 34 fixed-slot helpers this module actually reaches.
+/// Roots are every body that ships after the helper block (the reachable
+/// lowered fns, `main`, the program-driven extras); edges INSIDE the helper
+/// set come from scanning each helper's own encoded body, folded to a
+/// fixpoint. The proven runtime core is seeded unconditionally.
+fn used_static_helpers<'a>(
+    helpers: &[(u32, Function)],
+    roots: impl Iterator<Item = &'a Function>,
+) -> std::collections::HashSet<u32> {
+    use std::collections::HashSet;
+    let mut used: HashSet<u32> =
+        [F_ALLOC, F_FREE, F_INC, F_DEC_FLAT, F_COW].into_iter().collect();
+    let mut pending: Vec<u32> = used.iter().copied().collect();
+    fn note(set: &mut HashSet<u32>, pending: &mut Vec<u32>, idx: u32) {
+        if (F_PRINTLN_BLOCK..F_FN_BASE).contains(&idx) && set.insert(idx) {
+            pending.push(idx);
+        }
+    }
+    for f in roots {
+        for idx in called_function_indices(f) {
+            note(&mut used, &mut pending, idx);
+        }
+    }
+    let mut scanned: HashSet<u32> = HashSet::new();
+    while let Some(idx) = pending.pop() {
+        if !scanned.insert(idx) {
+            continue;
+        }
+        if let Some((_, f)) = helpers.iter().find(|(i, _)| *i == idx) {
+            for callee in called_function_indices(f) {
+                note(&mut used, &mut pending, callee);
+            }
+        }
+    }
+    used
+}
+
+/// Every `call` / `return_call` target in an encoded function body — parsed
+/// with wasmparser over the same bytes `wasm_encoder` wrote, never
+/// pattern-matched (a raw 0x10 inside an immediate is not a call). A body
+/// that fails to parse claims every helper: over-keeping is bytes,
+/// under-keeping is a trap.
+fn called_function_indices(f: &Function) -> Vec<u32> {
+    use wasm_encoder::Encode;
+    let mut buf = Vec::new();
+    f.encode(&mut buf);
+    let mut out = Vec::new();
+    let mut r = wasmparser::BinaryReader::new(&buf, 0);
+    let Ok(size) = r.read_var_u32() else {
+        return (F_PRINTLN_BLOCK..F_FN_BASE).collect();
+    };
+    let start = r.current_position();
+    let end = (start + size as usize).min(buf.len());
+    let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(&buf[start..end], 0));
+    let Ok(ops) = body.get_operators_reader() else {
+        return (F_PRINTLN_BLOCK..F_FN_BASE).collect();
+    };
+    for op in ops {
+        match op {
+            Ok(wasmparser::Operator::Call { function_index })
+            | Ok(wasmparser::Operator::ReturnCall { function_index }) => out.push(function_index),
+            Ok(_) => {}
+            Err(_) => return (F_PRINTLN_BLOCK..F_FN_BASE).collect(),
+        }
+    }
+    out
 }
