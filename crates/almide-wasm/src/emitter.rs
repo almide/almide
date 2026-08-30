@@ -82,6 +82,12 @@ pub(crate) struct Emitter<'a> {
     /// call in tail position with a matching return type emits
     /// `return_call` — constant stack for deep (incl. mutual) recursion.
     pub(crate) in_tail: bool,
+    /// Positive while lowering an if/match arm. A droppable PARAM reassigned
+    /// under a branch has no sound ownership story (one path frees the
+    /// caller's block, the other keeps it — #1688 shipped wrong bytes
+    /// silently); the C-132 fold removes the shapes it can prove, and
+    /// `lower_assign` WALLS the rest via this counter.
+    pub(crate) branch_depth: u32,
     /// The module this function belongs to (None = entry program) —
     /// intra-module Named calls resolve module-qualified FIRST.
     pub(crate) cur_module: Option<&'a str>,
@@ -566,11 +572,16 @@ impl Emitter<'_> {
                     None => self.infer(e)?,
                 };
                 self.f.instructions().if_(BlockType::Result(ty.val_type()));
-                self.in_tail = tail;
-                self.lower(then, Some(ty))?;
-                self.f.instructions().else_();
-                self.in_tail = tail;
-                self.lower(else_, Some(ty))?;
+                self.branch_depth += 1;
+                let arms = (|| {
+                    self.in_tail = tail;
+                    self.lower(then, Some(ty))?;
+                    self.f.instructions().else_();
+                    self.in_tail = tail;
+                    self.lower(else_, Some(ty))
+                })();
+                self.branch_depth -= 1;
+                arms?;
                 self.f.instructions().end();
                 ty
             }

@@ -263,6 +263,7 @@ pub(crate) fn lower_fn(
             scr_f64_local,
             loop_ctl: None,
             in_tail: false,
+            branch_depth: 0,
             cur_module,
             var_space,
             in_main,

@@ -132,9 +132,14 @@ impl Emitter<'_> {
         if let Some((extra, _)) = self.loop_ctl.as_mut() {
             *extra += 1;
         }
-        self.lower_stmt_expr(then)?;
-        self.f.instructions().else_();
-        self.lower_stmt_expr(else_)?;
+        self.branch_depth += 1;
+        let arms = (|| {
+            self.lower_stmt_expr(then)?;
+            self.f.instructions().else_();
+            self.lower_stmt_expr(else_)
+        })();
+        self.branch_depth -= 1;
+        arms?;
         self.f.instructions().end();
         if let Some((extra, _)) = self.loop_ctl.as_mut() {
             *extra -= 1;
@@ -621,6 +626,21 @@ impl Emitter<'_> {
                         None => return unsup("assign:unmapped"),
                     },
                 };
+                // #1688: a droppable PARAM reassigned under an if/match
+                // arm — one path releases the caller's block, the other
+                // keeps it, and the epilogue's release set can't tell
+                // which ran. The C-132 fold rewrites the provable shapes
+                // away before lowering; whatever still reaches here is
+                // refused, never silently emitted (native `A&B`, wasm
+                // `\0\0\0` was this exact hole).
+                if let Some(idx) = local
+                    && idx < self.rc_param_ceiling
+                    && self.branch_depth > 0
+                    && self.rc_droppable(declared)
+                    && !self.cells.contains(var)
+                {
+                    return unsup("assign:mut-param-in-branch-arm(#1688)");
+                }
                 self.lower(value, Some(declared))?;
                 // RC-5: same share discipline as Bind.
                 if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
