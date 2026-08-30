@@ -53,7 +53,7 @@ fn collect_decode_by_ref(program: &IrProgram) -> std::collections::HashSet<Strin
     let mut set = std::collections::HashSet::new();
     let mut add = |f: &IrFunction, origin: Option<&str>| {
         let by_ref = f.name.ends_with(".decode")
-            && f.params.first().map_or(false, |p| matches!(p.borrow, ParamBorrow::Ref)
+            && f.params.first().is_some_and(|p| matches!(p.borrow, ParamBorrow::Ref)
                 && matches!(&p.ty, Ty::Named(n, _) if n.as_str() == "Value"));
         if !by_ref { return; }
         let name = f.name.as_str();
@@ -201,8 +201,10 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
         // stdlib name, which BorrowInsertion has no signature for, so the
         // borrow is placed here, where the runtime target is chosen.
         let mut args = args;
-        if name.starts_with("__decode_list_") {
-            if let Some(v) = args.pop() { args.push(codec_value_arg(v, true)); }
+        if name.starts_with("__decode_list_")
+            && let Some(v) = args.pop()
+        {
+            args.push(codec_value_arg(v, true));
         }
         IrExpr { kind: IrExprKind::Call {
             target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
@@ -243,8 +245,10 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
         };
         let by_ref = !is_encode && DECODE_BY_REF.with(|c| c.borrow().contains(&codec_method));
         let mut new_args = args;
-        if !is_encode {
-            if let Some(v) = new_args.pop() { new_args.push(codec_value_arg(v, by_ref)); }
+        if !is_encode
+            && let Some(v) = new_args.pop()
+        {
+            new_args.push(codec_value_arg(v, by_ref));
         }
         new_args.push(IrExpr {
             kind: IrExprKind::FnRef { name: func_ref.into() },
