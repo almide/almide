@@ -141,6 +141,14 @@ def synth(mod, fn, params, ret, variant):
     variant 1: FIRST arg bound as a `var` (mut-param fns, E032).
     variant 2: the bind annotated `Map[Int, Int]` (generic-empty
                producers, E018) — only sensible for Map returns.
+    variant 3: EVERY arg hoisted into a `var` and passed by name — the
+               reachability sweep's repertoire (a var-bound callback
+               lowers where the inline lambda walls: the fs.for_each_line
+               lesson, where the weaker shape produced a false
+               wasm-unavailable row and E081 blocked a working fn).
+    variant 4: hoisted args AND the call as the FINAL statement (no
+               trailing print) — the same lesson's second half: the
+               postlude itself walls some shapes.
     """
     args, tys = [], []
     for p in split_top(params):
@@ -161,6 +169,11 @@ def synth(mod, fn, params, ret, variant):
             return None, "no-first-arg"
         prelude = f"  var subj = {args[0]}\n"
         args = ["subj"] + args[1:]
+    elif variant in (3, 4):
+        if not args:
+            return None, "no-args"
+        prelude = "".join(f"  var a{i} = {a}\n" for i, a in enumerate(args))
+        args = [f"a{i}" for i in range(len(args))]
     call = f"{mod}.{fn}({', '.join(args)})"
     # Result-returning fns propagate; Unit-returning fns sit in STATEMENT
     # position (a bare Unit call is legal and matches real usage);
@@ -181,7 +194,14 @@ def synth(mod, fn, params, ret, variant):
         stmt = call
     else:
         stmt = f"let _ = {call}"
-    body = f"  println(\"pre\")\n{prelude}  {stmt}\n  println(\"p\")"
+    if variant == 4:
+        # The final-statement form: a Result-returning effect call rides
+        # bare `call!` propagation (the sweep's shape-0 spelling).
+        if is_result:
+            stmt = f"{call}!"
+        body = f"{prelude}  {stmt}"
+    else:
+        body = f"  println(\"pre\")\n{prelude}  {stmt}\n  println(\"p\")"
     imp = f"import {mod}\n\n" if mod in EXPLICIT_IMPORT else ""
     return f"{imp}effect fn main() -> Unit = {{\n{body}\n}}\n", None
 
@@ -199,7 +219,7 @@ def main():
     env["ALMIDE_NO_AVAIL_CHECK"] = "1"
     for mod, fn, params, ret in sigs:
         verdict = None
-        for variant in (0, 1, 2):
+        for variant in (0, 1, 2, 3, 4):
             prog, missing = synth(mod, fn, params, ret, variant)
             if prog is None:
                 if variant == 0:
@@ -221,12 +241,20 @@ def main():
                 "?",
             )
             # A type/synthesis error is the probe's fault — try the next
-            # variant; only a renderer refusal is a wall.
+            # variant. A wall is only the VERDICT once every variant
+            # walled: the ladder exists because verdicts are shape-
+            # sensitive (the fs.for_each_line lesson — variant 0 walls,
+            # variant 4 builds), so a first-shape wall must not stop it.
             if "error[E0" in first or "Expected" in first or "type error" in first.lower():
-                verdict = ("unsynth", f"probe-ill-typed: {first[:80]}")
+                # Never let a later shape's TYPE error demote an earlier
+                # shape's renderer wall — verdict precedence is
+                # ok > wall > unsynth.
+                if verdict is None or verdict[0] != "wall":
+                    verdict = ("unsynth", f"probe-ill-typed: {first[:80]}")
                 continue
-            verdict = ("wall", first[:120])
-            break
+            if verdict is None or verdict[0] != "wall":
+                verdict = ("wall", first[:120])
+            continue
         status, detail = verdict
         print(f"{status}\t{mod}.{fn}\t{detail}")
     return 0

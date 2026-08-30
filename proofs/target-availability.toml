@@ -24,7 +24,7 @@
 # minimal call the probe cannot yet type (nominal runtime types, residual
 # generator gaps). Claimed neither way; shrinking it is probe work.
 
-# Measured (this generation): structural 339 ok / 50 native-only; default-routing 25 wasm-unavailable; 39 unsynthesizable.
+# Measured (this generation): structural 339 ok / 50 native-only; default-routing 24 wasm-unavailable; 39 unsynthesizable.
 pending_self_host_ceiling = 17
 
 [[native-only]]
@@ -293,11 +293,6 @@ issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "fs.fold_lines_range"
-reason = "the streaming-callback reader has no wasm lowering yet (read_text / read_lines work)"
-issue = "#1423"
-
-[[wasm-unavailable]]
-fn = "fs.for_each_line"
 reason = "the streaming-callback reader has no wasm lowering yet (read_text / read_lines work)"
 issue = "#1423"
 
