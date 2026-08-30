@@ -11,6 +11,7 @@ use almide_ir::*;
 use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
+use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while};
 
 #[derive(Debug)]
 pub struct CloneInsertionPass;
@@ -50,6 +51,8 @@ impl NanoPass for CloneInsertionPass {
         // so the branch-count memo only needs to track their union. Counts for
         // ids outside every `remaining` are deduct no-ops either way.
         let tracked: HashSet<VarId> = eligible.union(&eligible_plain).copied().collect();
+        // Nothing is fresh at function top level — see `CloneCtx::fresh`.
+        let no_fresh: HashSet<VarId> = HashSet::new();
 
         for func in &mut program.functions {
             // Reset remaining for each function (vars are function-scoped)
@@ -61,12 +64,12 @@ impl NanoPass for CloneInsertionPass {
             };
             reset_remaining(r, e, &syntactic);
             let memo = BranchCounts::compute(&func.body, &tracked);
-            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo });
+            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo, fresh: &no_fresh });
         }
         for tl in &mut program.top_lets {
             reset_remaining(&mut remaining, &eligible, &syntactic);
             let memo = BranchCounts::compute(&tl.value, &tracked);
-            tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false, memo: &memo });
+            tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false, memo: &memo, fresh: &no_fresh });
         }
 
         let IrProgram { modules, var_table, .. } = &mut program;
@@ -87,12 +90,12 @@ impl NanoPass for CloneInsertionPass {
                 };
                 reset_remaining(r, e, &module_syntactic);
                 let memo = BranchCounts::compute(&func.body, &m_tracked);
-                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo });
+                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo, fresh: &no_fresh });
             }
             for tl in module.top_lets.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
                 let memo = BranchCounts::compute(&tl.value, &m_tracked);
-                tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false, memo: &memo });
+                tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false, memo: &memo, fresh: &no_fresh });
             }
         }
         PassResult { program, changed: true }
@@ -188,7 +191,7 @@ fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
 // only ever touches ids present in `remaining`, whose key set is an eligible
 // set, so dropping untracked ids is behavior-neutral and keeps the per-branch
 // maps (and the absorb cost of merging them upward) small.
-struct BranchCounts {
+pub(crate) struct BranchCounts {
     map: HashMap<*const IrExpr, Rc<HashMap<VarId, u32>>>,
 }
 
@@ -378,13 +381,19 @@ fn reset_remaining(remaining: &mut HashMap<VarId, u32>, eligible: &HashSet<VarId
 /// helpers), so each fn stays at or under the `max-params` limit. `in_loop`
 /// flips to `true` for a nested loop body/cond — built as a fresh `CloneCtx`
 /// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_hoist.rs).
-struct CloneCtx<'a> {
-    always: &'a HashSet<VarId>,
-    eligible: &'a HashSet<VarId>,
-    remaining: &'a mut HashMap<VarId, u32>,
-    in_loop: bool,
+pub(crate) struct CloneCtx<'a> {
+    pub(crate) always: &'a HashSet<VarId>,
+    pub(crate) eligible: &'a HashSet<VarId>,
+    pub(crate) remaining: &'a mut HashMap<VarId, u32>,
+    pub(crate) in_loop: bool,
     /// Per-body branch-count memo (#1230) — see [`BranchCounts`].
-    memo: &'a BranchCounts,
+    pub(crate) memo: &'a BranchCounts,
+    /// Vars rebound on EVERY iteration of the innermost enclosing loop — the
+    /// loop's own binders and the `let`s at its body's top level (#1673).
+    /// Their last use in that body is a move even though `in_loop` holds:
+    /// the next iteration binds a fresh value. Empty outside loops and
+    /// inside lambda bodies (a closure may run many times per iteration).
+    pub(crate) fresh: &'a HashSet<VarId>,
 }
 
 fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
@@ -417,8 +426,9 @@ fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) 
     if ctx.eligible.contains(&id) {
         if let Some(r) = ctx.remaining.get_mut(&id) {
             *r = r.saturating_sub(1);
-            if *r == 0 && !ctx.in_loop {
-                // Last use outside a loop → move (no clone)
+            if *r == 0 && (!ctx.in_loop || ctx.fresh.contains(&id)) {
+                // Last use outside a loop — or of a var the loop rebinds
+                // every iteration (#1673) — → move (no clone)
                 return IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None };
             }
         }
@@ -518,24 +528,6 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
     IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms }
 }
 
-/// `ForIn { var, var_tuple, iterable, body }` arm of [`insert_clones_live`]:
-/// the iterable is NOT in the loop, the body IS.
-fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, iterable: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
-    let new_iterable = insert_clones_live(iterable, ctx);
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo };
-    let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
-    IrExprKind::ForIn { var, var_tuple, iterable: Box::new(new_iterable), body: new_body }
-}
-
-/// `While { cond, body }` arm of [`insert_clones_live`]: cond and body are
-/// both in the loop.
-fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo };
-    let new_cond = insert_clones_live(cond, &mut loop_ctx);
-    let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
-    IrExprKind::While { cond: Box::new(new_cond), body: new_body }
-}
-
 /// The E0505 guard's borrow scan (#809/#866): the vars passed BY BORROW at
 /// the top level of a call's arguments (or its method receiver). Such a var
 /// stays borrowed until the call itself executes, so a MOVE of it anywhere in
@@ -578,6 +570,7 @@ fn insert_clones_runtime_call(args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrEx
         remaining: ctx.remaining,
         in_loop: ctx.in_loop,
         memo: ctx.memo,
+        fresh: ctx.fresh,
     };
     args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect()
 }
@@ -599,6 +592,7 @@ fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>,
             remaining: ctx.remaining,
             in_loop: ctx.in_loop,
             memo: ctx.memo,
+            fresh: ctx.fresh,
         };
         let args = args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect();
         let target = match target {
@@ -692,7 +686,7 @@ fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Option<Span>, 
     access
 }
 
-fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
+pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
 
@@ -734,6 +728,15 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
             }
             IrExprKind::Borrow { expr: Box::new(inner), as_str, mutable }
         },
+        // A closure body may run any number of times per loop iteration, so
+        // nothing the enclosing loop rebinds is fresh inside it (#1673): walk
+        // the lambda with an empty `fresh` set, otherwise unchanged.
+        kind @ IrExprKind::Lambda { .. } => {
+            let no_fresh: HashSet<VarId> = HashSet::new();
+            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: &no_fresh };
+            let e = IrExpr { kind, ty: ty.clone(), span, def_id: None };
+            return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
+        }
         // Default: recurse into every child through the exhaustive `map_children`
         // chokepoint. Every node whose clone insertion is just "recurse into the
         // children, left to right" lands here — BinOp/UnOp/Lambda/StringInterp/
@@ -764,7 +767,7 @@ fn count_target_use(target: VarId, eligible: &HashSet<VarId>, remaining: &mut Ha
     }
 }
 
-fn insert_clone_stmts_live(stmts: Vec<IrStmt>, ctx: &mut CloneCtx) -> Vec<IrStmt> {
+pub(crate) fn insert_clone_stmts_live(stmts: Vec<IrStmt>, ctx: &mut CloneCtx) -> Vec<IrStmt> {
     stmts.into_iter().map(|s| {
         let kind = match s.kind {
             IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
