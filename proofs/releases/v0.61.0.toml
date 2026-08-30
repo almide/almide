@@ -1,0 +1,27 @@
+# Release evidence seal — v0.61.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.61.0"
+tag = "v0.61.0"
+tag_commit = "91f8a3175d3d45c61e30e22cb89d20cf9c15386d"
+date = "2026-08-31"
+url = "https://github.com/almide/almide/releases/tag/v0.61.0"
+
+[derived]
+cargo_version = "0.61.0"
+contracts_sha256 = "761a3475cda75f2d2d03e611c42fcede23972fe9fb5efb043568c13827db3a2e"
+contracts_total = "326"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "32dc2fbff95234ae685cf1df7c41e452678c63af0df425d82bf7d0241d2184a9"
+abstain_ledger_entries = "25"
+wasm_cross_fixtures = "644"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "RC channel (#1484): v0.61.0-rc1 tagged on the same merge commit (91f8a31), published as a prerelease with the full battery green and its tag Trust Spine green; the final followed a short clean soak (owner's call: two additive stdlib fns, no compiler-surface change). Blocker gate at the tag: 0 (#1482). Interface diff v0.60.0 -> v0.61.0: identical per the differ (added=0 removed=0; #1488) - its surface tracks non-effect signatures and both additions are effect fns; additive by inspection (nothing removed or changed). Tag-tree CI: full battery green on the content-identical develop head (CI, Trust Spine, Cross-Target, Acceptance Ring, mutation sweep full net); the tag's own Trust Spine run assembled and Sigstore-attested the qualification dossier. Fuzz: no dedicated tag dispatch - latest nightly differential fuzz 33301893855 (2026-08-30, red-as-findings per doctrine; findings triaged to issues, none release-blocking at the tag)."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.61.0.md (Sigstore-attested)"
+known_problems = "None release-blocking. Standing, all visible-by-design: (1) 25 both-legs stdlib walls (E081 at check time, triaged on #1423 - the two http status twins this release adds are declared native-only + wasm-unavailable rows, the same OS-socket class as the rest of the client); (2) the structural-only division and the incumbent retirement plan (#1696); (3) #1690: when both wasm legs wall, only the incumbent's wall text is surfaced; (4) scripts/check-interface-diff.sh's surface excludes effect signatures, so an effect-fn removal would not classify as breaking (surfaced by this release's diff reading identical for a 2-fn addition); (5) proofs/target-availability.toml's Measured-generation comment line lags the row counts (says 49/23, rows at the tag are 51/25) - informational only, the row discipline gate measures rows, not the comment."
