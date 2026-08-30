@@ -126,6 +126,7 @@ call:env.args
 call:env.cwd
 call:env.get
 call:env.os
+call:env.sleep_ms
 call:env.temp_dir
 call:eprintln
 call:fan.any

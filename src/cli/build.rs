@@ -777,7 +777,34 @@ fn render_wasm_module_routed(
             || uses_incumbent_features
             || (library_ok && host_variant));
     if incumbent {
-        return render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        // REVERSE handover (#1423 bucket A, the env.sleep_ms build shape):
+        // a SHAPE-routed host-variant program the incumbent walls gets one
+        // structural attempt — the same verified-to-verified doctrine as
+        // the forward reroute below, in the other direction. The forced
+        // routes (ALMIDE_WASM_INCUMBENT / FUEL_PROBE) and the main-less
+        // library form stay final: an explicit choice is not rerouted, and
+        // the structural leg has no library form to hand over to.
+        let shape_routed = std::env::var_os("ALMIDE_WASM_INCUMBENT").is_none()
+            && std::env::var_os("ALMIDE_FUEL_PROBE").is_none()
+            && has_main
+            && !uses_incumbent_features;
+        if r.is_err() && shape_routed {
+            if let Ok(ir) = almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths) {
+                if let Ok(bytes) = almide_wasm::emit_program(&ir) {
+                    if wasmparser::validate(&bytes).is_ok() {
+                        if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+                            err(&format!(
+                                "[almide] incumbent walled — structural leg took the build ({} bytes)",
+                                bytes.len()
+                            ));
+                        }
+                        return Ok((bytes, true));
+                    }
+                }
+            }
+        }
+        return r;
     }
     // A structural WALL routes to the incumbent renderer. This is NOT the
     // retired v0 fallback (#782's sin was falling into UNVERIFIED codegen):

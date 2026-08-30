@@ -4189,3 +4189,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/gzip_inflate_members.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-327"
+spec      = "ALS-R5"
+title     = "env.sleep_ms pauses and returns on every leg"
+statement = "env.sleep_ms(ms) suspends for at least ms milliseconds and returns ok(()) on every leg (#1423 bucket A): native sleeps in the runtime intrinsic; the embedded almide.* host sleeps the thread (fs_call op 36 — the count rides the a_len slot with a null a_ptr, the op-35 scalar discipline); the stock-WASI p1 artifact spins on the monotonic clock it already imports (clock_time_get busy-wait — WASI p1 has no sleep short of poll_oneoff, and importing a sixth WASI function would shift every defined function index while the element section is copied verbatim, a funcref corruption of the #1688 silent class; the spin is confined to stock p1 artifacts and retires with the component leg's wasi:clocks wait-for, the async-ABI form the vendored 0.3 WIT already carries). The build path reaches the structural leg through the REVERSE verified-to-verified handover: a shape-routed host-variant program the incumbent walls gets one structural attempt before the build fails. The pause is wall-clock, never an observable value — the fixture pins the return path and program order around it."
+since     = "0.60.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_sleep_pause.almd", class = "fixture" },
+]
