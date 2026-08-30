@@ -1,0 +1,26 @@
+// @contract: C-325
+// bytes.push growth at scale (#1689).
+//
+// `bytes.new(0)` grown by 70,000 pushes — past the ~69k threshold where
+// the old per-push copy-grow protocol died with `out of memory` on the
+// structural wasm leg (every push reallocated len+1 and never freed the
+// outgrown block: n pushes retained n²/2 bytes). The `$bytes_push`
+// helper gives bytes the `$list_push` discipline — cap fast path,
+// geometric growth, outgrown block freed at rc==1 — so growth is O(n)
+// and native/wasm stay byte-identical. Spot reads pin content across the
+// old page boundary; the alias block pins the value-semantics snapshot
+// (an in-place fast-path push must never leak into a prior bind).
+fn main() -> Unit = {
+  var b = bytes.new(0)
+  var i = 0
+  while i < 70000 {
+    bytes.push(b, int.band(i, 255))
+    i = i + 1
+  }
+  println("${bytes.len(b)},${bytes.get(b, 0) ?? -1},${bytes.get(b, 255) ?? -1},${bytes.get(b, 65536) ?? -1},${bytes.get(b, 69999) ?? -1}")
+  var a = bytes.new(0)
+  bytes.push(a, 1)
+  var alias = a
+  bytes.push(a, 2)
+  println("${bytes.len(a)},${bytes.len(alias)},${bytes.get(alias, 0) ?? -1}")
+}
