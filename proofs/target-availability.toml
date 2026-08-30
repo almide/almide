@@ -24,8 +24,8 @@
 # minimal call the probe cannot yet type (nominal runtime types, residual
 # generator gaps). Claimed neither way; shrinking it is probe work.
 
-# Measured (this generation): structural 339 ok / 50 native-only; default-routing 24 wasm-unavailable; 39 unsynthesizable.
-pending_self_host_ceiling = 17
+# Measured (this generation): structural 340 ok / 49 native-only; default-routing 23 wasm-unavailable; 39 unsynthesizable.
+pending_self_host_ceiling = 16
 
 [[native-only]]
 fn = "datetime.parse_iso"
@@ -135,11 +135,6 @@ issue = "#1423"
 [[native-only]]
 fn = "http.url_decode"
 reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "json.to_map"
-reason = "pending-self-host"
 issue = "#1423"
 
 [[native-only]]
@@ -334,12 +329,6 @@ issue = "#1423"
 [[wasm-unavailable]]
 fn = "http.request_bytes"
 reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-issue = "#1423"
-
-[[wasm-unavailable]]
-fn = "json.to_map"
-reason = "no wasm lowering on either leg yet (pending-self-host)"
-alt = "walk with value.field / value.keys"
 issue = "#1423"
 
 [[wasm-unavailable]]
