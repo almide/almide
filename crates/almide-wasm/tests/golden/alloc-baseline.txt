@@ -246,6 +246,7 @@
 66016	spec/wasm_cross/interp_effect_unwrap_arg.almd
 66048	spec/wasm_cross/io_write_ordering.almd
 227984	spec/wasm_cross/json_gltf_walk.almd
+231617552	spec/wasm_cross/json_many_keys.almd
 88464	spec/wasm_cross/json_number_unicode.almd
 74544	spec/wasm_cross/json_parse_lenient_edges.almd
 88896	spec/wasm_cross/json_path_edges.almd
