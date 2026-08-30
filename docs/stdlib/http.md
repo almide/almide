@@ -206,6 +206,30 @@ ALMIDE_HTTP_TIMEOUT_SECS=300 ./app   # five minutes
 ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
 ```
 
+### `http.get_status(url: String) -> Result[(Int, String), String]`
+
+Send a GET and return `(status_code, body)`. Unlike `http.get`, a non-2xx
+response is `Ok((code, body))` — a 404 does not become an `Err`. `Err` is
+reserved for transport failures (connection / TLS / timeout). Use this when a
+caller needs to branch on the numeric status rather than only body-or-error.
+
+```almd
+match http.get_status("https://example.com/x") {
+  Ok(pair) => if pair.0 == 404 then "missing" else "ok"
+  Err(e) => "network error: " + e
+}
+```
+
+### `http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String]`
+
+Like `http.request` but returns `(status_code, body)`, with the same status
+semantics as `http.get_status` (any complete response is `Ok`). Set custom
+headers (e.g. a `User-Agent`) via the `headers` map.
+
+```almd
+let r = http.request_status("GET", url, "", ["User-Agent": "my-app"])
+```
+
 ### `http.get_bytes(url: String) -> Result[Bytes, String]`
 
 Send an HTTP GET and return the raw response body as `Bytes` (no UTF-8
@@ -227,7 +251,7 @@ let blob = http.request_bytes("POST", url, body, headers)!
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (26 functions)
+## Signature index (28 functions)
 
 ```
 effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
@@ -251,6 +275,8 @@ effect http.put(url: String, body: String) -> String
 effect http.patch(url: String, body: String) -> String
 effect http.delete(url: String) -> String
 effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String
+effect http.get_status(url: String) -> ()
+effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> ()
 effect http.get_bytes(url: String) -> Bytes
 effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes
 effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit

@@ -312,6 +312,42 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &Almide
     }
 }
 
+// ── Status-preserving client ──
+//
+// Mirrors the String client but returns `(status_code, body)` for ANY
+// complete response — a 404 is `Ok((404, body))`, not an `Err`. `Err` is
+// reserved for transport failures (connection / TLS / timeout). The String
+// client above collapses the status into the body-or-error distinction, so a
+// caller that needs to branch on the numeric status (e.g. 404 vs 200) uses
+// these instead.
+
+pub fn almide_http_get_status(url: &str) -> Result<(i64, String), String> {
+    almide_http_request_status("GET", url, "", &AlmideMap::new())
+}
+
+pub fn almide_http_request_status(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<(i64, String), String> {
+    let (is_https, host, port, path) = parse_url(url)?;
+
+    let stream = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("connection failed: {}", e))?;
+    stream.set_read_timeout(client_read_timeout(30)).ok();
+
+    if is_https {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut tls_stream = make_tls_stream(&host, stream)?;
+            http_exchange_status(&mut tls_stream, method, &host, &path, body, headers)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("HTTPS is not supported on WASM target".to_string())
+        }
+    } else {
+        let mut stream = stream;
+        http_exchange_status(&mut stream, method, &host, &path, body, headers)
+    }
+}
+
 // ── Binary client ──
 //
 // Mirrors the String client but returns the raw response body as `Vec<u8>`
@@ -375,6 +411,45 @@ fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, pat
         }
     } else {
         Ok(text)
+    }
+}
+
+// Like http_exchange, but also parses the status line and returns
+// `(status_code, body)`. A missing/unparseable status line yields code 0.
+fn http_exchange_status(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<(i64, String), String> {
+    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
+    if !body.is_empty() {
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+            req.push_str("Content-Type: application/json\r\n");
+        }
+    }
+    for (k, v) in headers.iter() { req.push_str(&format!("{}: {}\r\n", k, v)); }
+    req.push_str("\r\n");
+    req.push_str(body);
+
+    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
+
+    let response = read_response_tolerant(stream)?;
+    let text = String::from_utf8_lossy(&response).to_string();
+
+    if let Some(idx) = text.find("\r\n\r\n") {
+        let header_section = &text[..idx];
+        let resp_body = &text[idx + 4..];
+        let status_line = header_section.lines().next().unwrap_or("");
+        let code: i64 = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let body_out = if header_section.to_lowercase().contains("transfer-encoding: chunked") {
+            decode_chunked(resp_body)
+        } else {
+            resp_body.to_string()
+        };
+        Ok((code, body_out))
+    } else {
+        Ok((0, text))
     }
 }
 
