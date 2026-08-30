@@ -195,6 +195,15 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
     };
     let primitives = ["string", "int", "float", "bool"];
     if primitives.contains(&type_name) {
+        // The primitive list DECODERS borrow their input (#1679) — the
+        // runtime `almide_rt___decode_list_<prim>(v: &Value)`; the encoders
+        // still consume their Vec. The call reaches this pass under its
+        // stdlib name, which BorrowInsertion has no signature for, so the
+        // borrow is placed here, where the runtime target is chosen.
+        let mut args = args;
+        if name.starts_with("__decode_list_") {
+            if let Some(v) = args.pop() { args.push(codec_value_arg(v, true)); }
+        }
         IrExpr { kind: IrExprKind::Call {
             target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
             args, type_args,
