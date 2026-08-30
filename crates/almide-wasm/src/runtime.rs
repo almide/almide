@@ -617,6 +617,55 @@ pub(crate) fn emit_list_push(s: Scalar) -> Function {
     f
 }
 
+/// `$bytes_push(b: i32, v: i64) -> i32`: the byte-stride twin of
+/// `$list_push` (#1689) — in-place when `cap - len >= 1`, else a fresh
+/// block at `max(cap*2, 16)` with the outgrown block freed at rc==1.
+/// The old inline `emit_copy_grow(b, 1)` protocol reallocated len+1 on
+/// EVERY push and never freed the outgrown block, so n pushes retained
+/// n²/2 bytes and 69k pushes OOM'd where native completes.
+pub(crate) fn emit_bytes_push() -> Function {
+    // params: 0=b i32, 1=v i64; locals: 2=la i32, 3=cap i32, 4=base i32
+    let (b, v, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(b).i32_load(len_memarg()).local_set(la);
+    i.local_get(b).i32_load(word(almide_layout::CAP.offset)).local_set(cap);
+    // fast path: room in cap → store at len, bump len, return same block
+    i.local_get(cap).local_get(la).i32_sub().i32_const(1).i32_ge_u().if_(BlockType::Empty);
+    i.local_get(b).local_get(la).i32_add();
+    i.local_get(v);
+    i.i64_store8(byte);
+    i.local_get(b).local_get(la).i32_const(1).i32_add().i32_store(word(almide_layout::LEN.offset));
+    i.local_get(b).return_();
+    i.end();
+    // grow: newcap = max(cap * 2, 16)
+    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    i.local_get(cap).i32_const(16).i32_lt_u().if_(BlockType::Empty);
+    i.i32_const(16).local_set(cap);
+    i.end();
+    i.local_get(cap).call(F_ALLOC).local_set(base);
+    i.local_get(base).i32_const(payload).i32_add();
+    i.local_get(b).i32_const(payload).i32_add();
+    i.local_get(la);
+    i.call(F_COPY);
+    i.local_get(base).local_get(la).i32_add();
+    i.local_get(v);
+    i.i64_store8(byte);
+    // live len = old len + 1 (cap field keeps newcap from $alloc)
+    i.local_get(base).local_get(la).i32_const(1).i32_add().i32_store(word(almide_layout::LEN.offset));
+    // RC-3: the outgrown block is garbage IFF uniquely owned — same
+    // judge as $list_push.
+    i.local_get(b).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.local_get(b).call(F_FREE);
+    i.end();
+    i.local_get(base);
+    i.end();
+    f
+}
+
 /// `$block_copy(src: i32) -> i32`: a fresh block with src's live bytes —
 /// the deep copy behind List value semantics at every bind/assign.
 pub(crate) fn emit_block_copy() -> Function {

@@ -213,8 +213,15 @@ const F_COW: u32 = 36;
 /// the outgrown block. Ownership transfers through the call (the C-132
 /// write-back shape the Assign dec-skip was built for).
 const F_STR_APPEND: u32 = 37;
+/// `$bytes_push(b, v) -> i32`: byte append with the list-push growth
+/// discipline — cap fast path in place, geometric grow on overflow, the
+/// outgrown block freed at rc==1. The old per-push `emit_copy_grow(b, 1)`
+/// reallocated len+1 EVERY push and never freed the outgrown block, so n
+/// pushes retained Σn ≈ n²/2 bytes — `bytes.new(0)` + 69k pushes OOM'd
+/// where native and the incumbent complete (#1689).
+const F_BYTES_PUSH: u32 = 38;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 38;
+const F_FN_BASE: u32 = 39;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
