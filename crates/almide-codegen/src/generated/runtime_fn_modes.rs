@@ -741,6 +741,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_value_encode_list" => &[false, false],
         "almide_rt_value_eq" => &[false, false],
         "almide_rt_value_field" => &[false, false],
+        "almide_rt_value_field_ref" => &[false, false],
         "almide_rt_value_float" => &[false],
         "almide_rt_value_int" => &[false],
         "almide_rt_value_keys" => &[false],

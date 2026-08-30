@@ -103,14 +103,17 @@ pub fn almide_rt_value_decode_option_custom<T, F: Fn(Value) -> Result<T, String>
 /// By-reference twin of `almide_rt_value_decode_option_custom` (#1679): the
 /// field is looked up without a copy and handed to a `&Value` decoder.
 pub fn almide_rt_value_decode_option_custom_ref<T, F: Fn(&Value) -> Result<T, String>>(v: &Value, key: String, f: F) -> Result<Option<T>, String> {
-    match value_field_ref(v, &key) {
+    match almide_rt_value_field_ref(v, &key) {
         Ok(Value::Null) => Ok(None),
         Ok(val) => f(val).map(Some),
         Err(_) => Ok(None),
     }
 }
-/// `almide_rt_value_field` without the copy: a borrow into the object.
-fn value_field_ref<'a>(v: &'a Value, key: &str) -> Result<&'a Value, String> {
+/// `almide_rt_value_field` without the copy: a borrow into the object. The
+/// native walker folds `&(almide_rt_value_field(v, k))?` — the shape every
+/// derived decode reads a field through — into `almide_rt_value_field_ref(v, k)?`
+/// (#1679): same lookup, same two error strings, no clone of the field.
+pub fn almide_rt_value_field_ref<'a>(v: &'a Value, key: &str) -> Result<&'a Value, String> {
     if let Value::Object(pairs) = v {
         for (k, val) in pairs {
             if k == key { return Ok(val); }
@@ -134,10 +137,13 @@ pub fn almide_rt___encode_list_string(items: Vec<String>) -> Value { almide_rt_v
 pub fn almide_rt___encode_list_int(items: Vec<i64>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_int) }
 pub fn almide_rt___encode_list_float(items: Vec<f64>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_float) }
 pub fn almide_rt___encode_list_bool(items: Vec<bool>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_bool) }
-pub fn almide_rt___decode_list_string(v: Value) -> Result<Vec<String>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_string(&x)) }
-pub fn almide_rt___decode_list_int(v: Value) -> Result<Vec<i64>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_int(&x)) }
-pub fn almide_rt___decode_list_float(v: Value) -> Result<Vec<f64>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_float(&x)) }
-pub fn almide_rt___decode_list_bool(v: Value) -> Result<Vec<bool>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_bool(&x)) }
+// The primitive list decoders borrow their input (#1679): the derive's
+// `__decode_list_<prim>(field)` call is borrow-wrapped by BorrowInsertion from
+// this signature, and the walker folds that into a `value_field_ref` lookup.
+pub fn almide_rt___decode_list_string(v: &Value) -> Result<Vec<String>, String> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_string) }
+pub fn almide_rt___decode_list_int(v: &Value) -> Result<Vec<i64>, String> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_int) }
+pub fn almide_rt___decode_list_float(v: &Value) -> Result<Vec<f64>, String> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_float) }
+pub fn almide_rt___decode_list_bool(v: &Value) -> Result<Vec<bool>, String> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_bool) }
 
 // ── Concrete option helpers ──
 
