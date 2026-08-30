@@ -117,8 +117,16 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         // ForIn/While: count the loop body once, then extra-count every
         // outer-scope var referenced in it (both need the same treatment —
         // a loop body runs N times, so outer captures are used N times too).
-        IrExprKind::ForIn { iterable: lead, body, .. }
-        | IrExprKind::While { cond: lead, body } => count_uses_in_loop_body(lead, body, table),
+        // The ForIn's own binders are rebound on every iteration, so they
+        // are body-locals, not outer captures — bumping them made every
+        // `for v in xs { f(v) }` clone `v` for a body that consumed it once
+        // (#1673).
+        IrExprKind::ForIn { iterable, body, var, var_tuple } => {
+            let mut loop_vars = vec![*var];
+            if let Some(t) = var_tuple { loop_vars.extend(t.iter().copied()); }
+            count_uses_in_loop_body(iterable, body, &loop_vars, table)
+        }
+        IrExprKind::While { cond, body } => count_uses_in_loop_body(cond, body, &[], table),
         IrExprKind::Lambda { params, body, .. } => count_uses_in_lambda(params, body, table),
         IrExprKind::StringInterp { parts } => count_uses_in_string_interp(parts, table),
         IrExprKind::IterChain { source, steps, collector, .. } => {
@@ -169,9 +177,10 @@ fn count_uses_in_call(target: &CallTarget, args: &[IrExpr], table: &mut VarTable
 /// expression, then the body normally, then extra-count outer-scope vars
 /// referenced in the body (a loop body runs N times, so outer captures used
 /// inside it are used N times too — this is what triggers clone insertion).
-fn count_uses_in_loop_body(lead: &IrExpr, body: &[IrStmt], table: &mut VarTable) {
+fn count_uses_in_loop_body(lead: &IrExpr, body: &[IrStmt], loop_vars: &[VarId], table: &mut VarTable) {
     count_uses_in_expr(lead, table);
-    let body_locals = collect_bound_vars(body);
+    let mut body_locals = collect_bound_vars(body);
+    body_locals.extend(loop_vars.iter().map(|v| v.0));
     for s in body { count_uses_in_stmt(s, table); }
     bump_outer_vars_in_loop(body, &body_locals, table);
 }
