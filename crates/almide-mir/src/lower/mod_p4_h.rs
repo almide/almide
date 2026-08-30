@@ -281,19 +281,19 @@ fn list_heap_call_name_special_cases(
         // range int acc, non-String-element lists, …) stay `_x`-walled until
         // their twins land — never a wrong-typed link.
         let int_acc = matches!(arg_tys.get(init_idx), Some(Ty::Int));
-        // `fold_lines`'s own String accumulator (the concat-fold shape) — the
-        // `_s` twin; chunked/range String accs have no twin and stay `_x`.
         let s_acc = matches!(arg_tys.get(init_idx), Some(Ty::String));
-        return Some(if msi_acc && func != "fold_lines_range" {
+        // The walker x accumulator twin matrix is COMPLETE (#1423 bucket A):
+        // every accumulating walker carries {_msi, _i, _ls, _s} — asserted
+        // by tests/fs_streaming_family_gate_test.rs. Any other accumulator
+        // type routes to an unregistered `_x` name and walls cleanly at
+        // render — never a wrong-typed link.
+        return Some(if msi_acc {
             format!("fs.{func}_msi")
         } else if ls_acc {
-            // All three family members carry an `_ls` twin now: `fold_lines_range`
-            // (the original cell), `fold_lines_chunked` (#1233), and `fold_lines`
-            // itself (the read_lines-equivalence shape, fs_streaming C-220).
             format!("fs.{func}_ls")
-        } else if int_acc && matches!(func, "fold_lines" | "fold_lines_chunked") {
+        } else if int_acc {
             format!("fs.{func}_i")
-        } else if s_acc && func == "fold_lines" {
+        } else if s_acc {
             format!("fs.{func}_s")
         } else {
             format!("fs.{func}_x")

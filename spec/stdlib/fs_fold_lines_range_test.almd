@@ -73,3 +73,21 @@ test "empty range folds to init" {
   fs.write(p, "x\ny\n")!
   assert_eq(fs.fold_lines_range(p, 2, 2, ["seed"], (acc, line) => acc + [line])!, ["seed"])
 }
+
+test "the range twin matrix: every accumulator type folds the same lines" {
+  let d = tmp()!
+  let p = d + "/cells.txt"
+  fs.write(p, "alpha\nbeta\ngamma\ndelta\n")!
+  // Int acc (_i): byte-length sum — the range [0, 6) owns only "alpha"
+  // (beta STARTS at byte 6, and a line folds only while its start < end).
+  assert_eq(fs.fold_lines_range(p, 0, 6, 100, (acc: Int, line) => acc + string.len(line))!, 105)
+  // String acc (_s): concat over the range starting inside line 1.
+  assert_eq(fs.fold_lines_range(p, 7, 17, "", (acc: String, line) => acc + line + "|")!, "gamma|")
+  // List[String] acc (_ls): the whole file.
+  assert_eq(fs.fold_lines_range(p, 0, 999, [], (acc, line) => acc + [line])!, ["alpha", "beta", "gamma", "delta"])
+  // Map[String, Int] acc (_msi): line -> byte length.
+  let z: Map[String, Int] = [:]
+  let m = fs.fold_lines_range(p, 0, 999, z, (acc: Map[String, Int], line) => map.set(acc, line, string.len(line)))!
+  assert_eq(map.len(m), 4)
+  assert_eq(map.get(m, "delta") ?? -1, 5)
+}
