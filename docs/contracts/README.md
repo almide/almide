@@ -348,7 +348,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-318 | Early exit inside a counted loop body is rejected in a @bounded function (E078) | 0.60.0 | active | fixture | 0 |
 | C-319 | A captured-and-mutated var List is shared storage through a closure | 0.59.0 | active | fixture | 2 |
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.59.2 | active | fixture | 1 |
-| C-321 | The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable | 0.59.3 | active | fixture | 1 |
-| C-322 | Constructors are function values, the builtin trio included | 0.59.3 | active | fixture | 1 |
-| C-323 | Or-patterns: an arm's alternatives match as a union, binder-free | 0.59.3 | active | fixture | 1 |
+| C-321 | The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable | 0.60.0 | active | fixture | 1 |
+| C-322 | Constructors are function values, the builtin trio included | 0.60.0 | active | fixture | 1 |
+| C-323 | Or-patterns: an arm's alternatives match as a union, binder-free | 0.60.0 | active | fixture | 1 |
 
