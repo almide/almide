@@ -60,7 +60,327 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
     rewrite_signatures(program, &mut_fns);
     rewrite_call_sites(program, &mut_fns);
     fold_tail_writebacks(program, &mut_fns);
+    hoist_branch_writebacks(program);
     true
+}
+
+/// Phase 4: hoist a write-back OUT of an if/match arm into straight-line
+/// position (#1688's gunzip shape — the terminal fold cannot reach a branch
+/// that is not the fn's last statement, and a write-back Assign left inside
+/// an arm is refused by the structural emitter's branch wall). Two forms:
+///
+/// was-Unit callee (arm = `{ let b = call; p = b; () }`):
+///   if c then WB(call1) else <arm2>            (Unit position)
+///   → { p = if c then call1 else { <arm2>; p } }
+///
+/// value callee (arm = `{ let (r, b) = call; p = b; r }` : T):
+///   match k { a1 => WB(call1), a2 => <arm2>, … }   : T
+///   → { let (__mp_hres, __mp_hbuf) = match k { a1 => call1, a2 => (<arm2>, p), … };
+///       p = __mp_hbuf; __mp_hres }               : T
+///
+/// Either way the Assign lands OUTSIDE the branch: every path yields the
+/// buffer (the callee's successor handle, or the param read back), and one
+/// straight-line write-back applies whichever ran — the exact discipline the
+/// proven straight-line form already uses. Arms that do not write `p` are
+/// admitted by wrapping (`{ arm; p }` reads the post-arm local, so a direct
+/// stdlib mut call in an arm — `bytes.push(out, b)` — flows through
+/// correctly); an arm that writes `p` some OTHER way (a nested branch
+/// write-back, a second mut param) declines the hoist and stays walled.
+fn hoist_branch_writebacks(program: &mut IrProgram) {
+    let vt = &mut program.var_table;
+    let mut h = WritebackHoister { vt };
+    for func in program.functions.iter_mut() {
+        h.visit_expr_mut(&mut func.body);
+    }
+    for tl in &mut program.top_lets {
+        h.visit_expr_mut(&mut tl.value);
+    }
+    for m in &mut program.modules {
+        for func in m.functions.iter_mut() {
+            h.visit_expr_mut(&mut func.body);
+        }
+        for tl in &mut m.top_lets {
+            h.visit_expr_mut(&mut tl.value);
+        }
+    }
+}
+
+struct WritebackHoister<'a> {
+    vt: &'a mut VarTable,
+}
+
+/// The phase-2 write-back block, either form. Returns (p, call, orig_ty:
+/// None = was-Unit form).
+fn as_writeback_block(e: &IrExpr) -> Option<(VarId, &IrExpr, Option<Ty>)> {
+    let IrExprKind::Block { stmts, expr } = &e.kind else { return None };
+    if stmts.len() != 2 {
+        return None;
+    }
+    let IrStmtKind::Assign { var: p, value: av } = &stmts[1].kind else { return None };
+    match (&stmts[0].kind, expr.as_deref().map(|t| &t.kind)) {
+        // was-Unit: Bind{buf = call}; p = buf; ()
+        (IrStmtKind::Bind { var: buf, value: call, .. }, None | Some(IrExprKind::Unit))
+            if matches!(&av.kind, IrExprKind::Var { id } if id == buf)
+                && matches!(call.kind, IrExprKind::Call { .. }) =>
+        {
+            Some((*p, call, None))
+        }
+        // value: BindDestructure{(res, buf) = call}; p = buf; res
+        (
+            IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value: call },
+            Some(IrExprKind::Var { id: tail_id }),
+        ) if matches!(call.kind, IrExprKind::Call { .. }) => {
+            let [IrPattern::Bind { var: res, ty: res_ty }, IrPattern::Bind { var: buf, .. }] =
+                elements.as_slice()
+            else {
+                return None;
+            };
+            if tail_id == res && matches!(&av.kind, IrExprKind::Var { id } if id == buf) {
+                Some((*p, call, Some(res_ty.clone())))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Does the expression contain an `Assign` to `var` at any depth? (The
+/// decline scan: a p-writing arm that is not the recognized write-back
+/// block cannot be wrapped.)
+fn assigns_var(e: &IrExpr, var: VarId) -> bool {
+    struct Scan {
+        var: VarId,
+        hit: bool,
+    }
+    impl IrVisitor for Scan {
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Assign { var, .. } = &s.kind
+                && *var == self.var
+            {
+                self.hit = true;
+            }
+            if !self.hit {
+                crate::visit::walk_stmt(self, s);
+            }
+        }
+    }
+    let mut s = Scan { var, hit: false };
+    crate::visit::IrVisitor::visit_expr(&mut s, e);
+    s.hit
+}
+
+impl WritebackHoister<'_> {
+    /// Try the hoist on a value- or unit-position branch node whose arms
+    /// include at least one write-back block. Returns false = shape not
+    /// covered (left for the wall).
+    fn try_hoist(&mut self, e: &mut IrExpr) -> bool {
+        // Collect arm expressions (then/else, or every match arm body).
+        let arms: Vec<&IrExpr> = match &e.kind {
+            IrExprKind::If { then, else_, .. } => vec![then, else_],
+            IrExprKind::Match { arms, .. } => arms.iter().map(|a| &a.body).collect(),
+            _ => return false,
+        };
+        // One agreed (p, form) across every write-back arm.
+        let mut agreed: Option<(VarId, Option<Ty>)> = None;
+        for a in &arms {
+            if let Some((p, _, ref orig)) = as_writeback_block(a) {
+                match &agreed {
+                    None => agreed = Some((p, orig.clone())),
+                    Some((q, prev)) if *q == p && prev == orig => {}
+                    _ => return false,
+                }
+            }
+        }
+        let Some((p, orig_ty)) = agreed else { return false };
+        // Non-write-back arms must not write p any other way; neither may
+        // the subject or a guard.
+        for a in &arms {
+            if as_writeback_block(a).is_none() && assigns_var(a, p) {
+                return false;
+            }
+        }
+        if let IrExprKind::Match { subject, arms, .. } = &e.kind {
+            if assigns_var(subject, p) {
+                return false;
+            }
+            for a in arms.iter() {
+                if let Some(g) = &a.guard
+                    && assigns_var(g, p)
+                {
+                    return false;
+                }
+            }
+        }
+        if let IrExprKind::If { cond, .. } = &e.kind
+            && assigns_var(cond, p)
+        {
+            return false;
+        }
+        let mut_ty = self.vt.get(p).ty.clone();
+        let p_read = |ty: Ty| IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty,
+            span: None,
+            def_id: None,
+        };
+        let span = e.span;
+        match orig_ty {
+            // was-Unit form: arms yield the buffer; one Assign outside.
+            None => {
+                let rewrite = |arm: &mut IrExpr, mut_ty: &Ty| {
+                    if let Some((_, _, _)) = as_writeback_block(arm) {
+                        let IrExprKind::Block { stmts, .. } = &mut arm.kind else { unreachable!() };
+                        let IrStmtKind::Bind { value, .. } = stmts.remove(0).kind else {
+                            unreachable!()
+                        };
+                        *arm = value;
+                    } else {
+                        let inner = std::mem::replace(
+                            arm,
+                            IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+                        );
+                        arm.kind = IrExprKind::Block {
+                            stmts: vec![IrStmt {
+                                kind: IrStmtKind::Expr { expr: inner },
+                                span: None,
+                            }],
+                            expr: Some(Box::new(IrExpr {
+                                kind: IrExprKind::Var { id: p },
+                                ty: mut_ty.clone(),
+                                span: None,
+                                def_id: None,
+                            })),
+                        };
+                    }
+                    arm.ty = mut_ty.clone();
+                };
+                match &mut e.kind {
+                    IrExprKind::If { then, else_, .. } => {
+                        rewrite(then, &mut_ty);
+                        rewrite(else_, &mut_ty);
+                    }
+                    IrExprKind::Match { arms, .. } => {
+                        for a in arms.iter_mut() {
+                            rewrite(&mut a.body, &mut_ty);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                let branch = std::mem::replace(
+                    e,
+                    IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span, def_id: None },
+                );
+                let mut branch = branch;
+                branch.ty = mut_ty.clone();
+                e.kind = IrExprKind::Block {
+                    stmts: vec![IrStmt {
+                        kind: IrStmtKind::Assign { var: p, value: branch },
+                        span,
+                    }],
+                    expr: None,
+                };
+                e.ty = Ty::Unit;
+            }
+            // value form: arms yield (orig, buffer); destructure + one
+            // Assign outside, the branch's own value restored as the tail.
+            Some(orig) => {
+                let tuple_ty = Ty::Tuple(vec![orig.clone(), mut_ty.clone()]);
+                let rewrite = |arm: &mut IrExpr, tuple_ty: &Ty, orig: &Ty, mut_ty: &Ty| {
+                    if as_writeback_block(arm).is_some() {
+                        let IrExprKind::Block { stmts, .. } = &mut arm.kind else { unreachable!() };
+                        let IrStmtKind::BindDestructure { value, .. } = stmts.remove(0).kind
+                        else {
+                            unreachable!()
+                        };
+                        *arm = value;
+                    } else {
+                        let inner = std::mem::replace(
+                            arm,
+                            IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+                        );
+                        arm.kind = IrExprKind::Tuple {
+                            elements: vec![inner, IrExpr {
+                                kind: IrExprKind::Var { id: p },
+                                ty: mut_ty.clone(),
+                                span: None,
+                                def_id: None,
+                            }],
+                        };
+                        let _ = orig;
+                    }
+                    arm.ty = tuple_ty.clone();
+                };
+                match &mut e.kind {
+                    IrExprKind::If { then, else_, .. } => {
+                        rewrite(then, &tuple_ty, &orig, &mut_ty);
+                        rewrite(else_, &tuple_ty, &orig, &mut_ty);
+                    }
+                    IrExprKind::Match { arms, .. } => {
+                        for a in arms.iter_mut() {
+                            rewrite(&mut a.body, &tuple_ty, &orig, &mut_ty);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                let res = self.vt.alloc(sym("__mp_hres"), orig.clone(), Mutability::Let, None);
+                let buf = self.vt.alloc(sym("__mp_hbuf"), mut_ty.clone(), Mutability::Let, None);
+                let mut branch = std::mem::replace(
+                    e,
+                    IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span, def_id: None },
+                );
+                branch.ty = tuple_ty.clone();
+                e.kind = IrExprKind::Block {
+                    stmts: vec![
+                        IrStmt {
+                            kind: IrStmtKind::BindDestructure {
+                                pattern: IrPattern::Tuple {
+                                    elements: vec![
+                                        IrPattern::Bind { var: res, ty: orig.clone() },
+                                        IrPattern::Bind { var: buf, ty: mut_ty.clone() },
+                                    ],
+                                },
+                                value: branch,
+                            },
+                            span,
+                        },
+                        IrStmt {
+                            kind: IrStmtKind::Assign {
+                                var: p,
+                                value: IrExpr {
+                                    kind: IrExprKind::Var { id: buf },
+                                    ty: mut_ty.clone(),
+                                    span: None,
+                                    def_id: None,
+                                },
+                            },
+                            span,
+                        },
+                    ],
+                    expr: Some(Box::new(IrExpr {
+                        kind: IrExprKind::Var { id: res },
+                        ty: orig.clone(),
+                        span: None,
+                        def_id: None,
+                    })),
+                };
+                e.ty = orig;
+            }
+        }
+        let _ = p_read;
+        true
+    }
+}
+
+impl IrMutVisitor for WritebackHoister<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        // Bottom-up, so a nested branch's own write-backs hoist first and
+        // the outer branch sees plain expressions.
+        walk_expr_mut(self, expr);
+        if matches!(expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) {
+            self.try_hoist(expr);
+        }
+    }
 }
 
 /// Phase 3: fold a write-back that immediately flows into the fn's own
