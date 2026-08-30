@@ -19,7 +19,26 @@ no leak, no dangling name, no undeclared capability. It proves **nothing about
 whether the lowering picked the right semantics**: a certified-sound function
 can still print the wrong string.
 
-## Where the boundary runs
+## Which leg is this page about?
+
+Since v0.60.0 (#1599) there are two wasm legs, and the boundary map below
+describes the **incumbent v1 leg** — the certified pipeline. That leg is what
+you get with `ALMIDE_WASM_INCUMBENT=1`, and automatically whenever the default
+leg refuses a shape (a verified-to-verified reroute; `ALMIDE_VERIFIED_DEBUG=1`
+names the handover).
+
+The **default** `--target wasm` leg — the structural emitter in
+`crates/almide-wasm` — is **trusted end to end, certificate pending** (#1696):
+no row of the table below applies to it. Its evidence is differential and
+CI-gated: byte-identity against the certified leg and native on the whole
+`spec/wasm_cross` corpus (grow-only), semantic-mutation nets over the emitter,
+per-fixture allocation and size ledgers, and a refusal ratchet (a shape it
+refuses must stay refused — silently emitting it again is the #1688 regression
+class). The `Built …` line names the leg that produced your bytes; no sentence
+below should be read as a claim about bytes that line attributes to the
+structural leg.
+
+## Where the boundary runs (incumbent v1 leg)
 
 | Stage | Status | What backs it |
 |---|---|---|

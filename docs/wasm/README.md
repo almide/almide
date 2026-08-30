@@ -12,8 +12,10 @@ error), never a silent fallback into unverified codegen.
 | **incumbent v1** | The MIR trust spine in `crates/almide-mir`: certified MIR → direct emit, with the per-function ownership certificate the kernel-proven checker re-verifies on every build | Main-less library modules (#881 export mode), dependency-bearing projects, host-variant programs on the build path, `ALMIDE_FUEL_PROBE` runs, and any shape the structural leg walls on — a verified-to-verified handover, named under `ALMIDE_VERIFIED_DEBUG=1` |
 
 The `Built …` line every wasm build prints names the leg that produced the
-bytes. `ALMIDE_WASM_INCUMBENT=1` forces the incumbent (a reversible switch kept
-for one release); `ALMIDE_WASM_STRUCTURAL=1` forces the structural leg and turns
+bytes. `ALMIDE_WASM_INCUMBENT=1` forces the incumbent — no longer a revert
+lever: the structural default is the ratified end state (#1696), and this
+switch selects the certified leg until the certificate moves and the incumbent
+retires; `ALMIDE_WASM_STRUCTURAL=1` forces the structural leg and turns
 its walls into hard errors (the frontier-development probe).
 
 ## What ships today
