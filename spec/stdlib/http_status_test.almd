@@ -1,0 +1,23 @@
+// http.get_status / http.request_status return (status_code, body) for any
+// complete response — a 404 is Ok((404, body)), not an Err. These helpers are
+// compile-checks that the tuple return typechecks and destructures; the network
+// client fns have no live-network spec (coverage is the target-availability
+// gate), so the executed test exercises only the pure status verdict.
+import http
+
+effect fn _status_of(url: String) -> Int = match http.request_status("GET", url, "", ["User-Agent": "almide-test"]) {
+  ok(pair) => pair.0,
+  err(_) => -1,
+}
+
+effect fn _get_status_of(url: String) -> Int = match http.get_status(url) {
+  ok(pair) => pair.0,
+  err(_) => -1,
+}
+
+fn verdict(code: Int) -> String = if code == 404 then "available" else "taken"
+
+test "http status verdict" {
+  assert_eq(verdict(404), "available")
+  assert_eq(verdict(200), "taken")
+}

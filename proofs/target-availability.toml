@@ -128,6 +128,16 @@ reason = "host-surface"
 issue = "#1423"
 
 [[native-only]]
+fn = "http.get_status"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
+fn = "http.request_status"
+reason = "host-surface"
+issue = "#1423"
+
+[[native-only]]
 fn = "http.request_bytes"
 reason = "host-surface"
 issue = "#1423"
@@ -323,6 +333,16 @@ issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "http.request"
+reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+issue = "#1423"
+
+[[wasm-unavailable]]
+fn = "http.get_status"
+reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+issue = "#1423"
+
+[[wasm-unavailable]]
+fn = "http.request_status"
 reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 issue = "#1423"
 

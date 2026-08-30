@@ -108,6 +108,17 @@ effect fn delete(url: String) -> Result[String, String] = _
 @borrow_ref(headers)
 effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
 
+// Status-preserving client: returns `(status_code, body)` for ANY complete
+// response — a 404 is `Ok((404, body))`, not an `Err`. `Err` is only a
+// transport failure (connection / TLS / timeout). Use these when you need to
+// branch on the numeric status; `get` / `request` collapse it into the body.
+@intrinsic("almide_http_get_status")
+effect fn get_status(url: String) -> Result[(Int, String), String] = _
+
+@intrinsic("almide_http_request_status")
+@borrow_ref(headers)
+effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = _
+
 // Binary client: returns the raw response body as `Bytes` with no UTF-8
 // conversion, so binary payloads (images, audio — e.g. TTS mp3/wav) survive
 // byte-identical. The String client above corrupts non-UTF-8 bodies.
