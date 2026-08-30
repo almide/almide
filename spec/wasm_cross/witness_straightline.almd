@@ -1,0 +1,22 @@
+// @contract: C-033
+// The straight-line alias probe the #1696 phase-A witness sweep records:
+// `b = a` is a copy-bind whose sharing must stay unobservable (C-033's
+// value semantics), and both fn bodies are exactly the phase-A subset —
+// fresh literal binds, Var alias binds, a Var or scalar tail — so the
+// structural emitter's witness recorder covers every RC event in them
+// (crates/almide-wasm/tests/witness_floor.rs holds the floor above zero
+// on the strength of these shapes).
+fn shed() -> List[Int] = {
+  let a = [1, 2, 3]
+  let b = a
+  b
+}
+
+fn tag(prefix: String) -> String = {
+  let t = prefix
+  t
+}
+
+fn main() -> Unit = {
+  println("${list.len(shed())} ${tag("w")}")
+}

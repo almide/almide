@@ -231,6 +231,9 @@ impl Emitter<'_> {
             if self.rc_droppable(declared) {
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                 self.rc_owned.insert(idx);
+                if self.witness.is_some() {
+                    self.witness_bind(idx, declared, value);
+                }
             }
             self.f.instructions().local_set(idx);
         }
